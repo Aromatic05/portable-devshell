@@ -8,6 +8,7 @@ import {
 export function ToolCallFilters({
     contexts,
     filters,
+    instanceLocked = false,
     instances,
     onChange,
     onClear,
@@ -15,6 +16,7 @@ export function ToolCallFilters({
 }: {
     contexts: string[];
     filters: Filters;
+    instanceLocked?: boolean;
     instances: string[];
     onChange(next: Filters): void;
     onClear(): void;
@@ -22,7 +24,7 @@ export function ToolCallFilters({
 }) {
     return <div className="filters activity-filters">
         <label>Search<input onChange={(event) => onChange({ ...filters, query: event.target.value })} placeholder="Tool, call, input, or error" type="search" value={filters.query} /></label>
-        <label>Instance<select onChange={(event) => onChange({ ...filters, instance: event.target.value })} value={filters.instance}><option value="all">All instances</option>{instances.map((instance) => <option key={instance} value={instance}>{instance}</option>)}</select></label>
+        <label>Instance<select disabled={instanceLocked} onChange={(event) => onChange({ ...filters, instance: event.target.value })} value={filters.instance}><option value="all">All instances</option>{instances.map((instance) => <option key={instance} value={instance}>{instance}</option>)}</select></label>
         <label>Context<select onChange={(event) => onChange({ ...filters, ctxId: event.target.value })} value={filters.ctxId}><option value="all">All contexts</option><option value="unscoped">Unscoped</option>{contexts.map((ctxId) => <option key={ctxId} value={contextFilterValue(ctxId)}>{ctxId}</option>)}</select></label>
         <label>Tool<select onChange={(event) => onChange({ ...filters, tool: event.target.value })} value={filters.tool}><option value="all">All tools</option>{tools.map((tool) => <option key={tool} value={tool}>{tool}</option>)}</select></label>
         <label>Result<select onChange={(event) => onChange({ ...filters, result: event.target.value as ToolCallResult })} value={filters.result}><option value="all">All results</option><option value="success">Success</option><option value="pending">Pending</option><option value="failure">Failure</option></select></label>

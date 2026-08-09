@@ -16,6 +16,8 @@ import {
 } from "../selectors/toolCalls.js";
 import type { WebState, WebStore } from "../state/WebStore.js";
 
+const pageSize = 100;
+
 export function ToolCalls({
     disabled = false,
     state,
@@ -27,6 +29,9 @@ export function ToolCalls({
 }) {
     const [filters, setFilters] = useState<Filters>(emptyToolCallFilters);
     const [draft, setDraft] = useState("");
+    const [toolCallPage, setToolCallPage] = useState(0);
+    const [queuedCommentPage, setQueuedCommentPage] = useState(0);
+    const [commentHistoryPage, setCommentHistoryPage] = useState(0);
     const [disableConfirmation, setDisableConfirmation] = useState<{
         ctxId: string;
         instance: string;
@@ -44,20 +49,24 @@ export function ToolCalls({
         () => state.readModel.instances.map((instance) => instance.name).sort(),
         [state.readModel.instances],
     );
-    const instance =
+    const selectedCtxId = selectedContextId(filters.ctxId);
+    const contextInstances = useMemo(() => {
+        const owners = new Map<string, string>();
+        for (const context of state.readModel.contexts) owners.set(context.ctxId, context.instance);
+        for (const call of [...allCalls, ...allCommentCalls]) {
+            if (call.ctxId !== undefined) owners.set(call.ctxId, call.instance);
+        }
+        return owners;
+    }, [allCalls, allCommentCalls, state.readModel.contexts]);
+    const contexts = useMemo(() => [...contextInstances.keys()].sort(), [contextInstances]);
+    const contextInstance = selectedCtxId === undefined
+        ? undefined
+        : contextInstances.get(selectedCtxId);
+    const instance = contextInstance ?? (
         filters.instance === "all" || instances.includes(filters.instance)
             ? filters.instance
-            : "all";
-    const contexts = useMemo(() => {
-        return [...new Set([...allCalls, ...allCommentCalls]
-            .filter(
-                (call) =>
-                    call.ctxId !== undefined &&
-                    (instance === "all" || call.instance === instance),
-            )
-            .map((call) => call.ctxId!))].sort();
-    }, [allCalls, allCommentCalls, instance]);
-    const selectedCtxId = selectedContextId(filters.ctxId);
+            : "all"
+    );
     const contextFilter =
         filters.ctxId === allContextsFilter ||
         filters.ctxId === unscopedContextFilter ||
@@ -73,8 +82,8 @@ export function ToolCalls({
         [allCalls],
     );
     const selection = useMemo(
-        () => selectToolCalls(allCalls, effectiveFilters),
-        [allCalls, effectiveFilters],
+        () => selectToolCalls(allCalls, effectiveFilters, Date.now(), toolCallPage * pageSize, pageSize),
+        [allCalls, effectiveFilters, toolCallPage],
     );
     const active = hasActiveToolCallFilters(effectiveFilters);
     const ctxId = selectedContextId(effectiveFilters.ctxId);
@@ -91,6 +100,9 @@ export function ToolCalls({
               )
               .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
         : [];
+    const queuedCommentPages = pageCount(queuedComments.length);
+    const visibleQueuedCommentPage = Math.min(queuedCommentPage, queuedCommentPages - 1);
+    const visibleQueuedComments = pageItems(queuedComments, visibleQueuedCommentPage);
     const commentCalls = concreteContext
         ? allCommentCalls
               .filter(
@@ -105,6 +117,9 @@ export function ToolCalls({
                   ),
               )
         : [];
+    const commentHistoryPages = pageCount(commentCalls.length);
+    const visibleCommentHistoryPage = Math.min(commentHistoryPage, commentHistoryPages - 1);
+    const visibleCommentCalls = pageItems(commentCalls, visibleCommentHistoryPage);
     const operation = concreteContext
         ? `context-message:${effectiveFilters.instance}:${ctxId}`
         : undefined;
@@ -129,7 +144,17 @@ export function ToolCalls({
         setFilters(effectiveFilters);
     }, [effectiveFilters, filters.ctxId, filters.instance]);
 
+    useEffect(() => {
+        setToolCallPage(0);
+    }, [effectiveFilters]);
+
+    useEffect(() => {
+        setQueuedCommentPage(0);
+        setCommentHistoryPage(0);
+    }, [concreteContext, ctxId, effectiveFilters.instance]);
+
     function changeFilters(next: Filters): void {
+        setToolCallPage(0);
         setFilters((current) => {
             const contextChanged =
                 next.instance !== current.instance || next.ctxId !== current.ctxId;
@@ -151,9 +176,9 @@ export function ToolCalls({
         if (queued) setDraft("");
     }
 
-    const countText = selection.total > selection.items.length
-        ? `Showing ${selection.items.length} of ${selection.total} matching tool calls.`
-        : `${selection.total} of ${allCalls.length} tool calls${active ? " match active filters." : "."}`;
+    const countText = selection.total === 0
+        ? `0 of ${allCalls.length} tool calls${active ? " match active filters." : "."}`
+        : `Showing ${toolCallPage * pageSize + 1}-${toolCallPage * pageSize + selection.items.length} of ${selection.total} matching tool calls.`;
 
     return <section>
         <h2>Tool Calls</h2>
@@ -161,6 +186,7 @@ export function ToolCalls({
         <ToolCallFilters
             contexts={contexts}
             filters={effectiveFilters}
+            instanceLocked={contextInstance !== undefined}
             instances={instances}
             onChange={changeFilters}
             onClear={() => {
@@ -228,23 +254,35 @@ export function ToolCalls({
                 {queuedComments.length === 0 ? null : <>
                     <h4>Queued for next call</h4>
                     <ol className="context-messages">
-                    {queuedComments.map((message) => <li key={message.id}>
+                    {visibleQueuedComments.map((message) => <li key={message.id}>
                         <span className={`result ${message.status === "delivered" ? "success" : message.status === "failed" ? "failure" : "pending"}`}>{message.status}</span>
                         <time>{message.createdAt}</time>
                         <p>{message.text}</p>
                         {message.error === undefined ? null : <p className="error">{message.error}</p>}
                     </li>)}
                     </ol>
+                    <Pagination
+                        label="Queued Comments"
+                        onPageChange={setQueuedCommentPage}
+                        page={visibleQueuedCommentPage}
+                        pageCount={queuedCommentPages}
+                    />
                 </>}
                 <h4>Comment history</h4>
                 {commentCalls.length === 0 ? <p className="empty">No tool calls with Comments in this Context.</p> : <ol className="context-messages">
-                    {commentCalls.map((call) => <li key={call.callId}>
+                    {visibleCommentCalls.map((call) => <li key={call.callId}>
                         <span className="result success">{call.toolName}</span>
                         <time>{call.completedAt ?? call.startedAt}</time>
                         <p><strong>{call.callId}</strong></p>
                         {readCallComments(call).map((comment, index) => <p key={`${call.callId}:${index}`}>{comment}</p>)}
                     </li>)}
                 </ol>}
+                {commentCalls.length === 0 ? null : <Pagination
+                    label="Comment history"
+                    onPageChange={setCommentHistoryPage}
+                    page={visibleCommentHistoryPage}
+                    pageCount={commentHistoryPages}
+                />}
             </> : <p className="empty">Select one instance and one scoped Context to queue a Comment.</p>}
         </section>
         {disableConfirmation === undefined ? null : <ConfirmationDialog
@@ -270,7 +308,40 @@ export function ToolCalls({
                         logs={instanceState[call.instance]?.logs ?? []}
                     />)}
                 </ol>}
+        <Pagination
+            label="Tool calls"
+            onPageChange={setToolCallPage}
+            page={toolCallPage}
+            pageCount={pageCount(selection.total)}
+        />
     </section>;
+}
+
+function Pagination({
+    label,
+    onPageChange,
+    page,
+    pageCount,
+}: {
+    label: string;
+    onPageChange(page: number): void;
+    page: number;
+    pageCount: number;
+}) {
+    if (pageCount < 2) return null;
+    return <nav aria-label={`${label} pagination`} className="pagination">
+        <button disabled={page === 0} onClick={() => onPageChange(page - 1)} type="button">Previous page</button>
+        <span aria-live="polite">Page {page + 1} of {pageCount}</span>
+        <button disabled={page === pageCount - 1} onClick={() => onPageChange(page + 1)} type="button">Next page</button>
+    </nav>;
+}
+
+function pageCount(total: number): number {
+    return Math.max(1, Math.ceil(total / pageSize));
+}
+
+function pageItems<T>(items: readonly T[], page: number): T[] {
+    return items.slice(page * pageSize, (page + 1) * pageSize);
 }
 
 function readCallComments(call: ToolCallRecord): string[] {

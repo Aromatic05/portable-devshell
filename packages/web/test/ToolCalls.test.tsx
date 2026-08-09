@@ -145,18 +145,16 @@ it("filters structured tool calls by ctxId and queues a Comment for the selected
     );
 });
 
-it("clears Context synchronously when the selected instance changes", async () => {
+it("locks the instance from the selected Context", () => {
     const queueContextMessage = vi.fn(async () => true);
     const store = { queueContextMessage } as unknown as WebStore;
     render(<ToolCalls state={state} store={store} />);
 
-    fireEvent.change(screen.getByLabelText("Instance"), { target: { value: "alpha" } });
     fireEvent.change(screen.getByLabelText("Context"), { target: { value: "context:ctx-alpha" } });
-    fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Do not misroute" } });
-    fireEvent.change(screen.getByLabelText("Instance"), { target: { value: "beta" } });
 
-    expect(screen.getByLabelText("Context")).toHaveValue("all");
-    expect(screen.queryByRole("button", { name: "Queue Comment" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Instance")).toHaveValue("alpha");
+    expect(screen.getByLabelText("Instance")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Queue Comment" })).toBeInTheDocument();
     expect(queueContextMessage).not.toHaveBeenCalled();
 });
 
@@ -219,6 +217,7 @@ it("normalizes a Context filter that disappears after refresh", () => {
             ...state,
             readModel: {
                 ...state.readModel,
+                contexts: [],
                 instanceState: {
                     ...state.readModel.instanceState,
                     alpha: {
@@ -237,7 +236,7 @@ it("normalizes a Context filter that disappears after refresh", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
 });
 
-it("shows the display limit without claiming it is the match total", () => {
+it("paginates matching tool calls", () => {
     const manyState: WebState = {
         ...state,
         readModel: {
@@ -256,10 +255,15 @@ it("shows the display limit without claiming it is the match total", () => {
         },
     };
 
-    render(<ToolCalls
+    const view = render(<ToolCalls
         state={manyState}
         store={{ queueContextMessage: vi.fn() } as unknown as WebStore}
     />);
 
-    expect(screen.getAllByRole("listitem")).toHaveLength(100);
+    expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(100);
+    const pagination = screen.getByRole("navigation", { name: "Tool calls pagination" });
+    expect(pagination).toHaveTextContent("Page 1 of 2");
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(51);
+    expect(pagination).toHaveTextContent("Page 2 of 2");
 });

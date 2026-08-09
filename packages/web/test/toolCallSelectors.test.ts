@@ -205,3 +205,22 @@ it("reports the full match count separately from the display limit", () => {
     expect(items).toHaveLength(100);
     expect(total).toBe(150);
 });
+
+it("returns the requested page of matching calls", () => {
+    const many = Array.from({ length: 150 }, (_, index) => ({
+        ...calls[0]!,
+        callId: `call-${index}`,
+        startedAt: `2026-07-31T09:${String(index % 60).padStart(2, "0")}:00Z`,
+    }));
+    const { items, total } = selectToolCalls(many, {
+        ctxId: "all",
+        instance: "all",
+        period: "all",
+        query: "",
+        result: "all",
+        tool: "all",
+    }, Date.now(), 100);
+
+    expect(items).toHaveLength(50);
+    expect(total).toBe(150);
+});

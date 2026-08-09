@@ -43,6 +43,7 @@ export function selectToolCalls(
     calls: readonly ToolCallRecord[],
     filters: ToolCallFilters,
     now = Date.now(),
+    offset = 0,
     limit = 100,
 ): ToolCallSelection {
     const query = filters.query.trim().toLowerCase();
@@ -69,7 +70,7 @@ export function selectToolCalls(
         if (minTime !== undefined && Date.parse(call.startedAt) < minTime) continue;
         if (query.length > 0 && !callSearchText(call).includes(query)) continue;
         total += 1;
-        if (items.length < limit) items.push(call);
+        if (total > offset && items.length < limit) items.push(call);
     }
     return { items, total };
 }
