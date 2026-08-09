@@ -242,6 +242,7 @@ function createTodoServer(socketPath: string): {
                 currentAssociation() {
                     return undefined;
                 },
+                async delete() {},
                 async read(title?: string) {
                     todoReadTitles.push(title);
                     return title === todoFixture.title

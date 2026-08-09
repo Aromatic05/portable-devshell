@@ -115,6 +115,11 @@ function createHarness(options: {
                 calls.push("service.restart");
             },
         },
+        todo: {
+            async delete(instance: string, taskId: string) {
+                calls.push(`todo.delete:${instance}:${taskId}`);
+            },
+        },
         tool: {
             async call(instance: string, toolName: string, input: JsonValue) {
                 calls.push(
