@@ -16,6 +16,9 @@ export function createTestTodoPort(): InstanceTodoPort {
         currentAssociation() {
             return undefined;
         },
+        async delete() {
+            return undefined;
+        },
         async read() {
             return empty;
         },

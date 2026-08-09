@@ -17,6 +17,7 @@ export interface InstanceContextMessagePort {
 
 export interface InstanceTodoPort {
     currentAssociation(): ToolCallAssociation | undefined;
+    delete(taskId: string): Promise<void>;
     read(title?: string): Promise<TodoReadResult>;
     summaries(): ActiveTodoSummary[];
     write(input: TodoWriteInput, ctxId: string): Promise<TodoReadResult>;

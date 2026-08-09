@@ -45,6 +45,7 @@ export function createCliClients(options: CliClientOptions = {}): CliClients {
         reconnect: async () => await connection.reconnect(),
         runtime: createCliRuntimeAdapter(connection, clients.runtime),
         todo: {
+            delete: clients.todo.delete,
             get: clients.todo.get,
             subscribe: async (instance, fromSeq) =>
                 new CliClientEventStream(
