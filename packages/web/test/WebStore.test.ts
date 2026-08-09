@@ -360,6 +360,7 @@ function fakeClients(
             }),
         },
         todo: {
+            delete: async () => ({}),
             get: async () => ({
                 lastSeq: 3,
                 todo: { items: [], revision: 1, summary: { completed: 0, total: 0 } },
