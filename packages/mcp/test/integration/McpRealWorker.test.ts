@@ -27,9 +27,10 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
     const instanceName = "aromatic-pc-mcp-real";
     const homeDirectory = await createTestTempDirectory("mcp-real-home");
     const workspacePath = await createTestTempDirectory("mcp-real-workspace");
-    const workspaceMarkerName = "mcp-real-workspace-marker.txt";
-    const workspaceMarker = "portable-devshell-mcp-real-workspace";
-    await writeFile(join(workspacePath, workspaceMarkerName), workspaceMarker, "utf8");
+    const selectedWorkspacePath = await createTestTempDirectory("mcp-real-selected-workspace");
+    const workspaceMarkerName = "mcp-real-selected-workspace-marker.txt";
+    const workspaceMarker = "portable-devshell-mcp-real-selected-workspace";
+    await writeFile(join(selectedWorkspacePath, workspaceMarkerName), workspaceMarker, "utf8");
     const instance = new WorkerInstanceFactory().create({
         defaultWorkspace: asWorkspacePath(workspacePath),
         env: { ...process.env, HOME: homeDirectory },
@@ -117,7 +118,7 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
             }
         );
 
-        const ctxId = await createContext(endpoint, sessionHeaders);
+        const ctxId = await createContext(endpoint, sessionHeaders, selectedWorkspacePath);
         const callRequest = withToolContext(
             await readFixture("mcp-tools-call.json"),
             ctxId
@@ -147,6 +148,7 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });
         await rm(workspacePath, { force: true, recursive: true });
+        await rm(selectedWorkspacePath, { force: true, recursive: true });
     }
 });
 
@@ -204,7 +206,7 @@ test("MCP tools/call waits for approval before invoking the worker tool", realWo
             sessionHeaders
         );
 
-        const ctxId = await createContext(endpoint, sessionHeaders);
+        const ctxId = await createContext(endpoint, sessionHeaders, workspacePath);
         callPromise = postJson(
             endpoint,
             withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
@@ -274,12 +276,12 @@ test("MCP tools/call waits for approval before invoking the worker tool", realWo
     }
 });
 
-async function createContext(endpoint: string, headers: Record<string, string>): Promise<string> {
+async function createContext(endpoint: string, headers: Record<string, string>, workspace: string): Promise<string> {
     const response = await postJson(endpoint, {
         id: `req-environ-${Date.now()}`,
         jsonrpc: "2.0",
         method: "tools/call",
-        params: { arguments: {}, name: "environ_info" }
+        params: { arguments: { workspace }, name: "environ_info" }
     }, headers);
     const ctxId = response.result?.structuredContent?.ctxId;
     assert.equal(typeof ctxId, "string");

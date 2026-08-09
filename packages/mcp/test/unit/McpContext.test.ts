@@ -163,13 +163,17 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
     assert.equal(bashSchema.required?.includes("ctxId"), true);
     assert.equal(bashSchema.required?.includes("command"), true);
 
-    const environment = await endpoint.callTool("environ_info", {}, { principal: "local", requestId: "env" });
+    const environment = await endpoint.callTool(
+        "environ_info",
+        { workspace: "/projects/alpha" },
+        { principal: "local", requestId: "env" }
+    );
     const environmentRecord = environment as Record<string, JsonValue>;
     assert.equal(environmentRecord.ctxId, "ctx-created");
     assert.equal(typeof environmentRecord.expiresAt, "string");
     assert.equal(environmentRecord.instance, "demo-local");
     assert.equal(environmentRecord.skillsDirectory, "/home/demo/.devshell/skill");
-    assert.equal(environmentRecord.workspace, "/workspace");
+    assert.equal(environmentRecord.workspace, "/projects/alpha");
     assert.deepEqual(environmentRecord.platform, {
         arch: "x86_64",
         distribution: { id: "arch", name: "Arch Linux", version: "rolling" },
@@ -189,7 +193,7 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
     );
     assert.deepEqual(calls, [
         {
-            context: { ctxId: "ctx-created", requestId: "run", source: "mcp" },
+            context: { ctxId: "ctx-created", requestId: "run", source: "mcp", workspace: "/projects/alpha" },
             input: { command: "pwd" },
             toolName: "bash_run"
         }
