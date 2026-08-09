@@ -182,6 +182,7 @@ export interface ControlClients {
         open(instance: string, input: TerminalOpenInput): Promise<TerminalOpenResult>;
     };
     todo: {
+        delete(instance: string, taskId: string): Promise<Record<string, JsonValue>>;
         get(instance: string, title?: string): Promise<TodoRpcEnvelope>;
         subscribe(instance: string, fromSeq: number): Promise<InstanceEventStream>;
     };
@@ -323,6 +324,7 @@ export function createControlClients(
             open: (name, input) => terminal.request(name, "open", input),
         },
         todo: {
+            delete: (name, taskId) => todo.request(name, "delete", { taskId }),
             get: (name, title) =>
                 todo.request(name, "get", title === undefined ? {} : { title }),
             subscribe: async (name, fromSeq) =>

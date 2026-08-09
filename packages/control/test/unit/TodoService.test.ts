@@ -165,3 +165,30 @@ test("TodoService emits terminal events once, archives terminal tasks, and reloa
     };
     assert.equal(persisted.archived.length, 1);
 });
+
+test("TodoService permanently deletes an active or archived todo project", async () => {
+    const root = await createTestTempDirectory("todo-delete");
+    const filePath = join(root, "todo.json");
+    const events: string[] = [];
+    const service = new TodoService({
+        appendEvent: async (type) => { events.push(type); },
+        filePath,
+        instanceName: "aromatic-pc",
+    });
+    const active = await service.write({
+        revision: 0,
+        title: "Active",
+        todos: [{ content: "Continue", id: "continue", status: "in_progress" }],
+    }, "ctx-active");
+    const archived = await service.write({
+        revision: 0,
+        title: "Archived",
+        todos: [{ content: "Done", id: "done", status: "completed" }],
+    }, "ctx-archived");
+
+    await service.delete(active.taskId!);
+    await service.delete(archived.taskId!);
+
+    assert.deepEqual((await service.read()).tasks, []);
+    assert.deepEqual(events.slice(-2), ["todo.deleted", "todo.deleted"]);
+});

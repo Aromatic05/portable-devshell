@@ -40,7 +40,8 @@ export type InstanceEventType = ArtifactEventType
     | "todo.created"
     | "todo.updated"
     | "todo.completed"
-    | "todo.archived";
+    | "todo.archived"
+    | "todo.deleted";
 
 export interface InstanceEvent {
     at: string;

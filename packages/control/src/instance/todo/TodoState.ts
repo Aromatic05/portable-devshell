@@ -119,6 +119,21 @@ export class TodoState {
         return { document: { active, archived, version: 4 }, events };
     }
 
+    delete(document: TodoDocument, taskId: string): TodoTransition {
+        const state = [...document.active, ...document.archived].find(
+            (entry) => entry.taskId === taskId
+        );
+        if (state === undefined) throw new Error(`Todo task ${taskId} was not found.`);
+        return {
+            document: {
+                active: document.active.filter((entry) => entry.taskId !== taskId),
+                archived: document.archived.filter((entry) => entry.taskId !== taskId),
+                version: 4
+            },
+            events: [todoEvent("todo.deleted", state)]
+        };
+    }
+
     readResult(document: TodoDocument, title?: string): TodoReadResult {
         const tasks = this.#taskSummaries(document);
         if (title === undefined) {

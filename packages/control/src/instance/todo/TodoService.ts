@@ -60,6 +60,14 @@ export class TodoService {
         });
     }
 
+    async delete(taskId: string): Promise<void> {
+        await this.#runExclusive(async () => {
+            const transition = this.#state.delete(this.#store.read(), taskId);
+            await this.#persistTransition(transition);
+            await this.#emitTransition(transition);
+        });
+    }
+
     #createTransition(
         input: TodoWriteInput,
         ctxId: string

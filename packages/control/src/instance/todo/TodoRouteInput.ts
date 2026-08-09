@@ -31,6 +31,17 @@ export function readTodoTitle(payload?: JsonValue): string | undefined {
     return payload.title;
 }
 
+export function readTodoTaskId(payload?: JsonValue): string {
+    if (!isRecord(payload) || typeof payload.taskId !== "string" || payload.taskId.trim().length === 0) {
+        throw createError({
+            code: errorCodes.targetInvalid,
+            message: "todo.delete taskId must be a non-empty string.",
+            retryable: false
+        });
+    }
+    return payload.taskId;
+}
+
 function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -7,7 +7,7 @@ import type {
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../../route/ControlRouteFactory.js";
-import { readTodoSubscriptionFromSeq, readTodoTitle } from "./TodoRouteInput.js";
+import { readTodoSubscriptionFromSeq, readTodoTaskId, readTodoTitle } from "./TodoRouteInput.js";
 import type { TodoService } from "./TodoService.js";
 
 export interface TodoRouteSubscriptionPort {
@@ -22,7 +22,7 @@ export interface TodoRouteSubscriptionPort {
 
 export interface TodoRouteInstancePort {
     name: string;
-    todo: Pick<TodoService, "read">;
+    todo: Pick<TodoService, "delete" | "read">;
     worker: Pick<WorkerInstance, "snapshot" | "subscribe">;
 }
 
@@ -35,6 +35,10 @@ export function createTodoRouteModule(
             lastSeq: instance.worker.snapshot().lastSeq,
             todo: await instance.todo.read(readTodoTitle(request.payload))
         }) as unknown as JsonValue,
+        delete: async (request) => {
+            await instance.todo.delete(readTodoTaskId(request.payload));
+            return {};
+        },
         subscribe: async (request, context) => {
             await subscriptions.subscribe(
                 context,
