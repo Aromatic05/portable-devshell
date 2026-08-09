@@ -237,7 +237,8 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             "method": "bash_run",
             "params": {
                 "command": command
-            }
+            },
+            "context": { "workspace": env.workspace() }
         }),
     );
     assert_eq!(bash_run["ok"], true);
@@ -316,7 +317,8 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             "params": {
                 "command": timeout_command,
                 "timeoutMs": 10
-            }
+            },
+            "context": { "workspace": env.workspace() }
         }),
     );
     assert_eq!(timed_out["ok"], true);
@@ -338,7 +340,8 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             "params": {
                 "command": "true",
                 "timeoutMs": 100001
-            }
+            },
+            "context": { "workspace": env.workspace() }
         }),
     );
     assert_eq!(too_long["ok"], false);
@@ -364,7 +367,8 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             "params": {
                 "command": output_command,
                 "maxCaptureBytes": 128
-            }
+            },
+            "context": { "workspace": env.workspace() }
         }),
     );
     assert_eq!(output_limited["ok"], true);
@@ -399,7 +403,8 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             "params": {
                 "handle": handle,
                 "maxBytes": 1000
-            }
+            },
+            "context": { "workspace": env.workspace() }
         }),
     );
     assert_eq!(first["ok"], true, "{first}");
@@ -417,7 +422,8 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
                 "handle": handle,
                 "offsetBytes": first["result"]["nextOffsetBytes"],
                 "maxBytes": 2000
-            }
+            },
+            "context": { "workspace": env.workspace() }
         }),
     );
     assert_eq!(second["ok"], true, "{second}");
@@ -442,7 +448,8 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             "type": "request",
             "id": "9",
             "method": "bash_run",
-            "params": { "command": compact_command }
+            "params": { "command": compact_command },
+            "context": { "workspace": env.workspace() }
         }),
     );
     assert_eq!(compact["ok"], true, "{compact}");
@@ -622,7 +629,8 @@ fn workspace_security_mode_rejects_absolute_bash_cwd() {
             "params": {
                 "command": "pwd",
                 "cwd": outside.to_string_lossy()
-            }
+            },
+            "context": { "workspace": env.workspace() }
         }),
     );
     assert_eq!(escaped["ok"], false);
@@ -997,7 +1005,8 @@ fn long_tool_call_does_not_block_control_requests_on_the_same_rpc_connection() {
             "params": {
                 "command": long_command,
                 "timeoutMs": 5000
-            }
+            },
+            "context": { "workspace": env.workspace() }
         }),
     );
     write_rpc_frame(
@@ -1171,7 +1180,8 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
             "context": {
                 "ctxId": "ctx-cancel",
                 "requestId": "mcp-cancel-me",
-                "source": "mcp"
+                "source": "mcp",
+                "workspace": env.workspace()
             }
         }),
     );
