@@ -62,6 +62,7 @@ test("config parser trims values and preserves explicit patch removals", () => {
         tools: null
     });
     assert.deepEqual(patch, {
+        alerts: undefined,
         approvalPolicy: undefined,
         container: null,
         dockerBinary: undefined,
