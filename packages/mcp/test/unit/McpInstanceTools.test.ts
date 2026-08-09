@@ -253,6 +253,9 @@ function createWorker(options: {
         async callTool(toolName: string, input: JsonValue, callContext: ToolCallContext) {
             return await (options.callTool?.(toolName, input, callContext) ?? Promise.resolve({ ok: true }));
         },
+        async readAlerts() {
+            return { advice: [] };
+        },
         handshake: {
             instance: "main-pc",
             skillsDirectory: "/home/demo/.devshell/skill",
