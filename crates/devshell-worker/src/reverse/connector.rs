@@ -847,7 +847,7 @@ mod tests {
             },
             WorkerRuntimeContext {
                 instance,
-                workspace,
+                workspace: workspace.clone(),
                 platform: PlatformInfo {
                     os: std::env::consts::OS,
                     arch: std::env::consts::ARCH,
@@ -870,7 +870,8 @@ mod tests {
                 "requestId": "operation-1",
                 "operationId": "operation-1",
                 "ctxId": "ctx-reverse",
-                "source": "control"
+                "source": "control",
+                "workspace": workspace
             }
         }))
         .unwrap();
@@ -902,7 +903,8 @@ mod tests {
                 "requestId": "operation-1",
                 "operationId": "operation-1",
                 "ctxId": "ctx-reverse",
-                "source": "control"
+                "source": "control",
+                "workspace": workspace
             }
         }))
         .unwrap();
@@ -946,7 +948,7 @@ mod tests {
             },
             WorkerRuntimeContext {
                 instance,
-                workspace,
+                workspace: workspace.clone(),
                 platform: PlatformInfo {
                     os: std::env::consts::OS,
                     arch: std::env::consts::ARCH,
@@ -969,7 +971,8 @@ mod tests {
                 "requestId": "retryable-operation",
                 "operationId": "retryable-operation",
                 "ctxId": "ctx-reverse",
-                "source": "control"
+                "source": "control",
+                "workspace": workspace
             }
         }))
         .unwrap();
@@ -1020,7 +1023,7 @@ mod tests {
             },
             WorkerRuntimeContext {
                 instance,
-                workspace,
+                workspace: workspace.clone(),
                 platform: PlatformInfo {
                     os: std::env::consts::OS,
                     arch: std::env::consts::ARCH,
@@ -1043,7 +1046,8 @@ mod tests {
             "context": {
                 "requestId": "mcp-long-tool",
                 "ctxId": "ctx-reverse",
-                "source": "mcp"
+                "source": "mcp",
+                "workspace": workspace
             }
         }))
         .unwrap();

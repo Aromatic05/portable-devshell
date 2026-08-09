@@ -67,7 +67,8 @@ fn call_with_identity(
     let mut context = json!({
         "ctxId": identity.ctx_id,
         "requestId": identity.request_id,
-        "source": "mcp"
+        "source": "mcp",
+        "workspace": env.workspace(),
     });
     if let Some(operation_id) = identity.operation_id {
         context["operationId"] = json!(operation_id);
