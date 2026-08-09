@@ -94,6 +94,65 @@ test("real Ink runtime handles keyboard navigation, search, redraw, and terminal
     assert.equal(terminal.output.includes("\u001B[?1049l"), true);
 });
 
+test("serializes rapid Audit Input navigation and activation", async () => {
+    const terminal = createTerminal();
+    const clients = createClients({
+        instanceList: [{ enabled: true, mcpEnabled: true, name: "alpha" }],
+        toolCallRecords: [{
+            callId: "rapid-input",
+            ctxId: "ctx-rapid",
+            input: { command: "printf rapid-input" },
+            inputSummary: '{"command":"printf rapid-input"}',
+            instance: asInstanceName("alpha"),
+            output: { stdout: "rapid-output" },
+            source: "mcp",
+            startedAt: "2026-08-09T00:00:00.000Z",
+            status: "completed",
+            toolName: "bash_run",
+        }],
+    });
+    const runtime = new TuiRuntime(
+        { stdin: terminal.stdin, stdout: terminal.stdout },
+        { clients: clients.value, inkDebug: true },
+    );
+    const running = runtime.run();
+
+    try {
+        await waitUntil(() => runtime.store.getState().connection.status === "connected");
+        await waitUntil(() => runtime.store.getState().readModel.instanceState.alpha?.toolCalls.length === 1);
+        runtime.store.setSelectedInstance("alpha");
+        runtime.store.setSelectedPage("audit");
+        runtime.store.replaceRoute({
+            ctxId: "ctx-rapid",
+            page: "audit",
+            scope: "context",
+            view: "context",
+        });
+        await waitUntil(() => selectMainScreenModel(runtime.store.getState()).boxes.some(
+            (candidate) => candidate.id === "audit-call:rapid-input",
+        ));
+        const box = selectMainScreenModel(runtime.store.getState()).boxes.find(
+            (candidate) => candidate.id === "audit-call:rapid-input",
+        )!;
+        runtime.store.toggleExpanded(box.expandedKey);
+        runtime.store.setFocusScope("mainBoxes");
+        runtime.store.setMainFocusId(box.id);
+
+        await Promise.all([
+            ...Array.from({ length: 7 }, () => runtime.handleInput("", { downArrow: true })),
+            runtime.handleInput("", { return: true }),
+        ]);
+
+        const overlay = topTuiOverlay(runtime.store.getState().interaction.overlays);
+        assert.equal(overlay?.kind, "text-detail");
+        assert.equal(overlay?.kind === "text-detail" && overlay.body.includes("rapid-input"), true);
+    } finally {
+        terminal.write("\u0004");
+        await running;
+        await runtime.stop();
+    }
+});
+
 test("real Ink runtime saves a restart-required Config edit through cross-box keyboard focus", async () => {
     const terminal = createTerminal();
     const clients = createClients({
