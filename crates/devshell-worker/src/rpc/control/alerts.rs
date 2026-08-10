@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -59,6 +60,7 @@ struct AlertsReadResult {
 }
 
 struct WorkspaceAlerts {
+    active_probe: Option<u64>,
     advice: Vec<Advice>,
     config: AlertConfig,
     last_run: Option<Instant>,
@@ -66,18 +68,21 @@ struct WorkspaceAlerts {
 }
 
 pub struct AlertService {
+    next_probe_id: Arc<AtomicU64>,
     state: Arc<Mutex<HashMap<PathBuf, WorkspaceAlerts>>>,
 }
 
 impl AlertService {
     pub fn new() -> Self {
         let state = Arc::new(Mutex::new(HashMap::new()));
+        let next_probe_id = Arc::new(AtomicU64::new(1));
         let polling_state = Arc::clone(&state);
+        let polling_probe_id = Arc::clone(&next_probe_id);
         thread::spawn(move || loop {
-            poll_due(&polling_state);
+            poll_due(&polling_state, &polling_probe_id);
             thread::sleep(Duration::from_millis(250));
         });
-        Self { state }
+        Self { next_probe_id, state }
     }
 
     fn read(&self, input: AlertsReadInput) -> Result<AlertsReadResult, RpcError> {
@@ -92,17 +97,20 @@ impl AlertService {
         };
         validate_config(&config)?;
         let now = Instant::now();
+        let probe_id = self.next_probe_id.fetch_add(1, Ordering::Relaxed);
         {
             let mut state = self.state.lock()
                 .map_err(|_| RpcError::new("alerts.unavailable", "alert state lock poisoned"))?;
             state.insert(workspace.clone(), WorkspaceAlerts {
+                active_probe: Some(probe_id),
                 advice: Vec::new(),
-                config,
+                config: config.clone(),
                 last_run: None,
                 last_seen: now,
             });
         }
-        poll_workspace(&self.state, &workspace);
+        let advice = collect_advice(&workspace, &config);
+        complete_probe(&self.state, &workspace, probe_id, &config, advice);
         let state = self.state.lock()
             .map_err(|_| RpcError::new("alerts.unavailable", "alert state lock poisoned"))?;
         Ok(AlertsReadResult {
@@ -135,6 +143,7 @@ impl AlertService {
             }
             None => {
                 state.insert(workspace, WorkspaceAlerts {
+                    active_probe: None,
                     advice: Vec::new(),
                     config,
                     last_run: None,
@@ -208,28 +217,44 @@ fn interval(config: &AlertConfig) -> Duration {
     Duration::from_millis(config.interval_ms.unwrap_or(DEFAULT_INTERVAL_MS))
 }
 
-fn poll_due(state: &Arc<Mutex<HashMap<PathBuf, WorkspaceAlerts>>>) {
+fn poll_due(
+    state: &Arc<Mutex<HashMap<PathBuf, WorkspaceAlerts>>>,
+    next_probe_id: &Arc<AtomicU64>,
+) {
     let now = Instant::now();
-    let workspaces: Vec<PathBuf> = state.lock().ok().map(|mut entries| {
+    let probes: Vec<(PathBuf, AlertConfig, u64)> = state.lock().ok().map(|mut entries| {
         entries.retain(|_, entry| now.saturating_duration_since(entry.last_seen) < CACHE_IDLE_TTL);
-        entries.iter()
-            .filter(|(_, entry)| entry.last_run.is_none_or(|last| now.saturating_duration_since(last) >= interval(&entry.config)))
-            .map(|(workspace, _)| workspace.clone())
-            .collect()
+        entries.iter_mut().filter_map(|(workspace, entry)| {
+            if entry.active_probe.is_some() ||
+                entry.last_run.is_some_and(|last| now.saturating_duration_since(last) < interval(&entry.config))
+            {
+                return None;
+            }
+            let probe_id = next_probe_id.fetch_add(1, Ordering::Relaxed);
+            entry.active_probe = Some(probe_id);
+            Some((workspace.clone(), entry.config.clone(), probe_id))
+        }).collect()
     }).unwrap_or_default();
-    for workspace in workspaces {
-        poll_workspace(state, &workspace);
+    for (workspace, config, probe_id) in probes {
+        let advice = collect_advice(&workspace, &config);
+        complete_probe(state, &workspace, probe_id, &config, advice);
     }
 }
 
-fn poll_workspace(state: &Arc<Mutex<HashMap<PathBuf, WorkspaceAlerts>>>, workspace: &Path) {
-    let config = state.lock().ok()
-        .and_then(|entries| entries.get(workspace).map(|entry| entry.config.clone()));
-    let Some(config) = config else { return; };
-    let advice = collect_advice(workspace, &config);
+fn complete_probe(
+    state: &Arc<Mutex<HashMap<PathBuf, WorkspaceAlerts>>>,
+    workspace: &Path,
+    probe_id: u64,
+    config: &AlertConfig,
+    advice: Vec<Advice>,
+) {
     if let Ok(mut entries) = state.lock() {
         if let Some(entry) = entries.get_mut(workspace) {
-            if entry.config == config {
+            if entry.active_probe != Some(probe_id) {
+                return;
+            }
+            entry.active_probe = None;
+            if entry.config == *config {
                 entry.advice = advice;
                 entry.last_run = Some(Instant::now());
             }
@@ -316,6 +341,7 @@ mod tests {
         AlertConfig, AlertScript, AlertService, AlertsReadInput, CACHE_IDLE_TTL,
         run_script, uncommitted_changes,
     };
+    use std::sync::Arc;
 
     #[test]
     fn non_git_workspace_has_no_uncommitted_changes() {
@@ -359,6 +385,47 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn initial_probe_is_not_scheduled_again_while_it_is_in_flight() {
+        let workspace = crate::testing::temp_dir();
+        let service = Arc::new(AlertService::new());
+        let reader = Arc::clone(&service);
+        let workspace_path = workspace.path().to_path_buf();
+        let read = std::thread::spawn(move || {
+            reader.read(AlertsReadInput {
+                config: Some(AlertConfig {
+                    interval_ms: Some(1_000),
+                    max_uncommitted_changes: None,
+                    scripts: Some(vec![AlertScript {
+                        command: vec![
+                            "sh".to_string(),
+                            "-c".to_string(),
+                            "printf 'x\\n' >> probe-count; while [ ! -f release-probe ]; do sleep 0.01; done; printf '[]'".to_string(),
+                        ],
+                        id: "counter".to_string(),
+                        timeout_ms: Some(2_000),
+                    }]),
+                    worker_memory_bytes: None,
+                }),
+                workspace: workspace_path.display().to_string(),
+            }).unwrap();
+        });
+
+        let probe_count = workspace.path().join("probe-count");
+        let started = std::time::Instant::now();
+        while !probe_count.exists() && started.elapsed() < std::time::Duration::from_secs(1) {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(probe_count.exists(), "initial alert probe did not start");
+        std::thread::sleep(std::time::Duration::from_millis(350));
+        std::fs::write(workspace.path().join("release-probe"), b"release").unwrap();
+        read.join().unwrap();
+
+        let probes = std::fs::read_to_string(probe_count).unwrap();
+        assert_eq!(probes.lines().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn background_probes_stop_after_the_workspace_lease_expires() {
         let workspace = crate::testing::temp_dir();
         let service = AlertService::new();
@@ -389,8 +456,6 @@ mod tests {
         }
         std::thread::sleep(std::time::Duration::from_millis(350));
 
-        let probes = std::fs::read_to_string(workspace.path().join("probe-count")).unwrap();
-        assert_eq!(probes.lines().count(), 1);
         assert!(!service.state.lock().unwrap().contains_key(&canonical));
     }
 }
