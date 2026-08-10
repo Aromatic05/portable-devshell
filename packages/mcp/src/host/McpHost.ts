@@ -1,4 +1,4 @@
-import type { JsonValue, ToolCallContext, ToolDefinition, ToolPolicy } from "@portable-devshell/shared";
+import type { JsonValue, McpContextRecord, ToolCallContext, ToolDefinition, ToolPolicy } from "@portable-devshell/shared";
 import { type McpAuthConfig } from "../auth/McpAuthConfig.js";
 import { McpContextRegistry } from "../context/McpContextRegistry.js";
 import type { McpInstanceGateway } from "../instance/McpInstanceGateway.js";
@@ -35,6 +35,8 @@ interface WorkerInstanceLike {
         workspace: string;
     }>;
     readAlerts(workspace: string): Promise<{ advice: Array<{ code: string; text: string }> }>;
+    releaseAlerts?(workspace: string): Promise<void>;
+    touchAlerts?(workspace: string): Promise<void>;
     snapshot(): { ready?: boolean };
 }
 
@@ -63,6 +65,7 @@ export class McpHost {
     readonly #oauth?: McpOAuthProtectedResource;
     readonly #registry = new McpHostRouteRegistry();
     readonly #retiredBindingClosures = new Set<Promise<void>>();
+    readonly #workers = new Map<string, WorkerInstanceLike>();
     #started = false;
 
     constructor(config: McpHostConfig) {
@@ -114,6 +117,7 @@ export class McpHost {
     }
 
     registerInstance(instance: McpHostInstanceConfig): void {
+        this.#workers.set(instance.name, instance.worker);
         const binding = new McpEndpointBinding(
             new McpEndpointWorker({
                 contextRegistry: this.#contextRegistry,
@@ -143,6 +147,7 @@ export class McpHost {
     }
 
     unregisterInstance(instanceName: string): void {
+        this.#workers.delete(instanceName);
         const previous = this.#registry.unregister(instanceName);
         if (previous === undefined) {
             return;
@@ -166,6 +171,42 @@ export class McpHost {
 
     get contextRegistry(): McpContextRegistry {
         return this.#contextRegistry;
+    }
+
+    get contextAdmin(): {
+        disable(ctxId: string): Promise<McpContextRecord>;
+        list(): Promise<McpContextRecord[]>;
+        renew(ctxId: string): Promise<McpContextRecord>;
+    } {
+        return {
+            disable: async (ctxId) => {
+                const disabled = await this.#contextRegistry.disable(ctxId);
+                const now = Date.now();
+                const hasOtherActiveContext = (await this.#contextRegistry.list()).some((context) =>
+                    context.ctxId !== disabled.ctxId &&
+                    context.instance === disabled.instance &&
+                    context.workspace === disabled.workspace &&
+                    context.status === "active" &&
+                    Date.parse(context.expiresAt) > now
+                );
+                if (!hasOtherActiveContext) {
+                    const worker = this.#workers.get(disabled.instance);
+                    if (worker?.snapshot().ready === true) {
+                        await worker.releaseAlerts?.(disabled.workspace);
+                    }
+                }
+                return disabled;
+            },
+            list: async () => await this.#contextRegistry.list(),
+            renew: async (ctxId) => {
+                const renewed = await this.#contextRegistry.renew(ctxId);
+                const worker = this.#workers.get(renewed.instance);
+                if (worker?.snapshot().ready === true) {
+                    await worker.touchAlerts?.(renewed.workspace);
+                }
+                return renewed;
+            },
+        };
     }
 
     get oauthApprovals(): McpOAuthApprovalService | undefined {

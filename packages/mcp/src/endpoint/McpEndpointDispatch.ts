@@ -170,6 +170,9 @@ export class McpEndpointDispatch {
             source: "mcp",
             workspace: record.workspace
         };
+        if (this.#worker.touchAlerts !== undefined) {
+            await this.#worker.touchAlerts(record.workspace);
+        }
         await this.#worker.appendMcpToolCalled(toolName, {
             ctxId: context.ctxId,
             requestId: context.requestId

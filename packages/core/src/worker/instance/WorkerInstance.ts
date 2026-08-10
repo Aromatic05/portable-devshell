@@ -175,6 +175,16 @@ export class WorkerInstance {
         return await this.#protocolClient.readAlerts(workspace, this.#config.alerts);
     }
 
+    async touchAlerts(workspace: string): Promise<void> {
+        this.#assertReady();
+        await this.#protocolClient.touchAlerts(workspace, this.#config.alerts);
+    }
+
+    async releaseAlerts(workspace: string): Promise<void> {
+        this.#assertReady();
+        await this.#protocolClient.releaseAlerts(workspace);
+    }
+
     async attachTerminal(input: {
         fromSeq: number;
         generation: number;
@@ -319,17 +329,22 @@ export class WorkerInstance {
         return await this.#tool.readToolCalls(query);
     }
 
-    reconfigure(input: {
+    async reconfigure(input: {
+        alerts?: ResolvedWorkerInstanceConfig["alerts"];
         approvalPolicy?: ResolvedWorkerInstanceConfig["approvalPolicy"];
         defaultWorkspace?: WorkspacePath;
         effectiveSecurityMode: ResolvedWorkerInstanceConfig["effectiveSecurityMode"];
         env?: NodeJS.ProcessEnv;
-    }): void {
+    }): Promise<void> {
+        this.#config.alerts = input.alerts;
         this.#config.approvalPolicy = input.approvalPolicy;
         this.#config.defaultWorkspace = input.defaultWorkspace;
         this.#config.effectiveSecurityMode = input.effectiveSecurityMode;
         this.#config.env = input.env;
         this.#approvalManager.setPolicy(input.approvalPolicy);
+        if (this.snapshot().ready) {
+            await this.#protocolClient.configureAlerts(input.alerts);
+        }
     }
 
     async appendMcpSessionOpened(sessionId: string): Promise<void> {

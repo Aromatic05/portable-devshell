@@ -115,6 +115,8 @@ pub fn register_control_handlers(
     );
     handlers.insert("worker.ping".to_string(), ping::handler());
     handlers.insert("workspace.prepare".to_string(), workspace::handler());
-    handlers.insert("alerts.read".to_string(), alerts::handler(alerts));
+    handlers.insert("alerts.configure".to_string(), alerts::configure_handler(Arc::clone(&alerts)));
+    handlers.insert("alerts.read".to_string(), alerts::read_handler(Arc::clone(&alerts)));
+    handlers.insert("alerts.touch".to_string(), alerts::touch_handler(alerts));
     handlers.insert("tools.list".to_string(), tools_list::handler(tools));
 }

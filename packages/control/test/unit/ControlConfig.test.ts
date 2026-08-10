@@ -205,6 +205,28 @@ test("global TOML round-trips web oauth2 auth with a flat web.oauth2 table", () 
     });
 });
 
+test("instance alerts survive Control config persistence", async () => {
+    const homeDirectory = await createTestTempDirectory("control-alerts");
+    const alerts = {
+        intervalMs: 2_000,
+        maxUncommittedChanges: 7,
+        scripts: [{ command: ["check-workspace", "--json"], id: "workspace", timeoutMs: 3_000 }],
+        workerMemoryBytes: 536_870_912,
+    };
+    const config = createDefaultControlConfig();
+    config.instances = [{ ...createInstanceConfig("/tmp/demo"), alerts }];
+
+    try {
+        const store = new ControlConfigStore();
+        await store.write(config, homeDirectory);
+        const loaded = await store.readOrCreate(homeDirectory);
+
+        assert.deepEqual(loaded.instances[0]?.alerts, alerts);
+    } finally {
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
 test("global TOML decode rejects web token residual alongside auth=none", () => {
     assert.throws(
         () =>
@@ -296,6 +318,20 @@ test("instance name and audit limits are semantic validation rules", () => {
     assert.throws(
         () => validator.validate({ ...createDefaultControlConfig(), instances: [invalidLogs] })
     );
+});
+
+test("instance alert limits are rejected by Control before reaching a worker", () => {
+    const validator = new ControlConfigValidator();
+    const validateAlerts = (alerts: NonNullable<ReturnType<typeof createInstanceConfig>["alerts"]>) =>
+        validator.validate({
+            ...createDefaultControlConfig(),
+            instances: [{ ...createInstanceConfig("/tmp/demo"), alerts }],
+        });
+
+    assert.throws(() => validateAlerts({ intervalMs: 999 }));
+    assert.throws(() => validateAlerts({ scripts: [{ command: ["check"], id: "check", timeoutMs: 0 }] }));
+    assert.throws(() => validateAlerts({ maxUncommittedChanges: -1 }));
+    assert.throws(() => validateAlerts({ workerMemoryBytes: -1 }));
 });
 
 test("unknown and legacy instance fields are rejected instead of silently ignored", () => {

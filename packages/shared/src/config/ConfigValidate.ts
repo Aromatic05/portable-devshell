@@ -2,6 +2,7 @@ import { configInputError } from "./ConfigIssue.js";
 import {
     minimumAuditStorageBytes,
     type ControlConfig,
+    type ControlInstanceAlertsConfig,
     type ControlInstanceConfig,
     type ControlToolSchedulerConfig
 } from "./ConfigModel.js";
@@ -62,11 +63,37 @@ function validateInstance(instance: ControlInstanceConfig, index: number): void 
         throw configInputError("semantic", [...base, "mcp", "path"], "config.instance.mcpPath", `must be ${expectedPath}`);
     }
 
+    validateAlerts(instance.alerts, base);
     validateLogs(instance, base);
     validateScheduler(instance.tools?.scheduler, base);
     validateApprovalPolicy(instance, base);
     validateContainer(instance, base);
     validateMcpAuth(instance, base);
+}
+
+function validateAlerts(alerts: ControlInstanceAlertsConfig | undefined, base: readonly (string | number)[]): void {
+    if (alerts === undefined) return;
+    if (alerts.intervalMs !== undefined && (!Number.isSafeInteger(alerts.intervalMs) || alerts.intervalMs < 1_000)) {
+        throw configInputError(
+            "semantic",
+            [...base, "alerts", "intervalMs"],
+            "config.alerts.intervalMs",
+            "must be an integer of at least 1000"
+        );
+    }
+    nonNegativeInteger(alerts.maxUncommittedChanges, [...base, "alerts", "maxUncommittedChanges"]);
+    positiveInteger(alerts.workerMemoryBytes, [...base, "alerts", "workerMemoryBytes"]);
+    for (const [index, script] of (alerts.scripts ?? []).entries()) {
+        if (script.id.trim().length === 0 || script.command.length === 0 || script.command.some((part) => part.trim().length === 0)) {
+            throw configInputError(
+                "semantic",
+                [...base, "alerts", "scripts", index],
+                "config.alerts.scriptInvalid",
+                "must contain a non-empty id and command"
+            );
+        }
+        positiveInteger(script.timeoutMs, [...base, "alerts", "scripts", index, "timeoutMs"]);
+    }
 }
 
 function validateGlobalMcp(config: ControlConfig): void {

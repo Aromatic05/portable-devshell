@@ -385,7 +385,7 @@ export class ConfigEditorCoordinator {
                 ? await this.#applyRuntimeOrRestore(input.currentConfig, input.nextConfig, input.runtimeChanges)
                 : false;
             if (input.existing !== undefined && input.instance !== undefined) {
-                this.#applyInstanceConfig(
+                await this.#applyInstanceConfig(
                     input.instance,
                     input.descriptor,
                     input.rebuildRequired,
@@ -433,7 +433,7 @@ export class ConfigEditorCoordinator {
         } else {
             this.#instanceRegistry.add(descriptor);
             try {
-                descriptor.worker.reconfigure(toWorkerReconfigureInput(existing));
+                await descriptor.worker.reconfigure(toWorkerReconfigureInput(existing));
                 descriptor.mcpCapabilities = [...existing.mcp.tools.capabilities];
                 descriptor.mcpGroups = [...existing.mcp.tools.groups];
                 descriptor.enabled = existing.enabled;
@@ -460,12 +460,12 @@ export class ConfigEditorCoordinator {
         return undefined;
     }
 
-    #applyInstanceConfig(
+    async #applyInstanceConfig(
         instance: ControlConfig["instances"][number],
         descriptor: ReturnType<InstanceRegistry["get"]>,
         rebuildRequired: boolean,
         preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined
-    ): void {
+    ): Promise<void> {
         if (descriptor === undefined) {
             if (instance.enabled && preparedDescriptor !== undefined) this.#instanceRegistry.add(preparedDescriptor);
             return;
@@ -475,7 +475,7 @@ export class ConfigEditorCoordinator {
             this.#instanceRegistry.add(preparedDescriptor);
             return;
         }
-        descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
+        await descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
         descriptor.mcpCapabilities = [...instance.mcp.tools.capabilities];
         descriptor.mcpGroups = [...instance.mcp.tools.groups];
         descriptor.enabled = instance.enabled;

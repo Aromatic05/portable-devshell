@@ -12,9 +12,10 @@ use crate::rpc::router::{ControlHandler, control_handler, parse_params, serializ
 
 const DEFAULT_INTERVAL_MS: u64 = 30_000;
 const DEFAULT_SCRIPT_TIMEOUT_MS: u64 = 5_000;
+const CACHE_IDLE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const MIN_INTERVAL_MS: u64 = 1_000;
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AlertConfig {
     interval_ms: Option<u64>,
@@ -23,7 +24,7 @@ struct AlertConfig {
     worker_memory_bytes: Option<u64>,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AlertScript {
     command: Vec<String>,
@@ -36,6 +37,12 @@ struct AlertScript {
 struct AlertsReadInput {
     config: Option<AlertConfig>,
     workspace: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AlertsConfigureInput {
+    config: Option<AlertConfig>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -55,6 +62,7 @@ struct WorkspaceAlerts {
     advice: Vec<Advice>,
     config: AlertConfig,
     last_run: Option<Instant>,
+    last_seen: Instant,
 }
 
 pub struct AlertService {
@@ -63,7 +71,7 @@ pub struct AlertService {
 
 impl AlertService {
     pub fn new() -> Self {
-        let state = Arc::new(Mutex::new(HashMap::<PathBuf, WorkspaceAlerts>::new()));
+        let state = Arc::new(Mutex::new(HashMap::new()));
         let polling_state = Arc::clone(&state);
         thread::spawn(move || loop {
             poll_due(&polling_state);
@@ -76,24 +84,108 @@ impl AlertService {
         let workspace = Path::new(&input.workspace).canonicalize().map_err(|error| {
             RpcError::new("workspace.invalid", format!("failed to resolve workspace {}: {error}", input.workspace))
         })?;
-        let Some(config) = input.config else { return Ok(AlertsReadResult { advice: Vec::new() }); };
+        let Some(config) = input.config else {
+            self.state.lock()
+                .map_err(|_| RpcError::new("alerts.unavailable", "alert state lock poisoned"))?
+                .remove(&workspace);
+            return Ok(AlertsReadResult { advice: Vec::new() });
+        };
         validate_config(&config)?;
+        let now = Instant::now();
         {
-            let mut state = self.state.lock().map_err(|_| RpcError::new("alerts.unavailable", "alert state lock poisoned"))?;
+            let mut state = self.state.lock()
+                .map_err(|_| RpcError::new("alerts.unavailable", "alert state lock poisoned"))?;
             state.insert(workspace.clone(), WorkspaceAlerts {
-                advice: Vec::new(), config, last_run: None
+                advice: Vec::new(),
+                config,
+                last_run: None,
+                last_seen: now,
             });
         }
         poll_workspace(&self.state, &workspace);
-        let state = self.state.lock().map_err(|_| RpcError::new("alerts.unavailable", "alert state lock poisoned"))?;
-        Ok(AlertsReadResult { advice: state.get(&workspace).map(|entry| entry.advice.clone()).unwrap_or_default() })
+        let state = self.state.lock()
+            .map_err(|_| RpcError::new("alerts.unavailable", "alert state lock poisoned"))?;
+        Ok(AlertsReadResult {
+            advice: state.get(&workspace).map(|entry| entry.advice.clone()).unwrap_or_default(),
+        })
+    }
+
+    fn touch(&self, input: AlertsReadInput) -> Result<(), RpcError> {
+        let workspace = Path::new(&input.workspace).canonicalize().map_err(|error| {
+            RpcError::new("workspace.invalid", format!("failed to resolve workspace {}: {error}", input.workspace))
+        })?;
+        let Some(config) = input.config else {
+            self.state.lock()
+                .map_err(|_| RpcError::new("alerts.unavailable", "alert state lock poisoned"))?
+                .remove(&workspace);
+            return Ok(());
+        };
+        validate_config(&config)?;
+        let now = Instant::now();
+        let mut state = self.state.lock()
+            .map_err(|_| RpcError::new("alerts.unavailable", "alert state lock poisoned"))?;
+        match state.get_mut(&workspace) {
+            Some(entry) => {
+                if entry.config != config {
+                    entry.config = config;
+                    entry.advice.clear();
+                    entry.last_run = None;
+                }
+                entry.last_seen = now;
+            }
+            None => {
+                state.insert(workspace, WorkspaceAlerts {
+                    advice: Vec::new(),
+                    config,
+                    last_run: None,
+                    last_seen: now,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn configure(&self, config: Option<AlertConfig>) -> Result<(), RpcError> {
+        let Some(config) = config else {
+            self.state.lock()
+                .map_err(|_| RpcError::new("alerts.unavailable", "alert state lock poisoned"))?
+                .clear();
+            return Ok(());
+        };
+        validate_config(&config)?;
+        let mut state = self.state.lock()
+            .map_err(|_| RpcError::new("alerts.unavailable", "alert state lock poisoned"))?;
+        for entry in state.values_mut() {
+            if entry.config != config {
+                entry.config = config.clone();
+                entry.advice.clear();
+                entry.last_run = None;
+            }
+        }
+        Ok(())
     }
 }
 
-pub fn handler(service: Arc<AlertService>) -> Arc<dyn ControlHandler> {
+pub fn read_handler(service: Arc<AlertService>) -> Arc<dyn ControlHandler> {
     control_handler(move |request| {
         let input: AlertsReadInput = parse_params(request)?;
         serialize(service.read(input)?)
+    })
+}
+
+pub fn touch_handler(service: Arc<AlertService>) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
+        let input: AlertsReadInput = parse_params(request)?;
+        service.touch(input)?;
+        serialize(serde_json::json!({}))
+    })
+}
+
+pub fn configure_handler(service: Arc<AlertService>) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
+        let input: AlertsConfigureInput = parse_params(request)?;
+        service.configure(input.config)?;
+        serialize(serde_json::json!({}))
     })
 }
 
@@ -112,26 +204,38 @@ fn validate_config(config: &AlertConfig) -> Result<(), RpcError> {
     Ok(())
 }
 
+fn interval(config: &AlertConfig) -> Duration {
+    Duration::from_millis(config.interval_ms.unwrap_or(DEFAULT_INTERVAL_MS))
+}
+
 fn poll_due(state: &Arc<Mutex<HashMap<PathBuf, WorkspaceAlerts>>>) {
-    let workspaces: Vec<PathBuf> = state.lock().ok().map(|entries| entries.iter()
-        .filter(|(_, entry)| entry.last_run.is_none_or(|last| last.elapsed() >= interval(&entry.config)))
-        .map(|(workspace, _)| workspace.clone()).collect()).unwrap_or_default();
-    for workspace in workspaces { poll_workspace(state, &workspace); }
+    let now = Instant::now();
+    let workspaces: Vec<PathBuf> = state.lock().ok().map(|mut entries| {
+        entries.retain(|_, entry| now.saturating_duration_since(entry.last_seen) < CACHE_IDLE_TTL);
+        entries.iter()
+            .filter(|(_, entry)| entry.last_run.is_none_or(|last| now.saturating_duration_since(last) >= interval(&entry.config)))
+            .map(|(workspace, _)| workspace.clone())
+            .collect()
+    }).unwrap_or_default();
+    for workspace in workspaces {
+        poll_workspace(state, &workspace);
+    }
 }
 
 fn poll_workspace(state: &Arc<Mutex<HashMap<PathBuf, WorkspaceAlerts>>>, workspace: &Path) {
-    let config = state.lock().ok().and_then(|entries| entries.get(workspace).map(|entry| entry.config.clone()));
+    let config = state.lock().ok()
+        .and_then(|entries| entries.get(workspace).map(|entry| entry.config.clone()));
     let Some(config) = config else { return; };
     let advice = collect_advice(workspace, &config);
     if let Ok(mut entries) = state.lock() {
         if let Some(entry) = entries.get_mut(workspace) {
-            entry.advice = advice;
-            entry.last_run = Some(Instant::now());
+            if entry.config == config {
+                entry.advice = advice;
+                entry.last_run = Some(Instant::now());
+            }
         }
     }
 }
-
-fn interval(config: &AlertConfig) -> Duration { Duration::from_millis(config.interval_ms.unwrap_or(DEFAULT_INTERVAL_MS)) }
 
 fn collect_advice(workspace: &Path, config: &AlertConfig) -> Vec<Advice> {
     let mut advice = Vec::new();
@@ -208,12 +312,35 @@ fn valid_advice(advice: &Advice) -> bool { !advice.text.trim().is_empty() && adv
 
 #[cfg(test)]
 mod tests {
-    use super::{AlertScript, run_script, uncommitted_changes};
+    use super::{
+        AlertConfig, AlertScript, AlertService, AlertsReadInput, CACHE_IDLE_TTL,
+        run_script, uncommitted_changes,
+    };
 
     #[test]
     fn non_git_workspace_has_no_uncommitted_changes() {
         let workspace = crate::testing::temp_dir();
         assert_eq!(uncommitted_changes(workspace.path()).unwrap(), 0);
+    }
+
+    #[test]
+    fn disabling_alerts_clears_registered_workspace_state() {
+        let workspace = crate::testing::temp_dir();
+        let service = AlertService::new();
+        service.read(AlertsReadInput {
+            config: Some(AlertConfig {
+                interval_ms: Some(1_000),
+                max_uncommitted_changes: None,
+                scripts: None,
+                worker_memory_bytes: None,
+            }),
+            workspace: workspace.path().display().to_string(),
+        }).unwrap();
+        assert_eq!(service.state.lock().unwrap().len(), 1);
+
+        service.configure(None).unwrap();
+
+        assert!(service.state.lock().unwrap().is_empty());
     }
 
     #[cfg(unix)]
@@ -228,5 +355,42 @@ mod tests {
         assert_eq!(advice.len(), 1);
         assert_eq!(advice[0].code, "custom.ready");
         assert_eq!(advice[0].text, "custom alert");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn background_probes_stop_after_the_workspace_lease_expires() {
+        let workspace = crate::testing::temp_dir();
+        let service = AlertService::new();
+        service.read(AlertsReadInput {
+            config: Some(AlertConfig {
+                interval_ms: Some(1_000),
+                max_uncommitted_changes: None,
+                scripts: Some(vec![AlertScript {
+                    command: vec![
+                        "sh".to_string(),
+                        "-c".to_string(),
+                        "printf 'x\\n' >> probe-count; printf '[]'".to_string(),
+                    ],
+                    id: "counter".to_string(),
+                    timeout_ms: Some(1_000),
+                }]),
+                worker_memory_bytes: None,
+            }),
+            workspace: workspace.path().display().to_string(),
+        }).unwrap();
+
+        let canonical = workspace.path().canonicalize().unwrap();
+        {
+            let mut state = service.state.lock().unwrap();
+            state.get_mut(&canonical).unwrap().last_seen = std::time::Instant::now()
+                .checked_sub(CACHE_IDLE_TTL + std::time::Duration::from_secs(1))
+                .unwrap();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(350));
+
+        let probes = std::fs::read_to_string(workspace.path().join("probe-count")).unwrap();
+        assert_eq!(probes.lines().count(), 1);
+        assert!(!service.state.lock().unwrap().contains_key(&canonical));
     }
 }

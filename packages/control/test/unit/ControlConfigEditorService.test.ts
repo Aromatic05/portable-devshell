@@ -380,6 +380,7 @@ test("config editor reconfigures and disables a running instance without replaci
     await service.updateInstanceConfig({
         instanceName: "demo-local",
         patch: {
+            alerts: { intervalMs: 2_000, maxUncommittedChanges: 5 },
             approvalPolicy: { mode: "ask" },
             security: { mode: "workspace" }
         }
@@ -390,6 +391,7 @@ test("config editor reconfigures and disables a running instance without replaci
     assert.equal(config.instances[0]?.security.mode, "workspace");
     assert.equal(reconfigureCalls.length, 1);
     assert.deepEqual(reconfigureCalls[0], {
+        alerts: { intervalMs: 2_000, maxUncommittedChanges: 5 },
         approvalPolicy: { mode: "ask", rules: undefined },
         defaultWorkspace: "/tmp/demo",
         effectiveSecurityMode: "workspace",

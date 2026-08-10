@@ -85,6 +85,7 @@ export class ControlInstanceTomlDocument {
             dockerBinary: instance.dockerBinary,
             podmanBinary: instance.podmanBinary,
             env: instance.env,
+            alerts: instance.alerts,
             mcp: {
                 auth: instance.mcp.auth.mode,
                 enabled: instance.mcp.enabled,

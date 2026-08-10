@@ -3,7 +3,7 @@ import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-import { McpContextRegistry, McpEndpointWorker } from "@portable-devshell/mcp/testing";
+import { McpContextRegistry, McpEndpointWorker, McpHost } from "@portable-devshell/mcp/testing";
 import type { JsonValue, ToolCallContext, ToolDefinition } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
@@ -116,10 +116,53 @@ test("McpContextRegistry lists contexts and supports manual disable and renew", 
     assert.equal((await registry.list())[0]?.status, "disabled");
 });
 
+test("McpHost context admin releases alerts only after the last workspace context is disabled", async () => {
+    const released: string[] = [];
+    const touched: string[] = [];
+    const host = new McpHost({
+        instances: [{
+            name: "demo-local",
+            policy: { capabilities: [], groups: [] },
+            worker: {
+                async releaseAlerts(workspace: string) { released.push(workspace); },
+                snapshot: () => ({ ready: true }),
+                async touchAlerts(workspace: string) { touched.push(workspace); },
+            } as never,
+        }],
+        listenHost: "127.0.0.1",
+        listenPort: 0,
+    });
+    await host.contextRegistry.initialize();
+    const first = await host.contextRegistry.create({
+        instance: "demo-local",
+        principal: "local",
+        workspace: "/projects/alpha",
+    });
+    const second = await host.contextRegistry.create({
+        instance: "demo-local",
+        principal: "local",
+        workspace: "/projects/alpha",
+    });
+
+    await host.contextAdmin.disable(first.ctxId);
+    assert.deepEqual(released, []);
+    await host.contextAdmin.disable(second.ctxId);
+    assert.deepEqual(released, ["/projects/alpha"]);
+
+    const renewed = await host.contextRegistry.create({
+        instance: "demo-local",
+        principal: "local",
+        workspace: "/projects/beta",
+    });
+    await host.contextAdmin.renew(renewed.ctxId);
+    assert.deepEqual(touched, ["/projects/beta"]);
+});
+
 test("McpEndpointWorker exposes environ_info and requires ctxId on every other tool", async () => {
     const registry = new McpContextRegistry({ idFactory: () => "ctx-created" });
     await registry.initialize();
     const calls: Array<{ context: ToolCallContext; input: JsonValue; toolName: string }> = [];
+    const touchedAlertWorkspaces: string[] = [];
     const endpoint = new McpEndpointWorker({
         contextRegistry: registry,
         instanceName: "demo-local",
@@ -161,6 +204,9 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
             },
             async readAlerts() {
                 return { advice: [{ code: "worker.memory.high", text: "Worker memory is high." }] };
+            },
+            async touchAlerts(workspace) {
+                touchedAlertWorkspaces.push(workspace);
             },
             snapshot: () => ({ ready: true })
         }
@@ -216,6 +262,7 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
             toolName: "bash_run"
         }
     ]);
+    assert.deepEqual(touchedAlertWorkspaces, ["/projects/alpha"]);
 });
 
 function hasCode(expected: string): (error: unknown) => boolean {

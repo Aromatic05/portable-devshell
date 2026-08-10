@@ -2,6 +2,7 @@ import {
     asWorkspacePath,
     type ApprovalPolicy,
     type ControlConfig,
+    type ControlInstanceAlertsConfig,
     type ControlInstanceConfig
 } from "@portable-devshell/shared";
 
@@ -70,6 +71,7 @@ function listenerId(host: string, port: number): string {
 }
 
 export function toWorkerReconfigureInput(instance: ControlInstanceConfig): {
+    alerts?: ControlInstanceAlertsConfig;
     approvalPolicy?: ApprovalPolicy;
     defaultWorkspace?: ReturnType<typeof asWorkspacePath>;
     effectiveSecurityMode: "disabled" | "workspace";
@@ -78,6 +80,10 @@ export function toWorkerReconfigureInput(instance: ControlInstanceConfig): {
     const effectiveSecurityMode = instance.security.mode;
 
     return {
+        alerts: instance.alerts === undefined ? undefined : {
+            ...instance.alerts,
+            scripts: instance.alerts.scripts?.map((script) => ({ ...script, command: [...script.command] })),
+        },
         approvalPolicy: instance.approvalPolicy,
         defaultWorkspace: asWorkspacePath(instance.workspace),
         effectiveSecurityMode,

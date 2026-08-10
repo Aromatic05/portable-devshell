@@ -164,6 +164,18 @@ export class WorkerProtocolClient {
         );
     }
 
+    async configureAlerts(config: ControlInstanceAlertsConfig | undefined): Promise<void> {
+        await this.#rpcClient.request("alerts.configure", { config } as unknown as JsonValue);
+    }
+
+    async touchAlerts(workspace: string, config: ControlInstanceAlertsConfig | undefined): Promise<void> {
+        await this.#rpcClient.request("alerts.touch", { config, workspace } as unknown as JsonValue);
+    }
+
+    async releaseAlerts(workspace: string): Promise<void> {
+        await this.#rpcClient.request("alerts.touch", { workspace });
+    }
+
     async closeToolSession(sessionId: string): Promise<void> {
         await this.#rpcClient.request("tool.session.close", { sessionId });
     }
