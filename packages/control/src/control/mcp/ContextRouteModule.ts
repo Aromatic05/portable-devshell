@@ -9,8 +9,13 @@ export interface ContextAdminPort {
     renew(ctxId: string): Promise<McpContextRecord>;
 }
 
-export function createContextRouteModule(port: ContextAdminPort | undefined): PrefixRouteModuleDefinition {
-    const admin = () => requirePort(port, "MCP contexts are not available.");
+export function createContextRouteModule(
+    port: ContextAdminPort | (() => ContextAdminPort | undefined) | undefined
+): PrefixRouteModuleDefinition {
+    const admin = () => requirePort(
+        typeof port === "function" ? port() : port,
+        "MCP contexts are not available."
+    );
     return routeModule("context", {
         list: async () => await admin().list() as unknown as JsonValue,
         disable: async (request) => await admin().disable(readCtxId(request.payload)) as unknown as JsonValue,

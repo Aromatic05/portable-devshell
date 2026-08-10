@@ -53,7 +53,7 @@ export class ControlRuntime {
         this.#routes = new ControlRouteComposition({
             artifact: options.artifact.service,
             config: options.mcp.configEditor,
-            contextAdmin: () => options.mcp.host?.contextRegistry,
+            contextAdmin: () => options.mcp.host?.contextAdmin,
             instanceCreate: options.mcp.instanceCreate,
             instances: options.instances,
             mcpStatus: () => options.mcp.status(),

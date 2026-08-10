@@ -99,7 +99,7 @@ export class ControlRouteComposition {
                             reason: "MCP runtime is disabled."
                         }))
                     }),
-                    createContextRouteModule(this.#options.contextAdmin?.()),
+                    createContextRouteModule(this.#options.contextAdmin),
                     createOperationalOverviewRouteModule(this.#overview),
                     createInstanceRouteModule({
                         create: this.#options.instanceCreate,
