@@ -780,6 +780,41 @@ test("WorkerInstance refreshStatus updates snapshot from worker status without a
     }
 });
 
+test("WorkerInstance refreshStatus on a connected instance keeps ready without a transient not-ready", async () => {
+    const homeDirectory = await createTestTempDirectory("instance-refresh-connected");
+    const harness = createWorkerInstanceHarness();
+    const instance = new WorkerInstanceFactory().create({
+        homeDirectory,
+        name: asInstanceName("task-6-refresh-connected"),
+        transport: harness.transport
+    });
+
+    try {
+        harness.setStatus("running");
+        const connected = await instance.refreshStatus();
+        assert.equal(connected.ready, true);
+        assert.equal(connected.connectionState, "connected");
+
+        const before = instance.subscribe(1);
+        assert.equal(before.kind, "events");
+        const beforeSeq = before.lastSeq;
+
+        const refreshed = await instance.refreshStatus();
+        assert.equal(refreshed.ready, true);
+        assert.equal(refreshed.connectionState, "connected");
+
+        const after = instance.subscribe(beforeSeq + 1);
+        assert.equal(after.kind, "events");
+        const transientReadyChanged = after.events.find(
+            (event) => event.type === "instance.readyChanged" && (event.data as { ready?: boolean } | undefined)?.ready === false
+        );
+        assert.equal(transientReadyChanged, undefined, "refreshStatus must not transiently flip ready to false");
+    } finally {
+        await instance.close();
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
 test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", async () => {
     const homeDirectory = await createTestTempDirectory("instance-reconnect");
     const harness = createWorkerInstanceHarness();
