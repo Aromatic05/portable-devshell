@@ -30,10 +30,10 @@ test("context routes resolve the current admin port for every request", async ()
     if (list === undefined) throw new Error("context.list operation is missing");
     const context = { connectionId: "conn", peer: "cli", requestId: "req" } as PrefixRouteContext;
 
-    const first = await list.handle({ id: "1", name: "list" }, context) as McpContextRecord[];
+    const first = await list.handle({ id: "1", name: "list" }, context);
     current = "second";
-    const second = await list.handle({ id: "2", name: "list" }, context) as McpContextRecord[];
+    const second = await list.handle({ id: "2", name: "list" }, context);
 
-    assert.equal(first[0]?.ctxId, "first:list");
-    assert.equal(second[0]?.ctxId, "second:list");
+    assert.deepEqual(first, [record("first:list")]);
+    assert.deepEqual(second, [record("second:list")]);
 });

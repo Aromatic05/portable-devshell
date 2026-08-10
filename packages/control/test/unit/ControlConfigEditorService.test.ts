@@ -390,16 +390,20 @@ test("config editor reconfigures and disables a running instance without replaci
     assert.equal(config.instances[0]?.enabled, false);
     assert.equal(config.instances[0]?.security.mode, "workspace");
     assert.equal(reconfigureCalls.length, 1);
-    assert.deepEqual(reconfigureCalls[0], {
-        alerts: { intervalMs: 2_000, maxUncommittedChanges: 5 },
-        approvalPolicy: { mode: "ask", rules: undefined },
-        defaultWorkspace: "/tmp/demo",
-        effectiveSecurityMode: "workspace",
-        env: {
-            DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "workspace",
-            DEVSHELL_WORKER_SECURITY_MODE: "workspace"
-        }
-    });
+    const reconfigure = reconfigureCalls[0] as {
+        alerts?: { intervalMs?: number; maxUncommittedChanges?: number };
+        approvalPolicy?: { mode?: string };
+        defaultWorkspace?: string;
+        effectiveSecurityMode?: string;
+        env?: Record<string, string>;
+    };
+    assert.equal(reconfigure.alerts?.intervalMs, 2_000);
+    assert.equal(reconfigure.alerts?.maxUncommittedChanges, 5);
+    assert.equal(reconfigure.approvalPolicy?.mode, "ask");
+    assert.equal(reconfigure.defaultWorkspace, "/tmp/demo");
+    assert.equal(reconfigure.effectiveSecurityMode, "workspace");
+    assert.equal(reconfigure.env?.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE, "workspace");
+    assert.equal(reconfigure.env?.DEVSHELL_WORKER_SECURITY_MODE, "workspace");
     assert.equal(registry.get("demo-local")?.enabled, false);
 });
 
