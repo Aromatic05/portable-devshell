@@ -26,6 +26,7 @@ export interface McpEndpointWorkerOptions {
     gateway?: McpInstanceGateway;
     instanceName: string;
     policy: ToolPolicy;
+    readyWaitMs?: number;
     worker: McpEndpointWorkerPort;
 }
 
@@ -47,6 +48,7 @@ export class McpEndpointWorker {
             contextRegistry: options.contextRegistry,
             gateway: options.gateway,
             instanceName: options.instanceName,
+            readyWaitMs: options.readyWaitMs,
             worker: options.worker
         });
         this.#instanceName = options.instanceName;

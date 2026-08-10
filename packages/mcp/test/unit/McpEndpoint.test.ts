@@ -610,7 +610,7 @@ test("environ_info remains callable without a worker schema", async () => {
 });
 
 test("tools/call still maps not ready to mcp.instanceNotReady", async () => {
-    const binding = createBinding(createWorkerHarness({ ready: false }));
+    const binding = createBinding(createWorkerHarness({ ready: false }), { readyWaitMs: 50 });
     const server = await createBindingServer(binding);
 
     try {
@@ -626,11 +626,51 @@ test("tools/call still maps not ready to mcp.instanceNotReady", async () => {
     }
 });
 
-function createBinding(harness = createWorkerHarness()): McpEndpointBinding {
+test("tools/call waits for a transiently not-ready instance before executing", async () => {
+    const pending = { ready: false };
+    const harness = createWorkerHarness({ ready: false });
+    const worker = harness.worker as unknown as {
+        callTool(...args: unknown[]): Promise<unknown>;
+        snapshot(): { ready: boolean };
+    };
+    let invoked = false;
+    worker.snapshot = () => ({ ready: pending.ready });
+    worker.callTool = async () => {
+        invoked = true;
+        return { exitCode: 0, stderr: "", stdout: "/workspace\n" };
+    };
+    const binding = createBinding(harness, { readyWaitMs: 2_000 });
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        const ctxId = await createContext(server.url, session.headers);
+
+        const call = postJson(
+            server.url,
+            withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
+            session.headers
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        pending.ready = true;
+
+        const response = await call;
+        assert.equal(response.status, 200);
+        assert.equal(response.body.error, undefined);
+        assert.equal(invoked, true);
+    } finally {
+        await server.close();
+        await binding.close();
+    }
+});
+
+function createBinding(harness = createWorkerHarness(), options?: { readyWaitMs?: number }): McpEndpointBinding {
     return new McpEndpointBinding(
         new McpEndpointWorker({
             policy: { capabilities: ["execute"], groups: ["bash"] },
             instanceName: "demo",
+            readyWaitMs: options?.readyWaitMs,
             worker: harness.worker
         })
     );

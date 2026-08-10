@@ -2,7 +2,11 @@ import { createError, errorCodes } from "@portable-devshell/shared";
 
 import type { McpInstanceGateway } from "../../instance/McpInstanceGateway.js";
 import type { McpEndpointCatalogWorker } from "../McpEndpointCatalog.js";
+import { throwIfMcpEndpointAborted } from "../McpEndpointCancellation.js";
 import type { McpEndpointEnvironmentHandshake, McpEndpointWorkerPort } from "../McpEndpointPort.js";
+
+const DEFAULT_READY_WAIT_MS = 5_000;
+const DEFAULT_READY_POLL_MS = 50;
 
 export function assertMcpEndpointReady(
     worker: Pick<McpEndpointCatalogWorker, "snapshot">,
@@ -16,6 +20,69 @@ export function assertMcpEndpointReady(
             retryable: false
         });
     }
+}
+
+export async function waitForMcpEndpointReady(
+    worker: Pick<McpEndpointCatalogWorker, "snapshot">,
+    instanceName: string,
+    signal?: AbortSignal,
+    options: { timeoutMs?: number; pollMs?: number } = {}
+): Promise<void> {
+    const timeoutMs = options.timeoutMs ?? DEFAULT_READY_WAIT_MS;
+    const pollMs = options.pollMs ?? DEFAULT_READY_POLL_MS;
+    const deadline = Date.now() + timeoutMs;
+
+    while (worker.snapshot().ready !== true) {
+        throwIfMcpEndpointAborted(signal);
+        if (Date.now() >= deadline) {
+            throw createError({
+                code: errorCodes.coreInstanceNotReady,
+                details: { instance: instanceName, waitedMs: timeoutMs },
+                message: `Instance ${instanceName} is not ready.`,
+                retryable: false
+            });
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+}
+
+export async function waitForMcpGatewayReady(
+    gateway: McpInstanceGateway,
+    instance: string,
+    signal?: AbortSignal,
+    options: { timeoutMs?: number; pollMs?: number } = {}
+): Promise<void> {
+    const timeoutMs = options.timeoutMs ?? DEFAULT_READY_WAIT_MS;
+    const pollMs = options.pollMs ?? DEFAULT_READY_POLL_MS;
+    const deadline = Date.now() + timeoutMs;
+
+    for (;;) {
+        try {
+            gateway.assertReady(instance);
+            return;
+        } catch (error) {
+            if (isNotReadyError(error)) {
+                throwIfMcpEndpointAborted(signal);
+                if (Date.now() >= deadline) {
+                    throw createError({
+                        code: errorCodes.coreInstanceNotReady,
+                        details: { instance, waitedMs: timeoutMs },
+                        message: `Instance ${instance} is not ready.`,
+                        retryable: false
+                    });
+                }
+                await new Promise((resolve) => setTimeout(resolve, pollMs));
+                continue;
+            }
+            throw error;
+        }
+    }
+}
+
+function isNotReadyError(error: unknown): boolean {
+    return typeof error === "object" && error !== null && "code" in error
+        ? (error as { code?: unknown }).code === errorCodes.coreInstanceNotReady
+        : false;
 }
 
 export function requireMcpEndpointGateway(

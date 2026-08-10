@@ -117,7 +117,7 @@ test("remote worker calls check target readiness before tool exposure", async ()
             return [bashTool];
         }
     });
-    const endpoint = createManagedEndpoint(createWorker(), gateway);
+    const endpoint = createManagedEndpoint(createWorker(), gateway, { readyWaitMs: 50 });
 
     await assert.rejects(
         endpoint.callTool("bash_run", withContext({ command: "pwd", instance: "remote-server" }), context),
@@ -221,7 +221,8 @@ test("instance management tools delegate to the gateway without requiring the lo
 
 function createManagedEndpoint(
     worker = createWorker(),
-    gateway = createGateway()
+    gateway = createGateway(),
+    options?: { readyWaitMs?: number }
 ): McpEndpointWorker {
     return new McpEndpointWorker({
         contextRegistry,
@@ -231,6 +232,7 @@ function createManagedEndpoint(
             capabilities: ["execute", "manage"],
             groups: ["bash", "instance"]
         },
+        readyWaitMs: options?.readyWaitMs,
         worker
     });
 }

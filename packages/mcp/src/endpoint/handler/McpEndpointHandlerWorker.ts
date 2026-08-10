@@ -4,13 +4,14 @@ import type { McpInstanceGateway } from "../../instance/McpInstanceGateway.js";
 import type { McpEndpointCatalog } from "../McpEndpointCatalog.js";
 import { readMcpRoutedInput } from "../McpEndpointInput.js";
 import type { McpEndpointWorkerPort } from "../McpEndpointPort.js";
-import { assertMcpEndpointReady, mcpEndpointToolNotExposed, requireMcpEndpointGateway } from "./McpEndpointHandlerSupport.js";
+import { mcpEndpointToolNotExposed, requireMcpEndpointGateway, waitForMcpEndpointReady, waitForMcpGatewayReady } from "./McpEndpointHandlerSupport.js";
 
 export class McpEndpointHandlerWorker {
     constructor(private readonly options: {
         catalog: McpEndpointCatalog;
         gateway?: McpInstanceGateway;
         instanceName: string;
+        readyWaitMs?: number;
         worker: McpEndpointWorkerPort;
     }) {}
 
@@ -25,7 +26,12 @@ export class McpEndpointHandlerWorker {
     ): Promise<JsonValue> {
         const routed = readMcpRoutedInput(input, instanceRoutingEnabled, this.options.instanceName);
         if (routed.instance === this.options.instanceName) {
-            assertMcpEndpointReady(this.options.worker, this.options.instanceName);
+            await waitForMcpEndpointReady(
+                this.options.worker,
+                this.options.instanceName,
+                signal,
+                { timeoutMs: this.options.readyWaitMs }
+            );
             if (selected === undefined) {
                 throw mcpEndpointToolNotExposed(toolName, this.options.instanceName);
             }
@@ -34,7 +40,7 @@ export class McpEndpointHandlerWorker {
         }
 
         const gateway = requireMcpEndpointGateway(this.options.gateway, this.options.instanceName);
-        gateway.assertReady(routed.instance);
+        await waitForMcpGatewayReady(gateway, routed.instance, signal, { timeoutMs: this.options.readyWaitMs });
         const targetTool = gateway.listTools(routed.instance).find((tool) => tool.name === toolName);
         if (targetTool === undefined || !this.options.catalog.isAllowed(targetTool)) {
             throw mcpEndpointToolNotExposed(toolName, routed.instance);

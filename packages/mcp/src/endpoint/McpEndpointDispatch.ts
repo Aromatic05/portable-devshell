@@ -34,6 +34,7 @@ export interface McpEndpointDispatchOptions {
     contextRegistry?: McpContextRegistry;
     gateway?: McpInstanceGateway;
     instanceName: string;
+    readyWaitMs?: number;
     worker: McpEndpointWorkerPort;
 }
 
@@ -71,6 +72,7 @@ export class McpEndpointDispatch {
             catalog: options.catalog,
             gateway: options.gateway,
             instanceName: options.instanceName,
+            readyWaitMs: options.readyWaitMs,
             worker: options.worker
         });
     }
