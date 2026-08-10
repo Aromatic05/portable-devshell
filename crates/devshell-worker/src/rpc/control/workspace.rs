@@ -1,6 +1,7 @@
 use std::fs::OpenOptions;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -25,6 +26,9 @@ struct WorkspacePrepareResult {
     workspace: String,
 }
 
+const CONTEXT_TEMP_ROOT: &str = "context-tmp";
+const CONTEXT_TEMP_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+
 pub fn handler() -> Arc<dyn ControlHandler> {
     control_handler(|request| {
         let input: WorkspacePrepareInput = parse_params(request)?;
@@ -47,10 +51,9 @@ fn prepare(workspace: &Path) -> Result<WorkspacePrepareResult, RpcError> {
     }
 
     let hash = format!("{:x}", Sha256::digest(workspace.as_os_str().as_encoded_bytes()));
-    let project_memory_directory = devshell_home()
-        .map_err(|error| RpcError::new("workspace.storageUnavailable", error))?
-        .join("project-memory")
-        .join(hash);
+    let home = devshell_home()
+        .map_err(|error| RpcError::new("workspace.storageUnavailable", error))?;
+    let project_memory_directory = home.join("project-memory").join(hash);
     ensure_dir(&project_memory_directory, 0o700)
         .map_err(|error| RpcError::new("workspace.storageUnavailable", error))?;
     let project_memory_agent_file = project_memory_directory.join("AGENT.md");
@@ -62,9 +65,14 @@ fn prepare(workspace: &Path) -> Result<WorkspacePrepareResult, RpcError> {
     ensure_file_mode(&project_memory_agent_file, 0o600)
         .map_err(|error| RpcError::new("workspace.storageUnavailable", error))?;
 
+    let context_temp_root = home.join(CONTEXT_TEMP_ROOT);
+    ensure_dir(&context_temp_root, 0o700)
+        .map_err(|error| RpcError::new("workspace.temporaryUnavailable", error.to_string()))?;
+    gc_stale_context_temp(&context_temp_root, CONTEXT_TEMP_TTL);
+
     let temporary_directory = tempfile::Builder::new()
         .prefix(&format!("{}-", temporary_prefix(&workspace)))
-        .tempdir_in(std::env::temp_dir())
+        .tempdir_in(&context_temp_root)
         .map_err(|error| RpcError::new("workspace.temporaryUnavailable", error.to_string()))?
         .keep();
 
@@ -74,6 +82,27 @@ fn prepare(workspace: &Path) -> Result<WorkspacePrepareResult, RpcError> {
         temporary_directory: protocol_path(&temporary_directory),
         workspace: protocol_path(&workspace),
     })
+}
+
+fn gc_stale_context_temp(root: &Path, ttl: Duration) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    let now = SystemTime::now();
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let Ok(modified) = entry.metadata().and_then(|metadata| metadata.modified()) else {
+            continue;
+        };
+        if now.duration_since(modified).is_ok_and(|age| age >= ttl) {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
 }
 
 fn temporary_prefix(workspace: &Path) -> String {
@@ -86,7 +115,7 @@ fn temporary_prefix(workspace: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::prepare;
+    use super::{gc_stale_context_temp, prepare, SystemTime};
 
     #[test]
     fn creates_stable_project_memory_and_unique_temporary_directories() {
@@ -97,5 +126,42 @@ mod tests {
         assert_eq!(first.project_memory_directory, second.project_memory_directory);
         assert_ne!(first.temporary_directory, second.temporary_directory);
         assert!(std::path::Path::new(&first.project_memory_agent_file).is_file());
+    }
+
+    #[test]
+    fn gc_removes_stale_context_temp_directories() {
+        let root = crate::testing::temp_dir();
+        let stale = root.path().join("stale-0001");
+        let fresh = root.path().join("fresh-0002");
+        std::fs::create_dir_all(&stale).unwrap();
+        std::fs::create_dir_all(&fresh).unwrap();
+        let stale_modified = SystemTime::now()
+            .checked_sub(std::time::Duration::from_secs(2 * 60 * 60))
+            .unwrap();
+        filetime::set_file_mtime(&stale, filetime::FileTime::from_system_time(stale_modified)).unwrap();
+
+        gc_stale_context_temp(root.path(), std::time::Duration::from_secs(60 * 60));
+
+        assert!(!stale.exists());
+        assert!(fresh.exists());
+    }
+
+    #[test]
+    fn gc_leaves_non_directory_entries_alone() {
+        let root = crate::testing::temp_dir();
+        let stale_dir = root.path().join("stale-0001");
+        let loose_file = root.path().join("loose.txt");
+        std::fs::create_dir_all(&stale_dir).unwrap();
+        std::fs::write(&loose_file, "not a directory").unwrap();
+        let old = SystemTime::now()
+            .checked_sub(std::time::Duration::from_secs(2 * 60 * 60))
+            .unwrap();
+        filetime::set_file_mtime(&stale_dir, filetime::FileTime::from_system_time(old)).unwrap();
+        filetime::set_file_mtime(&loose_file, filetime::FileTime::from_system_time(old)).unwrap();
+
+        gc_stale_context_temp(root.path(), std::time::Duration::from_secs(60 * 60));
+
+        assert!(!stale_dir.exists());
+        assert!(loose_file.exists());
     }
 }
