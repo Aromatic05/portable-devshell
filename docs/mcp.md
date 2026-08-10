@@ -120,9 +120,16 @@ Control 机器上的 Skill 目录固定为：
 - SSH、Docker 和 Podman instance 在启动或重新连接 worker 时，将该目录镜像到 worker 用户的 `~/.devshell/skill`；
 - self-managed reverse instance 由 worker 所在机器自行维护该目录，Control 不主动推送。
 
-`environ_info` 返回 worker 上展开后的绝对 `skillsDirectory`，并提示 Agent 按需读取其中相关 Skill 的 `SKILL.md`。
+`environ_info` 接收 `workspace` 参数；它是 **worker 机器上的绝对目录**，由调用方在自己已获准访问的目录范围内选择。返回值包含 canonical workspace、worker 上展开后的绝对 `skillsDirectory`，并提示 Agent 按需读取其中相关 Skill 的 `SKILL.md`。
 
 `environ_info` 还会提示：**Every project may contain `AGENT.md`**。Agent 在同时处理多个项目时，应分别读取、遵守和维护每个项目适用的 `AGENT.md`，不能把某个项目的项目记忆当成 instance 全局规则。
+
+每个 workspace 还会得到两类辅助目录：
+
+- `projectMemoryDirectory`：位于 worker 的 `~/.devshell/project-memory/` 下，按 canonical workspace 的稳定平台路径表示生成持久 key；其中的 `AGENT.md` 可跨 Context 长期保留；
+- `temporaryDirectory`：位于 worker 的 `~/.devshell/context-tmp/` 下，每个 Context 独立。有效 Context 的后续工具调用会刷新该目录活跃时间；连续 24 小时未活动的临时目录可在后续 workspace 初始化时被 GC。
+
+如果 instance 配置了 `[alerts]`，`environ_info` 同时读取该 workspace 的 alert advice，并启动该 workspace 的周期 probe。有效 Context 的后续工具调用会刷新 alert 活跃租约并同步当前 alerts 配置；最后一个同 workspace Context 被手动禁用时立即释放该租约，连续 24 小时无有效调用时也会自动停止 probe 并移除缓存状态。
 
 ## 可选实例管理与跨实例路由
 

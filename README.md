@@ -7,7 +7,7 @@
 ## 主要能力
 
 - `local`、`ssh`、`docker`、`podman`、`reverse` 五种 provider。
-- 每个 instance 独立 workspace、生命周期、日志、审批策略和 MCP endpoint。
+- 每个 instance 独立 worker、默认 workspace、生命周期、日志、审批策略和 MCP endpoint；MCP Context 可以在该 worker 上由调用方获准访问的绝对目录建立自己的 workspace。
 - 克制的系统级工具面：`bash`、`file`、`tmux`、`artifact`、`todo`，以及可选实例管理。
 - WSS 反向连接，SSE + HTTPS POST 回退。
 - OAuth 2.1、动态客户端注册、持久化密钥、刷新与撤销。

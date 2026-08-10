@@ -49,6 +49,22 @@ Windows control 使用当前用户专属 Named Pipe：
 
 worker 和 tmux 在 Unix 上仍维护各 instance 的独立运行目录与 socket；Windows worker 不注册 tmux 工具。
 
+## Control 管理命令
+
+除 `instance`、`watch` 和 `artifact` 外，CLI 还直接提供 Control 管理面：
+
+```text
+devshell overview
+devshell config --help
+devshell approval --help
+devshell oauth --help
+devshell context --help
+devshell tool --help
+devshell todo --help
+```
+
+这些命令都通过 Control RPC 执行。各命令的完整参数以对应的 `--help` 输出为准。
+
 ## 全局配置
 
 全局文件只配置 control、MCP listener 和 Web 管理界面。MCP 认证不在全局文件中配置，而是由每个 instance 独立决定。
@@ -160,6 +176,16 @@ capabilities = ["read", "write", "execute"]
 
 [security]
 mode = "workspace"
+
+[alerts]
+intervalMs = 30000
+maxUncommittedChanges = 100
+workerMemoryBytes = 1073741824
+
+[[alerts.scripts]]
+id = "project-health"
+command = ["project-health", "--json"]
+timeoutMs = 5000
 ```
 
 常用字段：
@@ -167,14 +193,18 @@ mode = "workspace"
 - `version`：全局和实例配置当前均为 `2`；
 - `name`：必须包含连字符；
 - `provider`：`local`、`ssh`、`docker`、`podman`、`reverse`；
-- `workspace`：worker 启动和工具运行的工作区；
+- `workspace`：instance 的默认 workspace；worker 启动以及未另外指定 workspace 的调用使用该值。MCP Context 通过 `environ_info` 可以在同一 worker 上选择调用方已获准访问的其他绝对目录；
 - `[mcp].enabled`：是否注册该 instance 的 MCP endpoint；
 - `[mcp].auth`：该 instance 独立使用 `none`、`token` 或 `oauth2`；
 - `[mcp].token`：仅在 `auth = "token"` 时使用，至少 32 UTF-8 字节；
 - `[mcp].path`：固定为 `/<instance>/mcp`，不可自定义；
 - `[mcp.tools].groups`：启用的工具组；
 - `[mcp.tools].capabilities`：授予的 `read`、`write`、`execute`、`manage`；
-- `[security].mode`：`disabled` 或 `workspace`。
+- `[security].mode`：`disabled` 或 `workspace`；
+- `[alerts].intervalMs`：活跃 workspace 的后台 alert probe 周期，至少 `1000` ms；MCP Context 的有效工具调用会刷新该 workspace 的活跃租约，连续 24 小时无有效调用后停止 probe 并移除状态；
+- `[alerts].maxUncommittedChanges`：Git 未提交条目数量阈值，必须为非负整数；
+- `[alerts].workerMemoryBytes`：worker RSS 阈值，配置时必须为正整数；
+- `[[alerts.scripts]]`：可选自定义 probe。`id` 与 `command` 必须非空，`timeoutMs` 必须为正整数。脚本工作目录为当前 workspace，并收到 `DEVSHELL_ALERT_WORKSPACE`；stdout 应输出由 `{code,text}` 对象组成的 JSON 数组。
 
 Web auth 和 instance MCP auth 完全独立：修改 `[web]` 不会改变任何 instance endpoint；不同 instance 也可以使用不同认证模式和 token。
 
