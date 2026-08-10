@@ -224,9 +224,13 @@ export class WorkerInstanceConnection {
 
     async refreshRunningStatus(
         pid?: number,
-        connectionState: "connecting" | "reconnecting" = this.#snapshot().connectionState === "disconnected" ? "connecting" : "reconnecting"
+        connectionState: "connecting" | "reconnecting" | "connected" = this.#snapshot().connectionState === "connected"
+            ? "connected"
+            : this.#snapshot().connectionState === "disconnected"
+                ? "connecting"
+                : "reconnecting"
     ): Promise<InstanceSnapshot> {
-        const shouldEmitRpcLifecycleEvents = this.#snapshot().connectionState !== "connected";
+        const shouldEmitRpcLifecycleEvents = connectionState !== "connected";
 
         await this.#applyStateUpdate({
             connectionState,
