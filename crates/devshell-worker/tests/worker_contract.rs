@@ -126,8 +126,8 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             "id": "1",
             "method": "worker.handshake",
             "params": {
-                "minProtocolVersion": 3,
-                "maxProtocolVersion": 3,
+                "minProtocolVersion": 4,
+                "maxProtocolVersion": 4,
                 "clientName": "portable-devshell",
                 "clientVersion": "0.1.0"
             }
@@ -135,7 +135,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     );
     assert_eq!(handshake["type"], "response");
     assert_eq!(handshake["ok"], true);
-    assert_eq!(handshake["result"]["protocolVersion"], 3);
+    assert_eq!(handshake["result"]["protocolVersion"], 4);
     assert_eq!(
         handshake["result"]["workerVersion"],
         env!("CARGO_PKG_VERSION")

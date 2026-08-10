@@ -2,7 +2,7 @@ import type { ArtifactPayloadDescriptor, ControlInstanceAlertsConfig, JsonValue 
 
 import { WorkerRpcClient } from "../rpc/WorkerRpcClient.js";
 
-export const WORKER_PROTOCOL_VERSION = 3;
+export const WORKER_PROTOCOL_VERSION = 4;
 
 export interface WorkerHandshakeParams {
     minProtocolVersion: number;
