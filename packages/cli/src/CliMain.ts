@@ -17,7 +17,7 @@ import { CliCommandWatchStatus } from "./command/watch/CliCommandWatchStatus.js"
 import { cliExitCodes } from "./exit/CliExitCode.js";
 import { CliExitMapper } from "./exit/CliExitMapper.js";
 import { renderCliError } from "./render/CliRenderError.js";
-import { renderCliUsage, renderInstanceUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
+import { renderCliTopicUsage, renderCliUsage, renderInstanceUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
 import { renderControlLogs } from "./render/control/CliRenderControlLogs.js";
 import { renderControlStatus } from "./render/control/CliRenderControlStatus.js";
 import { renderInstanceList } from "./render/instance/CliRenderInstanceList.js";
@@ -108,7 +108,7 @@ export class CliMain {
         }
         switch (command.kind) {
             case "help":
-                this.#stdout.write(`${renderCliUsage()}\n`);
+                this.#stdout.write(`${command.topic === undefined ? renderCliUsage() : renderCliTopicUsage(command.topic)}\n`);
                 return;
             case "control.start":
                 this.#stdout.write(renderControlStatus(await (await this.#lifecycle()).start()));
@@ -422,6 +422,17 @@ function commandUsesControlClient(command: CliParsedCommand): boolean {
         return ["share", "shares", "revoke", "transfer", "transfers"].includes(
             command.args[0] ?? "",
         );
+    }
+    if (
+        command.kind === "overview" ||
+        command.kind.startsWith("config.") ||
+        command.kind.startsWith("approval.") ||
+        command.kind.startsWith("oauth.") ||
+        command.kind.startsWith("context.") ||
+        command.kind.startsWith("tool.") ||
+        command.kind.startsWith("todo.")
+    ) {
+        return true;
     }
     return (command.kind.startsWith("instance.") &&
             command.kind !== "instance.help") ||

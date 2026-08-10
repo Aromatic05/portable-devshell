@@ -177,6 +177,10 @@ test("CliMain resolves help locally without contacting Control", async () => {
     assert.notEqual(stdout.flush().length, 0);
     assert.equal(await cli.run(["watch", "help"]), 0);
     assert.notEqual(stdout.flush().length, 0);
+    for (const topic of ["config", "approval", "oauth", "context", "tool", "todo"]) {
+        assert.equal(await cli.run([topic, "--help"]), 0);
+        assert.match(stdout.flush(), new RegExp(topic, "iu"));
+    }
     assert.equal(stderr.flush(), "");
 
     assert.equal(await cli.run(["unknown"]), 2);

@@ -1,3 +1,5 @@
+export type CliHelpTopic = "approval" | "config" | "context" | "oauth" | "todo" | "tool";
+
 export function renderCliUsage(): string {
     return [
         "portable-devshell",
@@ -16,14 +18,66 @@ export function renderCliUsage(): string {
         "  approval <command>             Review or decide tool approvals",
         "  oauth <command>                Inspect MCP OAuth and decide approvals",
         "  context <command>              Manage MCP contexts and messages",
+        "  tool <command>                 Inspect tool calls",
+        "  todo <command>                 Manage Todo projects",
         "  tui                            Open the terminal UI",
         "  instance <command>             Manage instances",
         "  watch <command>                Follow instance state or logs",
         "  artifact <command>             Manage artifact shares and transfers",
         "  help                           Show this help",
         "",
-        "Run `devshell instance --help`, `devshell watch --help`, or `devshell artifact help` for details.",
+        "Run `devshell <command> --help` for command-specific usage.",
     ].join("\n");
+}
+
+export function renderCliTopicUsage(topic: CliHelpTopic): string {
+    switch (topic) {
+        case "config":
+            return [
+                "Usage:",
+                "  devshell config get",
+                "  devshell config validate <jsonDraft>",
+                "  devshell config update <jsonUpdate>",
+                "  devshell config instance patch <instance> <jsonPatch>",
+                "  devshell config mcp patch <jsonPatch>",
+                "  devshell config web patch <jsonPatch>",
+            ].join("\n");
+        case "approval":
+            return [
+                "Usage:",
+                "  devshell approval list <instance>",
+                "  devshell approval show <instance> <approvalId>",
+                "  devshell approval approve <instance> <approvalId> [--reason <text>] [--remember] [--policy-patch <json>]",
+                "  devshell approval deny <instance> <approvalId> [--reason <text>] [--remember] [--policy-patch <json>]",
+            ].join("\n");
+        case "oauth":
+            return [
+                "Usage:",
+                "  devshell oauth status",
+                "  devshell oauth list",
+                "  devshell oauth approve <approvalId>",
+                "  devshell oauth deny <approvalId>",
+            ].join("\n");
+        case "context":
+            return [
+                "Usage:",
+                "  devshell context list",
+                "  devshell context messages <instance> [ctxId]",
+                "  devshell context send <instance> <ctxId> <text>",
+                "  devshell context disable <ctxId>",
+                "  devshell context renew <ctxId>",
+            ].join("\n");
+        case "tool":
+            return [
+                "Usage:",
+                "  devshell tool calls <instance> [callId]",
+            ].join("\n");
+        case "todo":
+            return [
+                "Usage:",
+                "  devshell todo delete <instance> <taskId>",
+            ].join("\n");
+    }
 }
 
 export function renderInstanceUsage(): string {

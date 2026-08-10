@@ -1,10 +1,16 @@
 import type { JsonValue } from "@portable-devshell/shared";
 
 import { CliRenderError } from "./render/CliRenderError.js";
-import { renderCliUsage, renderInstanceUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
+import {
+    renderCliTopicUsage,
+    renderCliUsage,
+    renderInstanceUsage,
+    renderWatchUsage,
+    type CliHelpTopic,
+} from "./render/CliRenderUsage.js";
 
 export type CliParsedCommand =
-    | { kind: "help" }
+    | { kind: "help"; topic?: CliHelpTopic }
     | { kind: "overview" }
     | { kind: "config.get" }
     | { draft: JsonValue; kind: "config.validate" }
@@ -189,6 +195,10 @@ export class CliParser {
 
     #parseConfig(argv: readonly string[]): CliParsedCommand {
         switch (argv[0]) {
+            case "help":
+            case "--help":
+            case "-h":
+                return this.#expectNoExtra(argv, { kind: "help", topic: "config" });
             case "get":
                 return this.#expectNoExtra(argv, { kind: "config.get" });
             case "validate":
@@ -208,12 +218,16 @@ export class CliParser {
             case "web":
                 return this.#parseConfigPatch(argv.slice(1), "web");
             default:
-                throw CliRenderError.usage(`Unknown config command: ${argv[0] ?? ""}`.trim());
+                throw CliRenderError.usage(`${`Unknown config command: ${argv[0] ?? ""}`.trim()}\n\n${renderCliTopicUsage("config")}`);
         }
     }
 
     #parseApproval(argv: readonly string[]): CliParsedCommand {
         switch (argv[0]) {
+            case "help":
+            case "--help":
+            case "-h":
+                return this.#expectNoExtra(argv, { kind: "help", topic: "approval" });
             case "list":
                 return this.#expectInstanceCommand(argv, "approval.list");
             case "show":
@@ -230,12 +244,16 @@ export class CliParser {
                     ...this.#parseApprovalOptions(argv.slice(3)),
                 };
             default:
-                throw CliRenderError.usage(`Unknown approval command: ${argv[0] ?? ""}`.trim());
+                throw CliRenderError.usage(`${`Unknown approval command: ${argv[0] ?? ""}`.trim()}\n\n${renderCliTopicUsage("approval")}`);
         }
     }
 
     #parseOAuth(argv: readonly string[]): CliParsedCommand {
         switch (argv[0]) {
+            case "help":
+            case "--help":
+            case "-h":
+                return this.#expectNoExtra(argv, { kind: "help", topic: "oauth" });
             case "status":
                 return this.#expectNoExtra(argv, { kind: "oauth.status" });
             case "list":
@@ -251,12 +269,16 @@ export class CliParser {
                     kind: "oauth.decide",
                 };
             default:
-                throw CliRenderError.usage(`Unknown oauth command: ${argv[0] ?? ""}`.trim());
+                throw CliRenderError.usage(`${`Unknown oauth command: ${argv[0] ?? ""}`.trim()}\n\n${renderCliTopicUsage("oauth")}`);
         }
     }
 
     #parseContext(argv: readonly string[]): CliParsedCommand {
         switch (argv[0]) {
+            case "help":
+            case "--help":
+            case "-h":
+                return this.#expectNoExtra(argv, { kind: "help", topic: "context" });
             case "list":
                 return this.#expectNoExtra(argv, { kind: "context.list" });
             case "messages":
@@ -288,13 +310,16 @@ export class CliParser {
                     kind: argv[0] === "disable" ? "context.disable" : "context.renew",
                 };
             default:
-                throw CliRenderError.usage(`Unknown context command: ${argv[0] ?? ""}`.trim());
+                throw CliRenderError.usage(`${`Unknown context command: ${argv[0] ?? ""}`.trim()}\n\n${renderCliTopicUsage("context")}`);
         }
     }
 
     #parseTool(argv: readonly string[]): CliParsedCommand {
+        if (argv[0] === "help" || argv[0] === "--help" || argv[0] === "-h") {
+            return this.#expectNoExtra(argv, { kind: "help", topic: "tool" });
+        }
         if (argv[0] !== "calls" || (argv.length !== 2 && argv.length !== 3)) {
-            throw CliRenderError.usage("tool calls requires <instance> [callId]");
+            throw CliRenderError.usage(`tool calls requires <instance> [callId]\n\n${renderCliTopicUsage("tool")}`);
         }
         return {
             ...(argv[2] === undefined ? {} : { callId: this.#required(argv[2], "callId is required") }),
@@ -304,8 +329,11 @@ export class CliParser {
     }
 
     #parseTodo(argv: readonly string[]): CliParsedCommand {
+        if (argv[0] === "help" || argv[0] === "--help" || argv[0] === "-h") {
+            return this.#expectNoExtra(argv, { kind: "help", topic: "todo" });
+        }
         if (argv[0] !== "delete" || argv.length !== 3) {
-            throw CliRenderError.usage("todo delete requires <instance> <taskId>");
+            throw CliRenderError.usage(`todo delete requires <instance> <taskId>\n\n${renderCliTopicUsage("todo")}`);
         }
         return { instance: this.#required(argv[1], "instance name is required"), kind: "todo.delete", taskId: this.#required(argv[2], "taskId is required") };
     }
