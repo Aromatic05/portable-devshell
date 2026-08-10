@@ -30,14 +30,14 @@ try {
         env,
         stdio: ["pipe", "pipe", "pipe"]
     });
-    const rpc = createRpcClient(bridge);
+    const rpc = createRpcClient(bridge, workspace);
     try {
         stage("worker.handshake");
         const handshake = await rpc.request("worker.handshake", {
             clientName: "portable-devshell-smoke",
             clientVersion: "0.0.0",
-            maxProtocolVersion: 3,
-            minProtocolVersion: 3
+            maxProtocolVersion: 4,
+            minProtocolVersion: 4
         });
         stage("tools.list");
         const tools = await rpc.request("tools.list", {});
@@ -285,7 +285,7 @@ function stage(message) {
     process.stdout.write(`[smoke-worker] ${message}\n`);
 }
 
-function createRpcClient(child) {
+function createRpcClient(child, workspace) {
     let buffer = Buffer.alloc(0);
     let nextId = 1;
     const pending = new Map();
@@ -320,7 +320,13 @@ function createRpcClient(child) {
     return {
         request(method, params) {
             const id = `smoke-${nextId++}`;
-            const payload = Buffer.from(JSON.stringify({ type: "request", id, method, params }), "utf8");
+            const payload = Buffer.from(JSON.stringify({
+                type: "request",
+                id,
+                method,
+                params,
+                context: { workspace }
+            }), "utf8");
             const frame = Buffer.allocUnsafe(payload.length + 4);
             frame.writeUInt32BE(payload.length, 0);
             payload.copy(frame, 4);

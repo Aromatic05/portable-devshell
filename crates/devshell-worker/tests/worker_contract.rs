@@ -287,7 +287,7 @@ fn handshake_rejects_unsupported_protocol_versions() {
         "worker.protocolVersionUnsupported"
     );
     assert_eq!(handshake["error"]["retryable"], false);
-    assert_eq!(handshake["error"]["details"]["workerProtocolVersion"], 3);
+    assert_eq!(handshake["error"]["details"]["workerProtocolVersion"], 4);
 
     env.json_command(&["stop", "--instance", instance]);
 }
