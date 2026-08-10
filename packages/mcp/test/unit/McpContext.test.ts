@@ -159,11 +159,14 @@ test("McpHost context admin releases alerts only after the last workspace contex
 });
 
 test("McpEndpointWorker exposes environ_info and requires ctxId on every other tool", async () => {
-    const registry = new McpContextRegistry({ idFactory: () => "ctx-created" });
+    let now = 1_000;
+    const registry = new McpContextRegistry({ idFactory: () => "ctx-created", now: () => now, ttlMs: 100 });
     await registry.initialize();
     const calls: Array<{ context: ToolCallContext; input: JsonValue; toolName: string }> = [];
+    const preparedTemporaryDirectories: string[] = [];
     const touchedAlertWorkspaces: string[] = [];
     const touchedTemporaryDirectories: string[] = [];
+    let temporaryTouchError: Error | undefined;
     const endpoint = new McpEndpointWorker({
         contextRegistry: registry,
         instanceName: "demo-local",
@@ -196,10 +199,14 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
             },
             listTools: () => [bashRun],
             async prepareWorkspace(workspace) {
+                const temporaryDirectory = preparedTemporaryDirectories.length === 0
+                    ? "/tmp/demo-local-123456"
+                    : "/tmp/demo-local-rebound";
+                preparedTemporaryDirectories.push(temporaryDirectory);
                 return {
                     projectMemoryAgentFile: `${workspace}/.memory/AGENT.md`,
                     projectMemoryDirectory: `${workspace}/.memory`,
-                    temporaryDirectory: "/tmp/demo-local-123456",
+                    temporaryDirectory,
                     workspace
                 };
             },
@@ -211,6 +218,9 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
             },
             async touchTemporaryDirectory(path) {
                 touchedTemporaryDirectories.push(path);
+                if (temporaryTouchError !== undefined) {
+                    throw temporaryTouchError;
+                }
             },
             snapshot: () => ({ ready: true })
         }
@@ -268,6 +278,43 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
     ]);
     assert.deepEqual(touchedAlertWorkspaces, ["/projects/alpha"]);
     assert.deepEqual(touchedTemporaryDirectories, ["/tmp/demo-local-123456"]);
+
+    now = 1_101;
+    const renewed = await registry.renew("ctx-created");
+    assert.equal(renewed.status, "active");
+    temporaryTouchError = Object.assign(
+        new Error("temporary directory no longer exists on this worker"),
+        { code: "workspace.temporaryUnavailable" }
+    );
+    await endpoint.callTool(
+        "bash_run",
+        { command: "pwd", ctxId: "ctx-created" },
+        { principal: "local", requestId: "rebound" }
+    );
+    assert.deepEqual(preparedTemporaryDirectories, ["/tmp/demo-local-123456", "/tmp/demo-local-rebound"]);
+    assert.equal((await registry.list())[0]?.temporaryDirectory, "/tmp/demo-local-rebound");
+
+    temporaryTouchError = undefined;
+    await endpoint.callTool(
+        "bash_run",
+        { command: "pwd", ctxId: "ctx-created" },
+        { principal: "local", requestId: "reused" }
+    );
+    assert.deepEqual(preparedTemporaryDirectories, ["/tmp/demo-local-123456", "/tmp/demo-local-rebound"]);
+    assert.equal(touchedTemporaryDirectories.at(-1), "/tmp/demo-local-rebound");
+
+    temporaryTouchError = Object.assign(new Error("worker rpc disconnected"), {
+        code: "core.workerRpcDisconnected"
+    });
+    await assert.rejects(
+        endpoint.callTool(
+            "bash_run",
+            { command: "pwd", ctxId: "ctx-created" },
+            { principal: "local", requestId: "transport-failure" }
+        ),
+        /worker rpc disconnected/u
+    );
+    assert.deepEqual(preparedTemporaryDirectories, ["/tmp/demo-local-123456", "/tmp/demo-local-rebound"]);
 });
 
 function hasCode(expected: string): (error: unknown) => boolean {

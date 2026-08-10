@@ -165,6 +165,29 @@ export class McpContextRegistry {
         });
     }
 
+    async updateWorkerState(
+        ctxId: string,
+        binding: Pick<McpContextBinding, "temporaryDirectory" | "workspace">
+    ): Promise<McpContextRecord> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined || !isCtxId(ctxId)) {
+                throw invalidContext(ctxId);
+            }
+            if (record.status === "disabled") {
+                throw disabledContext(ctxId);
+            }
+            if (record.status === "expired") {
+                throw expiredContext(ctxId, record.expiresAt);
+            }
+            record.workspace = binding.workspace;
+            record.temporaryDirectory = binding.temporaryDirectory;
+            await this.#persist();
+            return cloneRecord(record);
+        });
+    }
+
     async #load(): Promise<void> {
         if (this.#filePath === undefined) {
             return;

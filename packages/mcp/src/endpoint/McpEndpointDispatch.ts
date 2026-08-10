@@ -160,10 +160,11 @@ export class McpEndpointDispatch {
         requestContext: McpEndpointCallContext,
         signal?: AbortSignal
     ): Promise<ToolCallContext> {
-        const record = await this.#contextRegistry.validateAndTouch(ctxId, {
+        let record = await this.#contextRegistry.validateAndTouch(ctxId, {
             instance: this.#instanceName,
             principal: requestContext.principal
         });
+        record = await this.#ensureContextWorkerState(record);
         const context: ToolCallContext = {
             ctxId: record.ctxId,
             requestId: requestContext.requestId,
@@ -173,15 +174,39 @@ export class McpEndpointDispatch {
         if (this.#worker.touchAlerts !== undefined) {
             await this.#worker.touchAlerts(record.workspace);
         }
-        if (record.temporaryDirectory !== undefined && this.#worker.touchTemporaryDirectory !== undefined) {
-            await this.#worker.touchTemporaryDirectory(record.temporaryDirectory);
-        }
         await this.#worker.appendMcpToolCalled(toolName, {
             ctxId: context.ctxId,
             requestId: context.requestId
         });
         throwIfMcpEndpointAborted(signal);
         return context;
+    }
+
+    async #ensureContextWorkerState(
+        record: Awaited<ReturnType<McpContextRegistry["validateAndTouch"]>>
+    ): Promise<Awaited<ReturnType<McpContextRegistry["validateAndTouch"]>>> {
+        if (record.temporaryDirectory !== undefined && this.#worker.touchTemporaryDirectory !== undefined) {
+            try {
+                await this.#worker.touchTemporaryDirectory(record.temporaryDirectory);
+                return record;
+            } catch (error) {
+                if (!isRecoverableContextTemporaryError(error)) {
+                    throw error;
+                }
+            }
+        } else if (record.temporaryDirectory !== undefined) {
+            return record;
+        }
+
+        const prepareWorkspace = this.#worker.prepareWorkspace;
+        if (prepareWorkspace === undefined) {
+            return record;
+        }
+        const prepared = await prepareWorkspace.call(this.#worker, record.workspace);
+        return await this.#contextRegistry.updateWorkerState(record.ctxId, {
+            temporaryDirectory: prepared.temporaryDirectory,
+            workspace: prepared.workspace
+        });
     }
 
     async #auditControlTool(
@@ -231,4 +256,12 @@ export class McpEndpointDispatch {
         }
     }
 
+}
+
+function isRecoverableContextTemporaryError(error: unknown): boolean {
+    if (typeof error !== "object" || error === null || !("code" in error)) {
+        return false;
+    }
+    const code = (error as { code?: unknown }).code;
+    return code === "workspace.temporaryUnavailable" || code === "workspace.temporaryInvalid";
 }
