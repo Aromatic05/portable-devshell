@@ -114,7 +114,8 @@ pub fn register_control_handlers(
         stop::handler(shutdown_requested, active_processes, active_tool_calls),
     );
     handlers.insert("worker.ping".to_string(), ping::handler());
-    handlers.insert("workspace.prepare".to_string(), workspace::handler());
+    handlers.insert("workspace.prepare".to_string(), workspace::prepare_handler());
+    handlers.insert("workspace.touchTemporary".to_string(), workspace::touch_temporary_handler());
     handlers.insert("alerts.configure".to_string(), alerts::configure_handler(Arc::clone(&alerts)));
     handlers.insert("alerts.read".to_string(), alerts::read_handler(Arc::clone(&alerts)));
     handlers.insert("alerts.touch".to_string(), alerts::touch_handler(alerts));

@@ -173,6 +173,9 @@ export class McpEndpointDispatch {
         if (this.#worker.touchAlerts !== undefined) {
             await this.#worker.touchAlerts(record.workspace);
         }
+        if (record.temporaryDirectory !== undefined && this.#worker.touchTemporaryDirectory !== undefined) {
+            await this.#worker.touchTemporaryDirectory(record.temporaryDirectory);
+        }
         await this.#worker.appendMcpToolCalled(toolName, {
             ctxId: context.ctxId,
             requestId: context.requestId

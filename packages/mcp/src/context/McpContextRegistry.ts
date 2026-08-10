@@ -15,6 +15,7 @@ export const defaultMcpContextTtlMs = 24 * 60 * 60 * 1_000;
 export interface McpContextBinding {
     instance: string;
     principal: string;
+    temporaryDirectory?: string;
     workspace: string;
 }
 
@@ -279,6 +280,7 @@ function isRecord(value: unknown): value is McpContextRecord {
         typeof record.principal === "string" && typeof record.instance === "string" &&
         typeof record.workspace === "string" && typeof record.createdAt === "string" &&
         typeof record.lastAccessedAt === "string" && typeof record.expiresAt === "string" &&
+        (record.temporaryDirectory === undefined || typeof record.temporaryDirectory === "string") &&
         (record.status === "active" || record.status === "expired" || record.status === "disabled");
 }
 

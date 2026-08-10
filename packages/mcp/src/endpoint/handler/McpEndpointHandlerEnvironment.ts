@@ -46,6 +46,7 @@ export class McpEndpointHandlerEnvironment {
         const record = await this.#contextRegistry.create({
             instance: this.#instanceName,
             principal: requestContext.principal,
+            temporaryDirectory: prepared.temporaryDirectory,
             workspace: prepared.workspace
         });
         await this.#worker.appendMcpToolCalled(toolName, {

@@ -185,6 +185,11 @@ export class WorkerInstance {
         await this.#protocolClient.releaseAlerts(workspace);
     }
 
+    async touchTemporaryDirectory(path: string): Promise<void> {
+        this.#assertReady();
+        await this.#protocolClient.touchTemporaryDirectory(path);
+    }
+
     async attachTerminal(input: {
         fromSeq: number;
         generation: number;

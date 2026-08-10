@@ -158,6 +158,10 @@ export class WorkerProtocolClient {
         );
     }
 
+    async touchTemporaryDirectory(temporaryDirectory: string): Promise<void> {
+        await this.#rpcClient.request("workspace.touchTemporary", { temporaryDirectory });
+    }
+
     async readAlerts(workspace: string, config: ControlInstanceAlertsConfig | undefined): Promise<WorkerAlertsReadResult> {
         return asObjectResult<WorkerAlertsReadResult>(
             await this.#rpcClient.request("alerts.read", { config, workspace } as unknown as JsonValue)

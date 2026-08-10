@@ -8,5 +8,6 @@ export interface McpContextRecord {
     lastAccessedAt: string;
     principal: string;
     status: McpContextStatus;
+    temporaryDirectory?: string;
     workspace: string;
 }

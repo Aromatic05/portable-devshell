@@ -37,6 +37,7 @@ interface WorkerInstanceLike {
     readAlerts(workspace: string): Promise<{ advice: Array<{ code: string; text: string }> }>;
     releaseAlerts?(workspace: string): Promise<void>;
     touchAlerts?(workspace: string): Promise<void>;
+    touchTemporaryDirectory?(path: string): Promise<void>;
     snapshot(): { ready?: boolean };
 }
 

@@ -163,6 +163,7 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
     await registry.initialize();
     const calls: Array<{ context: ToolCallContext; input: JsonValue; toolName: string }> = [];
     const touchedAlertWorkspaces: string[] = [];
+    const touchedTemporaryDirectories: string[] = [];
     const endpoint = new McpEndpointWorker({
         contextRegistry: registry,
         instanceName: "demo-local",
@@ -207,6 +208,9 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
             },
             async touchAlerts(workspace) {
                 touchedAlertWorkspaces.push(workspace);
+            },
+            async touchTemporaryDirectory(path) {
+                touchedTemporaryDirectories.push(path);
             },
             snapshot: () => ({ ready: true })
         }
@@ -263,6 +267,7 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
         }
     ]);
     assert.deepEqual(touchedAlertWorkspaces, ["/projects/alpha"]);
+    assert.deepEqual(touchedTemporaryDirectories, ["/tmp/demo-local-123456"]);
 });
 
 function hasCode(expected: string): (error: unknown) => boolean {

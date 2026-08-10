@@ -17,6 +17,12 @@ struct WorkspacePrepareInput {
     workspace: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkspaceTouchTemporaryInput {
+    temporary_directory: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkspacePrepareResult {
@@ -29,10 +35,18 @@ struct WorkspacePrepareResult {
 const CONTEXT_TEMP_ROOT: &str = "context-tmp";
 const CONTEXT_TEMP_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
-pub fn handler() -> Arc<dyn ControlHandler> {
+pub fn prepare_handler() -> Arc<dyn ControlHandler> {
     control_handler(|request| {
         let input: WorkspacePrepareInput = parse_params(request)?;
         serialize(prepare(Path::new(&input.workspace))?)
+    })
+}
+
+pub fn touch_temporary_handler() -> Arc<dyn ControlHandler> {
+    control_handler(|request| {
+        let input: WorkspaceTouchTemporaryInput = parse_params(request)?;
+        touch_context_temporary_directory(Path::new(&input.temporary_directory))?;
+        serialize(serde_json::json!({}))
     })
 }
 
@@ -50,7 +64,7 @@ fn prepare(workspace: &Path) -> Result<WorkspacePrepareResult, RpcError> {
         ));
     }
 
-    let hash = format!("{:x}", Sha256::digest(workspace.as_os_str().as_encoded_bytes()));
+    let hash = project_memory_key(&workspace);
     let home = devshell_home()
         .map_err(|error| RpcError::new("workspace.storageUnavailable", error))?;
     let project_memory_directory = home.join("project-memory").join(hash);
@@ -84,6 +98,58 @@ fn prepare(workspace: &Path) -> Result<WorkspacePrepareResult, RpcError> {
     })
 }
 
+fn project_memory_key(workspace: &Path) -> String {
+    let mut digest = Sha256::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        digest.update(workspace.as_os_str().as_bytes());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        for unit in workspace.as_os_str().encode_wide() {
+            digest.update(unit.to_le_bytes());
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    digest.update(protocol_path(workspace).as_bytes());
+    format!("{:x}", digest.finalize())
+}
+
+fn touch_context_temporary_directory(path: &Path) -> Result<(), RpcError> {
+    let root = devshell_home()
+        .map_err(|error| RpcError::new("workspace.temporaryUnavailable", error))?
+        .join(CONTEXT_TEMP_ROOT);
+    ensure_dir(&root, 0o700)
+        .map_err(|error| RpcError::new("workspace.temporaryUnavailable", error.to_string()))?;
+    let root = root.canonicalize()
+        .map_err(|error| RpcError::new("workspace.temporaryUnavailable", error.to_string()))?;
+    let path = path.canonicalize()
+        .map_err(|error| RpcError::new("workspace.temporaryUnavailable", error.to_string()))?;
+    if path.strip_prefix(&root).is_err() {
+        return Err(RpcError::new(
+            "workspace.temporaryInvalid",
+            format!("temporary directory is outside the managed context root: {}", path.display()),
+        ));
+    }
+    touch_temporary_directory(&path)
+}
+
+fn touch_temporary_directory(path: &Path) -> Result<(), RpcError> {
+    if !path.is_dir() {
+        return Err(RpcError::new(
+            "workspace.temporaryUnavailable",
+            format!("temporary directory is unavailable: {}", path.display()),
+        ));
+    }
+    filetime::set_file_mtime(
+        path,
+        filetime::FileTime::from_system_time(SystemTime::now()),
+    )
+        .map_err(|error| RpcError::new("workspace.temporaryUnavailable", error.to_string()))
+}
+
 fn gc_stale_context_temp(root: &Path, ttl: Duration) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
@@ -115,7 +181,7 @@ fn temporary_prefix(workspace: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{gc_stale_context_temp, prepare, SystemTime};
+    use super::{gc_stale_context_temp, prepare, touch_temporary_directory, SystemTime};
 
     #[test]
     fn creates_stable_project_memory_and_unique_temporary_directories() {
@@ -144,6 +210,22 @@ mod tests {
 
         assert!(!stale.exists());
         assert!(fresh.exists());
+    }
+
+    #[test]
+    fn touching_an_active_context_temp_directory_prevents_gc() {
+        let root = crate::testing::temp_dir();
+        let active = root.path().join("active-0001");
+        std::fs::create_dir_all(&active).unwrap();
+        let old = SystemTime::now()
+            .checked_sub(std::time::Duration::from_secs(2 * 60 * 60))
+            .unwrap();
+        filetime::set_file_mtime(&active, filetime::FileTime::from_system_time(old)).unwrap();
+
+        touch_temporary_directory(&active).unwrap();
+        gc_stale_context_temp(root.path(), std::time::Duration::from_secs(60 * 60));
+
+        assert!(active.exists());
     }
 
     #[test]
