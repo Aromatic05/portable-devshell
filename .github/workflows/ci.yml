@@ -11,6 +11,65 @@ permissions:
     contents: read
 
 jobs:
+    common:
+        name: common-linux-x64
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@v5
+              with:
+                  fetch-depth: 0
+            - uses: pnpm/action-setup@v5
+              with:
+                  version: 10.13.1
+            - uses: actions/setup-node@v5
+              with:
+                  node-version: 24
+                  cache: pnpm
+            - name: 安装 Unix 测试依赖
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y tmux fish
+            - name: 安装 Rust 工具链
+              run: |
+                  rustup toolchain install stable --profile minimal
+                  rustup default stable
+            - run: node ./scripts/version-state.mjs check-development
+            - run: pnpm install --frozen-lockfile
+            - name: 安装 Web 验收 Chromium
+              shell: bash
+              run: |
+                  pnpm --filter @portable-devshell/control exec playwright install --with-deps chromium
+                  chromium_path=$(pnpm --filter @portable-devshell/control exec node -e "const { chromium } = require('playwright'); process.stdout.write(chromium.executablePath())")
+                  echo "PORTABLE_DEVSHELL_CHROMIUM=$chromium_path" >> "$GITHUB_ENV"
+                  echo "PORTABLE_DEVSHELL_REQUIRE_CHROMIUM=1" >> "$GITHUB_ENV"
+            - name: 运行通用正确性门禁
+              run: node ./scripts/run-development-ci.mjs --common
+
+    macos-contract:
+        name: macos-contract-arm64
+        runs-on: macos-15
+        steps:
+            - uses: actions/checkout@v5
+              with:
+                  fetch-depth: 0
+            - uses: pnpm/action-setup@v5
+              with:
+                  version: 10.13.1
+            - uses: actions/setup-node@v5
+              with:
+                  node-version: 24
+                  cache: pnpm
+            - name: 安装 Unix 测试依赖
+              run: brew install tmux fish
+            - name: 安装 Rust 工具链
+              run: |
+                  rustup toolchain install stable --profile minimal
+                  rustup default stable
+            - run: node ./scripts/version-state.mjs check-development
+            - run: pnpm install --frozen-lockfile
+            - name: 运行 macOS 平台行为门禁
+              run: node ./scripts/run-development-ci.mjs --platform-contract
+
     verify-target:
         strategy:
             fail-fast: false
@@ -51,16 +110,6 @@ jobs:
               with:
                   node-version: 24
                   cache: pnpm
-            - name: 安装 Unix 测试依赖
-              if: runner.os != 'Windows'
-              shell: bash
-              run: |
-                  if [[ "$RUNNER_OS" == "Linux" ]]; then
-                      sudo apt-get update
-                      sudo apt-get install -y tmux fish
-                  else
-                      brew install tmux fish
-                  fi
             - name: 安装 Rust 工具链
               run: |
                   rustup toolchain install stable --profile minimal
@@ -81,9 +130,6 @@ jobs:
               run: cargo install --locked cargo-zigbuild --version 0.23.0
             - run: node ./scripts/version-state.mjs check-development
             - run: pnpm install --frozen-lockfile
-            # Windows PowerShell/ConPTY 的交互、转义和终端语义过于晦涩且不稳定，
-            # 当前无法写出足够稳定且有证明力的 runtime 测试。Windows target plan
-            # 只保留 lint/build/typecheck、原生 Worker 构建和应用打包作为发布门禁。
             - name: 安装 Web 验收 Chromium
               if: matrix.target == 'linux-x64'
               shell: bash
@@ -92,14 +138,19 @@ jobs:
                   chromium_path=$(pnpm --filter @portable-devshell/control exec node -e "const { chromium } = require('playwright'); process.stdout.write(chromium.executablePath())")
                   echo "PORTABLE_DEVSHELL_CHROMIUM=$chromium_path" >> "$GITHUB_ENV"
                   echo "PORTABLE_DEVSHELL_REQUIRE_CHROMIUM=1" >> "$GITHUB_ENV"
-            - name: 运行完整开发验收套件
-              run: node ./scripts/run-development-ci.mjs "${{ matrix.target }}"
-            - name: 上传最终验收日志
+            # Windows PowerShell/ConPTY 的交互、转义和终端语义过于晦涩且不稳定，
+            # 当前无法写出足够稳定且有证明力的 runtime 测试。Windows target plan
+            # 只构建 JS 应用、原生 Worker 和最终应用包；通用 lint/typecheck/test 已由
+            # common job 证明，避免在两个 Windows 架构上重复执行平台无关门禁。
+            - name: 运行目标发布资产门禁
+              run: node ./scripts/run-development-ci.mjs --target "${{ matrix.target }}"
+            - name: 上传最终集成日志
               if: always() && matrix.target == 'linux-x64'
               uses: actions/upload-artifact@v7
               with:
                   name: linux-acceptance-${{ github.sha }}
                   path: acceptance.log
+                  if-no-files-found: ignore
             - uses: actions/upload-artifact@v7
               if: always()
               with:

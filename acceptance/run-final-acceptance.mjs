@@ -3,8 +3,60 @@ import { pathToFileURL } from "node:url";
 import { runCiSteps } from "../scripts/run-development-ci.mjs";
 import { resolvePreparedWorker, runCommand } from "./AcceptanceSupport.mjs";
 
+function createIntegrationSteps(state) {
+    return [
+        {
+            name: "Resolve prepared Worker",
+            run() {
+                state.env = {
+                    ...process.env,
+                    PORTABLE_DEVSHELL_TEST_WORKER_PATH: resolvePreparedWorker(),
+                };
+            },
+        },
+        {
+            name: "Real Worker smoke",
+            run: () => runCommand(
+                process.execPath,
+                ["acceptance/run-real-worker-smoke.mjs"],
+                { env: state.env, inherit: true },
+            ),
+        },
+        {
+            name: "MCP smoke",
+            run: () => runCommand(
+                process.execPath,
+                ["acceptance/run-mcp-smoke.mjs"],
+                { env: state.env, inherit: true },
+            ),
+        },
+        {
+            name: "Web browser smoke",
+            run: () => runCommand(
+                process.execPath,
+                ["acceptance/run-web-browser-smoke.mjs"],
+                { env: state.env, inherit: true },
+            ),
+        },
+    ];
+}
+
+function runAcceptanceSteps(steps) {
+    return runCiSteps(steps, {
+        execute(step) {
+            step.run();
+            return { status: 0 };
+        },
+    });
+}
+
+export function runFinalIntegration() {
+    const state = { env: { ...process.env } };
+    return runAcceptanceSteps(createIntegrationSteps(state));
+}
+
 export function runFinalAcceptance() {
-    let env = { ...process.env };
+    const state = { env: { ...process.env } };
     const steps = [
         {
             name: "Build packages",
@@ -21,7 +73,7 @@ export function runFinalAcceptance() {
         {
             name: "Resolve prepared Worker",
             run() {
-                env = {
+                state.env = {
                     ...process.env,
                     PORTABLE_DEVSHELL_TEST_WORKER_PATH: resolvePreparedWorker(),
                 };
@@ -29,7 +81,7 @@ export function runFinalAcceptance() {
         },
         {
             name: "Package tests",
-            run: () => runCommand("pnpm", ["test"], { env, inherit: true }),
+            run: () => runCommand("pnpm", ["test"], { env: state.env, inherit: true }),
         },
         {
             name: "Rust workspace tests",
@@ -39,45 +91,19 @@ export function runFinalAcceptance() {
             name: "tmux Worker contracts",
             run() {
                 if (process.platform !== "win32") {
-                    runCommand("pnpm", ["test:worker:tmux"], { env, inherit: true });
+                    runCommand("pnpm", ["test:worker:tmux"], { env: state.env, inherit: true });
                 }
             },
         },
-        {
-            name: "Real Worker smoke",
-            run: () => runCommand(
-                process.execPath,
-                ["acceptance/run-real-worker-smoke.mjs"],
-                { env, inherit: true },
-            ),
-        },
-        {
-            name: "MCP smoke",
-            run: () => runCommand(
-                process.execPath,
-                ["acceptance/run-mcp-smoke.mjs"],
-                { env, inherit: true },
-            ),
-        },
-        {
-            name: "Web browser smoke",
-            run: () => runCommand(
-                process.execPath,
-                ["acceptance/run-web-browser-smoke.mjs"],
-                { env, inherit: true },
-            ),
-        },
+        ...createIntegrationSteps(state).slice(1),
     ];
-    return runCiSteps(steps, {
-        execute(step) {
-            step.run();
-            return { status: 0 };
-        },
-    });
+    return runAcceptanceSteps(steps);
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-    const result = runFinalAcceptance();
+    const result = process.argv.includes("--integration-only")
+        ? runFinalIntegration()
+        : runFinalAcceptance();
     if (!result.ok) {
         process.exitCode = 1;
     }

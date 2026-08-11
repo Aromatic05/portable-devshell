@@ -38,37 +38,18 @@ export function runCiSteps(steps, options = {}) {
     return { failures, ok: false };
 }
 
-export function createDevelopmentCiSteps(target, platform = process.platform) {
-    if (typeof target !== "string" || target.length === 0) {
-        throw new Error("A native target is required.");
-    }
+function createPnpmStepFactory(platform) {
     const pnpm = resolvePnpmCommand({ platform });
-    const pnpmStep = (name, args) => ({
+    return (name, args) => ({
         args: [...pnpm.args, ...args],
         command: pnpm.command,
         name,
     });
-    const worker = join(
-        "ci-artifacts",
-        `devshell-worker-${target}${platform === "win32" ? ".exe" : ""}`,
-    );
-    const application = join("ci-artifacts", `portable-devshell-app-${target}.tar.gz`);
+}
 
-    if (platform === "win32") {
-        // PowerShell is obscure to script reliably, and ConPTY terminal behavior remains unstable
-        // even when the PTY child is Git Bash. We cannot currently write Windows runtime tests
-        // with enough determinism and proof value to make them a release gate. Keep static checks,
-        // native Worker compilation, and application packaging as the Windows release criteria.
-        return [
-            pnpmStep("Lint", ["lint"]),
-            pnpmStep("Build", ["build"]),
-            pnpmStep("Typecheck", ["typecheck"]),
-            pnpmStep("Build native Worker", ["build:worker", target, "--output-dir", "./ci-artifacts"]),
-            pnpmStep("Package native application", ["package:app", "--", "--target", target, "--output-dir", "./ci-artifacts"]),
-        ];
-    }
-
-    const steps = [
+export function createCommonCiSteps(platform = process.platform) {
+    const pnpmStep = createPnpmStepFactory(platform);
+    return [
         pnpmStep("Script tests", ["test:scripts"]),
         pnpmStep("Lint", ["lint"]),
         pnpmStep("Build", ["build"]),
@@ -76,26 +57,100 @@ export function createDevelopmentCiSteps(target, platform = process.platform) {
         { args: ["test", "--locked", "--workspace"], command: "cargo", name: "Rust workspace tests" },
         pnpmStep("Worker tmux contract tests", ["test:worker:tmux"]),
         pnpmStep("Prepare test Worker", ["test:prepare"]),
-        pnpmStep("Package tests", ["test"]),
+        pnpmStep("Package tests", ["test:packages"]),
+    ];
+}
+
+export function createPlatformContractCiSteps(platform = process.platform) {
+    if (platform === "win32") {
+        throw new Error("Platform contract CI requires a Unix host.");
+    }
+    const pnpmStep = createPnpmStepFactory(platform);
+    return [
+        { args: ["test", "--locked", "--workspace"], command: "cargo", name: "Rust workspace tests" },
+        pnpmStep("Worker tmux contract tests", ["test:worker:tmux"]),
+        pnpmStep("Prepare test Worker", ["test:prepare"]),
+        pnpmStep("Package tests", ["test:packages"]),
+    ];
+}
+
+export function createTargetCiSteps(target, platform = process.platform) {
+    if (typeof target !== "string" || target.length === 0) {
+        throw new Error("A native target is required.");
+    }
+    const pnpmStep = createPnpmStepFactory(platform);
+    const worker = join(
+        "ci-artifacts",
+        `devshell-worker-${target}${platform === "win32" ? ".exe" : ""}`,
+    );
+    const application = join("ci-artifacts", `portable-devshell-app-${target}.tar.gz`);
+    const steps = [
+        pnpmStep("Build", ["build"]),
         pnpmStep("Build native Worker", ["build:worker", target, "--output-dir", "./ci-artifacts"]),
+    ];
+
+    if (platform === "win32") {
+        // Windows runtime behavior remains outside the release gate because PowerShell/ConPTY
+        // interaction is not deterministic enough to provide a useful runtime proof. The target
+        // job still builds the complete JS application and the native Worker on both Windows
+        // architectures, then packages the exact release asset.
+        steps.push(
+            pnpmStep("Package native application", ["package:app", "--", "--target", target, "--output-dir", "./ci-artifacts"]),
+        );
+        return steps;
+    }
+
+    steps.push(
         { args: ["./scripts/smoke-worker.mjs", worker], command: process.execPath, name: "Worker daemon smoke" },
         { args: ["./scripts/smoke-reverse-worker.mjs", worker], command: process.execPath, name: "Reverse worker PTY smoke" },
         { args: ["./scripts/smoke-client.mjs", worker], command: process.execPath, name: "Client and local instance smoke" },
         pnpmStep("Package native application", ["package:app", "--", "--target", target, "--output-dir", "./ci-artifacts"]),
         pnpmStep("Application package smoke", ["smoke:package", "--", application]),
-    ];
-    steps.push(pnpmStep("Unix release installer smoke", ["smoke:install-release", "--", application]));
+        pnpmStep("Unix release installer smoke", ["smoke:install-release", "--", application]),
+    );
+
     if (target === "linux-x64") {
         steps.push({
             args: [
                 "-lc",
-                "set -o pipefail; bash acceptance/run-final-acceptance.sh 2>&1 | tee acceptance.log",
+                "set -o pipefail; node acceptance/run-final-acceptance.mjs --integration-only 2>&1 | tee acceptance.log",
             ],
             command: "bash",
-            name: "Final acceptance",
+            env: {
+                PORTABLE_DEVSHELL_TEST_WORKER_PATH: worker,
+            },
+            name: "Final integration",
         });
     }
     return steps;
+}
+
+export function createDevelopmentCiSteps(target, platform = process.platform) {
+    const targetSteps = createTargetCiSteps(target, platform);
+    if (platform === "win32") {
+        const pnpmStep = createPnpmStepFactory(platform);
+        return [
+            pnpmStep("Lint", ["lint"]),
+            pnpmStep("Typecheck", ["typecheck"]),
+            ...targetSteps,
+        ];
+    }
+    return [...createCommonCiSteps(platform), ...targetSteps];
+}
+
+export function runCommonCi(options = {}) {
+    const { platform = process.platform, ...runOptions } = options;
+    return runCiSteps(createCommonCiSteps(platform), runOptions);
+}
+
+export function runPlatformContractCi(options = {}) {
+    const { platform = process.platform, ...runOptions } = options;
+    return runCiSteps(createPlatformContractCiSteps(platform), runOptions);
+}
+
+export function runTargetCi(target, options = {}) {
+    const { platform = process.platform, ...runOptions } = options;
+    return runCiSteps(createTargetCiSteps(target, platform), runOptions);
 }
 
 export function runDevelopmentCi(target, options = {}) {
@@ -105,7 +160,7 @@ export function runDevelopmentCi(target, options = {}) {
 
 function executeCiStep(step) {
     const result = spawnSync(step.command, step.args, {
-        env: process.env,
+        env: step.env === undefined ? process.env : { ...process.env, ...step.env },
         shell: false,
         stdio: "inherit",
     });
@@ -117,7 +172,17 @@ function executeCiStep(step) {
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-    const result = runDevelopmentCi(process.argv[2]);
+    const [mode, target] = process.argv.slice(2);
+    let result;
+    if (mode === "--common") {
+        result = runCommonCi();
+    } else if (mode === "--platform-contract") {
+        result = runPlatformContractCi();
+    } else if (mode === "--target") {
+        result = runTargetCi(target);
+    } else {
+        result = runDevelopmentCi(mode);
+    }
     if (!result.ok) {
         process.exitCode = 1;
     }

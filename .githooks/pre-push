@@ -24,5 +24,5 @@ if [ -n "$(git status --porcelain)" ]; then
     exit 1
 fi
 
-echo "running canonical Linux x64 development CI gate before dev tag push" >&2
+echo "running dev tag preflight before dev tag push; exact-commit CI runs on GitHub" >&2
 exec node scripts/run-dev-tag-gate.mjs
