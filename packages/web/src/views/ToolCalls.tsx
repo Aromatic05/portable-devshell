@@ -3,6 +3,7 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import type { JsonValue, ToolCallRecord } from "@portable-devshell/shared/browser";
 
 import { ConfirmationDialog } from "../components/ConfirmationDialog.js";
+import { ContextBatchDisableDialog } from "../components/ContextBatchDisableDialog.js";
 import { ToolCallFilters } from "../components/toolcall/ToolCallFilters.js";
 import { ToolCallEntry } from "../components/toolcall/ToolCallEntry.js";
 import {
@@ -33,6 +34,8 @@ export function ToolCalls({
     const [toolCallPage, setToolCallPage] = useState(0);
     const [queuedCommentPage, setQueuedCommentPage] = useState(0);
     const [commentHistoryPage, setCommentHistoryPage] = useState(0);
+    const [batchDisableOpen, setBatchDisableOpen] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
     const [disableConfirmation, setDisableConfirmation] = useState<{
         ctxId: string;
         instance: string;
@@ -212,12 +215,32 @@ export function ToolCalls({
         if (queued) setDraft("");
     }
 
+    async function refreshAll(): Promise<void> {
+        if (!interactive || refreshing) return;
+        setRefreshing(true);
+        try {
+            await store.refreshAudit();
+        } finally {
+            setRefreshing(false);
+        }
+    }
+
     const countText = selection.total === 0
         ? `0 of ${allCalls.length} tool calls${active ? " match active filters." : "."}`
         : `Showing ${toolCallPage * toolCallPageSize + 1}-${toolCallPage * toolCallPageSize + selection.items.length} of ${selection.total} matching tool calls.`;
 
     return <section>
-        <h2>Tool Calls</h2>
+        <div className="audit-heading">
+            <h2>Tool Calls</h2>
+            <div className="actions audit-actions">
+                <button disabled={!interactive || refreshing} onClick={() => void refreshAll()} type="button">
+                    {refreshing ? "Refreshing…" : "Refresh all"}
+                </button>
+                <button disabled={!interactive} onClick={() => setBatchDisableOpen(true)} type="button">
+                    Manage Contexts
+                </button>
+            </div>
+        </div>
         <p aria-live="polite" className="hint">{countText}</p>
         <ToolCallFilters
             contexts={contexts}
@@ -331,6 +354,13 @@ export function ToolCalls({
                 void request.finally(() => setDisableConfirmation(undefined));
             }}
         />}
+        {batchDisableOpen ? <ContextBatchDisableDialog
+            busy={state.operations["context-disable-batch"] !== undefined}
+            contexts={state.readModel.contexts}
+            disabled={!interactive}
+            onClose={() => setBatchDisableOpen(false)}
+            onDisable={async (ctxIds) => await store.disableContexts(ctxIds)}
+        /> : null}
         {state.connection === "offline" && allCalls.length === 0
             ? <p className="empty">Tool calls are unavailable while offline.</p>
             : state.connection === "connecting" && allCalls.length === 0

@@ -71,6 +71,49 @@ describe("WebStore", () => {
         expect(clients.overview.get).toHaveBeenCalledOnce();
     });
 
+    it("refreshes every Audit read surface", async () => {
+        const clients = fakeClients();
+        clients.context.list = vi.fn(async () => []);
+        clients.tool.listCalls = vi.fn(async () => []);
+        clients.contextMessage.list = vi.fn(async () => []);
+        clients.runtime.readLogs = vi.fn(async () => []);
+        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+        await store.load();
+
+        vi.mocked(clients.context.list).mockClear();
+        vi.mocked(clients.tool.listCalls).mockClear();
+        vi.mocked(clients.contextMessage.list).mockClear();
+        vi.mocked(clients.runtime.readLogs).mockClear();
+        await store.refreshAudit();
+
+        expect(clients.context.list).toHaveBeenCalledOnce();
+        expect(clients.tool.listCalls).toHaveBeenCalledOnce();
+        expect(clients.contextMessage.list).toHaveBeenCalledOnce();
+        expect(clients.runtime.readLogs).toHaveBeenCalledOnce();
+        store.close();
+    });
+
+    it("attempts every Context in a batch disable and refreshes Context state after partial failure", async () => {
+        const clients = fakeClients();
+        clients.context.list = vi.fn(async () => []);
+        clients.context.disable = vi.fn(async (ctxId) => {
+            if (ctxId === "ctx-b") throw new Error("ctx-b refused");
+            return {} as Awaited<ReturnType<WebClients["context"]["disable"]>>;
+        });
+        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+        await store.load();
+        vi.mocked(clients.context.list).mockClear();
+
+        expect(await store.disableContexts(["ctx-a", "ctx-b", "ctx-c"])).toBe(false);
+        expect(clients.context.disable).toHaveBeenCalledTimes(3);
+        expect(clients.context.disable).toHaveBeenNthCalledWith(1, "ctx-a");
+        expect(clients.context.disable).toHaveBeenNthCalledWith(2, "ctx-b");
+        expect(clients.context.disable).toHaveBeenNthCalledWith(3, "ctx-c");
+        expect(clients.context.list).toHaveBeenCalledOnce();
+        expect(store.state.error).toContain("ctx-b");
+        store.close();
+    });
+
     it("automatically advances a queued Comment to delivered after the instance delivery event", async () => {
         const stream = controllableStream();
         const clients = fakeClients({ subscribe: async () => stream });

@@ -165,6 +165,102 @@ it("refreshes an expanded tool call to retrieve its latest content", async () =>
     await waitFor(() => expect(refreshToolCall).toHaveBeenCalledWith("alpha"));
 });
 
+it("refreshes the whole Audit surface without resetting filters or an expanded call", async () => {
+    const refreshAudit = vi.fn(async () => undefined);
+    const store = {
+        queueContextMessage: vi.fn(async () => true),
+        refreshAudit,
+    } as unknown as WebStore;
+    const view = render(<ToolCalls state={state} store={store} />);
+
+    fireEvent.change(screen.getByLabelText("Instance"), { target: { value: "alpha" } });
+    fireEvent.change(screen.getByLabelText("Context"), {
+        target: { value: "context:ctx-alpha" },
+    });
+    fireEvent.click(screen.getByText("bash_run", { selector: "strong" }));
+    expect(await screen.findByText("Call")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh all" }));
+    await waitFor(() => expect(refreshAudit).toHaveBeenCalledOnce());
+
+    view.rerender(<ToolCalls
+        state={{
+            ...state,
+            readModel: {
+                ...state.readModel,
+                instanceState: {
+                    ...state.readModel.instanceState,
+                    alpha: {
+                        ...state.readModel.instanceState.alpha!,
+                        toolCalls: [{
+                            ...alphaCall,
+                            output: { exitCode: 1, stderr: "failed", stdout: "refreshed-output" },
+                        }],
+                    },
+                },
+            },
+        }}
+        store={store}
+    />);
+
+    expect(screen.getByLabelText("Instance")).toHaveValue("alpha");
+    expect(screen.getByLabelText("Context")).toHaveValue("context:ctx-alpha");
+    expect(screen.getByText(/refreshed-output/u)).toBeInTheDocument();
+});
+
+it("filters inactive Contexts in a separate window and disables only the reviewed selection", async () => {
+    const now = Date.now();
+    const contextState: WebState = {
+        ...state,
+        readModel: {
+            ...state.readModel,
+            contexts: [{
+                ...state.readModel.contexts[0]!,
+                ctxId: "ctx-hour",
+                lastAccessedAt: new Date(now - 2 * 60 * 60 * 1_000).toISOString(),
+            }, {
+                ...state.readModel.contexts[0]!,
+                ctxId: "ctx-twenty",
+                lastAccessedAt: new Date(now - 30 * 60 * 1_000).toISOString(),
+            }, {
+                ...state.readModel.contexts[0]!,
+                ctxId: "ctx-recent",
+                lastAccessedAt: new Date(now - 5 * 60 * 1_000).toISOString(),
+            }, {
+                ...state.readModel.contexts[0]!,
+                ctxId: "ctx-disabled",
+                lastAccessedAt: new Date(now - 3 * 60 * 60 * 1_000).toISOString(),
+                status: "disabled",
+            }],
+        },
+    };
+    const disableContexts = vi.fn(async () => true);
+    const store = {
+        disableContexts,
+        queueContextMessage: vi.fn(async () => true),
+    } as unknown as WebStore;
+    render(<ToolCalls state={contextState} store={store} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage Contexts" }));
+    const dialog = screen.getByRole("dialog", { name: "Disable inactive Contexts" });
+    expect(within(dialog).getByText("ctx-hour")).toBeInTheDocument();
+    expect(within(dialog).queryByText("ctx-twenty")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("ctx-disabled")).not.toBeInTheDocument();
+
+    fireEvent.change(within(dialog).getByLabelText("Inactive for"), {
+        target: { value: "20" },
+    });
+    expect(within(dialog).getByText("ctx-twenty")).toBeInTheDocument();
+    expect(within(dialog).queryByText("ctx-recent")).not.toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Select ctx-twenty" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Review disable" }));
+    expect(disableContexts).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Disable 1 Context" }));
+
+    await waitFor(() => expect(disableContexts).toHaveBeenCalledWith(["ctx-twenty"]));
+});
+
 it("locks the instance from the selected Context", () => {
     const queueContextMessage = vi.fn(async () => true);
     const store = { queueContextMessage } as unknown as WebStore;

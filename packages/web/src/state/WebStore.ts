@@ -140,6 +140,13 @@ export class WebStore {
         await this.#model.refreshInstance(instance, ["toolCalls", "logs"]);
     }
 
+    async refreshAudit(): Promise<void> {
+        await this.#model.refreshControl();
+        await Promise.all(this.#model.state.instances.map(async ({ name }) => {
+            await this.#model.refreshInstance(name, ["toolCalls", "comments", "logs"]);
+        }));
+    }
+
     async decideTool(
         instance: string,
         approvalId: string,
@@ -198,6 +205,38 @@ export class WebStore {
             async (signal) => {
                 await this.#commands.disableContext(ctxId);
                 if (signal.aborted || !this.#current(generation)) return;
+            },
+        );
+    }
+
+    async disableContexts(ctxIds: readonly string[]): Promise<boolean> {
+        const uniqueCtxIds = [...new Set(ctxIds)].filter((ctxId) => ctxId.length > 0);
+        if (uniqueCtxIds.length === 0) return true;
+        const generation = this.#generation;
+        return await this.#operations.run(
+            "context-disable-batch",
+            `${uniqueCtxIds.length} Context${uniqueCtxIds.length === 1 ? "" : "s"} disabled.`,
+            generation,
+            async (signal) => {
+                if (signal.aborted || !this.#current(generation)) return;
+                const results = await Promise.all(uniqueCtxIds.map(async (ctxId) => {
+                    try {
+                        await withRequestTimeout(
+                            this.clients.context.disable(ctxId),
+                            this.#requestTimeoutMs,
+                            `context.disable:${ctxId}`,
+                        );
+                        return undefined;
+                    } catch (error) {
+                        return `${ctxId}: ${errorMessage(error)}`;
+                    }
+                }));
+                const failures = results.filter((result): result is string => result !== undefined);
+                if (signal.aborted || !this.#current(generation)) return;
+                if (this.#current(generation)) await this.#model.refreshContexts();
+                if (failures.length > 0) {
+                    throw new Error(`Failed to disable ${failures.join("; ")}`);
+                }
             },
         );
     }
