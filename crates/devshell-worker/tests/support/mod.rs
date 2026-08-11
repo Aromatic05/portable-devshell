@@ -49,6 +49,14 @@ impl TestEnv {
         self.home_root.join(instance)
     }
 
+    pub fn context_temp_link(&self) -> PathBuf {
+        self.home_root.join("context-tmp")
+    }
+
+    pub fn context_temp_target(&self) -> PathBuf {
+        self.runtime_root.join("devshell-worker").join("context-tmp")
+    }
+
     pub fn socket_file(&self, instance: &str) -> PathBuf {
         self.runtime_root
             .join("devshell-worker")
@@ -136,6 +144,24 @@ impl TestEnv {
     pub fn rpc(&self, instance: &str, request: &Value) -> Value {
         let payload = serde_json::to_vec(request).unwrap();
         self.raw_rpc(instance, &payload)
+    }
+
+    pub fn rpc_without_runtime_dir(&self, instance: &str, request: &Value) -> Value {
+        let payload = serde_json::to_vec(request).unwrap();
+        let mut input = Vec::with_capacity(4 + payload.len());
+        input.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        input.extend_from_slice(&payload);
+        let output = self
+            .command_without_runtime_dir()
+            .args(["rpc", "--instance", instance])
+            .write_stdin(input)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let length = u32::from_be_bytes(output[..4].try_into().unwrap()) as usize;
+        serde_json::from_slice(&output[4..4 + length]).unwrap()
     }
 
     pub fn raw_rpc(&self, instance: &str, payload: &[u8]) -> Value {

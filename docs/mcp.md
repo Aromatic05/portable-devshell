@@ -127,7 +127,7 @@ Control 机器上的 Skill 目录固定为：
 每个 workspace 还会得到两类辅助目录：
 
 - `projectMemoryDirectory`：位于 worker 的 `~/.devshell/project-memory/` 下，按 canonical workspace 的稳定平台路径表示生成持久 key；其中的 `AGENT.md` 可跨 Context 长期保留；
-- `temporaryDirectory`：位于 worker 的 `~/.devshell/context-tmp/` 下，每个 Context 独立。有效 Context 的后续工具调用会刷新该目录活跃时间；连续 24 小时未活动的临时目录可在后续 workspace 初始化时被 GC。若 Context 仍有效但该 worker-local 目录已被 GC，或 instance 已切换到新的 worker，本次工具调用会重新 prepare 同一 workspace、持久化新的临时目录后继续执行。
+- `temporaryDirectory`：对外路径稳定在 worker 的 `~/.devshell/context-tmp/` 下，每个 Context 独立。Unix worker 会把这个固定入口维护为指向 transient runtime storage 的符号链接，优先使用 `$XDG_RUNTIME_DIR/devshell-worker/context-tmp`；Linux 缺少 `XDG_RUNTIME_DIR` 时优先使用 `/dev/shm`，避免高频临时数据写入持久 home。有效 Context 的后续工具调用会刷新该目录活跃时间；连续 24 小时未活动的临时目录可在后续 workspace 初始化时被 GC。若 runtime storage 因重启、GC 或 worker replacement 消失，本次工具调用会重新 prepare 同一 workspace、持久化新的临时目录后继续执行。
 
 如果 instance 配置了 `[alerts]`，`environ_info` 同时读取该 workspace 的 alert advice，并启动该 workspace 的周期 probe。有效 Context 的后续工具调用会刷新 alert 活跃租约并同步当前 alerts 配置；最后一个同 workspace Context 被手动禁用时立即释放该租约，连续 24 小时无有效调用时也会自动停止 probe 并移除缓存状态。
 

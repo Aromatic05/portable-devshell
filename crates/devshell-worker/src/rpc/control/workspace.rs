@@ -1,5 +1,5 @@
 use std::fs::OpenOptions;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -79,9 +79,7 @@ fn prepare(workspace: &Path) -> Result<WorkspacePrepareResult, RpcError> {
     ensure_file_mode(&project_memory_agent_file, 0o600)
         .map_err(|error| RpcError::new("workspace.storageUnavailable", error))?;
 
-    let context_temp_root = home.join(CONTEXT_TEMP_ROOT);
-    ensure_dir(&context_temp_root, 0o700)
-        .map_err(|error| RpcError::new("workspace.temporaryUnavailable", error.to_string()))?;
+    let context_temp_root = ensure_context_temp_root(&home)?;
     gc_stale_context_temp(&context_temp_root, CONTEXT_TEMP_TTL);
 
     let temporary_directory = tempfile::Builder::new()
@@ -118,11 +116,9 @@ fn project_memory_key(workspace: &Path) -> String {
 }
 
 fn touch_context_temporary_directory(path: &Path) -> Result<(), RpcError> {
-    let root = devshell_home()
-        .map_err(|error| RpcError::new("workspace.temporaryUnavailable", error))?
-        .join(CONTEXT_TEMP_ROOT);
-    ensure_dir(&root, 0o700)
-        .map_err(|error| RpcError::new("workspace.temporaryUnavailable", error.to_string()))?;
+    let home = devshell_home()
+        .map_err(|error| RpcError::new("workspace.temporaryUnavailable", error))?;
+    let root = ensure_context_temp_root(&home)?;
     let root = root.canonicalize()
         .map_err(|error| RpcError::new("workspace.temporaryUnavailable", error.to_string()))?;
     let path = path.canonicalize()
@@ -168,6 +164,150 @@ fn gc_stale_context_temp(root: &Path, ttl: Duration) {
         if now.duration_since(modified).is_ok_and(|age| age >= ttl) {
             let _ = std::fs::remove_dir_all(entry.path());
         }
+    }
+}
+
+#[cfg(unix)]
+fn ensure_context_temp_root(home: &Path) -> Result<PathBuf, RpcError> {
+    use std::os::unix::fs::symlink;
+
+    ensure_dir(home, 0o700)
+        .map_err(|error| RpcError::new("workspace.temporaryUnavailable", error))?;
+    let link = home.join(CONTEXT_TEMP_ROOT);
+    let target = context_temp_target(home)?;
+
+    if managed_link_points_to(&link, &target)? {
+        return Ok(link);
+    }
+    remove_managed_context_temp_path(&link)?;
+    match symlink(&target, &link) {
+        Ok(()) => Ok(link),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && managed_link_points_to(&link, &target)? => Ok(link),
+        Err(error) => Err(RpcError::new(
+            "workspace.temporaryUnavailable",
+            format!("failed to create managed temporary link {}: {error}", link.display()),
+        )),
+    }
+}
+
+#[cfg(not(unix))]
+fn ensure_context_temp_root(home: &Path) -> Result<PathBuf, RpcError> {
+    let root = home.join(CONTEXT_TEMP_ROOT);
+    ensure_dir(&root, 0o700)
+        .map_err(|error| RpcError::new("workspace.temporaryUnavailable", error))?;
+    Ok(root)
+}
+
+#[cfg(unix)]
+fn context_temp_target(home: &Path) -> Result<PathBuf, RpcError> {
+    if let Some(runtime_dir) = std::env::var_os("XDG_RUNTIME_DIR")
+        && !runtime_dir.is_empty()
+    {
+        let parent = PathBuf::from(runtime_dir).join("devshell-worker");
+        ensure_dir(&parent, 0o700)
+            .map_err(|error| RpcError::new("workspace.temporaryUnavailable", error))?;
+        let target = parent.join(CONTEXT_TEMP_ROOT);
+        ensure_dir(&target, 0o700)
+            .map_err(|error| RpcError::new("workspace.temporaryUnavailable", error))?;
+        return Ok(target);
+    }
+    use std::os::unix::fs::MetadataExt;
+
+    let owner = std::fs::metadata(home)
+        .map_err(|error| RpcError::new("workspace.temporaryUnavailable", error.to_string()))?
+        .uid();
+    #[cfg(target_os = "linux")]
+    let base = if Path::new("/dev/shm").is_dir() {
+        PathBuf::from("/dev/shm")
+    } else {
+        return Err(RpcError::new(
+            "workspace.temporaryUnavailable",
+            "XDG_RUNTIME_DIR is unavailable and /dev/shm is not usable for Context temporary storage",
+        ));
+    };
+    #[cfg(not(target_os = "linux"))]
+    let base = std::env::temp_dir();
+    let parent = base.join(format!("devshell-worker-{owner}"));
+    ensure_owned_runtime_directory(&parent, owner)?;
+    let target = parent.join(CONTEXT_TEMP_ROOT);
+    ensure_dir(&target, 0o700)
+        .map_err(|error| RpcError::new("workspace.temporaryUnavailable", error))?;
+    Ok(target)
+}
+
+#[cfg(unix)]
+fn ensure_owned_runtime_directory(path: &Path, owner: u32) -> Result<(), RpcError> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    match std::fs::create_dir(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let metadata = std::fs::symlink_metadata(path).map_err(|inspect_error| RpcError::new(
+                "workspace.temporaryUnavailable",
+                format!("failed to inspect runtime directory {}: {inspect_error}", path.display()),
+            ))?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() || metadata.uid() != owner {
+                return Err(RpcError::new(
+                    "workspace.temporaryUnavailable",
+                    format!("runtime directory is not a private directory owned by the worker user: {}", path.display()),
+                ));
+            }
+        }
+        Err(error) => return Err(RpcError::new(
+            "workspace.temporaryUnavailable",
+            format!("failed to create runtime directory {}: {error}", path.display()),
+        )),
+    }
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+        .map_err(|error| RpcError::new(
+            "workspace.temporaryUnavailable",
+            format!("failed to secure runtime directory {}: {error}", path.display()),
+        ))
+}
+
+#[cfg(unix)]
+fn managed_link_points_to(link: &Path, target: &Path) -> Result<bool, RpcError> {
+    let metadata = match std::fs::symlink_metadata(link) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(RpcError::new(
+            "workspace.temporaryUnavailable",
+            format!("failed to inspect managed temporary path {}: {error}", link.display()),
+        )),
+    };
+    if !metadata.file_type().is_symlink() {
+        return Ok(false);
+    }
+    std::fs::read_link(link)
+        .map(|current| current == target)
+        .map_err(|error| RpcError::new(
+            "workspace.temporaryUnavailable",
+            format!("failed to read managed temporary link {}: {error}", link.display()),
+        ))
+}
+
+#[cfg(unix)]
+fn remove_managed_context_temp_path(path: &Path) -> Result<(), RpcError> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(RpcError::new(
+            "workspace.temporaryUnavailable",
+            format!("failed to inspect managed temporary path {}: {error}", path.display()),
+        )),
+    };
+    let result = if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    };
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(RpcError::new(
+            "workspace.temporaryUnavailable",
+            format!("failed to replace managed temporary path {}: {error}", path.display()),
+        )),
     }
 }
 

@@ -292,6 +292,90 @@ fn handshake_rejects_unsupported_protocol_versions() {
     env.json_command(&["stop", "--instance", instance]);
 }
 
+#[cfg(unix)]
+#[test]
+fn workspace_temporary_storage_migrates_to_runtime_and_recovers_after_runtime_loss() {
+    let env = TestEnv::new();
+    let instance = "aromatic-context-temp";
+    let context_temp_link = env.context_temp_link();
+    fs::create_dir_all(&context_temp_link).unwrap();
+    fs::write(context_temp_link.join("legacy-data"), b"discardable").unwrap();
+
+    env.command()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let prepare = |id: &str| env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": id,
+            "method": "workspace.prepare",
+            "params": { "workspace": env.protocol_workspace() }
+        }),
+    );
+
+    let first = prepare("workspace-prepare-1");
+    assert_eq!(first["ok"], true);
+    assert!(fs::symlink_metadata(&context_temp_link).unwrap().file_type().is_symlink());
+    assert_eq!(fs::read_link(&context_temp_link).unwrap(), env.context_temp_target());
+    let first_temporary = std::path::PathBuf::from(
+        first["result"]["temporaryDirectory"].as_str().unwrap(),
+    );
+    assert!(first_temporary.starts_with(&context_temp_link));
+    assert!(first_temporary.canonicalize().unwrap().starts_with(
+        env.context_temp_target().canonicalize().unwrap()
+    ));
+
+    fs::remove_dir_all(env.context_temp_target()).unwrap();
+    let second = prepare("workspace-prepare-2");
+    assert_eq!(second["ok"], true);
+    let second_temporary = std::path::PathBuf::from(
+        second["result"]["temporaryDirectory"].as_str().unwrap(),
+    );
+    assert!(second_temporary.starts_with(&context_temp_link));
+    assert!(second_temporary.canonicalize().unwrap().starts_with(
+        env.context_temp_target().canonicalize().unwrap()
+    ));
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn workspace_temporary_storage_without_xdg_runtime_uses_shared_memory() {
+    let env = TestEnv::new();
+    let instance = "aromatic-context-temp-fallback";
+    env.command_without_runtime_dir()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let prepared = env.rpc_without_runtime_dir(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "workspace-prepare-no-xdg",
+            "method": "workspace.prepare",
+            "params": { "workspace": env.protocol_workspace() }
+        }),
+    );
+    assert_eq!(prepared["ok"], true);
+    let target = fs::read_link(env.context_temp_link()).unwrap();
+    assert!(target.starts_with("/dev/shm"));
+    assert!(std::path::Path::new(
+        prepared["result"]["temporaryDirectory"].as_str().unwrap()
+    ).canonicalize().unwrap().starts_with(target.canonicalize().unwrap()));
+
+    env.command_without_runtime_dir()
+        .args(["stop", "--instance", instance])
+        .assert()
+        .success();
+}
+
 #[test]
 fn bash_run_returns_success_for_timeout_and_capture_truncation() {
     let env = TestEnv::new();
