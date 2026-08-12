@@ -33,6 +33,9 @@ export function createInstanceRouteModule(options: InstanceRouteModuleOptions): 
     const editor = () => requirePort(options.editor, "Config editing is not available.");
     return routeModule("instance", {
         list: () => options.registry.list().map((descriptor): InstanceListEntry => ({
+            ...(descriptor.worker.handshake?.homeDirectory === undefined
+                ? {}
+                : { homeDirectory: descriptor.worker.handshake.homeDirectory }),
             mcpEnabled: descriptor.mcpEnabled,
             name: descriptor.name,
             snapshot: descriptor.worker.snapshot()

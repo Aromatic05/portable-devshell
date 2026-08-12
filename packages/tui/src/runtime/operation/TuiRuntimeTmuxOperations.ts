@@ -1,6 +1,7 @@
 import { withRequestTimeout, type JsonValue } from "@portable-devshell/shared";
 
 import type { TuiRuntimeOperationClients } from "./TuiRuntimeOperationPorts.js";
+import type { TuiAppStore } from "../../state/TuiAppStore.js";
 import { TUI_TMUX_INSPECT_MAX_LINES, type TuiTmuxListPane } from "../../view/page/terminal/TuiTmuxPaneTerminalModel.js";
 
 export interface TuiTmuxInspectPane {
@@ -25,6 +26,7 @@ export class TuiRuntimeTmuxOperations {
     constructor(private readonly options: {
         clients: TuiRuntimeOperationClients;
         operationTimeoutMs: number;
+        store: TuiAppStore;
     }) {}
 
     async listPanes(instance: string): Promise<TuiTmuxListPane[]> {
@@ -65,7 +67,7 @@ export class TuiRuntimeTmuxOperations {
 
     private async call(instance: string, toolName: string, input: JsonValue): Promise<Record<string, JsonValue>> {
         const feedback = (await withRequestTimeout(
-            this.options.clients.tool.call(instance, toolName, input),
+            this.options.clients.tool.call(instance, toolName, input, this.#requireHomeDirectory(instance)),
             this.options.operationTimeoutMs,
             `tool.call:${toolName}`,
             "uncertain",
@@ -75,6 +77,12 @@ export class TuiRuntimeTmuxOperations {
             throw new Error(`${error.code}: ${error.message ?? "tmux tool call failed"}`);
         }
         return feedback;
+    }
+
+    #requireHomeDirectory(instance: string): string {
+        const home = this.options.store.getState().instances.find((candidate) => candidate.name === instance)?.homeDirectory;
+        if (home !== undefined && home.length > 0) return home;
+        throw new Error(`Worker home directory is unavailable for ${instance}.`);
     }
 }
 

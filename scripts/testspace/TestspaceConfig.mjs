@@ -50,13 +50,12 @@ export function buildTestspaceGlobalConfig({ mcpPort, webPort }) {
     ].join("\n");
 }
 
-export function buildTestspaceInstanceConfig({ workspace }) {
+export function buildTestspaceInstanceConfig() {
     return [
-        "version = 2",
+        "version = 3",
         `name = "${TESTSPACE_INSTANCE}"`,
         "enabled = true",
         'provider = "local"',
-        `workspace = ${JSON.stringify(workspace)}`,
         "",
         "[mcp]",
         "enabled = true",
@@ -81,13 +80,12 @@ export function buildTestspaceInstanceConfig({ workspace }) {
     ].join("\n");
 }
 
-export function buildTestspaceReverseInstanceConfig({ workspace }) {
+export function buildTestspaceReverseInstanceConfig() {
     return [
-        "version = 2",
+        "version = 3",
         `name = "${TESTSPACE_REVERSE_INSTANCE}"`,
         "enabled = true",
         'provider = "reverse"',
-        `workspace = ${JSON.stringify(workspace)}`,
         "",
         "[mcp]",
         "enabled = true",

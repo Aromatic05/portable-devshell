@@ -15,7 +15,6 @@ struct StatusResponse {
     state: &'static str,
     running: bool,
     pid: Option<u32>,
-    workspace: Option<String>,
     #[serde(rename = "workerSha256")]
     worker_sha256: Option<String>,
 }
@@ -35,11 +34,6 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
     } else {
         None
     };
-    let workspace = daemon_status
-        .as_ref()
-        .and_then(|result| result.get("workspace"))
-        .and_then(serde_json::Value::as_str)
-        .map(ToString::to_string);
     let worker_sha256 = daemon_status
         .as_ref()
         .and_then(|result| result.get("workerSha256"))
@@ -58,7 +52,6 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
         state,
         running,
         pid,
-        workspace,
         worker_sha256,
     })
     .map_err(|error| error.to_string())

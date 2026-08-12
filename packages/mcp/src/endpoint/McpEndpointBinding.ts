@@ -17,10 +17,12 @@ interface McpEndpointSession {
 
 export class McpEndpointBinding {
     readonly #requestSignals = new Map<string, AbortController>();
+    readonly #serverVersion: string;
     readonly #sessions = new Map<string, McpEndpointSession>();
     readonly #worker: McpEndpointWorker;
 
-    constructor(worker: McpEndpointWorker) {
+    constructor(worker: McpEndpointWorker, serverVersion = "0.0.0") {
+        this.#serverVersion = serverVersion;
         this.#worker = worker;
     }
 
@@ -102,7 +104,7 @@ export class McpEndpointBinding {
         const server = new Server(
             {
                 name: "portable-devshell-mcp",
-                version: "0.0.0"
+                version: this.#serverVersion
             },
             {
                 capabilities: {

@@ -44,8 +44,7 @@ const instanceKeys = [
     "provider",
     "security",
     "ssh",
-    "tools",
-    "workspace"
+    "tools"
 ] as const;
 
 const instancePatchKeys = instanceKeys.filter((key) => key !== "name");
@@ -108,8 +107,7 @@ export function parseConfigInstanceDraft(
                 ? undefined
                 : parseSecurityDraft(record.security, [...path, "security"]),
         ssh: record.ssh === undefined ? undefined : parseSshDraft(record.ssh, [...path, "ssh"]),
-        tools: record.tools === undefined ? undefined : parseTools(record.tools, [...path, "tools"]),
-        workspace: readOptionalTrimmedString(record.workspace, [...path, "workspace"])
+        tools: record.tools === undefined ? undefined : parseTools(record.tools, [...path, "tools"])
     };
 }
 
@@ -163,8 +161,7 @@ export function parseConfigInstancePatch(
                 ? undefined
                 : parseSecurityDraft(record.security, [...path, "security"]),
         ssh: readNullable(record.ssh, (entry) => parseSshDraft(entry, [...path, "ssh"])),
-        tools: readNullable(record.tools, (entry) => parseTools(entry, [...path, "tools"])),
-        workspace: readOptionalTrimmedString(record.workspace, [...path, "workspace"])
+        tools: readNullable(record.tools, (entry) => parseTools(entry, [...path, "tools"]))
     };
 }
 

@@ -165,6 +165,7 @@ export class TuiRuntime {
         if (dependencies.terminal === undefined) {
             this.#controlTerminalPty = new TuiControlTerminalPtyFactory({
                 client: clients.terminal,
+                workspaceForInstance: (instance) => this.#requireInstanceHome(instance),
             });
             this.terminal = new TuiTerminalSession({
                 ptyFactory: this.#controlTerminalPty.create(),
@@ -215,8 +216,16 @@ export class TuiRuntime {
             onArtifactRevokeShare: async (shareId) => {
                 await this.#operations.revokeArtifactShare(shareId);
             },
-            onArtifactViewImage: async (instance, input) =>
-                await clients.artifact.viewImage(instance, input),
+            onArtifactViewImage: async (instance, input) => {
+                if ("path" in input) {
+                    return await clients.artifact.viewImage(instance, {
+                        ...(input.instance === undefined ? {} : { instance: input.instance }),
+                        path: input.path,
+                        workspace: input.workspace ?? this.#requireInstanceHome(input.instance ?? instance),
+                    });
+                }
+                return await clients.artifact.viewImage(instance, input);
+            },
             onContextMessage: async (instance, ctxId, text) => {
                 await this.#operations.queueContextMessage(
                     instance,
@@ -773,6 +782,12 @@ export class TuiRuntime {
             this.#clearTerminalEscapeTimer();
             this.#terminalInputRouter.reset();
         }
+    }
+
+    #requireInstanceHome(instance: string): string {
+        const home = this.store.getState().instances.find((candidate) => candidate.name === instance)?.homeDirectory;
+        if (home !== undefined && home.length > 0) return home;
+        throw new Error(`Worker home directory is unavailable for ${instance}.`);
     }
 
     #syncTmuxPanes(): void {

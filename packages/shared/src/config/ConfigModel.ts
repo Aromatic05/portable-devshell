@@ -79,7 +79,6 @@ interface ControlInstanceConfigBase {
     name: string;
     security: ControlInstanceSecurityConfig;
     tools?: ControlInstanceToolsConfig;
-    workspace: string;
 }
 
 export interface ControlLocalInstanceConfig extends ControlInstanceConfigBase {
@@ -249,7 +248,6 @@ export interface ConfigInstanceDraft {
         command?: string;
     };
     tools?: ControlInstanceToolsConfig;
-    workspace?: string;
 }
 
 export interface ConfigMcpOAuth2Draft {
@@ -324,7 +322,6 @@ export interface ConfigInstancePatch {
         command?: string;
     }>;
     tools?: ConfigNullable<ControlInstanceToolsConfig>;
-    workspace?: string;
 }
 
 export interface ConfigMcpPatch {

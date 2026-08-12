@@ -155,6 +155,125 @@ test("a failed tool call does not consume a queued Comment", async () => {
     assert.equal(consumeCount, 0);
 });
 
+test("a routed artifact result consumes Comments from the routed instance Context", async () => {
+    const consumed: Array<{ callId: string; ctxId: string; instance: string }> = [];
+    const audited: Array<{ instance: string; toolName: string }> = [];
+    const called: Array<{ instance: string; toolName: string }> = [];
+    const worker = createHarness().worker;
+    const gateway = {
+        async appendMcpToolCalled(instance: string, toolName: string) {
+            called.push({ instance, toolName });
+        },
+        assertReady() {},
+        async auditToolCall<T extends JsonValue>(
+            instance: string,
+            toolName: string,
+            _input: JsonValue,
+            _context: ToolCallContext,
+            operation: (callId: string) => Promise<T>,
+        ): Promise<T> {
+            audited.push({ instance, toolName });
+            return await operation(`audit-${toolName}`);
+        },
+        async consumeContextMessages(instance: string, ctxId: string, callId: string) {
+            consumed.push({ callId, ctxId, instance });
+            return instance === "beta"
+                ? { callId, comment: "beta comment", messages: [] }
+                : { callId, messages: [] };
+        },
+        environment(instance: string) {
+            return instance === "beta"
+                ? {
+                      homeDirectory: "/home/beta",
+                      instance: "beta",
+                      platform: { arch: "x86_64", os: "linux" },
+                      skillsDirectory: "/home/beta/.devshell/skills",
+                  }
+                : undefined;
+        },
+        listTools: () => [],
+        async prepareWorkspace(_instance: string, workspace: string) {
+            return {
+                projectMemoryAgentFile: `${workspace}/AGENT.md`,
+                projectMemoryDirectory: workspace,
+                temporaryDirectory: `${workspace}/tmp`,
+                workspace,
+            };
+        },
+        async readAlerts() {
+            return { advice: [] };
+        },
+        async touchAlerts() {},
+        async touchTemporaryDirectory() {},
+        async viewArtifactImage(defaultInstance: string, input: { path?: string; workspace?: string }) {
+            assert.equal(defaultInstance, "alpha");
+            assert.equal((input as { instance?: string }).instance, "beta");
+            assert.equal(input.workspace, "/projects/beta");
+            return {
+                bytes: 1,
+                content: "AA==",
+                encoding: "base64" as const,
+                mediaType: "image/png" as const,
+                name: "preview.png",
+                source: {
+                    instance: "beta",
+                    path: input.path ?? "./preview.png",
+                    type: "file" as const,
+                    workspace: input.workspace,
+                },
+            };
+        },
+    };
+    const catalog = new McpEndpointCatalog({
+        gateway: gateway as never,
+        instanceName: "alpha",
+        policy: {
+            capabilities: ["manage", "read"],
+            groups: ["artifact", "instance"],
+        },
+        worker,
+    });
+    const dispatch = new McpEndpointDispatch({
+        catalog,
+        gateway: gateway as never,
+        instanceName: "alpha",
+        worker: worker as never,
+    });
+    const environment = (await dispatch.callTool(
+        "environ_info",
+        { instance: "beta", workspace: "/projects/beta" },
+        { principal: "tester", requestId: "environment-beta" },
+    )) as { ctxId: string };
+
+    const result = await dispatch.callTool(
+        "artifact_viewImage",
+        { ctxId: environment.ctxId, instance: "beta", path: "./preview.png" },
+        { principal: "tester", requestId: "image-beta" },
+    );
+
+    assert.deepEqual((result as { structuredContent?: JsonValue }).structuredContent, {
+        bytes: 1,
+        comment: ["beta comment"],
+        mediaType: "image/png",
+        name: "preview.png",
+        source: {
+            instance: "beta",
+            path: "./preview.png",
+            type: "file",
+            workspace: "/projects/beta",
+        },
+    });
+    assert.equal(consumed[0]?.instance, "beta");
+    assert.deepEqual(audited, [
+        { instance: "beta", toolName: "environ_info" },
+        { instance: "beta", toolName: "artifact_viewImage" },
+    ]);
+    assert.deepEqual(called, [
+        { instance: "beta", toolName: "environ_info" },
+        { instance: "beta", toolName: "artifact_viewImage" },
+    ]);
+});
+
 async function createContext(
     dispatch: McpEndpointDispatch,
     requestId: string,
@@ -219,7 +338,6 @@ function createHarness(
             return { advice: [] };
         },
         snapshot: () => ({ ready: true }),
-        workspacePath: "/workspace",
     };
     const gateway = {
         assertReady() {},

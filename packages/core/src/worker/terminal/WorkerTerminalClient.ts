@@ -20,6 +20,7 @@ export interface WorkerTerminalOpenInput {
     command?: string;
     cwd?: string;
     rows: number;
+    workspace: string;
 }
 
 export interface WorkerTerminalIdentity {

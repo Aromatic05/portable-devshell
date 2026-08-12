@@ -57,6 +57,7 @@ export class TuiRuntimeOperations {
         this.tmuxOperations = new TuiRuntimeTmuxOperations({
             clients: options.clients,
             operationTimeoutMs: timeout,
+            store: options.store,
         });
         this.callTool = execution.callTool.bind(execution);
         this.decideApproval = execution.decideApproval.bind(execution);

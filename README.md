@@ -1,13 +1,13 @@
 # portable-devshell
 
-`portable-devshell` 把本地、SSH、容器或反向连接设备中的工作区统一成可管理的 instance，并通过 MCP 暴露给 Codex、Claude Code、ChatGPT Connector 等客户端。
+`portable-devshell` 把本地、SSH、容器或反向连接目标统一成可管理的 instance，并通过 MCP 暴露给 Codex、Claude Code、ChatGPT Connector 等客户端。
 
 它采用一个长期运行的 TypeScript control daemon 管理多个 instance；每个目标环境运行独立的 Rust worker daemon。CLI、TUI 和 MCP 共用同一套状态、审批、审计和工具调用链。
 
 ## 主要能力
 
 - `local`、`ssh`、`docker`、`podman`、`reverse` 五种 provider。
-- 每个 instance 独立 worker、默认 workspace、生命周期、日志、审批策略和 MCP endpoint；MCP Context 可以在该 worker 上由调用方获准访问的绝对目录建立自己的 workspace。
+- 每个 instance 独立 worker、生命周期、日志、审批策略和 MCP endpoint。workspace 不持久化到 instance 配置；CLI/MCP 等调用在操作或 Context 建立时显式选择 worker 上的绝对 workspace。
 - 克制的系统级工具面：`bash`、`file`、`tmux`、`artifact`、`todo`，以及可选实例管理。
 - WSS 反向连接，SSE + HTTPS POST 回退。
 - OAuth 2.1、动态客户端注册、持久化密钥、刷新与撤销。
@@ -65,14 +65,13 @@ devshell instance status demo-local
 
 ```text
 provider: local
-workspace: 当前项目目录
 MCP enabled: yes
 ```
 
 验证 worker 调用：
 
 ```bash
-devshell instance call demo-local bash_run '{"command":"pwd"}'
+devshell instance call demo-local /absolute/path/to/project bash_run '{"command":"pwd"}'
 ```
 
 打开 TUI：
@@ -98,7 +97,7 @@ http://127.0.0.1:17890/<instance>/mcp
 enabled = true
 
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo", "context"]
+groups = ["file", "bash", "artifact", "tmux", "todo"]
 capabilities = ["read", "write", "execute"]
 ```
 
@@ -109,17 +108,21 @@ capabilities = ["read", "write", "execute"]
 公网暴露必须启用认证。常用配置：
 
 ```toml
+# ~/.devshell/control/config.toml
 [mcp]
 enabled = true
 listenHost = "127.0.0.1"
 listenPort = 17890
 publicBaseUrl = "https://devshell.example.com"
 
-[mcp.auth]
-mode = "oauth2"
+# ~/.devshell/control/instances/demo-local.toml
+[mcp]
+enabled = true
+auth = "oauth2"
+path = "/demo-local/mcp"
 
-[mcp.auth.oauth2]
-resourceName = "portable-devshell"
+[mcp.oauth2]
+resourceName = "demo-local"
 requiredScopes = ["mcp"]
 ```
 

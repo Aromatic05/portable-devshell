@@ -1,5 +1,5 @@
 import { InstancePaths, WorkerInstanceFactory, WorkerRpcInboundConnector, WorkerTransportFactory, resolveWorkerHomeDirectory, type WorkerInstance, type WorkerInstanceConfig, type WorkerTransportFactoryOptions } from "@portable-devshell/core";
-import { asInstanceName, asWorkspacePath, type ControlInstanceConfig } from "@portable-devshell/shared";
+import { asInstanceName, type ControlInstanceConfig } from "@portable-devshell/shared";
 
 import type { InstanceDescriptor } from "./InstanceDescriptor.js";
 import { ContextMessageService } from "../../instance/context/ContextMessageService.js";
@@ -51,8 +51,7 @@ export class InstanceFactory {
             ...(reverseConnector === undefined ? {} : { reverseConnector }),
             terminal,
             todo,
-            worker,
-            workspace: instance.workspace
+            worker
         };
     }
 
@@ -65,7 +64,6 @@ export class InstanceFactory {
             instance.security?.mode === "workspace" ? "workspace" : "disabled";
         const common = {
             alerts: instance.alerts,
-            defaultWorkspace: instance.workspace === undefined ? undefined : asWorkspacePath(instance.workspace),
             env: {
                 ...instance.env,
                     DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: effectiveSecurityMode,
@@ -107,21 +105,18 @@ export class InstanceFactory {
             case "ssh":
                 return {
                     command: instance.ssh.command,
-                    workspace: instance.workspace,
                     type: "ssh"
                 };
             case "docker":
                 return {
                     container: instance.container,
                     dockerBinary: instance.dockerBinary,
-                    remoteCwd: instance.workspace,
                     type: "docker"
                 };
             case "podman":
                 return {
                     container: instance.container,
                     podmanBinary: instance.podmanBinary,
-                    remoteCwd: instance.workspace,
                     type: "podman"
                 };
             case "reverse":

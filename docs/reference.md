@@ -159,11 +159,10 @@ Token 以明文保存在权限为 `0600` 的用户配置文件中。配置视图
 ## 本地实例配置
 
 ```toml
-version = 2
+version = 3
 name = "demo-local"
 enabled = true
 provider = "local"
-workspace = "/absolute/path/to/workspace"
 
 [mcp]
 enabled = true
@@ -171,7 +170,7 @@ auth = "none"
 path = "/demo-local/mcp"
 
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo", "context"]
+groups = ["file", "bash", "artifact", "tmux", "todo"]
 capabilities = ["read", "write", "execute"]
 
 [security]
@@ -190,10 +189,10 @@ timeoutMs = 5000
 
 常用字段：
 
-- `version`：全局和实例配置当前均为 `2`；
+- `version`：全局配置当前为 `2`，实例配置当前为 `3`；
 - `name`：必须包含连字符；
 - `provider`：`local`、`ssh`、`docker`、`podman`、`reverse`；
-- `workspace`：instance 的默认 workspace；worker 启动以及未另外指定 workspace 的调用使用该值。MCP Context 通过 `environ_info` 可以在同一 worker 上选择调用方已获准访问的其他绝对目录；
+- instance 配置不包含 `workspace`。worker 启动与实例生命周期不绑定项目目录；CLI 工具调用显式传绝对 workspace，MCP Context 通过 `environ_info` 选择调用方已获准访问的 worker 绝对目录；
 - `[mcp].enabled`：是否注册该 instance 的 MCP endpoint；
 - `[mcp].auth`：该 instance 独立使用 `none`、`token` 或 `oauth2`；
 - `[mcp].token`：仅在 `auth = "token"` 时使用，至少 32 UTF-8 字节；
@@ -208,16 +207,15 @@ timeoutMs = 5000
 
 Web auth 和 instance MCP auth 完全独立：修改 `[web]` 不会改变任何 instance endpoint；不同 instance 也可以使用不同认证模式和 token。
 
-全局 version 1 配置仅作为旧格式迁移入口读取。旧 `[mcp.auth]` 会在迁移时下沉到 instance，写回后统一成为 version 2；新配置不要继续使用旧结构。
+全局 version 1 配置仅作为旧格式迁移入口读取。旧 `[mcp.auth]` 会在迁移时下沉到 instance，写回后成为全局 version 2；旧 instance version 2 会迁移为 version 3，并删除持久化 `workspace`。新配置不要继续使用这些旧结构。
 
 ## SSH 实例
 
 ```toml
-version = 2
+version = 3
 name = "demo-ssh"
 enabled = true
 provider = "ssh"
-workspace = "/srv/project"
 
 [ssh]
 command = "ssh user@example-host"
@@ -226,7 +224,7 @@ command = "ssh user@example-host"
 enabled = true
 
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo", "context"]
+groups = ["file", "bash", "artifact", "tmux", "todo"]
 capabilities = ["read", "write", "execute"]
 ```
 

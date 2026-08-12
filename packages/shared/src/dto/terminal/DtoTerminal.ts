@@ -22,6 +22,7 @@ export interface TerminalOpenInput {
     command?: string;
     cwd?: string;
     rows: number;
+    workspace: string;
 }
 
 export interface TerminalOpenResult extends TerminalSessionDescriptor {}

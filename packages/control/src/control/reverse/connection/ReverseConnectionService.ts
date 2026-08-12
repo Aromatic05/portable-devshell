@@ -54,8 +54,7 @@ export class ReverseConnectionService {
         return {
             controllerUrl: this.#publicBaseUrl,
             deviceToken: credential.deviceToken,
-            instance: descriptor.name,
-            workspace: descriptor.workspace ?? ""
+            instance: descriptor.name
         };
     }
 

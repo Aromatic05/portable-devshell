@@ -17,15 +17,17 @@ test("artifact source helpers preserve handle and path variants", () => {
     assert.deepEqual(readSharePayloadSourceInput({ handle: "artifact:stdout:1" }), {
         handle: "artifact:stdout:1"
     });
-    assert.deepEqual(readSharePayloadSourceInput({ path: "./result.bin" }), {
-        path: "./result.bin"
+    assert.deepEqual(readSharePayloadSourceInput({ path: "./result.bin", workspace: "/workspace" }), {
+        path: "./result.bin",
+        workspace: "/workspace"
     });
     assert.deepEqual(
         readTransferPayloadSourceInput({
             handle: "artifact:stdout:1",
             operation: "start",
             targetInstance: "target-one",
-            targetPath: "/tmp/result.bin"
+            targetPath: "/tmp/result.bin",
+            targetWorkspace: "/tmp"
         }),
         { handle: "artifact:stdout:1" }
     );
@@ -33,10 +35,12 @@ test("artifact source helpers preserve handle and path variants", () => {
         readTransferPayloadSourceInput({
             operation: "start",
             sourcePath: "./result.bin",
+            sourceWorkspace: "/source",
             targetInstance: "target-one",
-            targetPath: "/tmp/result.bin"
+            targetPath: "/tmp/result.bin",
+            targetWorkspace: "/tmp"
         }),
-        { path: "./result.bin" }
+        { path: "./result.bin", workspace: "/source" }
     );
 });
 
@@ -61,7 +65,8 @@ test("artifact source helpers reject ambiguous or empty sources and missing targ
             handle: "one",
             operation: "start",
             targetInstance: "",
-            targetPath: "/target"
+            targetPath: "/target",
+            targetWorkspace: "/target"
         })
     ]) {
         assertTargetInvalid(action);
@@ -100,10 +105,11 @@ test("artifact source instance resolution and descriptors retain authority and s
         instance: "source-one",
         type: "artifact"
     });
-    assert.deepEqual(sourceDescriptor("source-one", { path: "./workspace" }, directoryPayload), {
+    assert.deepEqual(sourceDescriptor("source-one", { path: "./workspace", workspace: "/source" }, directoryPayload), {
         instance: "source-one",
         path: "./workspace",
-        type: "directory"
+        type: "directory",
+        workspace: "/source"
     });
 });
 

@@ -25,6 +25,7 @@ export interface ApprovalRequest {
     source: ToolCallSource;
     status: ApprovalStatus;
     toolName: string;
+    workspace?: string;
 }
 
 export interface ApprovalDecision {

@@ -18,6 +18,7 @@ export interface TerminalBackendOpenInput {
     command?: string;
     cwd?: string;
     rows: number;
+    workspace: string;
 }
 
 export interface TerminalBackendSessionIdentity {

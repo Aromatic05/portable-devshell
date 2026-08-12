@@ -189,6 +189,18 @@ export class ControlReadModel {
         }
     }
 
+    async refreshInstances(epoch = this.#epoch): Promise<void> {
+        await this.#readGlobal(
+            "instances",
+            this.#clients.instance.list(),
+            (value) => this.#applyInstances(value),
+            epoch,
+        );
+        if (this.#current(epoch)) {
+            this.#replaceSubscriptions(this.#state.instances.map(({ name }) => name), epoch);
+        }
+    }
+
     async refreshConfig(epoch = this.#epoch): Promise<void> {
         await this.#readGlobal(
             "config",

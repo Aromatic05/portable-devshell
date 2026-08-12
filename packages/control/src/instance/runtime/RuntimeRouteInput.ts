@@ -4,16 +4,6 @@ const MAX_LOG_READ_LIMIT = 100;
 const MAX_LOG_RESPONSE_BYTES = 1024 * 1024;
 const LOG_TRUNCATION_MARKER = "\n[log output truncated]\n";
 
-export function readRuntimeWorkspacePath(payload?: JsonValue): string | undefined {
-    if (!isRecord(payload) || payload.workspacePath === undefined) {
-        return undefined;
-    }
-    if (typeof payload.workspacePath !== "string") {
-        throw invalid("runtime.start requires workspacePath to be a string.");
-    }
-    return payload.workspacePath;
-}
-
 export function readRuntimeLogQuery(payload?: JsonValue): { fromSeq?: number; limit?: number } {
     const limit = isRecord(payload) && typeof payload.limit === "number" && Number.isInteger(payload.limit)
         ? Math.min(Math.max(payload.limit, 1), MAX_LOG_READ_LIMIT)

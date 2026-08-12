@@ -74,8 +74,7 @@ export class ControlRuntimeArtifact {
             appendControlEvent: async (type, data) => await authority.worker.appendControlEvent(type, data),
             authorityInstance,
             provider: authority.provider,
-            securityMode: snapshot.effectiveSecurityMode ?? "disabled",
-            workspace: authority.workspace
+            securityMode: snapshot.effectiveSecurityMode ?? "disabled"
         });
     }
 }

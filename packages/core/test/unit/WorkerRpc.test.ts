@@ -63,7 +63,8 @@ test("WorkerProtocolClient routes artifact payload and receive lifecycle through
 
     const opened = await client.openArtifactPayload({
         expiresAtMs: Date.now() + 60_000,
-        path: "./result.bin"
+        path: "./result.bin",
+        workspace: "/workspace"
     });
     const chunk = await client.readArtifactPayload({
         maxBytes: 1024,
@@ -73,7 +74,8 @@ test("WorkerProtocolClient routes artifact payload and receive lifecycle through
     const receive = await client.beginArtifactReceive({
         descriptor: opened.descriptor,
         overwrite: false,
-        targetPath: "./copy.bin"
+        targetPath: "./copy.bin",
+        workspace: "/workspace"
     });
     await client.writeArtifactReceive({
         content: chunk.content,
@@ -206,7 +208,6 @@ test("WorkerRpcBridge surfaces spawn failures as structured rpc spawn errors", a
 });
 
 test("WorkerProtocolClient performs ping, handshake, and tools.list against frozen devshell-worker", realWorkerTestOptions(workerBinaryPath), async (t) => {
-    const workspacePath = await createTestTempDirectory("core-rpc");
     const homeDirectory = await createTestTempDirectory("core-rpc-home");
     const runtimeDirectory = await createTestTempDirectory("core-rpc-runtime");
     const instanceName = `task-4-${process.pid}`;
@@ -215,7 +216,7 @@ test("WorkerProtocolClient performs ping, handshake, and tools.list against froz
         workerBinary: new WorkerBinary(workerBinaryPath!),
         spawnFunction: nodeSpawn
     });
-    const commandResult = await transport.runWorkerCommand("start", { env, instanceName, workspacePath });
+    const commandResult = await transport.runWorkerCommand("start", { env, instanceName });
 
     assert.equal(commandResult.exitCode, 0);
 
@@ -228,7 +229,6 @@ test("WorkerProtocolClient performs ping, handshake, and tools.list against froz
         bridge.close();
         await transport.runWorkerCommand("stop", { env, instanceName });
         await rm(homeDirectory, { recursive: true, force: true });
-        await rm(workspacePath, { recursive: true, force: true });
         await rm(runtimeDirectory, { recursive: true, force: true });
     });
     const protocolClient = new WorkerProtocolClient(new WorkerRpcClient(bridge));
@@ -244,7 +244,7 @@ test("WorkerProtocolClient performs ping, handshake, and tools.list against froz
 
     assert.equal(ping.pong, true);
     assert.equal(handshake.instance, instanceName);
-    assert.equal(handshake.workspace, workspacePath);
+    assert.equal(handshake.homeDirectory, homeDirectory);
     assert.equal(handshake.protocolVersion, WORKER_PROTOCOL_VERSION);
     assert.equal("tools" in handshake, false);
     const bashRun = tools.tools.find((tool) => tool.name === "bash_run");

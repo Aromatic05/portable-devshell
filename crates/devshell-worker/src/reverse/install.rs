@@ -30,13 +30,11 @@ pub fn install_current_binary() -> Result<PathBuf, String> {
 pub fn start_installed_worker(
     binary: &Path,
     instance: &InstanceName,
-    workspace: &Path,
 ) -> Result<(), String> {
     let output = Command::new(binary)
         .arg("start")
         .arg("--instance")
         .arg(instance.as_str())
-        .current_dir(workspace)
         .output()
         .map_err(|error| format!("failed to start installed worker: {error}"))?;
     if !output.status.success() {

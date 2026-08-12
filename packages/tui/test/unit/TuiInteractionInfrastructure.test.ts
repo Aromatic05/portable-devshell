@@ -158,7 +158,7 @@ test("search filters instances, config, audit, and logs only", async () => {
 
     harness.store.setSelectedPage("config");
     await harness.dispatch({ type: "search.open" });
-    await harness.dispatch({ text: "workspace", type: "search.append" });
+    await harness.dispatch({ text: "local", type: "search.append" });
     assert.equal(
         selectMainScreenModel(harness.store.getState()).boxes.some(
             (box) => box.id === "configuration",
@@ -311,6 +311,10 @@ test("Audit requires confirmation before disabling a Context", async () => {
     }] });
     harness.store.setSelectedPage("audit");
     const context = expandBox(harness, "audit-context:ctx-alpha");
+    assert.equal(
+        context.expandedLines.some((line) => line.text.includes("/workspace/alpha")),
+        true,
+    );
     harness.store.setMainFocusId(context.id);
     harness.store.setFocusScope("boxDetail");
     const disableLine = context.expandedLines.find((line) =>
@@ -325,6 +329,7 @@ test("Audit requires confirmation before disabling a Context", async () => {
     const overlay = topTuiOverlay(harness.store.getState().interaction.overlays);
     assert.equal(overlay?.kind, "confirmation");
     if (overlay?.kind !== "confirmation") throw new Error("confirmation overlay missing");
+    assert.match(overlay.body, /\/workspace\/alpha/u);
     assert.equal(overlay.selectedAction, "cancel");
 
     await harness.dispatch({ button: "confirm", type: "confirm.focus" });
@@ -579,6 +584,10 @@ test("Todo project deletion requires confirmation before permanently deleting it
         overlay?.kind === "confirmation" ? overlay.title : undefined,
         "Confirm Todo Project Deletion",
     );
+    if (overlay?.kind !== "confirmation") throw new Error("confirmation overlay missing");
+    assert.match(overlay.body, /Todo support/u);
+    assert.match(overlay.body, /task-1/u);
+    assert.match(overlay.body, /alpha/u);
     assert.deepEqual(deleted, []);
 
     await harness.dispatch({ button: "confirm", type: "confirm.focus" });
@@ -985,7 +994,6 @@ test("create wizard provider and container choices replace incompatible fields",
         provider: "local",
         security: { mode: "disabled" },
         ssh: { command: "stale" },
-        workspace: "/workspace"
     }, true);
     harness.store.setSelectedDetailLine(expandedKey, "create-wizard:field:provider");
 
@@ -1107,7 +1115,7 @@ test("wizard normalizes friendly container mode labels before control validation
 test("config validation errors render in the active field box", async () => {
     const harness = createHarness({
         onValidateConfigDraft: async () => {
-            throw new Error("workspace must be an absolute path");
+            throw new Error("provider configuration is invalid");
         },
     });
 
@@ -1123,7 +1131,7 @@ test("config validation errors render in the active field box", async () => {
     ).boxes.find((box) => box.id === "configuration");
     assert.equal(
         configuration?.expandedLines.some(
-            (line) => line.text === "error: workspace must be an absolute path",
+            (line) => line.text === "error: provider configuration is invalid",
         ),
         true,
     );
@@ -1133,7 +1141,7 @@ test("config validation errors render in the active field box", async () => {
     const actions = expandBox(harness, "configuration-actions");
     assert.equal(
         actions.expandedLines.some(
-            (line) => line.text === "error: workspace must be an absolute path",
+            (line) => line.text === "error: provider configuration is invalid",
         ),
         true,
     );
@@ -1152,7 +1160,6 @@ test("config choices use angle selectors and replace incompatible provider field
         provider: "ssh",
         security: { mode: "disabled" },
         ssh: { command: "ssh alpha.example" },
-        workspace: "/workspace/alpha",
     });
 
     const general = expandBox(harness, "configuration");
@@ -1361,14 +1368,14 @@ test("config separates MCP tool access and requires restart when it changes", ()
         mcp: {
             enabled: true,
             path: "/alpha/mcp",
-            tools: { capabilities: ["read"], groups: ["file", "context"] },
+            tools: { capabilities: ["read"], groups: ["file", "todo"] },
         },
     });
 
     const mcpTools = expandBox(harness, "mcp-tools");
     const actions = expandBox(harness, "configuration-actions");
     assert.equal(
-        mcpTools.expandedLines.some((line) => line.text.includes("context")),
+        mcpTools.expandedLines.some((line) => line.text.includes("todo")),
         true,
     );
     assert.equal(
@@ -1407,7 +1414,6 @@ test("config exposes container and tool scheduler settings", () => {
         tools: {
             scheduler: { maxRunning: 2, queueDepth: 8, queueTimeoutMs: 3000 },
         },
-        workspace: "/workspace/alpha",
     });
 
     const provider = expandBox(harness, "provider");
@@ -1546,6 +1552,7 @@ test("Audit Call detail page opens complete Input and Output content", async () 
             startedAt: "2026-08-06T12:00:00.000Z",
             status: "completed",
             toolName: "bash_run",
+            workspace: "/projects/detail",
         },
     ] } } });
     harness.store.setSelectedInstance("alpha");
@@ -1557,6 +1564,10 @@ test("Audit Call detail page opens complete Input and Output content", async () 
         view: "call",
     });
     const detail = expandBox(harness, "audit-call-detail:call-detail");
+    assert.equal(
+        detail.expandedLines.some((line) => line.text.includes("/projects/detail")),
+        true,
+    );
     const inputLine = detail.expandedLines.find(
         (line) => line.id === "audit-call-detail:call-detail:input",
     );
@@ -1617,6 +1628,7 @@ test("artifact_viewImage audit output loads an image into the detail panel", asy
                     instance: "alpha",
                     path: "./preview.png",
                     type: "file",
+                    workspace: "/projects/image",
                 },
             },
             source: "mcp",
@@ -1639,7 +1651,14 @@ test("artifact_viewImage audit output loads an image into the detail panel", asy
         harness.store.getState().interaction.overlays,
     );
     assert.deepEqual(calls, [
-        { input: { path: "./preview.png" }, instance: "alpha" },
+        {
+            input: {
+                instance: "alpha",
+                path: "./preview.png",
+                workspace: "/projects/image",
+            },
+            instance: "alpha",
+        },
     ]);
     assert.equal(overlay?.kind, "text-detail");
     assert.equal(
@@ -1949,8 +1968,8 @@ test("OAuth panel approves pending registration requests", async () => {
             expiresAt: "2026-07-10T00:05:00.000Z",
             kind: "registration",
             redirectUris: ["https://chatgpt.com/callback"],
-            requestedResources: [],
-            requestedScopes: [],
+            requestedResources: ["https://devshell.example/alpha/mcp"],
+            requestedScopes: ["mcp"],
             status: "pending",
         },
     ] });
@@ -1967,10 +1986,58 @@ test("OAuth panel approves pending registration requests", async () => {
         harness.store.getState().interaction.overlays,
     );
     assert.equal(overlay?.kind, "confirmation");
+    if (overlay?.kind !== "confirmation") throw new Error("confirmation overlay missing");
+    assert.match(overlay.body, /ChatGPT/u);
+    assert.match(overlay.body, /registration/u);
+    assert.match(overlay.body, /mcp/u);
+    assert.match(overlay.body, /devshell\.example\/alpha\/mcp/u);
+    assert.match(overlay.body, /chatgpt\.com\/callback/u);
     await harness.dispatch({ button: "confirm", type: "confirm.focus" });
     await harness.dispatch({ type: "confirm.accept" });
     assert.deepEqual(harness.oauthApprovalDecisions(), [
         { approvalId: "oauth-1", decision: "approve" },
+    ]);
+});
+test("OAuth denial requires the same reviewed request confirmation", async () => {
+    const harness = createHarness();
+    harness.store.patchControlReadModel({ oauthApprovals: [
+        {
+            approvalId: "oauth-deny",
+            clientId: "chatgpt-client",
+            clientName: "ChatGPT",
+            createdAt: "2026-07-10T00:00:00.000Z",
+            expiresAt: "2026-07-10T00:05:00.000Z",
+            kind: "authorization",
+            redirectUris: ["https://chatgpt.com/callback"],
+            requestedResources: ["https://devshell.example/alpha/mcp"],
+            requestedScopes: ["mcp"],
+            status: "pending",
+        },
+    ] });
+    enterConnectionsRoute(harness, "oauth");
+    const approval = expandBox(harness, "oauth-approval-oauth-deny");
+    harness.store.setMainFocusId(approval.id);
+    harness.store.setFocusScope("boxDetail");
+    harness.store.setSelectedDetailLine(
+        approval.expandedKey,
+        "oauth-approval-oauth-deny:oauth.deny:oauth-deny",
+    );
+
+    await harness.dispatch({ type: "focus.activate" });
+
+    const overlay = topTuiOverlay(harness.store.getState().interaction.overlays);
+    assert.equal(overlay?.kind, "confirmation");
+    if (overlay?.kind !== "confirmation") throw new Error("confirmation overlay missing");
+    assert.match(overlay.body, /ChatGPT/u);
+    assert.match(overlay.body, /authorization/u);
+    assert.match(overlay.body, /mcp/u);
+    assert.match(overlay.body, /devshell\.example\/alpha\/mcp/u);
+    assert.match(overlay.body, /chatgpt\.com\/callback/u);
+    assert.deepEqual(harness.oauthApprovalDecisions(), []);
+    await harness.dispatch({ button: "confirm", type: "confirm.focus" });
+    await harness.dispatch({ type: "confirm.accept" });
+    assert.deepEqual(harness.oauthApprovalDecisions(), [
+        { approvalId: "oauth-deny", decision: "deny" },
     ]);
 });
 test("OAuth detail keeps static rows selectable after expanding a completed approval", async () => {
@@ -2208,6 +2275,11 @@ test("approval detail defaults to Back and requires explicit approval confirmati
         overlay?.kind === "confirmation" ? overlay.title : undefined,
         "Confirm Approval",
     );
+    if (overlay?.kind !== "confirmation") throw new Error("confirmation overlay missing");
+    assert.match(overlay.body, /bash_run/u);
+    assert.match(overlay.body, /alpha/u);
+    assert.match(overlay.body, /\/projects\/alpha/u);
+    assert.match(overlay.body, /high/u);
     assert.deepEqual(harness.approvalDecisions(), []);
     await harness.dispatch({ button: "confirm", type: "confirm.focus" });
     await harness.dispatch({ type: "confirm.accept" });
@@ -2242,6 +2314,10 @@ test("approval detail Back restores the audit list focus and scroll position", a
     const harness = createHarness();
     enterAuditContext(harness, "ctx-alpha");
     const approval = expandBox(harness, "approval-approval-1");
+    assert.equal(
+        approval.expandedLines.some((line) => line.text.includes("/projects/alpha")),
+        true,
+    );
     const key = selectMainScrollKey(harness.store.getState());
     harness.store.setScrollOffset(key, 2);
     harness.store.setMainFocusId(approval.id);
@@ -2335,7 +2411,7 @@ function enableContextMessageMcp(harness: ReturnType<typeof createHarness>): voi
                     enabled: true,
                     tools: {
                         capabilities: ["read", "write", "execute"],
-                        groups: ["context"],
+                        groups: ["bash"],
                     },
                 },
             };
@@ -2433,13 +2509,12 @@ function openEditorForBox(
                     path: "/alpha/mcp",
                     tools: {
                         capabilities: ["read", "write", "execute"],
-                        groups: ["file", "bash", "artifact", "context"],
+                        groups: ["file", "bash", "artifact", "todo"],
                     },
                 },
                 name: "alpha",
                 provider: "local",
                 security: { mode: "disabled" },
-                workspace: "/workspace/alpha",
             },
             false,
         );
@@ -2506,9 +2581,6 @@ function instanceCreateSummary(
             ? {}
             : { podmanBinary: draft.podmanBinary }),
         ...(draft.ssh === undefined ? {} : { ssh: draft.ssh }),
-        ...(draft.workspace === undefined
-            ? {}
-            : { workspace: draft.workspace }),
         enabled: draft.enabled ?? true,
         mcp: {
             auth: draft.mcp?.auth === "oauth2"
@@ -2739,7 +2811,7 @@ function createHarness(
 function seedPrompt3State(store: TuiAppStore) {
     store.patchControlReadModel({ instances: [
         {
-            defaultWorkspace: "/workspace/alpha",
+            homeDirectory: "/home/alpha",
             enabled: true,
             mcpEnabled: true,
             mcpPath: "/alpha/mcp",
@@ -2747,7 +2819,7 @@ function seedPrompt3State(store: TuiAppStore) {
             provider: "local",
         },
         {
-            defaultWorkspace: "/workspace/beta",
+            homeDirectory: "/home/beta",
             enabled: true,
             mcpEnabled: false,
             mcpPath: "/beta/mcp",
@@ -2762,14 +2834,12 @@ function seedPrompt3State(store: TuiAppStore) {
                 mcp: { enabled: true, path: "/alpha/mcp" },
                 name: "alpha",
                 provider: "local",
-                workspace: "/workspace/alpha",
             },
             {
                 enabled: true,
                 mcp: { enabled: false, path: "/beta/mcp" },
                 name: "beta",
                 provider: "ssh",
-                workspace: "/workspace/beta",
             },
         ],
         mcp: {
@@ -2838,6 +2908,7 @@ function seedPrompt3State(store: TuiAppStore) {
             source: "tui",
             status: "pending",
             toolName: "bash_run",
+            workspace: "/projects/alpha",
         },
     ] } } });
     store.patchControlReadModel({ instanceState: { ["alpha"]: { logs: [

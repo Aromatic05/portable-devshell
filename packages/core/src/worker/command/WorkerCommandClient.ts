@@ -11,12 +11,11 @@ export class WorkerCommandClient {
         this.#env = env;
     }
 
-    start(workspacePath: string, interactiveSession?: WorkerCommandInteractiveSession): Promise<WorkerCommandResult> {
+    start(interactiveSession?: WorkerCommandInteractiveSession): Promise<WorkerCommandResult> {
         return this.#transport.runWorkerCommand(
             "start",
             {
                 instanceName: this.#instanceName,
-                workspacePath,
                 env: this.#env
             },
             interactiveSession

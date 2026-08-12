@@ -1,4 +1,4 @@
-import type { ApprovalPolicy, ApprovalTimeout, ControlInstanceAlertsConfig, EffectiveSecurityMode, InstanceName, WorkspacePath } from "@portable-devshell/shared";
+import type { ApprovalPolicy, ApprovalTimeout, ControlInstanceAlertsConfig, EffectiveSecurityMode, InstanceName } from "@portable-devshell/shared";
 
 import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
 import { WORKER_PROTOCOL_VERSION, type WorkerHandshakeParams } from "../protocol/WorkerProtocolClient.js";
@@ -15,7 +15,6 @@ interface WorkerInstanceConfigCommon {
     alerts?: ControlInstanceAlertsConfig;
     effectiveSecurityMode?: EffectiveSecurityMode;
     name: InstanceName;
-    defaultWorkspace?: WorkspacePath;
     homeDirectory?: string;
     env?: NodeJS.ProcessEnv;
     eventBufferSize?: number;

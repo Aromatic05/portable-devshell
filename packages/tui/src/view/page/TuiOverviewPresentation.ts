@@ -184,7 +184,6 @@ function toInstanceRow(
         runtime: snapshot.status,
         todos,
         tone: instanceTone(instance),
-        workspace: instance.workspace,
     };
 }
 
@@ -315,7 +314,6 @@ function instanceSearchText(row: TuiOverviewInstanceRowModel): string {
         row.runtime,
         row.connection,
         row.daemon,
-        row.workspace ?? "",
         row.lastError ?? "",
     ]
         .join(" ")

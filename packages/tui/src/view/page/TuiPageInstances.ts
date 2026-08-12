@@ -6,7 +6,7 @@ import { buildArtifactActivityView } from "../component/TuiComponentArtifactActi
 import { createDefaultInstanceDraft } from "../../state/editor/TuiEditorInstanceCreateDraft.js";
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
-import { compactSummary, formatField, makeBox, runtimeStatus, shortenPath } from "./TuiPageBoxSupport.js";
+import { compactSummary, formatField, makeBox, runtimeStatus } from "./TuiPageBoxSupport.js";
 import { editorDraft, readPath } from "../../state/editor/TuiEditorDraft.js";
 import { buttonLine, choiceLine, fieldLine, secretFieldLine, secretRecordFieldLine } from "../editor/TuiEditorView.js";
 
@@ -53,7 +53,7 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
                         tone: "accent"
                     },
                     formatField("provider", entry.provider ?? "unknown"),
-                    formatField("workspace", entry.defaultWorkspace ?? "-"),
+                    formatField("home", entry.homeDirectory ?? "-"),
                     formatField("runtime", instanceRuntimeSummary(snapshot)),
                     formatField("approvals", String(approvals.length)),
                     ...(snapshot?.reverse === undefined
@@ -87,7 +87,7 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
                 summaryLines: [
                     compactSummary(
                         ["provider", entry.provider ?? "unknown"],
-                        ["workspace", shortenPath(entry.defaultWorkspace ?? "-")],
+                        ["home", entry.homeDirectory ?? "-"],
                         ["approvals", String(approvals.length)]
                     ),
                     artifactActivity.summary
@@ -168,7 +168,6 @@ function wizardFields(step: number, draft: Record<string, JsonValue>): Array<str
             return [
                 fieldLine("name", "name", readPath(draft, "name")),
                 choiceLine("provider", "provider", readPath(draft, "provider")),
-                fieldLine("workspace", "defaultWorkspace", readPath(draft, "workspace")),
                 choiceLine("enabled", "enabled", readPath(draft, "enabled"))
             ];
         case 2:

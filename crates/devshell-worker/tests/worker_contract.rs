@@ -13,7 +13,7 @@ use serde_json::Value;
 use support::TestEnv;
 
 #[test]
-fn start_uses_runtime_workspace_and_keeps_config_minimal() {
+fn start_is_workspace_neutral_and_keeps_config_minimal() {
     let env = TestEnv::new();
     let instance = "aromatic-pc";
 
@@ -30,7 +30,7 @@ fn start_uses_runtime_workspace_and_keeps_config_minimal() {
 
     assert_eq!(start["ok"], true);
     assert_eq!(start["started"], true);
-    assert_eq!(start["workspace"], env.protocol_workspace());
+    assert!(start.get("workspace").is_none(), "{start}");
 
     let instance_root = env.instance_root(instance);
     assert!(instance_root.join("config.toml").exists());
@@ -51,7 +51,7 @@ fn start_uses_runtime_workspace_and_keeps_config_minimal() {
     let status = env.json_command(&["status", "--instance", instance]);
     assert_eq!(status["state"], "running");
     assert_eq!(status["running"], true);
-    assert_eq!(status["workspace"], env.protocol_workspace());
+    assert!(status.get("workspace").is_none(), "{status}");
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -126,8 +126,8 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             "id": "1",
             "method": "worker.handshake",
             "params": {
-                "minProtocolVersion": 4,
-                "maxProtocolVersion": 4,
+                "minProtocolVersion": 5,
+                "maxProtocolVersion": 5,
                 "clientName": "portable-devshell",
                 "clientVersion": "0.1.0"
             }
@@ -135,13 +135,13 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     );
     assert_eq!(handshake["type"], "response");
     assert_eq!(handshake["ok"], true);
-    assert_eq!(handshake["result"]["protocolVersion"], 4);
+    assert_eq!(handshake["result"]["protocolVersion"], 5);
     assert_eq!(
         handshake["result"]["workerVersion"],
         env!("CARGO_PKG_VERSION")
     );
     assert!(handshake["result"]["workerSha256"].is_null());
-    assert_eq!(handshake["result"]["workspace"], env.protocol_workspace());
+    assert!(handshake["result"].get("workspace").is_none(), "{handshake}");
     assert_eq!(
         handshake["result"]["skillsDirectory"],
         env.protocol_skills_directory()
@@ -229,6 +229,19 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     #[cfg(windows)]
     let command = "[Console]::Out.Write('ready')";
 
+    let missing_workspace = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "missing-workspace",
+            "method": "bash_run",
+            "params": { "command": command },
+            "context": { "ctxId": "ctx-explicit", "source": "mcp" }
+        }),
+    );
+    assert_eq!(missing_workspace["ok"], false, "{missing_workspace}");
+    assert_eq!(missing_workspace["error"]["code"], "rpc.invalidContext");
+
     let bash_run = env.rpc(
         instance,
         &serde_json::json!({
@@ -255,7 +268,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     let status = env.json_command(&["status", "--instance", instance]);
     assert_eq!(status["state"], "stopped");
     assert_eq!(status["running"], false);
-    assert!(status["workspace"].is_null());
+    assert!(status.get("workspace").is_none(), "{status}");
 }
 
 #[test]
@@ -287,7 +300,7 @@ fn handshake_rejects_unsupported_protocol_versions() {
         "worker.protocolVersionUnsupported"
     );
     assert_eq!(handshake["error"]["retryable"], false);
-    assert_eq!(handshake["error"]["details"]["workerProtocolVersion"], 4);
+    assert_eq!(handshake["error"]["details"]["workerProtocolVersion"], 5);
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -746,7 +759,8 @@ fn workspace_security_mode_rejects_absolute_terminal_cwd() {
                 "cols": 80,
                 "rows": 24,
                 "cwd": outside.to_string_lossy(),
-                "command": "exit"
+                "command": "exit",
+                "workspace": env.workspace()
             }
         }),
     );
@@ -1152,7 +1166,7 @@ fn persistent_rpc_bridge_forwards_terminal_notifications() {
             "type": "request",
             "id": "terminal-open",
             "method": "terminal.open",
-            "params": { "cols": 80, "rows": 24 }
+            "params": { "cols": 80, "rows": 24, "workspace": env.workspace() }
         }),
     );
     let opened = receive_response(&received, "terminal-open");
@@ -1358,7 +1372,8 @@ fn internal_artifact_payload_rpc_is_persistent_and_not_listed_as_a_tool() {
             "method": "artifact.payload.open",
             "params": {
                 "path": "./payload.txt",
-                "expiresAtMs": expires_at_ms
+                "expiresAtMs": expires_at_ms,
+                "workspace": env.workspace()
             }
         }),
     );
@@ -1393,7 +1408,8 @@ fn internal_artifact_payload_rpc_is_persistent_and_not_listed_as_a_tool() {
             "params": {
                 "descriptor": descriptor,
                 "overwrite": false,
-                "targetPath": "./received.txt"
+                "targetPath": "./received.txt",
+                "workspace": env.workspace()
             }
         }),
     );

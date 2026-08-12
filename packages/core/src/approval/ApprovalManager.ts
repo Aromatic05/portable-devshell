@@ -78,7 +78,8 @@ export class ApprovalManager {
             ...(input.context.ctxId === undefined ? {} : { ctxId: input.context.ctxId }),
             source: input.context.source,
             status: "pending",
-            toolName: input.toolName
+            toolName: input.toolName,
+            ...(input.context.workspace === undefined ? {} : { workspace: input.context.workspace }),
         };
 
         await this.#store.append(request);

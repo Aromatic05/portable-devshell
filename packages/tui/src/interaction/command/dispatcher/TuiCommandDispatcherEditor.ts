@@ -58,8 +58,7 @@ export class TuiCommandDispatcherEditor {
                     },
                     name: "",
                     provider: schema.defaultProvider,
-                    security: { mode: schema.defaultSecurityMode },
-                    workspace: ""
+                    security: { mode: schema.defaultSecurityMode }
                 }, false);
             }
             this.#store.setMainFocusId("create-wizard");
@@ -536,7 +535,7 @@ export class TuiCommandDispatcherEditor {
             ? entries.find((value) => asRecord(value)?.name === instanceName)
             : undefined;
         return toTuiInstanceEditorRecord(
-            cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { auth: "none", enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } }, name: instanceName, provider: "local", security: { mode: "disabled" }, workspace: "" })
+            cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { auth: "none", enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } }, name: instanceName, provider: "local", security: { mode: "disabled" } })
         );
     }
 

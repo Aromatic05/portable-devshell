@@ -56,13 +56,16 @@ interface PendingOperation {
 export class TuiControlTerminalPtyFactory {
     readonly #client: TuiControlTerminalClient;
     readonly #operationAckTimeoutMs: number;
+    readonly #workspaceForInstance: (instance: string) => string;
     readonly #sessions = new Map<string, StoredTerminalIdentity>();
 
     constructor(options: {
         client: TuiControlTerminalClient;
         operationAckTimeoutMs?: number;
+        workspaceForInstance(instance: string): string;
     }) {
         this.#client = options.client;
+        this.#workspaceForInstance = options.workspaceForInstance;
         this.#operationAckTimeoutMs =
             options.operationAckTimeoutMs ?? OPERATION_ACK_TIMEOUT_MS;
         if (
@@ -84,6 +87,7 @@ export class TuiControlTerminalPtyFactory {
                 operationAckTimeoutMs: this.#operationAckTimeoutMs,
                 options,
                 readIdentity: () => this.#sessions.get(targetInstance),
+                workspace: this.#workspaceForInstance(targetInstance),
                 writeIdentity: (identity) =>
                     this.#sessions.set(targetInstance, identity),
             });
@@ -126,6 +130,7 @@ class TuiControlTerminalPty implements TuiTerminalPty {
     readonly #instance: string;
     readonly #operationAckTimeoutMs: number;
     readonly #options: TuiTerminalPtyOptions;
+    readonly #workspace: string;
     readonly #pending = new Map<number, PendingOperation>();
     readonly #readIdentity: () => StoredTerminalIdentity | undefined;
     readonly #writeIdentity: (identity: StoredTerminalIdentity) => void;
@@ -142,12 +147,14 @@ class TuiControlTerminalPty implements TuiTerminalPty {
         operationAckTimeoutMs: number;
         options: TuiTerminalPtyOptions;
         readIdentity(): StoredTerminalIdentity | undefined;
+        workspace: string;
         writeIdentity(identity: StoredTerminalIdentity): void;
     }) {
         this.#client = options.client;
         this.#instance = options.instance;
         this.#operationAckTimeoutMs = options.operationAckTimeoutMs;
         this.#options = options.options;
+        this.#workspace = options.workspace;
         this.#readIdentity = options.readIdentity;
         this.#writeIdentity = options.writeIdentity;
         this.#ready = this.#connect().catch((error: unknown) => {
@@ -191,6 +198,7 @@ class TuiControlTerminalPty implements TuiTerminalPty {
             identity = await this.#client.open(this.#instance, {
                 cols: this.#options.columns,
                 rows: this.#options.rows,
+                workspace: this.#workspace,
             });
             this.#writeIdentity({ ...identity });
         }

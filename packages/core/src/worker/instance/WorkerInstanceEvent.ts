@@ -25,7 +25,8 @@ export function toApprovalEventData(request: ApprovalRequest, decision?: Approva
         ctxId: request.ctxId,
         source: request.source,
         status: request.status,
-        toolName: request.toolName
+        toolName: request.toolName,
+        workspace: request.workspace,
     });
 }
 

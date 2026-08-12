@@ -68,6 +68,7 @@ test("terminal attachments replay by sequence and detach without killing the pro
         backend: { open: async () => process },
         cols: 80,
         instance: "alpha",
+        workspace: "/workspace",
         rows: 24,
     });
 
@@ -111,6 +112,7 @@ test("terminal attach rejects stale identity and reports replay overflow as a ga
         backend: { open: async () => process },
         cols: 80,
         instance: "alpha",
+        workspace: "/workspace",
         rows: 24,
     });
 
@@ -168,6 +170,7 @@ test("closing Control detaches recoverable terminal adapters without killing rem
         cols: 80,
         instance: "reverse",
         rows: 24,
+        workspace: "/workspace",
     });
 
     service.close();
@@ -186,6 +189,7 @@ test("terminal exit is durable for later attachments and kill is explicit", asyn
         backend: { open: async () => process },
         cols: 80,
         instance: "alpha",
+        workspace: "/workspace",
         rows: 24,
     });
     process.emit("done\r\n");
@@ -206,6 +210,7 @@ test("terminal exit is durable for later attachments and kill is explicit", asyn
         backend: { open: async () => otherProcess },
         cols: 80,
         instance: "alpha",
+        workspace: "/workspace",
         rows: 24,
     });
     const killedExits: TerminalProcessExit[] = [];
@@ -236,6 +241,7 @@ test("closing terminal service fences a pending open and cleans the late process
         backend: { open: async () => await opened },
         cols: 80,
         instance: "alpha",
+        workspace: "/workspace",
         rows: 24,
     });
 
@@ -259,6 +265,7 @@ test("closing terminal service removes process listeners before disposing adapte
         backend: { open: async () => process },
         cols: 80,
         instance: "alpha",
+        workspace: "/workspace",
         rows: 24,
     });
     assert.equal(process.dataListenerCount, 1);
@@ -289,12 +296,14 @@ test("closing one instance terminates its recoverable sessions without touching 
         },
         cols: 80,
         instance: "alpha",
+        workspace: "/workspace",
         rows: 24,
     });
     await service.open({
         backend: { open: async () => beta },
         cols: 80,
         instance: "beta",
+        workspace: "/workspace",
         rows: 24,
     });
     const exits: TerminalProcessExit[] = [];
@@ -327,6 +336,7 @@ test("closing an instance fences a pending open from its replaced backend", asyn
         backend: { open: async () => await opened },
         cols: 80,
         instance: "alpha",
+        workspace: "/workspace",
         rows: 24,
     });
 

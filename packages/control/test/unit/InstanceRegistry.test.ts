@@ -14,14 +14,12 @@ test("disabled instances are skipped and registry does not auto start workers", 
             mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
             name: "demo-local",
             provider: "local",
-            workspace: "/tmp/demo"
         }),
         normalizeConfigInstanceDraft({
             enabled: false,
             mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
             name: "demo-disabled",
             provider: "local",
-            workspace: "/tmp/disabled"
         })
     );
     config.mcp.enabled = true;
@@ -41,7 +39,6 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
         mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
         name: "demo-local",
         provider: "local",
-        workspace: "/tmp/demo"
     }));
 
     const registry = new InstanceRegistryFactory().build(config);
@@ -76,7 +73,6 @@ test("MCP runtime is absent while global MCP remains disabled", () => {
         mcp: { enabled: true },
         name: "demo-local",
         provider: "local",
-        workspace: "/tmp/demo"
     }));
     const registry = new InstanceRegistryFactory().build(config);
     const mapped: string[] = [];

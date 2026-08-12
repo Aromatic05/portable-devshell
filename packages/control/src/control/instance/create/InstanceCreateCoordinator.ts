@@ -152,8 +152,7 @@ export class InstanceCreateCoordinator {
             security: { ...source.security },
             ssh: {
                 command: this.#readConfigInput(() => buildMcpSshCommand(input))
-            },
-            workspace: input.workspace
+            }
         };
 
         return await this.#createNormalized(
@@ -356,8 +355,7 @@ function toSummary(instance: ControlInstanceConfig): InstanceCreateSummary {
             mode: instance.security.mode
         },
         ...(instance.ssh === undefined ? {} : { ssh: { ...instance.ssh } }),
-        ...(instance.tools === undefined ? {} : { tools: structuredClone(instance.tools) }),
-        workspace: instance.workspace
+        ...(instance.tools === undefined ? {} : { tools: structuredClone(instance.tools) })
     };
 }
 

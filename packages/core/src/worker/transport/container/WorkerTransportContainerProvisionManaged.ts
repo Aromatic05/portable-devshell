@@ -2,7 +2,6 @@ import type { InstanceContainerConfig, InstanceContainerMountConfig } from "@por
 
 import {
     workerTransportContainerEnvironmentArgs,
-    workerTransportContainerWorkingDirectoryArgs,
     type WorkerTransportContainerProvision,
     type WorkerTransportContainerProvisionOperations
 } from "./WorkerTransportContainerProvision.js";
@@ -58,12 +57,10 @@ export class WorkerTransportContainerProvisionManaged implements WorkerTransport
 
     buildExecArgs(
         command: readonly string[],
-        useRemoteCwd: boolean,
         environmentKeys: readonly string[] = []
     ): string[] {
         return [
             "exec",
-            ...workerTransportContainerWorkingDirectoryArgs(this.#operations.remoteCwd, useRemoteCwd),
             "-i",
             ...workerTransportContainerEnvironmentArgs(environmentKeys),
             this.#config.containerName,
@@ -100,22 +97,7 @@ export class WorkerTransportContainerProvisionManaged implements WorkerTransport
     }
 
     #containerMounts(): InstanceContainerMountConfig[] {
-        const configured = this.#config.mounts ?? [];
-        const workspace = this.#operations.remoteCwd;
-        if (
-            workspace === undefined ||
-            configured.some((mount) => mount.target === workspace)
-        ) {
-            return [...configured];
-        }
-        return [
-            ...configured,
-            {
-                mode: "rw",
-                source: workspace,
-                target: workspace
-            }
-        ];
+        return [...(this.#config.mounts ?? [])];
     }
 
     #buildCreateArgs(image: string): string[] {

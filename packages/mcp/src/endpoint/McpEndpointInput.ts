@@ -80,7 +80,7 @@ export function readMcpArtifactViewImageInput(input: JsonValue): ArtifactViewIma
     if (path === undefined) {
         throw invalidArguments("artifact_viewImage requires path when handle is omitted.");
     }
-    return { ...common, path };
+    return { ...common, path, workspace: requiredString(input.workspace, "workspace") };
 }
 
 export function readMcpArtifactShareInput(input: JsonValue): ArtifactShareInput {
@@ -107,7 +107,7 @@ export function readMcpArtifactShareInput(input: JsonValue): ArtifactShareInput 
     if (path === undefined) {
         throw invalidArguments("artifact_share requires path when handle is omitted.");
     }
-    return { ...common, path };
+    return { ...common, path, workspace: requiredString(input.workspace, "workspace") };
 }
 
 export function readMcpArtifactTransferInput(
@@ -130,6 +130,7 @@ export function readMcpArtifactTransferInput(
     const instance = optionalString(input.instance, "instance");
     const targetInstance = requiredString(input.targetInstance, "targetInstance");
     const targetPath = requiredString(input.targetPath, "targetPath");
+    const targetWorkspace = requiredString(input.targetWorkspace, "targetWorkspace");
     if (input.overwrite !== undefined && typeof input.overwrite !== "boolean") {
         throw invalidArguments("overwrite must be a boolean.");
     }
@@ -138,7 +139,8 @@ export function readMcpArtifactTransferInput(
         operation: "start" as const,
         overwrite: input.overwrite === true,
         targetInstance,
-        targetPath
+        targetPath,
+        targetWorkspace
     };
     if (handle !== undefined) {
         return { ...common, handle };
@@ -146,7 +148,11 @@ export function readMcpArtifactTransferInput(
     if (sourcePath === undefined) {
         throw invalidArguments("artifact_transfer start requires sourcePath when handle is omitted.");
     }
-    return { ...common, sourcePath };
+    return {
+        ...common,
+        sourcePath,
+        sourceWorkspace: requiredString(input.sourceWorkspace, "sourceWorkspace")
+    };
 }
 
 export function assertMcpNoArguments(input: JsonValue, toolName: string): void {
@@ -182,8 +188,7 @@ export function readMcpSshCreateInput(input: JsonValue): McpSshInstanceCreateInp
         identityFile: optionalString(input.identityFile, "identityFile"),
         name: requiredString(input.name, "name"),
         port: port as number | undefined,
-        user: optionalString(input.user, "user"),
-        workspace: requiredString(input.workspace, "workspace")
+        user: optionalString(input.user, "user")
     };
 }
 

@@ -22,20 +22,20 @@ import {
 export interface ToolRouteInstancePort {
     worker: Pick<
         WorkerInstance,
-        "callTool" | "decideApproval" | "getApproval" | "listApprovals" | "readToolCalls" | "workspacePath"
+        "callTool" | "decideApproval" | "getApproval" | "listApprovals" | "readToolCalls"
     >;
 }
 
 export function createToolRouteModule(instance: ToolRouteInstancePort): PrefixRouteModuleDefinition {
     return routeModule("tool", {
         call: async (request, context) => {
-            const { input, toolName } = readToolCall(request.payload);
+            const { input, toolName, workspace } = readToolCall(request.payload);
             try {
                 const result = await instance.worker.callTool(toolName, input, {
                     requestId: context.requestId,
                     ctxId: context.connectionId,
                     source: context.peer,
-                    workspace: instance.worker.workspacePath,
+                    workspace,
                 });
                 return attachComments(result, mergeComments([], resolveResultHints(toolName, result)));
             } catch (error) {

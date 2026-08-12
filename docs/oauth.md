@@ -36,11 +36,10 @@ publicBaseUrl = "https://devshell.example.com"
 每个需要 OAuth 的 instance 独立配置：
 
 ```toml
-version = 2
+version = 3
 name = "demo-local"
 enabled = true
 provider = "local"
-workspace = "/absolute/path/to/workspace"
 
 [mcp]
 enabled = true
@@ -53,7 +52,7 @@ requiredScopes = ["mcp"]
 documentationUrl = "https://devshell.example.com/docs"
 
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo", "context"]
+groups = ["file", "bash", "artifact", "tmux", "todo"]
 capabilities = ["read", "write", "execute"]
 ```
 

@@ -13,7 +13,7 @@ import type { McpToolCatalogTodoName } from "../tool/catalog/McpToolCatalogTodo.
 import { throwIfMcpEndpointAborted } from "./McpEndpointCancellation.js";
 import { attachMcpComments } from "./McpEndpointFeedback.js";
 import type { McpEndpointCatalog, McpEndpointCatalogWorker } from "./McpEndpointCatalog.js";
-import { readMcpContextInput } from "./McpEndpointInput.js";
+import { readMcpContextInput, readMcpRoutedInput } from "./McpEndpointInput.js";
 import type { McpEndpointCallContext, McpEndpointWorkerPort } from "./McpEndpointPort.js";
 import { McpNativeToolResult, type McpEndpointResult } from "./McpEndpointResult.js";
 import { McpEndpointHandlerArtifact } from "./handler/McpEndpointHandlerArtifact.js";
@@ -21,7 +21,7 @@ import { McpEndpointHandlerEnvironment } from "./handler/McpEndpointHandlerEnvir
 import { McpEndpointHandlerInstance } from "./handler/McpEndpointHandlerInstance.js";
 import { McpEndpointHandlerTodo } from "./handler/McpEndpointHandlerTodo.js";
 import { McpEndpointHandlerWorker } from "./handler/McpEndpointHandlerWorker.js";
-import { assertMcpEndpointReady, mcpEndpointToolNotExposed } from "./handler/McpEndpointHandlerSupport.js";
+import { auditMcpEndpointTool, assertMcpEndpointReady, mcpEndpointToolNotExposed } from "./handler/McpEndpointHandlerSupport.js";
 
 export type {
     McpEndpointCallContext,
@@ -63,6 +63,7 @@ export class McpEndpointDispatch {
         this.#artifact = new McpEndpointHandlerArtifact(controlOptions);
         this.#environment = new McpEndpointHandlerEnvironment({
             contextRegistry: this.#contextRegistry,
+            gateway: options.gateway,
             instanceName: options.instanceName,
             worker: options.worker
         });
@@ -101,18 +102,24 @@ export class McpEndpointDispatch {
                 input,
                 requestContext,
                 selected !== undefined,
+                snapshot.instanceRoutingEnabled,
                 signal
             );
         }
 
         const contextInput = readMcpContextInput(input);
+        input = contextInput.input;
+        const routed = known?.owner === "worker" || known?.owner === "artifact"
+            ? readMcpRoutedInput(input, snapshot.instanceRoutingEnabled, this.#instanceName)
+            : { input, instance: this.#instanceName };
         const context = await this.#createToolContext(
             toolName,
             contextInput.ctxId,
             requestContext,
+            routed.instance,
+            known?.owner === "worker",
             signal
         );
-        input = contextInput.input;
 
         if (known?.owner === "todo" || known?.owner === "artifact" || known?.owner === "instance") {
             if (selected === undefined) {
@@ -125,6 +132,7 @@ export class McpEndpointDispatch {
                 toolName,
                 input,
                 context,
+                routed.instance,
                 signal
             );
         }
@@ -136,21 +144,27 @@ export class McpEndpointDispatch {
             selected?.definition,
             snapshot.instanceRoutingEnabled,
             signal,
-            async (result, callId) => await this.#attachComments(toolName, result, context, callId)
+            async (result, callId) => await this.#attachComments(toolName, result, context, callId, routed.instance)
         );
     }
 
-    async #attachComments(toolName: string, result: JsonValue, context: ToolCallContext, callId: string): Promise<JsonValue> {
+    async #attachComments(
+        toolName: string,
+        result: JsonValue,
+        context: ToolCallContext,
+        callId: string,
+        instance: string = this.#instanceName
+    ): Promise<JsonValue> {
         if (context.ctxId === undefined) return result;
-        const queuedComments = await this.#consumeQueuedComments(context.ctxId, callId);
+        const queuedComments = await this.#consumeQueuedComments(instance, context.ctxId, callId);
         const comments = mergeComments(queuedComments, resolveResultHints(toolName, result));
         return attachMcpComments(result, comments);
     }
 
-    async #consumeQueuedComments(ctxId: string, callId: string): Promise<string[]> {
+    async #consumeQueuedComments(instance: string, ctxId: string, callId: string): Promise<string[]> {
         const consume = this.#gateway?.consumeContextMessages;
         if (consume === undefined) return [];
-        const result = await consume.call(this.#gateway, this.#instanceName, ctxId, callId);
+        const result = await consume.call(this.#gateway, instance, ctxId, callId);
         return result.comment === undefined ? [] : [result.comment];
     }
 
@@ -158,23 +172,27 @@ export class McpEndpointDispatch {
         toolName: string,
         ctxId: string,
         requestContext: McpEndpointCallContext,
+        instance: string,
+        prepareWorkerState: boolean,
         signal?: AbortSignal
     ): Promise<ToolCallContext> {
         let record = await this.#contextRegistry.validateAndTouch(ctxId, {
-            instance: this.#instanceName,
+            instance,
             principal: requestContext.principal
         });
-        record = await this.#ensureContextWorkerState(record);
+        if (prepareWorkerState) {
+            record = await this.#ensureContextWorkerState(record, instance);
+        }
         const context: ToolCallContext = {
             ctxId: record.ctxId,
             requestId: requestContext.requestId,
             source: "mcp",
             workspace: record.workspace
         };
-        if (this.#worker.touchAlerts !== undefined) {
-            await this.#worker.touchAlerts(record.workspace);
+        if (prepareWorkerState) {
+            await this.#touchAlerts(instance, record.workspace);
         }
-        await this.#worker.appendMcpToolCalled(toolName, {
+        await this.#appendMcpToolCalled(instance, toolName, {
             ctxId: context.ctxId,
             requestId: context.requestId
         });
@@ -183,30 +201,63 @@ export class McpEndpointDispatch {
     }
 
     async #ensureContextWorkerState(
-        record: Awaited<ReturnType<McpContextRegistry["validateAndTouch"]>>
+        record: Awaited<ReturnType<McpContextRegistry["validateAndTouch"]>>,
+        instance: string
     ): Promise<Awaited<ReturnType<McpContextRegistry["validateAndTouch"]>>> {
-        if (record.temporaryDirectory !== undefined && this.#worker.touchTemporaryDirectory !== undefined) {
+        if (record.temporaryDirectory !== undefined) {
             try {
-                await this.#worker.touchTemporaryDirectory(record.temporaryDirectory);
+                await this.#touchTemporaryDirectory(instance, record.temporaryDirectory);
                 return record;
             } catch (error) {
                 if (!isRecoverableContextTemporaryError(error)) {
                     throw error;
                 }
             }
-        } else if (record.temporaryDirectory !== undefined) {
-            return record;
         }
 
-        const prepareWorkspace = this.#worker.prepareWorkspace;
-        if (prepareWorkspace === undefined) {
-            return record;
-        }
-        const prepared = await prepareWorkspace.call(this.#worker, record.workspace);
+        const prepared = await this.#prepareWorkspace(instance, record.workspace);
+        if (prepared === undefined) return record;
         return await this.#contextRegistry.updateWorkerState(record.ctxId, {
             temporaryDirectory: prepared.temporaryDirectory,
             workspace: prepared.workspace
         });
+    }
+
+    async #appendMcpToolCalled(
+        instance: string,
+        toolName: string,
+        context: { requestId?: string; ctxId?: string }
+    ): Promise<void> {
+        if (instance === this.#instanceName) {
+            await this.#worker.appendMcpToolCalled(toolName, context);
+            return;
+        }
+        if (this.#gateway !== undefined) {
+            await this.#gateway.appendMcpToolCalled(instance, toolName, context);
+        }
+    }
+
+    async #prepareWorkspace(instance: string, workspace: string) {
+        if (instance === this.#instanceName) {
+            return await this.#worker.prepareWorkspace?.(workspace);
+        }
+        return await this.#gateway?.prepareWorkspace(instance, workspace);
+    }
+
+    async #touchAlerts(instance: string, workspace: string): Promise<void> {
+        if (instance === this.#instanceName) {
+            await this.#worker.touchAlerts?.(workspace);
+            return;
+        }
+        await this.#gateway?.touchAlerts(instance, workspace);
+    }
+
+    async #touchTemporaryDirectory(instance: string, path: string): Promise<void> {
+        if (instance === this.#instanceName) {
+            await this.#worker.touchTemporaryDirectory?.(path);
+            return;
+        }
+        await this.#gateway?.touchTemporaryDirectory(instance, path);
     }
 
     async #auditControlTool(
@@ -214,17 +265,19 @@ export class McpEndpointDispatch {
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
+        instance: string,
         signal?: AbortSignal
     ): Promise<McpEndpointResult> {
         let nativeResult: McpNativeToolResult | undefined;
-        const structuredResult = await this.#worker.auditToolCall(
-            toolName,
-            input,
+        const structuredResult = await auditMcpEndpointTool({
             context,
-            async (callId) => {
+            gateway: this.#gateway,
+            input,
+            localInstance: this.#instanceName,
+            operation: async (callId) => {
                 const result = await this.#callControlTool(owner, toolName, input, context, signal);
                 if (result instanceof McpNativeToolResult) {
-                    const structuredContent = await this.#attachComments(toolName, result.structuredContent, context, callId);
+                    const structuredContent = await this.#attachComments(toolName, result.structuredContent, context, callId, instance);
                     nativeResult = new McpNativeToolResult({
                         content: result.content,
                         isError: result.isError,
@@ -232,10 +285,13 @@ export class McpEndpointDispatch {
                     });
                     return structuredContent;
                 }
-                return await this.#attachComments(toolName, result, context, callId);
+                return await this.#attachComments(toolName, result, context, callId, instance);
             },
-            signal
-        );
+            signal,
+            targetInstance: instance,
+            toolName,
+            worker: this.#worker,
+        });
         return nativeResult ?? structuredResult;
     }
 
@@ -248,7 +304,7 @@ export class McpEndpointDispatch {
     ): Promise<McpEndpointResult> {
         switch (owner) {
             case "artifact":
-                return await this.#artifact.call(toolName as McpToolCatalogArtifactName, input, signal);
+                return await this.#artifact.call(toolName as McpToolCatalogArtifactName, input, context, signal);
             case "instance":
                 return await this.#instance.call(toolName as McpToolCatalogInstanceName, input, signal);
             case "todo":

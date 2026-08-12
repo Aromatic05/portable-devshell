@@ -5,11 +5,9 @@ export interface ArtifactHostAccessContext {
     authorityInstance: string;
     provider: string;
     securityMode: EffectiveSecurityMode;
-    workspace?: string;
 }
 
 export interface ArtifactHostBridgeOptions {
     homeDirectory: string;
-    processCwd?: string;
     storageDir: string;
 }

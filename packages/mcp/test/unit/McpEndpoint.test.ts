@@ -29,7 +29,7 @@ interface ToolDefinition {
 }
 
 test("initialize succeeds over SDK transport", async () => {
-    const binding = createBinding();
+    const binding = createBinding(createWorkerHarness(), { serverVersion: "9.8.7" });
     const server = await createBindingServer(binding);
 
     try {
@@ -38,6 +38,7 @@ test("initialize succeeds over SDK transport", async () => {
         assert.equal(response.status, 200);
         assert.equal(typeof response.body.result?.protocolVersion, "string");
         assert.equal(response.body.result?.serverInfo?.name, "portable-devshell-mcp");
+        assert.equal(response.body.result?.serverInfo?.version, "9.8.7");
         assert.equal(typeof response.headers.get("mcp-session-id"), "string");
     } finally {
         await server.close();
@@ -205,7 +206,7 @@ test("tools/call appends a worker result hint and keeps the flat shape", async (
 
 test("environment and control-owned tools execute through the endpoint audit path", async () => {
     const harness = createWorkerHarness();
-    const gateway: McpInstanceGateway = {
+    const gateway = {
         assertReady() {},
         async callTool() {
             return {};
@@ -222,7 +223,7 @@ test("environment and control-owned tools execute through the endpoint audit pat
         listTools() {
             return [];
         },
-        async shareArtifact(_defaultInstance, input) {
+        async shareArtifact(_defaultInstance: string, input: { path?: string }) {
             return { ...(input.path === undefined ? {} : { path: input.path }), shareId: "share-1" };
         },
         async transferArtifact() {
@@ -240,7 +241,7 @@ test("environment and control-owned tools execute through the endpoint audit pat
         async writeTodo() {
             return {};
         }
-    };
+    } as unknown as McpInstanceGateway;
     const endpoint = new McpEndpointWorker({
         gateway,
         instanceName: "demo-local",
@@ -436,7 +437,7 @@ test("closing the HTTP request aborts an in-flight tools/call handler", async ()
 
 test("instance_list returns object structured content through SDK transport", async () => {
     const harness = createWorkerHarness({ hasToolSchemaCache: false, ready: false, tools: [] });
-    const gateway: McpInstanceGateway = {
+    const gateway = {
         assertReady() {},
         async callTool() {
             return {};
@@ -465,7 +466,7 @@ test("instance_list returns object structured content through SDK transport", as
         async writeTodo() {
             return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
         }
-    };
+    } as unknown as McpInstanceGateway;
     const binding = new McpEndpointBinding(
         new McpEndpointWorker({
             gateway,
@@ -507,7 +508,7 @@ test("instance_list returns object structured content through SDK transport", as
 test("artifact_viewImage returns native image content over SDK transport", async () => {
     const pngData = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
     const harness = createWorkerHarness({ hasToolSchemaCache: false, ready: false, tools: [] });
-    const gateway: McpInstanceGateway = {
+    const gateway = {
         assertReady() {},
         async callTool() { return {}; },
         async createSshInstance() { return {}; },
@@ -517,9 +518,9 @@ test("artifact_viewImage returns native image content over SDK transport", async
         async startInstance() { return {}; },
         async statusInstance() { return {}; },
         async stopInstance() { return {}; },
-        async viewArtifactImage(defaultInstance, input) {
+        async viewArtifactImage(defaultInstance: string, input: { path?: string; workspace?: string }) {
             assert.equal(defaultInstance, "demo");
-            assert.deepEqual(input, { path: "./pixel.png" });
+            assert.deepEqual(input, { path: "./pixel.png", workspace: "/workspace" });
             return {
                 bytes: 68,
                 content: pngData,
@@ -530,7 +531,7 @@ test("artifact_viewImage returns native image content over SDK transport", async
             };
         },
         async writeTodo() { return { revision: 0, todos: [] }; }
-    };
+    } as unknown as McpInstanceGateway;
     const binding = new McpEndpointBinding(
         new McpEndpointWorker({
             gateway,
@@ -665,14 +666,18 @@ test("tools/call waits for a transiently not-ready instance before executing", a
     }
 });
 
-function createBinding(harness = createWorkerHarness(), options?: { readyWaitMs?: number }): McpEndpointBinding {
+function createBinding(
+    harness = createWorkerHarness(),
+    options?: { readyWaitMs?: number; serverVersion?: string }
+): McpEndpointBinding {
     return new McpEndpointBinding(
         new McpEndpointWorker({
             policy: { capabilities: ["execute"], groups: ["bash"] },
             instanceName: "demo",
             readyWaitMs: options?.readyWaitMs,
             worker: harness.worker
-        })
+        }),
+        options?.serverVersion,
     );
 }
 
@@ -859,9 +864,9 @@ function createWorkerHarness(options?: {
                 });
             },
             handshake: {
+                homeDirectory: "/home/demo",
                 instance: "demo",
                 skillsDirectory: "/home/demo/.devshell/skill",
-                workspace: "/workspace",
                 platform: {
                     arch: "x86_64",
                     distribution: { id: "arch", name: "Arch Linux", version: "rolling" },
@@ -870,7 +875,6 @@ function createWorkerHarness(options?: {
                     shell: { executable: "/bin/bash", kind: "bash", version: "5" }
                 }
             },
-            workspacePath: "/workspace",
             async prepareWorkspace(workspace: string) {
                 return {
                     projectMemoryAgentFile: `${workspace}/.devshell/AGENT.md`,

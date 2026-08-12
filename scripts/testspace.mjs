@@ -226,10 +226,10 @@ async function start(argv) {
     const mcpPort = await reservePort(18790);
     const webPort = await reservePort(mcpPort === 18791 ? 18792 : 18791);
     await writeFile(paths.controlConfig, buildTestspaceGlobalConfig({ mcpPort, webPort }), "utf8");
-    await writeFile(paths.instanceConfig, buildTestspaceInstanceConfig({ workspace: paths.workspace }), "utf8");
+    await writeFile(paths.instanceConfig, buildTestspaceInstanceConfig(), "utf8");
     await writeFile(
         paths.reverseInstanceConfig,
-        buildTestspaceReverseInstanceConfig({ workspace: paths.reverseWorkspace }),
+        buildTestspaceReverseInstanceConfig(),
         "utf8",
     );
 
@@ -503,6 +503,7 @@ async function connectorLoop(argv) {
         logFile: target.logFile,
         seed: process.env.DEVSHELL_TESTSPACE_SEED,
         stopFile: target.stopFile,
+        workspace: target.workspace,
     });
 }
 
@@ -580,6 +581,7 @@ function connectorTargets(state) {
     return connectorProcessTargets().map((target) => ({
         ...target,
         endpoint: target.instance === TESTSPACE_INSTANCE ? urls.mcp : urls.reverseMcp,
+        workspace: target.instance === TESTSPACE_INSTANCE ? paths.workspace : paths.reverseWorkspace,
     }));
 }
 

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -45,10 +45,7 @@ impl RpcRouter {
         let active_tool_calls = Arc::new(ActiveToolCallRegistry::new());
         let shutdown_requested = Arc::new(AtomicBool::new(false));
         let policy = build_security_policy(runtime.security_mode.clone());
-        let terminals = TerminalManager::with_policy(
-            PathBuf::from(&runtime.workspace),
-            Arc::clone(&policy),
-        );
+        let terminals = TerminalManager::with_policy(Arc::clone(&policy));
         let alerts = Arc::new(AlertService::new());
         let mut control_handlers = HashMap::new();
         register_control_handlers(
@@ -122,6 +119,12 @@ impl RpcRouter {
         let workspace = context
             .and_then(|value| value.workspace.as_deref())
             .ok_or_else(|| RpcError::new("rpc.invalidContext", "tool calls require a workspace context"))?;
+        if !Path::new(workspace).is_absolute() {
+            return Err(RpcError::new(
+                "rpc.invalidContext",
+                "tool workspace must be an absolute path",
+            ));
+        }
         let workspace = PathBuf::from(workspace).canonicalize().map_err(|error| {
             RpcError::new(
                 "rpc.invalidContext",

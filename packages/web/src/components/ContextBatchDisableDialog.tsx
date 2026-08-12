@@ -171,7 +171,7 @@ export function ContextBatchDisableDialog({
             {candidates.length === 0 ? <p className="empty">No non-disabled Contexts match this inactivity threshold.</p> : <div className="context-batch-table-wrap">
                 <table className="context-batch-table">
                     <thead>
-                        <tr><th>Select</th><th>Context</th><th>Instance</th><th>Status</th><th>Last used</th></tr>
+                        <tr><th>Select</th><th>Context</th><th>Instance</th><th>Workspace</th><th>Status</th><th>Last used</th></tr>
                     </thead>
                     <tbody>
                         {candidates.map((context) => <tr key={context.ctxId}>
@@ -184,6 +184,7 @@ export function ContextBatchDisableDialog({
                             /></td>
                             <td><code>{context.ctxId}</code></td>
                             <td>{context.instance}</td>
+                            <td><code>{context.workspace}</code></td>
                             <td><span className={`result ${context.status === "active" ? "success" : "pending"}`}>{context.status}</span></td>
                             <td><time dateTime={context.lastAccessedAt}>{context.lastAccessedAt}</time><small>{formatIdle(context.lastAccessedAt)}</small></td>
                         </tr>)}

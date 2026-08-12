@@ -52,6 +52,44 @@ test("cross-instance readiness check accepts a ready target", () => {
     assert.doesNotThrow(() => gateway.assertReady("remote-server"));
 });
 
+test("cross-instance audit is recorded by the target worker", async () => {
+    const calls: Array<{ context: unknown; input: unknown; toolName: string }> = [];
+    const registry = new InstanceRegistry([{
+        enabled: true,
+        mcpCapabilities: ["read"],
+        mcpEnabled: true,
+        mcpGroups: ["artifact"],
+        mcpPath: "/remote-server/mcp",
+        name: "remote-server",
+        worker: {
+            async auditToolCall(toolName: string, input: unknown, context: unknown, operation: (callId: string) => Promise<unknown>) {
+                calls.push({ context, input, toolName });
+                return await operation("remote-call");
+            }
+        }
+    } as never]);
+    const gateway = new McpInstanceGatewayControl({
+        createService: {} as never,
+        getConfig: () => createDefaultControlConfig(),
+        instanceRegistry: registry
+    });
+
+    const result = await gateway.auditToolCall(
+        "remote-server",
+        "artifact_viewImage",
+        { path: "./preview.png" },
+        { ctxId: "ctx-remote", source: "mcp", workspace: "/projects/remote" },
+        async (callId) => ({ callId })
+    );
+
+    assert.deepEqual(result, { callId: "remote-call" });
+    assert.deepEqual(calls, [{
+        context: { ctxId: "ctx-remote", source: "mcp", workspace: "/projects/remote" },
+        input: { path: "./preview.png" },
+        toolName: "artifact_viewImage"
+    }]);
+});
+
 test("closing an MCP tool session releases worker-owned session state", async () => {
     const released: string[] = [];
     const registry = new InstanceRegistry(

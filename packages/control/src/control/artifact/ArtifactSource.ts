@@ -23,7 +23,14 @@ export function readTransferPayloadSourceInput(input: ArtifactTransferStartInput
         return { handle: input.handle };
     }
     if (typeof input.sourcePath === "string" && input.sourcePath.length > 0 && input.handle === undefined) {
-        return { path: input.sourcePath };
+        if (typeof input.sourceWorkspace !== "string" || input.sourceWorkspace.length === 0) {
+            throw createError({
+                code: errorCodes.targetInvalid,
+                message: "Artifact transfer sourcePath requires sourceWorkspace.",
+                retryable: false
+            });
+        }
+        return { path: input.sourcePath, workspace: input.sourceWorkspace };
     }
     throw createError({
         code: errorCodes.targetInvalid,
@@ -53,10 +60,10 @@ export function validateTransferStart(input: ArtifactTransferStartInput): void {
         });
     }
     readTransferPayloadSourceInput(input);
-    if (input.targetInstance.length === 0 || input.targetPath.length === 0) {
+    if (input.targetInstance.length === 0 || input.targetPath.length === 0 || input.targetWorkspace.length === 0) {
         throw createError({
             code: errorCodes.targetInvalid,
-            message: "Artifact transfer requires targetInstance and targetPath.",
+            message: "Artifact transfer requires targetInstance, targetPath, and targetWorkspace.",
             retryable: false
         });
     }
@@ -69,7 +76,12 @@ export function sourceDescriptor(
 ): ArtifactSourceDescriptor {
     return {
         instance,
-        ...(inputHasHandle(input) ? { handle: input.handle } : { path: input.path }),
+        ...(inputHasHandle(input)
+            ? { handle: input.handle }
+            : {
+                path: input.path,
+                ...(input.workspace === undefined ? {} : { workspace: input.workspace })
+            }),
         type: sourceTypeFromPayload(payload)
     };
 }
@@ -89,7 +101,7 @@ export function sourceTypeFromPayload(
 }
 
 function readPathOrHandle(
-    input: { handle?: string; path?: string },
+    input: { handle?: string; path?: string; workspace?: string },
     toolName: string
 ): ArtifactPayloadSourceInput {
     const handle = input.handle;
@@ -98,7 +110,14 @@ function readPathOrHandle(
         return { handle };
     }
     if (typeof path === "string" && path.length > 0 && handle === undefined) {
-        return { path };
+        if (typeof input.workspace !== "string" || input.workspace.length === 0) {
+            throw createError({
+                code: errorCodes.targetInvalid,
+                message: `${toolName} path requires workspace.`,
+                retryable: false
+            });
+        }
+        return { path, workspace: input.workspace };
     }
     throw createError({
         code: errorCodes.targetInvalid,

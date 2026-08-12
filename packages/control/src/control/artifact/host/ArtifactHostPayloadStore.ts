@@ -37,17 +37,14 @@ interface StoredPayload {
 
 export class ArtifactHostPayloadStore {
     readonly #homeDirectory: string;
-    readonly #processCwd: string;
     readonly #root: string;
     readonly #temporaryRoot: string;
 
     constructor(options: {
         homeDirectory: string;
-        processCwd: string;
         root: string;
     }) {
         this.#homeDirectory = options.homeDirectory;
-        this.#processCwd = options.processCwd;
         this.#root = options.root;
         this.#temporaryRoot = join(options.root, "tmp");
     }
@@ -63,6 +60,7 @@ export class ArtifactHostPayloadStore {
     async openPath(
         rawPath: string,
         expiresAtMs: number,
+        workspace: string,
         context: ArtifactHostAccessContext
     ): Promise<WorkerArtifactPayloadOpenResult> {
         if (!Number.isSafeInteger(expiresAtMs) || expiresAtMs <= Date.now()) {
@@ -70,9 +68,9 @@ export class ArtifactHostPayloadStore {
         }
         const sourcePath = await resolveSourcePath(
             rawPath,
+            workspace,
             context,
-            this.#homeDirectory,
-            this.#processCwd
+            this.#homeDirectory
         );
         const sourceMetadata = await lstat(sourcePath);
         if (sourceMetadata.isSymbolicLink()) {
@@ -227,24 +225,26 @@ export class ArtifactHostPayloadStore {
 
 async function resolveSourcePath(
     rawPath: string,
+    rawWorkspace: string,
     context: ArtifactHostAccessContext,
-    homeDirectory: string,
-    processCwd: string
+    homeDirectory: string
 ): Promise<string> {
     if (rawPath.length === 0) {
         throw artifactError("artifact.hostPathDenied", "Host source path must not be empty.");
     }
+    if (!isAbsolute(rawWorkspace)) {
+        throw artifactError("artifact.hostPathDenied", "Host workspace must be an absolute path.");
+    }
+    const workspace = await realpath(rawWorkspace).catch((error: unknown) => {
+        throw artifactError("artifact.hostPathDenied", "Host workspace is unavailable.", error);
+    });
     const expanded =
         rawPath === "~"
             ? homeDirectory
             : rawPath.startsWith("~/")
               ? join(homeDirectory, rawPath.slice(2))
               : rawPath;
-    const base =
-        context.securityMode === "workspace" && context.provider === "local" && context.workspace !== undefined
-            ? context.workspace
-            : processCwd;
-    const requested = isAbsolute(expanded) ? resolve(expanded) : resolve(base, expanded);
+    const requested = isAbsolute(expanded) ? resolve(expanded) : resolve(workspace, expanded);
     const requestedMetadata = await lstat(requested).catch((error: unknown) => {
         throw artifactError("artifact.hostPathDenied", "Host source path is unavailable.", error);
     });
@@ -254,15 +254,12 @@ async function resolveSourcePath(
     const canonical = await realpath(requested);
 
     if (context.securityMode === "workspace") {
-        if (context.provider !== "local" || context.workspace === undefined) {
+        if (context.provider !== "local") {
             throw artifactError(
                 "artifact.hostPathDenied",
-                "Workspace-restricted host access requires a local instance workspace."
+                "Workspace-restricted host access requires a local authority instance."
             );
         }
-        const workspace = await realpath(context.workspace).catch((error: unknown) => {
-            throw artifactError("artifact.hostPathDenied", "Instance workspace is unavailable on host.", error);
-        });
         if (!isWithin(workspace, canonical)) {
             throw artifactError(
                 "artifact.hostPathDenied",

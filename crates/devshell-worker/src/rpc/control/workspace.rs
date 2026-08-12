@@ -51,6 +51,12 @@ pub fn touch_temporary_handler() -> Arc<dyn ControlHandler> {
 }
 
 fn prepare(workspace: &Path) -> Result<WorkspacePrepareResult, RpcError> {
+    if !workspace.is_absolute() {
+        return Err(RpcError::new(
+            "workspace.invalid",
+            "workspace must be an absolute path",
+        ));
+    }
     let workspace = workspace.canonicalize().map_err(|error| {
         RpcError::new(
             "workspace.invalid",

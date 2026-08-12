@@ -60,14 +60,17 @@ export async function executeArtifactCommand(
 }
 
 async function share(client: CliClientArtifactPort, args: readonly string[]): Promise<ArtifactShareResult> {
-    const parsed = parseOptions(args, new Set(["--authority", "--expires-in"]));
+    const parsed = parseOptions(args, new Set(["--authority", "--expires-in", "--workspace"]));
     if (parsed.positionals.length !== 2) {
         throw usage(
-            "artifact share requires <instance> <artifact:<handle>|path:<path>> [--expires-in <seconds>] [--authority <instance>]"
+            "artifact share requires <instance> <artifact:<handle>|path:<path>> [--workspace <absolute-path>] [--expires-in <seconds>] [--authority <instance>]"
         );
     }
     const instance = parsed.positionals[0]!;
     const source = parseShareSource(parsed.positionals[1]!);
+    const workspace = "path" in source
+        ? required(parsed.options.get("--workspace"), "--workspace")
+        : undefined;
     const authority = parsed.options.get("--authority") ?? instance;
     if (authority === "host") {
         throw usage("--authority must name a managed instance.");
@@ -75,11 +78,18 @@ async function share(client: CliClientArtifactPort, args: readonly string[]): Pr
     const expiresInSeconds = parsed.options.has("--expires-in")
         ? integerAtLeast(parsed.options.get("--expires-in"), "--expires-in", 60)
         : undefined;
-    return await client.createShare(authority, {
-        ...source,
-        ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }),
-        instance
-    });
+    return await client.createShare(authority, "handle" in source
+        ? {
+            ...source,
+            ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }),
+            instance
+        }
+        : {
+            ...source,
+            ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }),
+            instance,
+            workspace: workspace!
+        });
 }
 
 async function transfer(
@@ -100,10 +110,10 @@ async function transfer(
         return await client.cancelTransfer(required(args[1], "transferId"));
     }
 
-    const parsed = parseOptions(args, new Set(["--authority", "--overwrite"]));
+    const parsed = parseOptions(args, new Set(["--authority", "--overwrite", "--source-workspace", "--target-workspace"]));
     if (parsed.positionals.length !== 4) {
         throw usage(
-            "artifact transfer requires <source-instance> <artifact:<handle>|path:<path>> <target-instance> <target-path> [--overwrite] [--authority <instance>]"
+            "artifact transfer requires <source-instance> <artifact:<handle>|path:<path>> <target-instance> <target-path> --target-workspace <absolute-path> [--source-workspace <absolute-path>] [--overwrite] [--authority <instance>]"
         );
     }
     const [instance, sourceText, targetInstance, targetPath] = parsed.positionals as [
@@ -113,19 +123,26 @@ async function transfer(
         string
     ];
     const source = parseTransferSource(sourceText);
+    const sourceWorkspace = "sourcePath" in source
+        ? required(parsed.options.get("--source-workspace"), "--source-workspace")
+        : undefined;
+    const targetWorkspace = required(parsed.options.get("--target-workspace"), "--target-workspace");
     const inferredAuthority = instance === "host" && targetInstance !== "host" ? targetInstance : instance;
     const authority = parsed.options.get("--authority") ?? inferredAuthority;
     if (authority === "host") {
         throw usage("A managed authority instance is required when both transfer endpoints are host.");
     }
-    return await client.startTransfer(authority, {
-        ...source,
+    const common = {
         instance,
-        operation: "start",
+        operation: "start" as const,
         overwrite: parsed.flags.has("--overwrite"),
         targetInstance,
-        targetPath: normalizeArtifactTargetPath(targetPath)
-    });
+        targetPath: normalizeArtifactTargetPath(targetPath),
+        targetWorkspace
+    };
+    return await client.startTransfer(authority, "handle" in source
+        ? { ...common, handle: source.handle }
+        : { ...common, sourcePath: source.sourcePath, sourceWorkspace: sourceWorkspace! });
 }
 
 function normalizeArtifactTargetPath(value: string): string {
@@ -212,15 +229,15 @@ function writeJson(stream: { write(chunk: string): void }, value: unknown): void
 export function artifactUsage(): string {
     return [
         "Artifact commands:",
-        "  devshell artifact share <instance> <artifact:<handle>|path:<path>> [--expires-in <seconds>] [--authority <instance>]",
+        "  devshell artifact share <instance> <artifact:<handle>|path:<path>> [--workspace <absolute-path>] [--expires-in <seconds>] [--authority <instance>]",
         "  devshell artifact shares",
         "  devshell artifact revoke <shareId>",
-        "  devshell artifact transfer <source-instance> <source> <target-instance> <target-path> [--overwrite] [--authority <instance>]",
+        "  devshell artifact transfer <source-instance> <source> <target-instance> <target-path> --target-workspace <absolute-path> [--source-workspace <absolute-path>] [--overwrite] [--authority <instance>]",
         "  devshell artifact transfer status <transferId>",
         "  devshell artifact transfer cancel <transferId>",
         "  devshell artifact transfers",
         "",
-        "Bare target paths are workspace-relative to the target instance."
+        "Path sources and targets require explicit absolute workspace options; relative paths resolve within those workspaces."
     ].join("\n");
 }
 

@@ -87,7 +87,6 @@ export interface RuntimeStartOptions {
     onOutput?(chunk: string): void;
     onRequestId?(requestId: string): void;
     signal?: AbortSignal;
-    workspacePath?: string;
 }
 
 export interface ControlClients {
@@ -148,10 +147,7 @@ export interface ControlClients {
         rotateToken(instance: string): Promise<{ deviceToken: string; instance: string }>;
     };
     runtime: {
-        openStart(
-            instance: string,
-            workspacePath?: string,
-        ): Promise<OpenedClientStream>;
+        openStart(instance: string): Promise<OpenedClientStream>;
         readLogs(
             instance: string,
             query?: { fromSeq?: number; limit?: number },
@@ -187,7 +183,7 @@ export interface ControlClients {
         subscribe(instance: string, fromSeq: number): Promise<InstanceEventStream>;
     };
     tool: {
-        call(instance: string, toolName: string, input: JsonValue): Promise<JsonValue>;
+        call(instance: string, toolName: string, input: JsonValue, workspace: string): Promise<JsonValue>;
         decideApproval(
             instance: string,
             approvalId: string,
@@ -217,15 +213,8 @@ export function createControlClients(
     const terminal = instanceClientModule(connection, "terminal");
     const todo = instanceClientModule(connection, "todo");
     const tool = instanceClientModule(connection, "tool");
-    const openRuntimeStart = (
-        name: string,
-        workspacePath?: string,
-    ): Promise<OpenedClientStream> =>
-        runtime.openStream(
-            name,
-            "start",
-            workspacePath === undefined ? undefined : { workspacePath },
-        );
+    const openRuntimeStart = (name: string): Promise<OpenedClientStream> =>
+        runtime.openStream(name, "start");
 
     return {
         artifact: {
@@ -334,8 +323,8 @@ export function createControlClients(
                 ),
         },
         tool: {
-            call: (name, toolName, input) =>
-                tool.request(name, "call", { input, toolName }),
+            call: (name, toolName, input, workspace) =>
+                tool.request(name, "call", { input, toolName, workspace }),
             decideApproval: (name, approvalId, decision, decisionOptions = {}) =>
                 tool.request(name, "decideApproval", {
                     approvalId,
@@ -352,19 +341,13 @@ export function createControlClients(
 
 async function startRuntime(
     connection: ClientConnection,
-    openStart: (
-        instance: string,
-        workspacePath?: string,
-    ) => Promise<OpenedClientStream>,
+    openStart: (instance: string) => Promise<OpenedClientStream>,
     instance: string,
     options: RuntimeStartOptions,
 ): Promise<InstanceSnapshot> {
     let stream: import("../transport/ClientConnection.js").ClientStream | undefined;
     try {
-        const opened = await openStart(
-            instance,
-            options.workspacePath,
-        );
+        const opened = await openStart(instance);
         stream = opened.stream;
         options.onRequestId?.(stream.id);
         const aborted = () => stream?.close();

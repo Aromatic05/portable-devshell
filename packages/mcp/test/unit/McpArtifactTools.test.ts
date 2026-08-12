@@ -101,23 +101,26 @@ test("artifact endpoint exposes worker read plus control share and transfer whil
                 operation: "start",
                 sourcePath: "./dist",
                 targetInstance: "remote-server",
-                targetPath: "/srv/app"
+                targetPath: "/srv/app",
+                targetWorkspace: "/srv"
             }),
             context
         ),
         { transferId: "transfer-1" }
     );
     assert.deepEqual(calls, [
-        { defaultInstance: "main-pc", input: { path: "./dist" }, kind: "share" },
-        { defaultInstance: "main-pc", input: { path: "./pixel.png" }, kind: "viewImage" },
+        { defaultInstance: "main-pc", input: { path: "./dist", workspace: "/workspace" }, kind: "share" },
+        { defaultInstance: "main-pc", input: { path: "./pixel.png", workspace: "/workspace" }, kind: "viewImage" },
         {
             defaultInstance: "main-pc",
             input: {
                 operation: "start",
                 overwrite: false,
                 sourcePath: "./dist",
+                sourceWorkspace: "/workspace",
                 targetInstance: "remote-server",
-                targetPath: "/srv/app"
+                targetPath: "/srv/app",
+                targetWorkspace: "/srv"
             },
             kind: "transfer"
         }
@@ -166,7 +169,6 @@ function createWorker(ready: boolean, hasSchema: boolean) {
         async appendMcpToolCalled() {},
         async callTool() { return {}; },
         async readAlerts() { return { advice: [] }; },
-        workspacePath: "/workspace",
         hasToolSchemaCache() { return hasSchema; },
         listTools() { return [artifactRead]; },
         snapshot() { return { ready }; }
@@ -175,16 +177,45 @@ function createWorker(ready: boolean, hasSchema: boolean) {
 
 function createGateway(overrides: Partial<McpInstanceGateway>): McpInstanceGateway {
     return {
+        ...overrides,
+        async appendMcpToolCalled() {},
         assertReady() {},
+        async auditToolCall<T extends JsonValue>(
+            instance: string,
+            toolName: string,
+            input: JsonValue,
+            context: ToolCallContext,
+            operation: (callId: string) => Promise<T>,
+            signal?: AbortSignal
+        ): Promise<T> {
+            if (overrides.auditToolCall !== undefined) {
+                return await overrides.auditToolCall(instance, toolName, input, context, operation, signal);
+            }
+            return await operation("call-test");
+        },
         async callTool() { return {}; },
         async createSshInstance(_source, input) { return { name: input.name }; },
+        environment() { return undefined; },
         async listInstances() { return []; },
         listTools() { return [artifactRead]; },
+        async prepareWorkspace(_instance, workspace) {
+            return {
+                projectMemoryAgentFile: `${workspace}/.devshell/AGENT.md`,
+                projectMemoryDirectory: `${workspace}/.devshell`,
+                temporaryDirectory: "/tmp/mcp-artifact",
+                workspace
+            };
+        },
+        async readAlerts() { return { advice: [] }; },
+        async releaseAlerts(instance, workspace) {
+            await overrides.releaseAlerts?.(instance, workspace);
+        },
         async readTodo() { return { items: [], revision: 0, summary: { completed: 0, total: 0 } }; },
         async startInstance(instance) { return { instance }; },
         async statusInstance(instance) { return { instance }; },
         async stopInstance(instance) { return { instance }; },
+        async touchAlerts() {},
+        async touchTemporaryDirectory() {},
         async writeTodo() { return { items: [], revision: 0, summary: { completed: 0, total: 0 } }; },
-        ...overrides
     };
 }

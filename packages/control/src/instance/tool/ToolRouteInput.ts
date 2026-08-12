@@ -8,11 +8,14 @@ import {
     type ToolCallStatus
 } from "@portable-devshell/shared";
 
-export function readToolCall(payload?: JsonValue): { input: JsonValue; toolName: string } {
+export function readToolCall(payload?: JsonValue): { input: JsonValue; toolName: string; workspace: string } {
     if (!isRecord(payload) || typeof payload.toolName !== "string" || payload.toolName.length === 0) {
         throw invalid("tool.call requires toolName.");
     }
-    return { input: payload.input ?? null, toolName: payload.toolName };
+    if (typeof payload.workspace !== "string" || payload.workspace.trim().length === 0) {
+        throw invalid("tool.call requires workspace.");
+    }
+    return { input: payload.input ?? null, toolName: payload.toolName, workspace: payload.workspace };
 }
 
 export function readToolCallQuery(payload?: JsonValue): ToolCallQuery {

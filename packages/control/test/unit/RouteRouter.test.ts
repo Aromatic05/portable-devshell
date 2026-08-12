@@ -43,8 +43,10 @@ test("artifact.startTransfer accepts an explicit source instance", async () => {
             payload: {
                 instance: "source-a",
                 sourcePath: "./result.bin",
+                sourceWorkspace: "/source",
                 targetInstance: "target-b",
-                targetPath: "/tmp/result.bin"
+                targetPath: "/tmp/result.bin",
+                targetWorkspace: "/tmp"
             }
         },
         createContext("@control", "artifact")
@@ -58,8 +60,10 @@ test("artifact.startTransfer accepts an explicit source instance", async () => {
                 instance: "source-a",
                 operation: "start",
                 sourcePath: "./result.bin",
+                sourceWorkspace: "/source",
                 targetInstance: "target-b",
-                targetPath: "/tmp/result.bin"
+                targetPath: "/tmp/result.bin",
+                targetWorkspace: "/tmp"
             }
         }
     ]);

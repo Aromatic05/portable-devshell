@@ -27,7 +27,6 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
     const home = await createTestTempDirectory("devshell-reverse-gateway");
     const connector = new WorkerRpcInboundConnector();
     const worker = new WorkerInstanceFactory().create({
-        defaultWorkspace: asWorkspacePath(home),
         homeDirectory: home,
         managementMode: "selfManaged",
         name: asInstanceName("reverse-test"),
@@ -49,8 +48,7 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
             provider: "reverse",
             reverseConnector: connector,
             todo,
-            worker,
-            workspace: home
+            worker
         }
     ]);
     const credentialStore = new ReverseCredentialStore(home);
@@ -136,7 +134,6 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
     const home = await createTestTempDirectory("devshell-reverse-sse");
     const connector = new WorkerRpcInboundConnector();
     const worker = new WorkerInstanceFactory().create({
-        defaultWorkspace: asWorkspacePath(home),
         homeDirectory: home,
         managementMode: "selfManaged",
         name: asInstanceName("reverse-test"),
@@ -157,8 +154,7 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
                 filePath: join(home, "todo.json"),
                 instanceName: "reverse-test"
             }),
-            worker,
-            workspace: home
+            worker
         }
     ]);
     const credentialStore = new ReverseCredentialStore(home);

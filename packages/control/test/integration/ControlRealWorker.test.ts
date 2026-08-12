@@ -77,7 +77,7 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
             );
             await writeFile(
                 homePaths.instanceConfigFile("aromatic-pc"),
-                encodeInstanceConfig(createInstanceConfig(workspacePath)),
+                encodeInstanceConfig(createInstanceConfig()),
                 "utf8",
             );
 
@@ -128,12 +128,13 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
                         command: readRelativeMarkerCommand(workspaceMarkerName),
                     },
                     toolName: "bash_run",
+                    workspace: workspacePath,
                 },
             );
             assert.equal(toolCall.exitCode, 0);
             assert.match(toolCall.stdout, new RegExp(workspaceMarker, "u"));
 
-            await exerciseWorkerTerminal(runtimePaths.socketFile, "aromatic-pc");
+            await exerciseWorkerTerminal(runtimePaths.socketFile, "aromatic-pc", workspacePath);
 
             const logs = await request(
                 runtimePaths.socketFile,
@@ -266,7 +267,7 @@ function createGlobalConfig() {
     };
 }
 
-function createInstanceConfig(workspacePath: string): ConfigInstanceDraft {
+function createInstanceConfig(): ConfigInstanceDraft {
     return {
         enabled: true,
         logs: {
@@ -283,7 +284,6 @@ function createInstanceConfig(workspacePath: string): ConfigInstanceDraft {
         },
         name: "aromatic-pc",
         provider: "local" as const,
-        workspace: workspacePath,
     };
 }
 
@@ -299,7 +299,7 @@ function restoreEnv(
     process.env[name] = value;
 }
 
-async function exerciseWorkerTerminal(socketPath: string, instance: string): Promise<void> {
+async function exerciseWorkerTerminal(socketPath: string, instance: string, workspace: string): Promise<void> {
     const client = new ClientConnection({
         connectChannel: (signal) => SocketChannel.connect(socketPath, { signal }),
         mapError: (error) => error instanceof Error ? error : new Error(String(error)),
@@ -317,7 +317,7 @@ async function exerciseWorkerTerminal(socketPath: string, instance: string): Pro
             generation: number;
             terminalId: string;
             version: number;
-        }>(asInstanceName(instance), "terminal", "open", { cols: 80, rows: 24 });
+        }>(asInstanceName(instance), "terminal", "open", { cols: 80, rows: 24, workspace });
         const attached = await client.openStream(
             asInstanceName(instance),
             "terminal",

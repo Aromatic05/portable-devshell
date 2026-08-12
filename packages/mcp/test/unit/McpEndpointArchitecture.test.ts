@@ -9,6 +9,7 @@ import type {
 
 import { McpEndpointCatalog } from "../../src/endpoint/McpEndpointCatalog.ts";
 import { McpEndpointDispatch } from "../../src/endpoint/McpEndpointDispatch.ts";
+import { McpContextRegistry } from "../../src/context/McpContextRegistry.ts";
 
 function workerTool(name: string = "bash_run"): ToolDefinition {
     return {
@@ -39,6 +40,7 @@ function workerTool(name: string = "bash_run"): ToolDefinition {
 
 function createWorker(options: {
     cached?: boolean;
+    failToolCalled?: boolean;
     ready?: boolean;
     tools?: ToolDefinition[];
 } = {}) {
@@ -48,15 +50,16 @@ function createWorker(options: {
         input: JsonValue;
         toolName: string;
     }> = [];
-    const audited: string[] = [];
+    const audited: Array<{ context: ToolCallContext; toolName: string }> = [];
+    const releasedAlerts: string[] = [];
     const worker = {
         async auditToolCall<T extends JsonValue>(
             toolName: string,
             _input: JsonValue,
-            _context: ToolCallContext,
+            context: ToolCallContext,
             operation: (callId: string) => Promise<T>
         ): Promise<T> {
-            audited.push(toolName);
+            audited.push({ context, toolName });
             return await operation("call-test");
         },
         async appendMcpSessionClosed(sessionId: string): Promise<void> {
@@ -66,6 +69,7 @@ function createWorker(options: {
             events.push({ data: { sessionId }, type: "opened" });
         },
         async appendMcpToolCalled(toolName: string, context: { requestId?: string; ctxId?: string }): Promise<void> {
+            if (options.failToolCalled === true) throw new Error("tool event failed");
             events.push({ data: { ...context, toolName } as JsonValue, type: "called" });
         },
         async callTool(
@@ -77,6 +81,7 @@ function createWorker(options: {
             return { ok: true, toolName };
         },
         handshake: {
+            homeDirectory: "/home/demo",
             instance: "demo-local",
             skillsDirectory: "/home/demo/.devshell/skill",
             platform: {
@@ -85,8 +90,7 @@ function createWorker(options: {
                 os: "linux",
                 packageManager: "pacman",
                 shell: { executable: "/bin/bash", kind: "bash", version: "5" }
-            },
-            workspace: "/workspace"
+            }
         },
         hasToolSchemaCache: () => options.cached ?? false,
         listTools: () => options.tools ?? [workerTool()],
@@ -101,10 +105,12 @@ function createWorker(options: {
         async readAlerts() {
             return { advice: [] };
         },
+        async releaseAlerts(workspace: string) {
+            releasedAlerts.push(workspace);
+        },
         snapshot: () => ({ ready: options.ready ?? true }),
-        workspacePath: "/workspace"
     };
-    return { audited, calls, events, worker };
+    return { audited, calls, events, releasedAlerts, worker };
 }
 
 test("McpEndpointCatalog keeps control tools available without a worker schema", () => {
@@ -195,5 +201,52 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
     );
     assert.deepEqual(workerResult, { ok: true, toolName: "bash_run" });
     assert.deepEqual(harness.calls[0]?.input, { command: "pwd" });
-    assert.deepEqual(harness.audited, ["environ_info", "instance_list"]);
+    assert.deepEqual(harness.audited, [
+        {
+            context: {
+                ctxId: environment.ctxId,
+                requestId: "request-environment",
+                source: "mcp",
+                workspace: "/workspace",
+            },
+            toolName: "environ_info",
+        },
+        {
+            context: {
+                ctxId: environment.ctxId,
+                requestId: "request-list",
+                source: "mcp",
+                workspace: "/workspace",
+            },
+            toolName: "instance_list",
+        },
+    ]);
+});
+
+test("environ_info rolls back an undisclosed Context when post-create event recording fails", async () => {
+    const harness = createWorker({ failToolCalled: true });
+    const registry = new McpContextRegistry({ idFactory: () => "ctx-rollback" });
+    const catalog = new McpEndpointCatalog({
+        instanceName: "demo-local",
+        policy: { capabilities: ["read"], groups: ["file"] },
+        worker: harness.worker,
+    });
+    const dispatch = new McpEndpointDispatch({
+        catalog,
+        contextRegistry: registry,
+        instanceName: "demo-local",
+        worker: harness.worker,
+    });
+
+    await assert.rejects(
+        dispatch.callTool(
+            "environ_info",
+            { workspace: "/projects/rollback" },
+            { principal: "tester", requestId: "request-rollback" },
+        ),
+        /tool event failed/u,
+    );
+
+    assert.deepEqual(await registry.list(), []);
+    assert.deepEqual(harness.releasedAlerts, ["/projects/rollback"]);
 });

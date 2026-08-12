@@ -1,12 +1,10 @@
 import {
-    asWorkspacePath,
     createError,
     errorCodes,
     type JsonValue,
     type ReverseEnrollmentState,
     type ReverseInstanceStatus,
-    type ReverseTransport,
-    type WorkspacePath
+    type ReverseTransport
 } from "@portable-devshell/shared";
 
 import type { InstanceEventInput } from "../../instance/event/InstanceEventBuffer.js";
@@ -42,7 +40,6 @@ export class WorkerInstanceConnection {
     #intentionalRpcCloseDepth = 0;
     #reconnectPromise?: Promise<InstanceSnapshot>;
     #reverseStatus?: ReverseInstanceStatus;
-    #workspacePath?: WorkspacePath;
 
     constructor(options: WorkerInstanceConnectionOptions) {
         this.#appendEvent = options.appendEvent;
@@ -72,16 +69,8 @@ export class WorkerInstanceConnection {
         return this.#handshake;
     }
 
-    get workspacePath(): WorkspacePath | undefined {
-        return this.#workspacePath;
-    }
-
     snapshotReverse(): ReverseInstanceStatus | undefined {
         return this.#reverseStatus === undefined ? undefined : { ...this.#reverseStatus };
-    }
-
-    setWorkspacePath(workspacePath: WorkspacePath | string): void {
-        this.#workspacePath = asWorkspacePath(workspacePath);
     }
 
     clearHandshake(): void {
@@ -98,7 +87,6 @@ export class WorkerInstanceConnection {
             await this.#appendEvent("worker.rpcConnected");
             await this.#appendEvent("worker.schemaRefreshed", toEventData({ toolCount: refreshedTools.length }));
             await this.#appendEvent("instance.started", {
-                workspace: this.#handshake.workspace,
                 workerVersion: this.#handshake.workerVersion
             });
             await this.#applyStateUpdate({
@@ -246,7 +234,6 @@ export class WorkerInstanceConnection {
             this.#handshake = await this.#protocolClient.handshake(this.#config.handshake);
             const tools = await this.#protocolClient.listTools();
             const refreshedTools = this.#catalog.refresh(tools.tools);
-            this.#workspacePath = asWorkspacePath(this.#handshake.workspace);
             if (this.#reverseStatus !== undefined) {
                 this.#reverseStatus = {
                     ...this.#reverseStatus,

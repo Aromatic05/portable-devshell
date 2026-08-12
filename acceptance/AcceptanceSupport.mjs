@@ -57,7 +57,7 @@ export async function createAcceptanceFixture() {
         webPort = await reservePort();
     }
     const globalConfig = [
-        "version = 1",
+        "version = 2",
         "",
         "[control]",
         'logLevel = "info"',
@@ -68,9 +68,6 @@ export async function createAcceptanceFixture() {
         `listenPort = ${port}`,
         `publicBaseUrl = "http://127.0.0.1:${port}"`,
         "",
-        "[mcp.auth]",
-        'mode = "none"',
-        "",
         "[web]",
         "enabled = true",
         'listenHost = "127.0.0.1"',
@@ -80,11 +77,10 @@ export async function createAcceptanceFixture() {
         ""
     ].join("\n");
     const instanceConfig = [
-        "version = 2",
+        "version = 3",
         'name = "aromatic-pc"',
         "enabled = true",
         'provider = "local"',
-        `workspace = ${JSON.stringify(workspace)}`,
         "",
         "[mcp]",
         "enabled = true",

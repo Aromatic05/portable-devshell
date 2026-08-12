@@ -33,6 +33,7 @@ export class WorkerTerminalBackend implements TerminalBackend {
             ...(input.command === undefined ? {} : { command: input.command }),
             ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
             rows: input.rows,
+            workspace: input.workspace,
         });
         const process = new WorkerTerminalProcess(this.options.worker, descriptor);
         await process.initialize();

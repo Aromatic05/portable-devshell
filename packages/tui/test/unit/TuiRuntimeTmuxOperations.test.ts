@@ -4,26 +4,33 @@ import test from "node:test";
 import type { JsonValue } from "@portable-devshell/shared";
 
 import { TuiRuntimeTmuxOperations } from "../../src/runtime/operation/TuiRuntimeTmuxOperations.ts";
+import { TuiAppStore } from "../../src/state/TuiAppStore.ts";
 
 interface RecordedCall {
     input: JsonValue;
     instance: string;
     toolName: string;
+    workspace: string;
 }
 
 function createHarness(responder: (call: RecordedCall) => JsonValue) {
     const calls: RecordedCall[] = [];
+    const store = new TuiAppStore();
+    store.patchControlReadModel({
+        instances: [{ enabled: true, homeDirectory: "/home/alpha", mcpEnabled: true, name: "alpha" }]
+    });
     const operations = new TuiRuntimeTmuxOperations({
         clients: {
             tool: {
-                async call(instance: string, toolName: string, input: JsonValue): Promise<JsonValue> {
-                    const call: RecordedCall = { input, instance, toolName };
+                async call(instance: string, toolName: string, input: JsonValue, workspace: string): Promise<JsonValue> {
+                    const call: RecordedCall = { input, instance, toolName, workspace };
                     calls.push(call);
                     return responder(call);
                 }
             }
         } as never,
-        operationTimeoutMs: 1000
+        operationTimeoutMs: 1000,
+        store
     });
     return { calls, operations };
 }
@@ -39,7 +46,7 @@ test("listPanes records a tmux_list call and preserves each task's actual status
 
     const panes = await harness.operations.listPanes("alpha");
 
-    assert.deepEqual(harness.calls, [{ input: {}, instance: "alpha", toolName: "tmux_list" }]);
+    assert.deepEqual(harness.calls, [{ input: {}, instance: "alpha", toolName: "tmux_list", workspace: "/home/alpha" }]);
     assert.deepEqual(panes, [
         { id: "%0", name: "main", status: "idle" },
         { id: "%1", name: "server", status: "running", task: { id: "task-9", status: "running" } },

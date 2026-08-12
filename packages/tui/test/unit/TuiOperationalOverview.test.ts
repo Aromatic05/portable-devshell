@@ -101,7 +101,6 @@ const overview: OperationalOverview = {
                 protocolVersion: 2,
                 version: "0.4.10",
             },
-            workspace: "/workspace/alpha",
         },
     ],
     todos: [

@@ -9,7 +9,7 @@ import { RuntimeSubscriptionManager } from "../../src/instance/runtime/RuntimeSu
 test("RuntimeSubscriptionManager returns snapshot lastSeq and pushes sequenced events", async () => {
     const manager = new RuntimeSubscriptionManager(5);
     const worker = new FakeWorker("alpha");
-    await worker.start("/tmp/ws");
+    await worker.start();
 
     const harness = createStreamContext("conn-1", "subscribe-1");
 
@@ -36,7 +36,7 @@ test("RuntimeSubscriptionManager returns snapshot lastSeq and pushes sequenced e
 test("RuntimeSubscriptionManager transports multi-segment event types through valid route segments", async () => {
     const manager = new RuntimeSubscriptionManager(5);
     const worker = new FakeWorker("alpha");
-    await worker.start("/tmp/ws");
+    await worker.start();
     const harness = createStreamContext("conn-context", "subscribe-context");
 
     await manager.subscribe(
@@ -65,7 +65,7 @@ test("RuntimeSubscriptionManager transports multi-segment event types through va
 test("RuntimeSubscriptionManager returns stream.gap when fromSeq is unavailable", async () => {
     const manager = new RuntimeSubscriptionManager(5);
     const worker = new FakeWorker("alpha");
-    await worker.start("/tmp/ws");
+    await worker.start();
     worker.emit("toolCall.completed", { toolName: "bash_run" });
     worker.dropBefore(2);
 
@@ -94,7 +94,7 @@ test("RuntimeSubscriptionManager returns stream.gap when fromSeq is unavailable"
 test("RuntimeSubscriptionManager emits a non-terminal runtime stream.gap", async () => {
     const manager = new RuntimeSubscriptionManager(5);
     const worker = new FakeWorker("alpha");
-    await worker.start("/tmp/ws");
+    await worker.start();
 
     const harness = createStreamContext("conn-3", "subscribe-3");
 
@@ -121,7 +121,7 @@ test("RuntimeSubscriptionManager does not overlap polls while an event emit is p
     t.mock.timers.enable({ apis: ["setInterval"] });
     const manager = new RuntimeSubscriptionManager(1);
     const worker = new FakeWorker("alpha");
-    await worker.start("/tmp/ws");
+    await worker.start();
     let emitCount = 0;
     let releaseFirstEmit!: () => void;
     const firstEmitStarted = new Promise<void>((resolve) => {
@@ -156,7 +156,7 @@ test("RuntimeSubscriptionManager isolates a throwing subscription poll", async (
     const manager = new RuntimeSubscriptionManager(1);
     const badWorker = new FakeWorker("bad");
     const healthyWorker = new FakeWorker("healthy");
-    await Promise.all([badWorker.start("/tmp/ws"), healthyWorker.start("/tmp/ws")]);
+    await Promise.all([badWorker.start(), healthyWorker.start()]);
     let failPoll = false;
     const throwingWorker = {
         subscribe(fromSeq: number) {
@@ -263,8 +263,8 @@ class FakeWorker {
         };
     }
 
-    async start(_workspacePath?: string) {
-        this.emit("instance.started", { workspacePath: "/tmp/ws" });
+    async start() {
+        this.emit("instance.started");
         this.#snapshot = {
             connectionState: "connected",
             daemonState: "running",

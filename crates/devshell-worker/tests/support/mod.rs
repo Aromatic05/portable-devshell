@@ -65,10 +65,22 @@ impl TestEnv {
     }
 
     pub fn tmux_socket_file(&self, instance: &str) -> PathBuf {
-        self.runtime_root
+        let instance_root = self.instance_root(instance);
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(instance_root.as_os_str().as_encoded_bytes());
+        hasher.update(&[0]);
+        hasher.update(self.workspace().as_os_str().as_encoded_bytes());
+        let hash = hasher.finalize().to_hex();
+        let workspace_key = &hash[..16];
+        let candidate = self.runtime_root
             .join("devshell-worker")
             .join(instance)
-            .join("tmux.sock")
+            .join(format!("tmux-{workspace_key}.sock"));
+        if candidate.as_os_str().as_encoded_bytes().len() <= 100 {
+            candidate
+        } else {
+            PathBuf::from("/tmp").join(format!("devshell-tmux-{workspace_key}.sock"))
+        }
     }
 
     pub fn fallback_socket_file(&self, instance: &str) -> PathBuf {

@@ -31,6 +31,10 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         this.#instanceRegistry = options.instanceRegistry;
     }
 
+    async appendMcpToolCalled(instance: string, toolName: string, context: { requestId?: string; ctxId?: string }): Promise<void> {
+        await this.#requireDescriptor(instance).worker.appendMcpToolCalled(toolName, context);
+    }
+
     assertReady(instance: string): void {
         const descriptor = this.#requireDescriptor(instance);
         if (!descriptor.worker.snapshot().ready) {
@@ -41,6 +45,23 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 retryable: false
             });
         }
+    }
+
+    async auditToolCall<T extends JsonValue>(
+        instance: string,
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        operation: (callId: string) => Promise<T>,
+        signal?: AbortSignal
+    ): Promise<T> {
+        return await this.#requireDescriptor(instance).worker.auditToolCall(
+            toolName,
+            input,
+            context,
+            operation,
+            signal
+        );
     }
 
     async callTool(
@@ -65,6 +86,10 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
 
     async createSshInstance(sourceInstance: string, input: McpSshInstanceCreateInput): Promise<JsonValue> {
         return (await this.#createService.createSshInstanceFromMcp(sourceInstance, input)) as unknown as JsonValue;
+    }
+
+    environment(instance: string) {
+        return this.#requireDescriptor(instance).worker.handshake;
     }
 
     async listInstances(): Promise<JsonValue> {
@@ -99,6 +124,18 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
 
     listTools(instance: string): ToolDefinition[] {
         return this.#requireDescriptor(instance).worker.listTools();
+    }
+
+    async prepareWorkspace(instance: string, workspace: string) {
+        return await this.#requireDescriptor(instance).worker.prepareWorkspace(workspace);
+    }
+
+    async readAlerts(instance: string, workspace: string) {
+        return await this.#requireDescriptor(instance).worker.readAlerts(workspace);
+    }
+
+    async releaseAlerts(instance: string, workspace: string): Promise<void> {
+        await this.#requireDescriptor(instance).worker.releaseAlerts(workspace);
     }
 
     async startInstance(instance: string): Promise<JsonValue> {
@@ -139,6 +176,14 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         );
         this.#instanceRegistry.clearOwned(instance);
         return snapshot as unknown as JsonValue;
+    }
+
+    async touchAlerts(instance: string, workspace: string): Promise<void> {
+        await this.#requireDescriptor(instance).worker.touchAlerts(workspace);
+    }
+
+    async touchTemporaryDirectory(instance: string, path: string): Promise<void> {
+        await this.#requireDescriptor(instance).worker.touchTemporaryDirectory(path);
     }
 
     async writeTodo(instance: string, input: JsonValue, context: ToolCallContext): Promise<JsonValue> {

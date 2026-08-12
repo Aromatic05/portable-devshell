@@ -38,6 +38,7 @@ export function buildAuditCallBoxes(
                 formatField("Tool", call.toolName),
                 formatField("Status", call.status),
                 formatField("Source", call.source),
+                formatField("Workspace", call.workspace ?? "-"),
                 formatField("Request", call.requestId ?? "-"),
                 formatField("Task", call.taskId ?? "-"),
                 formatField("Todo item", call.todoItemId ?? "-"),

@@ -2,7 +2,7 @@ import { defaultMcpToolGroups, type JsonValue } from "@portable-devshell/shared"
 
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
-import { buildSelectedInstancePageContext, compactSummary, makeBox, shortenPath } from "./TuiPageBoxSupport.js";
+import { buildSelectedInstancePageContext, compactSummary, makeBox } from "./TuiPageBoxSupport.js";
 import { asRecord, editorDraft, readPath } from "../../state/editor/TuiEditorDraft.js";
 import { normalizeTuiInstanceEditorRecord, toTuiInstanceEditorRecord, tuiEditorRecordsEqual } from "../../state/editor/TuiEditorConfigAdapter.js";
 import { buttonLine, choiceLine, editorErrorLine, fieldLine, secretRecordFieldLine } from "../editor/TuiEditorView.js";
@@ -23,16 +23,12 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
             detailLines: [
                 choiceLine("enabled", "enabled", readPath(draft, "enabled")),
                 choiceLine("provider", "provider", readPath(draft, "provider")),
-                fieldLine("workspace", "defaultWorkspace", readPath(draft, "workspace")),
-                ...editorErrorLine(state, "config", "configuration", ["enabled", "provider", "workspace"])
+                ...editorErrorLine(state, "config", "configuration", ["enabled", "provider"])
             ],
             id: "configuration",
-            status: configStatus(state, ["enabled", "provider", "workspace"], instance?.enabled === false ? "disabled" : "normal"),
+            status: configStatus(state, ["enabled", "provider"], instance?.enabled === false ? "disabled" : "normal"),
             summaryLines: [
-                compactSummary(
-                    ["provider", stringValue(readPath(draft, "provider"), "unknown")],
-                    ["workspace", shortenPath(stringValue(readPath(draft, "workspace"), "unavailable"))]
-                )
+                compactSummary(["provider", stringValue(readPath(draft, "provider"), "unknown")])
             ],
             title: "General"
         }),
@@ -280,8 +276,7 @@ function instanceDraft(state: TuiAppState, instanceName: string): Record<string,
         mcp: { auth: "none", enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } },
         name: instanceName,
         provider: "local",
-        security: { mode: "disabled" },
-        workspace: ""
+        security: { mode: "disabled" }
     } : toTuiInstanceEditorRecord(record);
 }
 

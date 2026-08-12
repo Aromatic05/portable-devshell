@@ -62,6 +62,7 @@ function callBox(
             formatField("Started", call.startedAt),
             formatField("Completed", call.completedAt ?? "-"),
             formatField("Duration", duration(call)),
+            formatField("Workspace", call.workspace ?? "-"),
             formatField("Operation", call.requestId ?? "-"),
             {
                 id: "input",
@@ -85,7 +86,7 @@ function callBox(
                       view: "call",
                   }
                 : undefined,
-        searchText: `${call.toolName} ${call.status} ${call.callId}`,
+        searchText: `${call.toolName} ${call.status} ${call.callId} ${call.workspace ?? ""}`,
         status: toolCallStatus(call),
         summaryLines: [
             compactSummary(
@@ -108,6 +109,7 @@ function approvalBox(
             formatField("Approval", approval.approvalId),
             formatField("Tool", approval.toolName),
             formatField("Risk", approval.riskLevel),
+            formatField("Workspace", approval.workspace ?? "-"),
             formatField("Reason", approval.reason),
             {
                 id: `approval.open:${approval.approvalId}`,
@@ -116,7 +118,7 @@ function approvalBox(
             },
         ],
         id: `approval-${approval.approvalId}`,
-        searchText: `status ${approval.status} risk ${approval.riskLevel} source ${approval.source} tool ${approval.toolName} ${approval.approvalId}`,
+        searchText: `status ${approval.status} risk ${approval.riskLevel} source ${approval.source} tool ${approval.toolName} ${approval.approvalId} ${approval.workspace ?? ""}`,
         severity: approval.riskLevel === "high" ? "danger" : "warning",
         status: approval.status === "pending" ? "pending" : "normal",
         summaryLines: [

@@ -196,7 +196,7 @@ xattr
 host 来源访问使用受管 authority instance 的有效 `security.mode`：
 
 - `disabled`：不增加 workspace 边界，但仍拒绝符号链接以及非文件、非目录来源；
-- `workspace`：仅当 authority instance 使用 local provider，且请求路径位于该本地 workspace 内时允许。远程或容器 workspace 不能被当作 host 路径。
+- `workspace`：仅当 authority instance 使用 local provider，且请求路径位于本次请求显式提供的本地 workspace 内时允许。远程或容器上的 workspace 不能被当作 control host 路径。
 
 当前 MCP endpoint 对应的 instance 默认充当 authority instance。CLI/TUI 使用 `host` 时也必须提供或推导出一个真实受管 authority instance。host 访问事件写入该 authority instance；`host` 本身永远不会成为 instance。
 
@@ -227,17 +227,17 @@ control.artifact.cancelTransfer
 ## CLI
 
 ```text
-devshell artifact share <instance> <artifact:<handle>|path:<path>> [--expires-in <seconds>] [--authority <instance>]
+devshell artifact share <instance> <artifact:<handle>|path:<path>> [--workspace <absolute-path>] [--expires-in <seconds>] [--authority <instance>]
 devshell artifact shares
 devshell artifact revoke <shareId>
 
-devshell artifact transfer <source-instance> <artifact:<handle>|path:<path>> <target-instance> <target-path> [--overwrite] [--authority <instance>]
+devshell artifact transfer <source-instance> <artifact:<handle>|path:<path>> <target-instance> <target-path> --target-workspace <absolute-path> [--source-workspace <absolute-path>] [--overwrite] [--authority <instance>]
 devshell artifact transfer status <transferId>
 devshell artifact transfer cancel <transferId>
 devshell artifact transfers
 ```
 
-显式的 `artifact:` 和 `path:` 前缀避免普通路径被误判为 Artifact handle。启动传输后，CLI 输出排队记录，不等待任务完成。
+显式的 `artifact:` 和 `path:` 前缀避免普通路径被误判为 Artifact handle。path 来源需要显式绝对 workspace；transfer 的目标也必须提供 `--target-workspace`。启动传输后，CLI 输出排队记录，不等待任务完成。
 
 ## TUI
 

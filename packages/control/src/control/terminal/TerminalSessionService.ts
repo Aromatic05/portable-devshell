@@ -57,6 +57,7 @@ export interface TerminalOpenRequest {
     cwd?: string;
     instance: string;
     rows: number;
+    workspace: string;
 }
 
 export interface TerminalAttachRequest {
@@ -103,6 +104,7 @@ export class TerminalSessionService {
             ...(request.command === undefined ? {} : { command: request.command }),
             ...(request.cwd === undefined ? {} : { cwd: request.cwd }),
             rows: request.rows,
+            workspace: request.workspace,
         });
         if (this.#closed || this.#instanceEpoch(request.instance) !== epoch) {
             await disposeUnregistered(opened);

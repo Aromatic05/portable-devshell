@@ -16,7 +16,6 @@ struct StartResponse {
     instance: String,
     started: bool,
     pid: Option<u32>,
-    workspace: String,
 }
 
 pub fn run(args: InstanceArgs) -> Result<String, String> {
@@ -70,11 +69,6 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
         instance: instance.as_str().to_string(),
         started,
         pid,
-        workspace: status
-            .result
-            .and_then(|result| result.get("workspace").cloned())
-            .and_then(|value| value.as_str().map(ToString::to_string))
-            .ok_or_else(|| "worker status did not include workspace".to_string())?,
     })
     .map_err(|error| error.to_string())
 }
@@ -113,7 +107,6 @@ fn start_daemon(
 
     let runtime = process::WorkerRuntimeContext {
         instance: instance.clone(),
-        workspace: process::capture_workspace()?,
         platform: process::PlatformInfo {
             os: std::env::consts::OS,
             arch: std::env::consts::ARCH,

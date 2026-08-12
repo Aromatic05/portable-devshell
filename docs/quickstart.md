@@ -31,11 +31,12 @@ devshell instance create
 ```text
 name: demo-local
 provider: local
-workspace: 当前项目的绝对路径
 MCP enabled: yes
 ```
 
 实例名必须包含连字符。`demo` 无效，`demo-local` 有效。
+
+workspace 不属于 instance 配置。需要执行工具时，由调用方显式给出 worker 上的绝对 workspace；MCP 则在 `environ_info` 建立 Context 时选择 workspace。
 
 向导默认启用这些 MCP group：
 
@@ -67,7 +68,7 @@ devshell instance status demo-local
 ## 4. 验证工具调用
 
 ```bash
-devshell instance call demo-local bash_run '{"command":"pwd"}'
+devshell instance call demo-local /absolute/path/to/project bash_run '{"command":"pwd"}'
 ```
 
 查看实例日志：
@@ -117,7 +118,7 @@ auth = "none"
 path = "/demo-local/mcp"
 
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo", "context"]
+groups = ["file", "bash", "artifact", "tmux", "todo"]
 capabilities = ["read", "write", "execute"]
 ```
 

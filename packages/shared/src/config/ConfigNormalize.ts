@@ -69,11 +69,6 @@ export function normalizeConfigInstanceDraft(
     draft: ConfigInstanceDraft,
     context: ConfigNormalizeContext = defaultConfigNormalizeContext
 ): ControlInstanceConfig {
-    const workspace = draft.workspace;
-    if (workspace === undefined) {
-        throw configInputError("normalize", ["workspace"], "config.instance.workspaceRequired", "is required");
-    }
-
     const expectedMcpPath = `/${draft.name}/mcp`;
     if (draft.mcp?.path !== undefined && draft.mcp.path !== expectedMcpPath) {
         throw configInputError(
@@ -103,8 +98,7 @@ export function normalizeConfigInstanceDraft(
         security: {
             mode: draft.security?.mode ?? context.defaultSecurityMode
         },
-        tools: cloneTools(draft.tools),
-        workspace
+        tools: cloneTools(draft.tools)
     };
 
     switch (draft.provider) {
@@ -225,8 +219,7 @@ export function applyConfigInstancePatch(
                       mode: patch.security.mode ?? base.security?.mode
                   },
         ssh: providerChanged ? applyNullable(patch.ssh, undefined) : applyNullable(patch.ssh, base.ssh),
-        tools: applyNullable(patch.tools, base.tools),
-        workspace: patch.workspace ?? base.workspace
+        tools: applyNullable(patch.tools, base.tools)
     };
 }
 
@@ -330,8 +323,7 @@ export function toConfigInstanceDraft(instance: ControlInstanceConfig): ConfigIn
         provider: instance.provider,
         security: { ...instance.security },
         ssh: instance.ssh === undefined ? undefined : { ...instance.ssh },
-        tools: cloneTools(instance.tools),
-        workspace: instance.workspace
+        tools: cloneTools(instance.tools)
     };
 }
 

@@ -69,7 +69,6 @@ test("real TUI keyboard approval completes registration, authorization, token ex
                             },
                             name: "demo",
                             provider: "local",
-                            workspace: "/workspace/demo",
                         },
                     ],
                     mcp: {

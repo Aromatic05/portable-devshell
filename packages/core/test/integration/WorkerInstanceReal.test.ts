@@ -6,7 +6,6 @@ import test from "node:test";
 
 import {
     asInstanceName,
-    asWorkspacePath,
     errorCodes,
     type JsonValue
 } from "@portable-devshell/shared";
@@ -36,7 +35,6 @@ test("WorkerInstance completes lifecycle against frozen devshell-worker", realWo
     const instanceName = asInstanceName(`task-6-${process.pid}`);
     const factory = new WorkerInstanceFactory();
     const instance = factory.create({
-        defaultWorkspace: asWorkspacePath(workspacePath),
         env: { ...process.env, HOME: homeDirectory, XDG_RUNTIME_DIR: runtimeDirectory },
         homeDirectory,
         name: instanceName,
@@ -60,7 +58,7 @@ test("WorkerInstance completes lifecycle against frozen devshell-worker", realWo
     assert.equal(started.connectionState, "connected");
     assert.equal(started.ready, true);
     assert.equal(instance.handshake?.instance, instanceName);
-    assert.equal(instance.handshake?.workspace, workspacePath);
+    assert.equal(instance.handshake?.homeDirectory, homeDirectory);
     const bashRun = instance.listTools().find((tool) => tool.name === "bash_run");
     assert.notEqual(bashRun, undefined);
     assert.notEqual(bashRun?.inputSchema, undefined);
@@ -133,7 +131,7 @@ test("WorkerInstance serializes start and stop lifecycle operations", async () =
     });
 
     try {
-        const starting = instance.start("/tmp/workspace");
+        const starting = instance.start();
         await waitFor(() => commands.includes("start"));
         const stopping = instance.stop();
         await new Promise<void>((resolve) => setImmediate(resolve));
@@ -279,7 +277,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
             return true;
         });
 
-        const started = await instance.start("/tmp/workspace");
+        const started = await instance.start();
         assert.equal(started.ready, true);
 
         const firstCall = instance.callTool("bash_run", { command: "pwd" }, cliToolCallContext);
@@ -442,9 +440,13 @@ test("WorkerInstance waits for approval before invoking tools and records approv
     });
 
     try {
-        await instance.start("/tmp/workspace");
+        await instance.start();
         const beforeInvokeCount = harness.requestedMethods();
-        const callPromise = instance.callTool("bash_run", { command: "pwd" }, cliToolCallContext);
+        const callPromise = instance.callTool(
+            "bash_run",
+            { command: "pwd" },
+            { source: "cli", workspace: homeDirectory },
+        );
 
         const pendingApproval = await waitForPendingApproval(instance);
         assert.equal(harness.requestedMethods(), beforeInvokeCount);
@@ -452,6 +454,7 @@ test("WorkerInstance waits for approval before invoking tools and records approv
         assert.equal(approvals.length, 1);
         assert.equal(approvals[0]?.status, "pending");
         assert.equal(approvals[0]?.source, "cli");
+        assert.equal(approvals[0]?.workspace, homeDirectory);
 
         const approvalId = pendingApproval.approvalId;
         assert.notEqual(approvalId, "");
@@ -527,7 +530,7 @@ test("WorkerInstance cancels a pending approval when the caller aborts", async (
     });
 
     try {
-        await instance.start("/tmp/workspace");
+        await instance.start();
         const beforeInvokeCount = harness.requestedMethods();
         const controller = new AbortController();
         const callPromise = instance.callTool(
@@ -586,7 +589,7 @@ test("WorkerInstance denies and expires approval-gated calls without invoking to
     });
 
     try {
-        await instance.start("/tmp/workspace");
+        await instance.start();
 
         const beforeDeniedInvokeCount = harness.requestedMethods();
         const deniedPromise = instance.callTool("bash_run", { command: "pwd" }, { requestId: "req-deny", source: "mcp" });
@@ -657,7 +660,7 @@ test("WorkerInstance restores a stopped disconnected snapshot when start fails",
     });
 
     try {
-        await assert.rejects(instance.start("/tmp/workspace"), (error: unknown) => {
+        await assert.rejects(instance.start(), (error: unknown) => {
             assert.equal((error as { code?: string }).code, errorCodes.coreWorkerStartFailed);
             return true;
         });
@@ -707,7 +710,7 @@ test("WorkerInstance refreshes actual daemon state when stop fails", async () =>
     });
 
     try {
-        await instance.start("/tmp/workspace");
+        await instance.start();
         harness.setStatus("running");
 
         await assert.rejects(instance.stop(), (error: unknown) => {
@@ -825,7 +828,7 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
     });
 
     try {
-        await instance.start("/tmp/workspace");
+        await instance.start();
         assert.deepEqual(instance.listTools()[0]?.inputSchema, toolSchemaFor("command"));
 
         harness.setTools([

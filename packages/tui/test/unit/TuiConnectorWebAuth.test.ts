@@ -19,7 +19,6 @@ function expandedWebBox(webDraft: Record<string, JsonValue>) {
                 name: "alpha",
                 provider: "local",
                 security: { effectiveMode: "disabled", mode: "disabled" },
-                workspace: "/workspace/alpha",
             },
         ],
         mcp: {

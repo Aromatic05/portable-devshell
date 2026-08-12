@@ -63,7 +63,8 @@ function artifactViewImageTool(): ToolDefinition {
                         handle: { minLength: 1, type: "string" },
                         instance: { minLength: 1, type: "string" },
                         path: { minLength: 1, type: "string" },
-                        type: { enum: ["artifact", "file"], type: "string" }
+                        type: { enum: ["artifact", "file"], type: "string" },
+                        workspace: { minLength: 1, type: "string" }
                     },
                     required: ["instance", "type"],
                     type: "object"
@@ -122,10 +123,10 @@ function artifactShareTool(): ToolDefinition {
 }
 
 function artifactTransferTool(): ToolDefinition {
-    const nonStartFields = ["handle", "sourcePath", "targetInstance", "targetPath", "overwrite"]
+    const nonStartFields = ["handle", "sourcePath", "targetInstance", "targetPath", "targetWorkspace", "overwrite"]
         .map((field) => ({ required: [field] }));
     return {
-        description: "Manage an asynchronous transfer between managed instances. For operation=start, provide exactly one of sourcePath or handle, plus targetInstance and targetPath; overwrite defaults to false. The returned transferId is used with operation=status or operation=cancel.",
+        description: "Manage an asynchronous transfer between managed instances. For operation=start, provide exactly one of sourcePath or handle, plus targetInstance, targetPath, and an absolute targetWorkspace. The source workspace comes from ctxId. overwrite defaults to false. The returned transferId is used with operation=status or operation=cancel.",
         group: "artifact",
         inputSchema: {
             additionalProperties: false,
@@ -136,7 +137,7 @@ function artifactTransferTool(): ToolDefinition {
                         { not: { required: ["handle"] }, required: ["sourcePath"] }
                     ],
                     properties: { operation: { const: "start" } },
-                    required: ["operation", "targetInstance", "targetPath"]
+                    required: ["operation", "targetInstance", "targetPath", "targetWorkspace"]
                 },
                 {
                     not: { anyOf: nonStartFields },
@@ -177,6 +178,11 @@ function artifactTransferTool(): ToolDefinition {
                 },
                 targetPath: {
                     description: "Destination file or directory path on targetInstance.",
+                    minLength: 1,
+                    type: "string"
+                },
+                targetWorkspace: {
+                    description: "Absolute workspace path on targetInstance used to resolve targetPath.",
                     minLength: 1,
                     type: "string"
                 },

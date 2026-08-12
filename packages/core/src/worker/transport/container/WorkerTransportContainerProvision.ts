@@ -11,7 +11,6 @@ export interface WorkerTransportContainerProvision {
     afterWorkerStop(): Promise<void>;
     buildExecArgs(
         command: readonly string[],
-        useRemoteCwd: boolean,
         environmentKeys?: readonly string[]
     ): string[];
     buildShellExecArgs(commandLine: string): string[];
@@ -22,7 +21,6 @@ export interface WorkerTransportContainerProvision {
 export interface WorkerTransportContainerProvisionOperations {
     provider: "docker" | "podman";
     readContainerStatus(containerName: string): Promise<WorkerTransportContainerLifecycleStatus>;
-    remoteCwd?: string;
     runProviderCommand(
         operation: string,
         args: readonly string[],
@@ -61,11 +59,4 @@ export function workerTransportContainerEnvironmentArgs(
     environmentKeys: readonly string[] | undefined
 ): string[] {
     return (environmentKeys ?? []).flatMap((key) => ["-e", key]);
-}
-
-export function workerTransportContainerWorkingDirectoryArgs(
-    remoteCwd: string | undefined,
-    useRemoteCwd: boolean
-): string[] {
-    return useRemoteCwd && remoteCwd ? ["-w", remoteCwd] : [];
 }

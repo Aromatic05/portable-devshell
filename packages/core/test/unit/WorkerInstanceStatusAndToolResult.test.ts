@@ -41,8 +41,7 @@ test("worker status parser accepts canonical status and ignores malformed option
         {
             daemonState: "running",
             pid: 1234,
-            workerSha256: "abc",
-            workspacePath: "/workspace"
+            workerSha256: "abc"
         }
     );
     assert.deepEqual(
@@ -50,8 +49,7 @@ test("worker status parser accepts canonical status and ignores malformed option
         {
             daemonState: "stopped",
             pid: undefined,
-            workerSha256: undefined,
-            workspacePath: undefined
+            workerSha256: undefined
         }
     );
 });

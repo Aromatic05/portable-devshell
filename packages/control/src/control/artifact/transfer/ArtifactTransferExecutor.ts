@@ -120,7 +120,8 @@ export class ArtifactTransferExecutor {
             const receive = await targetEndpoint.beginArtifactReceive({
                 descriptor: opened.descriptor,
                 overwrite: transfer.request.overwrite ?? false,
-                targetPath: transfer.request.targetPath
+                targetPath: transfer.request.targetPath,
+                workspace: transfer.request.targetWorkspace
             });
             transfer.receiveId = receive.receiveId;
             this.#assertRunActive(generation);

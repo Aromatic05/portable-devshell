@@ -35,7 +35,7 @@ try {
     process.stdout.write(after.stdout);
     assertOutput(after, /ready: true/u, "ready state was not reported");
 
-    const pwd = runCli(["instance", "call", "aromatic-pc", "bash_run", JSON.stringify({ command: "pwd" })], fixture.env);
+    const pwd = runCli(["instance", "call", "aromatic-pc", fixture.workspace, "bash_run", JSON.stringify({ command: "pwd" })], fixture.env);
     process.stdout.write(pwd.stdout);
     assert.equal(pwd.stdout.includes(fixture.workspace), true, "pwd output omitted the workspace");
 
@@ -43,6 +43,7 @@ try {
         "instance",
         "call",
         "aromatic-pc",
+        fixture.workspace,
         "bash_run",
         JSON.stringify({ command: "echo portable-devshell" })
     ], fixture.env);

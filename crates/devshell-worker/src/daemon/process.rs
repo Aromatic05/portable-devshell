@@ -3,7 +3,7 @@ use std::ffi::OsStr;
 use std::fs;
 #[cfg(unix)]
 use std::fs::OpenOptions;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 #[cfg(unix)]
 use std::process::{Child, Command, Stdio};
 
@@ -22,7 +22,6 @@ use crate::storage::InstancePaths;
 use crate::storage::permissions::ensure_file_mode;
 
 pub const INTERNAL_INSTANCE_ENV: &str = "DEVSHELL_WORKER_INTERNAL_INSTANCE";
-pub const INTERNAL_WORKSPACE_ENV: &str = "DEVSHELL_WORKER_INTERNAL_WORKSPACE";
 pub const INTERNAL_SECURITY_MODE_ENV: &str = "DEVSHELL_WORKER_INTERNAL_SECURITY_MODE";
 pub const SECURITY_MODE_ENV: &str = "DEVSHELL_WORKER_SECURITY_MODE";
 
@@ -35,7 +34,6 @@ pub struct PlatformInfo {
 #[derive(Clone, Debug)]
 pub struct WorkerRuntimeContext {
     pub instance: InstanceName,
-    pub workspace: PathBuf,
     pub platform: PlatformInfo,
     pub security_mode: SecurityMode,
     pub worker_sha256: Option<String>,
@@ -95,7 +93,6 @@ pub fn spawn(
         let mut command = Command::new(std::env::current_exe().map_err(|error| error.to_string())?);
         command
             .env(INTERNAL_INSTANCE_ENV, instance.as_str())
-            .env(INTERNAL_WORKSPACE_ENV, &runtime.workspace)
             .env(
                 INTERNAL_SECURITY_MODE_ENV,
                 match runtime.security_mode {
@@ -103,6 +100,7 @@ pub fn spawn(
                     SecurityMode::Workspace => "workspace",
                 },
             )
+            .current_dir(&paths.instance_root)
             .stdin(Stdio::null())
             .stdout(Stdio::from(stdout_file))
             .stderr(Stdio::from(log_file));
@@ -125,10 +123,9 @@ pub fn spawn(
         });
         let pid = spawn_daemon_process(
             &executable,
-            &runtime.workspace,
+            &paths.instance_root,
             &[
                 (INTERNAL_INSTANCE_ENV, OsStr::new(instance.as_str())),
-                (INTERNAL_WORKSPACE_ENV, runtime.workspace.as_os_str()),
                 (INTERNAL_SECURITY_MODE_ENV, security_mode),
             ],
         )?;
@@ -136,42 +133,12 @@ pub fn spawn(
     }
 }
 
-pub fn capture_workspace() -> Result<PathBuf, String> {
-    let cwd =
-        std::env::current_dir().map_err(|error| format!("failed to read current dir: {error}"))?;
-    let workspace = cwd.canonicalize().map_err(|error| {
-        format!(
-            "failed to canonicalize workspace {}: {error}",
-            cwd.display()
-        )
-    })?;
-    if !workspace.is_dir() {
-        return Err(format!(
-            "workspace is not a directory: {}",
-            workspace.display()
-        ));
-    }
-    Ok(workspace)
-}
-
 pub fn read_runtime_context() -> Result<WorkerRuntimeContext, String> {
     let instance = std::env::var(INTERNAL_INSTANCE_ENV)
         .map_err(|_| "internal daemon instance is missing".to_string())?;
     let instance = InstanceName::parse(&instance)?;
-    let workspace = std::env::var_os(INTERNAL_WORKSPACE_ENV)
-        .ok_or_else(|| "internal daemon workspace is missing".to_string())?;
-    let workspace = PathBuf::from(workspace)
-        .canonicalize()
-        .map_err(|error| format!("failed to canonicalize daemon workspace: {error}"))?;
-    if !workspace.is_dir() {
-        return Err(format!(
-            "daemon workspace is not a directory: {}",
-            workspace.display()
-        ));
-    }
     Ok(WorkerRuntimeContext {
         instance,
-        workspace,
         platform: PlatformInfo {
             os: std::env::consts::OS,
             arch: std::env::consts::ARCH,

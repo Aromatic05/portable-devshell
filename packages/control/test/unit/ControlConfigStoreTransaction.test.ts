@@ -22,18 +22,15 @@ test("a failed multi-file configuration write restores the previous complete gen
     original.web.listenPort = 17920;
     original.instances = [normalizeConfigInstanceDraft({
         name: "alpha-local",
-        provider: "local",
-        workspace: "/workspace/alpha"
+        provider: "local"
     })];
     await store.write(original, homeDirectory);
 
     const next = structuredClone(original);
     next.web.listenPort = 17921;
-    next.instances[0]!.workspace = "/workspace/alpha-next";
     next.instances.push(normalizeConfigInstanceDraft({
         name: "blocked-local",
-        provider: "local",
-        workspace: "/workspace/blocked"
+        provider: "local"
     }));
 
     const blockedTarget = paths.instanceConfigFile("blocked-local");
@@ -43,8 +40,5 @@ test("a failed multi-file configuration write restores the previous complete gen
 
     const recovered = await store.readOrCreate(homeDirectory);
     assert.equal(recovered.web.listenPort, 17920);
-    assert.deepEqual(
-        recovered.instances.map((instance) => ({ name: instance.name, workspace: instance.workspace })),
-        [{ name: "alpha-local", workspace: "/workspace/alpha" }]
-    );
+    assert.deepEqual(recovered.instances.map((instance) => instance.name), ["alpha-local"]);
 });

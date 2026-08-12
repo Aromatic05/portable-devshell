@@ -38,7 +38,7 @@ export function buildArtifactActivityView(
     for (const share of instanceShares) {
         const remainingSeconds = Math.max(0, Math.ceil((share.expiresAtMs - nowMs) / 1000));
         detailLines.push(
-            `share ${shortId(share.shareId)}  ${share.downloadName}  ${share.state}  expires=${formatDuration(remainingSeconds)}`
+            `share ${shortId(share.shareId)}  ${share.downloadName}  ${share.state}  expires=${formatDuration(remainingSeconds)}  source=${artifactSourceLabel(share.source)}`
         );
         if (share.state === "active") {
             detailLines.push({
@@ -56,7 +56,7 @@ export function buildArtifactActivityView(
                 ? formatBytes(transfer.transferredBytes)
                 : `${formatBytes(transfer.transferredBytes)} / ${formatBytes(total)}`;
         detailLines.push(
-            `transfer ${shortId(transfer.transferId)}  ${transfer.source.instance} -> ${transfer.target.instance}:${transfer.target.path}  ${transfer.status}  ${progress}`
+            `transfer ${shortId(transfer.transferId)}  source=${artifactSourceLabel(transfer.source)} -> target=${artifactTargetLabel(transfer.target)}  ${transfer.status}  ${progress}`
         );
         if (!isArtifactTransferTerminal(transfer.status) && transfer.status !== "cancelling") {
             detailLines.push({
@@ -75,4 +75,15 @@ export function buildArtifactActivityView(
 
 function shortId(value: string): string {
     return value.length <= 8 ? value : value.slice(0, 8);
+}
+
+function artifactSourceLabel(source: ArtifactShareResult["source"]): string {
+    if (source.handle !== undefined) {
+        return `${source.instance} handle=${shortId(source.handle)}`;
+    }
+    return `${source.instance} workspace=${source.workspace ?? "-"} path=${source.path ?? "-"}`;
+}
+
+function artifactTargetLabel(target: ArtifactTransferRecord["target"]): string {
+    return `${target.instance} workspace=${target.workspace ?? "-"} path=${target.path}`;
 }

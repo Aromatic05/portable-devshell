@@ -93,7 +93,7 @@ export function renderInstanceUsage(): string {
         "  devshell instance stop <instance>",
         "  devshell instance logs <instance> [-f]",
         "  devshell instance todo <instance> [--follow|-f]",
-        "  devshell instance call <instance> <toolName> <jsonInput>",
+        "  devshell instance call <instance> <workspace> <toolName> <jsonInput>",
         "  devshell instance device-code <instance>",
         "  devshell instance rotate-token <instance>",
         "  devshell instance revoke-token <instance>",

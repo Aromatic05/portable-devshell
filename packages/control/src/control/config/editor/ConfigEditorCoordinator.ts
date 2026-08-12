@@ -439,7 +439,6 @@ export class ConfigEditorCoordinator {
                 descriptor.enabled = existing.enabled;
                 descriptor.mcpEnabled = existing.mcp.enabled;
                 descriptor.mcpPath = existing.mcp.path;
-                descriptor.workspace = existing.workspace;
             } catch (error) {
                 failures.push(error);
             }
@@ -481,7 +480,6 @@ export class ConfigEditorCoordinator {
         descriptor.enabled = instance.enabled;
         descriptor.mcpEnabled = instance.mcp.enabled;
         descriptor.mcpPath = instance.mcp.path;
-        descriptor.workspace = instance.workspace;
     }
 
     #syncMcpEndpoint(instanceName: string): void {

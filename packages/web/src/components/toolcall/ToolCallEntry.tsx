@@ -60,6 +60,7 @@ function ToolCallDetails({
         <dl className="activity-detail">
             <div><dt>Call</dt><dd>{call.callId}</dd></div>
             <div><dt>Context</dt><dd>{call.ctxId ?? "unscoped"}</dd></div>
+            <div><dt>Workspace</dt><dd>{call.workspace ?? "-"}</dd></div>
             <div><dt>Started</dt><dd>{call.startedAt}</dd></div>
             <div><dt>Completed</dt><dd>{call.completedAt ?? "-"}</dd></div>
             <div><dt>Duration</dt><dd>{toolCallDuration(call)}</dd></div>

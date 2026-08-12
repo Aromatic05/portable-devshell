@@ -36,14 +36,12 @@ const SSH_INTERACTIVE_HINT =
 export interface WorkerTransportDriverSshOptions {
     command: string;
     skillsDirectory?: string;
-    workspace?: string;
     workerBinary?: WorkerBinary;
     spawnFunction?: SpawnFunction;
 }
 
 export class WorkerTransportDriverSsh implements WorkerCommandTransport {
     readonly #sshCommand: readonly [string, ...string[]];
-    readonly #workspace?: string;
     readonly #workerBinary: WorkerBinary;
     readonly #installer: WorkerInstallerRemote;
     readonly #process: WorkerTransportProcessRunner;
@@ -52,7 +50,6 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
 
     constructor(options: WorkerTransportDriverSshOptions) {
         this.#sshCommand = parseSshCommand(options.command);
-        this.#workspace = options.workspace;
         this.#workerBinary = options.workerBinary ?? new WorkerBinary();
         this.#process = new WorkerTransportProcessRunner(options.spawnFunction);
         this.#installer = new WorkerInstallerRemote({
@@ -112,8 +109,7 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
             command,
             remoteCommandLine,
             {
-                instance: options.instanceName,
-                useWorkspace: command === "start"
+                instance: options.instanceName
             }
         );
         let child;
@@ -297,13 +293,11 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
     #createRemoteShellContext(
         operation: string,
         commandLine: string,
-        options: { cwd?: string; instance?: string; useWorkspace?: boolean } = {}
+        options: { cwd?: string; instance?: string } = {}
     ): ProviderCommandContext {
-        const remoteCommand = this.#withRemoteCwd(commandLine, options.useWorkspace ?? false);
-
         return createCommandContext({
-            command: this.#buildRemoteShellCommand(remoteCommand),
-            cwd: options.cwd ?? (options.useWorkspace === true ? this.#workspace : undefined),
+            command: this.#buildRemoteShellCommand(commandLine),
+            cwd: options.cwd,
             instance: options.instance,
             operation,
             provider: "ssh"
@@ -316,10 +310,6 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
                 ? command[2]
                 : command.map(shellEscape).join(" ");
         return this.#createRemoteShellContext(operation, commandLine);
-    }
-
-    #withRemoteCwd(commandLine: string, useWorkspace: boolean): string {
-        return useWorkspace && this.#workspace ? `cd ${shellEscape(this.#workspace)} && ${commandLine}` : commandLine;
     }
 
     #buildRemoteShellCommand(commandLine: string): [string, ...string[]] {
@@ -386,7 +376,6 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
         const commandLine = ":";
         const context = createCommandContext({
             command: this.#buildInteractiveRemoteShellCommand(commandLine),
-            cwd: this.#workspace,
             instance,
             operation,
             provider: "ssh"
@@ -414,7 +403,7 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
             "--",
             "sh",
             "-lc",
-            this.#withRemoteCwd(commandLine, true)
+            commandLine
         ];
 
         return ["script", "-qefc", sshCommand.map(shellEscape).join(" "), "/dev/null"];

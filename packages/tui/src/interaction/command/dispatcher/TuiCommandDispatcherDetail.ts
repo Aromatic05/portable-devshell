@@ -11,7 +11,6 @@ interface CommandDispatcherDetailOptions {
     dispatch(intent: TuiUiIntent): Promise<boolean>;
     editor: TuiCommandDispatcherEditor;
     focus: TuiCommandDispatcherFocus;
-    onOAuthApprovalDecision(approvalId: string, decision: "approve" | "deny"): Promise<void>;
     projection: TuiInteractionProjection;
     store: TuiAppStore;
 }
@@ -21,7 +20,6 @@ export class TuiCommandDispatcherDetail {
     readonly #dispatch: CommandDispatcherDetailOptions["dispatch"];
     readonly #editor: TuiCommandDispatcherEditor;
     readonly #focus: TuiCommandDispatcherFocus;
-    readonly #onOAuthApprovalDecision: CommandDispatcherDetailOptions["onOAuthApprovalDecision"];
     readonly #projection: TuiInteractionProjection;
     readonly #store: TuiAppStore;
 
@@ -30,7 +28,6 @@ export class TuiCommandDispatcherDetail {
         this.#dispatch = options.dispatch;
         this.#editor = options.editor;
         this.#focus = options.focus;
-        this.#onOAuthApprovalDecision = options.onOAuthApprovalDecision;
         this.#projection = options.projection;
         this.#store = options.store;
     }
@@ -53,8 +50,14 @@ export class TuiCommandDispatcherDetail {
 
             if (state.ui.selectedPage === "connections" && actionId?.startsWith("oauth.approve:")) {
                 const approvalId = actionId.slice("oauth.approve:".length);
+                const approval = state.readModel.oauthApprovals.find(
+                    (candidate) => candidate.approvalId === approvalId,
+                );
+                const requestSummary = approval === undefined
+                    ? `OAuth request ${approvalId}`
+                    : `OAuth ${approval.kind} for ${approval.clientName}; scopes=${approval.requestedScopes.join(", ") || "none"}; resources=${approval.requestedResources.join(", ") || "none"}; redirects=${approval.redirectUris.join(", ") || "none"}`;
                 return await this.#dispatch({
-                    body: "Approve this OAuth request? The client may receive authorization immediately.",
+                    body: `Approve ${requestSummary}? The client may receive authorization immediately.`,
                     confirmIntent: { approvalId, decision: "approve", type: "oauthApproval.decide" },
                     confirmLabel: "Approve",
                     title: "Confirm OAuth Approval",
@@ -63,9 +66,20 @@ export class TuiCommandDispatcherDetail {
             }
 
             if (state.ui.selectedPage === "connections" && actionId?.startsWith("oauth.deny:")) {
-                await this.#onOAuthApprovalDecision(actionId.slice("oauth.deny:".length), "deny");
-                this.#store.setScreenStatus("connections", "OAuth approval denied.");
-                return true;
+                const approvalId = actionId.slice("oauth.deny:".length);
+                const approval = state.readModel.oauthApprovals.find(
+                    (candidate) => candidate.approvalId === approvalId,
+                );
+                const requestSummary = approval === undefined
+                    ? `OAuth request ${approvalId}`
+                    : `OAuth ${approval.kind} for ${approval.clientName}; scopes=${approval.requestedScopes.join(", ") || "none"}; resources=${approval.requestedResources.join(", ") || "none"}; redirects=${approval.redirectUris.join(", ") || "none"}`;
+                return await this.#dispatch({
+                    body: `Deny ${requestSummary}? The current OAuth request will be rejected immediately.`,
+                    confirmIntent: { approvalId, decision: "deny", type: "oauthApproval.decide" },
+                    confirmLabel: "Deny",
+                    title: "Confirm OAuth Denial",
+                    type: "overlay.openConfirm"
+                });
             }
 
             if (state.ui.selectedPage === "instances" && actionId?.startsWith("instance.toggleEnabled:")) {
@@ -92,9 +106,14 @@ export class TuiCommandDispatcherDetail {
             if (state.ui.selectedPage === "todo" && state.ui.selectedInstance !== undefined && button === "delete-project") {
                 const taskId = todoTaskIdFromBox(boxId);
                 if (taskId === undefined) return false;
+                const instance = state.ui.selectedInstance;
+                const todo = state.readModel.instanceState[instance]?.todo;
+                const title = todo?.taskId === taskId
+                    ? todo.title
+                    : todo?.tasks?.find((task) => task.taskId === taskId)?.title;
                 return await this.#dispatch({
-                    body: `Delete Todo project ${taskId}? This permanently removes the project and its history.`,
-                    confirmIntent: { instance: state.ui.selectedInstance, taskId, type: "todo.delete" },
+                    body: `Delete Todo project ${title ?? taskId} (${taskId}) from instance ${instance}? This permanently removes the project and its history.`,
+                    confirmIntent: { instance, taskId, type: "todo.delete" },
                     confirmLabel: "Delete",
                     title: "Confirm Todo Project Deletion",
                     type: "overlay.openConfirm"
@@ -129,8 +148,13 @@ export class TuiCommandDispatcherDetail {
                 const ctxId = ctxIdFromBox(boxId);
                 if (ctxId === undefined) return false;
                 if (actionId === "context.disable") {
+                    const workspace = state.readModel.contexts.find(
+                        (context) =>
+                            context.ctxId === ctxId &&
+                            context.instance === state.ui.selectedInstance,
+                    )?.workspace;
                     return await this.#dispatch({
-                        body: `Disable Context ${ctxId}? Disabled Contexts cannot be renewed; the client must establish a new Context.`,
+                        body: `Disable Context ${ctxId}${workspace === undefined ? "" : ` in workspace ${workspace}`}? Disabled Contexts cannot be renewed; the client must establish a new Context.`,
                         confirmIntent: { ctxId, instance: state.ui.selectedInstance, type: "context.disable" },
                         confirmLabel: "Disable",
                         title: "Confirm Context Disable",

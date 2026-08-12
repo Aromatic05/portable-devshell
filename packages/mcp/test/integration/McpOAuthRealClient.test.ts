@@ -27,7 +27,7 @@ import type {
     OAuthTokens
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 
-import { asInstanceName, asWorkspacePath } from "@portable-devshell/shared";
+import { asInstanceName, asWorkspacePath, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
 import { WorkerBinary, WorkerInstanceFactory, WorkerTransportDriverLocal } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import type { McpAuthConfig, McpInstanceGateway } from "@portable-devshell/mcp";
@@ -79,7 +79,17 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
         instanceName: "real-comment",
     });
     const gateway = {
+        async appendMcpToolCalled() {},
         assertReady() {},
+        async auditToolCall<T extends JsonValue>(
+            _instance: string,
+            _toolName: string,
+            _input: JsonValue,
+            _context: ToolCallContext,
+            operation: (callId: string) => Promise<T>,
+        ): Promise<T> {
+            return await operation("call-test");
+        },
         async callTool() {
             throw new Error("routed calls are not used by this test");
         },
@@ -88,12 +98,25 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
             return await messages.consumePending(ctxId, callId);
         },
         async createSshInstance() { return null; },
+        environment() { return undefined; },
         async listInstances() { return []; },
         listTools() { return []; },
+        async prepareWorkspace(_instance: string, workspace: string) {
+            return {
+                projectMemoryAgentFile: `${workspace}/.devshell/AGENT.md`,
+                projectMemoryDirectory: `${workspace}/.devshell`,
+                temporaryDirectory: "/tmp/mcp-comment",
+                workspace
+            };
+        },
+        async readAlerts() { return { advice: [] }; },
+        async releaseAlerts() {},
         async readTodo() { return { items: [], revision: 0 }; },
         async startInstance() { return null; },
         async statusInstance() { return null; },
         async stopInstance() { return null; },
+        async touchAlerts() {},
+        async touchTemporaryDirectory() {},
         async writeTodo() { return { items: [], revision: 0 }; },
     } satisfies McpInstanceGateway;
     const { cleanupDirs, host, instance, workspaceMarker, workspacePath } = await startFrozenWorkerHost(
@@ -618,7 +641,6 @@ function createFrozenWorker(
     workspacePath: string,
 ) {
     return new WorkerInstanceFactory().create({
-        defaultWorkspace: asWorkspacePath(workspacePath),
         env: {
             ...process.env,
             HOME: homeDirectory,

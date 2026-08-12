@@ -235,7 +235,7 @@ function instanceLine(row: TuiOverviewInstanceRowModel, width: number): string {
             [String(row.todos), 5],
             [String(row.approvals), 5],
             [
-                row.lastError ?? row.workspace ?? "",
+                row.lastError ?? "",
                 remainingWidth(width, [22, 9, 10, 12, 10, 4, 5, 5]),
             ],
         ]);

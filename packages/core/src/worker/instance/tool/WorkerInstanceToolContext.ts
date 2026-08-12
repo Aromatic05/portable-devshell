@@ -17,6 +17,7 @@ export interface WorkerInstanceToolCallScope {
         taskId?: string;
         todoItemId?: string;
         toolName: string;
+        workspace?: string;
     };
     input: JsonValue;
     inputSummary: string;
@@ -46,7 +47,8 @@ export function createWorkerInstanceToolCallScope(
             source: context.source,
             taskId: association?.taskId,
             todoItemId: association?.todoItemId,
-            toolName
+            toolName,
+            workspace: context.workspace,
         },
         input,
         inputSummary,

@@ -34,8 +34,7 @@ test("config parser trims values and preserves explicit patch removals", () => {
                     }
                 },
                 name: "local-one",
-                provider: "local",
-                workspace: "/workspace"
+                provider: "local"
             }
         ]
     });
@@ -43,7 +42,6 @@ test("config parser trims values and preserves explicit patch removals", () => {
     assert.equal(parsed.control?.logLevel, "debug");
     assert.equal(parsed.instances?.[0]?.name, "local-one");
     assert.equal(parsed.instances?.[0]?.provider, "local");
-    assert.equal(parsed.instances?.[0]?.workspace, "/workspace");
     assert.equal(parsed.mcp?.enabled, true);
     assert.equal(parsed.instances?.[0]?.mcp?.auth, "oauth2");
     assert.deepEqual(parsed.instances?.[0]?.mcp?.oauth2, {
@@ -74,9 +72,29 @@ test("config parser trims values and preserves explicit patch removals", () => {
         provider: undefined,
         security: undefined,
         ssh: null,
-        tools: null,
-        workspace: undefined
+        tools: null
     });
+});
+
+test("instance configuration has no persistent workspace authority", () => {
+    const instance = normalizeConfigInstanceDraft({
+        name: "local-one",
+        provider: "local"
+    });
+
+    assert.equal("workspace" in instance, false);
+    assertConfigIssue(
+        () => parseConfigDraft({
+            instances: [{
+                name: "legacy-workspace",
+                provider: "local",
+                workspace: "/workspace"
+            }]
+        }),
+        "parse",
+        ["instances", 0, "workspace"],
+        "config.field.unknown"
+    );
 });
 
 test("top-level MCP rejects auth while instance MCP validates OAuth2 structure", () => {
@@ -87,8 +105,7 @@ test("top-level MCP rejects auth while instance MCP validates OAuth2 structure",
                     {
                         legacyField: true,
                         name: "local-one",
-                        provider: "local",
-                        workspace: "/workspace"
+                        provider: "local"
                     }
                 ]
             }),
@@ -108,8 +125,7 @@ test("top-level MCP rejects auth while instance MCP validates OAuth2 structure",
                 instances: [{
                     mcp: { auth: "token", oauth2: { resourceName: "unexpected" } },
                     name: "local-one",
-                    provider: "local",
-                    workspace: "/workspace"
+                    provider: "local"
                 }]
             }),
         "parse",
@@ -117,7 +133,7 @@ test("top-level MCP rejects auth while instance MCP validates OAuth2 structure",
         "config.auth.unexpectedOauth2"
     );
     assertConfigIssue(
-        () => parseConfigDraft({ instances: [{ mcp: { auth: "token" }, name: "local-one", provider: "local", workspace: "/workspace" }] }),
+        () => parseConfigDraft({ instances: [{ mcp: { auth: "token" }, name: "local-one", provider: "local" }] }),
         "parse",
         ["instances", 0, "mcp", "token"],
         "config.auth.tokenRequired"
@@ -134,8 +150,7 @@ test("top-level MCP rejects auth while instance MCP validates OAuth2 structure",
                         }
                     },
                     name: "local-one",
-                    provider: "local",
-                    workspace: "/workspace"
+                    provider: "local"
                 }]
             }),
         "parse",
@@ -147,12 +162,12 @@ test("top-level MCP rejects auth while instance MCP validates OAuth2 structure",
 test("instance token auth requires a non-trivial configured secret", () => {
     const token = "0123456789abcdef0123456789abcdef";
     assert.deepEqual(
-        normalizeConfigDraft({ instances: [{ mcp: { auth: "token", token }, name: "local-one", provider: "local", workspace: "/workspace" }] }).instances[0]!.mcp.auth,
+        normalizeConfigDraft({ instances: [{ mcp: { auth: "token", token }, name: "local-one", provider: "local" }] }).instances[0]!.mcp.auth,
         { mode: "token", token }
     );
 
     const weak = normalizeConfigDraft({
-        instances: [{ mcp: { auth: "token", token: "too-short" }, name: "local-one", provider: "local", workspace: "/workspace" }]
+        instances: [{ mcp: { auth: "token", token: "too-short" }, name: "local-one", provider: "local" }]
     });
     assertConfigIssue(
         () => validateConfigSemantics(weak),
@@ -173,8 +188,7 @@ test("config normalization deduplicates MCP access lists", () => {
                     }
                 },
                 name: "local-one",
-                provider: "local",
-                workspace: "/workspace"
+                provider: "local"
             }
         ]
     });
@@ -187,8 +201,7 @@ test("obsolete context groups are removed from custom MCP allowlists", () => {
     const custom = normalizeConfigInstanceDraft({
         mcp: { tools: { groups: ["file", "bash", "context", "todo"] } },
         name: "custom-policy",
-        provider: "local",
-        workspace: "/workspace"
+        provider: "local"
     });
 
     assert.deepEqual(custom.mcp.tools.groups, ["file", "bash", "todo"]);
@@ -198,8 +211,7 @@ test("provider changes discard stale provider-specific fields before normalizati
     const current = normalizeConfigInstanceDraft({
         name: "remote-one",
         provider: "ssh",
-        ssh: { command: "ssh remote" },
-        workspace: "/workspace"
+        ssh: { command: "ssh remote" }
     });
     const draft = applyConfigInstancePatch(current, {
         container: { mode: "preset", preset: "debian" },
@@ -219,8 +231,8 @@ test("provider changes discard stale provider-specific fields before normalizati
 test("semantic validation rejects duplicate names and mismatched instance MCP paths", () => {
     const duplicate = normalizeConfigDraft({
         instances: [
-            { name: "local-one", provider: "local", workspace: "/one" },
-            { name: "local-one", provider: "local", workspace: "/two" }
+            { name: "local-one", provider: "local" },
+            { name: "local-one", provider: "local" }
         ]
     });
     assertConfigIssue(
@@ -231,7 +243,7 @@ test("semantic validation rejects duplicate names and mismatched instance MCP pa
     );
 
     const wrongPath = normalizeConfigDraft({
-        instances: [{ name: "local-one", provider: "local", workspace: "/one" }]
+        instances: [{ name: "local-one", provider: "local" }]
     });
     wrongPath.instances[0]!.mcp.path = "/wrong/mcp";
     assertConfigIssue(
@@ -254,7 +266,7 @@ test("semantic validation permits explicitly exposed unauthenticated endpoints a
     assert.doesNotThrow(() => validateConfigSemantics(publicWithoutAuth));
 
     const reverseWithoutMcp = normalizeConfigDraft({
-        instances: [{ name: "reverse-one", provider: "reverse", workspace: "/workspace" }],
+        instances: [{ name: "reverse-one", provider: "reverse" }],
         mcp: { enabled: false, publicBaseUrl: null }
     });
     assertConfigIssue(

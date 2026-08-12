@@ -1,8 +1,4 @@
-import {
-    createError,
-    errorCodes,
-    type WorkspacePath
-} from "@portable-devshell/shared";
+import { createError, errorCodes } from "@portable-devshell/shared";
 
 import { WorkerCommandClient } from "../command/WorkerCommandClient.js";
 import type { WorkerCommandInteractiveSession } from "../command/WorkerCommandTransport.js";
@@ -44,24 +40,15 @@ export class WorkerInstanceLifecycle {
         this.#connection = options.connection;
     }
 
-    async start(workspacePath?: WorkspacePath | string): Promise<InstanceSnapshot> {
-        return await this.#runExclusive(async () => await this.#start(workspacePath));
+    async start(): Promise<InstanceSnapshot> {
+        return await this.#runExclusive(async () => await this.#start());
     }
 
-    async startInteractive(
-        workspacePath: WorkerCommandInteractiveSession | WorkspacePath | string | undefined,
-        interactiveSession?: WorkerCommandInteractiveSession
-    ): Promise<InstanceSnapshot> {
-        return await this.#runExclusive(async () => await this.#start(
-            isInteractiveSession(workspacePath) ? undefined : workspacePath,
-            isInteractiveSession(workspacePath) ? workspacePath : interactiveSession
-        ));
+    async startInteractive(interactiveSession?: WorkerCommandInteractiveSession): Promise<InstanceSnapshot> {
+        return await this.#runExclusive(async () => await this.#start(interactiveSession));
     }
 
-    async #start(
-        workspacePath?: WorkspacePath | string,
-        interactiveSession?: WorkerCommandInteractiveSession
-    ): Promise<InstanceSnapshot> {
+    async #start(interactiveSession?: WorkerCommandInteractiveSession): Promise<InstanceSnapshot> {
         if (this.#config.managementMode === "selfManaged") {
             throw createError({
                 code: errorCodes.reverseSelfManagedOffline,
@@ -71,17 +58,6 @@ export class WorkerInstanceLifecycle {
             });
         }
 
-        const resolvedWorkspacePath = workspacePath ?? this.#config.defaultWorkspace;
-        if (resolvedWorkspacePath === undefined) {
-            throw createError({
-                code: errorCodes.coreWorkerStartFailed,
-                message: `Instance ${this.#config.name} requires a workspace to start.`,
-                retryable: false,
-                details: { instanceName: this.#config.name }
-            });
-        }
-
-        this.#connection.setWorkspacePath(resolvedWorkspacePath);
         await this.#applyStateUpdate({
             connectionState: "disconnected",
             daemonState: "starting",
@@ -90,7 +66,7 @@ export class WorkerInstanceLifecycle {
         });
 
         try {
-            const startResult = await this.#requireCommandClient().start(resolvedWorkspacePath, interactiveSession);
+            const startResult = await this.#requireCommandClient().start(interactiveSession);
             if (startResult.exitCode !== 0) {
                 throw createError({
                     code: errorCodes.coreWorkerStartFailed,
@@ -200,9 +176,6 @@ export class WorkerInstanceLifecycle {
         }
 
         const status = await this.#readWorkerStatus();
-        if (status.workspacePath !== undefined) {
-            this.#connection.setWorkspacePath(status.workspacePath);
-        }
 
         switch (status.daemonState) {
             case "stopped":
@@ -254,7 +227,6 @@ export class WorkerInstanceLifecycle {
     async #readWorkerStatus(): Promise<{
         daemonState: "running" | "stale" | "stopped";
         pid?: number;
-        workspacePath?: string;
     }> {
         let result: Awaited<ReturnType<WorkerCommandClient["status"]>>;
 
@@ -304,8 +276,4 @@ export class WorkerInstanceLifecycle {
             throw error;
         }
     }
-}
-
-function isInteractiveSession(value: unknown): value is WorkerCommandInteractiveSession {
-    return typeof value === "object" && value !== null && "readInput" in value && "writeOutput" in value;
 }

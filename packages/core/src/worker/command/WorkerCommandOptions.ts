@@ -2,7 +2,6 @@ export type WorkerCommandName = "start" | "status" | "stop" | "logs";
 
 export interface WorkerCommandOptions {
     instanceName: string;
-    workspacePath?: string;
     extraArgs?: readonly string[];
     env?: NodeJS.ProcessEnv;
 }

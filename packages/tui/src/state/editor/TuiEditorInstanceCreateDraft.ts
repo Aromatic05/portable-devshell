@@ -7,7 +7,6 @@ export function createDefaultInstanceDraft(): Record<string, JsonValue> {
         mcp: { auth: "none", enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } },
         name: "",
         provider: "local",
-        security: { mode: "disabled" },
-        workspace: ""
+        security: { mode: "disabled" }
     };
 }

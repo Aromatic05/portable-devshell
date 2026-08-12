@@ -17,6 +17,7 @@ const alphaCall = {
     startedAt: "2026-07-31T09:00:00Z",
     status: "failed" as const,
     toolName: "bash_run",
+    workspace: "/projects/alpha",
 };
 
 const state: WebState = {
@@ -131,12 +132,19 @@ it("filters structured tool calls by ctxId and queues a Comment for the selected
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
 
+    fireEvent.change(screen.getByLabelText("Search"), {
+        target: { value: "/projects/alpha" },
+    });
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+
     fireEvent.change(screen.getByLabelText("Instance"), {
         target: { value: "alpha" },
     });
     fireEvent.change(screen.getByLabelText("Context"), {
         target: { value: "context:ctx-alpha" },
     });
+    expect(screen.getByText(/Workspace: \/workspace\/alpha/u)).toBeInTheDocument();
     expect(screen.getByText("Check the failing command.")).toBeInTheDocument();
     expect(screen.getByText("Review the previous failure.")).toBeInTheDocument();
     expect(screen.getByText("call-comment-old")).toBeInTheDocument();
@@ -160,6 +168,7 @@ it("refreshes an expanded tool call to retrieve its latest content", async () =>
     render(<ToolCalls state={state} store={store} />);
 
     fireEvent.click(screen.getByText("bash_run", { selector: "strong" }));
+    expect(await screen.findByText("/projects/alpha")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
 
     await waitFor(() => expect(refreshToolCall).toHaveBeenCalledWith("alpha"));
@@ -218,10 +227,12 @@ it("filters inactive Contexts in a separate window and disables only the reviewe
                 ...state.readModel.contexts[0]!,
                 ctxId: "ctx-hour",
                 lastAccessedAt: new Date(now - 2 * 60 * 60 * 1_000).toISOString(),
+                workspace: "/projects/hour",
             }, {
                 ...state.readModel.contexts[0]!,
                 ctxId: "ctx-twenty",
                 lastAccessedAt: new Date(now - 30 * 60 * 1_000).toISOString(),
+                workspace: "/projects/twenty",
             }, {
                 ...state.readModel.contexts[0]!,
                 ctxId: "ctx-recent",
@@ -244,6 +255,7 @@ it("filters inactive Contexts in a separate window and disables only the reviewe
     fireEvent.click(screen.getByRole("button", { name: "Manage Contexts" }));
     const dialog = screen.getByRole("dialog", { name: "Disable inactive Contexts" });
     expect(within(dialog).getByText("ctx-hour")).toBeInTheDocument();
+    expect(within(dialog).getByText("/projects/hour")).toBeInTheDocument();
     expect(within(dialog).queryByText("ctx-twenty")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("ctx-disabled")).not.toBeInTheDocument();
 
@@ -251,6 +263,7 @@ it("filters inactive Contexts in a separate window and disables only the reviewe
         target: { value: "20" },
     });
     expect(within(dialog).getByText("ctx-twenty")).toBeInTheDocument();
+    expect(within(dialog).getByText("/projects/twenty")).toBeInTheDocument();
     expect(within(dialog).queryByText("ctx-recent")).not.toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "Select ctx-twenty" }));
@@ -289,6 +302,8 @@ it("requires confirmation before disabling a Context", async () => {
     fireEvent.click(screen.getByRole("button", { name: "Disable Context" }));
 
     expect(disableContext).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: "Confirm disable" });
+    expect(within(dialog).getByText(/\/workspace\/alpha/u)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: "Disable" }));
 

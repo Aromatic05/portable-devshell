@@ -12,6 +12,7 @@ import type {
     ToolCallContext,
     ToolDefinition
 } from "@portable-devshell/shared";
+import type { McpEndpointEnvironmentHandshake } from "../endpoint/McpEndpointPort.js";
 
 export interface McpSshInstanceCreateInput {
     host: string;
@@ -19,11 +20,19 @@ export interface McpSshInstanceCreateInput {
     name: string;
     port?: number;
     user?: string;
-    workspace: string;
 }
 
 export interface McpInstanceGateway {
+    appendMcpToolCalled(instance: string, toolName: string, context: { requestId?: string; ctxId?: string }): Promise<void>;
     assertReady(instance: string): void;
+    auditToolCall<T extends JsonValue>(
+        instance: string,
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        operation: (callId: string) => Promise<T>,
+        signal?: AbortSignal
+    ): Promise<T>;
     callTool(
         instance: string,
         toolName: string,
@@ -34,13 +43,24 @@ export interface McpInstanceGateway {
     ): Promise<JsonValue>;
     closeToolSession?(sessionId: string): Promise<void>;
     createSshInstance(sourceInstance: string, input: McpSshInstanceCreateInput): Promise<JsonValue>;
+    environment(instance: string): McpEndpointEnvironmentHandshake | undefined;
     listInstances(): Promise<JsonValue>;
     consumeContextMessages?(instance: string, ctxId: string, callId: string): Promise<ContextMessageReadResult>;
     readTodo(instance: string, title?: string): Promise<JsonValue>;
     listTools(instance: string): ToolDefinition[];
+    prepareWorkspace(instance: string, workspace: string): Promise<{
+        projectMemoryAgentFile: string;
+        projectMemoryDirectory: string;
+        temporaryDirectory: string;
+        workspace: string;
+    }>;
+    readAlerts(instance: string, workspace: string): Promise<{ advice: Array<{ code: string; text: string }> }>;
+    releaseAlerts(instance: string, workspace: string): Promise<void>;
     startInstance(instance: string): Promise<JsonValue>;
     statusInstance(instance: string): Promise<JsonValue>;
     stopInstance(instance: string): Promise<JsonValue>;
+    touchAlerts(instance: string, workspace: string): Promise<void>;
+    touchTemporaryDirectory(instance: string, path: string): Promise<void>;
     writeTodo(instance: string, input: JsonValue, context: ToolCallContext): Promise<JsonValue>;
 
     viewArtifactImage?(

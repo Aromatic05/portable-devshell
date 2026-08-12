@@ -56,6 +56,7 @@ export interface McpHostConfig {
     listenHost: string;
     listenPort: number;
     publicBaseUrl?: string;
+    serverVersion?: string;
     storageDir?: string;
 }
 
@@ -126,7 +127,8 @@ export class McpHost {
                 policy: instance.policy,
                 instanceName: instance.name,
                 worker: instance.worker
-            })
+            }),
+            this.#config.serverVersion,
         );
         const path = instance.path ?? `/${instance.name}/mcp`;
 

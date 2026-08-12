@@ -40,11 +40,10 @@ Access token 默认有效期为 1 小时；refresh token、grant 和登录 sessi
 
 ```toml
 # ~/.devshell/control/instances/<instance>.toml
-version = 2
+version = 3
 name = "demo-local"
 enabled = true
 provider = "local"
-workspace = "/absolute/path/to/workspace"
 
 [mcp]
 enabled = true
@@ -56,7 +55,7 @@ resourceName = "demo-local"
 requiredScopes = ["mcp"]
 
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo", "context"]
+groups = ["file", "bash", "artifact", "tmux", "todo"]
 capabilities = ["read", "write", "execute"]
 ```
 

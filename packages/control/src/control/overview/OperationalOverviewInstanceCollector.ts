@@ -99,8 +99,7 @@ export class OperationalOverviewInstanceCollector {
                 snapshot,
                 ...(descriptor.worker.handshake === undefined
                     ? {}
-                    : { worker: toOperationalWorker(descriptor.worker.handshake) }),
-                ...(descriptor.workspace === undefined ? {} : { workspace: descriptor.workspace })
+                    : { worker: toOperationalWorker(descriptor.worker.handshake) })
             },
             todos
         };

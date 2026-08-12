@@ -106,6 +106,7 @@ function callSearchText(call: ToolCallRecord): string {
         call.source,
         call.status,
         call.toolName,
+        call.workspace,
     ]
         .filter((value): value is string => typeof value === "string")
         .join(" ")

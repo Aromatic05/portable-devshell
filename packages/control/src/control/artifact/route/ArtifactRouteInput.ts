@@ -14,7 +14,7 @@ export function readArtifactViewImageInput(params?: JsonValue): ArtifactViewImag
     const path = readOptionalString(params.path, "path");
     if ((handle === undefined) === (path === undefined)) throw invalid("Exactly one of handle or path is required.");
     return handle === undefined
-        ? { ...(instance === undefined ? {} : { instance }), path: path! }
+        ? { ...(instance === undefined ? {} : { instance }), path: path!, workspace: readRequiredString(params.workspace, "workspace") }
         : { handle, ...(instance === undefined ? {} : { instance }) };
 }
 
@@ -26,7 +26,7 @@ export function readArtifactShareInput(params?: JsonValue): ArtifactShareInput {
     const path = readOptionalString(params.path, "path");
     if ((handle === undefined) === (path === undefined)) throw invalid("Exactly one of handle or path is required.");
     return handle === undefined
-        ? { ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }), ...(instance === undefined ? {} : { instance }), path: path! }
+        ? { ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }), ...(instance === undefined ? {} : { instance }), path: path!, workspace: readRequiredString(params.workspace, "workspace") }
         : { ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }), handle, ...(instance === undefined ? {} : { instance }) };
 }
 
@@ -35,8 +35,10 @@ export function readArtifactTransferStartInput(params?: JsonValue): ArtifactTran
     const instance = readOptionalString(params.instance, "instance");
     const handle = readOptionalString(params.handle, "handle");
     const sourcePath = readOptionalString(params.sourcePath, "sourcePath");
+    const sourceWorkspace = readOptionalString(params.sourceWorkspace, "sourceWorkspace");
     const targetInstance = readRequiredString(params.targetInstance, "targetInstance");
     const targetPath = readRequiredString(params.targetPath, "targetPath");
+    const targetWorkspace = readRequiredString(params.targetWorkspace, "targetWorkspace");
     if ((handle === undefined) === (sourcePath === undefined)) throw invalid("Exactly one of handle or sourcePath is required.");
     if (params.overwrite !== undefined && typeof params.overwrite !== "boolean") throw invalid("overwrite must be a boolean.");
     const common = {
@@ -44,9 +46,12 @@ export function readArtifactTransferStartInput(params?: JsonValue): ArtifactTran
         ...(instance === undefined ? {} : { instance }),
         ...(params.overwrite === undefined ? {} : { overwrite: params.overwrite }),
         targetInstance,
-        targetPath
+        targetPath,
+        targetWorkspace
     };
-    return handle === undefined ? { ...common, sourcePath: sourcePath! } : { ...common, handle };
+    return handle === undefined
+        ? { ...common, sourcePath: sourcePath!, sourceWorkspace: sourceWorkspace ?? readRequiredString(params.sourceWorkspace, "sourceWorkspace") }
+        : { ...common, handle };
 }
 
 export function readDefaultInstance(params?: JsonValue): string {

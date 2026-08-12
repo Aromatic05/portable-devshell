@@ -65,7 +65,7 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
             protocolVersion: 2,
             skillsDirectory: "/workspace/.agents/skills",
             workerVersion: "0.4.10",
-            workspace: "/workspace"
+            homeDirectory: "/workspace"
         },
         listApprovals: async () => [{ id: "approval-1" }],
         readToolCalls: async () => [failedCall],
@@ -84,8 +84,7 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
         todo: {
             ...createTestTodoPort(),
             summaries: () => [blockedTodo]
-        },
-        workspace: "/workspace"
+        }
     });
     const failed = createTestInstanceDescriptor({
         listApprovals: async () => [],

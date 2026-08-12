@@ -36,9 +36,19 @@ const activeContext = await contextRegistry.create({
     principal: "local",
     workspace: "/workspace"
 });
+const remoteContext = await contextRegistry.create({
+    instance: "remote-server",
+    principal: "local",
+    temporaryDirectory: "/tmp/remote-context",
+    workspace: "/remote-workspace"
+});
 const withContext = <T extends Record<string, unknown>>(input: T): T & { ctxId: string } => ({
     ...input,
     ctxId: activeContext.ctxId
+});
+const withRemoteContext = <T extends Record<string, unknown>>(input: T): T & { ctxId: string } => ({
+    ...input,
+    ctxId: remoteContext.ctxId
 });
 
 test("instance tools are hidden unless instance group and manage capability are both enabled", () => {
@@ -77,7 +87,7 @@ test("management-enabled endpoint augments worker schemas for cross-instance rou
 
 test("worker calls default to the endpoint instance and route explicit targets through the gateway", async () => {
     const localCalls: Array<{ input: JsonValue; toolName: string }> = [];
-    const remoteCalls: Array<{ input: JsonValue; instance: string; toolName: string }> = [];
+    const remoteCalls: Array<{ context: ToolCallContext; input: JsonValue; instance: string; toolName: string }> = [];
     const worker = createWorker({
         callTool: async (toolName, input) => {
             localCalls.push({ input, toolName });
@@ -85,8 +95,8 @@ test("worker calls default to the endpoint instance and route explicit targets t
         }
     });
     const gateway = createGateway({
-        callTool: async (instance, toolName, input) => {
-            remoteCalls.push({ input, instance, toolName });
+        callTool: async (instance, toolName, input, callContext) => {
+            remoteCalls.push({ context: callContext, input, instance, toolName });
             return { remote: true };
         }
     });
@@ -94,11 +104,29 @@ test("worker calls default to the endpoint instance and route explicit targets t
 
     assert.deepEqual(await endpoint.callTool("bash_run", withContext({ command: "pwd" }), context), { local: true });
     assert.deepEqual(
-        await endpoint.callTool("bash_run", withContext({ command: "pwd", instance: "remote-server" }), context),
+        await endpoint.callTool("bash_run", withRemoteContext({ command: "pwd", instance: "remote-server" }), context),
         { remote: true }
     );
     assert.deepEqual(localCalls, [{ input: { command: "pwd" }, toolName: "bash_run" }]);
-    assert.deepEqual(remoteCalls, [{ input: { command: "pwd" }, instance: "remote-server", toolName: "bash_run" }]);
+    assert.deepEqual(remoteCalls, [{
+        context: {
+            ctxId: remoteContext.ctxId,
+            requestId: "request-1",
+            source: "mcp",
+            workspace: "/remote-workspace"
+        },
+        input: { command: "pwd" },
+        instance: "remote-server",
+        toolName: "bash_run"
+    }]);
+
+    await assert.rejects(
+        endpoint.callTool("bash_run", withContext({ command: "pwd", instance: "remote-server" }), context),
+        (error: unknown) => {
+            assert.equal((error as { code?: string }).code, "mcp.contextInvalid");
+            return true;
+        }
+    );
 });
 
 test("remote worker calls check target readiness before tool exposure", async () => {
@@ -120,7 +148,7 @@ test("remote worker calls check target readiness before tool exposure", async ()
     const endpoint = createManagedEndpoint(createWorker(), gateway, { readyWaitMs: 50 });
 
     await assert.rejects(
-        endpoint.callTool("bash_run", withContext({ command: "pwd", instance: "remote-server" }), context),
+        endpoint.callTool("bash_run", withRemoteContext({ command: "pwd", instance: "remote-server" }), context),
         (error: unknown) => {
             assert.equal((error as { code?: string }).code, "core.instanceNotReady");
             return true;
@@ -196,8 +224,7 @@ test("instance management tools delegate to the gateway without requiring the lo
             identityFile: "~/.ssh/id_ed25519",
             name: "remote-server",
             port: 2222,
-            user: "dev",
-            workspace: "/srv/project"
+            user: "dev"
         }),
         context
     );
@@ -214,8 +241,7 @@ test("instance management tools delegate to the gateway without requiring the lo
         identityFile: "~/.ssh/id_ed25519",
         name: "remote-server",
         port: 2222,
-        user: "dev",
-        workspace: "/srv/project"
+        user: "dev"
     });
 });
 
@@ -259,9 +285,9 @@ function createWorker(options: {
             return { advice: [] };
         },
         handshake: {
+            homeDirectory: "/home/demo",
             instance: "main-pc",
             skillsDirectory: "/home/demo/.devshell/skill",
-            workspace: "/workspace",
             platform: {
                 arch: "x86_64",
                 distribution: { id: "arch", name: "Arch Linux", version: "rolling" },
@@ -270,7 +296,6 @@ function createWorker(options: {
                 shell: { executable: "/bin/bash", kind: "bash", version: "5" }
             }
         },
-        workspacePath: "/workspace",
         hasToolSchemaCache() {
             return options.hasSchema ?? true;
         },
@@ -285,8 +310,24 @@ function createWorker(options: {
 
 function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstanceGateway {
     return {
+        async appendMcpToolCalled(instance, toolName, callContext) {
+            await overrides.appendMcpToolCalled?.(instance, toolName, callContext);
+        },
         assertReady(instance) {
             overrides.assertReady?.(instance);
+        },
+        async auditToolCall<T extends JsonValue>(
+            instance: string,
+            toolName: string,
+            input: JsonValue,
+            callContext: ToolCallContext,
+            operation: (callId: string) => Promise<T>,
+            signal?: AbortSignal
+        ): Promise<T> {
+            if (overrides.auditToolCall !== undefined) {
+                return await overrides.auditToolCall(instance, toolName, input, callContext, operation, signal);
+            }
+            return await operation("call-test");
         },
         async callTool(instance, toolName, input, callContext) {
             if (overrides.callTool !== undefined) {
@@ -300,11 +341,33 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
             }
             return { name: input.name };
         },
+        environment(instance) {
+            return overrides.environment?.(instance) ?? {
+                homeDirectory: "/remote",
+                instance,
+                skillsDirectory: "/remote/.devshell/skill",
+                platform: { arch: "arm64", os: "darwin" }
+            };
+        },
         async listInstances() {
             return await (overrides.listInstances?.() ?? Promise.resolve([]));
         },
         listTools(instance) {
             return overrides.listTools?.(instance) ?? [bashTool];
+        },
+        async prepareWorkspace(instance, workspace) {
+            return await (overrides.prepareWorkspace?.(instance, workspace) ?? Promise.resolve({
+                projectMemoryAgentFile: `${workspace}/.memory/AGENT.md`,
+                projectMemoryDirectory: `${workspace}/.memory`,
+                temporaryDirectory: `/tmp/${instance}-context`,
+                workspace
+            }));
+        },
+        async readAlerts(instance, workspace) {
+            return await (overrides.readAlerts?.(instance, workspace) ?? Promise.resolve({ advice: [] }));
+        },
+        async releaseAlerts(instance, workspace) {
+            await overrides.releaseAlerts?.(instance, workspace);
         },
         async readTodo(instance, title) {
             return await (overrides.readTodo?.(instance, title) ?? Promise.resolve({ items: [], revision: 0, summary: { completed: 0, total: 0 } }));
@@ -317,6 +380,12 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
         },
         async stopInstance(instance) {
             return await (overrides.stopInstance?.(instance) ?? Promise.resolve({ instance }));
+        },
+        async touchAlerts(instance, workspace) {
+            await overrides.touchAlerts?.(instance, workspace);
+        },
+        async touchTemporaryDirectory(instance, path) {
+            await overrides.touchTemporaryDirectory?.(instance, path);
         },
         async writeTodo(instance, input, callContext) {
             return await (overrides.writeTodo?.(instance, input, callContext) ?? Promise.resolve({ items: [], revision: 1, summary: { completed: 0, total: 0 } }));

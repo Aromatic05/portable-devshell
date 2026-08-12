@@ -11,7 +11,7 @@ worker daemon 在整个生命周期内持有出站连接。首选 WSS，失败�
 ## 身份模型
 
 - 一个 worker daemon 对应一个 instance；
-- 一个 instance 对应一个 workspace 和一份设备凭据；
+- 一个 reverse instance 对应一份设备凭据，不持久化默认 workspace；
 - device code 有较短有效期，只能消费一次；
 - device token 是随机 bearer credential，control 只保存其 SHA-256；
 - device token 不接受 URL query string 传递；
@@ -19,7 +19,7 @@ worker daemon 在整个生命周期内持有出站连接。首选 WSS，失败�
 
 ## 生命周期
 
-reverse instance 是 `selfManaged`。worker 仍通过既有 `start`、`stop`、`status` 和 `rpc` 命令管理自己的 daemon 生命周期。注册完成后，安装好的 worker 在配置 workspace 中执行：
+reverse instance 是 `selfManaged`。worker 仍通过既有 `start`、`stop`、`status` 和 `rpc` 命令管理自己的 daemon 生命周期。注册完成后，安装好的 worker 启动 daemon；workspace 由后续工具调用或 MCP Context 显式提供：
 
 ```text
 devshell-worker start --instance <name>
@@ -40,7 +40,7 @@ transport     wss | sse
 
 1. `control.createReverseDeviceCode(instance)` 创建单次 device code；
 2. worker 向 `POST /reverse/v1/enroll` 提交 code 和平台元数据；
-3. control 原子消费 code，返回 instance 名、workspace、controller URL 和新 device token；
+3. control 原子消费 code，返回 instance 名、controller URL 和新 device token；
 4. worker 以 `0600` 权限把实例配置和凭据写入 `~/.devshell/<instance>/`；
 5. worker 把当前二进制安装到 `~/.devshell/workers/<target>/<sha256>/`，更新 `~/.devshell/bin/devshell-worker`，再启动 daemon；
 6. 重复使用、已经过期或已消费的 code 必须失败。

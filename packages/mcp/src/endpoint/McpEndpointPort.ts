@@ -32,16 +32,16 @@ export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
     readAlerts(workspace: string): Promise<{
         advice: Array<{ code: string; text: string }>;
     }>;
+    releaseAlerts?(workspace: string): Promise<void>;
     touchAlerts?(workspace: string): Promise<void>;
     touchTemporaryDirectory?(path: string): Promise<void>;
     readonly handshake?: McpEndpointEnvironmentHandshake;
-    readonly workspacePath?: string;
 }
 
 export interface McpEndpointEnvironmentHandshake {
+    homeDirectory: string;
     instance: string;
     skillsDirectory: string;
-    workspace: string;
     platform: {
         arch: string;
         distribution?: {

@@ -144,7 +144,6 @@ export interface InstanceCreateSummary {
         command?: string;
     };
     tools?: ControlInstanceToolsConfig;
-    workspace?: string;
 }
 
 export interface InstanceCreateResult {

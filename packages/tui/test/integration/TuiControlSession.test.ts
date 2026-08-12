@@ -100,6 +100,49 @@ test("TuiControlSession does not load details for a stopped instance during star
     assert.deepEqual(worker.logReadQueries, []);
 });
 
+test("TuiControlSession refreshes worker home metadata after RPC reconnect", async (t) => {
+    const runtimeDir = await createTestTempDirectory("tui-worker-home-reconnect");
+    const socketPath = createTestIpcPath("tui-worker-home-reconnect", runtimeDir);
+    const worker = new FakeWorker("alpha", {
+        connectionState: "disconnected",
+        daemonState: "running",
+        ready: false,
+        status: "running",
+    });
+    const server = createServer(socketPath, worker, () => 7);
+    const session = new TuiControlSession({
+        clients: createTuiClients({ socketPath }),
+    });
+
+    await server.start();
+    t.after(async () => {
+        await session.stop();
+        await server.stop();
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    await session.start();
+    assert.equal(
+        session.store.getState().instances.find((instance) => instance.name === "alpha")?.homeDirectory,
+        undefined,
+    );
+
+    worker.setHomeDirectory("/home/reconnected-alpha");
+    worker.emit("worker.rpcConnected");
+
+    await waitFor(() =>
+        session.store.getState().instances.find((instance) => instance.name === "alpha")?.homeDirectory ===
+        "/home/reconnected-alpha",
+    );
+
+    worker.setHomeDirectory(undefined);
+    worker.emit("instance.readyChanged", { ready: false });
+    await waitFor(() =>
+        session.store.getState().instances.find((instance) => instance.name === "alpha")?.homeDirectory ===
+        undefined,
+    );
+});
+
 test("Comment delivery never stalls visible Audit refreshes for the bound call or later calls", async (t) => {
     const runtimeDir = await createTestTempDirectory("tui-comment-audit-refresh");
     const socketPath = createTestIpcPath("tui-comment-audit", runtimeDir);
@@ -353,7 +396,6 @@ test("module TUI clients send explicit instance operations and preserve start re
         onOutput: (chunk) => {
             relayOutput.push(chunk);
         },
-        workspacePath: "/workspace/alpha",
     });
     assert.equal(started.name, "alpha");
     assert.deepEqual(relayOutput, ["starting alpha\n"]);
@@ -364,7 +406,7 @@ test("module TUI clients send explicit instance operations and preserve start re
     await clients.tool.decideApproval("alpha", "approval-1", "approve");
     assert.equal(worker.decisions[0]?.decision, "approve");
 
-    const result = await clients.tool.call("alpha", "bash_run", { command: "pwd" });
+    const result = await clients.tool.call("alpha", "bash_run", { command: "pwd" }, "/home/alpha");
     assert.equal(jsonRecord(result)?.exitCode, 0);
     assert.equal(worker.callToolCount, 1);
 });
@@ -514,8 +556,7 @@ function createServer(
                             enabled: true,
                             mcp: { enabled: false, path: "/alpha/mcp" },
                             name: "alpha",
-                            provider: "local",
-                            workspace: "/workspace/alpha"
+                            provider: "local"
                         }
                     ],
                     mcp: { enabled: false, listenHost: "127.0.0.1", listenPort: 3210 },
@@ -558,6 +599,7 @@ function createServer(
 class FakeWorker {
     readonly #name: string;
     #events: Array<{ at: string; data?: unknown; instanceName: string; seq: number; type: string }> = [];
+    #homeDirectory?: string;
     #lastSeq = 0;
     readonly #approvals: ApprovalRequest[];
     readonly #logs: Array<{ at: string; instanceName: string; message: string; seq: number; stream: "stderr" | "stdout" }>;
@@ -611,6 +653,16 @@ class FakeWorker {
                 toolName: "bash_run"
             }
         ];
+    }
+
+    get handshake(): { homeDirectory: string } | undefined {
+        return this.#homeDirectory === undefined
+            ? undefined
+            : { homeDirectory: this.#homeDirectory };
+    }
+
+    setHomeDirectory(homeDirectory: string | undefined): void {
+        this.#homeDirectory = homeDirectory;
     }
 
     snapshot(): InstanceSnapshot {
@@ -675,7 +727,7 @@ class FakeWorker {
         return this.snapshot();
     }
 
-    async startInteractive(_workspacePath?: string, relay?: { writeOutput(chunk: string): Promise<void> }) {
+    async startInteractive(relay?: { writeOutput(chunk: string): Promise<void> }) {
         await relay?.writeOutput(`starting ${this.#name}\n`);
         return this.snapshot();
     }

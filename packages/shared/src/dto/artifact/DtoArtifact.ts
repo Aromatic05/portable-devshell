@@ -40,11 +40,13 @@ export interface ArtifactSourceDescriptor {
     instance: string;
     path?: string;
     type?: ArtifactSourceType;
+    workspace?: string;
 }
 
 export interface ArtifactTargetDescriptor {
     instance: string;
     path: string;
+    workspace?: string;
 }
 
 export interface ArtifactPayloadDescriptorBase {
@@ -79,6 +81,7 @@ export type ArtifactViewImageInput =
           handle?: never;
           instance?: string;
           path: string;
+          workspace: string;
       };
 
 export interface ArtifactViewImageResult {
@@ -102,6 +105,7 @@ export type ArtifactShareInput =
           handle?: never;
           instance?: string;
           path: string;
+          workspace: string;
       };
 
 export interface ArtifactShareResult {
@@ -131,6 +135,7 @@ export type ArtifactTransferSourceInput =
           handle?: never;
           instance?: string;
           sourcePath: string;
+          sourceWorkspace: string;
       };
 
 export type ArtifactTransferStartInput = ArtifactTransferSourceInput & {
@@ -138,6 +143,7 @@ export type ArtifactTransferStartInput = ArtifactTransferSourceInput & {
     overwrite?: boolean;
     targetInstance: string;
     targetPath: string;
+    targetWorkspace: string;
 };
 
 export interface ArtifactTransferLookupInput {

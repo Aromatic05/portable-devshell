@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { McpHost, type McpInstanceGateway } from "@portable-devshell/mcp";
 import type { ControlConfig } from "@portable-devshell/shared";
 
@@ -6,9 +10,11 @@ import { McpEndpointFactory } from "./McpEndpointFactory.js";
 
 export class McpRuntimeFactory {
     readonly #mapper: McpEndpointFactory;
+    readonly #serverVersion?: string;
 
-    constructor(options?: { mapper?: McpEndpointFactory }) {
+    constructor(options?: { mapper?: McpEndpointFactory; serverVersion?: string }) {
         this.#mapper = options?.mapper ?? new McpEndpointFactory();
+        this.#serverVersion = options?.serverVersion;
     }
 
     wire(
@@ -37,7 +43,35 @@ export class McpRuntimeFactory {
             listenHost: config.mcp.listenHost,
             listenPort: config.mcp.listenPort,
             publicBaseUrl: config.mcp.publicBaseUrl,
+            serverVersion: this.#serverVersion ?? resolveApplicationVersion(),
             storageDir: options?.storageDir
         });
     }
+}
+
+function resolveApplicationVersion(): string {
+    let directory = dirname(fileURLToPath(import.meta.url));
+    while (true) {
+        const manifestPath = join(directory, "package.json");
+        try {
+            const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+                name?: unknown;
+                version?: unknown;
+            };
+            if (manifest.name === "portable-devshell") {
+                if (typeof manifest.version !== "string" || manifest.version.length === 0) {
+                    throw new Error(`Application package version is invalid: ${manifestPath}`);
+                }
+                return manifest.version;
+            }
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                throw error;
+            }
+        }
+        const parent = dirname(directory);
+        if (parent === directory) break;
+        directory = parent;
+    }
+    throw new Error("Cannot locate portable-devshell application package manifest.");
 }

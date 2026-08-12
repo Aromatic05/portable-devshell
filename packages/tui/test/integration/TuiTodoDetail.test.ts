@@ -274,7 +274,6 @@ function createTodoServer(socketPath: string): {
                             mcp: { enabled: false, path: "/alpha/mcp" },
                             name: "alpha",
                             provider: "local",
-                            workspace: "/workspace/alpha",
                         },
                     ],
                     mcp: { enabled: false, listenHost: "127.0.0.1", listenPort: 3210 },

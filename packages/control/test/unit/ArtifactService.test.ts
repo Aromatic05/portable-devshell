@@ -164,8 +164,10 @@ test("artifact transfer returns queued immediately and completes asynchronously"
         {
             operation: "start",
             sourcePath: "./payload.bin",
+            sourceWorkspace: "/source",
             targetInstance: "target-b",
-            targetPath: "/target/payload.bin"
+            targetPath: "/target/payload.bin",
+            targetWorkspace: "/target"
         },
         "source-a"
     );
@@ -193,7 +195,7 @@ test("artifact image view reads through the payload protocol and always closes t
     });
     await service.initialize();
 
-    const image = await service.viewImage({ path: "./pixel.png" }, "source-a");
+    const image = await service.viewImage({ path: "./pixel.png", workspace: "/workspace" }, "source-a");
 
     assert.deepEqual(image, {
         bytes: png.length,
@@ -204,7 +206,8 @@ test("artifact image view reads through the payload protocol and always closes t
         source: {
             instance: "source-a",
             path: "./pixel.png",
-            type: "file"
+            type: "file",
+            workspace: "/workspace"
         }
     });
     assert.deepEqual(source.closedPayloads, ["payload-1"]);
@@ -223,11 +226,11 @@ test("artifact image view rejects unsupported and oversized payloads before retu
     await service.initialize();
 
     await assert.rejects(
-        service.viewImage({ path: "./plain.txt" }, "unsupported"),
+        service.viewImage({ path: "./plain.txt", workspace: "/workspace" }, "unsupported"),
         (error: unknown) => (error as { code?: string }).code === "artifact.imageUnsupported"
     );
     await assert.rejects(
-        service.viewImage({ path: "./huge.png" }, "oversized"),
+        service.viewImage({ path: "./huge.png", workspace: "/workspace" }, "oversized"),
         (error: unknown) => (error as { code?: string }).code === "artifact.imageTooLarge"
     );
     assert.deepEqual(unsupported.closedPayloads, ["payload-1"]);
@@ -252,8 +255,10 @@ test("queued transfer resumes after restart while active transfer becomes interr
         {
             operation: "start",
             sourcePath: "./queued.bin",
+            sourceWorkspace: "/source",
             targetInstance: "target-b",
-            targetPath: "/target/queued.bin"
+            targetPath: "/target/queued.bin",
+            targetWorkspace: "/target"
         },
         "source-a"
     );
@@ -283,8 +288,10 @@ test("queued transfer resumes after restart while active transfer becomes interr
         {
             operation: "start",
             sourcePath: "./blocked.bin",
+            sourceWorkspace: "/source",
             targetInstance: "target-b",
-            targetPath: "/target/blocked.bin"
+            targetPath: "/target/blocked.bin",
+            targetWorkspace: "/target"
         },
         "source-a"
     );
@@ -322,7 +329,7 @@ test("artifact share persists its payload lease and revoke closes it", async (t)
     });
     await service.initialize();
 
-    const share = await service.createShare({ path: "./share.bin" }, "source-a");
+    const share = await service.createShare({ path: "./share.bin", workspace: "/workspace" }, "source-a");
     assert.equal(share.state, "active");
     assert.match(share.url, /^https:\/\/example\.test\/artifacts\/share\//u);
     assert.equal(service.listShares().length, 1);
@@ -343,7 +350,7 @@ test("expired share is closed and unavailable after restart", async (t) => {
     };
     const service = new ArtifactService(options);
     await service.initialize();
-    const share = await service.createShare({ path: "./expired.bin" }, "source-a");
+    const share = await service.createShare({ path: "./expired.bin", workspace: "/workspace" }, "source-a");
     await service.stop();
 
     const recordPath = join(storageDir, "shares", `${share.shareId}.json`);

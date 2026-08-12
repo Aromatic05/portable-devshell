@@ -28,7 +28,6 @@ export interface WorkerTransportDriverContainerBaseOptions {
     container: InstanceContainerConfig;
     keepIdUserNamespace?: boolean;
     provider: "docker" | "podman";
-    remoteCwd?: string;
     skillsDirectory?: string;
     spawnFunction?: SpawnFunction;
     workerBinary?: WorkerBinary;
@@ -40,13 +39,11 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
     readonly #process: WorkerTransportProcessRunner;
     readonly #provider: "docker" | "podman";
     readonly #provision: WorkerTransportContainerProvision;
-    readonly #remoteCwd?: string;
     readonly #workerBinary: WorkerBinary;
 
     constructor(options: WorkerTransportDriverContainerBaseOptions) {
         this.#binary = options.binary;
         this.#provider = options.provider;
-        this.#remoteCwd = options.remoteCwd;
         this.#workerBinary = options.workerBinary ?? new WorkerBinary();
         this.#process = new WorkerTransportProcessRunner(options.spawnFunction);
         this.#provision = createWorkerTransportContainerProvision({
@@ -55,7 +52,6 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
             operations: {
                 provider: this.#provider,
                 readContainerStatus: (containerName) => this.#readContainerStatus(containerName),
-                remoteCwd: this.#remoteCwd,
                 runProviderCommand: (operation, args, commandOptions) =>
                     this.#runProviderCommand(operation, args, commandOptions)
             }
@@ -117,7 +113,6 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
             command,
             [workerCommand.command, ...workerCommand.args],
             options.instanceName,
-            command === "start",
             environment.keys
         );
         return await this.#process.run(invocation.context, {
@@ -136,7 +131,6 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
             "spawnWorkerRpc",
             [workerCommand.command, ...workerCommand.args],
             options.instanceName,
-            false,
             environment.keys
         );
         return createWorkerRpcProcess(
@@ -163,7 +157,6 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
             "status",
             [workerCommand.command, ...workerCommand.args],
             options.instanceName,
-            false,
             environment.keys
         );
         return await this.#process.run(invocation.context, {
@@ -187,7 +180,6 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
             "stop",
             [workerCommand.command, ...workerCommand.args],
             options.instanceName,
-            false,
             environment.keys
         );
         const result = await this.#process.run(invocation.context, {
@@ -288,15 +280,13 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
         operation: string,
         command: readonly string[],
         instance?: string,
-        useRemoteCwd: boolean = false,
         environmentKeys: readonly string[] = []
     ) {
-        const args = this.#provision.buildExecArgs(command, useRemoteCwd, environmentKeys);
+        const args = this.#provision.buildExecArgs(command, environmentKeys);
         return {
             args,
             context: createCommandContext({
                 command: [this.#binary, ...args],
-                cwd: useRemoteCwd ? this.#remoteCwd : undefined,
                 instance,
                 operation,
                 provider: this.#provider
@@ -307,7 +297,6 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
     #createProviderContext(operation: string, args: readonly string[]): ProviderCommandContext {
         return createCommandContext({
             command: [this.#binary, ...args],
-            cwd: this.#remoteCwd,
             operation,
             provider: this.#provider
         });
@@ -321,7 +310,6 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
         const args = this.#provision.buildShellExecArgs(commandLine);
         return createCommandContext({
             command: [this.#binary, ...args],
-            cwd: this.#remoteCwd,
             operation,
             provider: this.#provider
         });
@@ -332,7 +320,6 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
             details: {
                 command: [this.#binary],
                 commandDisplay: this.#binary,
-                cwd: this.#remoteCwd,
                 exitCode: 0,
                 instance,
                 operation,

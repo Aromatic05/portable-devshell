@@ -39,7 +39,7 @@ export interface TuiRuntimeOperationClients {
         delete(instance: string, taskId: string): Promise<unknown>;
     };
     tool: {
-        call(instance: string, toolName: string, input: JsonValue): Promise<JsonValue>;
+        call(instance: string, toolName: string, input: JsonValue, workspace: string): Promise<JsonValue>;
     };
 }
 
@@ -57,7 +57,6 @@ export interface TuiRuntimeOperationSession {
                 onOutput?(chunk: string): void;
                 onRequestId?(requestId: string): void;
                 signal?: AbortSignal;
-                workspacePath?: string;
             },
         ): Promise<unknown>;
         stopInstance(instance: string): Promise<unknown>;
@@ -68,6 +67,7 @@ export interface TuiRuntimeOperationSession {
     refreshAudit(instance: string): Promise<unknown>;
     refreshConfig(): Promise<unknown>;
     refreshInstance(instance: string): Promise<unknown>;
+    refreshInstances(): Promise<unknown>;
     refreshLogs(): Promise<unknown>;
     refreshLogsForInstance(instance: string): Promise<unknown>;
     refreshOAuth(): Promise<unknown>;

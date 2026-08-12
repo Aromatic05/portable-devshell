@@ -48,7 +48,7 @@ test("valid global and instance documents are assembled into canonical config", 
     try {
         const paths = new ControlPathHome(homeDirectory);
         await writeFileWithParents(paths.configFile, await readFixture("config-valid.toml"));
-        await writeFileWithParents(paths.instanceConfigFile("demo-local"), encodeInstance(createInstanceConfig("/tmp/demo")));
+        await writeFileWithParents(paths.instanceConfigFile("demo-local"), encodeInstance(createInstanceConfig()));
 
         const config = await new ControlConfigStore().readOrCreate(homeDirectory);
         const instance = config.instances[0];
@@ -83,7 +83,7 @@ test("version 1 global MCP auth migrates to each enabled namespace and writes ve
             "[web]",
             "enabled = true"
         ].join("\n"));
-        await writeFileWithParents(paths.instanceConfigFile("demo-local"), encodeInstance(createInstanceConfig("/tmp/demo")));
+        await writeFileWithParents(paths.instanceConfigFile("demo-local"), encodeInstance(createInstanceConfig()));
 
         const config = await new ControlConfigStore().readOrCreate(homeDirectory);
         assert.deepEqual(config.instances[0]?.mcp.auth, { mode: "token", token });
@@ -97,7 +97,7 @@ test("version 1 global MCP auth migrates to each enabled namespace and writes ve
     }
 });
 
-test("version 2 removes the obsolete context MCP group from persisted allowlists", async () => {
+test("version 2 instance documents migrate to version 3 without workspace", async () => {
     const homeDirectory = await createTestTempDirectory("control-home");
 
     try {
@@ -144,6 +144,14 @@ test("version 2 removes the obsolete context MCP group from persisted allowlists
             config.instances.find((instance) => instance.name === "custom-policy")?.mcp.tools.groups,
             ["file", "todo"]
         );
+        const migratedDefault = await readFile(paths.instanceConfigFile("legacy-default"), "utf8");
+        const migratedCustom = await readFile(paths.instanceConfigFile("custom-policy"), "utf8");
+        for (const source of [migratedDefault, migratedCustom]) {
+            assert.match(source, /^version = 3$/mu);
+            assert.doesNotMatch(source, /^workspace\s*=/mu);
+        }
+        assert.equal("workspace" in config.instances[0]!, false);
+        assert.equal("workspace" in config.instances[1]!, false);
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
     }
@@ -214,7 +222,7 @@ test("instance alerts survive Control config persistence", async () => {
         workerMemoryBytes: 536_870_912,
     };
     const config = createDefaultControlConfig();
-    config.instances = [{ ...createInstanceConfig("/tmp/demo"), alerts }];
+    config.instances = [{ ...createInstanceConfig(), alerts }];
 
     try {
         const store = new ControlConfigStore();
@@ -306,14 +314,13 @@ test("instance name and audit limits are semantic validation rules", () => {
     const validator = new ControlConfigValidator();
     const invalidName = normalizeConfigInstanceDraft({
         name: "invalidname",
-        provider: "local",
-        workspace: "/tmp/demo"
+        provider: "local"
     });
     assert.throws(
         () => validator.validate({ ...createDefaultControlConfig(), instances: [invalidName] })
     );
 
-    const invalidLogs = createInstanceConfig("/tmp/demo");
+    const invalidLogs = createInstanceConfig();
     invalidLogs.logs!.maxBytes = 0;
     assert.throws(
         () => validator.validate({ ...createDefaultControlConfig(), instances: [invalidLogs] })
@@ -325,7 +332,7 @@ test("instance alert limits are rejected by Control before reaching a worker", (
     const validateAlerts = (alerts: NonNullable<ReturnType<typeof createInstanceConfig>["alerts"]>) =>
         validator.validate({
             ...createDefaultControlConfig(),
-            instances: [{ ...createInstanceConfig("/tmp/demo"), alerts }],
+            instances: [{ ...createInstanceConfig(), alerts }],
         });
 
     assert.throws(() => validateAlerts({ intervalMs: 999 }));
@@ -364,12 +371,23 @@ test("unknown and legacy instance fields are rejected instead of silently ignore
     );
 });
 
+test("version 3 instance documents reject persistent workspace authority", () => {
+    assert.throws(
+        () => instanceDocument.decode(toml.decode([
+            "version = 3",
+            'name = "demo-local"',
+            "enabled = true",
+            'provider = "local"',
+            'workspace = "/tmp/demo"'
+        ].join("\n")))
+    );
+});
+
 test("SSH instance normalization requires ssh.command", () => {
     assert.throws(
         () => normalizeConfigInstanceDraft(parseConfigInstanceDraft({
             name: "demo-ssh",
-            provider: "ssh",
-            workspace: "/srv/workspace"
+            provider: "ssh"
         }))
     );
 });
@@ -388,7 +406,7 @@ function encodeInstance(instance: ReturnType<typeof createInstanceConfig>): stri
     return toml.encode(instanceDocument.encode(instance));
 }
 
-function createInstanceConfig(workspace: string) {
+function createInstanceConfig() {
     return normalizeConfigInstanceDraft({
         approvalPolicy: {
             mode: "ask",
@@ -416,7 +434,6 @@ function createInstanceConfig(workspace: string) {
         },
         name: "demo-local",
         provider: "local",
-        security: { mode: "workspace" },
-        workspace
+        security: { mode: "workspace" }
     });
 }

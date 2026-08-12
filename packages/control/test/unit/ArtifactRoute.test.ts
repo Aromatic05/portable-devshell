@@ -5,8 +5,8 @@ import { readArtifactViewImageInput } from "../../src/control/artifact/route/Art
 
 test("artifact viewImage route accepts exactly one path or handle", () => {
     assert.deepEqual(
-        readArtifactViewImageInput({ defaultInstance: "alpha", path: "./preview.png" }),
-        { path: "./preview.png" }
+        readArtifactViewImageInput({ defaultInstance: "alpha", path: "./preview.png", workspace: "/workspace" }),
+        { path: "./preview.png", workspace: "/workspace" }
     );
     assert.deepEqual(
         readArtifactViewImageInput({ handle: "artifact-1", instance: "remote" }),

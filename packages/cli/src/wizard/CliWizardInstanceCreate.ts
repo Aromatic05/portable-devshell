@@ -61,7 +61,6 @@ export class CliWizardInstanceCreate {
         const name = await this.#required(lines, "instance name");
         const enabled = await this.#confirm(lines, "enabled", schema.defaultEnabled);
         const provider = await this.#provider(lines, schema);
-        const workspace = await this.#optional(lines, "workspace", process.cwd());
 
         const providerFields = await this.#providerFields(lines, schema, name, provider);
 
@@ -81,7 +80,6 @@ export class CliWizardInstanceCreate {
         const tools = await this.#tools(lines);
 
         return {
-            ...(workspace.length === 0 ? {} : { workspace }),
             ...(providerFields.container === undefined ? {} : { container: providerFields.container }),
             ...(providerFields.dockerBinary === undefined ? {} : { dockerBinary: providerFields.dockerBinary }),
             ...(providerFields.podmanBinary === undefined ? {} : { podmanBinary: providerFields.podmanBinary }),
@@ -557,7 +555,6 @@ export class CliWizardInstanceCreate {
         this.#output.write(`name: ${summary.name}\n`);
         this.#output.write(`enabled: ${summary.enabled}\n`);
         this.#output.write(`provider: ${summary.provider}\n`);
-        this.#output.write(`workspace: ${summary.workspace ?? ""}\n`);
 
         if (summary.ssh?.command !== undefined) {
             this.#output.write(`ssh command: ${summary.ssh.command}\n`);

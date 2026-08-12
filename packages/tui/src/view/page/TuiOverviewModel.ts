@@ -21,7 +21,6 @@ export interface TuiOverviewInstanceRowModel {
     readonly runtime: string;
     readonly todos: number;
     readonly tone: TuiOverviewTone;
-    readonly workspace?: string;
 }
 
 export interface TuiOverviewAlertRowModel {

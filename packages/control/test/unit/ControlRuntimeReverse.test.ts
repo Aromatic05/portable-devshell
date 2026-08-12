@@ -92,7 +92,6 @@ function reverseConfig(publicBaseUrl: string): ControlConfig {
     config.instances = [normalizeConfigInstanceDraft({
         name: "reverse-worker",
         provider: "reverse",
-        workspace: "/workspace/reverse-worker"
     })];
     return config;
 }

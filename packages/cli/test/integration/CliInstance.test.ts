@@ -60,7 +60,7 @@ async function runInstanceCommandsThroughControlRpc(t: { after(callback: () => P
     assert.equal(await runCli(["instance", "logs", "demo-local", "-f"]), 0);
     assert.equal(stdout.flush(), "[1] stdout before\n[2] stdout after\n");
 
-    assert.equal(await runCli(["instance", "call", "demo-local", "bash_run", "{\"command\":\"pwd\"}"]), 0);
+    assert.equal(await runCli(["instance", "call", "demo-local", "/tmp/ws", "bash_run", "{\"command\":\"pwd\"}"]), 0);
     const callOutput = stdout.flush();
     assert.match(callOutput, /tool: bash_run/u);
     assert.match(callOutput, /stdout:\n\/tmp\/ws/u);
@@ -100,7 +100,7 @@ async function runRealWorkerSmoke(): Promise<void> {
         );
         await writeFile(
             join(homeDirectory, ".devshell", "control", "instances", "aromatic-pc.toml"),
-            createLocalInstanceConfig("aromatic-pc", workspacePath),
+            createLocalInstanceConfig("aromatic-pc"),
             "utf8"
         );
         assert.equal(await runCli(["start"]), 0);
@@ -127,6 +127,7 @@ async function runRealWorkerSmoke(): Promise<void> {
                 "instance",
                 "call",
                 "aromatic-pc",
+                workspacePath,
                 "bash_run",
                 JSON.stringify({ command: readRelativeMarkerCommand(workspaceMarkerName) })
             ]),
@@ -136,7 +137,7 @@ async function runRealWorkerSmoke(): Promise<void> {
         assert.match(markerOutput, new RegExp(workspaceMarker, "u"));
 
         assert.equal(
-            await runCli(["instance", "call", "aromatic-pc", "bash_run", "{\"command\":\"echo portable-devshell\"}"]),
+            await runCli(["instance", "call", "aromatic-pc", workspacePath, "bash_run", "{\"command\":\"echo portable-devshell\"}"]),
             0
         );
         assert.match(stdout.flush(), /portable-devshell/u);
@@ -186,7 +187,6 @@ async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void>
         "aromatic-pc\n",
         "\n",
         "\n",
-        `${workspacePath}\n`,
         "\n",
         "\n",
         "\n",
@@ -258,6 +258,7 @@ async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void>
             "instance",
             "call",
             "aromatic-pc",
+            workspacePath,
             "bash_run",
             JSON.stringify({ command: readRelativeMarkerCommand(workspaceMarkerName) })
         ]),
@@ -485,13 +486,12 @@ function createCreateConfig(): string {
     ].join("\n");
 }
 
-function createLocalInstanceConfig(name: string, workspacePath: string): string {
+function createLocalInstanceConfig(name: string): string {
     return [
-        "version = 2",
+        "version = 3",
         `name = ${JSON.stringify(name)}`,
         "enabled = true",
         'provider = "local"',
-        `workspace = ${JSON.stringify(workspacePath)}`,
         "",
         "[mcp]",
         "enabled = false",

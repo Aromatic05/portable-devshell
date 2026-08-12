@@ -112,7 +112,6 @@ test(
                 },
                 name: "reverse-test",
                 provider: "reverse",
-                workspace,
             }),
             "utf8",
         );
@@ -149,7 +148,6 @@ test(
                 ...process.env,
                 DEVSHELL_WORKER_INTERNAL_INSTANCE: "reverse-test",
                 DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "disabled",
-                DEVSHELL_WORKER_INTERNAL_WORKSPACE: workspace,
                 HOME: homeDirectory,
                 USERPROFILE: homeDirectory,
                 XDG_RUNTIME_DIR: xdgRuntimeDir,
@@ -191,6 +189,7 @@ test(
                     command: readRelativeMarkerCommand(workspaceMarkerName),
                 },
                 toolName: "bash_run",
+                workspace,
             },
         );
         assert.equal(result.exitCode, 0);
@@ -206,6 +205,7 @@ test(
         }>(asInstanceName("reverse-test"), "terminal", "open", {
             cols: 80,
             rows: 24,
+            workspace,
         });
         const attached = await terminalClient.openStream(
             asInstanceName("reverse-test"),
@@ -509,7 +509,6 @@ test(
                 },
                 name: "reverse-reenroll",
                 provider: "reverse",
-                workspace,
             }),
             "utf8",
         );
@@ -549,7 +548,7 @@ test(
             server.socketPath,
             "reverse-reenroll",
         );
-        await assertReverseMarker(server.socketPath, "reverse-reenroll", markerName, marker);
+        await assertReverseMarker(server.socketPath, "reverse-reenroll", workspace, markerName, marker);
 
         await enroll();
         const secondGeneration = await waitForReverseGeneration(
@@ -557,7 +556,7 @@ test(
             "reverse-reenroll",
             firstGeneration,
         );
-        await assertReverseMarker(server.socketPath, "reverse-reenroll", markerName, marker);
+        await assertReverseMarker(server.socketPath, "reverse-reenroll", workspace, markerName, marker);
 
         runWorkerCommand(
             ["stop", "--instance", "reverse-reenroll"],
@@ -574,7 +573,7 @@ test(
             "reverse-reenroll",
             secondGeneration,
         );
-        await assertReverseMarker(server.socketPath, "reverse-reenroll", markerName, marker);
+        await assertReverseMarker(server.socketPath, "reverse-reenroll", workspace, markerName, marker);
     },
 );
 
@@ -629,6 +628,7 @@ async function waitForReverseGeneration(
 async function assertReverseMarker(
     socketPath: string,
     instance: string,
+    workspace: string,
     markerName: string,
     expected: string,
 ): Promise<void> {
@@ -639,6 +639,7 @@ async function assertReverseMarker(
         {
             input: { command: readRelativeMarkerCommand(markerName) },
             toolName: "bash_run",
+            workspace,
         },
     );
     assert.equal(result.exitCode, 0);

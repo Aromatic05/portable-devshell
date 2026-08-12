@@ -4,7 +4,6 @@ import type {
     InstanceCreateSummary,
     ConfigBatchUpdateRequest,
     ConfigDraft,
-    ArtifactViewImageInput,
     ArtifactViewImageResult,
     JsonValue
 } from "@portable-devshell/shared";
@@ -15,7 +14,7 @@ import type { TuiAppStore } from "../../../state/TuiAppStore.js";
 import { topTuiOverlay } from "../../../state/overlay/TuiOverlay.js";
 import type { TuiPageId } from "../../../state/TuiUiState.js";
 import type { TuiInteractionProjection } from "../../TuiInteractionProjection.js";
-import { TuiCommandDispatcherAudit } from "./TuiCommandDispatcherAudit.js";
+import { TuiCommandDispatcherAudit, type TuiArtifactViewImageRequest } from "./TuiCommandDispatcherAudit.js";
 import { TuiCommandDispatcherDetail } from "./TuiCommandDispatcherDetail.js";
 import { TuiCommandDispatcherEditor } from "./TuiCommandDispatcherEditor.js";
 import { TuiCommandDispatcherFocus } from "./TuiCommandDispatcherFocus.js";
@@ -32,7 +31,7 @@ export interface TuiCommandDispatcherOptions {
     onArtifactCancelTransfer?(transferId: string): Promise<void>;
     onArtifactViewImage?(
         instance: string,
-        input: ArtifactViewImageInput
+        input: TuiArtifactViewImageRequest
     ): Promise<ArtifactViewImageResult>;
     onInstanceAction(
         action: "refresh" | "restart" | "start" | "stop",
@@ -117,8 +116,6 @@ export class TuiCommandDispatcher {
             dispatch: (intent) => this.dispatch(intent),
             editor: this.#editor,
             focus: this.#focus,
-            onOAuthApprovalDecision:
-                options.onOAuthApprovalDecision ?? unavailable,
             projection: options.projection,
             store: this.#store
         });

@@ -18,7 +18,6 @@ test("instance create validates docker preset drafts into container config", () 
         },
         name: "demo-docker",
         provider: "docker",
-        workspace: "/workspace",
     });
 
     assert.deepEqual(summary.container, {
@@ -45,7 +44,6 @@ test("instance create validates existing stopped container drafts with adoptLife
         },
         name: "demo-podman",
         provider: "podman",
-        workspace: "/workspace",
     });
 
     assert.deepEqual(summary.container, {
@@ -73,7 +71,6 @@ test("instance create validation summary never returns secret values", () => {
         },
         name: "demo-docker",
         provider: "docker",
-        workspace: "/workspace"
     });
 
     const serialized = JSON.stringify(summary);
@@ -131,7 +128,6 @@ test("instance create prepares the runtime descriptor before persisting configur
         service.createInstance({
             name: "demo-local",
             provider: "local",
-            workspace: "/workspace/demo"
         }),
         /runtime descriptor failed/u
     );
@@ -154,7 +150,6 @@ test("instance create restores configuration and registry when MCP registration 
         provider: "local",
         todo: {},
         worker: { snapshot: () => ({ status: "stopped" }) },
-        workspace: "/workspace/demo"
     } as never;
     const service = new InstanceCreateCoordinator({
         configStore: {
@@ -178,7 +173,6 @@ test("instance create restores configuration and registry when MCP registration 
             mcp: { enabled: true },
             name: "demo-local",
             provider: "local",
-            workspace: "/workspace/demo"
         }),
         /MCP registration failed/u
     );
@@ -216,7 +210,6 @@ test("MCP instance_create creates only SSH and strips instance management from i
             security: {
                 mode: "workspace",
             },
-            workspace: "/home/dev/main",
         }),
     );
     const registry = new InstanceRegistry([]);
@@ -248,7 +241,6 @@ test("MCP instance_create creates only SSH and strips instance management from i
         name: "remote-server",
         port: 2222,
         user: "dev",
-        workspace: "/srv/project",
     });
 
     assert.equal(result.name, "remote-server");
@@ -290,7 +282,6 @@ test("MCP instance_create rejects SSH option injection through host and user", a
         service.createSshInstanceFromMcp("main-pc", {
             host: "-oProxyCommand=sh",
             name: "remote-server",
-            workspace: "/srv/project",
         }),
         /host must not contain whitespace, control characters, or begin with '-'/u,
     );
@@ -300,7 +291,6 @@ test("MCP instance_create rejects SSH option injection through host and user", a
             host: "server.example.com",
             name: "remote-server",
             user: "dev user",
-            workspace: "/srv/project",
         }),
         /user must not contain whitespace, control characters, or begin with '-'/u,
     );
@@ -320,7 +310,6 @@ function createMcpCreateService() {
             },
             name: "main-pc",
             provider: "local",
-            workspace: "/home/dev/main",
         }),
     );
 

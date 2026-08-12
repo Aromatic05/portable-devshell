@@ -11,8 +11,7 @@ import { routeModule } from "../../route/ControlRouteFactory.js";
 import {
     limitRuntimeLogResponse,
     readRuntimeLogQuery,
-    readRuntimeSubscriptionFromSeq,
-    readRuntimeWorkspacePath
+    readRuntimeSubscriptionFromSeq
 } from "./RuntimeRouteInput.js";
 import { RuntimeInteractiveSession } from "./RuntimeInteractiveSession.js";
 import type { RuntimeSubscriptionManager } from "./RuntimeSubscriptionManager.js";
@@ -67,10 +66,7 @@ export function createRuntimeRouteModule(
             relay.bindOutput(async (chunk) => await stream.emit("output", { chunk }));
             try {
                 const result = withTodoSummaries(
-                    await instance.worker.startInteractive(
-                        readRuntimeWorkspacePath(request.payload),
-                        relay
-                    ),
+                    await instance.worker.startInteractive(relay),
                     instance.todoSummaries()
                 );
                 ownership.markOwned(instance.name);

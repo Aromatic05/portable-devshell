@@ -44,7 +44,6 @@ pub fn register_control_handlers(
         artifact_payload::receive_begin(
             Arc::clone(&receives),
             Arc::clone(&policy),
-            std::path::PathBuf::from(&runtime.workspace),
         ),
     );
     handlers.insert(
@@ -64,7 +63,6 @@ pub fn register_control_handlers(
         artifact_payload::payload_open(
             Arc::clone(&payloads),
             Arc::clone(&policy),
-            std::path::PathBuf::from(&runtime.workspace),
         ),
     );
     handlers.insert(

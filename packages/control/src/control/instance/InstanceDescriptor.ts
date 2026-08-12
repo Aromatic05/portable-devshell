@@ -36,5 +36,4 @@ export interface InstanceDescriptor {
     terminal?: TerminalBackend;
     todo: InstanceTodoPort;
     worker: WorkerInstance;
-    workspace?: string;
 }

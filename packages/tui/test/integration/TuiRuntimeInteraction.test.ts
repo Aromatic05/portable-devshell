@@ -137,9 +137,18 @@ test("serializes rapid Audit Input navigation and activation", async () => {
         runtime.store.toggleExpanded(box.expandedKey);
         runtime.store.setFocusScope("mainBoxes");
         runtime.store.setMainFocusId(box.id);
+        const expandedBox = selectMainScreenModel(runtime.store.getState()).boxes.find(
+            (candidate) => candidate.id === box.id,
+        )!;
+        const inputLineIndex = expandedBox.expandedLines.findIndex((line) =>
+            line.id?.endsWith(":input") === true,
+        );
+        assert.notEqual(inputLineIndex, -1);
 
         await Promise.all([
-            ...Array.from({ length: 7 }, () => runtime.handleInput("", { downArrow: true })),
+            ...Array.from({ length: inputLineIndex }, () =>
+                runtime.handleInput("", { downArrow: true }),
+            ),
             runtime.handleInput("", { return: true }),
         ]);
 
@@ -172,13 +181,12 @@ test("real Ink runtime saves a restart-required Config edit through cross-box ke
                     effectiveMode: "workspace",
                     mode: "workspace",
                 },
-                workspace: "/workspace/alpha",
             }],
             mcp: { enabled: false, listenHost: "127.0.0.1", listenPort: 0 },
             restartControlRequired: false,
         },
         instanceList: [{
-            defaultWorkspace: "/workspace/alpha",
+            homeDirectory: "/workspace/alpha",
             enabled: true,
             mcpEnabled: true,
             name: "alpha",
@@ -575,7 +583,7 @@ test("real Ink runtime routes every page and drives approval and text detail scr
     const clients = createClients({
         approvalRecords: [approval],
         instanceList: [{
-            defaultWorkspace: "/workspace/alpha",
+            homeDirectory: "/workspace/alpha",
             enabled: true,
             mcpEnabled: true,
             name: "alpha",
@@ -726,7 +734,7 @@ test("real Ink runtime routes Open Terminal without suspending the TUI", async (
         await waitUntil(() => runtime.store.getState().connection.status === "connected");
         clients.setControlState(
             [{
-                defaultWorkspace: process.cwd(),
+                homeDirectory: process.cwd(),
                 enabled: true,
                 mcpEnabled: false,
                 name: "alpha",
@@ -737,12 +745,11 @@ test("real Ink runtime routes Open Terminal without suspending the TUI", async (
                     enabled: true,
                     name: "alpha",
                     provider: "local",
-                    workspace: process.cwd(),
                 }],
             },
         );
         runtime.store.patchControlReadModel({ instances: [{
-            defaultWorkspace: process.cwd(),
+            homeDirectory: process.cwd(),
             enabled: true,
             mcpEnabled: false,
             name: "alpha",
@@ -837,7 +844,7 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
         clients.setControlState(
             [
                 {
-                    defaultWorkspace: process.cwd(),
+                    homeDirectory: process.cwd(),
                     enabled: true,
                     mcpEnabled: true,
                     name: "alpha",
@@ -856,7 +863,7 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
         );
         runtime.store.patchControlReadModel({ instances: [
             {
-                defaultWorkspace: process.cwd(),
+                homeDirectory: process.cwd(),
                 enabled: true,
                 mcpEnabled: true,
                 name: "alpha",
@@ -1026,7 +1033,7 @@ test("real Ink runtime switches terminal sources and drives tmux View and Attach
         },
         instanceList: [
             {
-                defaultWorkspace: process.cwd(),
+                homeDirectory: process.cwd(),
                 enabled: true,
                 mcpEnabled: true,
                 name: "alpha",
@@ -1231,6 +1238,7 @@ test("real Ink runtime renders artifact_viewImage audit output in the detail pan
             [
                 {
                     enabled: true,
+                    homeDirectory: "/home/alpha",
                     mcpEnabled: true,
                     name: "alpha",
                     provider: "local",
@@ -1241,6 +1249,7 @@ test("real Ink runtime renders artifact_viewImage audit output in the detail pan
         runtime.store.patchControlReadModel({ instances: [
             {
                 enabled: true,
+                homeDirectory: "/home/alpha",
                 mcpEnabled: true,
                 name: "alpha",
                 provider: "local",
@@ -1316,7 +1325,14 @@ test("real Ink runtime renders artifact_viewImage audit output in the detail pan
     }
 
     assert.deepEqual(clients.imageReads(), [
-        { input: { path: "./preview.png" }, instance: "alpha" },
+        {
+            input: {
+                instance: "alpha",
+                path: "./preview.png",
+                workspace: "/home/alpha",
+            },
+            instance: "alpha",
+        },
     ]);
 });
 
@@ -1325,7 +1341,7 @@ function createClients(
         configUpdate?: (request: unknown) => unknown;
         configView?: Record<string, unknown>;
         instanceList?: Array<{
-            defaultWorkspace?: string;
+            homeDirectory?: string;
             enabled: boolean;
             mcpEnabled: boolean;
             name: string;

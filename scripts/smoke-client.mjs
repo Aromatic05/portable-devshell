@@ -47,7 +47,7 @@ await mkdir(runtime, { recursive: true });
 await writeFile(
     resolve(devshellHome, "control", "config.toml"),
     [
-        "version = 1",
+        "version = 2",
         "",
         "[control]",
         'logLevel = "info"',
@@ -57,9 +57,6 @@ await writeFile(
         'listenHost = "127.0.0.1"',
         "listenPort = 17890",
         'publicBaseUrl = "http://127.0.0.1:17890"',
-        "",
-        "[mcp.auth]",
-        'mode = "none"',
         ""
     ].join("\n"),
     "utf8"
@@ -68,11 +65,10 @@ await writeFile(
 await writeFile(
     resolve(devshellHome, "control", "instances", `${instance}.toml`),
     [
-        "version = 2",
+        "version = 3",
         `name = ${tomlString(instance)}`,
         "enabled = true",
         'provider = "local"',
-        `workspace = ${tomlString(workspace)}`,
         "",
         "[mcp]",
         "enabled = false",
@@ -114,7 +110,7 @@ try {
         process.platform === "win32"
             ? "Write-Output 'portable-devshell-client-smoke'"
             : "printf 'portable-devshell-client-smoke\\n'";
-    const call = runCli(["instance", "call", instance, "bash_run", JSON.stringify({ command })]);
+    const call = runCli(["instance", "call", instance, workspace, "bash_run", JSON.stringify({ command })]);
     if (!call.stdout.includes("portable-devshell-client-smoke")) {
         throw new Error(`client tool call did not return expected output:\n${call.stdout}${call.stderr}`);
     }

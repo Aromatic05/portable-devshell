@@ -110,7 +110,7 @@ export async function runConnectorLoop(options) {
             if (await stopRequested(options.stopFile)) break;
             try {
                 if (client === undefined || ctxId === undefined) {
-                    ({ client, ctxId, toolNames } = await connectClient(options.endpoint));
+                    ({ client, ctxId, toolNames } = await connectClient(options.endpoint, options.workspace));
                     const connectedAt = new Date().toISOString();
                     await updateHealth({
                         lastConnectedAt: connectedAt,
@@ -237,11 +237,11 @@ export async function readTestspaceConnectorHealth(path) {
     }
 }
 
-async function connect(endpoint) {
+async function connect(endpoint, workspace) {
     const client = new Client({ name: "testspace-gpt-connector", version: "0.0.0" });
     await client.connect(new StreamableHTTPClientTransport(new URL(endpoint)));
     const listed = await client.listTools();
-    const environment = await client.callTool({ arguments: {}, name: "environ_info" });
+    const environment = await client.callTool({ arguments: { workspace }, name: "environ_info" });
     const ctxId = environment.structuredContent?.ctxId;
     if (typeof ctxId !== "string" || ctxId.length === 0) {
         await client.close();

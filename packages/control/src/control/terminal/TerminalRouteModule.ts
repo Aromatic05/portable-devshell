@@ -61,6 +61,7 @@ export function createTerminalRouteModule(
                 ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
                 instance: options.instance,
                 rows: input.rows,
+                workspace: input.workspace,
             })) as unknown as JsonValue;
         },
         list: async () => {
@@ -290,6 +291,7 @@ function readOpenInput(value: JsonValue | undefined): TerminalOpenInput {
             ? {}
             : { cwd: readString(payload.cwd, "cwd") }),
         rows: readIntegerField(payload, "rows"),
+        workspace: readString(payload.workspace, "workspace"),
     };
 }
 

@@ -7,7 +7,7 @@ use crate::rpc::error::RpcError;
 use crate::rpc::router::{ControlHandler, control_handler, parse_params, serialize};
 use crate::security::SecurityPolicy;
 use crate::tools::ToolError;
-use crate::tools::artifact::payload::ArtifactPayloadStore;
+use crate::tools::artifact::payload::{ArtifactPayloadDescriptor, ArtifactPayloadStore};
 use crate::tools::artifact::receive::{ArtifactReceiveBeginInput, ArtifactReceiveStore};
 
 #[derive(Debug, Deserialize)]
@@ -16,6 +16,7 @@ struct ArtifactPayloadOpenInput {
     handle: Option<String>,
     path: Option<String>,
     expires_at_ms: u128,
+    workspace: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,6 +43,16 @@ struct ArtifactReceiveWriteInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ArtifactReceiveBeginRpcInput {
+    descriptor: ArtifactPayloadDescriptor,
+    #[serde(default)]
+    overwrite: bool,
+    target_path: String,
+    workspace: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ArtifactReceiveIdInput {
     receive_id: String,
 }
@@ -49,18 +60,21 @@ struct ArtifactReceiveIdInput {
 pub fn payload_open(
     payloads: Arc<ArtifactPayloadStore>,
     policy: Arc<dyn SecurityPolicy>,
-    workspace: PathBuf,
 ) -> Arc<dyn ControlHandler> {
     control_handler(move |request| {
         let input: ArtifactPayloadOpenInput = parse_params(request)?;
-        let result = match (input.handle.as_deref(), input.path.as_deref()) {
-            (Some(handle), None) => payloads.open_handle(handle, input.expires_at_ms),
-            (None, Some(path)) => {
-                payloads.open_path(&workspace, path, policy.as_ref(), input.expires_at_ms)
+        let result = match (input.handle.as_deref(), input.path.as_deref(), input.workspace.as_deref()) {
+            (Some(handle), None, None) => payloads.open_handle(handle, input.expires_at_ms),
+            (None, Some(path), Some(workspace)) if PathBuf::from(workspace).is_absolute() => {
+                payloads.open_path(PathBuf::from(workspace).as_path(), path, policy.as_ref(), input.expires_at_ms)
             }
+            (None, Some(_), Some(_)) => Err(ToolError::new(
+                "rpc.invalidContext",
+                "artifact workspace must be an absolute path",
+            )),
             _ => Err(ToolError::new(
                 "rpc.invalidParams",
-                "exactly one of handle or path is required",
+                "handle requires no workspace; path requires an absolute workspace",
             )),
         }
         .map_err(RpcError::from)?;
@@ -97,13 +111,26 @@ pub fn payload_close(payloads: Arc<ArtifactPayloadStore>) -> Arc<dyn ControlHand
 pub fn receive_begin(
     receives: Arc<ArtifactReceiveStore>,
     policy: Arc<dyn SecurityPolicy>,
-    workspace: PathBuf,
 ) -> Arc<dyn ControlHandler> {
     control_handler(move |request| {
-        let input: ArtifactReceiveBeginInput = parse_params(request)?;
+        let input: ArtifactReceiveBeginRpcInput = parse_params(request)?;
+        if !PathBuf::from(&input.workspace).is_absolute() {
+            return Err(RpcError::new(
+                "rpc.invalidContext",
+                "artifact workspace must be an absolute path",
+            ));
+        }
         serialize(
             receives
-                .begin(&workspace, policy.as_ref(), input)
+                .begin(
+                    PathBuf::from(&input.workspace).as_path(),
+                    policy.as_ref(),
+                    ArtifactReceiveBeginInput {
+                        descriptor: input.descriptor,
+                        overwrite: input.overwrite,
+                        target_path: input.target_path,
+                    },
+                )
                 .map_err(RpcError::from)?,
         )
     })

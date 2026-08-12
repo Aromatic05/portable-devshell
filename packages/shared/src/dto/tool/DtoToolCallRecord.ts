@@ -54,6 +54,7 @@ export interface ToolCallRecord {
     termSignal?: number;
     termination?: ToolTermination;
     toolName: string;
+    workspace?: string;
 }
 
 export type ToolTermination = "exited" | "signaled" | "timeout";

@@ -62,8 +62,9 @@ export class TuiRuntimeExecutionOperations {
     async callTool(instance: string, toolName: string, input: string): Promise<boolean> {
         return await this.#runCommand(`Call Tool: ${toolName}`, instance, async () => {
             const parsed = JSON.parse(input) as JsonValue;
+            const workspace = this.#requireHomeDirectory(instance);
             const feedback = await this.#request(
-                this.options.clients.tool.call(instance, toolName, parsed),
+                this.options.clients.tool.call(instance, toolName, parsed, workspace),
                 `tool.call:${toolName}`
             ) as {
                 comment?: string[];
@@ -88,17 +89,32 @@ export class TuiRuntimeExecutionOperations {
     async #startInstanceWithinCommand(instance: string, commandId: string): Promise<void> {
         const entry = this.options.store.getState().instances.find((candidate) => candidate.name === instance);
         this.options.store.setRelayMetadata(commandId, {
-            provider: entry?.provider,
-            workspace: entry?.defaultWorkspace
+            provider: entry?.provider
         });
         await this.options.session.commands.startInstance(instance, {
             onOutput: (chunk) =>
                 this.options.store.appendRelayOutput(commandId, chunk),
             onRequestId: (requestId) =>
                 this.options.store.setRelayMetadata(commandId, { requestId }),
-            workspacePath: entry?.defaultWorkspace,
         });
+        await this.#refreshInstanceMetadataBestEffort(instance);
         await this.#refreshInstanceBestEffort(instance);
+    }
+
+    #requireHomeDirectory(instance: string): string {
+        const home = this.options.store.getState().instances.find((candidate) => candidate.name === instance)?.homeDirectory;
+        if (home !== undefined && home.length > 0) return home;
+        throw new Error(`Worker home directory is unavailable for ${instance}.`);
+    }
+
+    async #refreshInstanceMetadataBestEffort(instance: string): Promise<void> {
+        const key = `${this.options.store.getState().ui.selectedPage}:${instance}:metadataRefresh`;
+        try {
+            await this.options.session.refreshInstances();
+            this.options.store.setPanelError(key, undefined);
+        } catch (error) {
+            this.options.store.setPanelError(key, toControlError(error));
+        }
     }
 
     async #refreshInstanceBestEffort(instance: string): Promise<void> {

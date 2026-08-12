@@ -48,7 +48,6 @@ test("instance wizard retries invalid basic answers, deduplicates lists, and sup
             "",
             "",
             "",
-            "",
             "file,file bash",
             "read execute read",
             "unsafe",
@@ -82,8 +81,6 @@ test("instance wizard collects SSH configuration and accepts validated creation"
             "remote-one",
             "",
             "ssh",
-            "/remote/work",
-            "",
             "ssh devbox",
             "n",
             "",
@@ -114,8 +111,7 @@ test("instance wizard collects SSH configuration and accepts validated creation"
         name: "remote-one",
         provider: "ssh",
         security: { mode: "disabled" },
-        ssh: { command: "ssh devbox" },
-        workspace: "/remote/work"
+        ssh: { command: "ssh devbox" }
     });
 });
 
@@ -126,7 +122,6 @@ test("instance wizard collects complete OAuth, approval, environment, log, and s
             "complete-local",
             "",
             "local",
-            "/workspace/complete",
             "",
             "oauth2",
             "complete-resource",
@@ -205,7 +200,6 @@ test("instance wizard validates and collects a managed Docker preset", async () 
             "docker-one",
             "",
             "docker",
-            "/workspace",
             "9",
             "1",
             "unknown",
@@ -298,8 +292,7 @@ function summaryFor(draft: InstanceCreateDraft): InstanceCreateSummary {
         provider: instance.provider,
         security: {
             mode: instance.security.mode
-        },
-        workspace: instance.workspace
+        }
     };
 }
 

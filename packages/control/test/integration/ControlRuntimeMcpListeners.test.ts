@@ -103,7 +103,6 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
     config.instances = [normalizeConfigInstanceDraft({
         name: "demo-local",
         provider: "local",
-        workspace: "/workspace/demo"
     })];
     let webApplyCalls = 0;
     let mcpApplyCalls = 0;

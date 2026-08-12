@@ -329,12 +329,11 @@ function createRoutes(
                                     enabled: true,
                                     tools: {
                                         capabilities: ["read", "write", "execute"],
-                                        groups: ["context"],
+                                        groups: ["bash"],
                                     },
                                 },
                                 name: "alpha",
                                 provider: "local",
-                                workspace: "/workspace/alpha",
                             }],
                             mcp: { enabled: true, listenHost: "127.0.0.1", listenPort: 3210 },
                         }),
@@ -345,7 +344,7 @@ function createRoutes(
                     operations: [{
                         name: "list",
                         handle: () => [{
-                            defaultWorkspace: "/workspace/alpha",
+                            homeDirectory: "/workspace/alpha",
                             enabled: true,
                             mcpEnabled: true,
                             name: "alpha",

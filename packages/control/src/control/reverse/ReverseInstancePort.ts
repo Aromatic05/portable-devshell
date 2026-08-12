@@ -5,7 +5,6 @@ export interface ReverseInstancePort {
     provider: "docker" | "local" | "podman" | "reverse" | "ssh";
     reverseConnector?: WorkerRpcInboundConnector;
     worker: Pick<WorkerInstance, "acceptReverseChannel" | "setReverseEnrollmentState" | "snapshot">;
-    workspace?: string;
 }
 
 export interface ReverseInstanceLookupPort {

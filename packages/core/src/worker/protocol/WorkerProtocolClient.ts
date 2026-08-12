@@ -2,7 +2,7 @@ import type { ArtifactPayloadDescriptor, ControlInstanceAlertsConfig, JsonValue 
 
 import { WorkerRpcClient } from "../rpc/WorkerRpcClient.js";
 
-export const WORKER_PROTOCOL_VERSION = 4;
+export const WORKER_PROTOCOL_VERSION = 5;
 
 export interface WorkerHandshakeParams {
     minProtocolVersion: number;
@@ -25,9 +25,9 @@ export interface WorkerShellRuntime {
 }
 
 export interface WorkerHandshakeResult {
+    homeDirectory: string;
     instance: string;
     skillsDirectory: string;
-    workspace: string;
     workerVersion: string;
     workerSha256?: string;
     protocolVersion: number;
@@ -76,7 +76,7 @@ export interface WorkerAlertsReadResult {
 
 export type WorkerArtifactPayloadOpenInput =
     | { expiresAtMs: number; handle: string; path?: never }
-    | { expiresAtMs: number; handle?: never; path: string };
+    | { expiresAtMs: number; handle?: never; path: string; workspace: string };
 
 export interface WorkerArtifactPayloadOpenResult {
     descriptor: ArtifactPayloadDescriptor;
@@ -105,6 +105,7 @@ export interface WorkerArtifactReceiveBeginInput {
     descriptor: ArtifactPayloadDescriptor;
     overwrite: boolean;
     targetPath: string;
+    workspace: string;
 }
 
 export interface WorkerArtifactReceiveBeginResult {

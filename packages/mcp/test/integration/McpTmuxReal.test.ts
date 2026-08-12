@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn, spawnSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -10,7 +10,7 @@ import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
 
 import { WorkerTransportDriverLocal, WorkerBinary, WorkerInstanceFactory } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
-import { asInstanceName, asWorkspacePath } from "@portable-devshell/shared";
+import { asInstanceName } from "@portable-devshell/shared";
 import { resolveTestWorkerBinary, tmuxTestOptions } from "../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
@@ -161,7 +161,6 @@ async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness
     ));
     const workspacePath = await createTestTempDirectory("mcp-tmux-workspace");
     const instance = new WorkerInstanceFactory().create({
-        defaultWorkspace: asWorkspacePath(workspacePath),
         env: {
             ...process.env,
             HOME: homeDirectory,
@@ -236,17 +235,21 @@ async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness
         await body({ callTool, createContext, listTools });
     } finally {
         await host.stop();
+        const runtimeInstanceDirectory = join(runtimeDirectory, "devshell-worker", instanceName);
+        const sockets = (await readdir(runtimeInstanceDirectory).catch(() => []))
+            .filter((name) => name === "tmux.sock" || /^tmux-.+\.sock$/u.test(name));
+        for (const socket of sockets) {
+            const cleanup = spawnSync("tmux", ["-S", join(runtimeInstanceDirectory, socket), "kill-server"], {
+                encoding: "utf8",
+            });
+            assert.equal(
+                cleanup.status,
+                0,
+                cleanup.stderr || cleanup.error?.message || "failed to stop test tmux server",
+            );
+        }
         await instance.stop();
         await instance.close();
-        const tmuxSocket = join(runtimeDirectory, "devshell-worker", instanceName, "tmux.sock");
-        const cleanup = spawnSync("tmux", ["-S", tmuxSocket, "kill-server"], {
-            encoding: "utf8",
-        });
-        assert.equal(
-            cleanup.status,
-            0,
-            cleanup.stderr || cleanup.error?.message || "failed to stop test tmux server",
-        );
         await rm(homeDirectory, { force: true, recursive: true });
         await rm(runtimeDirectory, { force: true, recursive: true });
         await rm(workspacePath, { force: true, recursive: true });

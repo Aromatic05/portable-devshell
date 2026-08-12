@@ -18,14 +18,14 @@ function createHarness() {
     const store = new TuiAppStore();
     store.patchControlReadModel({ instances: [
         {
-            defaultWorkspace: "/workspace/alpha",
+            homeDirectory: "/workspace/alpha",
             enabled: true,
             mcpEnabled: false,
             name: "alpha",
             provider: "local",
         },
         {
-            defaultWorkspace: "/workspace/beta",
+            homeDirectory: "/workspace/beta",
             enabled: true,
             mcpEnabled: true,
             name: "beta",

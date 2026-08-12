@@ -43,11 +43,10 @@ publicBaseUrl = "http://127.0.0.1:17890"
 编辑 `~/.devshell/control/instances/demo-local.toml`：
 
 ```toml
-version = 2
+version = 3
 name = "demo-local"
 enabled = true
 provider = "local"
-workspace = "/absolute/path/to/workspace"
 
 [mcp]
 enabled = true
@@ -55,7 +54,7 @@ auth = "none"
 path = "/demo-local/mcp"
 
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo", "context"]
+groups = ["file", "bash", "artifact", "tmux", "todo"]
 capabilities = ["read", "write", "execute"]
 ```
 
@@ -103,10 +102,9 @@ requiredScopes = ["mcp"]
 | `artifact` | `artifact_read`、`artifact_viewImage`、`artifact_share`、`artifact_transfer`             | `read`、`write`   |
 | `tmux`     | `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_list`、`tmux_create`、`tmux_close`    | `read`、`execute` |
 | `todo`     | `todo_read`、`todo_write`                                                                | 无硬性 capability |
-| `context`  | `context_message_read`                                                                  | 无硬性 capability |
 | `instance` | `instance_list`、`instance_status`、`instance_create`、`instance_start`、`instance_stop` | `manage`          |
 
-默认创建的实例包含 `context` group，使 Agent 能读取用户从 TUI 定向发送给当前 Context 的消息；默认不包含 `instance` group，也不授予 `manage`。
+默认不包含 `instance` group，也不授予 `manage`。用户从 TUI 定向发送给某个 Context 的 Comment 不作为独立 MCP 工具暴露；消息按 `ctxId` 排队，并附着到该 Context 下一次成功的普通工具结果中。
 
 ## Skills 与项目记忆提示
 
@@ -137,7 +135,7 @@ Control 机器上的 Skill 目录固定为：
 
 ```toml
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo", "context", "instance"]
+groups = ["file", "bash", "artifact", "tmux", "todo", "instance"]
 capabilities = ["read", "write", "execute", "manage"]
 ```
 

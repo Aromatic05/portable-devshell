@@ -73,14 +73,9 @@ export class McpToolCatalogInstance {
                         description: "Optional SSH user name.",
                         minLength: 1,
                         type: "string"
-                    },
-                    workspace: {
-                        description: "Workspace path on the SSH host.",
-                        minLength: 1,
-                        type: "string"
                     }
                 },
-                required: ["name", "host", "workspace"],
+                required: ["name", "host"],
                 type: "object"
             }
         ),

@@ -642,7 +642,6 @@ test("start keeps real worker config registered and does not auto-start worker",
             mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
             name: "demo-local",
             provider: "local",
-            workspace: "/tmp/demo"
         }),
         "utf8"
     );

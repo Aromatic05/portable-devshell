@@ -19,8 +19,7 @@ test("config patch has explicit null clearing and strict unknown-field parsing",
         },
         dockerBinary: "docker",
         name: "demo-docker",
-        provider: "docker",
-        workspace: "/workspace/demo"
+        provider: "docker"
     }));
     const next = normalizeConfigInstanceDraft(applyConfigInstancePatch(current, parseConfigInstancePatch({
         dockerBinary: null
@@ -30,7 +29,6 @@ test("config patch has explicit null clearing and strict unknown-field parsing",
     assert.throws(() => parseConfigInstanceDraft({
         name: "demo-local",
         provider: "local",
-        workspace: "/workspace/demo",
         workspacePath: "/legacy"
     }), /workspacePath is not supported/u);
 });
@@ -39,8 +37,7 @@ test("semantic validation accepts normalized canonical config", () => {
     const config = createDefaultControlConfig();
     config.instances.push(normalizeConfigInstanceDraft({
         name: "demo-local",
-        provider: "local",
-        workspace: "/workspace/demo"
+        provider: "local"
     }));
 
     assert.equal(validateConfigSemantics(config), config);

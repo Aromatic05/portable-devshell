@@ -11,6 +11,7 @@ import {
     formatConfigPath,
     normalizeConfigGlobalDraft,
     normalizeConfigInstanceDraft,
+    type ConfigInstanceDraft,
     type ConfigMcpAuthDraft,
     type ControlConfig,
     type ControlGlobalConfig,
@@ -63,11 +64,12 @@ export class ControlConfigStore {
             return config;
         }
 
+        const loadedInstances = await this.#readInstances(paths, legacyMcpAuth);
         const config = this.#validator.validate({
             ...globalConfig,
-            instances: await this.#readInstances(paths, legacyMcpAuth)
+            instances: loadedInstances.instances
         });
-        if (legacyMcpAuth !== undefined) await this.write(config, homeDirectory);
+        if (legacyMcpAuth !== undefined || loadedInstances.migrated) await this.write(config, homeDirectory);
         return config;
     }
 
@@ -106,7 +108,10 @@ export class ControlConfigStore {
         }
     }
 
-    async #readInstances(paths: ControlPathHome, legacyMcpAuth?: ConfigMcpAuthDraft): Promise<ControlInstanceConfig[]> {
+    async #readInstances(
+        paths: ControlPathHome,
+        legacyMcpAuth?: ConfigMcpAuthDraft
+    ): Promise<{ instances: ControlInstanceConfig[]; migrated: boolean }> {
         let entries: Array<{ isFile(): boolean; name: string }>;
         try {
             entries = await readdir(paths.instancesDir, { encoding: "utf8", withFileTypes: true });
@@ -114,7 +119,7 @@ export class ControlConfigStore {
                 await chmod(paths.instancesDir, 0o700);
             }
         } catch (error) {
-            if (isFileMissingError(error)) return [];
+            if (isFileMissingError(error)) return { instances: [], migrated: false };
             throw createError({
                 code: errorCodes.controlConfigLoadFailed,
                 cause: error,
@@ -125,6 +130,7 @@ export class ControlConfigStore {
         }
 
         const instances: ControlInstanceConfig[] = [];
+        let migrated = false;
         for (const fileName of entries
             .filter((entry) => entry.isFile() && entry.name.endsWith(".toml"))
             .map((entry) => entry.name)
@@ -133,7 +139,8 @@ export class ControlConfigStore {
             try {
                 const source = await readFile(filePath, "utf8");
                 await secureFile(filePath);
-                const draft = this.#instanceDocument.decode(this.#tomlCodec.decode(source));
+                const draft = this.#instanceDocument.decode(this.#tomlCodec.decode(source)) as ConfigInstanceDraftWithMigration;
+                migrated ||= draft.migratedFromVersion === 2;
                 instances.push(normalizeConfigInstanceDraft({
                     ...draft,
                     mcp: draft.mcp?.enabled === false || legacyMcpAuth === undefined
@@ -144,7 +151,7 @@ export class ControlConfigStore {
                 throw attachConfigFile(error, filePath);
             }
         }
-        return instances;
+        return { instances, migrated };
     }
 
     async #removeStaleInstances(paths: ControlPathHome, activeFiles: ReadonlySet<string>): Promise<void> {
@@ -156,6 +163,10 @@ export class ControlConfigStore {
     }
 }
 
+
+type ConfigInstanceDraftWithMigration = ConfigInstanceDraft & {
+    migratedFromVersion?: 2;
+};
 
 interface ConfigTransactionManifest {
     existingGlobal: boolean;

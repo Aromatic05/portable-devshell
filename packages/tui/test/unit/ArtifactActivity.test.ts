@@ -25,16 +25,30 @@ const share: ArtifactShareResult = {
     expiresAtMs: Date.now() + 60_000,
     mediaType: "application/octet-stream",
     shareId: "share-12345678",
-    source: { instance: "instance-a", path: "./result.bin", type: "file" },
+    source: {
+        instance: "instance-a",
+        path: "./result.bin",
+        type: "file",
+        workspace: "/projects/a",
+    },
     state: "active",
     url: "https://example.test/artifacts/share/token",
 };
 
 const transfer: ArtifactTransferRecord = {
     createdAt: "2026-07-13T00:00:00.000Z",
-    source: { instance: "instance-a", path: "./result.bin", type: "file" },
+    source: {
+        instance: "instance-a",
+        path: "./result.bin",
+        type: "file",
+        workspace: "/projects/a",
+    },
     status: "transferring",
-    target: { instance: "instance-b", path: "/srv/result.bin" },
+    target: {
+        instance: "instance-b",
+        path: "./result.bin",
+        workspace: "/projects/b",
+    },
     totalBytes: 10,
     transferId: "transfer-12345678",
     transferredBytes: 4,
@@ -375,6 +389,14 @@ test("TUI ignores an old visible Overview failure after reconnect", async () => 
         box.collapsedLines[1]?.text ?? "",
         /artifacts shares=1 transfers=1 active=2/u,
     );
+    assert.equal(
+        box.expandedLines.some((line) => line.text.includes("/projects/a")),
+        true,
+    );
+    assert.equal(
+        box.expandedLines.some((line) => line.text.includes("/projects/b")),
+        true,
+    );
     const revokeLine = box.expandedLines.find((line) =>
         line.id?.includes("button:artifact-revoke:"),
     );
@@ -415,7 +437,7 @@ function seededStore(): TuiAppStore {
     const store = new TuiAppStore();
     store.patchControlReadModel({ instances: [
         {
-            defaultWorkspace: "/workspace/a",
+            homeDirectory: "/workspace/a",
             enabled: true,
             mcpEnabled: true,
             name: "instance-a",

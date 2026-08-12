@@ -64,22 +64,28 @@ export class ControlGlobalTomlDocument {
 export class ControlInstanceTomlDocument {
     decode(document: ConfigTomlDocument): ConfigInstanceDraft {
         const record = asRecord(document);
-        assertDocumentVersion(record.version, 2, ["version"]);
+        const version = readDocumentVersion(record.version);
+        if (version !== 2 && version !== 3) {
+            throw configInputError("parse", ["version"], "config.document.versionUnsupported", "must be 2 or 3");
+        }
         rejectLegacyField(record, "workerBinaryPath", "is not supported");
         rejectLegacyField(record, "host", "is not supported; use ssh.command");
-        rejectLegacyField(record, "remoteCwd", "is not supported; use workspace");
+        rejectLegacyField(record, "remoteCwd", "is not supported");
         rejectLegacyField(record, "sshBinary", "is not supported; use ssh.command");
-        const { version: _version, ...config } = record;
-        return parseConfigInstanceDraft(config);
+        if (version === 3) {
+            rejectLegacyField(record, "workspace", "is not supported; select an absolute workspace when creating an environment context");
+        }
+        const { version: _version, workspace: _legacyWorkspace, ...config } = record;
+        const draft = parseConfigInstanceDraft(config);
+        return version === 2 ? Object.assign(draft, { migratedFromVersion: 2 as const }) : draft;
     }
 
     encode(instance: ControlInstanceConfig): ConfigTomlDocument {
         return compact({
-            version: 2,
+            version: 3,
             name: instance.name,
             enabled: instance.enabled,
             provider: instance.provider,
-            workspace: instance.workspace,
             container: instance.container,
             ssh: instance.ssh,
             dockerBinary: instance.dockerBinary,
@@ -102,15 +108,6 @@ export class ControlInstanceTomlDocument {
             tools: instance.tools,
             security: instance.security
         });
-    }
-}
-
-function assertDocumentVersion(value: unknown, expected: number, path: readonly string[]): void {
-    if (typeof value !== "number" || !Number.isSafeInteger(value)) {
-        throw configInputError("parse", path, "config.document.versionType", "must be an integer");
-    }
-    if (value !== expected) {
-        throw configInputError("parse", path, "config.document.versionUnsupported", `must be ${expected}`);
     }
 }
 

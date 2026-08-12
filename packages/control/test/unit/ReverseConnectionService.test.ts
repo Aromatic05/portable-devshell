@@ -60,7 +60,6 @@ test("ReverseConnectionService enrolls and authenticates without an HTTP server"
             },
             snapshot: () => ({}) as never
         },
-        workspace: "/workspace"
     };
     const service = new ReverseConnectionService({
         credentialStore,
@@ -79,7 +78,6 @@ test("ReverseConnectionService enrolls and authenticates without an HTTP server"
 
     assert.equal(enrolled.controllerUrl, "https://example.test/devshell");
     assert.equal(enrolled.instance, descriptor.name);
-    assert.equal(enrolled.workspace, "/workspace");
     assert.deepEqual(enrollmentStates, ["enrolled"]);
     assert.equal(typeof enrolled.deviceToken, "string");
 

@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -107,19 +108,21 @@ impl TmuxBackend {
         instance_paths: &InstancePaths,
         socket_paths: &SocketPaths,
         runtime: &WorkerRuntimeContext,
+        workspace: &Path,
     ) -> Result<Self, ToolError> {
-        let root = instance_paths.instance_root.join("tmux");
+        let workspace_key = workspace_key(&instance_paths.instance_root, workspace);
+        let (root, socket) = workspace_storage(instance_paths, socket_paths, workspace, &workspace_key)?;
         let panes_dir = root.join("panes").join("by-id");
         let shell_dir = root.join("shell");
         let status_dir = root.join("status");
         for path in [&root, &panes_dir, &shell_dir, &status_dir] {
             ensure_dir(path, 0o700).map_err(|error| ToolError::new("tmux.storageFailed", error))?;
         }
-        let observation_reset = session_exists(&socket_paths.tmux_socket_file);
+        let observation_reset = session_exists(&socket);
         Ok(Self {
             instance: runtime.instance.as_str().to_string(),
-            workspace: runtime.workspace.clone(),
-            socket: socket_paths.tmux_socket_file.clone(),
+            workspace: workspace.to_path_buf(),
+            socket,
             panes_dir,
             shell_dir,
             status_dir,
@@ -790,6 +793,103 @@ fn session_exists(socket: &Path) -> bool {
             .args(["has-session", "-t", TMUX_SESSION])
             .output()
             .is_ok_and(|output| output.status.success())
+}
+
+fn workspace_key(instance_root: &Path, workspace: &Path) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(instance_root.as_os_str().as_bytes());
+    hasher.update(&[0]);
+    hasher.update(workspace.as_os_str().as_bytes());
+    hasher.finalize().to_hex()[..16].to_string()
+}
+
+fn workspace_socket(
+    socket_paths: &SocketPaths,
+    instance_root: &Path,
+    workspace: &Path,
+    workspace_key: &str,
+) -> PathBuf {
+    const MAX_UNIX_SOCKET_PATH_BYTES: usize = 100;
+    let candidate = socket_paths
+        .instance_runtime_dir
+        .join(format!("tmux-{workspace_key}.sock"));
+    if candidate.as_os_str().as_bytes().len() <= MAX_UNIX_SOCKET_PATH_BYTES {
+        return candidate;
+    }
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(instance_root.as_os_str().as_bytes());
+    hasher.update(&[0]);
+    hasher.update(workspace.as_os_str().as_bytes());
+    let hash = hasher.finalize().to_hex();
+    PathBuf::from("/tmp").join(format!("devshell-tmux-{}.sock", &hash[..16]))
+}
+
+fn workspace_storage(
+    instance_paths: &InstancePaths,
+    socket_paths: &SocketPaths,
+    workspace: &Path,
+    workspace_key: &str,
+) -> Result<(PathBuf, PathBuf), ToolError> {
+    let tmux_root = instance_paths.instance_root.join("tmux");
+    let scoped_root = tmux_root.join("workspaces").join(workspace_key);
+    let scoped_socket = workspace_socket(
+        socket_paths,
+        &instance_paths.instance_root,
+        workspace,
+        workspace_key,
+    );
+    let legacy_marker = tmux_root.join("legacy-workspace.json");
+    if let Some(claimed_key) = read_legacy_workspace_key(&legacy_marker)? {
+        return if claimed_key == workspace_key {
+            Ok((tmux_root, socket_paths.tmux_socket_file.clone()))
+        } else {
+            Ok((scoped_root, scoped_socket))
+        };
+    }
+    if session_exists(&socket_paths.tmux_socket_file)
+        && legacy_session_is_within(&socket_paths.tmux_socket_file, workspace)?
+    {
+        atomic_write_json(&legacy_marker, &workspace_key.to_string())?;
+        return Ok((tmux_root, socket_paths.tmux_socket_file.clone()));
+    }
+    Ok((scoped_root, scoped_socket))
+}
+
+fn read_legacy_workspace_key(path: &Path) -> Result<Option<String>, ToolError> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(ToolError::new("tmux.storageFailed", error.to_string())),
+    };
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|error| ToolError::new("tmux.storageFailed", error.to_string()))
+}
+
+fn legacy_session_is_within(socket: &Path, workspace: &Path) -> Result<bool, ToolError> {
+    let output = Command::new("tmux")
+        .arg("-S")
+        .arg(socket)
+        .args(["list-panes", "-s", "-t", TMUX_SESSION, "-F", "#{q:pane_current_path}"])
+        .output()
+        .map_err(|error| ToolError::new("tmux.inspectFailed", error.to_string()))?;
+    if !output.status.success() {
+        return Ok(false);
+    }
+    let raw = String::from_utf8(output.stdout)
+        .map_err(|error| ToolError::new("tmux.inspectFailed", error.to_string()))?;
+    let mut saw_pane = false;
+    for line in raw.lines().filter(|line| !line.trim().is_empty()) {
+        saw_pane = true;
+        let decoded = decode_tmux_argument(line)?;
+        let canonical = PathBuf::from(decoded).canonicalize().map_err(|error| {
+            ToolError::new("tmux.inspectFailed", format!("failed to resolve legacy pane cwd: {error}"))
+        })?;
+        if !canonical.starts_with(workspace) {
+            return Ok(false);
+        }
+    }
+    Ok(saw_pane)
 }
 
 fn status_text(record: &PaneStatusRecord) -> String {

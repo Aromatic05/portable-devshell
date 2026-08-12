@@ -20,10 +20,8 @@ export class ArtifactHostBridge {
     readonly #receives: ArtifactHostReceiveStore;
 
     constructor(options: ArtifactHostBridgeOptions) {
-        const processCwd = options.processCwd ?? process.cwd();
         this.#payloads = new ArtifactHostPayloadStore({
             homeDirectory: options.homeDirectory,
-            processCwd,
             root: join(options.storageDir, "payloads")
         });
         this.#receives = new ArtifactHostReceiveStore({
@@ -63,6 +61,7 @@ export class ArtifactHostBridge {
                 return await this.#payloads.openPath(
                     input.path,
                     input.expiresAtMs,
+                    input.workspace,
                     context
                 );
             },

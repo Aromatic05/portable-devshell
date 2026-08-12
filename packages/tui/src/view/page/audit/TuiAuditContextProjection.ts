@@ -21,6 +21,7 @@ export interface TuiAuditContextSummary {
     readonly latestActivityAt: string;
     readonly latestCall?: ToolCallRecord;
     readonly status: TuiExpandableBoxStatus;
+    readonly workspace?: string;
 }
 
 interface MutableAuditContext {
@@ -102,25 +103,26 @@ function toSummary(
             .sort()
             .at(-1) ?? "-";
     const ctxId = context.key.kind === "context" ? context.key.ctxId : undefined;
-    const registryStatus = ctxId === undefined
+    const registryRecord = ctxId === undefined
         ? undefined
         : state.readModel.contexts.find(
               (record) =>
                   record.ctxId === ctxId &&
                   record.instance === instance,
-          )?.status;
+          );
 
     return {
         approvals: [...context.approvals].sort((left, right) =>
             left.createdAt.localeCompare(right.createdAt),
         ),
         calls: sortedCalls,
-        contextStatus: registryStatus,
+        contextStatus: registryRecord?.status,
         key: context.key,
         label: context.label,
         latestActivityAt,
         latestCall,
         status: contextStatus(sortedCalls, context.approvals),
+        workspace: registryRecord?.workspace,
     };
 }
 

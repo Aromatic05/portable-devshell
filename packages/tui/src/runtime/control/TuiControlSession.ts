@@ -140,6 +140,11 @@ export class TuiControlSession {
         await this.#model.refreshControl();
     }
 
+    async refreshInstances(generation = this.#generation, signal?: AbortSignal): Promise<void> {
+        if (!this.#canRefresh(generation, signal)) return;
+        await this.#model.refreshInstances();
+    }
+
     async refreshOverview(generation = this.#generation, signal?: AbortSignal): Promise<void> {
         if (this.#canRefresh(generation, signal)) await this.#refreshScheduler.refresh("overview");
     }
@@ -256,6 +261,13 @@ export class TuiControlSession {
         if (!this.#started || !isTuiPresentationEvent(event.type)) return;
         this.#store.applyInstanceEvent(event);
         if (
+            event.type === "worker.rpcConnected" ||
+            event.type === "instance.readyChanged" ||
+            event.type === "instance.stopped"
+        ) {
+            void this.refreshInstances();
+        }
+        if (
             this.#store.getState().ui.selectedPage === "overview" &&
             isOverviewRefreshEvent(event.type)
         ) this.#refreshScheduler.scheduleOverview(75);
@@ -353,6 +365,7 @@ function mergeInstances(
         const runtime = runtimeByName.get(instance.name);
         merged.set(instance.name, {
             ...instance,
+            homeDirectory: runtime?.homeDirectory,
             mcpEnabled: runtime?.mcpEnabled ?? instance.mcpEnabled,
         });
     }
@@ -360,6 +373,7 @@ function mergeInstances(
         if (!merged.has(runtime.name)) {
             merged.set(runtime.name, {
                 enabled: true,
+                homeDirectory: runtime.homeDirectory,
                 mcpEnabled: runtime.mcpEnabled,
                 name: runtime.name,
             });
@@ -382,7 +396,6 @@ function readConfigInstances(
             ? entry.mcp
             : undefined;
         return [{
-            defaultWorkspace: typeof entry.workspace === "string" ? entry.workspace : undefined,
             enabled: entry.enabled !== false,
             mcpEnabled: mcp?.enabled === true,
             mcpPath: typeof mcp?.path === "string" ? mcp.path : undefined,

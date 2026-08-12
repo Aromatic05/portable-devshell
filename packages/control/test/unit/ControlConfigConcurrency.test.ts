@@ -64,7 +64,6 @@ test("instance creation and endpoint updates share one configuration mutation bo
     const instanceCreate = creator.createInstance({
         name: "concurrent-local",
         provider: "local",
-        workspace: "/tmp/concurrent-local"
     });
 
     await new Promise((resolve) => setImmediate(resolve));

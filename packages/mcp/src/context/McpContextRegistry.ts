@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import {
@@ -59,10 +59,16 @@ export class McpContextRegistry {
                 return;
             }
             await this.#load();
+            const previous = cloneContextMap(this.#contexts);
             const changed = this.#expireOverdue(this.#now());
-            this.#initialized = true;
-            if (changed) {
-                await this.#persist();
+            try {
+                if (changed) {
+                    await this.#persist();
+                }
+                this.#initialized = true;
+            } catch (error) {
+                restoreContextMap(this.#contexts, previous);
+                throw error;
             }
         });
     }
@@ -84,8 +90,9 @@ export class McpContextRegistry {
                 lastAccessedAt: at,
                 status: "active"
             };
-            this.#contexts.set(ctxId, record);
-            await this.#persist();
+            await this.#mutateAndPersist(() => {
+                this.#contexts.set(ctxId, record);
+            });
             return cloneRecord(record);
         });
     }
@@ -106,8 +113,9 @@ export class McpContextRegistry {
             }
             if (record.status === "expired" || Date.parse(record.expiresAt) <= now) {
                 if (record.status !== "expired") {
-                    record.status = "expired";
-                    await this.#persist();
+                    await this.#mutateAndPersist(() => {
+                        record.status = "expired";
+                    });
                 }
                 throw expiredContext(ctxId, record.expiresAt);
             }
@@ -117,9 +125,10 @@ export class McpContextRegistry {
             ) {
                 throw invalidContext(ctxId);
             }
-            record.lastAccessedAt = new Date(now).toISOString();
-            record.expiresAt = new Date(now + this.#ttlMs).toISOString();
-            await this.#persist();
+            await this.#mutateAndPersist(() => {
+                record.lastAccessedAt = new Date(now).toISOString();
+                record.expiresAt = new Date(now + this.#ttlMs).toISOString();
+            });
             return cloneRecord(record);
         });
     }
@@ -140,8 +149,23 @@ export class McpContextRegistry {
             if (record === undefined || !isCtxId(ctxId)) {
                 throw invalidContext(ctxId);
             }
-            record.status = "disabled";
-            await this.#persist();
+            await this.#mutateAndPersist(() => {
+                record.status = "disabled";
+            });
+            return cloneRecord(record);
+        });
+    }
+
+    async discard(ctxId: string): Promise<McpContextRecord> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined || !isCtxId(ctxId)) {
+                throw invalidContext(ctxId);
+            }
+            await this.#mutateAndPersist(() => {
+                this.#contexts.delete(ctxId);
+            });
             return cloneRecord(record);
         });
     }
@@ -157,10 +181,11 @@ export class McpContextRegistry {
                 throw disabledContext(ctxId);
             }
             const now = this.#now();
-            record.status = "active";
-            record.lastAccessedAt = new Date(now).toISOString();
-            record.expiresAt = new Date(now + this.#ttlMs).toISOString();
-            await this.#persist();
+            await this.#mutateAndPersist(() => {
+                record.status = "active";
+                record.lastAccessedAt = new Date(now).toISOString();
+                record.expiresAt = new Date(now + this.#ttlMs).toISOString();
+            });
             return cloneRecord(record);
         });
     }
@@ -181,11 +206,23 @@ export class McpContextRegistry {
             if (record.status === "expired") {
                 throw expiredContext(ctxId, record.expiresAt);
             }
-            record.workspace = binding.workspace;
-            record.temporaryDirectory = binding.temporaryDirectory;
-            await this.#persist();
+            await this.#mutateAndPersist(() => {
+                record.workspace = binding.workspace;
+                record.temporaryDirectory = binding.temporaryDirectory;
+            });
             return cloneRecord(record);
         });
+    }
+
+    async #mutateAndPersist(mutate: () => void): Promise<void> {
+        const previous = cloneContextMap(this.#contexts);
+        mutate();
+        try {
+            await this.#persist();
+        } catch (error) {
+            restoreContextMap(this.#contexts, previous);
+            throw error;
+        }
     }
 
     async #load(): Promise<void> {
@@ -234,8 +271,13 @@ export class McpContextRegistry {
             version: 1
         };
         const temporary = `${this.#filePath}.${process.pid}.${randomUUID()}.tmp`;
-        await writeFile(temporary, `${JSON.stringify(document, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-        await rename(temporary, this.#filePath);
+        try {
+            await writeFile(temporary, `${JSON.stringify(document, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+            await rename(temporary, this.#filePath);
+        } catch (error) {
+            await rm(temporary, { force: true }).catch(() => undefined);
+            throw error;
+        }
     }
 
     #assertInitialized(): void {
@@ -287,6 +329,22 @@ function isCtxId(value: string): boolean {
 
 function cloneRecord(record: McpContextRecord): McpContextRecord {
     return { ...record };
+}
+
+function cloneContextMap(
+    contexts: ReadonlyMap<string, McpContextRecord>
+): Map<string, McpContextRecord> {
+    return new Map([...contexts].map(([ctxId, record]) => [ctxId, cloneRecord(record)]));
+}
+
+function restoreContextMap(
+    contexts: Map<string, McpContextRecord>,
+    previous: ReadonlyMap<string, McpContextRecord>
+): void {
+    contexts.clear();
+    for (const [ctxId, record] of previous) {
+        contexts.set(ctxId, cloneRecord(record));
+    }
 }
 
 function isDocument(value: unknown): value is McpContextDocument {

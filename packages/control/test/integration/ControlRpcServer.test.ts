@@ -105,7 +105,7 @@ test("ControlSocketServer routes canonical control and instance operations over 
         harness.socketPath,
         asInstanceName("alpha"),
         "tool.call",
-        { input: { command: "pwd" }, toolName: "bash_run" },
+        { input: { command: "pwd" }, toolName: "bash_run", workspace: "/tmp/ws" },
         "tui"
     );
     assert.equal((toolReply.payload as { exitCode: number }).exitCode, 0);
@@ -117,7 +117,7 @@ test("ControlSocketServer routes canonical control and instance operations over 
         harness.socketPath,
         asInstanceName("alpha"),
         "tool.call",
-        { input: { command: "pwd" }, toolName: "bash_run" },
+        { input: { command: "pwd" }, toolName: "bash_run", workspace: "/tmp/ws" },
         "web"
     );
     assert.equal(rejectedWeb.error?.code, "control.clientIdentityInvalid");
@@ -250,7 +250,7 @@ test("interactive runtime receives stream input while the root handler is still 
         asInstanceName("alpha"),
         "runtime",
         "start",
-        { workspacePath: "/tmp/ws" }
+        {}
     );
     const stream: ClientStream = opened.stream;
     t.after(() => stream.close());
@@ -313,7 +313,7 @@ test("terminal RPC streams real session input, resize, detach, and sequence resu
         asInstanceName("alpha"),
         "terminal",
         "open",
-        { cols: 80, rows: 24 },
+        { cols: 80, rows: 24, workspace: "/tmp/ws" },
     );
     process.emit("before-attach");
 
@@ -432,7 +432,7 @@ test("terminal stream cancels a slow attachment at the unacknowledged window wit
         asInstanceName("alpha"),
         "terminal",
         "open",
-        { cols: 80, rows: 24 },
+        { cols: 80, rows: 24, workspace: "/tmp/ws" },
     );
     const attached = await client.openStream(
         asInstanceName("alpha"),
@@ -656,7 +656,7 @@ class FakeWorker {
         return this.snapshot();
     }
 
-    async startInteractive(_workspacePath: string | undefined, session: WorkerCommandInteractiveSession) {
+    async startInteractive(session: WorkerCommandInteractiveSession) {
         const input = await session.readInput();
         await session.writeOutput(`echo:${input?.toString("utf8") ?? ""}`);
         this.#ready = true;

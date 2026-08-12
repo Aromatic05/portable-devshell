@@ -152,7 +152,6 @@ export class WorkerTransportDriverLocal implements WorkerCommandTransport {
     ): Promise<Awaited<ReturnType<WorkerCommandTransport["runWorkerCommand"]>>> {
         const workerCommand = new WorkerBinary(executable).buildCommand(command, options.instanceName, options.extraArgs);
         const context = this.#createCommandContext(command, [workerCommand.command, ...workerCommand.args], {
-            cwd: command === "start" ? options.workspacePath : undefined,
             instance: options.instanceName
         });
         return await this.#process.run(context, {

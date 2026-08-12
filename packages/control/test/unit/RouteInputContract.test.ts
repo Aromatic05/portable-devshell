@@ -18,8 +18,7 @@ import { readReverseInstanceName } from "../../src/control/reverse/route/Reverse
 import {
     limitRuntimeLogResponse,
     readRuntimeLogQuery,
-    readRuntimeSubscriptionFromSeq,
-    readRuntimeWorkspacePath
+    readRuntimeSubscriptionFromSeq
 } from "../../src/instance/runtime/RuntimeRouteInput.ts";
 import { readTodoSubscriptionFromSeq } from "../../src/instance/todo/TodoRouteInput.ts";
 import {
@@ -42,8 +41,9 @@ test("artifact route inputs preserve the two supported source forms", () => {
             instance: "source-one"
         }
     );
-    assert.deepEqual(readArtifactShareInput({ path: "./result.bin" }), {
-        path: "./result.bin"
+    assert.deepEqual(readArtifactShareInput({ path: "./result.bin", workspace: "/workspace" }), {
+        path: "./result.bin",
+        workspace: "/workspace"
     });
 
     assert.deepEqual(
@@ -51,29 +51,35 @@ test("artifact route inputs preserve the two supported source forms", () => {
             handle: "artifact:stdout:1",
             overwrite: true,
             targetInstance: "target-one",
-            targetPath: "/tmp/result.bin"
+            targetPath: "/tmp/result.bin",
+            targetWorkspace: "/tmp"
         }),
         {
             handle: "artifact:stdout:1",
             operation: "start",
             overwrite: true,
             targetInstance: "target-one",
-            targetPath: "/tmp/result.bin"
+            targetPath: "/tmp/result.bin",
+            targetWorkspace: "/tmp"
         }
     );
     assert.deepEqual(
         readArtifactTransferStartInput({
             instance: "source-one",
             sourcePath: "./result.bin",
+            sourceWorkspace: "/source",
             targetInstance: "target-one",
-            targetPath: "/tmp/result.bin"
+            targetPath: "/tmp/result.bin",
+            targetWorkspace: "/tmp"
         }),
         {
             instance: "source-one",
             operation: "start",
             sourcePath: "./result.bin",
+            sourceWorkspace: "/source",
             targetInstance: "target-one",
-            targetPath: "/tmp/result.bin"
+            targetPath: "/tmp/result.bin",
+            targetWorkspace: "/tmp"
         }
     );
 });
@@ -87,20 +93,26 @@ test("artifact route inputs reject ambiguous, missing, and malformed fields", ()
         () => readArtifactShareInput({ handle: "" }),
         () => readArtifactTransferStartInput({
             sourcePath: "./source",
+            sourceWorkspace: "/source",
             targetInstance: "target",
             targetPath: "/target",
+            targetWorkspace: "/target",
             overwrite: "yes"
         } as never),
         () => readArtifactTransferStartInput({
             handle: "one",
             sourcePath: "./source",
+            sourceWorkspace: "/source",
             targetInstance: "target",
-            targetPath: "/target"
+            targetPath: "/target",
+            targetWorkspace: "/target"
         }),
         () => readArtifactTransferStartInput({
             sourcePath: "./source",
+            sourceWorkspace: "/source",
             targetInstance: "",
-            targetPath: "/target"
+            targetPath: "/target",
+            targetWorkspace: "/target"
         })
     ];
 
@@ -141,11 +153,6 @@ test("MCP and reverse route inputs accept only their closed decision and identit
 });
 
 test("runtime route inputs clamp log queries and strictly validate subscription cursors", () => {
-    assert.equal(readRuntimeWorkspacePath(), undefined);
-    assert.equal(readRuntimeWorkspacePath({ workspacePath: "" }), "");
-    assert.equal(readRuntimeWorkspacePath({ workspacePath: "/workspace" }), "/workspace");
-    assertTargetInvalid(() => readRuntimeWorkspacePath({ workspacePath: 1 } as never));
-
     assert.deepEqual(readRuntimeLogQuery(), { fromSeq: undefined, limit: 100 });
     assert.deepEqual(readRuntimeLogQuery({ fromSeq: 10, limit: 0 }), { fromSeq: 10, limit: 1 });
     assert.deepEqual(readRuntimeLogQuery({ fromSeq: 10, limit: 500 }), { fromSeq: 10, limit: 100 });
@@ -177,13 +184,15 @@ test("runtime log response limiting stays within one MiB and retains the newest 
 });
 
 test("tool route inputs preserve call defaults, filters, and approval metadata", () => {
-    assert.deepEqual(readToolCall({ toolName: "bash_run" }), {
+    assert.deepEqual(readToolCall({ toolName: "bash_run", workspace: "/workspace" }), {
         input: null,
-        toolName: "bash_run"
+        toolName: "bash_run",
+        workspace: "/workspace"
     });
-    assert.deepEqual(readToolCall({ input: { command: "pwd" }, toolName: "bash_run" }), {
+    assert.deepEqual(readToolCall({ input: { command: "pwd" }, toolName: "bash_run", workspace: "/workspace" }), {
         input: { command: "pwd" },
-        toolName: "bash_run"
+        toolName: "bash_run",
+        workspace: "/workspace"
     });
     assert.deepEqual(
         readToolCallQuery({

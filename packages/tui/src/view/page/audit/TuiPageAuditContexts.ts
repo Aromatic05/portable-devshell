@@ -27,6 +27,9 @@ export function buildAuditContextListBoxes(
                 formatField("Context", context.label),
                 formatField("Calls", String(context.calls.length)),
                 formatField("Approvals", String(context.approvals.length)),
+                ...(context.workspace === undefined
+                    ? []
+                    : [formatField("Workspace", context.workspace)]),
                 formatField("Latest", context.latestActivityAt),
                 formatField("Latest call", context.latestCall?.toolName ?? "-"),
                 ...(context.contextStatus === undefined
@@ -63,6 +66,7 @@ export function buildAuditContextListBoxes(
                       },
             searchText: [
                 context.label,
+                context.workspace ?? "",
                 ...context.calls.flatMap((call) => [
                     `status ${call.status}`,
                     `source ${call.source}`,

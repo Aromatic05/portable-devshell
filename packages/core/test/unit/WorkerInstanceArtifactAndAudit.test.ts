@@ -64,7 +64,7 @@ test("worker artifact facade checks readiness and delegates every payload lifecy
         protocolClient: protocolClient as never
     });
 
-    const openInput = { expiresAtMs: 100, path: "./result.bin" } as const;
+    const openInput = { expiresAtMs: 100, path: "./result.bin", workspace: "/workspace" } as const;
     const readInput = { maxBytes: 10, offsetBytes: 0, payloadId: "payload-1" };
     const beginInput = {
         descriptor: {
@@ -75,7 +75,8 @@ test("worker artifact facade checks readiness and delegates every payload lifecy
             type: "file" as const
         },
         overwrite: false,
-        targetPath: "/tmp/result.bin"
+        targetPath: "/tmp/result.bin",
+        workspace: "/tmp"
     };
     const writeInput = { content: "dGVzdA==", offsetBytes: 0, receiveId: "receive-1" };
 
@@ -115,7 +116,7 @@ test("worker artifact facade never calls the protocol client when readiness fail
     });
 
     await assert.rejects(
-        artifact.openPayload({ expiresAtMs: 100, path: "./result.bin" }),
+        artifact.openPayload({ expiresAtMs: 100, path: "./result.bin", workspace: "/workspace" }),
         (error: unknown) => error === expected
     );
     assert.equal(protocolCalls, 0);

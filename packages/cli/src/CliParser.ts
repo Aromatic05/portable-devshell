@@ -35,7 +35,7 @@ export type CliParsedCommand =
     | { kind: "control.stop" }
     | { args: string[]; kind: "artifact" }
     | { kind: "tui" }
-    | { input: JsonValue; instance: string; kind: "instance.call"; toolName: string }
+    | { input: JsonValue; instance: string; kind: "instance.call"; toolName: string; workspace: string }
     | { kind: "instance.create" }
     | { instance: string; kind: "instance.delete" }
     | { instance: string; kind: "instance.enable" }
@@ -145,15 +145,16 @@ export class CliParser {
                     kind: "instance.todo"
                 };
             case "call":
-                if (argv.length !== 4) {
-                    throw CliRenderError.usage("instance call requires <instance> <toolName> <jsonInput>");
+                if (argv.length !== 5) {
+                    throw CliRenderError.usage("instance call requires <instance> <workspace> <toolName> <jsonInput>");
                 }
 
                 return {
-                    input: this.#parseJson(this.#required(argv[3], "tool input JSON is required")),
+                    input: this.#parseJson(this.#required(argv[4], "tool input JSON is required")),
                     instance: this.#required(argv[1], "instance name is required"),
                     kind: "instance.call",
-                    toolName: this.#required(argv[2], "tool name is required")
+                    toolName: this.#required(argv[3], "tool name is required"),
+                    workspace: this.#required(argv[2], "workspace is required")
                 };
             default:
                 throw CliRenderError.usage(

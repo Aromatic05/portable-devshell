@@ -32,7 +32,6 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
     const workspaceMarker = "portable-devshell-mcp-real-selected-workspace";
     await writeFile(join(selectedWorkspacePath, workspaceMarkerName), workspaceMarker, "utf8");
     const instance = new WorkerInstanceFactory().create({
-        defaultWorkspace: asWorkspacePath(workspacePath),
         env: { ...process.env, HOME: homeDirectory },
         homeDirectory,
         name: asInstanceName(instanceName),
@@ -158,7 +157,6 @@ test("MCP tools/call waits for approval before invoking the worker tool", realWo
     const workspacePath = await createTestTempDirectory("mcp-approval-workspace");
     const instance = new WorkerInstanceFactory().create({
         approvalPolicy: { mode: "ask" },
-        defaultWorkspace: asWorkspacePath(workspacePath),
         env: { ...process.env, HOME: homeDirectory },
         homeDirectory,
         name: asInstanceName(instanceName),

@@ -7,8 +7,10 @@ pub mod state;
 pub mod task;
 pub mod types;
 
+use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use schemars::JsonSchema;
 use serde::{Serialize, de::DeserializeOwned};
@@ -39,7 +41,7 @@ struct TmuxTool<I, O> {
     name: ToolName,
     description: &'static str,
     capability: ToolCapability,
-    state: Arc<TmuxState>,
+    states: Arc<TmuxStateRegistry>,
     operation: fn(&TmuxState, &ToolCall, I) -> Result<O, ToolError>,
     marker: PhantomData<fn(I) -> O>,
 }
@@ -63,7 +65,44 @@ where
 
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         let params = call.parse_params()?;
-        crate::tools::contract::serialize((self.operation)(&self.state, &call, params)?)
+        let state = self.states.state_for(&call.workspace)?;
+        crate::tools::contract::serialize((self.operation)(state.as_ref(), &call, params)?)
+    }
+}
+
+struct TmuxStateRegistry {
+    instance_paths: InstancePaths,
+    runtime: WorkerRuntimeContext,
+    socket_paths: SocketPaths,
+    states: Mutex<HashMap<PathBuf, Arc<TmuxState>>>,
+}
+
+impl TmuxStateRegistry {
+    fn new(instance_paths: &InstancePaths, socket_paths: &SocketPaths, runtime: &WorkerRuntimeContext) -> Self {
+        Self {
+            instance_paths: instance_paths.clone(),
+            runtime: runtime.clone(),
+            socket_paths: socket_paths.clone(),
+            states: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn state_for(&self, workspace: &Path) -> Result<Arc<TmuxState>, ToolError> {
+        let mut states = self.states.lock().map_err(|_| {
+            ToolError::new("tmux.internalError", "tmux workspace registry lock poisoned")
+        })?;
+        if let Some(state) = states.get(workspace) {
+            return Ok(Arc::clone(state));
+        }
+        let state = Arc::new(TmuxState::new(TmuxBackend::new(
+            &self.instance_paths,
+            &self.socket_paths,
+            &self.runtime,
+            workspace,
+        )?));
+        TmuxState::start_gc(&state);
+        states.insert(workspace.to_path_buf(), Arc::clone(&state));
+        Ok(state)
     }
 }
 
@@ -71,7 +110,7 @@ fn tool<I, O>(
     name: ToolName,
     description: &'static str,
     capability: ToolCapability,
-    state: Arc<TmuxState>,
+    states: Arc<TmuxStateRegistry>,
     operation: fn(&TmuxState, &ToolCall, I) -> Result<O, ToolError>,
 ) -> Arc<dyn ToolHandler>
 where
@@ -82,7 +121,7 @@ where
         name,
         description,
         capability,
-        state,
+        states,
         operation,
         marker: PhantomData,
     })
@@ -97,59 +136,54 @@ pub fn register_tools(
     if !TmuxBackend::available() {
         return Ok(());
     }
-    let state = Arc::new(TmuxState::new(TmuxBackend::new(
-        instance_paths,
-        socket_paths,
-        runtime,
-    )?));
-    TmuxState::start_gc(&state);
+    let states = Arc::new(TmuxStateRegistry::new(instance_paths, socket_paths, runtime));
     registry.register(tool::<TmuxRunParams, TmuxTaskOperationOutput>(
         ToolName::parse("tmux_run").unwrap(),
         "Run a long-running or interactive shell task from one shell line. wait defaults to block; timeMs limits only this call's wait and never stops the task. Use wait=nonblock to return after start, then use tmux_read, tmux_input, or tmux_inspect.",
         ToolCapability::Execute,
-        Arc::clone(&state),
+        Arc::clone(&states),
         TmuxState::run,
     ))?;
     registry.register(tool::<TmuxInputParams, TmuxTaskOperationOutput>(
         ToolName::parse("tmux_input").unwrap(),
         "Send terminal input to a running task. Returns immediately by default; set timeMs to wait for output. Caret notation supports control keys such as ^B, ^C, ^D, ^I, and ^M.",
         ToolCapability::Execute,
-        Arc::clone(&state),
+        Arc::clone(&states),
         TmuxState::input,
     ))?;
     registry.register(tool::<TmuxReadParams, TmuxTaskOperationOutput>(
         ToolName::parse("tmux_read").unwrap(),
         "Consume unread terminal output associated with a managed task. Output is derived from terminal history and may include command echo, shell prompts, and terminal-rendered text; it is not raw process stdout. Positive line values return the oldest unread lines, zero discards unread output, and negative values return only the requested tail.",
         ToolCapability::Read,
-        Arc::clone(&state),
+        Arc::clone(&states),
         TmuxState::read,
     ))?;
     registry.register(tool::<TmuxInspectParams, TmuxPaneOperationOutput>(
         ToolName::parse("tmux_inspect").unwrap(),
         "Inspect terminal history without consuming unread output. Use this for curses applications or terminal screen state.",
         ToolCapability::Read,
-        Arc::clone(&state),
+        Arc::clone(&states),
         TmuxState::inspect,
     ))?;
     registry.register(tool::<TmuxListParams, TmuxListOutput>(
         ToolName::parse("tmux_list").unwrap(),
         "List managed panes, running tasks, and pane capacity.",
         ToolCapability::Read,
-        Arc::clone(&state),
+        Arc::clone(&states),
         |state, call, _| state.list(call),
     ))?;
     registry.register(tool::<TmuxCreateParams, TmuxCreateOutput>(
         ToolName::parse("tmux_create").unwrap(),
         "Create an empty managed pane. Use tmux_run to start a task in it.",
         ToolCapability::Execute,
-        Arc::clone(&state),
+        Arc::clone(&states),
         TmuxState::create,
     ))?;
     registry.register(tool::<TmuxCloseParams, TmuxCloseOutput>(
         ToolName::parse("tmux_close").unwrap(),
         "Close a managed pane. A running pane requires force, and the final pane cannot be closed.",
         ToolCapability::Execute,
-        state,
+        states,
         TmuxState::close,
     ))?;
     Ok(())

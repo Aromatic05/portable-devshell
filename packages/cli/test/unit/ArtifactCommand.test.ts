@@ -106,14 +106,14 @@ test("artifact share uses the existing CLI control client", async () => {
     const client = createArtifactClientStub();
     const runtime = cli(client);
     assert.equal(
-        await runtime.instance.run(["artifact", "share", "source-a", "path:./dist", "--expires-in", "600"]),
+        await runtime.instance.run(["artifact", "share", "source-a", "path:./dist", "--workspace", "/source", "--expires-in", "600"]),
         0
     );
     assert.deepEqual(client.calls, [
         {
             input: {
                 defaultInstance: "source-a",
-                input: { expiresInSeconds: 600, instance: "source-a", path: "./dist" }
+                input: { expiresInSeconds: 600, instance: "source-a", path: "./dist", workspace: "/source" }
             },
             method: "share"
         }
@@ -132,7 +132,11 @@ test("artifact transfer returns queued and infers authority for a host source", 
             "host",
             "path:~/Download/input.bin",
             "target-b",
-            "/tmp/input.bin"
+            "/tmp/input.bin",
+            "--source-workspace",
+            "/source",
+            "--target-workspace",
+            "/tmp"
         ]),
         0
     );
@@ -145,8 +149,10 @@ test("artifact transfer returns queued and infers authority for a host source", 
                     operation: "start",
                     overwrite: false,
                     sourcePath: "~/Download/input.bin",
+                    sourceWorkspace: "/source",
                     targetInstance: "target-b",
-                    targetPath: "/tmp/input.bin"
+                    targetPath: "/tmp/input.bin",
+                    targetWorkspace: "/tmp"
                 }
             },
             method: "transfer"
@@ -165,7 +171,11 @@ test("artifact transfer treats a bare target path as workspace-relative", async 
             "source-a",
             "path:./input.bin",
             "target-b",
-            "copy.bin"
+            "copy.bin",
+            "--source-workspace",
+            "/source",
+            "--target-workspace",
+            "/target"
         ]),
         0
     );
@@ -177,8 +187,10 @@ test("artifact transfer treats a bare target path as workspace-relative", async 
                 operation: "start",
                 overwrite: false,
                 sourcePath: "./input.bin",
+                sourceWorkspace: "/source",
                 targetInstance: "target-b",
-                targetPath: "./copy.bin"
+                targetPath: "./copy.bin",
+                targetWorkspace: "/target"
             }
         },
         method: "transfer"

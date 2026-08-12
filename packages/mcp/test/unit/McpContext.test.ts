@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -59,6 +59,46 @@ test("McpContextRegistry persists active contexts and renews their sliding expir
             "ctx-persisted"
         );
         assert.match(await readFile(filePath, "utf8"), /ctx-persisted/u);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("McpContextRegistry rolls back in-memory mutations when persistence fails", async () => {
+    const root = await createTestTempDirectory("context-persist-failure");
+    const binding = {
+        instance: "demo-local",
+        principal: "local",
+        workspace: "/workspace",
+    };
+
+    try {
+        const createPath = join(root, "create-contexts.json");
+        const createRegistry = new McpContextRegistry({
+            filePath: createPath,
+            idFactory: () => "ctx-create-failure",
+        });
+        await createRegistry.initialize();
+        await mkdir(createPath);
+
+        await assert.rejects(createRegistry.create(binding));
+        assert.deepEqual(await createRegistry.list(), []);
+
+        const updatePath = join(root, "update-contexts.json");
+        const updateRegistry = new McpContextRegistry({
+            filePath: updatePath,
+            idFactory: () => "ctx-update-failure",
+        });
+        await updateRegistry.initialize();
+        await updateRegistry.create(binding);
+        await rm(updatePath, { force: true });
+        await mkdir(updatePath);
+
+        await assert.rejects(updateRegistry.disable("ctx-update-failure"));
+        const listed = await updateRegistry.list();
+        assert.equal(listed.length, 1);
+        assert.equal(listed[0]?.ctxId, "ctx-update-failure");
+        assert.equal(listed[0]?.status, "active");
     } finally {
         await rm(root, { force: true, recursive: true });
     }
@@ -186,6 +226,7 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
                 return { ok: true };
             },
             handshake: {
+                homeDirectory: "/home/demo",
                 instance: "demo-local",
                 skillsDirectory: "/home/demo/.devshell/skill",
                 platform: {
@@ -194,8 +235,7 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
                     os: "linux",
                     packageManager: "pacman",
                     shell: { executable: "/bin/bash", kind: "bash", version: "5.3" }
-                },
-                workspace: "/workspace"
+                }
             },
             listTools: () => [bashRun],
             async prepareWorkspace(workspace) {

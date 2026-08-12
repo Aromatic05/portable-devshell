@@ -25,7 +25,7 @@ test("WorkerInstance wraps start stop and status command failures with diagnosti
         })
     });
 
-    await assert.rejects(startFailure.start("/tmp/workspace"), (error: unknown) => {
+    await assert.rejects(startFailure.start(), (error: unknown) => {
         assert.ok(typeof error === "object" && error !== null);
         assert.equal((error as { code?: string }).code, "core.workerStartFailed");
         assert.equal((error as { details?: Record<string, unknown> }).details?.provider, "ssh");
@@ -98,7 +98,7 @@ test("WorkerInstance preserves catalog failures during startup", async () => {
         }
     });
 
-    await assert.rejects(instance.start("/tmp/workspace"), (error: unknown) => {
+    await assert.rejects(instance.start(), (error: unknown) => {
         assert.ok(typeof error === "object" && error !== null);
         assert.equal((error as { code?: string }).code, "core.toolSchemaUnavailable");
         assert.equal((error as { message?: string }).message, "catalog-error-fixture");

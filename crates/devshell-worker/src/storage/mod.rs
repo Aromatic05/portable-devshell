@@ -4,5 +4,5 @@ pub mod instance_dir;
 pub mod permissions;
 
 pub use config_path::config_path;
-pub use devshell_home::{devshell_home, skill_directory};
+pub use devshell_home::{devshell_home, skill_directory, user_home_directory};
 pub use instance_dir::InstancePaths;

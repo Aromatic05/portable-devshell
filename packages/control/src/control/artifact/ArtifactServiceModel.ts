@@ -90,4 +90,4 @@ export interface ArtifactShareAccess {
     sourceInstance: string;
 }
 
-export type ArtifactPayloadSourceInput = { handle: string } | { path: string };
+export type ArtifactPayloadSourceInput = { handle: string } | { path: string; workspace: string };

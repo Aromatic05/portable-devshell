@@ -1,4 +1,4 @@
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createError, errorCodes, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
 
 import type { McpInstanceGateway } from "../../instance/McpInstanceGateway.js";
 import type { McpEndpointCatalogWorker } from "../McpEndpointCatalog.js";
@@ -98,6 +98,36 @@ export function requireMcpEndpointGateway(
         message: `Control tools are not available for ${instanceName}.`,
         retryable: false
     });
+}
+
+export async function auditMcpEndpointTool<T extends JsonValue>(options: {
+    context: ToolCallContext;
+    gateway?: McpInstanceGateway;
+    input: JsonValue;
+    localInstance: string;
+    operation: (callId: string) => Promise<T>;
+    signal?: AbortSignal;
+    targetInstance: string;
+    toolName: string;
+    worker: Pick<McpEndpointWorkerPort, "auditToolCall">;
+}): Promise<T> {
+    if (options.targetInstance === options.localInstance) {
+        return await options.worker.auditToolCall(
+            options.toolName,
+            options.input,
+            options.context,
+            options.operation,
+            options.signal
+        );
+    }
+    return await requireMcpEndpointGateway(options.gateway, options.localInstance).auditToolCall(
+        options.targetInstance,
+        options.toolName,
+        options.input,
+        options.context,
+        options.operation,
+        options.signal
+    );
 }
 
 export function requireMcpEndpointEnvironment(

@@ -111,6 +111,7 @@ function ApprovalOverlay(props: {
         ["call", props.approval.callId],
         ["source", props.approval.source],
         ["tool", props.approval.toolName],
+        ["workspace", props.approval.workspace ?? "-"],
         ["risk", props.approval.riskLevel],
         ["policy reason", props.approval.reason],
         ["requested", props.approval.createdAt],

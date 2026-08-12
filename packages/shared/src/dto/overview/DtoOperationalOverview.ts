@@ -70,7 +70,6 @@ export interface OperationalOverviewInstance {
     provider: "docker" | "local" | "podman" | "reverse" | "ssh";
     snapshot: InstanceSnapshot;
     worker?: OperationalOverviewWorker;
-    workspace?: string;
 }
 
 export interface OperationalOverviewTodo extends ActiveTodoSummary {

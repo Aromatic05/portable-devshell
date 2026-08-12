@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createError, type JsonValue, type PrefixRouteContext, type WorkspacePath } from "@portable-devshell/shared";
+import { createError, type JsonValue, type PrefixRouteContext } from "@portable-devshell/shared";
 
 import { createToolRouteModule } from "../../src/instance/tool/ToolRouteModule.ts";
 
@@ -30,8 +30,7 @@ function callHandler(callTool: (toolName: string, input: JsonValue) => Promise<J
             },
             async readToolCalls() {
                 throw new Error("unused");
-            },
-            workspacePath: "/workspace" as WorkspacePath
+            }
         }
     });
     const operation = module.operations.find((entry) => entry.name === "call");
@@ -48,7 +47,7 @@ test("control tool route appends the worker result hint", async () => {
     }) as JsonValue);
 
     const result = await handle(
-        { id: "1", name: "call", payload: { input: { command: "pwd" }, toolName: "bash_run" } },
+        { id: "1", name: "call", payload: { input: { command: "pwd" }, toolName: "bash_run", workspace: "/workspace" } },
         routeContext("conn-1")
     ) as Record<string, JsonValue>;
 
@@ -67,7 +66,7 @@ test("control tool route turns a thrown error into a structured hint instead of 
     });
 
     const result = await handle(
-        { id: "1", name: "call", payload: { input: {}, toolName: "file_edit" } },
+        { id: "1", name: "call", payload: { input: {}, toolName: "file_edit", workspace: "/workspace" } },
         routeContext("conn-2")
     ) as Record<string, JsonValue>;
 

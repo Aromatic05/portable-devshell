@@ -24,6 +24,7 @@ interface ActiveToolCall {
     taskId?: string;
     todoItemId?: string;
     toolName: string;
+    workspace?: string;
 }
 
 interface ToolCallCompletionResult {
@@ -68,7 +69,8 @@ export class AuditToolCallHistory {
             status,
             taskId: association?.taskId,
             todoItemId: association?.todoItemId,
-            toolName
+            toolName,
+            workspace: context.workspace,
         });
     }
 

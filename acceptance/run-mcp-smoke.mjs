@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 import { createAcceptanceFixture, runCli } from "./AcceptanceSupport.mjs";
 
+const applicationVersion = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8"),
+).version;
 const fixture = await createAcceptanceFixture();
 try {
     runCli(["start"], fixture.env);
@@ -22,6 +26,7 @@ try {
     const protocolVersion = String(initialize.body.result?.protocolVersion ?? "");
     assert.ok(sessionId);
     assert.notEqual(protocolVersion, "");
+    assert.equal(initialize.body.result?.serverInfo?.version, applicationVersion);
     const headers = {
         "mcp-protocol-version": protocolVersion,
         "mcp-session-id": sessionId

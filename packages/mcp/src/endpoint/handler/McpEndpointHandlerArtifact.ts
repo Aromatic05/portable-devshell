@@ -1,4 +1,4 @@
-import type { JsonValue } from "@portable-devshell/shared";
+import { createError, errorCodes, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
 
 import type { McpInstanceGateway } from "../../instance/McpInstanceGateway.js";
 import type { McpToolCatalogArtifactName } from "../../tool/catalog/McpToolCatalogArtifact.js";
@@ -17,6 +17,7 @@ export class McpEndpointHandlerArtifact {
     async call(
         toolName: McpToolCatalogArtifactName,
         input: JsonValue,
+        context: ToolCallContext,
         signal?: AbortSignal
     ): Promise<McpEndpointResult> {
         const gateway = requireMcpEndpointGateway(this.options.gateway, this.options.instanceName);
@@ -28,7 +29,7 @@ export class McpEndpointHandlerArtifact {
                 const image = await waitForMcpEndpointAbortable(
                     gateway.viewArtifactImage(
                         this.options.instanceName,
-                        readMcpArtifactViewImageInput(input),
+                        readMcpArtifactViewImageInput(withSourceWorkspace(input, context)),
                         signal
                     ),
                     signal
@@ -53,7 +54,7 @@ export class McpEndpointHandlerArtifact {
                     throw mcpEndpointToolNotExposed(toolName, this.options.instanceName);
                 }
                 return await waitForMcpEndpointAbortable(
-                    gateway.shareArtifact(this.options.instanceName, readMcpArtifactShareInput(input)),
+                    gateway.shareArtifact(this.options.instanceName, readMcpArtifactShareInput(withSourceWorkspace(input, context))),
                     signal
                 );
             case "artifact_transfer":
@@ -61,9 +62,32 @@ export class McpEndpointHandlerArtifact {
                     throw mcpEndpointToolNotExposed(toolName, this.options.instanceName);
                 }
                 return await waitForMcpEndpointAbortable(
-                    gateway.transferArtifact(this.options.instanceName, readMcpArtifactTransferInput(input)),
+                    gateway.transferArtifact(this.options.instanceName, readMcpArtifactTransferInput(withTransferWorkspace(input, context))),
                     signal
                 );
         }
     }
+}
+
+function requireContextWorkspace(context: ToolCallContext): string {
+    if (context.workspace !== undefined && context.workspace.length > 0) return context.workspace;
+    throw createError({
+        code: errorCodes.mcpContextInvalid,
+        message: "Artifact path operations require a workspace-bound context.",
+        retryable: false
+    });
+}
+
+function withSourceWorkspace(input: JsonValue, context: ToolCallContext): JsonValue {
+    if (!isRecord(input) || input.path === undefined) return input;
+    return { ...input, workspace: requireContextWorkspace(context) };
+}
+
+function withTransferWorkspace(input: JsonValue, context: ToolCallContext): JsonValue {
+    if (!isRecord(input) || input.operation !== "start" || input.sourcePath === undefined) return input;
+    return { ...input, sourceWorkspace: requireContextWorkspace(context) };
+}
+
+function isRecord(value: JsonValue): value is Record<string, JsonValue> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

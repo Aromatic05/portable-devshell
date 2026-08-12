@@ -70,7 +70,6 @@ export function reduceTuiStoreReducerControl(
                         ...current,
                         ...(action.provider === undefined ? {} : { provider: action.provider }),
                         ...(action.requestId === undefined ? {} : { requestId: action.requestId }),
-                        ...(action.workspace === undefined ? {} : { workspace: action.workspace }),
                     },
                 },
             };

@@ -13,7 +13,6 @@ function context(overrides?: Partial<ArtifactHostAccessContext>): ArtifactHostAc
         authorityInstance: "demo-local",
         provider: "local",
         securityMode: "disabled",
-        workspace: undefined,
         ...overrides
     };
 }
@@ -46,25 +45,23 @@ async function readPayload(endpoint: ReturnType<ArtifactHostBridge["endpointFor"
 async function fixture(t: TestContext) {
     const root = await createTestTempDirectory("artifact-host");
     const homeDirectory = join(root, "home");
-    const processCwd = join(root, "cwd");
     const storageDir = join(root, "storage");
     await mkdir(homeDirectory, { recursive: true });
-    await mkdir(processCwd, { recursive: true });
-    const bridge = new ArtifactHostBridge({ homeDirectory, processCwd, storageDir });
+    const bridge = new ArtifactHostBridge({ homeDirectory, storageDir });
     await bridge.initialize();
     t.after(() => rm(root, { force: true, recursive: true }));
-    return { bridge, homeDirectory, processCwd, root, storageDir };
+    return { bridge, homeDirectory, root, storageDir };
 }
 
 test("host source snapshots arbitrary paths when security is disabled and persists across bridge restart", async (t) => {
-    const { bridge, root, storageDir, homeDirectory, processCwd } = await fixture(t);
+    const { bridge, root, storageDir, homeDirectory } = await fixture(t);
     const source = join(root, "outside.bin");
     await writeFile(source, Buffer.from("before"));
     const endpoint = bridge.endpointFor(context());
-    const opened = await endpoint.openArtifactPayload({ expiresAtMs: Date.now() + 60_000, path: source });
+    const opened = await endpoint.openArtifactPayload({ expiresAtMs: Date.now() + 60_000, path: source, workspace: root });
     await writeFile(source, Buffer.from("after"));
 
-    const reopenedBridge = new ArtifactHostBridge({ homeDirectory, processCwd, storageDir });
+    const reopenedBridge = new ArtifactHostBridge({ homeDirectory, storageDir });
     await reopenedBridge.initialize();
     const reopenedEndpoint = reopenedBridge.endpointFor(context());
     assert.equal(
@@ -90,30 +87,33 @@ test("host source workspace mode permits only a local provider workspace and rej
     } else {
         await symlink(outsideDirectory, linkPath, "dir");
     }
-    const local = bridge.endpointFor(context({ provider: "local", securityMode: "workspace", workspace }));
+    const local = bridge.endpointFor(context({ provider: "local", securityMode: "workspace" }));
 
     const inside = await local.openArtifactPayload({
         expiresAtMs: Date.now() + 60_000,
-        path: join(workspace, "inside.txt")
+        path: join(workspace, "inside.txt"),
+        workspace
     });
     assert.equal((await readPayload(local, inside.payloadId, inside.descriptor.payloadBytes)).toString(), "inside");
     await assert.rejects(
-        local.openArtifactPayload({ expiresAtMs: Date.now() + 60_000, path: outside }),
+        local.openArtifactPayload({ expiresAtMs: Date.now() + 60_000, path: outside, workspace }),
         hasCode("artifact.hostPathDenied")
     );
     await assert.rejects(
         local.openArtifactPayload({
             expiresAtMs: Date.now() + 60_000,
-            path: join(linkPath, "linked.txt")
+            path: join(linkPath, "linked.txt"),
+            workspace
         }),
         hasAnyCode("artifact.directoryUnsafe", "artifact.hostPathDenied")
     );
 
-    const remote = bridge.endpointFor(context({ provider: "ssh", securityMode: "workspace", workspace }));
+    const remote = bridge.endpointFor(context({ provider: "ssh", securityMode: "workspace" }));
     await assert.rejects(
         remote.openArtifactPayload({
             expiresAtMs: Date.now() + 60_000,
-            path: join(workspace, "inside.txt")
+            path: join(workspace, "inside.txt"),
+        workspace
         }),
         hasCode("artifact.hostPathDenied")
     );
@@ -139,7 +139,8 @@ test("host target redirects any path to a direct child of ~/Download", async (t)
     const receive = await endpoint.beginArtifactReceive({
         descriptor,
         overwrite: false,
-        targetPath: "../../etc/passwd"
+        targetPath: "../../etc/passwd",
+        workspace: homeDirectory
     });
     await endpoint.writeArtifactReceive({
         content: bytes.toString("base64"),
@@ -162,13 +163,14 @@ test("host directory payload round-trips through tar.zst and restores executable
         await chmod(join(source, "assets", "app.sh"), 0o755);
     }
     const endpoint = bridge.endpointFor(context());
-    const opened = await endpoint.openArtifactPayload({ expiresAtMs: Date.now() + 60_000, path: source });
+    const opened = await endpoint.openArtifactPayload({ expiresAtMs: Date.now() + 60_000, path: source, workspace: root });
     assert.equal(opened.descriptor.type, "directoryArchive");
     const archive = await readPayload(endpoint, opened.payloadId, opened.descriptor.payloadBytes);
     const receive = await endpoint.beginArtifactReceive({
         descriptor: opened.descriptor,
         overwrite: false,
-        targetPath: "/srv/app"
+        targetPath: "/srv/app",
+        workspace: root
     });
     await endpoint.writeArtifactReceive({
         content: archive.toString("base64"),
@@ -208,8 +210,10 @@ test("artifact service routes hidden host source and target with the real author
             instance: "host",
             operation: "start",
             sourcePath: source,
+            sourceWorkspace: root,
             targetInstance: "host",
-            targetPath: "/ignored/copy.txt"
+            targetPath: "/ignored/copy.txt",
+            targetWorkspace: homeDirectory
         },
         authority.authorityInstance
     );

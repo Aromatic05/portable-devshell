@@ -1,5 +1,4 @@
 import type {
-    ArtifactViewImageInput,
     ArtifactViewImageResult,
     JsonValue,
 } from "@portable-devshell/shared";
@@ -15,12 +14,16 @@ import type { TuiUiIntent } from "../../../state/TuiInteractionState.js";
 import { topTuiOverlay } from "../../../state/overlay/TuiOverlay.js";
 import type { TuiFocusManager } from "../../focus/TuiFocusManager.js";
 
+export type TuiArtifactViewImageRequest =
+    | { handle: string; instance?: string }
+    | { instance?: string; path: string; workspace?: string };
+
 interface CommandAuditOptions {
     dispatch(intent: TuiUiIntent): Promise<boolean>;
     focusManager: TuiFocusManager;
     onArtifactViewImage?(
         instance: string,
-        input: ArtifactViewImageInput,
+        input: TuiArtifactViewImageRequest,
     ): Promise<ArtifactViewImageResult>;
     store: TuiAppStore;
 }
@@ -84,7 +87,7 @@ export class TuiCommandDispatcherAudit {
         );
         const imageInput =
             record.toolName === "artifact_viewImage"
-                ? readArtifactViewImageInput(record.input)
+                ? readArtifactViewImageInput(record.input, record.output)
                 : undefined;
         if (
             imageInput !== undefined &&
@@ -141,7 +144,7 @@ export class TuiCommandDispatcherAudit {
             }
             case "approve":
                 return await this.#dispatch({
-                    body: "Approve this tool call? The requested operation may execute immediately.",
+                    body: `Approve ${approval.toolName} on ${overlay.instance}${approval.workspace === undefined ? "" : ` in workspace ${approval.workspace}`} (risk ${approval.riskLevel})? The requested operation may execute immediately.`,
                     confirmIntent: {
                         approvalId: overlay.approvalId,
                         decision: "approve",
@@ -154,7 +157,7 @@ export class TuiCommandDispatcherAudit {
                 });
             case "deny":
                 return await this.#dispatch({
-                    body: "Deny this tool call?",
+                    body: `Deny ${approval.toolName} on ${overlay.instance}${approval.workspace === undefined ? "" : ` in workspace ${approval.workspace}`} (risk ${approval.riskLevel})?`,
                     confirmIntent: {
                         approvalId: overlay.approvalId,
                         instance: overlay.instance,
@@ -170,7 +173,7 @@ export class TuiCommandDispatcherAudit {
     async #openImageOutput(
         instance: string,
         toolName: string,
-        input: ArtifactViewImageInput,
+        input: TuiArtifactViewImageRequest,
         output: JsonValue | undefined,
     ): Promise<boolean> {
         const title = `${toolName} · output`;
@@ -207,8 +210,37 @@ export class TuiCommandDispatcherAudit {
 }
 
 function readArtifactViewImageInput(
+    input: JsonValue | undefined,
+    output: JsonValue | undefined,
+): TuiArtifactViewImageRequest | undefined {
+    const inputRequest = readArtifactViewImageRequest(input);
+    const outputSource = readArtifactViewImageSource(output);
+    if (outputSource === undefined) return inputRequest;
+    if ("handle" in outputSource) return outputSource;
+    if (
+        inputRequest !== undefined &&
+        "path" in inputRequest &&
+        inputRequest.path === outputSource.path
+    ) {
+        return {
+            ...inputRequest,
+            ...outputSource,
+            workspace: outputSource.workspace ?? inputRequest.workspace,
+        };
+    }
+    return outputSource;
+}
+
+function readArtifactViewImageSource(
     value: JsonValue | undefined,
-): ArtifactViewImageInput | undefined {
+): TuiArtifactViewImageRequest | undefined {
+    if (!isRecord(value)) return undefined;
+    return readArtifactViewImageRequest(value.source);
+}
+
+function readArtifactViewImageRequest(
+    value: JsonValue | undefined,
+): TuiArtifactViewImageRequest | undefined {
     if (typeof value !== "object" || value === null || Array.isArray(value))
         return undefined;
     const handle =
@@ -223,10 +255,22 @@ function readArtifactViewImageInput(
         typeof value.instance === "string" && value.instance.length > 0
             ? value.instance
             : undefined;
+    const workspace =
+        typeof value.workspace === "string" && value.workspace.length > 0
+            ? value.workspace
+            : undefined;
     if ((handle === undefined) === (path === undefined)) return undefined;
     return handle === undefined
-        ? { ...(instance === undefined ? {} : { instance }), path: path! }
+        ? {
+              ...(instance === undefined ? {} : { instance }),
+              path: path!,
+              ...(workspace === undefined ? {} : { workspace }),
+          }
         : { handle, ...(instance === undefined ? {} : { instance }) };
+}
+
+function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function readErrorMessage(error: unknown): string {

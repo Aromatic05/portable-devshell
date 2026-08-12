@@ -90,7 +90,10 @@ test("control terminal PTY waits for versioned acknowledgements and resumes by o
             return opened;
         },
     };
-    const factory = new TuiControlTerminalPtyFactory({ client });
+    const factory = new TuiControlTerminalPtyFactory({
+        client,
+        workspaceForInstance: () => "/home/alpha",
+    });
     const pty = factory.create("alpha")("ignored", [], {
         columns: 80,
         environment: {},
@@ -248,6 +251,7 @@ test("control terminal PTY reports result unknown instead of replaying unacknowl
     const pty = new TuiControlTerminalPtyFactory({
         client,
         operationAckTimeoutMs: 20,
+        workspaceForInstance: () => "/home/alpha",
     }).create("alpha")("ignored", [], {
         columns: 80,
         environment: {},
@@ -304,7 +308,10 @@ test("control terminal PTY keeps the authoritative completed session version", a
             return opened;
         },
     };
-    const factory = new TuiControlTerminalPtyFactory({ client });
+    const factory = new TuiControlTerminalPtyFactory({
+        client,
+        workspaceForInstance: () => "/home/alpha",
+    });
     const pty = factory.create("alpha")("ignored", [], {
         columns: 80,
         environment: {},
@@ -377,7 +384,10 @@ test("control terminal kill uses versioned identity without overwriting a replac
             return currentOpen;
         },
     };
-    const factory = new TuiControlTerminalPtyFactory({ client });
+    const factory = new TuiControlTerminalPtyFactory({
+        client,
+        workspaceForInstance: () => "/home/alpha",
+    });
     factory.create("alpha")("ignored", [], {
         columns: 80,
         environment: {},

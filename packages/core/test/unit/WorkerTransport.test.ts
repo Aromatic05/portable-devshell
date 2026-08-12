@@ -48,13 +48,12 @@ test("local transport builds start command and rpc bridge", async () => {
 
     const startResult = await transport.runWorkerCommand("start", {
         instanceName: "task-3-local",
-        workspacePath: "/tmp/workspace"
     });
 
     assert.equal(startResult.exitCode, 0);
     assert.equal(recorder.calls[0]?.command, "/worker/bin");
     assert.deepEqual(recorder.calls[0]?.args, ["start", "--instance", "task-3-local"]);
-    assert.equal(recorder.calls[0]?.options.cwd, "/tmp/workspace");
+    assert.equal(recorder.calls[0]?.options.cwd, undefined);
     assert.deepEqual(recorder.calls[0]?.options.env, sanitizedWorkerEnv());
     assert.deepEqual(recorder.calls[0]?.options.stdio, ["ignore", "pipe", "pipe"]);
 
@@ -149,7 +148,6 @@ test("local start upgrades a changed worker while status keeps the active worker
     const transport = new WorkerTransportDriverLocal({ spawnFunction: recorder.spawn });
     const baseOptions = {
         instanceName: "local-upgrade",
-        workspacePath: "/tmp/workspace"
     };
     const oldEnv = {
         PORTABLE_DEVSHELL_HOME: devshellHome,
@@ -287,7 +285,6 @@ test("local transport preserves base process env when instance env is provided",
         await transport.runWorkerCommand("start", {
             env: { FOO: "bar" },
             instanceName: "task-3-local",
-            workspacePath: "/tmp/workspace"
         });
     } finally {
         restoreEnv("PATH", previousPath);
@@ -299,26 +296,24 @@ test("local transport preserves base process env when instance env is provided",
         command: "/worker/bin",
         args: ["start", "--instance", "task-3-local"],
         options: {
-            cwd: "/tmp/workspace",
+            cwd: undefined,
             env: expectedEnv,
             stdio: ["ignore", "pipe", "pipe"]
         }
     });
 });
 
-test("ssh transport uses remote cwd only for start command", async () => {
+test("ssh transport starts the worker without a workspace cwd", async () => {
     const recorder = createSpawnRecorder();
     const transport = new WorkerTransportDriverSsh({
         command: "ssh-bin devbox",
         skillsDirectory: NO_SKILLS_DIRECTORY,
-        workspace: "/srv/workspaces/task 3",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
 
     const result = await transport.runWorkerCommand("start", {
         instanceName: "task-3-ssh",
-        workspacePath: "/srv/workspaces/task 3"
     });
 
     assert.equal(result.exitCode, 0);
@@ -333,7 +328,7 @@ test("ssh transport uses remote cwd only for start command", async () => {
             "--",
             "sh",
             "-lc",
-            shellEscape("cd '/srv/workspaces/task 3' && '/usr/local/bin/devshell-worker' 'start' '--instance' 'task-3-ssh'")
+            shellEscape("'/usr/local/bin/devshell-worker' 'start' '--instance' 'task-3-ssh'")
         ],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
@@ -348,12 +343,11 @@ test("ssh transport uses remote cwd only for start command", async () => {
             "--",
             "sh",
             "-lc",
-            shellEscape("cd '/srv/workspaces/task 3' && '/usr/local/bin/devshell-worker' 'start' '--instance' 'task-3-ssh'")
+            shellEscape("'/usr/local/bin/devshell-worker' 'start' '--instance' 'task-3-ssh'")
         ],
         commandDisplay:
             `ssh-bin -oBatchMode=yes -oNumberOfPasswordPrompts=0 -oKbdInteractiveAuthentication=no -oPasswordAuthentication=no devbox -- sh -lc ` +
-            shellEscape("cd '/srv/workspaces/task 3' && '/usr/local/bin/devshell-worker' 'start' '--instance' 'task-3-ssh'"),
-        cwd: "/srv/workspaces/task 3",
+            shellEscape("'/usr/local/bin/devshell-worker' 'start' '--instance' 'task-3-ssh'"),
         exitCode: 0,
         instance: "task-3-ssh",
         operation: "start",
@@ -372,7 +366,6 @@ test("ssh transport uploads instance environment without replacing the local ssh
     const transport = new WorkerTransportDriverSsh({
         skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
-        workspace: "/srv/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
@@ -386,7 +379,6 @@ test("ssh transport uploads instance environment without replacing the local ssh
             PATH: "/remote/bin"
         },
         instanceName: "task-3-ssh",
-        workspacePath: "/srv/workspace"
     });
 
     assert.equal(result.exitCode, 0);
@@ -428,7 +420,6 @@ test("ssh RPC exit cleans an uploaded environment file after an early local term
     const transport = new WorkerTransportDriverSsh({
         skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
-        workspace: "/srv/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
@@ -453,7 +444,6 @@ test("ssh transport rejects environment keys that cannot be represented safely",
     const transport = new WorkerTransportDriverSsh({
         skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
-        workspace: "/srv/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
@@ -462,7 +452,6 @@ test("ssh transport rejects environment keys that cannot be represented safely",
         transport.runWorkerCommand("start", {
             env: { "INVALID-KEY": "value" },
             instanceName: "task-3-ssh",
-            workspacePath: "/srv/workspace"
         }),
         (error: unknown) => {
             assert.equal((error as { code?: string }).code, "core.providerFailed");
@@ -478,7 +467,6 @@ test("ssh transport runs installWorker probe via remote shell", async () => {
     const transport = new WorkerTransportDriverSsh({
         skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
-        workspace: "/srv/workspaces/task 3",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
@@ -869,7 +857,6 @@ test("ssh transport appends interactive-auth hint when batch mode authentication
     const transport = new WorkerTransportDriverSsh({
         skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh demo",
-        workspace: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
@@ -975,7 +962,6 @@ test("docker transport builds exec command", async () => {
         skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
-        remoteCwd: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
@@ -1008,7 +994,6 @@ test("docker transport runs installWorker probe via exec", async () => {
         skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
-        remoteCwd: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
@@ -1112,7 +1097,6 @@ test("docker transport installs default worker before exec command", async (t) =
         skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
-        remoteCwd: "/workspace",
         spawnFunction: recorder.spawn
     });
 
@@ -1167,7 +1151,6 @@ test("podman transport builds exec command", async () => {
         skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
-        remoteCwd: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
@@ -1204,7 +1187,6 @@ test("podman transport preserves provider storage environment and forwards worke
         skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
-        remoteCwd: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
@@ -1283,7 +1265,6 @@ test("podman transport rejects provider-reserved instance environment before pro
         skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
-        remoteCwd: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
@@ -1292,7 +1273,6 @@ test("podman transport rejects provider-reserved instance environment before pro
         transport.runWorkerCommand("start", {
             env: { HOME: "/worker/home", PATH: "/worker/bin" },
             instanceName: "task-3-podman",
-            workspacePath: "/workspace"
         }),
         (error: unknown) => {
             assert.equal((error as { code?: string }).code, "core.providerFailed");
@@ -1317,7 +1297,6 @@ test("podman transport runs installWorker probe via exec", async () => {
         skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
-        remoteCwd: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
@@ -1379,7 +1358,6 @@ test("podman transport installs default worker before spawning rpc", async (t) =
         skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
-        remoteCwd: "/workspace",
         spawnFunction: recorder.spawn
     });
 
@@ -1446,26 +1424,22 @@ test("docker transport creates and starts managed containers before starting the
             preset: "arch"
         },
         dockerBinary: "docker-bin",
-        remoteCwd: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
 
     const result = await transport.runWorkerCommand("start", {
         instanceName: "task-3-docker",
-        workspacePath: "/workspace"
     });
 
     assert.equal(result.exitCode, 0);
     assert.deepEqual(recorder.calls[0]?.args, ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"]);
     assert.deepEqual(recorder.calls[1]?.args.slice(0, 3), ["create", "--name", "worker-container"]);
-    assert.equal(recorder.calls[1]?.args.includes("/workspace:/workspace:rw"), true);
+    assert.equal(recorder.calls[1]?.args.includes("/workspace:/workspace:rw"), false);
     assert.equal(recorder.calls[1]?.args.includes("archlinux:latest"), true);
     assert.deepEqual(recorder.calls[2]?.args, ["start", "worker-container"]);
     assert.deepEqual(recorder.calls[3]?.args, [
         "exec",
-        "-w",
-        "/workspace",
         "-i",
         "worker-container",
         "/usr/local/bin/devshell-worker",
@@ -1501,26 +1475,22 @@ test("dockerfile container mode builds the image before creating the managed con
             mode: "dockerfile"
         },
         dockerBinary: "docker-bin",
-        remoteCwd: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
 
     await transport.runWorkerCommand("start", {
         instanceName: "task-3-dockerfile",
-        workspacePath: "/workspace"
     });
 
     assert.deepEqual(recorder.calls.map((call) => call.args), [
         ["image", "inspect", "devshell-test:latest"],
         ["build", "-t", "devshell-test:latest", "-f", "/project/Containerfile", "/project"],
         ["inspect", "--type", "container", "--format", "{{.State.Status}}", "dockerfile-container"],
-        ["create", "--name", "dockerfile-container", "-v", "/workspace:/workspace:rw", "devshell-test:latest", "sh", "-lc", "trap 'exit 0' TERM INT; while :; do sleep 2147483647; done"],
+        ["create", "--name", "dockerfile-container", "devshell-test:latest", "sh", "-lc", "trap 'exit 0' TERM INT; while :; do sleep 2147483647; done"],
         ["start", "dockerfile-container"],
         [
             "exec",
-            "-w",
-            "/workspace",
             "-i",
             "dockerfile-container",
             "/usr/local/bin/devshell-worker",
@@ -1544,14 +1514,12 @@ test("compose container mode starts the configured service and executes the work
             mode: "compose"
         },
         dockerBinary: "docker-bin",
-        remoteCwd: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
 
     await transport.runWorkerCommand("start", {
         instanceName: "task-3-compose",
-        workspacePath: "/workspace"
     });
 
     assert.deepEqual(recorder.calls.map((call) => call.args), [
@@ -1565,8 +1533,6 @@ test("compose container mode starts the configured service and executes the work
             "devshell-test",
             "exec",
             "-T",
-            "-w",
-            "/workspace",
             "workspace",
             "/usr/local/bin/devshell-worker",
             "start",
@@ -1593,14 +1559,12 @@ test("existing image container mode creates a dedicated managed container", asyn
             mode: "existingImage"
         },
         podmanBinary: "podman-bin",
-        remoteCwd: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
 
     await transport.runWorkerCommand("start", {
         instanceName: "task-3-existing-image",
-        workspacePath: "/workspace"
     });
 
     assert.deepEqual(recorder.calls[1]?.args.slice(0, 4), [
@@ -1612,10 +1576,10 @@ test("existing image container mode creates a dedicated managed container", asyn
     assert.equal(recorder.calls[1]?.args.includes("registry.example/devshell:latest"), true);
     assert.equal(
         recorder.calls[1]?.args.includes("/workspace:/workspace:rw"),
-        true
+        false
     );
     assert.deepEqual(recorder.calls[2]?.args, ["start", "existing-image-container"]);
-    assert.deepEqual(recorder.calls[3]?.args.slice(0, 5), ["exec", "-w", "/workspace", "-i", "existing-image-container"]);
+    assert.deepEqual(recorder.calls[3]?.args.slice(0, 3), ["exec", "-i", "existing-image-container"]);
 });
 
 test("managed container uses an explicit workspace mount without adding a duplicate", async () => {
@@ -1635,14 +1599,12 @@ test("managed container uses an explicit workspace mount without adding a duplic
             mounts: [{ mode: "ro", source: "/host/project", target: "/workspace" }]
         },
         podmanBinary: "podman-bin",
-        remoteCwd: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
 
     await transport.runWorkerCommand("start", {
         instanceName: "task-3-mounted-image",
-        workspacePath: "/workspace"
     });
 
     assert.equal(
@@ -1673,14 +1635,12 @@ test("existing stopped container mode adopts and restores the configured lifecyc
             mode: "existingStoppedContainer"
         },
         podmanBinary: "podman-bin",
-        remoteCwd: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
 
     await transport.runWorkerCommand("start", {
         instanceName: "task-3-adopted",
-        workspacePath: "/workspace"
     });
     await transport.runWorkerCommand("stop", { instanceName: "task-3-adopted" });
 
@@ -1689,8 +1649,6 @@ test("existing stopped container mode adopts and restores the configured lifecyc
         ["start", "adopted-container"],
         [
             "exec",
-            "-w",
-            "/workspace",
             "-i",
             "adopted-container",
             "/usr/local/bin/devshell-worker",
@@ -1721,19 +1679,17 @@ test("podman transport rejects already running existing stopped containers", asy
             mode: "existingStoppedContainer"
         },
         podmanBinary: "podman-bin",
-        remoteCwd: "/workspace",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
 
     await assert.rejects(
-        transport.runWorkerCommand("start", { instanceName: "task-3-podman", workspacePath: "/workspace" }),
+        transport.runWorkerCommand("start", { instanceName: "task-3-podman" }),
         /Running container attach is not a supported instance mode/u
     );
 });
 
 test("local transport executes frozen devshell-worker start status logs stop rpc", realWorkerTestOptions(workerBinaryPath), async (t) => {
-    const workspacePath = await createTestTempDirectory("core");
     const homeDirectory = await createTestTempDirectory("core-home");
     const runtimeDirectory = await createTestTempDirectory("core-runtime");
     const instanceName = `task-3-${process.pid}`;
@@ -1746,15 +1702,14 @@ test("local transport executes frozen devshell-worker start status logs stop rpc
     t.after(async () => {
         await transport.runWorkerCommand("stop", { env, instanceName });
         await rm(homeDirectory, { recursive: true, force: true });
-        await rm(workspacePath, { recursive: true, force: true });
         await rm(runtimeDirectory, { recursive: true, force: true });
     });
 
     await transport.installWorker();
 
-    const startResult = await transport.runWorkerCommand("start", { env, instanceName, workspacePath });
+    const startResult = await transport.runWorkerCommand("start", { env, instanceName });
     assert.equal(startResult.exitCode, 0);
-    assert.equal(JSON.parse(startResult.stdout).workspace, workspacePath);
+    assert.equal("workspace" in JSON.parse(startResult.stdout), false);
 
     const statusResult = await transport.runWorkerCommand("status", { env, instanceName });
     assert.equal(statusResult.exitCode, 0);

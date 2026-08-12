@@ -307,7 +307,7 @@ export class TuiAppStore {
 
     setRelayMetadata(
         commandId: string,
-        input: { provider?: string; requestId?: string; workspace?: string },
+        input: { provider?: string; requestId?: string },
     ): void {
         this.dispatch({
             commandId,

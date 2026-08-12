@@ -5,7 +5,7 @@ mod pty_windows;
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -36,6 +36,7 @@ pub struct TerminalOpenInput {
     pub rows: u16,
     pub cwd: Option<String>,
     pub command: Option<String>,
+    pub workspace: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -120,7 +121,6 @@ struct TerminalManagerInner {
     notifications: NotificationQueue,
     policy: Arc<dyn SecurityPolicy>,
     sessions: Mutex<HashMap<String, Arc<TerminalSession>>>,
-    workspace: PathBuf,
 }
 
 struct TerminalSession {
@@ -160,9 +160,8 @@ pub(crate) struct SpawnedTerminal {
 }
 
 impl TerminalManager {
-    pub fn with_policy(workspace: PathBuf, policy: Arc<dyn SecurityPolicy>) -> Self {
+    pub fn with_policy(policy: Arc<dyn SecurityPolicy>) -> Self {
         Self::with_policy_limits(
-            workspace,
             policy,
             DEFAULT_MAX_REPLAY_BYTES,
             DEFAULT_MAX_NOTIFICATION_BYTES,
@@ -172,13 +171,11 @@ impl TerminalManager {
 
     #[cfg(test)]
     fn with_limits(
-        workspace: PathBuf,
         max_replay_bytes: usize,
         max_notification_bytes: usize,
         max_sessions: usize,
     ) -> Self {
         Self::with_policy_limits(
-            workspace,
             build_security_policy(SecurityMode::Disabled),
             max_replay_bytes,
             max_notification_bytes,
@@ -187,7 +184,6 @@ impl TerminalManager {
     }
 
     fn with_policy_limits(
-        workspace: PathBuf,
         policy: Arc<dyn SecurityPolicy>,
         max_replay_bytes: usize,
         max_notification_bytes: usize,
@@ -201,7 +197,6 @@ impl TerminalManager {
                 notifications: NotificationQueue::new(max_notification_bytes),
                 policy,
                 sessions: Mutex::new(HashMap::new()),
-                workspace,
             }),
         }
     }
@@ -209,7 +204,7 @@ impl TerminalManager {
     pub fn open(&self, input: TerminalOpenInput) -> Result<TerminalDescriptor, RpcError> {
         validate_dimensions(input.cols, input.rows)?;
         let cwd = resolve_cwd(
-            &self.inner.workspace,
+            Path::new(&input.workspace),
             self.inner.policy.as_ref(),
             input.cwd.as_deref(),
         )?;
@@ -648,6 +643,12 @@ fn resolve_cwd(
     policy: &dyn SecurityPolicy,
     value: Option<&str>,
 ) -> Result<ResolvedPath, RpcError> {
+    if !workspace.is_absolute() {
+        return Err(RpcError::new(
+            "rpc.invalidContext",
+            "terminal workspace must be an absolute path",
+        ));
+    }
     let raw = normalize_cwd_request(value);
     let requested = parse_requested_path(&raw)?;
     let (read, write) = match requested.namespace {
@@ -756,7 +757,6 @@ mod tests {
     fn real_terminal_replays_output_resizes_and_kills_explicitly() {
         let workspace = crate::testing::temp_dir();
         let manager = TerminalManager::with_limits(
-            workspace.path().to_path_buf(),
             1024 * 1024,
             1024 * 1024,
             2,
@@ -767,6 +767,7 @@ mod tests {
                 rows: 24,
                 cwd: None,
                 command: None,
+                workspace: workspace.path().to_string_lossy().to_string(),
             })
             .expect("open terminal");
         manager
@@ -861,7 +862,6 @@ mod tests {
     fn exited_terminal_does_not_permanently_consume_the_session_limit() {
         let workspace = crate::testing::temp_dir();
         let manager = TerminalManager::with_limits(
-            workspace.path().to_path_buf(),
             1024 * 1024,
             1024 * 1024,
             1,
@@ -872,6 +872,7 @@ mod tests {
                 rows: 24,
                 cwd: None,
                 command: None,
+                workspace: workspace.path().to_string_lossy().to_string(),
             })
             .expect("open first terminal");
         manager
@@ -907,6 +908,7 @@ mod tests {
                 rows: 24,
                 cwd: None,
                 command: None,
+                workspace: workspace.path().to_string_lossy().to_string(),
             })
             .expect("open replacement terminal after the first exited");
         let listed = manager.list().expect("list replacement terminal");

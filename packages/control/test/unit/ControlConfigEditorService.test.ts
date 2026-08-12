@@ -393,14 +393,12 @@ test("config editor reconfigures and disables a running instance without replaci
     const reconfigure = reconfigureCalls[0] as {
         alerts?: { intervalMs?: number; maxUncommittedChanges?: number };
         approvalPolicy?: { mode?: string };
-        defaultWorkspace?: string;
         effectiveSecurityMode?: string;
         env?: Record<string, string>;
     };
     assert.equal(reconfigure.alerts?.intervalMs, 2_000);
     assert.equal(reconfigure.alerts?.maxUncommittedChanges, 5);
     assert.equal(reconfigure.approvalPolicy?.mode, "ask");
-    assert.equal(reconfigure.defaultWorkspace, "/tmp/demo");
     assert.equal(reconfigure.effectiveSecurityMode, "workspace");
     assert.equal(reconfigure.env?.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE, "workspace");
     assert.equal(reconfigure.env?.DEVSHELL_WORKER_SECURITY_MODE, "workspace");
@@ -410,11 +408,11 @@ test("config editor reconfigures and disables a running instance without replaci
 test("instance reconfigure failure restores persisted and runtime configuration", async () => {
     let config = createConfig();
     const writes: ControlConfig[] = [];
-    let runtimeWorkspace = "/tmp/demo";
+    let runtimeSecurityMode = "disabled";
     let failNext = true;
     const worker = {
-        reconfigure(input: { defaultWorkspace?: string }) {
-            runtimeWorkspace = input.defaultWorkspace ?? "";
+        reconfigure(input: { effectiveSecurityMode?: string }) {
+            runtimeSecurityMode = input.effectiveSecurityMode ?? "";
             if (failNext) {
                 failNext = false;
                 throw new Error("worker reconfigure failed");
@@ -445,15 +443,14 @@ test("instance reconfigure failure restores persisted and runtime configuration"
     await assert.rejects(
         service.updateInstanceConfig({
             instanceName: "demo-local",
-            patch: { workspace: "/tmp/next" }
+            patch: { security: { mode: "workspace" } }
         }),
         /worker reconfigure failed/u
     );
 
     assert.equal(writes.length, 2);
-    assert.equal(config.instances[0]?.workspace, "/tmp/demo");
-    assert.equal(runtimeWorkspace, "/tmp/demo");
-    assert.equal(registry.get("demo-local")?.workspace, "/tmp/demo");
+    assert.equal(config.instances[0]?.security.mode, "disabled");
+    assert.equal(runtimeSecurityMode, "disabled");
 });
 
 test("config editor rejects delete and rebuild patches while an instance is running before persistence", async () => {
@@ -571,8 +568,7 @@ function createConfig() {
             },
             name: "demo-local",
             provider: "local",
-            security: { mode: "disabled" },
-            workspace: "/tmp/demo"
+            security: { mode: "disabled" }
         })
     ];
     return config;

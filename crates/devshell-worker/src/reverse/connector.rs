@@ -847,7 +847,6 @@ mod tests {
             },
             WorkerRuntimeContext {
                 instance,
-                workspace: workspace.clone(),
                 platform: PlatformInfo {
                     os: std::env::consts::OS,
                     arch: std::env::consts::ARCH,
@@ -948,7 +947,6 @@ mod tests {
             },
             WorkerRuntimeContext {
                 instance,
-                workspace: workspace.clone(),
                 platform: PlatformInfo {
                     os: std::env::consts::OS,
                     arch: std::env::consts::ARCH,
@@ -1023,7 +1021,6 @@ mod tests {
             },
             WorkerRuntimeContext {
                 instance,
-                workspace: workspace.clone(),
                 platform: PlatformInfo {
                     os: std::env::consts::OS,
                     arch: std::env::consts::ARCH,

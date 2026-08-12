@@ -13,15 +13,20 @@ function createHarness(options: {
     failConfigUpdate?: boolean;
     failReverseCode?: boolean;
     failStart?: boolean;
+    initialHomeDirectory?: string | null;
     operationTimeoutMs?: number;
     reconnectDelayMs?: number;
     restartReconnectFailures?: number;
+    startedHomeDirectory?: string;
 } = {}) {
     const store = new TuiAppStore();
+    const initialHomeDirectory = options.initialHomeDirectory === undefined
+        ? "/home/alpha"
+        : options.initialHomeDirectory;
     store.patchControlReadModel({ instances: [
         {
-            defaultWorkspace: "/workspace/alpha",
             enabled: true,
+            ...(initialHomeDirectory === null ? {} : { homeDirectory: initialHomeDirectory }),
             mcpEnabled: false,
             name: "alpha",
             provider: "local",
@@ -95,7 +100,6 @@ function createHarness(options: {
                     name: draft.name,
                     provider: draft.provider,
                     security: { mode: "disabled" as const },
-                    ...(draft.workspace === undefined ? {} : { workspace: draft.workspace }),
                 };
             },
         },
@@ -121,9 +125,9 @@ function createHarness(options: {
             },
         },
         tool: {
-            async call(instance: string, toolName: string, input: JsonValue) {
+            async call(instance: string, toolName: string, input: JsonValue, workspace: string) {
                 calls.push(
-                    `tool.call:${instance}:${toolName}:${JSON.stringify(input)}`,
+                    `tool.call:${instance}:${workspace}:${toolName}:${JSON.stringify(input)}`,
                 );
                 return {};
             },
@@ -202,6 +206,16 @@ function createHarness(options: {
         async refreshConfig() {
             refreshed.push("config");
         },
+        async refreshInstances() {
+            refreshed.push("instances");
+            if (options.startedHomeDirectory !== undefined) {
+                store.patchControlReadModel({ instances: store.getState().instances.map((instance) =>
+                    instance.name === "alpha"
+                        ? { ...instance, homeDirectory: options.startedHomeDirectory }
+                        : instance
+                ) });
+            }
+        },
         async refreshInstance(instance: string) {
             refreshed.push(`instance:${instance}`);
         },
@@ -237,7 +251,7 @@ test("runtime operations own instance command lifecycle and relay diagnostics", 
     await harness.operations.runInstanceAction("start", "alpha");
 
     assert.deepEqual(harness.calls, ["runtime.start:alpha"]);
-    assert.deepEqual(harness.refreshed, ["instance:alpha"]);
+    assert.deepEqual(harness.refreshed, ["instances", "instance:alpha"]);
     const command = harness.store.getState().commandRecords[0];
     assert.equal(command?.status, "succeeded");
     assert.equal(command?.targetInstance, "alpha");
@@ -247,8 +261,29 @@ test("runtime operations own instance command lifecycle and relay diagnostics", 
             : harness.store.getState().relayByCommand[command.commandId];
     assert.deepEqual(relay?.output, ["starting alpha\n"]);
     assert.equal(relay?.provider, "local");
-    assert.equal(relay?.workspace, "/workspace/alpha");
     assert.equal(relay?.requestId, "request-start");
+});
+
+test("starting a previously stopped instance refreshes worker home before direct tool calls", async () => {
+    const harness = createHarness({
+        initialHomeDirectory: null,
+        startedHomeDirectory: "/home/started-alpha",
+    });
+
+    assert.equal(harness.store.getState().instances[0]?.homeDirectory, undefined);
+    await harness.operations.runInstanceAction("start", "alpha");
+    assert.equal(
+        harness.store.getState().instances[0]?.homeDirectory,
+        "/home/started-alpha",
+    );
+    assert.equal(
+        await harness.operations.callTool("alpha", "bash_run", '{"command":"pwd"}'),
+        true,
+    );
+    assert.equal(
+        harness.calls.includes('tool.call:alpha:/home/started-alpha:bash_run:{"command":"pwd"}'),
+        true,
+    );
 });
 
 test("runtime operations preserve failed command diagnostics without throwing into the dispatcher", async () => {
@@ -367,7 +402,7 @@ test("runtime operations expose control callbacks and route page refreshes", asy
         true,
     );
     assert.equal(
-        harness.calls.includes('tool.call:alpha:bash_run:{"command":"pwd"}'),
+        harness.calls.includes('tool.call:alpha:/home/alpha:bash_run:{"command":"pwd"}'),
         true,
     );
     assert.deepEqual(harness.refreshed, [

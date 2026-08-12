@@ -174,7 +174,8 @@ export class ArtifactTransferService {
             status: "queued",
             target: {
                 instance: input.targetInstance,
-                path: input.targetPath
+                path: input.targetPath,
+                workspace: input.targetWorkspace
             },
             transferId,
             transferredBytes: 0,

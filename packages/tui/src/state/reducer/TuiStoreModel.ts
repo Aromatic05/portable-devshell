@@ -25,8 +25,8 @@ export type TuiConnectionStatus =
     "connecting" | "connected" | "disconnected" | "error";
 
 export interface TuiInstanceListEntry {
-    defaultWorkspace?: string;
     enabled: boolean;
+    homeDirectory?: string;
     mcpEnabled: boolean;
     mcpPath?: string;
     name: string;
@@ -70,7 +70,6 @@ export interface TuiRelayRecord {
     output: string[];
     provider?: string;
     requestId?: string;
-    workspace?: string;
 }
 
 export interface TuiAppState {
@@ -101,7 +100,6 @@ export type TuiAppAction =
           commandId: string;
           provider?: string;
           requestId?: string;
-          workspace?: string;
           type: "relay.setMetadata";
       }
     | {

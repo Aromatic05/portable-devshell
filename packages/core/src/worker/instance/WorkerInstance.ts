@@ -9,8 +9,7 @@ import {
     type ToolCallQuery,
     type ToolCallRecord,
     type ReverseEnrollmentState,
-    type ReverseTransport,
-    type WorkspacePath
+    type ReverseTransport
 } from "@portable-devshell/shared";
 
 import type { ApprovalManager } from "../../approval/ApprovalManager.js";
@@ -272,15 +271,12 @@ export class WorkerInstance {
         await this.#artifact.abortReceive(receiveId);
     }
 
-    async start(workspacePath?: WorkspacePath | string): Promise<InstanceSnapshot> {
-        return await this.#lifecycle.start(workspacePath);
+    async start(): Promise<InstanceSnapshot> {
+        return await this.#lifecycle.start();
     }
 
-    async startInteractive(
-        workspacePath: WorkerCommandInteractiveSession | WorkspacePath | string | undefined,
-        interactiveSession?: WorkerCommandInteractiveSession
-    ): Promise<InstanceSnapshot> {
-        return await this.#lifecycle.startInteractive(workspacePath, interactiveSession);
+    async startInteractive(interactiveSession?: WorkerCommandInteractiveSession): Promise<InstanceSnapshot> {
+        return await this.#lifecycle.startInteractive(interactiveSession);
     }
 
     async stop(): Promise<InstanceSnapshot> {
@@ -337,13 +333,11 @@ export class WorkerInstance {
     async reconfigure(input: {
         alerts?: ResolvedWorkerInstanceConfig["alerts"];
         approvalPolicy?: ResolvedWorkerInstanceConfig["approvalPolicy"];
-        defaultWorkspace?: WorkspacePath;
         effectiveSecurityMode: ResolvedWorkerInstanceConfig["effectiveSecurityMode"];
         env?: NodeJS.ProcessEnv;
     }): Promise<void> {
         this.#config.alerts = input.alerts;
         this.#config.approvalPolicy = input.approvalPolicy;
-        this.#config.defaultWorkspace = input.defaultWorkspace;
         this.#config.effectiveSecurityMode = input.effectiveSecurityMode;
         this.#config.env = input.env;
         this.#approvalManager.setPolicy(input.approvalPolicy);
@@ -382,10 +376,6 @@ export class WorkerInstance {
 
     get handshake(): WorkerHandshakeResult | undefined {
         return this.#connection.handshake;
-    }
-
-    get workspacePath(): WorkspacePath | undefined {
-        return this.#connection.workspacePath;
     }
 
     async reconnectRpc(): Promise<InstanceSnapshot> {

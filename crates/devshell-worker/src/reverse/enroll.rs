@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::time::Duration;
 
 use reqwest::blocking::Client;
@@ -34,7 +33,6 @@ struct EnrollmentResponse {
     controller_url: String,
     device_token: String,
     instance: String,
-    workspace: String,
 }
 
 #[derive(Serialize)]
@@ -44,7 +42,6 @@ struct EnrollResult {
     installed_binary: String,
     ok: bool,
     started: bool,
-    workspace: String,
 }
 
 pub fn run(options: EnrollOptions) -> Result<String, String> {
@@ -76,7 +73,6 @@ pub fn run(options: EnrollOptions) -> Result<String, String> {
     validate_controller_url(&enrollment.controller_url)?;
 
     let instance = InstanceName::parse(&enrollment.instance)?;
-    let workspace = canonical_workspace(&enrollment.workspace)?;
     let paths = InstancePaths::resolve(&instance)?;
     ensure_dir(&paths.instance_root, 0o700)?;
     ensure_dir(&paths.logs_dir, 0o700)?;
@@ -104,32 +100,14 @@ pub fn run(options: EnrollOptions) -> Result<String, String> {
         write_config(&paths, &config)?;
     }
 
-    start_installed_worker(&installed_binary, &instance, &workspace)?;
+    start_installed_worker(&installed_binary, &instance)?;
     serde_json::to_string_pretty(&EnrollResult {
         instance: instance.as_str().to_string(),
         installed_binary: protocol_path(&installed_binary),
         ok: true,
         started: true,
-        workspace: protocol_path(&workspace),
     })
     .map_err(|error| error.to_string())
-}
-
-fn canonical_workspace(value: &str) -> Result<PathBuf, String> {
-    let path = PathBuf::from(value);
-    let canonical = path.canonicalize().map_err(|error| {
-        format!(
-            "failed to resolve enrolled workspace {}: {error}",
-            path.display()
-        )
-    })?;
-    if !canonical.is_dir() {
-        return Err(format!(
-            "enrolled workspace is not a directory: {}",
-            canonical.display()
-        ));
-    }
-    Ok(canonical)
 }
 
 fn enrollment_endpoint(base: &str) -> Result<Url, String> {

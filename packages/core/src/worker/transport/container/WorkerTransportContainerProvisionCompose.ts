@@ -2,7 +2,6 @@ import type { InstanceContainerConfig } from "@portable-devshell/shared";
 
 import {
     workerTransportContainerEnvironmentArgs,
-    workerTransportContainerWorkingDirectoryArgs,
     type WorkerTransportContainerProvision,
     type WorkerTransportContainerProvisionOperations
 } from "./WorkerTransportContainerProvision.js";
@@ -47,13 +46,11 @@ export class WorkerTransportContainerProvisionCompose implements WorkerTransport
 
     buildExecArgs(
         command: readonly string[],
-        useRemoteCwd: boolean,
         environmentKeys: readonly string[] = []
     ): string[] {
         return this.#buildComposeArgs([
             "exec",
             "-T",
-            ...workerTransportContainerWorkingDirectoryArgs(this.#operations.remoteCwd, useRemoteCwd),
             ...workerTransportContainerEnvironmentArgs(environmentKeys),
             this.#config.compose.service,
             ...command

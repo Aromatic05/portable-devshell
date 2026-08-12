@@ -39,6 +39,7 @@ export function ToolCalls({
     const [disableConfirmation, setDisableConfirmation] = useState<{
         ctxId: string;
         instance: string;
+        workspace: string;
     }>();
     const instanceState = state.readModel.instanceState;
     const allCalls = useMemo(
@@ -259,7 +260,7 @@ export function ToolCalls({
             {concreteContext ? <>
                 <p className="hint">{effectiveFilters.instance} · {ctxId}</p>
                 {contextRecord === undefined ? null : <p className="hint">
-                    Status: {contextRecord.status} · expires {contextRecord.expiresAt}
+                    Workspace: {contextRecord.workspace} · Status: {contextRecord.status} · expires {contextRecord.expiresAt}
                 </p>}
                 {contextRecord !== undefined && contextRecord.status !== "disabled" ? <p>
                     <button
@@ -268,6 +269,7 @@ export function ToolCalls({
                         onClick={() => setDisableConfirmation({
                             ctxId,
                             instance: effectiveFilters.instance,
+                            workspace: contextRecord.workspace,
                         })}
                         type="button"
                     >
@@ -347,7 +349,7 @@ export function ToolCalls({
         {disableConfirmation === undefined ? null : <ConfirmationDialog
             actionLabel="Disable"
             busy={disableOperation !== undefined && state.operations[disableOperation] !== undefined}
-            description={`Disable Context ${disableConfirmation.ctxId} for ${disableConfirmation.instance}? This cannot be renewed; the client must establish a new Context.`}
+            description={`Disable Context ${disableConfirmation.ctxId} for ${disableConfirmation.instance} in workspace ${disableConfirmation.workspace}? This cannot be renewed; the client must establish a new Context.`}
             onCancel={() => setDisableConfirmation(undefined)}
             onConfirm={() => {
                 const request = store.disableContext(disableConfirmation.ctxId);

@@ -24,7 +24,7 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
     const directory = await createTestTempDirectory("stream-recovery");
     const socketPath = createTestIpcPath("stream-recovery", directory);
     const worker = new FakeWorker("alpha");
-    worker.emit("instance.started", { workspacePath: "/tmp/ws" });
+    worker.emit("instance.started");
     const registry = new InstanceRegistry([
         createTestInstanceDescriptor(worker as unknown as WorkerInstance, { name: "alpha" })
     ]);

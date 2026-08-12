@@ -109,7 +109,7 @@ async function fixture(
     });
     const port = requireTcpPort(server.address);
     const baseUrl = `http://127.0.0.1:${port}`;
-    const share = await service.createShare({ instance: "source-a", path: "./result.bin" }, "source-a");
+    const share = await service.createShare({ instance: "source-a", path: "./result.bin", workspace: "/workspace" }, "source-a");
     const token = new URL(share.url).pathname.split("/").at(-1)!;
     const downloadUrl = `${baseUrl}${artifactShareRoute(publicBaseUrl)}/${token}`;
     return { downloadUrl, endpoint, service, share, token };

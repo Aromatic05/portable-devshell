@@ -323,7 +323,7 @@ export class CliMain {
             case "instance.call":
                 this.#stdout.write(renderToolCall(command.instance, command.toolName));
                 this.#stdout.write(
-                    renderToolResult(await this.#clients.tool.call(command.instance, command.toolName, command.input))
+                    renderToolResult(await this.#clients.tool.call(command.instance, command.toolName, command.input, command.workspace))
                 );
                 return;
             case "watch.logs":

@@ -85,6 +85,7 @@ function ToolApproval({
         <details>
             <summary>Open details</summary>
             <p>Risk: {item.riskLevel}; expires: {item.expiresAt}</p>
+            <p>Workspace: {item.workspace ?? "-"}</p>
             <p>{item.inputSummary}</p>
         </details>
         <Decision
@@ -93,7 +94,7 @@ function ToolApproval({
                 approvalId: item.approvalId,
                 instance: item.instance,
                 kind: "tool",
-                label: item.toolName,
+                label: `${item.toolName} on ${item.instance}${item.workspace === undefined ? "" : ` in workspace ${item.workspace}`} (risk ${item.riskLevel})`,
             }}
             onDecide={onDecide}
         />
@@ -122,7 +123,7 @@ function OAuthApproval({
             item={{
                 approvalId: item.approvalId,
                 kind: "oauth",
-                label: `OAuth ${item.kind}`,
+                label: `OAuth ${item.kind} for ${item.clientName}; scopes=${item.requestedScopes.join(", ") || "none"}; resources=${item.requestedResources.join(", ") || "none"}; redirects=${item.redirectUris.join(", ") || "none"}`,
             }}
             onDecide={onDecide}
         />

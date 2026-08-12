@@ -6,6 +6,7 @@ export interface InstanceRuntimeEnvelope {
 }
 
 export interface InstanceListEntry {
+    homeDirectory?: string;
     mcpEnabled: boolean;
     name: string;
     snapshot: InstanceSnapshot;

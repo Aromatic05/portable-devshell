@@ -205,7 +205,7 @@ test("LogStoreInstance and AuditToolCallHistory write and query per-instance rec
             "call-1",
             "bash_run",
             "{\"command\":\"pwd\"}",
-            { source: "cli" },
+            { source: "cli", workspace: "/projects/alpha" },
             "2026-07-07T00:00:01.000Z",
             "running",
             { taskId: "task-1", todoItemId: "implement" },
@@ -213,7 +213,16 @@ test("LogStoreInstance and AuditToolCallHistory write and query per-instance rec
         );
 
         await history.started("call-2", "bash_run", "{\"command\":\"ls\"}", { source: "cli" }, "2026-07-07T00:00:02.000Z");
-        assert.deepEqual((await history.read({ status: "running" })).map((record) => record.callId), ["call-1", "call-2"]);
+        assert.deepEqual(
+            (await history.read({ status: "running" })).map((record) => ({
+                callId: record.callId,
+                workspace: record.workspace,
+            })),
+            [
+                { callId: "call-1", workspace: "/projects/alpha" },
+                { callId: "call-2", workspace: undefined },
+            ],
+        );
 
         const completed = await history.completed(
             "call-1",
@@ -228,6 +237,7 @@ test("LogStoreInstance and AuditToolCallHistory write and query per-instance rec
         assert.equal((completed.input as { input?: unknown } | undefined)?.input, patch);
         assert.deepEqual(completed.output, { stdout: "ok" });
         assert.equal(completed.source, "cli");
+        assert.equal(completed.workspace, "/projects/alpha");
         assert.equal(completed.taskId, "task-1");
         assert.equal(completed.todoItemId, "implement");
 

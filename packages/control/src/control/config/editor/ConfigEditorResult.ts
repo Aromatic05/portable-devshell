@@ -1,5 +1,4 @@
 import {
-    asWorkspacePath,
     type ApprovalPolicy,
     type ControlConfig,
     type ControlInstanceAlertsConfig,
@@ -73,7 +72,6 @@ function listenerId(host: string, port: number): string {
 export function toWorkerReconfigureInput(instance: ControlInstanceConfig): {
     alerts?: ControlInstanceAlertsConfig;
     approvalPolicy?: ApprovalPolicy;
-    defaultWorkspace?: ReturnType<typeof asWorkspacePath>;
     effectiveSecurityMode: "disabled" | "workspace";
     env?: NodeJS.ProcessEnv;
 } {
@@ -85,7 +83,6 @@ export function toWorkerReconfigureInput(instance: ControlInstanceConfig): {
             scripts: instance.alerts.scripts?.map((script) => ({ ...script, command: [...script.command] })),
         },
         approvalPolicy: instance.approvalPolicy,
-        defaultWorkspace: asWorkspacePath(instance.workspace),
         effectiveSecurityMode,
         env: {
             ...instance.env,

@@ -29,7 +29,7 @@ CLI 和 TUI 都是 control client。它们不直接读取实例配置、不自�
 
 ## 实例模型
 
-每个 instance 绑定一个 provider 和一个 workspace。当前 provider 为：
+每个 instance 绑定一个 provider，但不持久化默认 workspace。workspace 是操作级 authority：CLI 工具调用显式传入绝对路径，MCP 由 `environ_info` 建立的 Context 持有其 workspace；TUI 的直接终端、tmux 和手工工具调用使用 worker handshake 报告的用户 home 作为默认操作目录。当前 provider 为：
 
 ```text
 local
@@ -45,7 +45,7 @@ reverse
 ~/.devshell/control/instances/<instance>.toml
 ```
 
-实例名必须包含连字符，例如 `demo-local`。实例配置版本为 `2`。
+实例名必须包含连字符，例如 `demo-local`。实例配置版本为 `3`。
 
 ## Worker 模型
 
@@ -72,7 +72,7 @@ tools.list
 
 ```toml
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo", "context"]
+groups = ["file", "bash", "artifact", "tmux", "todo"]
 capabilities = ["read", "write", "execute"]
 ```
 

@@ -11,11 +11,17 @@ test("tool-call live event metadata excludes full input and bounds its summary",
     const scope = createWorkerInstanceToolCallScope(
         "bash_run",
         input,
-        { ctxId: "ctx-large", requestId: "request-large", source: "mcp" }
+        {
+            ctxId: "ctx-large",
+            requestId: "request-large",
+            source: "mcp",
+            workspace: "/projects/alpha",
+        }
     );
 
     assert.equal("input" in scope.eventContext, false);
     assert.equal(scope.input, input);
     assert.equal(scope.inputSummary.length <= 512, true);
     assert.equal(scope.eventContext.inputSummary, scope.inputSummary);
+    assert.equal(scope.eventContext.workspace, "/projects/alpha");
 });
