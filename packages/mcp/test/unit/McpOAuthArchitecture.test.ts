@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { access, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
@@ -190,7 +191,7 @@ test("McpOAuthProviderRuntime upgrades persisted dynamic clients with required r
     }
 });
 
-test("McpOAuthProviderRuntime removes a dynamic client when its approval record cannot be created", async () => {
+test("dynamic registration fails before credentials are issued when registration approval capacity is exhausted", async () => {
     const storageDir = await createTestTempDirectory("mcp-oauth-registration-overflow");
     const approvals = new McpOAuthApprovalService(storageDir, { maxPendingRegistrations: 1 });
     const runtime = new McpOAuthProviderRuntime({
@@ -207,39 +208,32 @@ test("McpOAuthProviderRuntime removes a dynamic client when its approval record 
             clientName: "Pending Client",
             redirectUris: ["http://localhost/pending"]
         });
-        const adapter = (runtime.provider.Client as unknown as { adapter: {
-            upsert(id: string, payload: Record<string, unknown>, expiresIn: number): Promise<void>;
-        } }).adapter;
-        await adapter.upsert("overflow-client", {
-            application_type: "native",
-            client_id: "overflow-client",
-            client_name: "Overflow Client",
-            grant_types: ["authorization_code", "refresh_token"],
-            redirect_uris: ["http://localhost/overflow"],
-            response_types: ["code"],
-            token_endpoint_auth_method: "none"
-        }, 3600);
-        const client = await runtime.provider.Client.find("overflow-client");
-        assert.notEqual(client, undefined);
+        const server = createServer(runtime.provider.callback());
+        await new Promise<void>((resolve, reject) => {
+            server.once("error", reject);
+            server.listen(0, "127.0.0.1", resolve);
+        });
+        const address = server.address();
+        assert.notEqual(address, null);
+        assert.equal(typeof address, "object");
+        const response = await fetch(`http://127.0.0.1:${address.port}/register`, {
+            body: JSON.stringify({
+                client_name: "Overflow Client",
+                grant_types: ["authorization_code", "refresh_token"],
+                redirect_uris: ["http://localhost/overflow"],
+                response_types: ["code"],
+                token_endpoint_auth_method: "none"
+            }),
+            headers: { "content-type": "application/json" },
+            method: "POST"
+        });
+        const body = await response.json() as Record<string, unknown>;
+        await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
 
-        let registrationTokenDestroyed = false;
-        runtime.provider.emit("registration_create.success", {
-            body: {},
-            oidc: {
-                entities: {
-                    RegistrationAccessToken: {
-                        async destroy() { registrationTokenDestroyed = true; }
-                    }
-                }
-            }
-        }, client!);
-        for (let attempt = 0; attempt < 50; attempt += 1) {
-            if (await runtime.provider.Client.find("overflow-client") === undefined) break;
-            await new Promise((resolve) => setTimeout(resolve, 5));
-        }
-
-        assert.equal(await runtime.provider.Client.find("overflow-client"), undefined);
-        assert.equal(registrationTokenDestroyed, true);
+        assert.equal(response.status, 429);
+        assert.equal(body.error, "invalid_request");
+        assert.equal("client_id" in body, false);
+        assert.equal("registration_access_token" in body, false);
         assert.deepEqual(
             (await approvals.list()).map((request) => request.clientId),
             ["pending-client"]

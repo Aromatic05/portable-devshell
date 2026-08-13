@@ -8,6 +8,8 @@ const approvalTimeoutMs = 300_000;
 const defaultMaxEntries = 2048;
 const defaultMaxPendingRegistrations = 128;
 
+export class OAuthApprovalCapacityError extends Error {}
+
 export interface OAuthApprovalInput {
     clientId: string;
     clientName: string;
@@ -83,7 +85,7 @@ export class McpOAuthApprovalService {
             ).length;
             if (pendingRegistrations >= this.#maxPendingRegistrations) {
                 if (changed) await this.#persistLockedWithRollback(previous);
-                throw new Error(`The pending OAuth registration limit of ${this.#maxPendingRegistrations} was reached.`);
+                throw new OAuthApprovalCapacityError(`The pending OAuth registration limit of ${this.#maxPendingRegistrations} was reached.`);
             }
             const request = this.#createLocked("registration", input);
             await this.#persistLockedWithRollback(previous);
@@ -106,7 +108,7 @@ export class McpOAuthApprovalService {
                 ).length;
                 if (pendingRegistrations >= this.#maxPendingRegistrations) {
                     await this.#persistLockedWithRollback(previous);
-                    throw new Error(`The pending OAuth registration limit of ${this.#maxPendingRegistrations} was reached.`);
+                    throw new OAuthApprovalCapacityError(`The pending OAuth registration limit of ${this.#maxPendingRegistrations} was reached.`);
                 }
                 registration = this.#createLocked("registration", input);
                 await this.#persistLockedWithRollback(previous);
@@ -276,7 +278,7 @@ export class McpOAuthApprovalService {
         while (this.#requests.size >= this.#maxEntries) {
             const removable = this.#oldestTerminalRequest();
             if (removable === undefined) {
-                throw new Error(`The OAuth approval storage limit of ${this.#maxEntries} entries was reached.`);
+                throw new OAuthApprovalCapacityError(`The OAuth approval storage limit of ${this.#maxEntries} entries was reached.`);
             }
             this.#requests.delete(removable.approvalId);
             this.#removeApprovalBindingsLocked(removable.approvalId);

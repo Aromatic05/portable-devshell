@@ -22,6 +22,7 @@ import type {
 } from "express";
 import { exportJWK, generateKeyPair } from "jose";
 import Provider, {
+    errors,
     type Adapter,
     type AdapterFactory,
     type AdapterPayload
@@ -36,6 +37,7 @@ const DYNAMIC_CLIENT_REQUIRED_SCOPES = ["openid", "offline_access"] as const;
 import type { McpOAuth2Config } from "../McpAuthConfig.js";
 import {
     McpOAuthApprovalService,
+    OAuthApprovalCapacityError,
     type OAuthApprovalInput
 } from "./McpOAuthApprovalService.js";
 import { createMcpOAuthOidcFileAdapterFactory } from "./McpOAuthOidcFileAdapter.js";
@@ -154,7 +156,19 @@ export class McpOAuthProviderRuntime {
                     join(this.#storageDir, "adapter"),
                     async (path) => await this.#storageSecurity.secureStorage(path),
                 ),
-                dynamicClientRequiredScopes
+                dynamicClientRequiredScopes,
+                async (clientId, payload) => {
+                    try {
+                        await this.#approvals.registerClient(
+                            toRegistrationApprovalInputFromPayload(clientId, payload)
+                        );
+                    } catch (error) {
+                        if (error instanceof OAuthApprovalCapacityError) {
+                            throw new errors.InvalidRequest(error.message, 429);
+                        }
+                        throw error;
+                    }
+                }
             ),
             clientDefaults: {
                 grant_types: ["authorization_code", "refresh_token"],
@@ -256,25 +270,6 @@ export class McpOAuthProviderRuntime {
             if (isRecord(context.body)) {
                 context.body.scope = scope;
             }
-            void this.#approvals.registerClient(
-                toRegistrationApprovalInput(client)
-            ).catch(async () => {
-                const clientId = (client as { clientId?: unknown }).clientId;
-                const registrationAccessToken = (context as unknown as {
-                    oidc?: {
-                        entities?: {
-                            RegistrationAccessToken?: { destroy(): Promise<void> };
-                        };
-                    };
-                }).oidc?.entities?.RegistrationAccessToken;
-                await registrationAccessToken?.destroy().catch(() => undefined);
-                if (typeof clientId === "string" && clientId.length > 0) {
-                    const adapter = (provider.Client as unknown as {
-                        adapter: { destroy(id: string): Promise<void> };
-                    }).adapter;
-                    await adapter.destroy(clientId).catch(() => undefined);
-                }
-            });
         });
         provider.on("access_token.destroyed", (token) => {
             if (typeof token.grantId === "string") {
@@ -378,12 +373,13 @@ export class McpOAuthProviderRuntime {
 
 function createDynamicClientScopeAdapterFactory(
     delegate: AdapterFactory,
-    requiredScopes: () => readonly string[]
+    requiredScopes: () => readonly string[],
+    onClientCreated: (clientId: string, payload: AdapterPayload) => Promise<void>
 ): AdapterFactory {
     return (name) => {
         const adapter = delegate(name);
         return name === "Client"
-            ? new DynamicClientScopeAdapter(adapter, requiredScopes)
+            ? new DynamicClientScopeAdapter(adapter, requiredScopes, onClientCreated)
             : adapter;
     };
 }
@@ -391,7 +387,8 @@ function createDynamicClientScopeAdapterFactory(
 class DynamicClientScopeAdapter implements Adapter {
     constructor(
         private readonly delegate: Adapter,
-        private readonly requiredScopes: () => readonly string[]
+        private readonly requiredScopes: () => readonly string[],
+        private readonly onClientCreated: (clientId: string, payload: AdapterPayload) => Promise<void>
     ) {}
 
     async consume(id: string): Promise<void> {
@@ -431,11 +428,23 @@ class DynamicClientScopeAdapter implements Adapter {
         payload: AdapterPayload,
         expiresIn: number
     ): Promise<void> {
-        await this.delegate.upsert(
-            id,
-            extendDynamicClientPayload(payload, this.requiredScopes()),
-            expiresIn
-        );
+        const existing = await this.delegate.find(id);
+        const extended = extendDynamicClientPayload(payload, this.requiredScopes());
+        await this.delegate.upsert(id, extended, expiresIn);
+        if (existing !== undefined) return;
+        try {
+            await this.onClientCreated(id, extended);
+        } catch (error) {
+            try {
+                await this.delegate.destroy(id);
+            } catch (rollbackError) {
+                throw new AggregateError(
+                    [error, rollbackError],
+                    `Dynamic client ${id} approval failed and client rollback was incomplete.`
+                );
+            }
+            throw error;
+        }
     }
 }
 
@@ -594,18 +603,11 @@ function readTokenResources(
     return resources;
 }
 
-function toRegistrationApprovalInput(client: unknown): OAuthApprovalInput {
-    const value = client as {
-        clientId?: unknown;
-        clientName?: unknown;
-        redirectUris?: unknown;
-    };
+function toRegistrationApprovalInputFromPayload(clientId: string, payload: AdapterPayload): OAuthApprovalInput {
     return {
-        clientId: typeof value.clientId === "string"
-            ? value.clientId
-            : "unknown-client",
-        clientName: readClientName(value.clientId, value.clientName),
-        redirectUris: readStringArray(value.redirectUris)
+        clientId,
+        clientName: readClientName(clientId, payload.client_name),
+        redirectUris: readStringArray(payload.redirect_uris)
     };
 }
 
