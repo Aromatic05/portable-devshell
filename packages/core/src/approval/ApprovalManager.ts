@@ -29,19 +29,18 @@ interface ApprovalManagerOptions {
     timeout?: ApprovalTimeout;
 }
 
+interface PendingApproval {
+    request: ApprovalRequest;
+    resolve: (resolution: ApprovalResolution) => void;
+    timeout: NodeJS.Timeout;
+}
+
 export class ApprovalManager {
     readonly #instanceName: InstanceName;
     #policy: ApprovalPolicy;
     readonly #store: ApprovalStore;
     readonly #timeoutMs: number;
-    readonly #pending = new Map<
-        string,
-        {
-            request: ApprovalRequest;
-            resolve: (resolution: ApprovalResolution) => void;
-            timeout: NodeJS.Timeout;
-        }
-    >();
+    readonly #pending = new Map<string, PendingApproval>();
 
     constructor(options: ApprovalManagerOptions) {
         this.#instanceName = options.instanceName;
@@ -85,14 +84,13 @@ export class ApprovalManager {
         await this.#store.append(request);
 
         const awaitDecision = new Promise<ApprovalResolution>((resolve) => {
-            const timeout = setTimeout(() => {
-                void this.#expire(request.approvalId).then(resolve);
-            }, this.#timeoutMs);
-            this.#pending.set(request.approvalId, {
+            const pending: PendingApproval = {
                 request,
                 resolve,
-                timeout
-            });
+                timeout: undefined as unknown as NodeJS.Timeout
+            };
+            this.#pending.set(request.approvalId, pending);
+            this.#armExpiration(request.approvalId, pending, this.#timeoutMs);
         });
 
         return {
@@ -166,13 +164,11 @@ export class ApprovalManager {
             status: input.decision === "approve" ? "approved" : "denied"
         };
 
-        if (pending !== undefined) {
-            clearTimeout(pending.timeout);
-            pending.request = resolvedRequest;
-        }
         await this.#store.append(resolvedRequest);
 
         if (pending !== undefined) {
+            clearTimeout(pending.timeout);
+            pending.request = resolvedRequest;
             if (this.#pending.get(approvalId) === pending) {
                 this.#pending.delete(approvalId);
             }
@@ -214,11 +210,24 @@ export class ApprovalManager {
             ...request,
             status: "cancelled"
         };
+
         if (pending !== undefined) {
             clearTimeout(pending.timeout);
             pending.request = cancelledRequest;
         }
-        await this.#store.append(cancelledRequest);
+        try {
+            await this.#store.append(cancelledRequest);
+        } catch (error) {
+            if (pending !== undefined && this.#pending.get(approvalId) === pending) {
+                pending.request = request;
+                this.#armExpiration(
+                    approvalId,
+                    pending,
+                    Math.min(1_000, Math.max(1, this.#timeoutMs))
+                );
+            }
+            throw error;
+        }
 
         if (pending !== undefined) {
             if (this.#pending.get(approvalId) === pending) {
@@ -235,6 +244,20 @@ export class ApprovalManager {
 
     setPolicy(policy: ApprovalPolicy | undefined): void {
         this.#policy = policy ?? { mode: "disabled" };
+    }
+
+    #armExpiration(approvalId: string, pending: PendingApproval, delayMs: number): void {
+        const expire = () => {
+            void this.#expire(approvalId).then(pending.resolve, () => {
+                if (this.#pending.get(approvalId) !== pending) return;
+                this.#armExpiration(
+                    approvalId,
+                    pending,
+                    Math.min(1_000, Math.max(1, this.#timeoutMs))
+                );
+            });
+        };
+        pending.timeout = setTimeout(expire, delayMs);
     }
 
     async #expire(approvalId: string): Promise<ApprovalResolution> {
@@ -255,8 +278,8 @@ export class ApprovalManager {
             ...pending.request,
             status: "expired"
         };
-        pending.request = expiredRequest;
         await this.#store.append(expiredRequest);
+        pending.request = expiredRequest;
         if (this.#pending.get(approvalId) === pending) {
             this.#pending.delete(approvalId);
         }

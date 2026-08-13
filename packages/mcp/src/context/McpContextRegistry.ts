@@ -133,9 +133,47 @@ export class McpContextRegistry {
         });
     }
 
+    async validateForInstance(ctxId: string, instance: string): Promise<McpContextRecord> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            if (!isCtxId(ctxId)) {
+                throw invalidContext(ctxId);
+            }
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined) {
+                throw invalidContext(ctxId);
+            }
+            const now = this.#now();
+            if (record.status === "disabled") {
+                throw disabledContext(ctxId);
+            }
+            if (record.status === "expired" || Date.parse(record.expiresAt) <= now) {
+                if (record.status !== "expired") {
+                    await this.#mutateAndPersist(() => {
+                        record.status = "expired";
+                    });
+                }
+                throw expiredContext(ctxId, record.expiresAt);
+            }
+            if (record.instance !== instance) {
+                throw invalidContext(ctxId);
+            }
+            return cloneRecord(record);
+        });
+    }
+
     async list(): Promise<McpContextRecord[]> {
         return await this.#run(async () => {
             this.#assertInitialized();
+            const previous = cloneContextMap(this.#contexts);
+            if (this.#expireOverdue(this.#now())) {
+                try {
+                    await this.#persist();
+                } catch (error) {
+                    restoreContextMap(this.#contexts, previous);
+                    throw error;
+                }
+            }
             return [...this.#contexts.values()]
                 .map(cloneRecord)
                 .sort((left, right) => left.createdAt.localeCompare(right.createdAt));

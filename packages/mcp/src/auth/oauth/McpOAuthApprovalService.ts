@@ -23,6 +23,12 @@ export interface McpOAuthApprovalServiceOptions {
     timeoutMs?: number;
 }
 
+interface OAuthApprovalMemorySnapshot {
+    authorizationByInteraction: Map<string, string>;
+    authorizationByTransaction: Map<string, { approvalId: string; requestKey: string }>;
+    requests: Map<string, OAuthApprovalRequest>;
+}
+
 export class McpOAuthApprovalService {
     readonly #filePath: string;
     readonly #maxEntries: number;
@@ -65,21 +71,22 @@ export class McpOAuthApprovalService {
 
     async registerClient(input: OAuthApprovalInput): Promise<OAuthApprovalRequest> {
         return await this.#mutex.runExclusive(async () => {
+            const previous = this.#snapshotLocked();
             const changed = this.#expirePendingLocked();
             const existing = this.#findRegistration(input.clientId);
             if (existing !== undefined) {
-                if (changed) await this.#persistLocked();
+                if (changed) await this.#persistLockedWithRollback(previous);
                 return existing;
             }
             const pendingRegistrations = [...this.#requests.values()].filter(
                 (request) => request.kind === "registration" && request.status === "pending"
             ).length;
             if (pendingRegistrations >= this.#maxPendingRegistrations) {
-                if (changed) await this.#persistLocked();
+                if (changed) await this.#persistLockedWithRollback(previous);
                 throw new Error(`The pending OAuth registration limit of ${this.#maxPendingRegistrations} was reached.`);
             }
             const request = this.#createLocked("registration", input);
-            await this.#persistLocked();
+            await this.#persistLockedWithRollback(previous);
             return request;
         });
     }
@@ -90,6 +97,7 @@ export class McpOAuthApprovalService {
         input: OAuthApprovalInput
     ): Promise<OAuthApprovalRequest> {
         return await this.#mutex.runExclusive(async () => {
+            const previous = this.#snapshotLocked();
             const expired = this.#expirePendingLocked();
             let registration = this.#findRegistration(input.clientId);
             if (registration === undefined) {
@@ -97,16 +105,16 @@ export class McpOAuthApprovalService {
                     (request) => request.kind === "registration" && request.status === "pending"
                 ).length;
                 if (pendingRegistrations >= this.#maxPendingRegistrations) {
-                    await this.#persistLocked();
+                    await this.#persistLockedWithRollback(previous);
                     throw new Error(`The pending OAuth registration limit of ${this.#maxPendingRegistrations} was reached.`);
                 }
                 registration = this.#createLocked("registration", input);
-                await this.#persistLocked();
+                await this.#persistLockedWithRollback(previous);
             }
 
             if (registration.status !== "approved") {
                 if (expired) {
-                    await this.#persistLocked();
+                    await this.#persistLockedWithRollback(previous);
                 }
                 return registration;
             }
@@ -116,7 +124,7 @@ export class McpOAuthApprovalService {
                 const existing = this.#requests.get(interactionApproval);
                 if (existing !== undefined) {
                     if (expired) {
-                        await this.#persistLocked();
+                        await this.#persistLockedWithRollback(previous);
                     }
                     return existing;
                 }
@@ -129,7 +137,7 @@ export class McpOAuthApprovalService {
                 if (existing !== undefined) {
                     this.#authorizationByInteraction.set(interactionId, existing.approvalId);
                     if (expired) {
-                        await this.#persistLocked();
+                        await this.#persistLockedWithRollback(previous);
                     }
                     return existing;
                 }
@@ -138,15 +146,16 @@ export class McpOAuthApprovalService {
             const request = this.#createLocked("authorization", input);
             this.#authorizationByInteraction.set(interactionId, request.approvalId);
             this.#authorizationByTransaction.set(transactionId, { approvalId: request.approvalId, requestKey });
-            await this.#persistLocked();
+            await this.#persistLockedWithRollback(previous);
             return request;
         });
     }
 
     async list(): Promise<OAuthApprovalRequest[]> {
         return await this.#mutex.runExclusive(async () => {
+            const previous = this.#snapshotLocked();
             if (this.#expirePendingLocked()) {
-                await this.#persistLocked();
+                await this.#persistLockedWithRollback(previous);
             }
             return [...this.#requests.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
         });
@@ -154,8 +163,9 @@ export class McpOAuthApprovalService {
 
     async get(approvalId: string): Promise<OAuthApprovalRequest | undefined> {
         return await this.#mutex.runExclusive(async () => {
+            const previous = this.#snapshotLocked();
             if (this.#expirePendingLocked()) {
-                await this.#persistLocked();
+                await this.#persistLockedWithRollback(previous);
             }
             return this.#requests.get(approvalId);
         });
@@ -163,8 +173,9 @@ export class McpOAuthApprovalService {
 
     async getAuthorization(interactionId: string): Promise<OAuthApprovalRequest | undefined> {
         return await this.#mutex.runExclusive(async () => {
+            const previous = this.#snapshotLocked();
             if (this.#expirePendingLocked()) {
-                await this.#persistLocked();
+                await this.#persistLockedWithRollback(previous);
             }
             const approvalId = this.#authorizationByInteraction.get(interactionId);
             return approvalId === undefined ? undefined : this.#requests.get(approvalId);
@@ -185,12 +196,15 @@ export class McpOAuthApprovalService {
         decidedBy: "cli" | "tui" | "web"
     ): Promise<OAuthApprovalRequest> {
         return await this.#mutex.runExclusive(async () => {
-            this.#expirePendingLocked();
+            const previous = this.#snapshotLocked();
+            const expired = this.#expirePendingLocked();
             const request = this.#requests.get(approvalId);
             if (request === undefined) {
+                if (expired) await this.#persistLockedWithRollback(previous);
                 throw new Error(`OAuth approval ${approvalId} was not found.`);
             }
             if (request.status !== "pending") {
+                if (expired) await this.#persistLockedWithRollback(previous);
                 throw new Error(`OAuth approval ${approvalId} is already ${request.status}.`);
             }
 
@@ -201,7 +215,7 @@ export class McpOAuthApprovalService {
                 status: decision === "approve" ? "approved" : "denied"
             };
             this.#requests.set(next.approvalId, next);
-            await this.#persistLocked();
+            await this.#persistLockedWithRollback(previous);
             return next;
         });
     }
@@ -282,6 +296,40 @@ export class McpOAuthApprovalService {
         return [...this.#requests.values()]
             .filter((request) => request.status !== "pending")
             .sort((left, right) => left.createdAt.localeCompare(right.createdAt))[0];
+    }
+
+    #snapshotLocked(): OAuthApprovalMemorySnapshot {
+        return {
+            authorizationByInteraction: new Map(this.#authorizationByInteraction),
+            authorizationByTransaction: new Map(
+                [...this.#authorizationByTransaction].map(([key, value]) => [key, { ...value }])
+            ),
+            requests: new Map(
+                [...this.#requests].map(([key, value]) => [key, { ...value }])
+            )
+        };
+    }
+
+    #restoreLocked(snapshot: OAuthApprovalMemorySnapshot): void {
+        this.#requests.clear();
+        for (const [key, value] of snapshot.requests) this.#requests.set(key, { ...value });
+        this.#authorizationByInteraction.clear();
+        for (const [key, value] of snapshot.authorizationByInteraction) {
+            this.#authorizationByInteraction.set(key, value);
+        }
+        this.#authorizationByTransaction.clear();
+        for (const [key, value] of snapshot.authorizationByTransaction) {
+            this.#authorizationByTransaction.set(key, { ...value });
+        }
+    }
+
+    async #persistLockedWithRollback(previous: OAuthApprovalMemorySnapshot): Promise<void> {
+        try {
+            await this.#persistLocked();
+        } catch (error) {
+            this.#restoreLocked(previous);
+            throw error;
+        }
     }
 
     async #persistLocked(): Promise<void> {

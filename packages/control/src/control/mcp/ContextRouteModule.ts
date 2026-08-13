@@ -7,6 +7,7 @@ export interface ContextAdminPort {
     disable(ctxId: string): Promise<McpContextRecord>;
     list(): Promise<McpContextRecord[]>;
     renew(ctxId: string): Promise<McpContextRecord>;
+    validateForInstance(ctxId: string, instance: string): Promise<McpContextRecord>;
 }
 
 export function createContextRouteModule(

@@ -26,6 +26,7 @@ export class InstanceEventBuffer {
     readonly #instanceName: InstanceName;
     readonly #capacity: number;
     readonly #store?: AuditRecordStore<InstanceEvent>;
+    #appendTail: Promise<void> = Promise.resolve();
     #initialized = false;
     #events: InstanceEvent[] = [];
     #lastSeq = 0;
@@ -41,25 +42,29 @@ export class InstanceEventBuffer {
     }
 
     async append(event: InstanceEventInput): Promise<InstanceEvent> {
-        await this.#initialize();
+        const operation = this.#appendTail.then(async () => {
+            await this.#initialize();
+            const storedEvent: InstanceEvent = {
+                at: event.at,
+                data: event.data,
+                instanceName: this.#instanceName,
+                seq: this.#lastSeq + 1,
+                type: event.type
+            };
 
-        const storedEvent: InstanceEvent = {
-            at: event.at,
-            data: event.data,
-            instanceName: this.#instanceName,
-            seq: this.#lastSeq + 1,
-            type: event.type
-        };
-
-        this.#lastSeq = storedEvent.seq;
-        this.#events.push(storedEvent);
-
-        if (this.#events.length > this.#capacity) {
-            this.#events.shift();
-        }
-
-        await this.#store?.append(storedEvent);
-        return storedEvent;
+            await this.#store?.append(storedEvent);
+            this.#lastSeq = storedEvent.seq;
+            this.#events.push(storedEvent);
+            if (this.#events.length > this.#capacity) {
+                this.#events.shift();
+            }
+            return storedEvent;
+        });
+        this.#appendTail = operation.then(
+            () => undefined,
+            () => undefined
+        );
+        return await operation;
     }
 
     readFrom(fromSeq = 1): InstanceEventStreamGap | InstanceEventStreamSlice {

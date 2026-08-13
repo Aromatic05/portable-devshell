@@ -29,6 +29,13 @@ export function Instances({
         ? undefined
         : `${confirmation.action.toLowerCase()}:${confirmation.instance}`;
     const interactive = state.connection === "online" && !disabled;
+    const selfManaged = entry?.snapshot.reverse?.managementMode === "selfManaged";
+    const reverseOnline = entry?.snapshot.reverse?.availability === "online";
+    const lifecycleAction = entry === undefined
+        ? undefined
+        : selfManaged
+            ? (reverseOnline ? "Stop" : undefined)
+            : (entry.snapshot.status === "stopped" ? "Start" : "Stop");
 
     return <section>
         <h2>Instances</h2>
@@ -59,22 +66,26 @@ export function Instances({
                 Runtime: {entry.snapshot.status}; daemon: {entry.snapshot.daemonState};
                 sequence: {entry.snapshot.lastSeq}
             </p>
+            {selfManaged ? <p className="hint">
+                Self-managed reverse worker · {entry.snapshot.reverse?.availability ?? "unknown"}
+                {entry.snapshot.reverse?.transport === undefined ? "" : ` · ${entry.snapshot.reverse.transport}`}
+            </p> : null}
             <WorkerDiagnostics worker={selectedWorker} />
             <div className="actions">
-                <button
-                    className={entry.snapshot.status === "stopped" ? "primary" : "danger"}
+                {lifecycleAction === undefined ? null : <button
+                    className={lifecycleAction === "Start" ? "primary" : "danger"}
                     disabled={
                         !interactive ||
                         state.operations[`start:${entry.name}`] !== undefined ||
                         state.operations[`stop:${entry.name}`] !== undefined
                     }
                     onClick={() => setConfirmation({
-                        action: entry.snapshot.status === "stopped" ? "Start" : "Stop",
+                        action: lifecycleAction,
                         instance: entry.name,
                     })}
                 >
-                    {entry.snapshot.status === "stopped" ? "Start" : "Stop"}
-                </button>
+                    {lifecycleAction}
+                </button>}
             </div>
             <h4>Recent logs</h4>
             <pre>{(model.instanceState[entry.name]?.logs ?? [])

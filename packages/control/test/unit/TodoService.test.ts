@@ -197,3 +197,24 @@ test("TodoService permanently deletes an active or archived todo project", async
     assert.deepEqual((await service.read()).tasks, []);
     assert.deepEqual(events.slice(-2), ["todo.deleted", "todo.deleted"]);
 });
+
+test("TodoService keeps a committed write successful when its derived audit event fails", async () => {
+    const root = await createTestTempDirectory("todo-audit-failure");
+    const filePath = join(root, "todo.json");
+    const service = new TodoService({
+        appendEvent: async () => { throw new Error("audit unavailable"); },
+        filePath,
+        instanceName: "aromatic-pc",
+    });
+
+    const written = await service.write({
+        revision: 0,
+        title: "Durable task",
+        todos: [{ content: "Keep committed state", id: "keep", status: "in_progress" }],
+    }, "ctx-audit");
+
+    assert.equal(written.revision, 1);
+    assert.equal((await service.read("Durable task")).revision, 1);
+    const persisted = JSON.parse(await readFile(filePath, "utf8")) as { active: Array<{ revision: number }> };
+    assert.equal(persisted.active[0]?.revision, 1);
+});

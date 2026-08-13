@@ -207,7 +207,12 @@ export function ToolCalls({
 
     async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
         event.preventDefault();
-        if (!interactive || !concreteContext || draft.trim().length === 0) return;
+        if (
+            !interactive ||
+            !concreteContext ||
+            contextRecord?.status !== "active" ||
+            draft.trim().length === 0
+        ) return;
         const queued = await store.queueContextMessage(
             effectiveFilters.instance,
             ctxId,
@@ -283,7 +288,7 @@ export function ToolCalls({
                         Renew Context
                     </button>
                 </p> : null}
-                <form onSubmit={(event) => void submit(event)}>
+                {contextRecord?.status === "active" ? <form onSubmit={(event) => void submit(event)}>
                     <label>
                         Comment
                         <textarea
@@ -308,8 +313,10 @@ export function ToolCalls({
                             ? "Sending…"
                             : "Queue Comment"}
                     </button>
-                </form>
-                {!interactive ? <p className="empty">
+                </form> : <p className="empty">
+                    Comments can only be queued for an active Context.
+                </p>}
+                {contextRecord?.status === "active" && !interactive ? <p className="empty">
                     {disabled ? "Finish the session operation before queuing a Comment." : "Reconnect before queuing a Comment."}
                 </p> : null}
                 {queuedComments.length === 0 ? null : <>

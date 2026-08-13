@@ -86,7 +86,7 @@ export class TodoService {
 
     async #emitTransition(transition: TodoTransition): Promise<void> {
         for (const event of transition.events) {
-            await this.#appendEvent(event.type, event.data);
+            await this.#appendEvent(event.type, event.data).catch(() => undefined);
         }
     }
 

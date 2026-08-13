@@ -190,6 +190,65 @@ test("McpOAuthProviderRuntime upgrades persisted dynamic clients with required r
     }
 });
 
+test("McpOAuthProviderRuntime removes a dynamic client when its approval record cannot be created", async () => {
+    const storageDir = await createTestTempDirectory("mcp-oauth-registration-overflow");
+    const approvals = new McpOAuthApprovalService(storageDir, { maxPendingRegistrations: 1 });
+    const runtime = new McpOAuthProviderRuntime({
+        approvals,
+        config,
+        publicBaseUrl: "https://mcp.example.test/",
+        storageDir
+    });
+
+    try {
+        await runtime.warmup();
+        await approvals.registerClient({
+            clientId: "pending-client",
+            clientName: "Pending Client",
+            redirectUris: ["http://localhost/pending"]
+        });
+        const adapter = (runtime.provider.Client as unknown as { adapter: {
+            upsert(id: string, payload: Record<string, unknown>, expiresIn: number): Promise<void>;
+        } }).adapter;
+        await adapter.upsert("overflow-client", {
+            application_type: "native",
+            client_id: "overflow-client",
+            client_name: "Overflow Client",
+            grant_types: ["authorization_code", "refresh_token"],
+            redirect_uris: ["http://localhost/overflow"],
+            response_types: ["code"],
+            token_endpoint_auth_method: "none"
+        }, 3600);
+        const client = await runtime.provider.Client.find("overflow-client");
+        assert.notEqual(client, undefined);
+
+        let registrationTokenDestroyed = false;
+        runtime.provider.emit("registration_create.success", {
+            body: {},
+            oidc: {
+                entities: {
+                    RegistrationAccessToken: {
+                        async destroy() { registrationTokenDestroyed = true; }
+                    }
+                }
+            }
+        }, client!);
+        for (let attempt = 0; attempt < 50; attempt += 1) {
+            if (await runtime.provider.Client.find("overflow-client") === undefined) break;
+            await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+
+        assert.equal(await runtime.provider.Client.find("overflow-client"), undefined);
+        assert.equal(registrationTokenDestroyed, true);
+        assert.deepEqual(
+            (await approvals.list()).map((request) => request.clientId),
+            ["pending-client"]
+        );
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
 
 test("OAuth resource verification rejects tokens with missing or malformed audience", async () => {
     const storageDir = await createTestTempDirectory("mcp-oauth-audience");

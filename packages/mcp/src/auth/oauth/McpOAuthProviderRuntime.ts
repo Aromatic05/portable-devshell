@@ -258,7 +258,23 @@ export class McpOAuthProviderRuntime {
             }
             void this.#approvals.registerClient(
                 toRegistrationApprovalInput(client)
-            );
+            ).catch(async () => {
+                const clientId = (client as { clientId?: unknown }).clientId;
+                const registrationAccessToken = (context as unknown as {
+                    oidc?: {
+                        entities?: {
+                            RegistrationAccessToken?: { destroy(): Promise<void> };
+                        };
+                    };
+                }).oidc?.entities?.RegistrationAccessToken;
+                await registrationAccessToken?.destroy().catch(() => undefined);
+                if (typeof clientId === "string" && clientId.length > 0) {
+                    const adapter = (provider.Client as unknown as {
+                        adapter: { destroy(id: string): Promise<void> };
+                    }).adapter;
+                    await adapter.destroy(clientId).catch(() => undefined);
+                }
+            });
         });
         provider.on("access_token.destroyed", (token) => {
             if (typeof token.grantId === "string") {

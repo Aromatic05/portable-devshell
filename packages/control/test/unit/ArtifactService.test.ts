@@ -42,12 +42,15 @@ class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
     readonly abortedReceives: string[] = [];
     readonly received = new Map<string, Buffer>();
     readonly openStarted = new Deferred();
+    readonly finishStarted = new Deferred();
     readonly #bytes: Buffer;
+    readonly #finishGate?: Deferred;
     readonly #openGate?: Deferred;
     #nextReceive = 1;
 
-    constructor(bytes: Buffer, openGate?: Deferred) {
+    constructor(bytes: Buffer, openGate?: Deferred, finishGate?: Deferred) {
         this.#bytes = bytes;
+        this.#finishGate = finishGate;
         this.#openGate = openGate;
     }
 
@@ -114,6 +117,8 @@ class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
     }
 
     async finishArtifactReceive(receiveId: string) {
+        this.finishStarted.resolve();
+        await this.#finishGate?.promise;
         return {
             blake3: "a".repeat(64),
             bytes: this.received.get(receiveId)?.length ?? 0,
@@ -316,6 +321,77 @@ test("queued transfer resumes after restart while active transfer becomes interr
     await verified.initialize();
     assert.equal(verified.getTransfer(activeTransfer.transfer.transferId).status, "interrupted");
     assert.deepEqual(blockedSource.closedPayloads, ["payload-1"]);
+});
+
+test("control stop waits for an in-flight artifact commit and preserves completed state", async (t) => {
+    const storageDir = await createTestTempDirectory("artifact-commit-stop");
+    t.after(() => rm(storageDir, { force: true, recursive: true }));
+    const finishGate = new Deferred();
+    const source = new MemoryArtifactEndpoint(Buffer.from("committed"));
+    const target = new MemoryArtifactEndpoint(Buffer.alloc(0), undefined, finishGate);
+    const service = new ArtifactService({
+        resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
+        shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
+        storageDir
+    });
+    await service.initialize();
+    const started = await service.startTransfer({
+        operation: "start",
+        sourcePath: "./commit.bin",
+        sourceWorkspace: "/source",
+        targetInstance: "target-b",
+        targetPath: "/target/commit.bin",
+        targetWorkspace: "/target"
+    }, "source-a");
+
+    await waitForStatus(service, started.transfer.transferId, "committing");
+    await target.finishStarted.promise;
+    let stopSettled = false;
+    const stopping = service.stop().then(() => { stopSettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(stopSettled, false);
+
+    finishGate.resolve();
+    await stopping;
+
+    const reloaded = new ArtifactService({
+        resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
+        shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
+        storageDir
+    });
+    await reloaded.initialize();
+    assert.equal(reloaded.getTransfer(started.transfer.transferId).status, "completed");
+});
+
+test("artifact cancellation rolls back its in-memory state when persistence fails", async (t) => {
+    const storageDir = await createTestTempDirectory("artifact-cancel-persist-failure");
+    t.after(() => rm(storageDir, { force: true, recursive: true }));
+    const scheduled: Array<() => void> = [];
+    const source = new MemoryArtifactEndpoint(Buffer.from("queued"));
+    const target = new MemoryArtifactEndpoint(Buffer.alloc(0));
+    const service = new ArtifactService({
+        resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
+        schedule: (task) => scheduled.push(task),
+        shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
+        storageDir
+    });
+    await service.initialize();
+    const started = await service.startTransfer({
+        operation: "start",
+        sourcePath: "./queued.bin",
+        sourceWorkspace: "/source",
+        targetInstance: "target-b",
+        targetPath: "/target/queued.bin",
+        targetWorkspace: "/target"
+    }, "source-a");
+    assert.equal(scheduled.length, 1);
+
+    const transfersDir = join(storageDir, "transfers");
+    await rm(transfersDir, { force: true, recursive: true });
+    await writeFile(transfersDir, "not a directory", "utf8");
+    await assert.rejects(service.cancelTransfer(started.transfer.transferId));
+
+    assert.equal(service.getTransfer(started.transfer.transferId).status, "queued");
 });
 
 test("artifact share persists its payload lease and revoke closes it", async (t) => {

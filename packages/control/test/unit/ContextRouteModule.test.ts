@@ -24,6 +24,7 @@ test("context routes resolve the current admin port for every request", async ()
         async disable(ctxId) { return record(`${current}:disable:${ctxId}`); },
         async list() { return [record(`${current}:list`)]; },
         async renew(ctxId) { return record(`${current}:renew:${ctxId}`); },
+        async validateForInstance(ctxId, instance) { return record(`${current}:validate:${instance}:${ctxId}`); },
     });
     const module = createContextRouteModule(port);
     const list = module.operations.find((operation) => operation.name === "list");

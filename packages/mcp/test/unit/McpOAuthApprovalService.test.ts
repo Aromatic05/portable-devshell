@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -201,6 +201,30 @@ test("OAuth approvals enforce a pending registration quota", async () => {
             service.registerClient({ clientId: "client-c", clientName: "C", redirectUris: [] }),
             /pending OAuth registration limit/u
         );
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("OAuth approval memory rolls back when a decision cannot be persisted", async () => {
+    const storageDir = await createTestTempDirectory("oauth-decision-rollback");
+    const service = new McpOAuthApprovalService(storageDir);
+
+    try {
+        await service.warmup();
+        const request = await service.registerClient({
+            clientId: "rollback-client",
+            clientName: "Rollback Client",
+            redirectUris: []
+        });
+        const approvalFile = join(storageDir, "approvals.jsonl");
+        await rm(approvalFile, { force: true });
+        await mkdir(approvalFile);
+
+        await assert.rejects(
+            service.decide(request.approvalId, "approve", "cli")
+        );
+        assert.equal((await service.get(request.approvalId))?.status, "pending");
     } finally {
         await rm(storageDir, { force: true, recursive: true });
     }

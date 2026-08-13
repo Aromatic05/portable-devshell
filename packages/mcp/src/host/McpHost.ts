@@ -166,6 +166,7 @@ export class McpHost {
             this.#retiredBindingClosures.delete(closure);
         });
         this.#retiredBindingClosures.add(closure);
+        void closure.catch(() => undefined);
     }
 
     get server(): HttpHost {
@@ -180,6 +181,7 @@ export class McpHost {
         disable(ctxId: string): Promise<McpContextRecord>;
         list(): Promise<McpContextRecord[]>;
         renew(ctxId: string): Promise<McpContextRecord>;
+        validateForInstance(ctxId: string, instance: string): Promise<McpContextRecord>;
     } {
         return {
             disable: async (ctxId) => {
@@ -209,6 +211,8 @@ export class McpHost {
                 }
                 return renewed;
             },
+            validateForInstance: async (ctxId, instance) =>
+                await this.#contextRegistry.validateForInstance(ctxId, instance),
         };
     }
 

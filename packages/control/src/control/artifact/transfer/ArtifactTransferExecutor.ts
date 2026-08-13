@@ -49,6 +49,7 @@ export class ArtifactTransferExecutor {
     readonly #persistTransfer: ArtifactTransferExecutorOptions["persistTransfer"];
     readonly #resolveEndpoint: ArtifactTransferExecutorOptions["resolveEndpoint"];
     readonly #schedule: ArtifactServiceSchedule;
+    readonly #commitBarriers = new Set<Promise<void>>();
     readonly #runningTransfers = new Set<string>();
 
     constructor(options: ArtifactTransferExecutorOptions) {
@@ -64,8 +65,13 @@ export class ArtifactTransferExecutor {
 
     schedule(transferId: string, generation: number): void {
         this.#schedule(() => {
-            void this.#run(transferId, generation);
+            void this.#run(transferId, generation).catch(() => undefined);
         });
+    }
+
+    async waitForCommits(): Promise<void> {
+        if (this.#commitBarriers.size === 0) return;
+        await Promise.all([...this.#commitBarriers]);
     }
 
     async cleanupResources(transfer: StoredArtifactTransfer): Promise<void> {
@@ -90,6 +96,8 @@ export class ArtifactTransferExecutor {
         this.#runningTransfers.add(transferId);
         let sourceEndpoint: ArtifactServiceEndpoint | undefined;
         let targetEndpoint: ArtifactServiceEndpoint | undefined;
+        let commitBarrier: Promise<void> | undefined;
+        let resolveCommitBarrier: (() => void) | undefined;
         try {
             this.#throwIfCancelled(transfer);
             sourceEndpoint = requireArtifactEndpoint(this.#resolveEndpoint, transfer.record.source.instance, transfer.defaultInstance);
@@ -173,8 +181,12 @@ export class ArtifactTransferExecutor {
             transfer.record.status = "committing";
             transfer.record.updatedAt = new Date().toISOString();
             await this.#persistTransfer(transfer);
-            const finished = await targetEndpoint.finishArtifactReceive(receive.receiveId);
             this.#assertRunActive(generation);
+            commitBarrier = new Promise<void>((resolve) => {
+                resolveCommitBarrier = resolve;
+            });
+            this.#commitBarriers.add(commitBarrier);
+            const finished = await targetEndpoint.finishArtifactReceive(receive.receiveId);
             if (
                 finished.bytes !== opened.descriptor.payloadBytes ||
                 finished.blake3 !== opened.descriptor.payloadBlake3
@@ -187,7 +199,6 @@ export class ArtifactTransferExecutor {
                 });
             }
             await this.#closePayload(transfer, sourceEndpoint);
-            this.#assertRunActive(generation);
 
             transfer.receiveId = undefined;
             transfer.record.status = "completed";
@@ -206,6 +217,10 @@ export class ArtifactTransferExecutor {
         } finally {
             await this.#closePayload(transfer, sourceEndpoint);
             this.#runningTransfers.delete(transferId);
+            if (commitBarrier !== undefined) {
+                this.#commitBarriers.delete(commitBarrier);
+                resolveCommitBarrier?.();
+            }
         }
     }
 

@@ -130,7 +130,11 @@ export class ControlRouteComposition {
                         this.#options.instances,
                         this.#subscriptions
                     ),
-                    ...(descriptor.contextMessages === undefined ? [] : [createContextMessageRouteModule(descriptor.contextMessages)]),
+                    ...(descriptor.contextMessages === undefined ? [] : [createContextMessageRouteModule(
+                        descriptor.contextMessages,
+                        descriptor.name,
+                        this.#options.contextAdmin
+                    )]),
                     createTodoRouteModule(descriptor, this.#subscriptions),
                     createToolRouteModule(descriptor),
                     ...(descriptor.terminal === undefined ? [] : [createTerminalRouteModule({

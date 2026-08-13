@@ -287,6 +287,27 @@ it("locks the instance from the selected Context", () => {
     expect(queueContextMessage).not.toHaveBeenCalled();
 });
 
+it("does not offer Comment composition for a disabled Context", () => {
+    const disabledState: WebState = {
+        ...state,
+        readModel: {
+            ...state.readModel,
+            contexts: state.readModel.contexts.map((context) => context.ctxId === "ctx-alpha"
+                ? { ...context, status: "disabled" as const }
+                : context),
+        },
+    };
+    const store = { queueContextMessage: vi.fn(async () => true) } as unknown as WebStore;
+    render(<ToolCalls state={disabledState} store={store} />);
+
+    fireEvent.change(screen.getByLabelText("Context status"), { target: { value: "disabled" } });
+    fireEvent.change(screen.getByLabelText("Context"), { target: { value: "context:ctx-alpha" } });
+
+    expect(screen.queryByRole("button", { name: "Queue Comment" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Comment")).not.toBeInTheDocument();
+    expect(screen.getByText(/Comments can only be queued for an active Context/u)).toBeInTheDocument();
+});
+
 it("requires confirmation before disabling a Context", async () => {
     const disableContext = vi.fn(async () => true);
     const store = {

@@ -99,7 +99,10 @@ export class WorkerInstanceToolApproval {
         );
 
         const onAbort = () => {
-            void this.#approvalManager.cancel(evaluation.request.approvalId, readWorkerAbortReason(signal?.reason));
+            void this.#approvalManager.cancel(
+                evaluation.request.approvalId,
+                readWorkerAbortReason(signal?.reason)
+            ).catch(() => undefined);
         };
         if (signal?.aborted === true) {
             await this.#approvalManager.cancel(evaluation.request.approvalId, readWorkerAbortReason(signal.reason));

@@ -84,31 +84,37 @@ export class ArtifactTransferService {
         }
 
         this.#initialized = true;
-        for (const transfer of this.#transfers.values()) {
-            const recovered = recoverArtifactTransferStatus(transfer.record.status);
-            if (recovered === "queued") {
-                this.#scheduleTransfer(transfer.record.transferId);
-                continue;
-            }
-            if (recovered === transfer.record.status) {
-                continue;
-            }
+        try {
+            for (const transfer of this.#transfers.values()) {
+                const recovered = recoverArtifactTransferStatus(transfer.record.status);
+                if (recovered === "queued") {
+                    this.#scheduleTransfer(transfer.record.transferId);
+                    continue;
+                }
+                if (recovered === transfer.record.status) {
+                    continue;
+                }
 
-            transfer.record.status = "interrupted";
-            transfer.record.completedAt = new Date().toISOString();
-            transfer.record.updatedAt = transfer.record.completedAt;
-            transfer.record.failure = {
-                code: errorCodes.artifactTransferInterrupted,
-                message: "Artifact transfer was interrupted by control restart.",
-                retryable: true
-            };
-            await this.#recordStore.persistTransfer(transfer);
-            await this.#transferExecutor.cleanupResources(transfer);
-            await this.#emitTransferEvent(
-                transfer,
-                "artifact.transferInterrupted"
-            );
-            this.#resolveTransferWaiters(transfer.record);
+                await this.#mutateAndPersist(transfer, () => {
+                    transfer.record.status = "interrupted";
+                    transfer.record.completedAt = new Date().toISOString();
+                    transfer.record.updatedAt = transfer.record.completedAt;
+                    transfer.record.failure = {
+                        code: errorCodes.artifactTransferInterrupted,
+                        message: "Artifact transfer was interrupted by control restart.",
+                        retryable: true
+                    };
+                });
+                await this.#transferExecutor.cleanupResources(transfer);
+                await this.#emitTransferEvent(
+                    transfer,
+                    "artifact.transferInterrupted"
+                );
+                this.#resolveTransferWaiters(transfer.record);
+            }
+        } catch (error) {
+            this.#initialized = false;
+            throw error;
         }
     }
 
@@ -117,6 +123,7 @@ export class ArtifactTransferService {
 
         this.#initialized = false;
         this.#generation += 1;
+        await this.#transferExecutor.waitForCommits();
         for (const transfer of this.#transfers.values()) {
             if (
                 transfer.record.status === "queued" ||
@@ -126,15 +133,16 @@ export class ArtifactTransferService {
             }
 
             const now = new Date().toISOString();
-            transfer.record.status = "interrupted";
-            transfer.record.completedAt = now;
-            transfer.record.updatedAt = now;
-            transfer.record.failure = {
-                code: errorCodes.artifactTransferInterrupted,
-                message: "Artifact transfer was interrupted by control shutdown.",
-                retryable: true
-            };
-            await this.#recordStore.persistTransfer(transfer);
+            await this.#mutateAndPersist(transfer, () => {
+                transfer.record.status = "interrupted";
+                transfer.record.completedAt = now;
+                transfer.record.updatedAt = now;
+                transfer.record.failure = {
+                    code: errorCodes.artifactTransferInterrupted,
+                    message: "Artifact transfer was interrupted by control shutdown.",
+                    retryable: true
+                };
+            });
             await this.#transferExecutor.cleanupResources(transfer);
             await this.#emitTransferEvent(
                 transfer,
@@ -189,8 +197,8 @@ export class ArtifactTransferService {
             version: ARTIFACT_RECORD_VERSION
         };
 
-        this.#transfers.set(transferId, stored);
         await this.#recordStore.persistTransfer(stored);
+        this.#transfers.set(transferId, stored);
         this.#scheduleTransfer(transferId);
         return {
             operation: "start",
@@ -239,22 +247,25 @@ export class ArtifactTransferService {
             };
         }
 
-        transfer.cancelRequested = true;
         const now = new Date().toISOString();
         if (transfer.record.status === "queued") {
-            transfer.record.status = "cancelled";
-            transfer.record.completedAt = now;
-            transfer.record.updatedAt = now;
-            await this.#recordStore.persistTransfer(transfer);
+            await this.#mutateAndPersist(transfer, () => {
+                transfer.cancelRequested = true;
+                transfer.record.status = "cancelled";
+                transfer.record.completedAt = now;
+                transfer.record.updatedAt = now;
+            });
             await this.#emitTransferEvent(
                 transfer,
                 "artifact.transferCancelled"
             );
             this.#resolveTransferWaiters(transfer.record);
         } else {
-            transfer.record.status = "cancelling";
-            transfer.record.updatedAt = now;
-            await this.#recordStore.persistTransfer(transfer);
+            await this.#mutateAndPersist(transfer, () => {
+                transfer.cancelRequested = true;
+                transfer.record.status = "cancelling";
+                transfer.record.updatedAt = now;
+            });
         }
 
         return {
@@ -313,11 +324,40 @@ export class ArtifactTransferService {
         }
     }
 
+    async #mutateAndPersist(
+        transfer: StoredArtifactTransfer,
+        mutate: () => void
+    ): Promise<void> {
+        const previous = structuredClone(transfer);
+        mutate();
+        try {
+            await this.#recordStore.persistTransfer(transfer);
+        } catch (error) {
+            restoreStoredTransfer(transfer, previous);
+            throw error;
+        }
+    }
+
     #assertInitialized(): void {
         if (!this.#initialized) {
             throw new Error("ArtifactService is not initialized.");
         }
     }
+}
+
+function restoreStoredTransfer(
+    target: StoredArtifactTransfer,
+    previous: StoredArtifactTransfer
+): void {
+    target.cancelRequested = previous.cancelRequested;
+    target.defaultInstance = previous.defaultInstance;
+    target.record = structuredClone(previous.record);
+    target.request = structuredClone(previous.request);
+    target.version = previous.version;
+    if (previous.payloadId === undefined) delete target.payloadId;
+    else target.payloadId = previous.payloadId;
+    if (previous.receiveId === undefined) delete target.receiveId;
+    else target.receiveId = previous.receiveId;
 }
 
 async function emitToEndpoint(

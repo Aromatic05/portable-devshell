@@ -126,6 +126,31 @@ test("McpContextRegistry distinguishes invalid and expired ctxId values", async 
     await assert.rejects(registry.validateAndTouch("ctx-expiring", binding), hasCode("mcp.contextExpired"));
 });
 
+test("McpContextRegistry validates an active Context for its owning instance without renewing it", async () => {
+    let now = Date.parse("2026-08-13T00:00:00.000Z");
+    const registry = new McpContextRegistry({ idFactory: () => "ctx-comment", now: () => now, ttlMs: 60_000 });
+    await registry.initialize();
+    const created = await registry.create({
+        instance: "alpha",
+        principal: "client-alpha",
+        workspace: "/workspace/alpha",
+    });
+
+    now += 10_000;
+    const validated = await registry.validateForInstance(created.ctxId, "alpha");
+    assert.equal(validated.expiresAt, created.expiresAt);
+    await assert.rejects(
+        registry.validateForInstance(created.ctxId, "beta"),
+        hasCode("mcp.contextInvalid"),
+    );
+
+    await registry.disable(created.ctxId);
+    await assert.rejects(
+        registry.validateForInstance(created.ctxId, "alpha"),
+        hasCode("mcp.contextDisabled"),
+    );
+});
+
 test("McpContextRegistry lists contexts and supports manual disable and renew", async () => {
     const now = 1_000;
     const registry = new McpContextRegistry({

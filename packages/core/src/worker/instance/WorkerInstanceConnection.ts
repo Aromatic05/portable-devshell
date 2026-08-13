@@ -57,7 +57,7 @@ export class WorkerInstanceConnection {
             };
         }
         this.#rpcBridge.onDisconnect((error) => {
-            void this.#handleRpcDisconnect(error);
+            void this.#handleRpcDisconnect(error).catch(() => undefined);
         });
     }
 

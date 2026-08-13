@@ -158,6 +158,36 @@ test("InstanceEventBuffer replays from fromSeq and reports stream.gap", async ()
     }
 });
 
+test("InstanceEventBuffer does not advance memory state when durable append fails", async () => {
+    const instanceName = asInstanceName("event-persist-failure");
+    let failNext = true;
+    const persisted: InstanceEvent[] = [];
+    const store = {
+        async append(record: InstanceEvent) {
+            if (failNext) {
+                failNext = false;
+                throw new Error("audit unavailable");
+            }
+            persisted.push(record);
+        },
+        async readAll() { return [...persisted]; },
+        async readHighWater() { return persisted.at(-1)?.seq ?? 0; },
+    } as never;
+    const buffer = new InstanceEventBuffer(instanceName, 8, store);
+
+    await assert.rejects(
+        buffer.append({ at: "2026-08-13T00:00:00.000Z", type: "instance.started" }),
+        /audit unavailable/u,
+    );
+    assert.equal(buffer.lastSeq, 0);
+    assert.deepEqual(buffer.readFrom(1), { events: [], kind: "events", lastSeq: 0 });
+
+    const appended = await buffer.append({ at: "2026-08-13T00:00:01.000Z", type: "instance.started" });
+    assert.equal(appended.seq, 1);
+    assert.equal(buffer.lastSeq, 1);
+    assert.deepEqual(persisted.map((event) => event.seq), [1]);
+});
+
 test("LogStoreInstance and AuditToolCallHistory write and query per-instance records", async () => {
     const root = await createTestTempDirectory("storage");
     const instanceName = asInstanceName("task-5-storage");

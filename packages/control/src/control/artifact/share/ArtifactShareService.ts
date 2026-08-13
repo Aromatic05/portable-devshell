@@ -160,8 +160,14 @@ export class ArtifactShareService {
         }
 
         if (share.result.state !== "revoked") {
+            const previousState = share.result.state;
             share.result.state = "revoked";
-            await this.#recordStore.persistShare(share);
+            try {
+                await this.#recordStore.persistShare(share);
+            } catch (error) {
+                share.result.state = previousState;
+                throw error;
+            }
             await this.#closeSharePayload(share);
             const endpoint = this.#resolveEndpoint(
                 share.sourceInstance,
@@ -248,8 +254,14 @@ export class ArtifactShareService {
 
     async #expireShare(share: StoredArtifactShare): Promise<void> {
         if (share.result.state !== "expired") {
+            const previousState = share.result.state;
             share.result.state = "expired";
-            await this.#recordStore.persistShare(share);
+            try {
+                await this.#recordStore.persistShare(share);
+            } catch (error) {
+                share.result.state = previousState;
+                throw error;
+            }
         }
         await this.#closeSharePayload(share);
         const endpoint = this.#resolveEndpoint(
