@@ -27,6 +27,7 @@ const crossToolHints: Record<string, string> = {
     [errorCodes.coreWorkerStopFailed]: "Confirm state with instance_status.",
     [errorCodes.coreWorkerTargetProbeFailed]: "Check provider connectivity.",
     [errorCodes.coreWorkerTargetUnsupported]: "Use a supported provider or target.",
+    [errorCodes.reverseSelfManagedLifecycle]: "Start or stop the worker on the remote machine.",
     [errorCodes.reverseSelfManagedOffline]: "Wait for the remote worker to connect.",
     [errorCodes.reverseTransportUnavailable]: "Check the reverse connection.",
     [errorCodes.reverseGenerationInvalid]: "Use the current connection generation.",

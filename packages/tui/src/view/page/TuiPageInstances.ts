@@ -77,8 +77,12 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
                     "",
                     "Actions",
                     buttonLine("open-terminal", "Open Terminal", !lifecycle.attach),
-                    buttonLine(lifecycle.restart ? "restart" : "start", lifecycle.restart ? "Restart" : "Start", !lifecycle.startOrRestart),
-                    buttonLine("stop", "Stop", !lifecycle.stop),
+                    ...(snapshot?.reverse?.managementMode === "selfManaged"
+                        ? ["Lifecycle           managed on remote machine"]
+                        : [
+                              buttonLine(lifecycle.restart ? "restart" : "start", lifecycle.restart ? "Restart" : "Start", !lifecycle.startOrRestart),
+                              buttonLine("stop", "Stop", !lifecycle.stop)
+                          ]),
                     buttonLine("delete", "Delete")
                 ],
                 expandedKey: `instances:${entry.name}:instance`,
@@ -128,7 +132,7 @@ function lifecycleAvailability(
             !transitional,
         restart,
         startOrRestart: enabled && !selfManaged && !transitional,
-        stop: enabled && (selfManaged ? reverseOnline : running) && !transitional
+        stop: enabled && !selfManaged && running && !transitional
     };
 }
 

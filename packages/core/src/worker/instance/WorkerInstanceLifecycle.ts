@@ -51,10 +51,10 @@ export class WorkerInstanceLifecycle {
     async #start(interactiveSession?: WorkerCommandInteractiveSession): Promise<InstanceSnapshot> {
         if (this.#config.managementMode === "selfManaged") {
             throw createError({
-                code: errorCodes.reverseSelfManagedOffline,
-                details: { instance: this.#config.name },
-                message: `Instance ${this.#config.name} is self-managed and must be started on the remote machine.`,
-                retryable: true
+                code: errorCodes.reverseSelfManagedLifecycle,
+                details: { instance: this.#config.name, operation: "start" },
+                message: `Instance ${this.#config.name} is self-managed; start it on the remote machine.`,
+                retryable: false
             });
         }
 
@@ -101,7 +101,12 @@ export class WorkerInstanceLifecycle {
 
     async #stop(): Promise<InstanceSnapshot> {
         if (this.#config.managementMode === "selfManaged") {
-            return await this.#connection.stopSelfManaged();
+            throw createError({
+                code: errorCodes.reverseSelfManagedLifecycle,
+                details: { instance: this.#config.name, operation: "stop" },
+                message: `Instance ${this.#config.name} is self-managed; stop it on the remote machine.`,
+                retryable: false
+            });
         }
 
         await this.#applyStateUpdate({

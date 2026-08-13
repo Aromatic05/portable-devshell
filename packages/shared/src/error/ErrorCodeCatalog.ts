@@ -59,6 +59,7 @@ export const errorCodes = {
     reverseFrameInvalid: "reverse.frameInvalid",
     reverseGenerationInvalid: "reverse.generationInvalid",
     reverseInstanceNotReverse: "reverse.instanceNotReverse",
+    reverseSelfManagedLifecycle: "reverse.selfManagedLifecycle",
     reverseSelfManagedOffline: "reverse.selfManagedOffline",
     reverseTransportUnavailable: "reverse.transportUnavailable",
     streamGap: "stream.gap",

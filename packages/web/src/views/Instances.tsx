@@ -30,11 +30,10 @@ export function Instances({
         : `${confirmation.action.toLowerCase()}:${confirmation.instance}`;
     const interactive = state.connection === "online" && !disabled;
     const selfManaged = entry?.snapshot.reverse?.managementMode === "selfManaged";
-    const reverseOnline = entry?.snapshot.reverse?.availability === "online";
     const lifecycleAction = entry === undefined
         ? undefined
         : selfManaged
-            ? (reverseOnline ? "Stop" : undefined)
+            ? undefined
             : (entry.snapshot.status === "stopped" ? "Start" : "Stop");
 
     return <section>
@@ -69,6 +68,7 @@ export function Instances({
             {selfManaged ? <p className="hint">
                 Self-managed reverse worker · {entry.snapshot.reverse?.availability ?? "unknown"}
                 {entry.snapshot.reverse?.transport === undefined ? "" : ` · ${entry.snapshot.reverse.transport}`}
+                {" · Lifecycle is managed on the remote machine."}
             </p> : null}
             <WorkerDiagnostics worker={selectedWorker} />
             <div className="actions">

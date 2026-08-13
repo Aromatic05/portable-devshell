@@ -179,7 +179,8 @@ export class TuiRuntimeControlOperations {
 
     async setInstanceEnabled(instance: string, enabled: boolean): Promise<void> {
         const snapshot = this.options.store.getState().readModel.instanceState[instance]?.snapshot;
-        const wasRunning = !enabled && snapshot?.daemonState !== undefined && snapshot.daemonState !== "stopped";
+        const selfManaged = snapshot?.reverse?.managementMode === "selfManaged";
+        const wasRunning = !enabled && !selfManaged && snapshot?.daemonState !== undefined && snapshot.daemonState !== "stopped";
         let stoppedForDisable = false;
         try {
             if (wasRunning) {

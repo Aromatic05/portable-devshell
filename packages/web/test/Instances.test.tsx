@@ -48,10 +48,11 @@ it("does not offer Start or Stop for an offline self-managed reverse instance", 
     expect(screen.getByText(/self-managed.*offline/iu)).toBeInTheDocument();
 });
 
-it("offers Stop, but never Start, for an online self-managed reverse instance", () => {
+it("does not offer Control lifecycle actions for an online self-managed reverse instance", () => {
     render(<Instances store={reverseStore("online")} />);
     fireEvent.click(screen.getByRole("button", { name: /reverse-mac/u }));
 
-    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
+    expect(screen.getByText(/self-managed.*remote machine/iu)).toBeInTheDocument();
 });

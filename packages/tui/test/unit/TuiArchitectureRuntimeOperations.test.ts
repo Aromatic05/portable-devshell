@@ -341,6 +341,28 @@ test("failed disable restores a worker that was running before the config update
     ]);
 });
 
+test("disabling an online self-managed reverse instance never stops the remote worker", async () => {
+    const harness = createHarness();
+    harness.store.patchControlSnapshot({
+        connectionState: "connected",
+        daemonState: "running",
+        lastSeq: 1,
+        name: "alpha",
+        ready: true,
+        reverse: {
+            availability: "online",
+            enrollmentState: "enrolled",
+            managementMode: "selfManaged",
+            transport: "sse",
+        },
+        status: "ready"
+    } as never);
+
+    await harness.operations.setInstanceEnabled("alpha", false);
+
+    assert.deepEqual(harness.calls, ["config.instance:alpha"]);
+});
+
 test("control restart retries until the replacement runtime is reachable", async () => {
     const harness = createHarness({
         operationTimeoutMs: 100,

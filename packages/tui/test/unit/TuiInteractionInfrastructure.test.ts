@@ -1356,7 +1356,7 @@ test("failed Save & Restart restores a previously running instance", async () =>
     assert.equal(harness.store.getState().ui.dirtyForms["config:alpha"], true);
 });
 
-test("config separates MCP tool access and requires restart when it changes", () => {
+test("config separates MCP tool access and hot-applies it without a worker restart", () => {
     const harness = createHarness();
     harness.store.setSelectedPage("config");
     openEditorForBox(harness, "config", "configuration");
@@ -1382,8 +1382,97 @@ test("config separates MCP tool access and requires restart when it changes", ()
         mcpTools.expandedLines.some((line) => line.text.includes("read")),
         true,
     );
+    assert.notEqual(
+        actions.expandedLines.find((line) => line.id?.endsWith(":button:save"))?.disabled,
+        true,
+    );
+    assert.equal(
+        actions.expandedLines.find((line) => line.id?.endsWith(":button:save-restart"))?.disabled,
+        true,
+    );
+});
+
+test("self-managed reverse hides Control lifecycle actions and requires remote restart for rebuild changes", () => {
+    const harness = createHarness();
+    const state = harness.store.getState();
+    harness.store.patchControlReadModel({
+        instances: [
+            ...state.readModel.instances,
+            {
+                enabled: true,
+                mcpEnabled: true,
+                mcpPath: "/reverse-mac/mcp",
+                name: "reverse-mac",
+                provider: "reverse",
+            },
+        ],
+        configView: {
+            ...state.readModel.configView!,
+            instances: [
+                ...((state.readModel.configView!.instances as JsonValue[]) ?? []),
+                {
+                    enabled: true,
+                    logs: { retentionDays: 7 },
+                    mcp: {
+                        enabled: true,
+                        path: "/reverse-mac/mcp",
+                        tools: { capabilities: ["read"], groups: ["file"] },
+                    },
+                    name: "reverse-mac",
+                    provider: "reverse",
+                    security: { mode: "disabled" },
+                },
+            ],
+        },
+    });
+    harness.store.patchControlSnapshot({
+        connectionState: "connected",
+        daemonState: "running",
+        lastSeq: 1,
+        name: "reverse-mac",
+        ready: true,
+        reverse: {
+            availability: "online",
+            enrollmentState: "enrolled",
+            managementMode: "selfManaged",
+            transport: "sse",
+        },
+        status: "ready",
+    } as never);
+    harness.store.setSelectedInstance("reverse-mac");
+
+    harness.store.setSelectedPage("instances");
+    const instanceBox = expandBox(harness, "instance:reverse-mac");
+    assert.equal(
+        instanceBox.expandedLines.some((line) => line.id?.endsWith(":button:stop")),
+        false,
+    );
+    assert.equal(
+        instanceBox.expandedLines.some((line) => line.id?.endsWith(":button:restart")),
+        false,
+    );
+    assert.equal(
+        instanceBox.expandedLines.some((line) => /lifecycle.*remote machine/iu.test(line.text)),
+        true,
+    );
+
+    harness.store.setSelectedPage("config");
+    openEditorForBox(harness, "config", "logs");
+    harness.store.setFormDraft("config:reverse-mac", {
+        ...(harness.store.getState().ui.formDrafts["config:reverse-mac"] as Record<string, JsonValue>),
+        logs: { retentionDays: 8 },
+    });
+    const actions = expandBox(harness, "configuration-actions");
     assert.equal(
         actions.expandedLines.find((line) => line.id?.endsWith(":button:save"))?.disabled,
+        true,
+    );
+    assert.equal(
+        actions.expandedLines.find((line) => line.id?.endsWith(":button:save-restart"))?.disabled,
+        true,
+    );
+    assert.equal(
+        actions.expandedLines.some((line) => /stop.*remote.*save.*start.*remote/iu.test(line.text)),
         true,
     );
 });

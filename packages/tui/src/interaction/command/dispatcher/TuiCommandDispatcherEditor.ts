@@ -326,7 +326,16 @@ export class TuiCommandDispatcherEditor {
             return false;
         }
         const state = this.#store.getState();
-        const wasRunning = state.readModel.instanceState[instance]?.snapshot?.daemonState === "running" || state.readModel.instanceState[instance]?.snapshot?.ready === true;
+        const snapshot = state.readModel.instanceState[instance]?.snapshot;
+        const wasRunning = snapshot?.daemonState === "running" || snapshot?.ready === true;
+        if (restartInstance && snapshot?.reverse?.managementMode === "selfManaged") {
+            this.#store.setEditor({
+                ...editor,
+                editing: false,
+                error: `Instance ${instance} is self-managed; restart it on the remote machine.`
+            });
+            return false;
+        }
         let stoppedForRestart = false;
         try {
             if (restartInstance && wasRunning) {

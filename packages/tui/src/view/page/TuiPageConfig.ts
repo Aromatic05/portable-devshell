@@ -16,6 +16,8 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
     const unsaved = dirty ? " [UNSAVED]" : "";
     const restartRequired = requiresRestart(fallback, comparableDraft);
     const running = snapshot?.daemonState === "running" || snapshot?.ready === true;
+    const selfManaged = snapshot?.reverse?.managementMode === "selfManaged";
+    const remoteRestartRequired = restartRequired && running && selfManaged;
     const changes = draftDiff(fallback, comparableDraft);
 
     return [
@@ -116,9 +118,13 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
         }),
         makeBox(state, "config", instanceName, {
             detailLines: [
-                `Apply mode          ${restartRequired ? "restart required" : "hot apply"}`,
+                `Apply mode          ${restartRequired ? (selfManaged ? "remote restart required" : "restart required") : "hot apply"}`,
                 ...editorErrorLine(state, "config", "configuration-actions", []),
-                ...(restartRequired && running ? ["Save Only is unavailable until the instance is stopped."] : []),
+                ...(remoteRestartRequired
+                    ? ["Stop this worker on the remote machine, save while it is offline, then start it on the remote machine."]
+                    : restartRequired && running
+                      ? ["Save Only is unavailable until the instance is stopped."]
+                      : []),
                 ...(dirty
                     ? ["", { id: "pending-changes", text: "Pending changes", tone: "warning" as const }, ...changes.map((change, index) => ({ id: `pending-change:${index}`, text: change, tone: "warning" as const }))]
                     : ["", { id: "no-pending-changes", text: "No pending changes. Hot apply is available.", tone: "success" as const }]),
@@ -126,7 +132,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
                 "Actions",
                 buttonLine("reload", "Reload"),
                 buttonLine("save", "Save Only", restartRequired && running),
-                buttonLine("save-restart", "Save & Restart", !running),
+                buttonLine("save-restart", "Save & Restart", !running || !restartRequired || selfManaged),
                 buttonLine("cancel", "Cancel"),
                 buttonLine("delete", "Delete")
             ],
@@ -286,7 +292,7 @@ function comparableInstanceDraft(value: Record<string, JsonValue>): Record<strin
 
 
 function requiresRestart(previous: Record<string, JsonValue>, next: Record<string, JsonValue>): boolean {
-    return ["provider", "ssh", "container", "dockerBinary", "podmanBinary", "logs", "mcp"].some(
+    return ["provider", "ssh", "container", "dockerBinary", "podmanBinary", "logs", "tools"].some(
         (path) => JSON.stringify(readPath(previous, path)) !== JSON.stringify(readPath(next, path))
     );
 }
