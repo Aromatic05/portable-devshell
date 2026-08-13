@@ -22,7 +22,7 @@ interface ArtifactTransferExecutorOptions {
     emitTransferEvent: (transfer: StoredArtifactTransfer, type: ArtifactEventType) => Promise<void>;
     getTransfer: (transferId: string) => StoredArtifactTransfer | undefined;
     isRunActive: (generation: number) => boolean;
-    onTerminal: (record: ArtifactTransferRecord) => void;
+    onTerminal: (record: ArtifactTransferRecord) => Promise<void>;
     persistTransfer: (transfer: StoredArtifactTransfer) => Promise<void>;
     resolveEndpoint: (instance: string, authorityInstance?: string) => ArtifactServiceEndpoint | undefined;
     schedule: ArtifactServiceSchedule;
@@ -207,7 +207,7 @@ export class ArtifactTransferExecutor {
             transfer.record.transferredBytes = opened.descriptor.payloadBytes;
             await this.#persistTransfer(transfer);
             await this.#emitTransferEvent(transfer, "artifact.transferCompleted");
-            this.#onTerminal(transfer.record);
+            await this.#onTerminal(transfer.record);
         } catch (error) {
             if (!this.#isRunActive(generation) || error instanceof ArtifactServiceStoppedError) {
                 await this.cleanupResources(transfer);
@@ -251,7 +251,7 @@ export class ArtifactTransferExecutor {
             await this.#emitTransferEvent(transfer, "artifact.transferFailed");
         }
         await this.#closePayload(transfer, sourceEndpoint);
-        this.#onTerminal(transfer.record);
+        await this.#onTerminal(transfer.record);
     }
 
     async #closePayload(

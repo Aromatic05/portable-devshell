@@ -20,6 +20,7 @@ import type {
     ArtifactServiceOptions,
     ArtifactShareAccess
 } from "./ArtifactServiceModel.js";
+import { DEFAULT_ARTIFACT_TERMINAL_HISTORY_LIMIT } from "./ArtifactServiceModel.js";
 import { ArtifactTransferService } from "./transfer/ArtifactTransferService.js";
 
 export type {
@@ -37,18 +38,24 @@ export class ArtifactService {
     #initialized = false;
 
     constructor(options: ArtifactServiceOptions) {
+        const terminalHistoryLimit = options.terminalHistoryLimit ?? DEFAULT_ARTIFACT_TERMINAL_HISTORY_LIMIT;
+        if (!Number.isSafeInteger(terminalHistoryLimit) || terminalHistoryLimit < 0) {
+            throw new TypeError("Artifact terminalHistoryLimit must be a non-negative safe integer.");
+        }
         this.#imageService = new ArtifactImageService(options);
         this.#recordStore = new ArtifactRecordStore(options.storageDir);
         this.#shareService = new ArtifactShareService({
             recordStore: this.#recordStore,
             resolveEndpoint: options.resolveEndpoint,
-            shareUrl: options.shareUrl
+            shareUrl: options.shareUrl,
+            terminalHistoryLimit
         });
         this.#transferService = new ArtifactTransferService({
             chunkBytes: options.chunkBytes,
             recordStore: this.#recordStore,
             resolveEndpoint: options.resolveEndpoint,
-            schedule: options.schedule
+            schedule: options.schedule,
+            terminalHistoryLimit
         });
     }
 

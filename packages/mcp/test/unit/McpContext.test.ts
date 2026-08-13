@@ -181,6 +181,50 @@ test("McpContextRegistry lists contexts and supports manual disable and renew", 
     assert.equal((await registry.list())[0]?.status, "disabled");
 });
 
+test("McpContextRegistry bounds terminal history without evicting active contexts and persists the compacted state", async () => {
+    const root = await createTestTempDirectory("context-terminal-history");
+    const filePath = join(root, "contexts.json");
+    let now = Date.parse("2026-08-13T00:00:00.000Z");
+    const ids = ["ctx-active", "ctx-old-1", "ctx-old-2", "ctx-old-3"];
+    let index = 0;
+    const binding = { instance: "demo-local", principal: "local", workspace: "/workspace" };
+
+    try {
+        const registry = new McpContextRegistry({
+            filePath,
+            idFactory: () => ids[index++]!,
+            maxTerminalContexts: 2,
+            now: () => now,
+            ttlMs: 60_000
+        });
+        await registry.initialize();
+        await registry.create(binding);
+        for (const ctxId of ids.slice(1)) {
+            now += 1;
+            await registry.create(binding);
+            await registry.disable(ctxId);
+        }
+
+        assert.deepEqual(
+            (await registry.list()).map(({ ctxId, status }) => [ctxId, status]),
+            [
+                ["ctx-active", "active"],
+                ["ctx-old-2", "disabled"],
+                ["ctx-old-3", "disabled"]
+            ]
+        );
+
+        const reloaded = new McpContextRegistry({ filePath, maxTerminalContexts: 2, now: () => now, ttlMs: 60_000 });
+        await reloaded.initialize();
+        assert.deepEqual(
+            (await reloaded.list()).map(({ ctxId }) => ctxId),
+            ["ctx-active", "ctx-old-2", "ctx-old-3"]
+        );
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
 test("McpHost context admin releases alerts only after the last workspace context is disabled", async () => {
     const released: string[] = [];
     const touched: string[] = [];

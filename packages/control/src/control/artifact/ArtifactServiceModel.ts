@@ -24,6 +24,7 @@ export const DEFAULT_ARTIFACT_CHUNK_BYTES = 512 * 1024;
 export const DEFAULT_ARTIFACT_SHARE_TTL_SECONDS = 60 * 60;
 export const MAX_ARTIFACT_SHARE_TTL_SECONDS = 7 * 24 * 60 * 60;
 export const ARTIFACT_TRANSFER_PAYLOAD_TTL_MS = 24 * 60 * 60 * 1000;
+export const DEFAULT_ARTIFACT_TERMINAL_HISTORY_LIMIT = 256;
 
 export type ArtifactServiceSchedule = (task: () => void) => void;
 
@@ -44,6 +45,7 @@ export interface ArtifactServiceOptions {
     schedule?: ArtifactServiceSchedule;
     shareUrl: (token: string) => string;
     storageDir: string;
+    terminalHistoryLimit?: number;
 }
 
 export function requireArtifactEndpoint(
@@ -70,6 +72,7 @@ export interface StoredArtifactShare {
     payloadId: string;
     result: ArtifactShareResult;
     sourceInstance: string;
+    terminalAtMs?: number;
     token: string;
     version: number;
 }

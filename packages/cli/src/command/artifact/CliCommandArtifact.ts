@@ -31,7 +31,10 @@ export async function executeArtifactCommand(
             return;
         case "shares":
             expectNoArguments(rest, "artifact shares");
-            writeJson(stdout, await client.listShares());
+            writeJson(stdout, (await client.listShares()).map((share) => ({
+                ...share,
+                url: "[redacted]"
+            })));
             return;
         case "revoke":
             if (rest.length !== 1) {

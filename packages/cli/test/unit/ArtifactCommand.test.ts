@@ -118,8 +118,31 @@ test("artifact share uses the existing CLI control client", async () => {
             method: "share"
         }
     ]);
-    assert.match(runtime.stdout.flush(), /"shareId": "share-1"/u);
+    const output = runtime.stdout.flush();
+    assert.match(output, /"shareId": "share-1"/u);
+    assert.match(output, /artifacts\/share\/token/u);
     assert.equal(runtime.stderr.flush(), "");
+});
+
+test("artifact shares listing redacts bearer URLs while retaining share metadata", async () => {
+    const client = createArtifactClientStub();
+    client.listShares = async () => [{
+        blake3: "a".repeat(64),
+        bytes: 1,
+        downloadName: "dist.tar.zst",
+        expiresAtMs: Date.now() + 60_000,
+        mediaType: "application/zstd",
+        shareId: "share-list-1",
+        source: { instance: "source-a", path: "./dist", type: "directory" as const },
+        state: "active" as const,
+        url: "https://example.test/artifacts/share/secret-bearer-token"
+    }];
+    const runtime = cli(client);
+
+    assert.equal(await runtime.instance.run(["artifact", "shares"]), 0);
+    const output = runtime.stdout.flush();
+    assert.match(output, /"shareId": "share-list-1"/u);
+    assert.equal(output.includes("secret-bearer-token"), false);
 });
 
 test("artifact transfer returns queued and infers authority for a host source", async () => {

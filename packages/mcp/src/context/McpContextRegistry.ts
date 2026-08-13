@@ -11,6 +11,7 @@ import {
 export type { McpContextRecord } from "@portable-devshell/shared";
 
 export const defaultMcpContextTtlMs = 24 * 60 * 60 * 1_000;
+export const defaultMcpContextTerminalHistory = 256;
 
 export interface McpContextBinding {
     instance: string;
@@ -29,6 +30,7 @@ interface McpContextDocument {
 export interface McpContextRegistryOptions {
     filePath?: string;
     idFactory?: () => string;
+    maxTerminalContexts?: number;
     now?: () => number;
     ttlMs?: number;
 }
@@ -37,6 +39,7 @@ export class McpContextRegistry {
     readonly #contexts = new Map<string, McpContextRecord>();
     readonly #filePath?: string;
     readonly #idFactory: () => string;
+    readonly #maxTerminalContexts: number;
     readonly #now: () => number;
     readonly #ttlMs: number;
     #initialized = false;
@@ -46,8 +49,12 @@ export class McpContextRegistry {
         this.#filePath = options.filePath;
         this.#initialized = this.#filePath === undefined;
         this.#idFactory = options.idFactory ?? (() => `ctx-${randomUUID()}`);
+        this.#maxTerminalContexts = options.maxTerminalContexts ?? defaultMcpContextTerminalHistory;
         this.#now = options.now ?? Date.now;
         this.#ttlMs = options.ttlMs ?? defaultMcpContextTtlMs;
+        if (!Number.isSafeInteger(this.#maxTerminalContexts) || this.#maxTerminalContexts < 0) {
+            throw new Error("MCP context maxTerminalContexts must be a non-negative safe integer.");
+        }
         if (!Number.isFinite(this.#ttlMs) || this.#ttlMs <= 0) {
             throw new Error("MCP context ttlMs must be a positive finite number.");
         }
@@ -60,7 +67,9 @@ export class McpContextRegistry {
             }
             await this.#load();
             const previous = cloneContextMap(this.#contexts);
-            const changed = this.#expireOverdue(this.#now());
+            const expired = this.#expireOverdue(this.#now());
+            const compacted = this.#compactTerminalContexts();
+            const changed = expired || compacted;
             try {
                 if (changed) {
                     await this.#persist();
@@ -166,7 +175,9 @@ export class McpContextRegistry {
         return await this.#run(async () => {
             this.#assertInitialized();
             const previous = cloneContextMap(this.#contexts);
-            if (this.#expireOverdue(this.#now())) {
+            const expired = this.#expireOverdue(this.#now());
+            const compacted = this.#compactTerminalContexts();
+            if (expired || compacted) {
                 try {
                     await this.#persist();
                 } catch (error) {
@@ -255,6 +266,7 @@ export class McpContextRegistry {
     async #mutateAndPersist(mutate: () => void): Promise<void> {
         const previous = cloneContextMap(this.#contexts);
         mutate();
+        this.#compactTerminalContexts();
         try {
             await this.#persist();
         } catch (error) {
@@ -295,6 +307,22 @@ export class McpContextRegistry {
                 record.status = "expired";
                 changed = true;
             }
+        }
+        return changed;
+    }
+
+    #compactTerminalContexts(): boolean {
+        const terminal = [...this.#contexts.values()]
+            .filter((record) => record.status !== "active")
+            .sort((left, right) => {
+                const created = left.createdAt.localeCompare(right.createdAt);
+                return created === 0 ? left.ctxId.localeCompare(right.ctxId) : created;
+            });
+        let changed = false;
+        while (terminal.length > this.#maxTerminalContexts) {
+            const record = terminal.shift()!;
+            this.#contexts.delete(record.ctxId);
+            changed = true;
         }
         return changed;
     }

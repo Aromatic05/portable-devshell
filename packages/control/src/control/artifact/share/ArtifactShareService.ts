@@ -32,12 +32,14 @@ export interface ArtifactShareServiceOptions {
     recordStore: ArtifactRecordStore;
     resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
     shareUrl: ArtifactServiceOptions["shareUrl"];
+    terminalHistoryLimit: number;
 }
 
 export class ArtifactShareService {
     readonly #recordStore: ArtifactRecordStore;
     readonly #resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
     readonly #shareUrl: ArtifactServiceOptions["shareUrl"];
+    readonly #terminalHistoryLimit: number;
     readonly #shares = new Map<string, StoredArtifactShare>();
     readonly #shareIdsByToken = new Map<string, string>();
     #initialized = false;
@@ -46,6 +48,7 @@ export class ArtifactShareService {
         this.#recordStore = options.recordStore;
         this.#resolveEndpoint = options.resolveEndpoint;
         this.#shareUrl = options.shareUrl;
+        this.#terminalHistoryLimit = options.terminalHistoryLimit;
     }
 
     async initialize(): Promise<void> {
@@ -67,6 +70,7 @@ export class ArtifactShareService {
                 await this.#closeSharePayload(share);
             }
         }
+        await this.#compactTerminalHistory();
     }
 
     stop(): void {
@@ -161,11 +165,14 @@ export class ArtifactShareService {
 
         if (share.result.state !== "revoked") {
             const previousState = share.result.state;
+            const previousTerminalAtMs = share.terminalAtMs;
             share.result.state = "revoked";
+            share.terminalAtMs = Date.now();
             try {
                 await this.#recordStore.persistShare(share);
             } catch (error) {
                 share.result.state = previousState;
+                share.terminalAtMs = previousTerminalAtMs;
                 throw error;
             }
             await this.#closeSharePayload(share);
@@ -180,6 +187,7 @@ export class ArtifactShareService {
                     share.result
                 );
             }
+            await this.#compactTerminalHistory();
         }
 
         return { revoked: true, shareId };
@@ -255,11 +263,14 @@ export class ArtifactShareService {
     async #expireShare(share: StoredArtifactShare): Promise<void> {
         if (share.result.state !== "expired") {
             const previousState = share.result.state;
+            const previousTerminalAtMs = share.terminalAtMs;
             share.result.state = "expired";
+            share.terminalAtMs = Date.now();
             try {
                 await this.#recordStore.persistShare(share);
             } catch (error) {
                 share.result.state = previousState;
+                share.terminalAtMs = previousTerminalAtMs;
                 throw error;
             }
         }
@@ -274,6 +285,29 @@ export class ArtifactShareService {
                 "artifact.shareExpired",
                 share.result
             );
+        }
+        await this.#compactTerminalHistory();
+    }
+
+    async #compactTerminalHistory(): Promise<void> {
+        const terminal = [...this.#shares.values()]
+            .filter((share) => share.result.state !== "active")
+            .sort((left, right) => {
+                const byTime = (left.terminalAtMs ?? left.result.expiresAtMs) -
+                    (right.terminalAtMs ?? right.result.expiresAtMs);
+                return byTime === 0
+                    ? left.result.shareId.localeCompare(right.result.shareId)
+                    : byTime;
+            });
+        while (terminal.length > this.#terminalHistoryLimit) {
+            const share = terminal.shift()!;
+            try {
+                await this.#recordStore.deleteShare(share.result.shareId);
+            } catch {
+                return;
+            }
+            this.#shares.delete(share.result.shareId);
+            this.#shareIdsByToken.delete(share.token);
         }
     }
 

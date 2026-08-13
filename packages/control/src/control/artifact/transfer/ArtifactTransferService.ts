@@ -35,11 +35,13 @@ export interface ArtifactTransferServiceOptions {
     recordStore: ArtifactRecordStore;
     resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
     schedule?: ArtifactServiceOptions["schedule"];
+    terminalHistoryLimit: number;
 }
 
 export class ArtifactTransferService {
     readonly #recordStore: ArtifactRecordStore;
     readonly #resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
+    readonly #terminalHistoryLimit: number;
     readonly #transferExecutor: ArtifactTransferExecutor;
     readonly #transfers = new Map<string, StoredArtifactTransfer>();
     readonly #transferWaiters = new Map<
@@ -57,6 +59,7 @@ export class ArtifactTransferService {
 
         this.#recordStore = options.recordStore;
         this.#resolveEndpoint = options.resolveEndpoint;
+        this.#terminalHistoryLimit = options.terminalHistoryLimit;
         this.#transferExecutor = new ArtifactTransferExecutor({
             chunkBytes,
             emitTransferEvent: async (transfer, type) => {
@@ -66,7 +69,7 @@ export class ArtifactTransferService {
             isRunActive: (generation) => {
                 return this.#initialized && this.#generation === generation;
             },
-            onTerminal: (record) => this.#resolveTransferWaiters(record),
+            onTerminal: async (record) => await this.#finalizeTerminal(record),
             persistTransfer: async (transfer) => {
                 await this.#recordStore.persistTransfer(transfer);
             },
@@ -110,8 +113,9 @@ export class ArtifactTransferService {
                     transfer,
                     "artifact.transferInterrupted"
                 );
-                this.#resolveTransferWaiters(transfer.record);
+                await this.#finalizeTerminal(transfer.record);
             }
+            await this.#compactTerminalHistory();
         } catch (error) {
             this.#initialized = false;
             throw error;
@@ -148,7 +152,7 @@ export class ArtifactTransferService {
                 transfer,
                 "artifact.transferInterrupted"
             );
-            this.#resolveTransferWaiters(transfer.record);
+            await this.#finalizeTerminal(transfer.record);
         }
     }
 
@@ -259,7 +263,7 @@ export class ArtifactTransferService {
                 transfer,
                 "artifact.transferCancelled"
             );
-            this.#resolveTransferWaiters(transfer.record);
+            await this.#finalizeTerminal(transfer.record);
         } else {
             await this.#mutateAndPersist(transfer, () => {
                 transfer.cancelRequested = true;
@@ -321,6 +325,33 @@ export class ArtifactTransferService {
         const cloned = structuredClone(record);
         for (const resolve of waiters) {
             resolve(cloned);
+        }
+    }
+
+    async #finalizeTerminal(record: ArtifactTransferRecord): Promise<void> {
+        await this.#compactTerminalHistory();
+        this.#resolveTransferWaiters(record);
+    }
+
+    async #compactTerminalHistory(): Promise<void> {
+        const terminal = [...this.#transfers.values()]
+            .filter((transfer) => isArtifactTransferTerminal(transfer.record.status))
+            .sort((left, right) => {
+                const leftAt = left.record.completedAt ?? left.record.updatedAt;
+                const rightAt = right.record.completedAt ?? right.record.updatedAt;
+                const terminalAt = leftAt.localeCompare(rightAt);
+                return terminalAt === 0
+                    ? left.record.createdAt.localeCompare(right.record.createdAt)
+                    : terminalAt;
+            });
+        while (terminal.length > this.#terminalHistoryLimit) {
+            const transfer = terminal.shift()!;
+            try {
+                await this.#recordStore.deleteTransfer(transfer.record.transferId);
+            } catch {
+                return;
+            }
+            this.#transfers.delete(transfer.record.transferId);
         }
     }
 

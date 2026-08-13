@@ -415,6 +415,114 @@ test("artifact share persists its payload lease and revoke closes it", async (t)
     assert.equal(service.listShares()[0]?.state, "revoked");
 });
 
+test("artifact share history bounds terminal records while preserving active shares", async (t) => {
+    const storageDir = await createTestTempDirectory("artifact-share-history");
+    t.after(() => rm(storageDir, { force: true, recursive: true }));
+    const source = new MemoryArtifactEndpoint(Buffer.from("share"));
+    const service = new ArtifactService({
+        resolveEndpoint: resolver({ "source-a": source }),
+        shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
+        storageDir,
+        terminalHistoryLimit: 2
+    });
+    await service.initialize();
+
+    const active = await service.createShare({ path: "./active.bin", workspace: "/workspace" }, "source-a");
+    const terminalIds: string[] = [];
+    for (const name of ["old-1.bin", "old-2.bin", "old-3.bin"]) {
+        const share = await service.createShare({ path: `./${name}`, workspace: "/workspace" }, "source-a");
+        terminalIds.push(share.shareId);
+        await service.revokeShare(share.shareId);
+    }
+
+    const shares = service.listShares();
+    assert.equal(shares.some((share) => share.shareId === active.shareId && share.state === "active"), true);
+    assert.equal(shares.some((share) => share.shareId === terminalIds[0]), false);
+    assert.deepEqual(
+        shares.filter((share) => share.state !== "active").map((share) => share.shareId).sort(),
+        terminalIds.slice(-2).sort()
+    );
+});
+
+test("artifact transfer history bounds terminal records while preserving an in-flight transfer", async (t) => {
+    const storageDir = await createTestTempDirectory("artifact-transfer-history");
+    t.after(() => rm(storageDir, { force: true, recursive: true }));
+    let source: MemoryArtifactEndpoint = new MemoryArtifactEndpoint(Buffer.from("transfer"));
+    const target = new MemoryArtifactEndpoint(Buffer.alloc(0));
+    const service = new ArtifactService({
+        resolveEndpoint: (name) => name === "source-a" ? source : name === "target-b" ? target : undefined,
+        shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
+        storageDir,
+        terminalHistoryLimit: 2
+    });
+    await service.initialize();
+
+    const terminalIds: string[] = [];
+    for (let index = 1; index <= 3; index += 1) {
+        const started = await service.startTransfer({
+            operation: "start",
+            sourcePath: `./source-${index}.bin`,
+            sourceWorkspace: "/source",
+            targetInstance: "target-b",
+            targetPath: `/target/${index}.bin`,
+            targetWorkspace: "/target"
+        }, "source-a");
+        terminalIds.push(started.transfer.transferId);
+        assert.equal((await service.waitForTransfer(started.transfer.transferId)).status, "completed");
+    }
+
+    const gate = new Deferred();
+    source = new MemoryArtifactEndpoint(Buffer.from("active"), gate);
+    const active = await service.startTransfer({
+        operation: "start",
+        sourcePath: "./active.bin",
+        sourceWorkspace: "/source",
+        targetInstance: "target-b",
+        targetPath: "/target/active.bin",
+        targetWorkspace: "/target"
+    }, "source-a");
+    await waitForStatus(service, active.transfer.transferId, "preparing");
+
+    const transfers = service.listTransfers();
+    assert.equal(transfers.some((transfer) => transfer.transferId === active.transfer.transferId && transfer.status === "preparing"), true);
+    assert.equal(transfers.some((transfer) => transfer.transferId === terminalIds[0]), false);
+    assert.deepEqual(
+        transfers.filter((transfer) => transfer.status === "completed").map((transfer) => transfer.transferId).sort(),
+        terminalIds.slice(-2).sort()
+    );
+
+    gate.resolve();
+    await service.waitForTransfer(active.transfer.transferId);
+});
+
+test("completed transfer waiters resolve before zero-retention history is discarded", async (t) => {
+    const storageDir = await createTestTempDirectory("artifact-transfer-no-terminal-history");
+    t.after(() => rm(storageDir, { force: true, recursive: true }));
+    const gate = new Deferred();
+    const source = new MemoryArtifactEndpoint(Buffer.from("transfer"), gate);
+    const target = new MemoryArtifactEndpoint(Buffer.alloc(0));
+    const service = new ArtifactService({
+        resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
+        shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
+        storageDir,
+        terminalHistoryLimit: 0
+    });
+    await service.initialize();
+    const started = await service.startTransfer({
+        operation: "start",
+        sourcePath: "./source.bin",
+        sourceWorkspace: "/source",
+        targetInstance: "target-b",
+        targetPath: "/target/source.bin",
+        targetWorkspace: "/target"
+    }, "source-a");
+    const completed = service.waitForTransfer(started.transfer.transferId);
+
+    gate.resolve();
+    assert.equal((await completed).status, "completed");
+    assert.deepEqual(service.listTransfers(), []);
+});
+
 test("expired share is closed and unavailable after restart", async (t) => {
     const storageDir = await createTestTempDirectory("artifact-share-expired");
     t.after(() => rm(storageDir, { force: true, recursive: true }));

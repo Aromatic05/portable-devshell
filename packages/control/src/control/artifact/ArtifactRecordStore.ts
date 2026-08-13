@@ -58,12 +58,35 @@ export class ArtifactRecordStore {
         await this.#persistJson(join(this.#transfersDir, `${transfer.record.transferId}.json`), transfer);
     }
 
+    async deleteShare(shareId: string): Promise<void> {
+        await this.#deleteJson(join(this.#sharesDir, `${shareId}.json`));
+    }
+
+    async deleteTransfer(transferId: string): Promise<void> {
+        await this.#deleteJson(join(this.#transfersDir, `${transferId}.json`));
+    }
+
     async #persistJson(path: string, value: unknown): Promise<void> {
         const body = `${JSON.stringify(value)}\n`;
         const previous = this.#writeQueues.get(path) ?? Promise.resolve();
         const current = previous
             .catch(() => undefined)
             .then(async () => await atomicWriteJson(path, body));
+        this.#writeQueues.set(path, current);
+        try {
+            await current;
+        } finally {
+            if (this.#writeQueues.get(path) === current) {
+                this.#writeQueues.delete(path);
+            }
+        }
+    }
+
+    async #deleteJson(path: string): Promise<void> {
+        const previous = this.#writeQueues.get(path) ?? Promise.resolve();
+        const current = previous
+            .catch(() => undefined)
+            .then(async () => await rm(path, { force: true }));
         this.#writeQueues.set(path, current);
         try {
             await current;
