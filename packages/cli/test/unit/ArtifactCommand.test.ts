@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type {
     ArtifactShareInput,
+    ArtifactShareResult,
     ArtifactTransferStartInput
 } from "@portable-devshell/shared";
 import { CliMain } from "../../src/CliMain.ts";
@@ -47,7 +48,7 @@ function createArtifactClientStub() {
             calls.push({ input: transferId, method: "status" });
             return transferRecord(transferId, "transferring");
         },
-        async listShares() {
+        async listShares(): Promise<ArtifactShareResult[]> {
             calls.push({ method: "shares" });
             return [];
         },

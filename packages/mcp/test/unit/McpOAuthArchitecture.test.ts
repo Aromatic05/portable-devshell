@@ -214,8 +214,9 @@ test("dynamic registration fails before credentials are issued when registration
             server.listen(0, "127.0.0.1", resolve);
         });
         const address = server.address();
-        assert.notEqual(address, null);
-        assert.equal(typeof address, "object");
+        if (address === null || typeof address === "string") {
+            throw new Error("OAuth registration test server did not expose a TCP address.");
+        }
         const response = await fetch(`http://127.0.0.1:${address.port}/register`, {
             body: JSON.stringify({
                 client_name: "Overflow Client",

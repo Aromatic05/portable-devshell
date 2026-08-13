@@ -1397,7 +1397,6 @@ test("self-managed reverse hides Control lifecycle actions and requires remote r
     const state = harness.store.getState();
     harness.store.patchControlReadModel({
         instances: [
-            ...state.readModel.instances,
             {
                 enabled: true,
                 mcpEnabled: true,

@@ -422,13 +422,23 @@ test(
         );
         assert.equal(killed.state, "killed");
 
-        const stopped = await request(
-            server.socketPath,
-            "runtime.stop",
-            asInstanceName("reverse-test"),
-        );
-        assert.equal(stopped.ready, false);
+        worker.kill("SIGTERM");
         await waitForExit(worker);
+        await waitUntil(
+            async () => {
+                const snapshot = await request(
+                    server.socketPath,
+                    "runtime.snapshot",
+                    asInstanceName("reverse-test"),
+                );
+                return (
+                    snapshot.snapshot.ready === false &&
+                    snapshot.snapshot.reverse?.availability === "offline"
+                );
+            },
+            () =>
+                `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
+        );
     },
 );
 
