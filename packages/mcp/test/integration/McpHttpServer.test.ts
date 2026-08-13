@@ -126,6 +126,27 @@ test("a running host can add an OAuth namespace without exposing it as local aut
     }
 });
 
+test("MCP status reports observable listener state without claiming unimplemented protocol or public reachability probes", async () => {
+    const host = createHost({ publicBaseUrl: "https://mcp.example.test" });
+    const stopped = host.status();
+    assert.equal(stopped.running, false);
+    assert.equal(stopped.reason, "MCP host is not listening.");
+    assert.equal("protocolReadiness" in stopped, false);
+    assert.equal("publicReachability" in stopped, false);
+
+    await host.start();
+    try {
+        const running = host.status();
+        assert.equal(running.running, true);
+        assert.equal(typeof running.listenAddress, "string");
+        assert.equal("reason" in running, false);
+        assert.equal("protocolReadiness" in running, false);
+        assert.equal("publicReachability" in running, false);
+    } finally {
+        await host.stop();
+    }
+});
+
 test("oauth2 emits HTTPS endpoints behind a loopback reverse proxy", async () => {
     const storageDir = await createTestTempDirectory("mcp-proxy");
     const host = createHost({

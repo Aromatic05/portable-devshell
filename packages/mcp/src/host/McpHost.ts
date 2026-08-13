@@ -228,9 +228,8 @@ export class McpHost {
         authMode: "none" | "oauth2" | "token";
         listenAddress?: string;
         oauthReady: boolean;
-        protocolReadiness: "notChecked";
         publicBaseUrl?: string;
-        publicReachability: "notChecked";
+        reason?: string;
         running: boolean;
     } {
         const address = this.#httpServer.address;
@@ -245,9 +244,8 @@ export class McpHost {
             authMode,
             ...(listenAddress === undefined ? {} : { listenAddress }),
             oauthReady: !authProviders.includes("oauth2") || this.#oauth !== undefined,
-            protocolReadiness: "notChecked",
             ...(this.#config.publicBaseUrl === undefined ? {} : { publicBaseUrl: this.#config.publicBaseUrl }),
-            publicReachability: "notChecked",
+            ...(running ? {} : { reason: "MCP host is not listening." }),
             running
         };
     }
