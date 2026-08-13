@@ -25,7 +25,7 @@ reverse instance 是 `selfManaged`。worker 仍通过既有 `start`、`stop`、`
 devshell-worker start --instance <name>
 ```
 
-`start` 由 worker 自行 daemonize。control 无法启动一台离线 reverse worker；在线时可以请求优雅停止，但再次启动必须在目标机器上发生。
+`start` 由 worker 自行 daemonize。reverse worker 的启动和停止都由目标机器负责；Control 不对 `selfManaged` instance 执行 `start` 或 `stop`。这样不会出现 Control 停掉唯一反向连接后却无法恢复的单向生命周期。需要停机、重启或应用要求 worker rebuild 的配置时，先在目标机器停止 worker，完成 Control 侧配置更新，再在目标机器启动 worker。
 
 reverse 状态与原有 daemon/RPC 状态轴分开：
 
@@ -158,5 +158,6 @@ reverse.connectionSuperseded
 reverse.generationInvalid
 reverse.frameInvalid
 reverse.transportUnavailable
+reverse.selfManagedLifecycle
 reverse.selfManagedOffline
 ```
