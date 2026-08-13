@@ -179,6 +179,54 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
     );
 });
 
+test("operational overview treats a deliberately stopped instance as neutral while keeping transitional non-ready instances actionable", async () => {
+    const stopped = createTestInstanceDescriptor({
+        listApprovals: async () => [],
+        readToolCalls: async () => [],
+        snapshot: () => ({
+            connectionState: "disconnected",
+            daemonState: "stopped",
+            lastSeq: 1,
+            name: asInstanceName("stopped-one"),
+            ready: false,
+            status: "stopped"
+        })
+    } as never, { name: "stopped-one" });
+    const starting = createTestInstanceDescriptor({
+        listApprovals: async () => [],
+        readToolCalls: async () => [],
+        snapshot: () => ({
+            connectionState: "connecting",
+            daemonState: "starting",
+            lastSeq: 2,
+            name: asInstanceName("starting-one"),
+            ready: false,
+            status: "starting"
+        })
+    } as never, { name: "starting-one" });
+
+    const overview = await new OperationalOverviewService({
+        instances: { list: () => [stopped, starting] },
+        now: () => now,
+        systemCollector: healthySystemCollector
+    }).read();
+
+    assert.equal(overview.health, "attention");
+    assert.deepEqual(overview.counts, {
+        activeTodos: 0,
+        failedCalls24h: 0,
+        instancesAttention: 1,
+        instancesCritical: 0,
+        instancesReady: 0,
+        instancesTotal: 2,
+        pendingApprovals: 0
+    });
+    assert.deepEqual(
+        overview.alerts.filter((alert) => alert.kind === "instance.attention").map((alert) => alert.instance),
+        [asInstanceName("starting-one")]
+    );
+});
+
 test("operational overview counts the full 24 hour failure window while bounding activity", async () => {
     const completedCalls: ToolCallRecord[] = Array.from({ length: 25 }, (_, index) => {
         const timestamp = new Date(now.getTime() - index * 60_000).toISOString();

@@ -14,6 +14,7 @@ import {
 } from "./OperationalOverviewSystemCollector.js";
 import {
     createCollectionFailure,
+    isAttentionSnapshot,
     isCriticalSnapshot,
     readOperationalHealth,
     sortOperationalAlerts
@@ -132,7 +133,7 @@ export class OperationalOverviewService {
                     0
                 ),
                 instancesAttention: instances.filter(
-                    (instance) => !isCriticalSnapshot(instance.snapshot) && !instance.snapshot.ready
+                    (instance) => isAttentionSnapshot(instance.snapshot)
                 ).length,
                 instancesCritical: instances.filter(
                     (instance) => isCriticalSnapshot(instance.snapshot)

@@ -24,7 +24,7 @@ export function createSnapshotAlerts(
             title: "Instance failed"
         }];
     }
-    if (!snapshot.ready) {
+    if (isAttentionSnapshot(snapshot)) {
         return [{
             detail: summarize(snapshot.lastErrorMessage) ?? describeSnapshot(snapshot),
             id: `instance.attention:${instanceName}`,
@@ -126,6 +126,16 @@ export function isCriticalSnapshot(snapshot: InstanceSnapshot): boolean {
     return snapshot.status === "failed" ||
         snapshot.connectionState === "failed" ||
         snapshot.daemonState === "failed";
+}
+
+export function isAttentionSnapshot(snapshot: InstanceSnapshot): boolean {
+    return !snapshot.ready &&
+        !isCriticalSnapshot(snapshot) &&
+        !(
+            snapshot.status === "stopped" &&
+            snapshot.connectionState === "disconnected" &&
+            snapshot.daemonState === "stopped"
+        );
 }
 
 export function sortOperationalAlerts(alerts: OperationalOverviewAlert[]): void {
