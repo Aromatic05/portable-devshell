@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
+import { WORKER_PROTOCOL_VERSION } from "../packages/core/dist/worker/protocol/WorkerProtocolClient.js";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const workerArgument = process.argv[2];
@@ -36,8 +37,8 @@ try {
         const handshake = await rpc.request("worker.handshake", {
             clientName: "portable-devshell-smoke",
             clientVersion: "0.0.0",
-            maxProtocolVersion: 4,
-            minProtocolVersion: 4
+            maxProtocolVersion: WORKER_PROTOCOL_VERSION,
+            minProtocolVersion: WORKER_PROTOCOL_VERSION
         });
         stage("tools.list");
         const tools = await rpc.request("tools.list", {});
@@ -86,7 +87,7 @@ try {
             terminalCapabilities.replay !== true) {
             throw new Error(`worker did not advertise PTY support: ${JSON.stringify(terminalCapabilities)}`);
         }
-        const terminal = await rpc.request("terminal.open", { cols: 80, rows: 24 });
+        const terminal = await rpc.request("terminal.open", { cols: 80, rows: 24, workspace });
         const terminalClient = {
             clientSeq: 1,
             fromSeq: 0,
