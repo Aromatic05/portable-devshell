@@ -66,10 +66,11 @@ impl TestEnv {
 
     pub fn tmux_socket_file(&self, instance: &str) -> PathBuf {
         let instance_root = self.instance_root(instance);
+        let workspace = self.workspace().canonicalize().unwrap();
         let mut hasher = blake3::Hasher::new();
         hasher.update(instance_root.as_os_str().as_encoded_bytes());
         hasher.update(&[0]);
-        hasher.update(self.workspace().as_os_str().as_encoded_bytes());
+        hasher.update(workspace.as_os_str().as_encoded_bytes());
         let hash = hasher.finalize().to_hex();
         let workspace_key = &hash[..16];
         let candidate = self.runtime_root

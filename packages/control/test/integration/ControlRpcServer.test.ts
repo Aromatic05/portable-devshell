@@ -89,11 +89,10 @@ test("ControlSocketServer routes canonical control and instance operations over 
         "@control",
         "overview.get"
     )).payload as {
-        counts: { instancesTotal: number };
-        health: string;
+        counts: { instancesAttention: number; instancesTotal: number };
     };
     assert.equal(overview.counts.instancesTotal, 1);
-    assert.equal(overview.health, "healthy");
+    assert.equal(overview.counts.instancesAttention, 0);
 
     const snapshot = await request(harness.socketPath, asInstanceName("alpha"), "runtime.snapshot");
     assert.equal((snapshot.payload as { lastSeq: number }).lastSeq, 0);
