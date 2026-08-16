@@ -18,6 +18,8 @@ import type { ResolvedWorkerInstanceConfig } from "./WorkerInstanceConfig.js";
 import { getErrorCode, isKnownErrorCode, readErrorMessage, wrapWorkerCommandError } from "./WorkerInstanceError.js";
 import { toEventData } from "./WorkerInstanceEvent.js";
 
+const reconnectRetryDelayMs = 250;
+
 interface WorkerInstanceConnectionOptions {
     appendEvent(type: InstanceEventInput["type"], data?: JsonValue): Promise<unknown>;
     applyStateUpdate(update: InstanceStateUpdate): Promise<InstanceSnapshot>;
@@ -36,6 +38,7 @@ export class WorkerInstanceConnection {
     readonly #protocolClient: WorkerProtocolClient;
     readonly #rpcBridge: WorkerRpcBridge;
     readonly #snapshot: WorkerInstanceConnectionOptions["snapshot"];
+    #closed = false;
     #handshake?: WorkerHandshakeResult;
     #intentionalRpcCloseDepth = 0;
     #reconnectPromise?: Promise<InstanceSnapshot>;
@@ -123,6 +126,7 @@ export class WorkerInstanceConnection {
     }
 
     async close(): Promise<void> {
+        this.#closed = true;
         this.closeBridge();
         this.#handshake = undefined;
         if (this.#config.managementMode === "selfManaged") {
@@ -414,10 +418,14 @@ export class WorkerInstanceConnection {
             return;
         }
 
-        try {
-            await this.reconnectRpc();
-        } catch {
-            return;
+        while (!this.#closed && this.#snapshot().daemonState === "running") {
+            try {
+                await this.reconnectRpc();
+                return;
+            } catch {
+                if (this.#closed || this.#snapshot().daemonState !== "running") return;
+                await delay(reconnectRetryDelayMs);
+            }
         }
     }
 
@@ -432,4 +440,8 @@ export class WorkerInstanceConnection {
         }
     }
 
+}
+
+async function delay(ms: number): Promise<void> {
+    await new Promise<void>((resolve) => setTimeout(resolve, ms));
 }

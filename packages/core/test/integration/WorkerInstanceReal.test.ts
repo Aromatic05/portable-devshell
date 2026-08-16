@@ -876,6 +876,29 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
     }
 });
 
+test("WorkerInstance keeps retrying automatic rpc reconnect after a transient failure", async () => {
+    const homeDirectory = await createTestTempDirectory("instance-reconnect-retry");
+    const harness = createWorkerInstanceHarness();
+    const instance = new WorkerInstanceFactory().create({
+        homeDirectory,
+        name: asInstanceName("task-6-reconnect-retry"),
+        transport: harness.transport
+    });
+
+    try {
+        await instance.start();
+        harness.failNextRpcStarts();
+        harness.disconnect();
+
+        await harness.waitForMethodCount("tools.list", 2);
+        await waitFor(() => instance.snapshot().connectionState === "connected");
+        assert.equal(instance.snapshot().connectionState, "connected");
+    } finally {
+        await instance.close();
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
 type HarnessTool = {
     requiredCapabilities: ["execute"];
     description: string;
@@ -887,6 +910,7 @@ type HarnessTool = {
 
 function createWorkerInstanceHarness(): {
     disconnect: () => void;
+    failNextRpcStarts: (count?: number) => void;
     setTools: (tools: HarnessTool[]) => void;
     transport: WorkerCommandTransport;
     requestedMethods: () => number;
@@ -899,6 +923,7 @@ function createWorkerInstanceHarness(): {
     const requestMethods: string[] = [];
     const methodWaiters = new Map<string, Array<() => void>>();
     let commandStatus: "running" | "stale" | "stopped" = "stopped";
+    let rpcSpawnFailures = 0;
     let tools: HarnessTool[] = [
         {
             requiredCapabilities: ["execute"] as ["execute"],
@@ -944,6 +969,10 @@ function createWorkerInstanceHarness(): {
             };
         },
         async spawnWorkerRpc() {
+            if (rpcSpawnFailures > 0) {
+                rpcSpawnFailures -= 1;
+                throw new Error("transient rpc spawn failure");
+            }
             const stdout = new PassThrough();
             const stdin = new PassThrough();
             const stderr = new PassThrough();
@@ -999,6 +1028,9 @@ function createWorkerInstanceHarness(): {
         disconnect() {
             activeProcess?.stdout.end();
             activeProcess?.exitResolve?.({ code: 1, signal: null });
+        },
+        failNextRpcStarts(count = 1) {
+            rpcSpawnFailures = count;
         },
         setTools(nextTools) {
             tools = nextTools;
