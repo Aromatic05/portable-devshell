@@ -72,8 +72,9 @@ export class McpEndpointHandlerArtifact {
 function requireContextWorkspace(context: ToolCallContext): string {
     if (context.workspace !== undefined && context.workspace.length > 0) return context.workspace;
     throw createError({
-        code: errorCodes.mcpContextInvalid,
-        message: "Artifact path operations require a workspace-bound context.",
+        code: errorCodes.mcpContextWorkspaceRequired,
+        details: context.ctxId === undefined ? undefined : { ctxId: context.ctxId },
+        message: "Artifact path operations require a workspace attachment on the selected instance.",
         retryable: false
     });
 }

@@ -156,6 +156,36 @@ test("artifact control tools apply read-only and mutating capability requirement
     assert.equal(names.includes("artifact_transfer"), false);
 });
 
+test("remote artifact path operations request an instance workspace attachment", async () => {
+    const gateway = createGateway({
+        async shareArtifact() {
+            return { shareId: "unexpected" };
+        }
+    });
+    const endpoint = new McpEndpointWorker({
+        contextRegistry,
+        gateway,
+        instanceName: "main-pc",
+        policy: {
+            capabilities: ["read", "write", "manage"],
+            groups: ["artifact", "instance"]
+        },
+        worker: createWorker(false, true)
+    });
+
+    await assert.rejects(
+        endpoint.callTool(
+            "artifact_share",
+            withContext({ instance: "remote-server", path: "./dist" }),
+            context
+        ),
+        (error: unknown) => {
+            assert.equal((error as { code?: string }).code, "mcp.contextWorkspaceRequired");
+            return true;
+        }
+    );
+});
+
 function createWorker(ready: boolean, hasSchema: boolean) {
     return {
         async auditToolCall<T extends JsonValue>(
