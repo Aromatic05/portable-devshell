@@ -379,8 +379,11 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
         async readTodo(instance, title) {
             return await (overrides.readTodo?.(instance, title) ?? Promise.resolve({ items: [], revision: 0, summary: { completed: 0, total: 0 } }));
         },
-        async connectInstance(instance) {
-            return await (overrides.connectInstance?.(instance) ?? Promise.resolve({ instance }));
+        async connectInstance(instance, reference) {
+            return await (overrides.connectInstance?.(instance, reference) ?? Promise.resolve({ instance }));
+        },
+        async releaseInstanceReference(instance, reference) {
+            await overrides.releaseInstanceReference?.(instance, reference);
         },
         async statusInstance(instance) {
             return await (overrides.statusInstance?.(instance) ?? Promise.resolve({ instance }));

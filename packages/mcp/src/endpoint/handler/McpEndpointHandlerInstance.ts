@@ -60,33 +60,38 @@ export class McpEndpointHandlerInstance {
     ): Promise<JsonValue> {
         const ctxId = requireCtxId(context);
         const { instance, workspace } = readMcpInstanceConnectInput(input);
-        const connected = await waitForMcpEndpointAbortable(gateway.connectInstance(instance), signal);
-        if (workspace === undefined) {
-            await this.#contextRegistry.attachEnvironment(ctxId, { instance });
-            return connected;
-        }
+        const connected = await waitForMcpEndpointAbortable(gateway.connectInstance(instance, ctxId), signal);
+        try {
+            if (workspace === undefined) {
+                await this.#contextRegistry.attachEnvironment(ctxId, { instance });
+                return connected;
+            }
 
-        const prepared = await waitForMcpEndpointAbortable(gateway.prepareWorkspace(instance, workspace), signal);
-        const alerts = await waitForMcpEndpointAbortable(gateway.readAlerts(instance, prepared.workspace), signal);
-        await this.#contextRegistry.attachEnvironment(ctxId, {
-            instance,
-            temporaryDirectory: prepared.temporaryDirectory,
-            workspace: prepared.workspace
-        });
-        const base = isRecord(connected) ? connected : { result: connected };
-        return {
-            ...base,
-            comment: [
-                `Read ${prepared.projectMemoryAgentFile} before working.`,
-                `Use ${prepared.projectMemoryDirectory} for durable project memory; keep it useful for future sessions.`,
-                `Use ${prepared.temporaryDirectory} for all temporary files.`,
-                ...alerts.advice.map((advice) => advice.text)
-            ],
-            projectMemoryAgentFile: prepared.projectMemoryAgentFile,
-            projectMemoryDirectory: prepared.projectMemoryDirectory,
-            temporaryDirectory: prepared.temporaryDirectory,
-            workspace: prepared.workspace
-        };
+            const prepared = await waitForMcpEndpointAbortable(gateway.prepareWorkspace(instance, workspace), signal);
+            const alerts = await waitForMcpEndpointAbortable(gateway.readAlerts(instance, prepared.workspace), signal);
+            await this.#contextRegistry.attachEnvironment(ctxId, {
+                instance,
+                temporaryDirectory: prepared.temporaryDirectory,
+                workspace: prepared.workspace
+            });
+            const base = isRecord(connected) ? connected : { result: connected };
+            return {
+                ...base,
+                comment: [
+                    `Read ${prepared.projectMemoryAgentFile} before working.`,
+                    `Use ${prepared.projectMemoryDirectory} for durable project memory; keep it useful for future sessions.`,
+                    `Use ${prepared.temporaryDirectory} for all temporary files.`,
+                    ...alerts.advice.map((advice) => advice.text)
+                ],
+                projectMemoryAgentFile: prepared.projectMemoryAgentFile,
+                projectMemoryDirectory: prepared.projectMemoryDirectory,
+                temporaryDirectory: prepared.temporaryDirectory,
+                workspace: prepared.workspace
+            };
+        } catch (error) {
+            await gateway.releaseInstanceReference?.(instance, ctxId);
+            throw error;
+        }
     }
 }
 

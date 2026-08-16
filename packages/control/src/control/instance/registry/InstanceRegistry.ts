@@ -3,6 +3,8 @@ import type { InstanceDescriptor } from "../InstanceDescriptor.js";
 export class InstanceRegistry {
     readonly #descriptors = new Map<string, InstanceDescriptor>();
     readonly #owned = new Set<string>();
+    readonly #ownedConnectionReferences = new Set<string>();
+    readonly #connectionReferences = new Map<string, Set<string>>();
     readonly #changeListeners = new Set<() => void>();
 
     constructor(descriptors: readonly InstanceDescriptor[]) {
@@ -22,6 +24,7 @@ export class InstanceRegistry {
 
     delete(name: string): void {
         if (this.#descriptors.delete(name)) {
+            this.clearOwned(name);
             this.#emitChange();
         }
     }
@@ -36,6 +39,30 @@ export class InstanceRegistry {
 
     clearOwned(name: string): void {
         this.#owned.delete(name);
+        this.#ownedConnectionReferences.delete(name);
+        this.#connectionReferences.delete(name);
+    }
+
+    retainConnectionReference(name: string, reference: string, ownsLifecycle: boolean): void {
+        const references = this.#connectionReferences.get(name) ?? new Set<string>();
+        references.add(reference);
+        this.#connectionReferences.set(name, references);
+        if (ownsLifecycle) {
+            this.#ownedConnectionReferences.add(name);
+        }
+    }
+
+    releaseConnectionReference(name: string, reference: string): boolean {
+        const references = this.#connectionReferences.get(name);
+        if (references === undefined) return false;
+        references.delete(reference);
+        if (references.size > 0) return false;
+        this.#connectionReferences.delete(name);
+        return this.#ownedConnectionReferences.has(name) && !this.#owned.has(name);
+    }
+
+    clearConnectionOwnership(name: string): void {
+        this.#ownedConnectionReferences.delete(name);
     }
 
     onChange(listener: () => void): () => void {
@@ -48,15 +75,16 @@ export class InstanceRegistry {
     async stopOwned(): Promise<void> {
         const failures: Error[] = [];
 
-        for (const name of [...this.#owned]) {
+        const owned = new Set([...this.#owned, ...this.#ownedConnectionReferences]);
+        for (const name of owned) {
             const descriptor = this.#descriptors.get(name);
             if (descriptor === undefined) {
-                this.#owned.delete(name);
+                this.clearOwned(name);
                 continue;
             }
             try {
                 await descriptor.worker.stop();
-                this.#owned.delete(name);
+                this.clearOwned(name);
             } catch (error) {
                 failures.push(error instanceof Error ? error : new Error(String(error)));
             }

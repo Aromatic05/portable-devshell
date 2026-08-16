@@ -67,6 +67,7 @@ export class McpHost {
     readonly #oauth?: McpOAuthProtectedResource;
     readonly #registry = new McpHostRouteRegistry();
     readonly #retiredBindingClosures = new Set<Promise<void>>();
+    readonly #gateways = new Map<string, McpInstanceGateway | undefined>();
     readonly #workers = new Map<string, WorkerInstanceLike>();
     #started = false;
 
@@ -119,6 +120,7 @@ export class McpHost {
     }
 
     registerInstance(instance: McpHostInstanceConfig): void {
+        this.#gateways.set(instance.name, instance.gateway);
         this.#workers.set(instance.name, instance.worker);
         const binding = new McpEndpointBinding(
             new McpEndpointWorker({
@@ -150,6 +152,7 @@ export class McpHost {
     }
 
     unregisterInstance(instanceName: string): void {
+        this.#gateways.delete(instanceName);
         this.#workers.delete(instanceName);
         const previous = this.#registry.unregister(instanceName);
         if (previous === undefined) {
@@ -189,21 +192,27 @@ export class McpHost {
                 const contexts = await this.#contextRegistry.list();
                 const now = Date.now();
                 for (const environment of disabled.environments) {
-                    if (environment.workspace === undefined) continue;
-                    const hasOtherActiveContext = contexts.some((context) =>
-                        context.ctxId !== disabled.ctxId &&
-                        context.status === "active" &&
-                        Date.parse(context.expiresAt) > now &&
-                        context.environments.some((candidate) =>
-                            candidate.instance === environment.instance &&
-                            candidate.workspace === environment.workspace
-                        )
-                    );
-                    if (hasOtherActiveContext) continue;
-                    const worker = this.#workers.get(environment.instance);
-                    if (worker?.snapshot().ready === true) {
-                        await worker.releaseAlerts?.(environment.workspace);
+                    if (environment.workspace !== undefined) {
+                        const hasOtherActiveContext = contexts.some((context) =>
+                            context.ctxId !== disabled.ctxId &&
+                            context.status === "active" &&
+                            Date.parse(context.expiresAt) > now &&
+                            context.environments.some((candidate) =>
+                                candidate.instance === environment.instance &&
+                                candidate.workspace === environment.workspace
+                            )
+                        );
+                        if (!hasOtherActiveContext) {
+                            const worker = this.#workers.get(environment.instance);
+                            if (worker?.snapshot().ready === true) {
+                                await worker.releaseAlerts?.(environment.workspace);
+                            }
+                        }
                     }
+                    await this.#gateways.get(environment.instance)?.releaseInstanceReference?.(
+                        environment.instance,
+                        disabled.ctxId
+                    );
                 }
                 return disabled;
             },

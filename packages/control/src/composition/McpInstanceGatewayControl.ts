@@ -138,7 +138,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         await this.#requireDescriptor(instance).worker.releaseAlerts(workspace);
     }
 
-    async connectInstance(instance: string): Promise<JsonValue> {
+    async connectInstance(instance: string, reference: string): Promise<JsonValue> {
         const descriptor = this.#requireDescriptor(instance);
         if (!descriptor.enabled) {
             throw createError({
@@ -150,6 +150,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         }
 
         let snapshot = descriptor.worker.snapshot();
+        let ownsLifecycle = false;
         if (!snapshot.ready) {
             if (descriptor.worker.managementMode === "selfManaged") {
                 snapshot = await descriptor.worker.refreshStatus();
@@ -163,12 +164,21 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 }
             } else {
                 snapshot = await descriptor.worker.start();
+                ownsLifecycle = true;
             }
         }
         if (descriptor.worker.managementMode !== "selfManaged") {
-            this.#instanceRegistry.markOwned(instance);
+            this.#instanceRegistry.retainConnectionReference(instance, reference, ownsLifecycle);
         }
         return withTodoSummaries(snapshot, descriptor.todo.summaries()) as unknown as JsonValue;
+    }
+
+    async releaseInstanceReference(instance: string, reference: string): Promise<void> {
+        const descriptor = this.#requireDescriptor(instance);
+        if (descriptor.worker.managementMode === "selfManaged") return;
+        if (!this.#instanceRegistry.releaseConnectionReference(instance, reference)) return;
+        await descriptor.worker.stop();
+        this.#instanceRegistry.clearConnectionOwnership(instance);
     }
 
     async statusInstance(instance: string): Promise<JsonValue> {

@@ -239,9 +239,15 @@ test("McpContextRegistry bounds terminal history without evicting active context
 
 test("McpHost context admin releases alerts only after the last workspace context is disabled", async () => {
     const released: string[] = [];
+    const releasedReferences: string[] = [];
     const touched: string[] = [];
     const host = new McpHost({
         instances: [{
+            gateway: {
+                async releaseInstanceReference(instance: string, reference: string) {
+                    releasedReferences.push(`${instance}:${reference}`);
+                }
+            } as never,
             name: "demo-local",
             policy: { capabilities: [], groups: [] },
             worker: {
@@ -267,8 +273,13 @@ test("McpHost context admin releases alerts only after the last workspace contex
 
     await host.contextAdmin.disable(first.ctxId);
     assert.deepEqual(released, []);
+    assert.deepEqual(releasedReferences, [`demo-local:${first.ctxId}`]);
     await host.contextAdmin.disable(second.ctxId);
     assert.deepEqual(released, ["/projects/alpha"]);
+    assert.deepEqual(releasedReferences, [
+        `demo-local:${first.ctxId}`,
+        `demo-local:${second.ctxId}`
+    ]);
 
     const renewed = await host.contextRegistry.create({
         instance: "demo-local",

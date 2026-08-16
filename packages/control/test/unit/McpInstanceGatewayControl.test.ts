@@ -172,13 +172,78 @@ test("MCP instance lifecycle responses preserve active Todo summaries", async ()
     });
 
     assert.deepEqual(
-        (await gateway.connectInstance("remote-server") as { activeTodos?: unknown }).activeTodos,
+        (await gateway.connectInstance("remote-server", "ctx-one") as { activeTodos?: unknown }).activeTodos,
         activeTodos
     );
-    await gateway.connectInstance("remote-server");
+    await gateway.connectInstance("remote-server", "ctx-one");
     assert.equal(startCalls, 1);
     assert.deepEqual(
         (await gateway.stopInstance("remote-server") as { activeTodos?: unknown }).activeTodos,
         activeTodos
     );
+});
+
+test("MCP instance connect lifecycle uses Context references without adopting an already-ready worker", async () => {
+    let ready = false;
+    let startCalls = 0;
+    let stopCalls = 0;
+    const registry = new InstanceRegistry([{
+        enabled: true,
+        mcpCapabilities: ["manage"],
+        mcpEnabled: true,
+        mcpGroups: ["instance"],
+        mcpPath: "/managed/mcp",
+        name: "managed",
+        todo: { summaries: () => [] },
+        worker: {
+            managementMode: "controllerManaged",
+            snapshot: () => ({ ready }),
+            async start() {
+                startCalls += 1;
+                ready = true;
+                return { ready: true };
+            },
+            async stop() {
+                stopCalls += 1;
+                ready = false;
+                return { ready: false };
+            }
+        }
+    } as never, {
+        enabled: true,
+        mcpCapabilities: ["manage"],
+        mcpEnabled: true,
+        mcpGroups: ["instance"],
+        mcpPath: "/external/mcp",
+        name: "external",
+        todo: { summaries: () => [] },
+        worker: {
+            managementMode: "controllerManaged",
+            snapshot: () => ({ ready: true }),
+            async stop() {
+                stopCalls += 100;
+                return { ready: false };
+            }
+        }
+    } as never]);
+    const gateway = new McpInstanceGatewayControl({
+        createService: {} as never,
+        getConfig: () => createDefaultControlConfig(),
+        instanceRegistry: registry
+    });
+
+    await gateway.connectInstance("managed", "ctx-a");
+    await gateway.connectInstance("managed", "ctx-a");
+    await gateway.connectInstance("managed", "ctx-b");
+    assert.equal(startCalls, 1);
+
+    await gateway.releaseInstanceReference("managed", "ctx-a");
+    assert.equal(stopCalls, 0);
+    await gateway.releaseInstanceReference("managed", "ctx-b");
+    assert.equal(stopCalls, 1);
+
+    await gateway.connectInstance("external", "ctx-external");
+    await gateway.releaseInstanceReference("external", "ctx-external");
+    await registry.stopOwned();
+    assert.equal(stopCalls, 1);
 });
