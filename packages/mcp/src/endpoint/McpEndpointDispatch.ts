@@ -165,7 +165,10 @@ export class McpEndpointDispatch {
     ): Promise<JsonValue> {
         if (context.ctxId === undefined) return result;
         const queuedComments = await this.#consumeQueuedComments(instance, context.ctxId, callId);
-        const comments = mergeComments(queuedComments, resolveResultHints(toolName, result));
+        const comments = mergeComments(
+            queuedComments,
+            routedResultHints(toolName, result, instance, this.#instanceName)
+        );
         return attachMcpComments(result, comments);
     }
 
@@ -345,4 +348,25 @@ function contextWorkspaceRequired(ctxId: string, instance: string) {
         message: `No workspace is attached to ${instance} for this ctxId. Call instance_connect with an absolute workspace.`,
         retryable: false
     });
+}
+
+function routedResultHints(toolName: string, result: JsonValue, instance: string, localInstance: string) {
+    const hints = resolveResultHints(toolName, result);
+    if (toolName !== "bash_run" || instance === localInstance || !isRecord(result)) return hints;
+    const streams = [
+        ...(isRecord(result.stdoutArtifact) ? ["stdout"] : []),
+        ...(isRecord(result.stderrArtifact) ? ["stderr"] : [])
+    ];
+    if (streams.length === 0) return hints;
+    return hints.map((hint) => hint.code === "bash.outputTruncated"
+        ? {
+            ...hint,
+            text: `Read full ${streams.join(" and ")} with artifact_read using instance ${JSON.stringify(instance)}.`
+        }
+        : hint
+    );
+}
+
+function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

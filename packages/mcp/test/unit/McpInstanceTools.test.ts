@@ -230,6 +230,49 @@ test("instance_connect cleans an unused alert lease and reference when workspace
     assert.deepEqual(releasedReferences, [`remote-server:${created.ctxId}`]);
 });
 
+test("remote bash artifacts tell artifact_read to stay on the source instance", async () => {
+    const registry = new McpContextRegistry({ idFactory: () => "ctx-remote-artifact" });
+    const created = await registry.create({
+        instance: "main-pc",
+        principal: "local",
+        workspace: "/workspace"
+    });
+    await registry.attachEnvironment(created.ctxId, {
+        instance: "remote-server",
+        temporaryDirectory: "/tmp/remote-artifact",
+        workspace: "/remote-workspace"
+    });
+    const gateway = createGateway({
+        async callTool() {
+            return {
+                exitCode: 0,
+                stderr: "",
+                stderrTruncated: false,
+                stdout: "partial",
+                stdoutArtifact: { handle: "artifact-1" },
+                stdoutTruncated: true,
+                termination: "exited"
+            };
+        }
+    });
+    const endpoint = new McpEndpointWorker({
+        contextRegistry: registry,
+        gateway,
+        instanceName: "main-pc",
+        policy: { capabilities: ["execute", "manage"], groups: ["bash", "instance"] },
+        worker: createWorker()
+    });
+
+    const result = await endpoint.callTool(
+        "bash_run",
+        { command: "produce-output", ctxId: created.ctxId, instance: "remote-server" },
+        context
+    ) as { comment?: string[] };
+    assert.deepEqual(result.comment, [
+        `[bash.outputTruncated] Read full stdout with artifact_read using instance "remote-server".`
+    ]);
+});
+
 test("remote worker calls check target readiness before tool exposure", async () => {
     let listToolsCalled = false;
     const notReady = Object.assign(new Error("not ready"), {
@@ -463,11 +506,13 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
             }
             return await operation("call-test");
         },
-        async callTool(instance, toolName, input, callContext) {
-            if (overrides.callTool !== undefined) {
-                return await overrides.callTool(instance, toolName, input, callContext);
-            }
-            return { instance, toolName };
+        async callTool(instance, toolName, input, callContext, signal, transformResult) {
+            const result = overrides.callTool === undefined
+                ? { instance, toolName }
+                : await overrides.callTool(instance, toolName, input, callContext, signal);
+            return transformResult === undefined
+                ? result
+                : await transformResult(result, "call-test");
         },
         async createSshInstance(sourceInstance, input) {
             if (overrides.createSshInstance !== undefined) {
