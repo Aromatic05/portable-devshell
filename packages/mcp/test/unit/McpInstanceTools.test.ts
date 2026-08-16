@@ -131,6 +131,105 @@ test("worker calls default to the endpoint instance and route explicit targets t
 
 });
 
+test("instance_connect reuses a live workspace attachment and releases a replaced alert lease", async () => {
+    const registry = new McpContextRegistry({ idFactory: () => "ctx-connect-idempotent" });
+    const created = await registry.create({
+        instance: "main-pc",
+        principal: "local",
+        workspace: "/workspace"
+    });
+    let prepareCalls = 0;
+    const touchedTemporary: string[] = [];
+    const touchedAlerts: string[] = [];
+    const releasedAlerts: string[] = [];
+    const gateway = createGateway({
+        async prepareWorkspace(instance, workspace) {
+            prepareCalls += 1;
+            return {
+                projectMemoryAgentFile: `${workspace}/AGENT.md`,
+                projectMemoryDirectory: `${workspace}/.memory`,
+                temporaryDirectory: `/tmp/${instance}-${prepareCalls}`,
+                workspace
+            };
+        },
+        async releaseAlerts(_instance, workspace) {
+            releasedAlerts.push(workspace);
+        },
+        async touchAlerts(_instance, workspace) {
+            touchedAlerts.push(workspace);
+        },
+        async touchTemporaryDirectory(_instance, path) {
+            touchedTemporary.push(path);
+        }
+    });
+    const endpoint = new McpEndpointWorker({
+        contextRegistry: registry,
+        gateway,
+        instanceName: "main-pc",
+        policy: { capabilities: ["execute", "manage"], groups: ["bash", "instance"] },
+        worker: createWorker()
+    });
+    const call = async (workspace: string) => await endpoint.callTool(
+        "instance_connect",
+        { ctxId: created.ctxId, instance: "remote-server", workspace },
+        context
+    );
+
+    await call("/remote-a");
+    await call("/remote-a");
+    await call("/remote-b");
+
+    assert.equal(prepareCalls, 2);
+    assert.deepEqual(touchedTemporary, ["/tmp/remote-server-1"]);
+    assert.deepEqual(touchedAlerts, ["/remote-a"]);
+    assert.deepEqual(releasedAlerts, ["/remote-a"]);
+});
+
+test("instance_connect cleans an unused alert lease and reference when workspace preparation fails", async () => {
+    const registry = new McpContextRegistry({ idFactory: () => "ctx-connect-failure" });
+    const created = await registry.create({
+        instance: "main-pc",
+        principal: "local",
+        workspace: "/workspace"
+    });
+    const releasedAlerts: string[] = [];
+    const releasedReferences: string[] = [];
+    const gateway = createGateway({
+        async prepareWorkspace(instance, workspace) {
+            return {
+                projectMemoryAgentFile: `${workspace}/AGENT.md`,
+                projectMemoryDirectory: `${workspace}/.memory`,
+                temporaryDirectory: `/tmp/${instance}`,
+                workspace
+            };
+        },
+        async readAlerts() {
+            throw new Error("alerts failed");
+        },
+        async releaseAlerts(_instance, workspace) {
+            releasedAlerts.push(workspace);
+        },
+        async releaseInstanceReference(instance, reference) {
+            releasedReferences.push(`${instance}:${reference}`);
+        }
+    });
+    const endpoint = new McpEndpointWorker({
+        contextRegistry: registry,
+        gateway,
+        instanceName: "main-pc",
+        policy: { capabilities: ["execute", "manage"], groups: ["bash", "instance"] },
+        worker: createWorker()
+    });
+
+    await assert.rejects(endpoint.callTool(
+        "instance_connect",
+        { ctxId: created.ctxId, instance: "remote-server", workspace: "/remote-fail" },
+        context
+    ), /alerts failed/u);
+    assert.deepEqual(releasedAlerts, ["/remote-fail"]);
+    assert.deepEqual(releasedReferences, [`remote-server:${created.ctxId}`]);
+});
+
 test("remote worker calls check target readiness before tool exposure", async () => {
     let listToolsCalled = false;
     const notReady = Object.assign(new Error("not ready"), {

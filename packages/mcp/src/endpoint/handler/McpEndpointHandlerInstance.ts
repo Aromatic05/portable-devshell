@@ -1,4 +1,4 @@
-import { createError, errorCodes, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
+import { createError, errorCodes, type JsonValue, type McpContextEnvironment, type ToolCallContext } from "@portable-devshell/shared";
 
 import type { McpContextRegistry } from "../../context/McpContextRegistry.js";
 import type { McpInstanceGateway } from "../../instance/McpInstanceGateway.js";
@@ -60,20 +60,48 @@ export class McpEndpointHandlerInstance {
     ): Promise<JsonValue> {
         const ctxId = requireCtxId(context);
         const { instance, workspace } = readMcpInstanceConnectInput(input);
+        const previous = await this.#environment(ctxId, instance);
         const connected = await waitForMcpEndpointAbortable(gateway.connectInstance(instance, ctxId), signal);
-        try {
-            if (workspace === undefined) {
+        if (workspace === undefined) {
+            try {
                 await this.#contextRegistry.attachEnvironment(ctxId, { instance });
                 return connected;
+            } catch (error) {
+                if (previous === undefined) await gateway.releaseInstanceReference?.(instance, ctxId);
+                throw error;
             }
+        }
 
+        if (previous?.workspace === workspace && previous.temporaryDirectory !== undefined) {
+            try {
+                await waitForMcpEndpointAbortable(
+                    gateway.touchTemporaryDirectory(instance, previous.temporaryDirectory),
+                    signal
+                );
+                await waitForMcpEndpointAbortable(gateway.touchAlerts(instance, workspace), signal);
+                return {
+                    ...(isRecord(connected) ? connected : { result: connected }),
+                    temporaryDirectory: previous.temporaryDirectory,
+                    workspace
+                };
+            } catch (error) {
+                if (!isRecoverableTemporaryError(error)) throw error;
+            }
+        }
+
+        let preparedWorkspace: string | undefined;
+        try {
             const prepared = await waitForMcpEndpointAbortable(gateway.prepareWorkspace(instance, workspace), signal);
+            preparedWorkspace = prepared.workspace;
             const alerts = await waitForMcpEndpointAbortable(gateway.readAlerts(instance, prepared.workspace), signal);
             await this.#contextRegistry.attachEnvironment(ctxId, {
                 instance,
                 temporaryDirectory: prepared.temporaryDirectory,
                 workspace: prepared.workspace
             });
+            if (previous?.workspace !== undefined && previous.workspace !== prepared.workspace) {
+                await this.#releaseAlertsIfUnused(gateway, instance, previous.workspace).catch(() => undefined);
+            }
             const base = isRecord(connected) ? connected : { result: connected };
             return {
                 ...base,
@@ -89,9 +117,32 @@ export class McpEndpointHandlerInstance {
                 workspace: prepared.workspace
             };
         } catch (error) {
-            await gateway.releaseInstanceReference?.(instance, ctxId);
+            if (preparedWorkspace !== undefined) {
+                await this.#releaseAlertsIfUnused(gateway, instance, preparedWorkspace).catch(() => undefined);
+            }
+            if (previous === undefined) await gateway.releaseInstanceReference?.(instance, ctxId);
             throw error;
         }
+    }
+
+    async #environment(ctxId: string, instance: string): Promise<McpContextEnvironment | undefined> {
+        const record = (await this.#contextRegistry.list()).find((context) =>
+            context.ctxId === ctxId && context.status === "active"
+        );
+        return record?.environments.find((environment) => environment.instance === instance);
+    }
+
+    async #releaseAlertsIfUnused(
+        gateway: McpInstanceGateway,
+        instance: string,
+        workspace: string
+    ): Promise<void> {
+        const inUse = (await this.#contextRegistry.list()).some((context) =>
+            context.status === "active" && context.environments.some((environment) =>
+                environment.instance === instance && environment.workspace === workspace
+            )
+        );
+        if (!inUse) await gateway.releaseAlerts(instance, workspace);
     }
 }
 
@@ -106,4 +157,10 @@ function requireCtxId(context: ToolCallContext): string {
 
 function isRecord(value: JsonValue): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isRecoverableTemporaryError(error: unknown): boolean {
+    if (typeof error !== "object" || error === null || !("code" in error)) return false;
+    const code = (error as { code?: unknown }).code;
+    return code === "workspace.temporaryUnavailable" || code === "workspace.temporaryInvalid";
 }
