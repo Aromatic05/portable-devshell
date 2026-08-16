@@ -164,6 +164,34 @@ test("remote worker calls check target readiness before tool exposure", async ()
     assert.equal(listToolsCalled, false);
 });
 
+test("worker tools missing from the endpoint catalog cannot be recovered from a remote instance", async () => {
+    let remoteCalled = false;
+    const gateway = createGateway({
+        assertReady() {},
+        async callTool() {
+            remoteCalled = true;
+            return { remote: true };
+        },
+        listTools() {
+            return [bashTool];
+        }
+    });
+    const endpoint = createManagedEndpoint(createWorker({ hasSchema: false, ready: false }), gateway);
+
+    await assert.rejects(
+        endpoint.callTool(
+            "bash_run",
+            withContext({ command: "pwd", instance: "remote-server" }),
+            context
+        ),
+        (error: unknown) => {
+            assert.equal((error as { code?: string }).code, "core.toolSchemaUnavailable");
+            return true;
+        }
+    );
+    assert.equal(remoteCalled, false);
+});
+
 test("cancelling an instance lifecycle tool stops MCP waiting while the operation continues", async () => {
     let resolveStart!: (value: JsonValue) => void;
     const start = new Promise<JsonValue>((resolve) => {

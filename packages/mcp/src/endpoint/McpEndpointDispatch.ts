@@ -114,9 +114,13 @@ export class McpEndpointDispatch {
             );
         }
 
+        if (selected === undefined) {
+            throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
+        }
+
         const contextInput = readMcpContextInput(input);
         input = contextInput.input;
-        const routed = known?.owner === "worker" || known?.owner === "artifact"
+        const routed = selected.owner === "worker" || selected.owner === "artifact"
             ? readMcpRoutedInput(input, snapshot.instanceRoutingEnabled, this.#instanceName)
             : { input, instance: this.#instanceName };
         const context = await this.#createToolContext(
@@ -124,15 +128,12 @@ export class McpEndpointDispatch {
             contextInput.ctxId,
             requestContext,
             routed.instance,
-            known?.owner === "worker",
+            selected.owner === "worker",
             signal
         );
 
-        if (known?.owner === "todo" || known?.owner === "artifact" || known?.owner === "instance") {
-            if (selected === undefined) {
-                throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
-            }
-            const owner = known.owner;
+        if (selected.owner === "todo" || selected.owner === "artifact" || selected.owner === "instance") {
+            const owner = selected.owner;
             this.#catalog.assertAdaptable(selected.definition);
             return await this.#auditControlTool(
                 owner,
@@ -148,7 +149,7 @@ export class McpEndpointDispatch {
             toolName,
             input,
             context,
-            selected?.definition,
+            selected.definition,
             snapshot.instanceRoutingEnabled,
             signal,
             async (result, callId) => await this.#attachComments(toolName, result, context, callId, routed.instance)
