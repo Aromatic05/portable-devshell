@@ -302,6 +302,7 @@ test("Audit requires confirmation before disabling a Context", async () => {
     harness.store.patchControlReadModel({ contexts: [{
         createdAt: "2026-08-02T00:00:00.000Z",
         ctxId: "ctx-alpha",
+        environments: [{ instance: "alpha", workspace: "/workspace/alpha" }],
         expiresAt: "2026-08-02T01:00:00.000Z",
         instance: "alpha",
         lastAccessedAt: "2026-08-02T00:05:00.000Z",

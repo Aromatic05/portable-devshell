@@ -105,24 +105,27 @@ function toSummary(
     const ctxId = context.key.kind === "context" ? context.key.ctxId : undefined;
     const registryRecord = ctxId === undefined
         ? undefined
-        : state.readModel.contexts.find(
-              (record) =>
-                  record.ctxId === ctxId &&
-                  record.instance === instance,
-          );
+        : state.readModel.contexts.find((record) => record.ctxId === ctxId);
+    const environment = registryRecord === undefined
+        ? undefined
+        : (registryRecord.environments ?? [{
+              instance: registryRecord.instance,
+              temporaryDirectory: registryRecord.temporaryDirectory,
+              workspace: registryRecord.workspace,
+          }]).find((candidate) => candidate.instance === instance);
 
     return {
         approvals: [...context.approvals].sort((left, right) =>
             left.createdAt.localeCompare(right.createdAt),
         ),
         calls: sortedCalls,
-        contextStatus: registryRecord?.status,
+        contextStatus: environment === undefined ? undefined : registryRecord?.status,
         key: context.key,
         label: context.label,
         latestActivityAt,
         latestCall,
         status: contextStatus(sortedCalls, context.approvals),
-        workspace: registryRecord?.workspace,
+        workspace: environment?.workspace,
     };
 }
 

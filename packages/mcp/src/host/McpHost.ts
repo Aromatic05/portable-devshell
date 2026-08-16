@@ -186,18 +186,23 @@ export class McpHost {
         return {
             disable: async (ctxId) => {
                 const disabled = await this.#contextRegistry.disable(ctxId);
+                const contexts = await this.#contextRegistry.list();
                 const now = Date.now();
-                const hasOtherActiveContext = (await this.#contextRegistry.list()).some((context) =>
-                    context.ctxId !== disabled.ctxId &&
-                    context.instance === disabled.instance &&
-                    context.workspace === disabled.workspace &&
-                    context.status === "active" &&
-                    Date.parse(context.expiresAt) > now
-                );
-                if (!hasOtherActiveContext) {
-                    const worker = this.#workers.get(disabled.instance);
+                for (const environment of disabled.environments) {
+                    if (environment.workspace === undefined) continue;
+                    const hasOtherActiveContext = contexts.some((context) =>
+                        context.ctxId !== disabled.ctxId &&
+                        context.status === "active" &&
+                        Date.parse(context.expiresAt) > now &&
+                        context.environments.some((candidate) =>
+                            candidate.instance === environment.instance &&
+                            candidate.workspace === environment.workspace
+                        )
+                    );
+                    if (hasOtherActiveContext) continue;
+                    const worker = this.#workers.get(environment.instance);
                     if (worker?.snapshot().ready === true) {
-                        await worker.releaseAlerts?.(disabled.workspace);
+                        await worker.releaseAlerts?.(environment.workspace);
                     }
                 }
                 return disabled;
@@ -205,9 +210,12 @@ export class McpHost {
             list: async () => await this.#contextRegistry.list(),
             renew: async (ctxId) => {
                 const renewed = await this.#contextRegistry.renew(ctxId);
-                const worker = this.#workers.get(renewed.instance);
-                if (worker?.snapshot().ready === true) {
-                    await worker.touchAlerts?.(renewed.workspace);
+                for (const environment of renewed.environments) {
+                    if (environment.workspace === undefined) continue;
+                    const worker = this.#workers.get(environment.instance);
+                    if (worker?.snapshot().ready === true) {
+                        await worker.touchAlerts?.(environment.workspace);
+                    }
                 }
                 return renewed;
             },

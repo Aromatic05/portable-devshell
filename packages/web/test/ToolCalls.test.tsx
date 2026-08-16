@@ -287,6 +287,34 @@ it("locks the instance from the selected Context", () => {
     expect(queueContextMessage).not.toHaveBeenCalled();
 });
 
+it("keeps the instance selectable when one Context is attached to multiple instances", () => {
+    const multiInstanceState: WebState = {
+        ...state,
+        readModel: {
+            ...state.readModel,
+            contexts: state.readModel.contexts.map((context) => context.ctxId === "ctx-alpha"
+                ? {
+                    ...context,
+                    environments: [
+                        { instance: "alpha", workspace: "/workspace/alpha" },
+                        { instance: "beta", workspace: "/workspace/remote" },
+                    ],
+                }
+                : context),
+        },
+    };
+    const store = { queueContextMessage: vi.fn(async () => true) } as unknown as WebStore;
+    render(<ToolCalls state={multiInstanceState} store={store} />);
+
+    fireEvent.change(screen.getByLabelText("Context"), { target: { value: "context:ctx-alpha" } });
+    expect(screen.getByLabelText("Instance")).not.toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Instance"), { target: { value: "beta" } });
+    expect(screen.getByLabelText("Context")).toHaveValue("context:ctx-alpha");
+    expect(screen.getByText(/\/workspace\/remote/u)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Queue Comment" })).toBeInTheDocument();
+});
+
 it("does not offer Comment composition for a disabled Context", () => {
     const disabledState: WebState = {
         ...state,

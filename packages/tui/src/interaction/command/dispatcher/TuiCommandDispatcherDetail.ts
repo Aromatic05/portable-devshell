@@ -148,13 +148,16 @@ export class TuiCommandDispatcherDetail {
                 const ctxId = ctxIdFromBox(boxId);
                 if (ctxId === undefined) return false;
                 if (actionId === "context.disable") {
-                    const workspace = state.readModel.contexts.find(
-                        (context) =>
-                            context.ctxId === ctxId &&
-                            context.instance === state.ui.selectedInstance,
-                    )?.workspace;
+                    const context = state.readModel.contexts.find((candidate) => candidate.ctxId === ctxId);
+                    const workspace = context === undefined
+                        ? undefined
+                        : (context.environments ?? [{
+                              instance: context.instance,
+                              temporaryDirectory: context.temporaryDirectory,
+                              workspace: context.workspace,
+                          }]).find((environment) => environment.instance === state.ui.selectedInstance)?.workspace;
                     return await this.#dispatch({
-                        body: `Disable Context ${ctxId}${workspace === undefined ? "" : ` in workspace ${workspace}`}? Disabled Contexts cannot be renewed; the client must establish a new Context.`,
+                        body: `Disable Context ${ctxId}${workspace === undefined ? "" : ` from workspace ${workspace}`} across all attached instances? Disabled Contexts cannot be renewed; the client must establish a new Context.`,
                         confirmIntent: { ctxId, instance: state.ui.selectedInstance, type: "context.disable" },
                         confirmLabel: "Disable",
                         title: "Confirm Context Disable",

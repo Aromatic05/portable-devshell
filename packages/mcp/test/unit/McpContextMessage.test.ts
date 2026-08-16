@@ -354,7 +354,7 @@ function createHarness(
         async readTodo(): Promise<JsonValue> {
             return { items: [], revision: 0 };
         },
-        async startInstance(): Promise<JsonValue> {
+        async connectInstance(): Promise<JsonValue> {
             return {};
         },
         async statusInstance(): Promise<JsonValue> {

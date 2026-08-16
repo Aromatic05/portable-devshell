@@ -211,7 +211,7 @@ function createGateway(overrides: Partial<McpInstanceGateway>): McpInstanceGatew
             await overrides.releaseAlerts?.(instance, workspace);
         },
         async readTodo() { return { items: [], revision: 0, summary: { completed: 0, total: 0 } }; },
-        async startInstance(instance) { return { instance }; },
+        async connectInstance(instance) { return { instance }; },
         async statusInstance(instance) { return { instance }; },
         async stopInstance(instance) { return { instance }; },
         async touchAlerts() {},

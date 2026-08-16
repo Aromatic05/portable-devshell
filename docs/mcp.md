@@ -102,9 +102,9 @@ requiredScopes = ["mcp"]
 | `artifact` | `artifact_read`、`artifact_viewImage`、`artifact_share`、`artifact_transfer`             | `read`、`write`   |
 | `tmux`     | `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_list`、`tmux_create`、`tmux_close`    | `read`、`execute` |
 | `todo`     | `todo_read`、`todo_write`                                                                | 无硬性 capability |
-| `instance` | `instance_list`、`instance_status`、`instance_create`、`instance_start`、`instance_stop` | `manage`          |
+| `instance` | `instance_list`、`instance_status`、`instance_create`、`instance_connect`、`instance_stop` | `manage`          |
 
-默认不包含 `instance` group，也不授予 `manage`。`instance_start` / `instance_stop` 只管理由 Control 拥有生命周期的 worker；`selfManaged` reverse worker 必须在目标机器启动或停止。用户从 TUI 定向发送给某个 Context 的 Comment 不作为独立 MCP 工具暴露；消息按 `ctxId` 排队，并附着到该 Context 下一次成功的普通工具结果中。
+默认不包含 `instance` group，也不授予 `manage`。`instance_connect` 是幂等的“确保可用”入口：目标未启动时由 Control 启动并连接，已经 ready 时不重复启动；可选 `workspace` 会作为当前 `ctxId` 在该 instance 上的 workspace attachment。`selfManaged` reverse worker 不由 Control 启动，`instance_connect` 只接受已经连入的 worker。`instance_stop` 仍只适用于由 Control 管理生命周期的 worker。用户从 TUI 定向发送给某个 Context 的 Comment 不作为独立 MCP 工具暴露；消息按 `ctxId` 排队，并附着到该 Context 下一次成功的普通工具结果中。
 
 ## Skills 与项目记忆提示
 
@@ -127,7 +127,7 @@ Control 机器上的 Skill 目录固定为：
 - `projectMemoryDirectory`：位于 worker 的 `~/.devshell/project-memory/` 下，按 canonical workspace 的稳定平台路径表示生成持久 key；其中的 `AGENT.md` 可跨 Context 长期保留；
 - `temporaryDirectory`：对外路径稳定在 worker 的 `~/.devshell/context-tmp/` 下，每个 Context 独立。Unix worker 会把这个固定入口维护为指向 transient runtime storage 的符号链接，优先使用 `$XDG_RUNTIME_DIR/devshell-worker/context-tmp`；Linux 缺少 `XDG_RUNTIME_DIR` 时优先使用 `/dev/shm`，避免高频临时数据写入持久 home。有效 Context 的后续工具调用会刷新该目录活跃时间；连续 24 小时未活动的临时目录可在后续 workspace 初始化时被 GC。若 runtime storage 因重启、GC 或 worker replacement 消失，本次工具调用会重新 prepare 同一 workspace、持久化新的临时目录后继续执行。
 
-如果 instance 配置了 `[alerts]`，`environ_info` 同时读取该 workspace 的 alert advice，并启动该 workspace 的周期 probe。有效 Context 的后续工具调用会刷新 alert 活跃租约并同步当前 alerts 配置；最后一个同 workspace Context 被手动禁用时立即释放该租约，连续 24 小时无有效调用时也会自动停止 probe 并移除缓存状态。
+如果 instance 配置了 `[alerts]`，`environ_info` 同时读取该 workspace 的 alert advice，并启动该 workspace 的周期 probe。`instance_connect` 附加 workspace 时执行同样的准备。有效 Context 在各 instance 上的后续工具调用会分别刷新对应 workspace 的 alert 活跃租约并同步当前 alerts 配置；最后一个持有某个 instance/workspace attachment 的 Context 被手动禁用时立即释放该租约，连续 24 小时无有效调用时也会自动停止 probe 并移除缓存状态。
 
 Context registry 永远保留全部 active Context；expired / disabled 终态历史默认只保留最近 256 条，并在正常运行期间持续压缩，不依赖 Control 重启。被历史压缩淘汰的旧 `ctxId` 后续按无效 Context 处理。
 

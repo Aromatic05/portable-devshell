@@ -192,7 +192,7 @@ timeoutMs = 5000
 - `version`：全局配置当前为 `2`，实例配置当前为 `3`；
 - `name`：必须包含连字符；
 - `provider`：`local`、`ssh`、`docker`、`podman`、`reverse`；
-- instance 配置不包含 `workspace`。worker 启动与实例生命周期不绑定项目目录；CLI 工具调用显式传绝对 workspace，MCP Context 通过 `environ_info` 选择调用方已获准访问的 worker 绝对目录；
+- instance 配置不包含 `workspace`。worker 启动与实例生命周期不绑定项目目录；CLI 工具调用显式传绝对 workspace，MCP Context 通过 `environ_info` 选择初始 worker 绝对目录，并通过 `instance_connect` 为同一 `ctxId` 附加其他 instance 的绝对 workspace；
 - `[mcp].enabled`：是否注册该 instance 的 MCP endpoint；
 - `[mcp].auth`：该 instance 独立使用 `none`、`token` 或 `oauth2`；
 - `[mcp].token`：仅在 `auth = "token"` 时使用，至少 32 UTF-8 字节；

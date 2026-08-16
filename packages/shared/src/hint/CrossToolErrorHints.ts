@@ -42,6 +42,7 @@ const crossToolHints: Record<string, string> = {
     [errorCodes.streamGap]: "Fetch a fresh snapshot and resubscribe.",
     [errorCodes.mcpContextExpired]: "Call environ_info and use its new ctxId.",
     [errorCodes.mcpContextInvalid]: "Stop and ask the user; do not create a ctxId.",
+    [errorCodes.mcpContextWorkspaceRequired]: "Call instance_connect with this instance and an absolute workspace.",
     [errorCodes.targetInvalid]: "Use a valid instance target.",
     [errorCodes.controlClientIdentityRequired]: "Supply the required client identity.",
     [errorCodes.controlClientIdentityInvalid]: "Correct the client identity."

@@ -229,7 +229,7 @@ test("environment and control-owned tools execute through the endpoint audit pat
         async transferArtifact() {
             return {};
         },
-        async startInstance() {
+        async connectInstance() {
             return {};
         },
         async statusInstance() {
@@ -454,7 +454,7 @@ test("instance_list returns object structured content through SDK transport", as
         listTools() {
             return [];
         },
-        async startInstance() {
+        async connectInstance() {
             return {};
         },
         async statusInstance() {
@@ -515,7 +515,7 @@ test("artifact_viewImage returns native image content over SDK transport", async
         async listInstances() { return []; },
         async readTodo() { return { revision: 0, todos: [] }; },
         listTools() { return []; },
-        async startInstance() { return {}; },
+        async connectInstance() { return {}; },
         async statusInstance() { return {}; },
         async stopInstance() { return {}; },
         async viewArtifactImage(defaultInstance: string, input: { path?: string; workspace?: string }) {

@@ -4,7 +4,7 @@ export type McpToolCatalogInstanceName =
     | "instance_list"
     | "instance_status"
     | "instance_create"
-    | "instance_start"
+    | "instance_connect"
     | "instance_stop";
 
 const emptyObjectSchema: JsonValue = {
@@ -18,6 +18,24 @@ const instanceNameSchema: JsonValue = {
     properties: {
         instance: {
             description: "Managed instance name returned by instance_list.",
+            minLength: 1,
+            type: "string"
+        }
+    },
+    required: ["instance"],
+    type: "object"
+};
+
+const instanceConnectSchema: JsonValue = {
+    additionalProperties: false,
+    properties: {
+        instance: {
+            description: "Managed instance name returned by instance_list.",
+            minLength: 1,
+            type: "string"
+        },
+        workspace: {
+            description: "Optional absolute workspace path to attach to this session context on the target instance.",
             minLength: 1,
             type: "string"
         }
@@ -80,9 +98,9 @@ export class McpToolCatalogInstance {
             }
         ),
         definition(
-            "instance_start",
-            "Start a managed instance. Use only when explicitly requested by the user.",
-            instanceNameSchema
+            "instance_connect",
+            "Ensure a managed instance is ready and optionally attach an absolute workspace to this session context. The operation is idempotent. Use only when explicitly requested by the user.",
+            instanceConnectSchema
         ),
         definition(
             "instance_stop",

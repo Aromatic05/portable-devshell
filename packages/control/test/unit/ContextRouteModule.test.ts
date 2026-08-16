@@ -9,6 +9,7 @@ function record(ctxId: string): McpContextRecord {
     return {
         createdAt: "2026-08-10T00:00:00.000Z",
         ctxId,
+        environments: [{ instance: "demo-local", workspace: "/workspace" }],
         expiresAt: "2026-08-11T00:00:00.000Z",
         instance: "demo-local",
         lastAccessedAt: "2026-08-10T00:00:00.000Z",

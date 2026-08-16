@@ -29,7 +29,7 @@ CLI 和 TUI 都是 control client。它们不直接读取实例配置、不自�
 
 ## 实例模型
 
-每个 instance 绑定一个 provider，但不持久化默认 workspace。workspace 是操作级 authority：CLI 工具调用显式传入绝对路径，MCP 由 `environ_info` 建立的 Context 持有其 workspace；TUI 的直接终端、tmux 和手工工具调用使用 worker handshake 报告的用户 home 作为默认操作目录。当前 provider 为：
+每个 instance 绑定一个 provider，但不持久化默认 workspace。workspace 是操作级 authority：CLI 工具调用显式传入绝对路径；MCP 的 `environ_info` 建立 session Context 和初始 instance workspace，后续 `instance_connect` 可在同一 `ctxId` 上附加其他 instance 的 workspace；TUI 的直接终端、tmux 和手工工具调用使用 worker handshake 报告的用户 home 作为默认操作目录。当前 provider 为：
 
 ```text
 local
@@ -110,7 +110,7 @@ todo_write
 instance_list
 instance_status
 instance_create
-instance_start
+instance_connect
 instance_stop
 ```
 

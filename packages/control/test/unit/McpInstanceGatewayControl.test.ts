@@ -139,6 +139,8 @@ test("MCP instance lifecycle responses preserve active Todo summaries", async ()
         ready: false,
         status: "stopped"
     };
+    let currentSnapshot = snapshot;
+    let startCalls = 0;
     const registry = new InstanceRegistry([{
         enabled: true,
         mcpCapabilities: ["manage"],
@@ -148,11 +150,18 @@ test("MCP instance lifecycle responses preserve active Todo summaries", async ()
         name: "remote-server",
         todo: { summaries: () => activeTodos },
         worker: {
+            managementMode: "controllerManaged",
+            snapshot() {
+                return currentSnapshot;
+            },
             async start() {
-                return { ...snapshot, daemonState: "running", ready: true, status: "ready" };
+                startCalls += 1;
+                currentSnapshot = { ...snapshot, daemonState: "running", ready: true, status: "ready" };
+                return currentSnapshot;
             },
             async stop() {
-                return snapshot;
+                currentSnapshot = snapshot;
+                return currentSnapshot;
             }
         }
     } as never]);
@@ -163,9 +172,11 @@ test("MCP instance lifecycle responses preserve active Todo summaries", async ()
     });
 
     assert.deepEqual(
-        (await gateway.startInstance("remote-server") as { activeTodos?: unknown }).activeTodos,
+        (await gateway.connectInstance("remote-server") as { activeTodos?: unknown }).activeTodos,
         activeTodos
     );
+    await gateway.connectInstance("remote-server");
+    assert.equal(startCalls, 1);
     assert.deepEqual(
         (await gateway.stopInstance("remote-server") as { activeTodos?: unknown }).activeTodos,
         activeTodos

@@ -138,22 +138,37 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         await this.#requireDescriptor(instance).worker.releaseAlerts(workspace);
     }
 
-    async startInstance(instance: string): Promise<JsonValue> {
+    async connectInstance(instance: string): Promise<JsonValue> {
         const descriptor = this.#requireDescriptor(instance);
         if (!descriptor.enabled) {
             throw createError({
                 code: errorCodes.instanceConflict,
-                details: { instance, operation: "start" },
+                details: { instance, operation: "connect" },
                 message: `Instance ${instance} is disabled.`,
                 retryable: false
             });
         }
-        const snapshot = withTodoSummaries(
-            await descriptor.worker.start(),
-            descriptor.todo.summaries()
-        );
-        this.#instanceRegistry.markOwned(instance);
-        return snapshot as unknown as JsonValue;
+
+        let snapshot = descriptor.worker.snapshot();
+        if (!snapshot.ready) {
+            if (descriptor.worker.managementMode === "selfManaged") {
+                snapshot = await descriptor.worker.refreshStatus();
+                if (!snapshot.ready) {
+                    throw createError({
+                        code: errorCodes.reverseSelfManagedOffline,
+                        details: { instance },
+                        message: `Instance ${instance} is self-managed and is not connected.`,
+                        retryable: true
+                    });
+                }
+            } else {
+                snapshot = await descriptor.worker.start();
+            }
+        }
+        if (descriptor.worker.managementMode !== "selfManaged") {
+            this.#instanceRegistry.markOwned(instance);
+        }
+        return withTodoSummaries(snapshot, descriptor.todo.summaries()) as unknown as JsonValue;
     }
 
     async statusInstance(instance: string): Promise<JsonValue> {

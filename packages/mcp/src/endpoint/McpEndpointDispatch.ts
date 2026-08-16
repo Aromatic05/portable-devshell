@@ -1,7 +1,11 @@
 import {
+    createError,
+    errorCodes,
     mergeComments,
     resolveResultHints,
     type JsonValue,
+    type McpContextEnvironment,
+    type McpContextRecord,
     type ToolCallContext
 } from "@portable-devshell/shared";
 
@@ -67,7 +71,10 @@ export class McpEndpointDispatch {
             instanceName: options.instanceName,
             worker: options.worker
         });
-        this.#instance = new McpEndpointHandlerInstance(controlOptions);
+        this.#instance = new McpEndpointHandlerInstance({
+            ...controlOptions,
+            contextRegistry: this.#contextRegistry
+        });
         this.#todo = new McpEndpointHandlerTodo(controlOptions);
         this.#workerHandler = new McpEndpointHandlerWorker({
             catalog: options.catalog,
@@ -176,21 +183,20 @@ export class McpEndpointDispatch {
         prepareWorkerState: boolean,
         signal?: AbortSignal
     ): Promise<ToolCallContext> {
-        let record = await this.#contextRegistry.validateAndTouch(ctxId, {
-            instance,
+        const record = await this.#contextRegistry.validateAndTouch(ctxId, {
             principal: requestContext.principal
         });
-        if (prepareWorkerState) {
-            record = await this.#ensureContextWorkerState(record, instance);
-        }
+        const environment = prepareWorkerState
+            ? await this.#ensureContextWorkerState(record, instance)
+            : contextEnvironment(record, instance);
         const context: ToolCallContext = {
             ctxId: record.ctxId,
             requestId: requestContext.requestId,
             source: "mcp",
-            workspace: record.workspace
+            ...(environment?.workspace === undefined ? {} : { workspace: environment.workspace })
         };
         if (prepareWorkerState) {
-            await this.#touchAlerts(instance, record.workspace);
+            await this.#touchAlerts(instance, environment!.workspace!);
         }
         await this.#appendMcpToolCalled(instance, toolName, {
             ctxId: context.ctxId,
@@ -203,11 +209,15 @@ export class McpEndpointDispatch {
     async #ensureContextWorkerState(
         record: Awaited<ReturnType<McpContextRegistry["validateAndTouch"]>>,
         instance: string
-    ): Promise<Awaited<ReturnType<McpContextRegistry["validateAndTouch"]>>> {
-        if (record.temporaryDirectory !== undefined) {
+    ): Promise<McpContextEnvironment> {
+        const environment = contextEnvironment(record, instance);
+        if (environment?.workspace === undefined) {
+            throw contextWorkspaceRequired(record.ctxId, instance);
+        }
+        if (environment.temporaryDirectory !== undefined) {
             try {
-                await this.#touchTemporaryDirectory(instance, record.temporaryDirectory);
-                return record;
+                await this.#touchTemporaryDirectory(instance, environment.temporaryDirectory);
+                return environment;
             } catch (error) {
                 if (!isRecoverableContextTemporaryError(error)) {
                     throw error;
@@ -215,12 +225,13 @@ export class McpEndpointDispatch {
             }
         }
 
-        const prepared = await this.#prepareWorkspace(instance, record.workspace);
-        if (prepared === undefined) return record;
-        return await this.#contextRegistry.updateWorkerState(record.ctxId, {
+        const prepared = await this.#prepareWorkspace(instance, environment.workspace);
+        if (prepared === undefined) return environment;
+        const updated = await this.#contextRegistry.updateWorkerState(record.ctxId, instance, {
             temporaryDirectory: prepared.temporaryDirectory,
             workspace: prepared.workspace
         });
+        return contextEnvironment(updated, instance)!;
     }
 
     async #appendMcpToolCalled(
@@ -306,7 +317,7 @@ export class McpEndpointDispatch {
             case "artifact":
                 return await this.#artifact.call(toolName as McpToolCatalogArtifactName, input, context, signal);
             case "instance":
-                return await this.#instance.call(toolName as McpToolCatalogInstanceName, input, signal);
+                return await this.#instance.call(toolName as McpToolCatalogInstanceName, input, context, signal);
             case "todo":
                 return await this.#todo.call(toolName as McpToolCatalogTodoName, input, context, signal);
         }
@@ -320,4 +331,17 @@ function isRecoverableContextTemporaryError(error: unknown): boolean {
     }
     const code = (error as { code?: unknown }).code;
     return code === "workspace.temporaryUnavailable" || code === "workspace.temporaryInvalid";
+}
+
+function contextEnvironment(record: McpContextRecord, instance: string): McpContextEnvironment | undefined {
+    return record.environments.find((environment) => environment.instance === instance);
+}
+
+function contextWorkspaceRequired(ctxId: string, instance: string) {
+    return createError({
+        code: errorCodes.mcpContextWorkspaceRequired,
+        details: { ctxId, instance },
+        message: `No workspace is attached to ${instance} for this ctxId. Call instance_connect with an absolute workspace.`,
+        retryable: false
+    });
 }

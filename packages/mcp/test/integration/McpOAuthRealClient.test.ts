@@ -112,7 +112,7 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
         async readAlerts() { return { advice: [] }; },
         async releaseAlerts() {},
         async readTodo() { return { items: [], revision: 0 }; },
-        async startInstance() { return null; },
+        async connectInstance() { return null; },
         async statusInstance() { return null; },
         async stopInstance() { return null; },
         async touchAlerts() {},

@@ -168,6 +168,15 @@ export function readMcpInstanceName(input: JsonValue, toolName: string): string 
     return input.instance.trim();
 }
 
+export function readMcpInstanceConnectInput(input: JsonValue): { instance: string; workspace?: string } {
+    if (!isRecord(input) || Object.keys(input).some((key) => key !== "instance" && key !== "workspace")) {
+        throw invalidArguments("instance_connect accepts only instance and optional workspace.");
+    }
+    const instance = requiredString(input.instance, "instance");
+    const workspace = optionalString(input.workspace, "workspace");
+    return workspace === undefined ? { instance } : { instance, workspace };
+}
+
 export function readMcpWorkspace(input: JsonValue, toolName: string): string {
     if (!isRecord(input) || Object.keys(input).length !== 1 || input.workspace === undefined) {
         throw invalidArguments(`${toolName} requires workspace.`);

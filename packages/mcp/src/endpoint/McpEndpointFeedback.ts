@@ -32,9 +32,12 @@ export function attachMcpComments(result: JsonValue, comments: readonly string[]
         throw new Error("MCP tool results must be objects when context comments are enabled.");
     }
     if (comments.length === 0) return result;
+    const existing = Array.isArray(result.comment)
+        ? result.comment.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+        : [];
     return {
         ...result,
-        comment: [...comments]
+        comment: [...existing, ...comments]
     };
 }
 

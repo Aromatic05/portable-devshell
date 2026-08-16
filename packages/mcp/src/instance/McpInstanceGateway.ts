@@ -56,7 +56,7 @@ export interface McpInstanceGateway {
     }>;
     readAlerts(instance: string, workspace: string): Promise<{ advice: Array<{ code: string; text: string }> }>;
     releaseAlerts(instance: string, workspace: string): Promise<void>;
-    startInstance(instance: string): Promise<JsonValue>;
+    connectInstance(instance: string): Promise<JsonValue>;
     statusInstance(instance: string): Promise<JsonValue>;
     stopInstance(instance: string): Promise<JsonValue>;
     touchAlerts(instance: string, workspace: string): Promise<void>;

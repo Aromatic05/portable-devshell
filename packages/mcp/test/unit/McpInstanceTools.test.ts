@@ -36,19 +36,9 @@ const activeContext = await contextRegistry.create({
     principal: "local",
     workspace: "/workspace"
 });
-const remoteContext = await contextRegistry.create({
-    instance: "remote-server",
-    principal: "local",
-    temporaryDirectory: "/tmp/remote-context",
-    workspace: "/remote-workspace"
-});
 const withContext = <T extends Record<string, unknown>>(input: T): T & { ctxId: string } => ({
     ...input,
     ctxId: activeContext.ctxId
-});
-const withRemoteContext = <T extends Record<string, unknown>>(input: T): T & { ctxId: string } => ({
-    ...input,
-    ctxId: remoteContext.ctxId
 });
 
 test("instance tools are hidden unless instance group and manage capability are both enabled", () => {
@@ -83,6 +73,13 @@ test("management-enabled endpoint augments worker schemas for cross-instance rou
         undefined
     );
     assert.equal(tools.some((tool) => tool.name === "instance_list"), true);
+    const connectSchema = tools.find((tool) => tool.name === "instance_connect")?.inputSchema as {
+        properties?: Record<string, unknown>;
+        required?: string[];
+    };
+    assert.notEqual(connectSchema.properties?.ctxId, undefined);
+    assert.notEqual(connectSchema.properties?.workspace, undefined);
+    assert.equal(connectSchema.required?.includes("ctxId"), true);
 });
 
 test("worker calls default to the endpoint instance and route explicit targets through the gateway", async () => {
@@ -103,14 +100,26 @@ test("worker calls default to the endpoint instance and route explicit targets t
     const endpoint = createManagedEndpoint(worker, gateway);
 
     assert.deepEqual(await endpoint.callTool("bash_run", withContext({ command: "pwd" }), context), { local: true });
+    await assert.rejects(
+        endpoint.callTool("bash_run", withContext({ command: "pwd", instance: "remote-server" }), context),
+        (error: unknown) => {
+            assert.equal((error as { code?: string }).code, "mcp.contextWorkspaceRequired");
+            return true;
+        }
+    );
+    await endpoint.callTool(
+        "instance_connect",
+        withContext({ instance: "remote-server", workspace: "/remote-workspace" }),
+        context
+    );
     assert.deepEqual(
-        await endpoint.callTool("bash_run", withRemoteContext({ command: "pwd", instance: "remote-server" }), context),
+        await endpoint.callTool("bash_run", withContext({ command: "pwd", instance: "remote-server" }), context),
         { remote: true }
     );
     assert.deepEqual(localCalls, [{ input: { command: "pwd" }, toolName: "bash_run" }]);
     assert.deepEqual(remoteCalls, [{
         context: {
-            ctxId: remoteContext.ctxId,
+            ctxId: activeContext.ctxId,
             requestId: "request-1",
             source: "mcp",
             workspace: "/remote-workspace"
@@ -120,13 +129,6 @@ test("worker calls default to the endpoint instance and route explicit targets t
         toolName: "bash_run"
     }]);
 
-    await assert.rejects(
-        endpoint.callTool("bash_run", withContext({ command: "pwd", instance: "remote-server" }), context),
-        (error: unknown) => {
-            assert.equal((error as { code?: string }).code, "mcp.contextInvalid");
-            return true;
-        }
-    );
 });
 
 test("remote worker calls check target readiness before tool exposure", async () => {
@@ -147,8 +149,13 @@ test("remote worker calls check target readiness before tool exposure", async ()
     });
     const endpoint = createManagedEndpoint(createWorker(), gateway, { readyWaitMs: 50 });
 
+    await contextRegistry.attachEnvironment(activeContext.ctxId, {
+        instance: "remote-server",
+        temporaryDirectory: "/tmp/remote-context",
+        workspace: "/remote-workspace"
+    });
     await assert.rejects(
-        endpoint.callTool("bash_run", withRemoteContext({ command: "pwd", instance: "remote-server" }), context),
+        endpoint.callTool("bash_run", withContext({ command: "pwd", instance: "remote-server" }), context),
         (error: unknown) => {
             assert.equal((error as { code?: string }).code, "core.instanceNotReady");
             return true;
@@ -163,14 +170,14 @@ test("cancelling an instance lifecycle tool stops MCP waiting while the operatio
         resolveStart = resolve;
     });
     const gateway = createGateway({
-        async startInstance() {
+        async connectInstance() {
             return await start;
         }
     });
     const endpoint = createManagedEndpoint(createWorker({ hasSchema: false, ready: false }), gateway);
     const controller = new AbortController();
     const pending = endpoint.callTool(
-        "instance_start",
+        "instance_connect",
         withContext({ instance: "remote-server" }),
         context,
         controller.signal
@@ -198,8 +205,8 @@ test("instance management tools delegate to the gateway without requiring the lo
             calls.push("list");
             return [];
         },
-        startInstance: async (instance) => {
-            calls.push(`start:${instance}`);
+        connectInstance: async (instance) => {
+            calls.push(`connect:${instance}`);
             return { instance };
         },
         statusInstance: async (instance) => {
@@ -215,7 +222,7 @@ test("instance management tools delegate to the gateway without requiring the lo
 
     assert.deepEqual(await endpoint.callTool("instance_list", withContext({}), context), { instances: [] });
     await endpoint.callTool("instance_status", withContext({ instance: "remote-server" }), context);
-    await endpoint.callTool("instance_start", withContext({ instance: "remote-server" }), context);
+    await endpoint.callTool("instance_connect", withContext({ instance: "remote-server" }), context);
     await endpoint.callTool("instance_stop", withContext({ instance: "remote-server" }), context);
     await endpoint.callTool(
         "instance_create",
@@ -232,7 +239,7 @@ test("instance management tools delegate to the gateway without requiring the lo
     assert.deepEqual(calls, [
         "list",
         "status:remote-server",
-        "start:remote-server",
+        "connect:remote-server",
         "stop:remote-server",
         "create:main-pc"
     ]);
@@ -372,8 +379,8 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
         async readTodo(instance, title) {
             return await (overrides.readTodo?.(instance, title) ?? Promise.resolve({ items: [], revision: 0, summary: { completed: 0, total: 0 } }));
         },
-        async startInstance(instance) {
-            return await (overrides.startInstance?.(instance) ?? Promise.resolve({ instance }));
+        async connectInstance(instance) {
+            return await (overrides.connectInstance?.(instance) ?? Promise.resolve({ instance }));
         },
         async statusInstance(instance) {
             return await (overrides.statusInstance?.(instance) ?? Promise.resolve({ instance }));

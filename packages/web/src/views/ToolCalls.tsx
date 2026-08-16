@@ -38,8 +38,7 @@ export function ToolCalls({
     const [refreshing, setRefreshing] = useState(false);
     const [disableConfirmation, setDisableConfirmation] = useState<{
         ctxId: string;
-        instance: string;
-        workspace: string;
+        workspace?: string;
     }>();
     const instanceState = state.readModel.instanceState;
     const allCalls = useMemo(
@@ -69,12 +68,24 @@ export function ToolCalls({
     );
     const selectedCtxId = selectedContextId(filters.ctxId);
     const contextInstances = useMemo(() => {
-        const owners = new Map<string, string>();
-        for (const context of state.readModel.contexts) owners.set(context.ctxId, context.instance);
-        for (const call of [...allCalls, ...allCommentCalls]) {
-            if (call.ctxId !== undefined) owners.set(call.ctxId, call.instance);
+        const targets = new Map<string, Set<string>>();
+        const add = (ctxId: string, instance: string) => {
+            const instances = targets.get(ctxId) ?? new Set<string>();
+            instances.add(instance);
+            targets.set(ctxId, instances);
+        };
+        for (const context of state.readModel.contexts) {
+            const environments = context.environments ?? [{
+                instance: context.instance,
+                temporaryDirectory: context.temporaryDirectory,
+                workspace: context.workspace,
+            }];
+            for (const environment of environments) add(context.ctxId, environment.instance);
         }
-        return owners;
+        for (const call of [...allCalls, ...allCommentCalls]) {
+            if (call.ctxId !== undefined) add(call.ctxId, call.instance);
+        }
+        return targets;
     }, [allCalls, allCommentCalls, state.readModel.contexts]);
     const contexts = useMemo(
         () => [...contextInstances.keys()]
@@ -85,14 +96,18 @@ export function ToolCalls({
             .sort(),
         [contextInstances, contextStatuses, filters.contextStatus],
     );
-    const contextInstance = selectedCtxId === undefined
+    const contextTargets = selectedCtxId === undefined
         ? undefined
         : contextInstances.get(selectedCtxId);
-    const instance = contextInstance ?? (
-        filters.instance === "all" || instances.includes(filters.instance)
-            ? filters.instance
-            : "all"
-    );
+    const contextInstance = contextTargets?.size === 1
+        ? [...contextTargets][0]
+        : undefined;
+    const selectedInstance = filters.instance === "all" || instances.includes(filters.instance)
+        ? filters.instance
+        : "all";
+    const instance = selectedInstance !== "all" && contextTargets?.has(selectedInstance) === true
+        ? selectedInstance
+        : contextInstance ?? selectedInstance;
     const contextFilter =
         filters.ctxId === allContextsFilter ||
         filters.ctxId === unscopedContextFilter ||
@@ -122,7 +137,8 @@ export function ToolCalls({
     const concreteContext =
         effectiveFilters.instance !== "all" &&
         ctxId !== undefined &&
-        contexts.includes(ctxId);
+        contexts.includes(ctxId) &&
+        contextInstances.get(ctxId)?.has(effectiveFilters.instance) === true;
     const queuedComments = concreteContext
         ? (instanceState[effectiveFilters.instance]?.contextMessages ?? [])
               .filter(
@@ -164,12 +180,15 @@ export function ToolCalls({
         ? `context-message:${effectiveFilters.instance}:${ctxId}`
         : undefined;
     const interactive = state.connection === "online" && !disabled;
-    const contextRecord = concreteContext
-        ? state.readModel.contexts.find(
-              (record) =>
-                  record.ctxId === ctxId &&
-                  record.instance === effectiveFilters.instance,
-          )
+    const contextRecord = ctxId === undefined
+        ? undefined
+        : state.readModel.contexts.find((record) => record.ctxId === ctxId);
+    const contextEnvironment = concreteContext && contextRecord !== undefined
+        ? (contextRecord.environments ?? [{
+              instance: contextRecord.instance,
+              temporaryDirectory: contextRecord.temporaryDirectory,
+              workspace: contextRecord.workspace,
+          }]).find((environment) => environment.instance === effectiveFilters.instance)
         : undefined;
     const disableOperation = disableConfirmation === undefined
         ? undefined
@@ -199,9 +218,7 @@ export function ToolCalls({
             const contextChanged =
                 next.instance !== current.instance || next.ctxId !== current.ctxId;
             if (contextChanged) setDraft("");
-            return next.instance !== current.instance
-                ? { ...next, ctxId: allContextsFilter }
-                : next;
+            return next;
         });
     }
 
@@ -265,7 +282,7 @@ export function ToolCalls({
             {concreteContext ? <>
                 <p className="hint">{effectiveFilters.instance} · {ctxId}</p>
                 {contextRecord === undefined ? null : <p className="hint">
-                    Workspace: {contextRecord.workspace} · Status: {contextRecord.status} · expires {contextRecord.expiresAt}
+                    Workspace: {contextEnvironment?.workspace ?? "not attached"} · Status: {contextRecord.status} · expires {contextRecord.expiresAt}
                 </p>}
                 {contextRecord !== undefined && contextRecord.status !== "disabled" ? <p>
                     <button
@@ -273,8 +290,7 @@ export function ToolCalls({
                         disabled={!interactive}
                         onClick={() => setDisableConfirmation({
                             ctxId,
-                            instance: effectiveFilters.instance,
-                            workspace: contextRecord.workspace,
+                            workspace: contextEnvironment?.workspace,
                         })}
                         type="button"
                     >
@@ -356,7 +372,7 @@ export function ToolCalls({
         {disableConfirmation === undefined ? null : <ConfirmationDialog
             actionLabel="Disable"
             busy={disableOperation !== undefined && state.operations[disableOperation] !== undefined}
-            description={`Disable Context ${disableConfirmation.ctxId} for ${disableConfirmation.instance} in workspace ${disableConfirmation.workspace}? This cannot be renewed; the client must establish a new Context.`}
+            description={`Disable Context ${disableConfirmation.ctxId}${disableConfirmation.workspace === undefined ? "" : ` from workspace ${disableConfirmation.workspace}`} across all attached instances? This cannot be renewed; the client must establish a new Context.`}
             onCancel={() => setDisableConfirmation(undefined)}
             onConfirm={() => {
                 const request = store.disableContext(disableConfirmation.ctxId);

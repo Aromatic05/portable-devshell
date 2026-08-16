@@ -36,7 +36,7 @@ MCP enabled: yes
 
 实例名必须包含连字符。`demo` 无效，`demo-local` 有效。
 
-workspace 不属于 instance 配置。需要执行工具时，由调用方显式给出 worker 上的绝对 workspace；MCP 则在 `environ_info` 建立 Context 时选择 workspace。
+workspace 不属于 instance 配置。需要执行工具时，由调用方显式给出 worker 上的绝对 workspace；MCP 在 `environ_info` 建立 Context 时选择初始 workspace，并可用 `instance_connect` 给同一 `ctxId` 附加其他 instance 的 workspace。
 
 向导默认启用这些 MCP group：
 

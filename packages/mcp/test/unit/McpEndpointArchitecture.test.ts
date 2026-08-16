@@ -150,7 +150,7 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
         async readTodo(): Promise<JsonValue> {
             return { items: [], revision: 0 };
         },
-        async startInstance(): Promise<JsonValue> {
+        async connectInstance(): Promise<JsonValue> {
             return { started: true };
         },
         async statusInstance(): Promise<JsonValue> {

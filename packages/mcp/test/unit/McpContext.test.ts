@@ -41,10 +41,14 @@ test("McpContextRegistry persists active contexts and renews their sliding expir
         });
         assert.equal(created.ctxId, "ctx-persisted");
         assert.equal(created.expiresAt, "2026-07-15T00:01:00.000Z");
+        await registry.attachEnvironment(created.ctxId, {
+            instance: "remote-server",
+            temporaryDirectory: "/tmp/remote-context",
+            workspace: "/remote-workspace"
+        });
 
         now += 30_000;
         const renewed = await registry.validateAndTouch("ctx-persisted", {
-            instance: "demo-local",
             principal: "local"
         });
         assert.equal(renewed.expiresAt, "2026-07-15T00:01:30.000Z");
@@ -53,10 +57,14 @@ test("McpContextRegistry persists active contexts and renews their sliding expir
         await reloaded.initialize();
         assert.equal(
             (await reloaded.validateAndTouch("ctx-persisted", {
-                instance: "demo-local",
                 principal: "local"
             })).ctxId,
             "ctx-persisted"
+        );
+        const remote = await reloaded.validateForInstance("ctx-persisted", "remote-server");
+        assert.equal(
+            remote.environments.find((environment) => environment.instance === "remote-server")?.workspace,
+            "/remote-workspace"
         );
         assert.match(await readFile(filePath, "utf8"), /ctx-persisted/u);
     } finally {
@@ -126,7 +134,7 @@ test("McpContextRegistry distinguishes invalid and expired ctxId values", async 
     await assert.rejects(registry.validateAndTouch("ctx-expiring", binding), hasCode("mcp.contextExpired"));
 });
 
-test("McpContextRegistry validates an active Context for its owning instance without renewing it", async () => {
+test("McpContextRegistry validates attached instances without binding ctxId authority to one instance", async () => {
     let now = Date.parse("2026-08-13T00:00:00.000Z");
     const registry = new McpContextRegistry({ idFactory: () => "ctx-comment", now: () => now, ttlMs: 60_000 });
     await registry.initialize();
@@ -143,6 +151,10 @@ test("McpContextRegistry validates an active Context for its owning instance wit
         registry.validateForInstance(created.ctxId, "beta"),
         hasCode("mcp.contextInvalid"),
     );
+    await registry.attachEnvironment(created.ctxId, { instance: "beta" });
+    const attached = await registry.validateForInstance(created.ctxId, "beta");
+    assert.equal(attached.ctxId, created.ctxId);
+    assert.equal(attached.expiresAt, created.expiresAt);
 
     await registry.disable(created.ctxId);
     await assert.rejects(

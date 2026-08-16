@@ -283,7 +283,7 @@ test("cross-tool error hints apply to any tool and walk the cause chain", () => 
     const denied = resolveErrorHints("bash_run", body("core.approvalDenied"));
     assert.deepEqual(codes(denied), ["core.approvalDenied"]);
 
-    const wrapped = resolveErrorHints("instance_start", body("core.workerStartFailed", {
+    const wrapped = resolveErrorHints("instance_connect", body("core.workerStartFailed", {
         cause: { code: "core.providerFailed", message: "provider", retryable: true }
     }));
     assert.deepEqual(codes(wrapped), ["core.workerStartFailed", "core.providerFailed"]);

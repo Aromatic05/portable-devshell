@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 import {
     createError,
     errorCodes,
+    type McpContextEnvironment,
     type McpContextRecord,
 } from "@portable-devshell/shared";
 
@@ -20,7 +21,15 @@ export interface McpContextBinding {
     workspace: string;
 }
 
-export type McpContextValidationBinding = Omit<McpContextBinding, "workspace">;
+export interface McpContextEnvironmentBinding {
+    instance: string;
+    temporaryDirectory?: string;
+    workspace?: string;
+}
+
+export interface McpContextValidationBinding {
+    principal: string;
+}
 
 interface McpContextDocument {
     contexts: McpContextRecord[];
@@ -95,6 +104,11 @@ export class McpContextRegistry {
                 ...binding,
                 createdAt: at,
                 ctxId,
+                environments: [{
+                    instance: binding.instance,
+                    temporaryDirectory: binding.temporaryDirectory,
+                    workspace: binding.workspace
+                }],
                 expiresAt: new Date(now + this.#ttlMs).toISOString(),
                 lastAccessedAt: at,
                 status: "active"
@@ -128,10 +142,7 @@ export class McpContextRegistry {
                 }
                 throw expiredContext(ctxId, record.expiresAt);
             }
-            if (
-                record.principal !== binding.principal ||
-                record.instance !== binding.instance
-            ) {
+            if (record.principal !== binding.principal) {
                 throw invalidContext(ctxId);
             }
             await this.#mutateAndPersist(() => {
@@ -164,9 +175,55 @@ export class McpContextRegistry {
                 }
                 throw expiredContext(ctxId, record.expiresAt);
             }
-            if (record.instance !== instance) {
+            if (contextEnvironment(record, instance) === undefined) {
                 throw invalidContext(ctxId);
             }
+            return cloneRecord(record);
+        });
+    }
+
+    async attachEnvironment(
+        ctxId: string,
+        binding: McpContextEnvironmentBinding
+    ): Promise<McpContextRecord> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined || !isCtxId(ctxId)) {
+                throw invalidContext(ctxId);
+            }
+            if (record.status === "disabled") {
+                throw disabledContext(ctxId);
+            }
+            const now = this.#now();
+            if (record.status === "expired" || Date.parse(record.expiresAt) <= now) {
+                if (record.status !== "expired") {
+                    await this.#mutateAndPersist(() => {
+                        record.status = "expired";
+                    });
+                }
+                throw expiredContext(ctxId, record.expiresAt);
+            }
+            await this.#mutateAndPersist(() => {
+                const index = record.environments.findIndex((environment) => environment.instance === binding.instance);
+                const current = index < 0 ? undefined : record.environments[index];
+                const next: McpContextEnvironment = binding.workspace === undefined
+                    ? { ...(current ?? {}), instance: binding.instance }
+                    : {
+                        instance: binding.instance,
+                        temporaryDirectory: binding.temporaryDirectory,
+                        workspace: binding.workspace
+                    };
+                if (index < 0) {
+                    record.environments.push(next);
+                } else {
+                    record.environments[index] = next;
+                }
+                if (record.instance === binding.instance && binding.workspace !== undefined) {
+                    record.workspace = binding.workspace;
+                    record.temporaryDirectory = binding.temporaryDirectory;
+                }
+            });
             return cloneRecord(record);
         });
     }
@@ -241,6 +298,7 @@ export class McpContextRegistry {
 
     async updateWorkerState(
         ctxId: string,
+        instance: string,
         binding: Pick<McpContextBinding, "temporaryDirectory" | "workspace">
     ): Promise<McpContextRecord> {
         return await this.#run(async () => {
@@ -255,9 +313,17 @@ export class McpContextRegistry {
             if (record.status === "expired") {
                 throw expiredContext(ctxId, record.expiresAt);
             }
+            const environment = contextEnvironment(record, instance);
+            if (environment === undefined) {
+                throw invalidContext(ctxId);
+            }
             await this.#mutateAndPersist(() => {
-                record.workspace = binding.workspace;
-                record.temporaryDirectory = binding.temporaryDirectory;
+                environment.workspace = binding.workspace;
+                environment.temporaryDirectory = binding.temporaryDirectory;
+                if (record.instance === instance) {
+                    record.workspace = binding.workspace;
+                    record.temporaryDirectory = binding.temporaryDirectory;
+                }
             });
             return cloneRecord(record);
         });
@@ -293,9 +359,10 @@ export class McpContextRegistry {
             throw new Error(`Invalid MCP context registry: ${this.#filePath}`);
         }
         this.#contexts.clear();
-        for (const record of parsed.contexts) {
-            if (isRecord(record)) {
-                this.#contexts.set(record.ctxId, { ...record });
+        for (const value of parsed.contexts) {
+            const record = parseRecord(value);
+            if (record !== undefined) {
+                this.#contexts.set(record.ctxId, record);
             }
         }
     }
@@ -394,7 +461,14 @@ function isCtxId(value: string): boolean {
 }
 
 function cloneRecord(record: McpContextRecord): McpContextRecord {
-    return { ...record };
+    return {
+        ...record,
+        environments: record.environments.map((environment) => ({ ...environment }))
+    };
+}
+
+function contextEnvironment(record: McpContextRecord, instance: string): McpContextEnvironment | undefined {
+    return record.environments.find((environment) => environment.instance === instance);
 }
 
 function cloneContextMap(
@@ -418,17 +492,63 @@ function isDocument(value: unknown): value is McpContextDocument {
         (value as { version?: unknown }).version === 1 && Array.isArray((value as { contexts?: unknown }).contexts);
 }
 
-function isRecord(value: unknown): value is McpContextRecord {
+function parseRecord(value: unknown): McpContextRecord | undefined {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        return false;
+        return undefined;
     }
     const record = value as Partial<McpContextRecord>;
-    return typeof record.ctxId === "string" && isCtxId(record.ctxId) &&
-        typeof record.principal === "string" && typeof record.instance === "string" &&
-        typeof record.workspace === "string" && typeof record.createdAt === "string" &&
-        typeof record.lastAccessedAt === "string" && typeof record.expiresAt === "string" &&
-        (record.temporaryDirectory === undefined || typeof record.temporaryDirectory === "string") &&
-        (record.status === "active" || record.status === "expired" || record.status === "disabled");
+    if (typeof record.ctxId !== "string" || !isCtxId(record.ctxId) ||
+        typeof record.principal !== "string" || typeof record.instance !== "string" ||
+        typeof record.workspace !== "string" || typeof record.createdAt !== "string" ||
+        typeof record.lastAccessedAt !== "string" || typeof record.expiresAt !== "string" ||
+        (record.temporaryDirectory !== undefined && typeof record.temporaryDirectory !== "string") ||
+        (record.status !== "active" && record.status !== "expired" && record.status !== "disabled")) {
+        return undefined;
+    }
+    const environments = Array.isArray(record.environments)
+        ? record.environments.map(parseEnvironment)
+        : [];
+    if (environments.some((environment) => environment === undefined)) {
+        return undefined;
+    }
+    const byInstance = new Map<string, McpContextEnvironment>();
+    for (const environment of environments as McpContextEnvironment[]) {
+        byInstance.set(environment.instance, environment);
+    }
+    byInstance.set(record.instance, {
+        instance: record.instance,
+        temporaryDirectory: record.temporaryDirectory,
+        workspace: record.workspace
+    });
+    return {
+        createdAt: record.createdAt,
+        ctxId: record.ctxId,
+        environments: [...byInstance.values()],
+        expiresAt: record.expiresAt,
+        instance: record.instance,
+        lastAccessedAt: record.lastAccessedAt,
+        principal: record.principal,
+        status: record.status,
+        temporaryDirectory: record.temporaryDirectory,
+        workspace: record.workspace
+    };
+}
+
+function parseEnvironment(value: unknown): McpContextEnvironment | undefined {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return undefined;
+    }
+    const environment = value as Partial<McpContextEnvironment>;
+    if (typeof environment.instance !== "string" || environment.instance.length === 0 ||
+        (environment.workspace !== undefined && typeof environment.workspace !== "string") ||
+        (environment.temporaryDirectory !== undefined && typeof environment.temporaryDirectory !== "string")) {
+        return undefined;
+    }
+    return {
+        instance: environment.instance,
+        temporaryDirectory: environment.temporaryDirectory,
+        workspace: environment.workspace
+    };
 }
 
 function isMissing(error: unknown): error is NodeJS.ErrnoException {
