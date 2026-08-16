@@ -96,6 +96,7 @@ pub struct TmuxCreateParams {
     )]
     pub name: String,
     #[serde(default)]
+    /// Initial pane directory. Use ./ for a workspace-relative path or / for an absolute path.
     pub cwd: Option<String>,
 }
 

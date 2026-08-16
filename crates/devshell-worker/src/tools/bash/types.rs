@@ -11,6 +11,7 @@ use crate::tools::artifact::types::ArtifactReference;
 pub struct BashRunParams {
     pub command: String,
     #[serde(default)]
+    /// Working directory. Use ./ for a workspace-relative path or / for an absolute path.
     pub cwd: Option<String>,
     #[serde(default)]
     pub stdin: Option<String>,

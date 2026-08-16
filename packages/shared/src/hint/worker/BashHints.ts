@@ -67,7 +67,7 @@ export function bashErrorHints(body: ControlErrorBody): ToolDiagnosticHint[] {
         case "bash.invalidCwd":
             return [errorHint(
                 "bash.invalidCwd",
-                "Confirm the working directory."
+                "Use ./ for a workspace-relative cwd or / for an absolute cwd."
             )];
         case "bash.spawnFailed":
             return [errorHint(

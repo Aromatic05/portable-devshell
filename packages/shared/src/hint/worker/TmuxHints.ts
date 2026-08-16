@@ -185,7 +185,7 @@ export function tmuxErrorHints(toolName: string, body: ControlErrorBody): ToolDi
         case "tmux.invalidCwd":
             return [errorHint(
                 "tmux.invalidCwd",
-                "Confirm the working directory."
+                "Use ./ for a workspace-relative cwd or / for an absolute cwd."
             )];
         case "tmux.invalidInput":
         case "tmux.invalidFormat":

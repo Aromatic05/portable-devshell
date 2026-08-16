@@ -98,6 +98,7 @@ test("bash_run truncation hint does not leak an artifact handle", () => {
 
 test("bash_run error hints cover invalid command and cancellation semantics", () => {
     assert.deepEqual(codes(resolveErrorHints("bash_run", body("bash.invalidCommand"))), ["bash.invalidCommand"]);
+    assert.match(resolveErrorHints("bash_run", body("bash.invalidCwd"))[0]?.text ?? "", /\.\/.*workspace-relative/u);
     const cancelled = resolveErrorHints("bash_run", body("tool.cancelled"));
     assert.deepEqual(codes(cancelled), ["tool.cancelled"]);
 });
@@ -216,6 +217,10 @@ test("tmux task terminal status distinguishes success, failure, and unknown", ()
 test("tmux_run start-unconfirmed forbids an immediate relaunch", () => {
     const hints = resolveErrorHints("tmux_run", body("tmux.taskStartUnconfirmed"));
     assert.deepEqual(codes(hints), ["tmux.taskStartUnconfirmed"]);
+});
+
+test("tmux cwd errors explain the supported path namespaces", () => {
+    assert.match(resolveErrorHints("tmux_create", body("tmux.invalidCwd"))[0]?.text ?? "", /\.\/.*workspace-relative/u);
 });
 
 test("tmux_list full capacity is a diagnostic, not a list failure", () => {
