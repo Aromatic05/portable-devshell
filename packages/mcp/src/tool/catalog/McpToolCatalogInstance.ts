@@ -99,7 +99,7 @@ export class McpToolCatalogInstance {
         ),
         definition(
             "instance_connect",
-            "Ensure a managed instance is ready and optionally attach an absolute workspace to this session context. The operation is idempotent. Use only when explicitly requested by the user.",
+            "Ensure a managed instance is ready and optionally attach an absolute workspace to this session context. The operation is idempotent; use it to satisfy mcp.contextWorkspaceRequired for cross-instance work.",
             instanceConnectSchema
         ),
         definition(
