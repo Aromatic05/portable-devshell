@@ -250,3 +250,41 @@ test("environ_info rolls back an undisclosed Context when post-create event reco
     assert.deepEqual(await registry.list(), []);
     assert.deepEqual(harness.releasedAlerts, ["/projects/rollback"]);
 });
+
+test("environ_info rollback keeps alerts leased by another Context attachment", async () => {
+    const harness = createWorker({ failToolCalled: true });
+    const ids = ["ctx-existing", "ctx-rollback"];
+    const registry = new McpContextRegistry({ idFactory: () => ids.shift()! });
+    const existing = await registry.create({
+        instance: "origin",
+        principal: "tester",
+        workspace: "/projects/origin"
+    });
+    await registry.attachEnvironment(existing.ctxId, {
+        instance: "demo-local",
+        workspace: "/projects/rollback"
+    });
+    const catalog = new McpEndpointCatalog({
+        instanceName: "demo-local",
+        policy: { capabilities: ["read"], groups: ["file"] },
+        worker: harness.worker,
+    });
+    const dispatch = new McpEndpointDispatch({
+        catalog,
+        contextRegistry: registry,
+        instanceName: "demo-local",
+        worker: harness.worker,
+    });
+
+    await assert.rejects(
+        dispatch.callTool(
+            "environ_info",
+            { workspace: "/projects/rollback" },
+            { principal: "tester", requestId: "request-rollback" },
+        ),
+        /tool event failed/u,
+    );
+
+    assert.deepEqual((await registry.list()).map(({ ctxId }) => ctxId), [existing.ctxId]);
+    assert.deepEqual(harness.releasedAlerts, []);
+});

@@ -151,10 +151,11 @@ export class McpEndpointHandlerEnvironment {
         await this.#contextRegistry.discard(ctxId);
         const now = Date.now();
         const hasOtherActiveContext = (await this.#contextRegistry.list()).some((context) =>
-            context.instance === instance &&
-            context.workspace === workspace &&
             context.status === "active" &&
-            Date.parse(context.expiresAt) > now
+            Date.parse(context.expiresAt) > now &&
+            context.environments.some((environment) =>
+                environment.instance === instance && environment.workspace === workspace
+            )
         );
         if (hasOtherActiveContext) return;
         if (instance === this.#instanceName) {
