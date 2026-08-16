@@ -24,7 +24,7 @@ pub struct FileReadInput {
     pub path: String,
     #[serde(default)]
     pub view: FileReadView,
-    /// Content selector using N, N-M, N+count, or sorted non-overlapping comma-separated ranges. Append :raw for exact lines; otherwise each range includes one preceding line and up to three following lines for editing context. Cannot be combined with view=outline.
+    /// Content selector using N, N-M, N+count, or sorted non-overlapping comma-separated ranges. Append :raw to disable editing-context expansion; a single N still opens the default window, so use N-N:raw for exactly one line. Without :raw, each range includes one preceding line and up to three following lines. Cannot be combined with view=outline.
     pub selector: Option<String>,
 }
 
