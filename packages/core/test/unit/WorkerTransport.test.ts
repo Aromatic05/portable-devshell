@@ -528,8 +528,12 @@ test("ssh transport mirrors control skills to the remote user skill directory", 
             closeRecordedChild(child, { stdout: "/home/dev" });
             return true;
         }
-        if (callIndex === 1) {
+        if (callIndex === 1 || callIndex === 3) {
             child.stdin.once("finish", () => closeRecordedChild(child));
+            return true;
+        }
+        if (callIndex === 2 || callIndex === 4) {
+            closeRecordedChild(child, { stdout: "devshell-worker 0.0.0\n" });
             return true;
         }
         return false;
@@ -544,15 +548,18 @@ test("ssh transport mirrors control skills to the remote user skill directory", 
     await transport.installWorker();
     await transport.installWorker();
 
-    assert.equal(recorder.calls.length, 4);
+    assert.equal(recorder.calls.length, 5);
     assert.equal(recorder.calls[1]?.args[8]?.includes("/home/dev/.devshell/skill"), true);
     assert.equal(recorder.calls[1]?.args[8]?.includes("tar -xpf -"), true);
     assert.deepEqual(recorder.calls[1]?.options.stdio, ["pipe", "pipe", "pipe"]);
     assert.equal(recorder.calls[2]?.args[8], shellEscape("'/usr/local/bin/devshell-worker' '--version'"));
-    assert.equal(recorder.calls[3]?.args[8], shellEscape("'/usr/local/bin/devshell-worker' '--version'"));
+    assert.equal(recorder.calls[3]?.args[8]?.includes("tar -xpf -"), true);
+    assert.equal(recorder.calls[4]?.args[8], shellEscape("'/usr/local/bin/devshell-worker' '--version'"));
 
-    const entries = await readTarEntries(Buffer.concat(recorder.children[1]?.stdinChunks ?? []));
-    assert.deepEqual(entries, {
+    const firstEntries = await readTarEntries(Buffer.concat(recorder.children[1]?.stdinChunks ?? []));
+    const secondEntries = await readTarEntries(Buffer.concat(recorder.children[3]?.stdinChunks ?? []));
+    assert.deepEqual(secondEntries, firstEntries);
+    assert.deepEqual(firstEntries, {
         "review/": { content: "", mode: 0o755, type: "directory" },
         "review/SKILL.md": { content: "# Review\n", mode: 0o644, type: "file" },
         "review/scripts/": { content: "", mode: 0o755, type: "directory" },
@@ -601,6 +608,15 @@ test("remote skill synchronization atomically replaces the real target directory
     assert.equal(await readFile(join(remoteHome, ".devshell", "skill", "review", "SKILL.md"), "utf8"), "first\n");
     assert.equal((await stat(join(remoteHome, ".devshell", "skill", "review", "scripts", "run.sh"))).mode & 0o777, 0o755);
     await assert.rejects(readFile(join(remoteHome, ".devshell", "skill", "stale", "old.txt")), hasFsCode("ENOENT"));
+
+    await writeFile(join(remoteHome, ".devshell", "skill", "review", "SKILL.md"), "corrupt\n");
+    await installer.syncSkills();
+    assert.equal(await readFile(join(remoteHome, ".devshell", "skill", "review", "SKILL.md"), "utf8"), "first\n");
+
+    await rm(join(remoteHome, ".devshell", "skill", "review"), { recursive: true, force: true });
+    await installer.syncSkills();
+    assert.equal(await readFile(join(remoteHome, ".devshell", "skill", "review", "SKILL.md"), "utf8"), "first\n");
+    assert.equal((await stat(join(remoteHome, ".devshell", "skill", "review", "scripts", "run.sh"))).mode & 0o777, 0o755);
 
     await writeFile(join(source, "review", "SKILL.md"), "second\n");
     await unlink(sourceScript);

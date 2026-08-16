@@ -53,7 +53,6 @@ export class WorkerInstallerRemote {
     readonly #skillsDirectory: string;
     #homeDirectoryPromise?: Promise<string>;
     #installPromise?: Promise<string>;
-    #lastSkillsSha256?: string;
     #skillsSyncPromise?: Promise<void>;
 
     constructor(options: WorkerInstallerRemoteOptions) {
@@ -83,7 +82,7 @@ export class WorkerInstallerRemote {
 
     async syncSkills(): Promise<void> {
         if (this.#skillsSyncPromise !== undefined) {
-            await this.#skillsSyncPromise;
+            return await this.#skillsSyncPromise;
         }
 
         const archive = await createWorkerSkillArchive(
@@ -98,24 +97,15 @@ export class WorkerInstallerRemote {
                 { errorCode: errorCodes.coreWorkerProvisionFailed },
             );
         });
-        if (
-            archive === undefined ||
-            archive.sha256 === this.#lastSkillsSha256
-        ) {
-            return;
-        }
+        if (archive === undefined) return;
 
-        const promise = this.#syncSkillsArchive(
-            archive.bytes,
-            archive.sha256,
-        ).finally(() => {
+        const promise = this.#syncSkillsArchive(archive.bytes).finally(() => {
             if (this.#skillsSyncPromise === promise) {
                 this.#skillsSyncPromise = undefined;
             }
         });
         this.#skillsSyncPromise = promise;
         await promise;
-        this.#lastSkillsSha256 = archive.sha256;
     }
 
     async #installDefaultWorker(): Promise<string> {
@@ -323,9 +313,9 @@ export class WorkerInstallerRemote {
         return homeDirectory;
     }
 
-    async #syncSkillsArchive(bytes: Buffer, sha256: string): Promise<void> {
+    async #syncSkillsArchive(bytes: Buffer): Promise<void> {
         const homeDirectory = await this.#resolveHomeDirectory("syncSkills");
-        const commandLine = buildSkillSyncScript(homeDirectory, sha256);
+        const commandLine = buildSkillSyncScript(homeDirectory);
         const context = this.#createContext("syncSkills", [
             "sh",
             "-lc",
@@ -467,34 +457,24 @@ function buildRemoteExecutablePath(homeDirectory: string): string {
     return `${homeDirectory}/.devshell/bin/devshell-worker`;
 }
 
-function buildSkillSyncScript(homeDirectory: string, sha256: string): string {
+function buildSkillSyncScript(homeDirectory: string): string {
     const rootDirectory = `${homeDirectory}/.devshell`;
     const targetDirectory = `${rootDirectory}/skill`;
-    const stampPath = `${rootDirectory}/skill.sha256`;
 
     return [
         "set -eu",
         `root_dir=${shellEscape(rootDirectory)}`,
         `target_dir=${shellEscape(targetDirectory)}`,
-        `stamp_path=${shellEscape(stampPath)}`,
-        `expected_sha=${shellEscape(sha256)}`,
         'staged_dir="$root_dir/.skill.tmp.$$"',
         'backup_dir="$root_dir/.skill.backup.$$"',
-        'stamp_tmp="$root_dir/.skill.sha256.tmp.$$"',
         'mkdir -p "$root_dir"',
-        'if [ -d "$target_dir" ] && [ -f "$stamp_path" ] && [ "$(cat "$stamp_path")" = "$expected_sha" ]; then',
-        "  cat >/dev/null",
-        "  exit 0",
-        "fi",
-        'cleanup() { rm -rf "$staged_dir" "$stamp_tmp"; }',
+        'cleanup() { rm -rf "$staged_dir"; }',
         "trap cleanup EXIT HUP INT TERM",
         'rm -rf "$staged_dir" "$backup_dir"',
         'mkdir -p "$staged_dir"',
         'tar -xpf - -C "$staged_dir"',
         'if [ -e "$target_dir" ]; then mv "$target_dir" "$backup_dir"; fi',
         'if mv "$staged_dir" "$target_dir"; then',
-        '  printf \'%s\\n\' "$expected_sha" > "$stamp_tmp"',
-        '  mv "$stamp_tmp" "$stamp_path"',
         '  rm -rf "$backup_dir"',
         "else",
         '  if [ -e "$backup_dir" ]; then mv "$backup_dir" "$target_dir"; fi',
