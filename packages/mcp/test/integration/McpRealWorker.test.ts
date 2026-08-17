@@ -300,7 +300,7 @@ function withToolContext(body: JsonValue, ctxId: string): JsonValue {
         params?: { arguments?: Record<string, JsonValue> };
     };
     request.params ??= {};
-    request.params.arguments = { ...(request.params.arguments ?? {}), ctxId };
+    request.params.arguments = { ...(request.params.arguments ?? {}), ctxId, timeoutMs: 30_000 };
     return request as JsonValue;
 }
 
