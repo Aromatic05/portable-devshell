@@ -73,7 +73,7 @@ try {
         method: "tools/call",
         params: {
             name: "bash_run",
-            arguments: { command: "pwd", ctxId }
+            arguments: { command: "pwd", ctxId, timeoutMs: 30_000 }
         }
     }, headers);
     assert.deepEqual(toolCall.body.result?.content, []);

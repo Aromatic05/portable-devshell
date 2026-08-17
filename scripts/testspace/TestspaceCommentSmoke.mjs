@@ -71,6 +71,7 @@ export async function runTestspaceCommentSmoke({
             arguments: {
                 command: printCommand("testspace-comment-tool-ran"),
                 ctxId,
+                timeoutMs: 30_000,
             },
             name: "bash_run",
         });

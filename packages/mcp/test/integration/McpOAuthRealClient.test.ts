@@ -53,7 +53,7 @@ test("a real MCP SDK client drives a none-auth frozen worker through initialize,
 
         const ctxId = await readContextId(client, workspacePath);
         const result = await client.callTool({
-            arguments: { command: readRelativeMarkerCommand(workspaceMarker.name), ctxId },
+            arguments: { command: readRelativeMarkerCommand(workspaceMarker.name), ctxId, timeoutMs: 30_000 },
             name: "bash_run"
         });
         assert.equal(result.isError, false);
@@ -154,7 +154,7 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
         });
         assert.equal(queued.status, "sent");
         const first = await client.callTool({
-            arguments: { command: readRelativeMarkerCommand(workspaceMarker.name), ctxId },
+            arguments: { command: readRelativeMarkerCommand(workspaceMarker.name), ctxId, timeoutMs: 30_000 },
             name: "bash_run",
         });
         assert.deepEqual(
@@ -188,7 +188,7 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
         );
 
         const second = await client.callTool({
-            arguments: { command: "pwd", ctxId },
+            arguments: { command: "pwd", ctxId, timeoutMs: 30_000 },
             name: "bash_run",
         });
         assert.equal(
@@ -196,7 +196,7 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
             undefined,
         );
         const third = await client.callTool({
-            arguments: { command: readRelativeMarkerCommand(workspaceMarker.name), ctxId },
+            arguments: { command: readRelativeMarkerCommand(workspaceMarker.name), ctxId, timeoutMs: 30_000 },
             name: "bash_run",
         });
         assert.equal(third.isError, false);
@@ -248,7 +248,7 @@ test("a real MCP SDK client authenticates to a token-auth frozen worker with a b
 
         const ctxId = await readContextId(client, workspacePath);
         const result = await client.callTool({
-            arguments: { command: readRelativeMarkerCommand(workspaceMarker.name), ctxId },
+            arguments: { command: readRelativeMarkerCommand(workspaceMarker.name), ctxId, timeoutMs: 30_000 },
             name: "bash_run"
         });
         assert.equal(result.isError, false);
@@ -357,7 +357,7 @@ test("a real MCP SDK OAuth consumer completes registration, PKCE authorization, 
         assert.equal(tools.tools.some((tool) => tool.name === "bash_run"), true);
         const ctxId = await readContextId(client, workspacePath);
         const result = await client.callTool({
-            arguments: { command: readRelativeMarkerCommand(markerName), ctxId },
+            arguments: { command: readRelativeMarkerCommand(markerName), ctxId, timeoutMs: 30_000 },
             name: "bash_run"
         });
         assert.equal(result.isError, false);
