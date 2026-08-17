@@ -110,7 +110,7 @@ try {
         process.platform === "win32"
             ? "Write-Output 'portable-devshell-client-smoke'"
             : "printf 'portable-devshell-client-smoke\\n'";
-    const call = runCli(["instance", "call", instance, workspace, "bash_run", JSON.stringify({ command })]);
+    const call = runCli(["instance", "call", instance, workspace, "bash_run", JSON.stringify({ command, timeoutMs: 30_000 })]);
     if (!call.stdout.includes("portable-devshell-client-smoke")) {
         throw new Error(`client tool call did not return expected output:\n${call.stdout}${call.stderr}`);
     }

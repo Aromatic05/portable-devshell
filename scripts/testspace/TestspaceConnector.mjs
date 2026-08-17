@@ -14,6 +14,7 @@ export function createSafeAction(name, { ctxId, iteration, revision = 0 }) {
                 arguments: {
                     command: `printf 'testspace connector tick ${iteration}\\n'; pwd`,
                     ctxId,
+                    timeoutMs: 30_000,
                 },
                 name,
             };
