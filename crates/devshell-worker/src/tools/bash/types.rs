@@ -15,10 +15,9 @@ pub struct BashRunParams {
     pub cwd: Option<String>,
     #[serde(default)]
     pub stdin: Option<String>,
-    #[serde(default)]
-    /// Command timeout in milliseconds. Defaults to 30000.
+    /// Required command timeout in milliseconds. Use tmux_run for work that may exceed 100000 ms.
     #[schemars(range(min = 1, max = 100000))]
-    pub timeout_ms: Option<u64>,
+    pub timeout_ms: u64,
     #[serde(default)]
     /// Maximum captured bytes per output stream. Defaults to 4194304.
     #[schemars(range(min = 1, max = 16777216))]

@@ -21,7 +21,6 @@ use crate::tools::bash::runtime::ShellRuntime;
 use crate::tools::bash::types::{BashRunOutput, BashRunParams, BashTermination};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
-const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_TIMEOUT_MS: u64 = 100_000;
 const MAX_CAPTURE_BYTES: usize = 16 * 1024 * 1024;
@@ -61,7 +60,7 @@ impl ToolHandler for BashRunTool {
                 "command cannot be empty",
             ));
         }
-        let timeout_ms = params.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
+        let timeout_ms = params.timeout_ms;
         let max_capture = params
             .max_capture_bytes
             .unwrap_or(DEFAULT_MAX_CAPTURE_BYTES);

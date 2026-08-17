@@ -126,6 +126,7 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
                 {
                     input: {
                         command: readRelativeMarkerCommand(workspaceMarkerName),
+                        timeoutMs: 30_000,
                     },
                     toolName: "bash_run",
                     workspace: workspacePath,

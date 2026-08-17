@@ -223,6 +223,9 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         bash_schema["inputSchema"]["properties"]["timeoutMs"]["maximum"],
         100_000
     );
+    assert!(bash_schema["inputSchema"]["required"]
+        .as_array()
+        .is_some_and(|required| required.iter().any(|field| field == "timeoutMs")));
 
     #[cfg(unix)]
     let command = "printf ready";
@@ -235,7 +238,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             "type": "request",
             "id": "missing-workspace",
             "method": "bash_run",
-            "params": { "command": command },
+            "params": { "command": command, "timeoutMs": 30_000 },
             "context": { "ctxId": "ctx-explicit", "source": "mcp" }
         }),
     );
@@ -249,7 +252,8 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             "id": "3",
             "method": "bash_run",
             "params": {
-                "command": command
+                "command": command,
+                "timeoutMs": 30_000
             },
             "context": { "workspace": env.workspace() }
         }),
@@ -405,6 +409,22 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
     #[cfg(windows)]
     let timeout_command = "Start-Sleep -Seconds 1";
 
+    let missing_timeout = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "5-required",
+            "method": "bash_run",
+            "params": { "command": "true" },
+            "context": { "workspace": env.workspace() }
+        }),
+    );
+    assert_eq!(missing_timeout["ok"], false, "{missing_timeout}");
+    assert_eq!(missing_timeout["error"]["code"], "tool.invalidArguments");
+    assert!(missing_timeout["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("timeoutMs")));
+
     let timed_out = env.rpc(
         instance,
         &serde_json::json!({
@@ -463,6 +483,7 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             "method": "bash_run",
             "params": {
                 "command": output_command,
+                "timeoutMs": 30_000,
                 "maxCaptureBytes": 128
             },
             "context": { "workspace": env.workspace() }
@@ -545,7 +566,7 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             "type": "request",
             "id": "9",
             "method": "bash_run",
-            "params": { "command": compact_command },
+            "params": { "command": compact_command, "timeoutMs": 30_000 },
             "context": { "workspace": env.workspace() }
         }),
     );
@@ -725,7 +746,8 @@ fn workspace_security_mode_rejects_absolute_bash_cwd() {
             "method": "bash_run",
             "params": {
                 "command": "pwd",
-                "cwd": outside.to_string_lossy()
+                "cwd": outside.to_string_lossy(),
+                "timeoutMs": 30_000
             },
             "context": { "workspace": env.workspace() }
         }),

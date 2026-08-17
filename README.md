@@ -71,7 +71,7 @@ MCP enabled: yes
 验证 worker 调用：
 
 ```bash
-devshell instance call demo-local /absolute/path/to/project bash_run '{"command":"pwd"}'
+devshell instance call demo-local /absolute/path/to/project bash_run '{"command":"pwd","timeoutMs":30000}'
 ```
 
 打开 TUI：

@@ -452,7 +452,7 @@ test("CliMain handles instance logs follow and tool call through injected client
     assert.equal(await cli.run(["instance", "logs", "demo-local", "-f"]), 0);
     assert.equal(stdout.flush(), "[1] stdout before\n[2] stdout after\n");
 
-    assert.equal(await cli.run(["instance", "call", "demo-local", "/tmp/ws", "bash_run", "{\"command\":\"pwd\"}"]), 0);
+    assert.equal(await cli.run(["instance", "call", "demo-local", "/tmp/ws", "bash_run", "{\"command\":\"pwd\",\"timeoutMs\":30000}"]), 0);
     const callOutput = stdout.flush();
     assert.match(callOutput, /tool: bash_run/u);
     assert.match(callOutput, /stdout:\n\/tmp\/ws/u);

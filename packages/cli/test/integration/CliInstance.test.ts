@@ -60,7 +60,7 @@ async function runInstanceCommandsThroughControlRpc(t: { after(callback: () => P
     assert.equal(await runCli(["instance", "logs", "demo-local", "-f"]), 0);
     assert.equal(stdout.flush(), "[1] stdout before\n[2] stdout after\n");
 
-    assert.equal(await runCli(["instance", "call", "demo-local", "/tmp/ws", "bash_run", "{\"command\":\"pwd\"}"]), 0);
+    assert.equal(await runCli(["instance", "call", "demo-local", "/tmp/ws", "bash_run", "{\"command\":\"pwd\",\"timeoutMs\":30000}"]), 0);
     const callOutput = stdout.flush();
     assert.match(callOutput, /tool: bash_run/u);
     assert.match(callOutput, /stdout:\n\/tmp\/ws/u);
@@ -129,7 +129,7 @@ async function runRealWorkerSmoke(): Promise<void> {
                 "aromatic-pc",
                 workspacePath,
                 "bash_run",
-                JSON.stringify({ command: readRelativeMarkerCommand(workspaceMarkerName) })
+                JSON.stringify({ command: readRelativeMarkerCommand(workspaceMarkerName), timeoutMs: 30_000 })
             ]),
             0
         );
@@ -137,7 +137,7 @@ async function runRealWorkerSmoke(): Promise<void> {
         assert.match(markerOutput, new RegExp(workspaceMarker, "u"));
 
         assert.equal(
-            await runCli(["instance", "call", "aromatic-pc", workspacePath, "bash_run", "{\"command\":\"echo portable-devshell\"}"]),
+            await runCli(["instance", "call", "aromatic-pc", workspacePath, "bash_run", "{\"command\":\"echo portable-devshell\",\"timeoutMs\":30000}"]),
             0
         );
         assert.match(stdout.flush(), /portable-devshell/u);
@@ -260,7 +260,7 @@ async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void>
             "aromatic-pc",
             workspacePath,
             "bash_run",
-            JSON.stringify({ command: readRelativeMarkerCommand(workspaceMarkerName) })
+            JSON.stringify({ command: readRelativeMarkerCommand(workspaceMarkerName), timeoutMs: 30_000 })
         ]),
         0
     );

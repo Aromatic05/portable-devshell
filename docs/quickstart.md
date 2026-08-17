@@ -68,7 +68,7 @@ devshell instance status demo-local
 ## 4. 验证工具调用
 
 ```bash
-devshell instance call demo-local /absolute/path/to/project bash_run '{"command":"pwd"}'
+devshell instance call demo-local /absolute/path/to/project bash_run '{"command":"pwd","timeoutMs":30000}'
 ```
 
 查看实例日志：
