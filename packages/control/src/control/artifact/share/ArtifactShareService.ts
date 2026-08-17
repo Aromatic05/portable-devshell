@@ -43,6 +43,7 @@ export class ArtifactShareService {
     readonly #shares = new Map<string, StoredArtifactShare>();
     readonly #shareIdsByToken = new Map<string, string>();
     #initialized = false;
+    #lastTerminalAtMs = 0;
 
     constructor(options: ArtifactShareServiceOptions) {
         this.#recordStore = options.recordStore;
@@ -59,6 +60,7 @@ export class ArtifactShareService {
             share.authorityInstance ??= share.sourceInstance;
             this.#shares.set(share.result.shareId, share);
             this.#shareIdsByToken.set(share.token, share.result.shareId);
+            this.#lastTerminalAtMs = Math.max(this.#lastTerminalAtMs, share.terminalAtMs ?? 0);
         }
 
         this.#initialized = true;
@@ -167,7 +169,7 @@ export class ArtifactShareService {
             const previousState = share.result.state;
             const previousTerminalAtMs = share.terminalAtMs;
             share.result.state = "revoked";
-            share.terminalAtMs = Date.now();
+            share.terminalAtMs = this.#nextTerminalAtMs();
             try {
                 await this.#recordStore.persistShare(share);
             } catch (error) {
@@ -265,7 +267,7 @@ export class ArtifactShareService {
             const previousState = share.result.state;
             const previousTerminalAtMs = share.terminalAtMs;
             share.result.state = "expired";
-            share.terminalAtMs = Date.now();
+            share.terminalAtMs = this.#nextTerminalAtMs();
             try {
                 await this.#recordStore.persistShare(share);
             } catch (error) {
@@ -309,6 +311,11 @@ export class ArtifactShareService {
             this.#shares.delete(share.result.shareId);
             this.#shareIdsByToken.delete(share.token);
         }
+    }
+
+    #nextTerminalAtMs(): number {
+        this.#lastTerminalAtMs = Math.max(Date.now(), this.#lastTerminalAtMs + 1);
+        return this.#lastTerminalAtMs;
     }
 
     async #closeSharePayload(share: StoredArtifactShare): Promise<void> {
