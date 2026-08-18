@@ -39,7 +39,7 @@
         "acceptance:mcp": "node ./acceptance/run-mcp-smoke.mjs",
         "acceptance:web": "node ./acceptance/run-web-browser-smoke.mjs",
         "typecheck:source": "tsc --noEmit -p tsconfig.typecheck.json",
-        "test:worker:tmux": "cargo test --locked -p devshell-worker --test tmux_tools_contract -- --ignored --test-threads=4",
+        "test:worker:tmux": "cargo test --locked -p devshell-worker --test tmux_tools_contract -- --ignored",
         "testspace": "node ./scripts/testspace.mjs"
     },
     "devDependencies": {
