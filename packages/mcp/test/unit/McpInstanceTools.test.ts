@@ -12,6 +12,7 @@ import {
     type McpInstanceGateway,
     type McpSshInstanceCreateInput
 } from "@portable-devshell/mcp/testing";
+import { withMcpContextId, withMcpInstanceTarget } from "../../src/endpoint/McpEndpointInput.ts";
 
 const bashTool: ToolDefinition = {
     requiredCapabilities: ["execute"],
@@ -80,6 +81,45 @@ test("management-enabled endpoint augments worker schemas for cross-instance rou
     assert.notEqual(connectSchema.properties?.ctxId, undefined);
     assert.notEqual(connectSchema.properties?.workspace, undefined);
     assert.equal(connectSchema.required?.includes("ctxId"), true);
+});
+
+test("routing fields are injected into strict worker schema union branches", () => {
+    const unionTool: ToolDefinition = {
+        requiredCapabilities: ["execute"],
+        description: "Union tool",
+        group: "tmux",
+        inputSchema: {
+            $defs: {
+                Pane: {
+                    additionalProperties: false,
+                    properties: { pane: { type: "string" } },
+                    required: ["pane"],
+                    type: "object"
+                },
+                Task: {
+                    additionalProperties: false,
+                    properties: { task: { type: "string" } },
+                    required: ["task"],
+                    type: "object"
+                }
+            },
+            anyOf: [{ $ref: "#/$defs/Task" }, { $ref: "#/$defs/Pane" }]
+        },
+        name: "tmux_input",
+        outputSchema: { type: "object" }
+    };
+    const schema = withMcpInstanceTarget(withMcpContextId(unionTool)).inputSchema as {
+        $defs?: Record<string, {
+            properties?: Record<string, unknown>;
+            required?: string[];
+        }>;
+    };
+    for (const branch of Object.values(schema.$defs ?? {})) {
+        assert.notEqual(branch.properties?.ctxId, undefined);
+        assert.notEqual(branch.properties?.instance, undefined);
+        assert.equal(branch.required?.includes("ctxId"), true);
+        assert.equal(branch.required?.includes("instance"), false);
+    }
 });
 
 test("worker calls default to the endpoint instance and route explicit targets through the gateway", async () => {
@@ -600,6 +640,14 @@ test("todo tools are control-side, group-controlled, capability-free, and availa
         revision: 0,
         summary: { completed: 0, total: 0 }
     });
+    const todoReadSchema = endpoint.listTools().find((tool) => tool.name === "todo_read")?.outputSchema as {
+        properties?: Record<string, unknown>;
+        required?: string[];
+    };
+    assert.equal(todoReadSchema.required?.includes("revision"), true);
+    assert.notEqual(todoReadSchema.properties?.items, undefined);
+    assert.notEqual(todoReadSchema.properties?.summary, undefined);
+    assert.notEqual(todoReadSchema.properties?.tasks, undefined);
     await endpoint.callTool("todo_read", withContext({ title: "Recover" }), context);
     await endpoint.callTool("todo_write", withContext({ revision: 0, title: "Recover", todos: [] }), context);
     assert.deepEqual(calls, ["read:main-pc:all", "read:main-pc:Recover", "write:main-pc:ctx-instance-test:0"]);

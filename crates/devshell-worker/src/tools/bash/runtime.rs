@@ -19,14 +19,14 @@ impl ShellRuntime {
         #[cfg(windows)]
         {
             return format!(
-                "Run a short, non-interactive command using {} {}. Use PowerShell syntax. Use tmux_run for long-running or interactive commands.",
+                "Run a bounded, non-interactive command using {} {}. Use PowerShell syntax. Use tmux_run for commands expected to run about a minute or longer or that need a PTY/interaction.",
                 self.display_name(),
                 self.version
             );
         }
         #[cfg(not(windows))]
         {
-            "Run a short, non-interactive shell command. Use tmux_run for long-running or interactive commands.".to_string()
+            "Run a bounded, non-interactive Bash command. Use tmux_run for commands expected to run about a minute or longer or that need a PTY/interaction.".to_string()
         }
     }
 

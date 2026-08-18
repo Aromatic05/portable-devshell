@@ -210,18 +210,60 @@ function withInputProperty(
     if (!isRecord(tool.inputSchema)) {
         throw new McpToolSchemaUnavailableError(tool.name);
     }
-    const properties = isRecord(tool.inputSchema.properties) ? tool.inputSchema.properties : {};
-    const required = Array.isArray(tool.inputSchema.required)
-        ? tool.inputSchema.required.filter((entry): entry is string => typeof entry === "string")
-        : [];
+    const inputSchema = structuredClone(tool.inputSchema);
+    if (!addInputProperty(inputSchema, inputSchema, name, property, requiredProperty)) {
+        throw new McpToolSchemaUnavailableError(tool.name);
+    }
     return {
         ...tool,
-        inputSchema: {
-            ...tool.inputSchema,
-            properties: { ...properties, [name]: property },
-            ...(requiredProperty ? { required: required.includes(name) ? required : [...required, name] } : {})
-        }
+        inputSchema
     };
+}
+
+function addInputProperty(
+    root: Record<string, JsonValue>,
+    schema: Record<string, JsonValue>,
+    name: string,
+    property: Record<string, JsonValue>,
+    requiredProperty: boolean
+): boolean {
+    if (schema.type === "object" || isRecord(schema.properties)) {
+        const properties = isRecord(schema.properties) ? schema.properties : {};
+        schema.properties = { ...properties, [name]: property };
+        if (requiredProperty) {
+            const required = Array.isArray(schema.required)
+                ? schema.required.filter((entry): entry is string => typeof entry === "string")
+                : [];
+            schema.required = required.includes(name) ? required : [...required, name];
+        }
+        return true;
+    }
+
+    const variants = Array.isArray(schema.anyOf)
+        ? schema.anyOf
+        : Array.isArray(schema.oneOf)
+            ? schema.oneOf
+            : undefined;
+    if (variants === undefined) return false;
+
+    let changed = false;
+    for (const variant of variants) {
+        if (!isRecord(variant)) continue;
+        const target = typeof variant.$ref === "string"
+            ? resolveLocalDefinition(root, variant.$ref)
+            : variant;
+        if (target !== undefined) {
+            changed = addInputProperty(root, target, name, property, requiredProperty) || changed;
+        }
+    }
+    return changed;
+}
+
+function resolveLocalDefinition(root: Record<string, JsonValue>, reference: string): Record<string, JsonValue> | undefined {
+    const prefix = "#/$defs/";
+    if (!reference.startsWith(prefix) || !isRecord(root.$defs)) return undefined;
+    const definition = root.$defs[reference.slice(prefix.length)];
+    return isRecord(definition) ? definition : undefined;
 }
 
 function requiredString(value: JsonValue | undefined, field: string): string {

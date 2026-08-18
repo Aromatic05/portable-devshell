@@ -88,7 +88,7 @@ impl ToolHandler for FileSearchTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tools::contract::catalog_entry::<FileSearchInput, FileSearchOutput>(
             &self.name,
-            "Search text in files, directories, or globs. Returned source lines prepare those lines for file_edit. Continue result pages with cursor alone. A cursor remains retryable until a later nextCursor derived from it is actually used. A truncated file includes nextLine; search that exact file again with startLine=nextLine to continue its matches.".to_string(),
+            "Search UTF-8 text in files, directories, or globs. Use ./ for workspace-relative paths and / for absolute paths. Returned source lines prepare those lines for file_edit. Continue result pages with cursor alone. A cursor remains retryable until a later nextCursor derived from it is actually used. A truncated file includes nextLine; rerun the same search against that exact file with startLine=nextLine to continue its matches.".to_string(),
             [ToolCapability::Read],
         )
     }
@@ -107,6 +107,12 @@ impl ToolHandler for FileSearchTool {
             }
             FileSearchInput::Start(input) => {
                 let paths = input.paths.unwrap_or_else(|| vec!["./".to_string()]);
+                if paths.is_empty() {
+                    return Err(ToolError::new(
+                        "tool.invalidArguments",
+                        "paths must contain at least one path when provided",
+                    ));
+                }
                 let syntax = input.syntax.unwrap_or(SearchSyntax::Regex);
                 let case_sensitive = input.case_sensitive.unwrap_or(true);
                 let expression = match syntax {

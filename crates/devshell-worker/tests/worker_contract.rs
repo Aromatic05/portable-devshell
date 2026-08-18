@@ -226,6 +226,58 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     assert!(bash_schema["inputSchema"]["required"]
         .as_array()
         .is_some_and(|required| required.iter().any(|field| field == "timeoutMs")));
+    assert_eq!(
+        bash_schema["inputSchema"]["properties"]["command"]["minLength"],
+        1
+    );
+    let file_edit_schema = catalog
+        .iter()
+        .find(|tool| tool["name"] == "file_edit")
+        .unwrap();
+    assert_eq!(
+        file_edit_schema["inputSchema"]["properties"]["changes"]["minLength"],
+        1
+    );
+    let file_search_schema = catalog
+        .iter()
+        .find(|tool| tool["name"] == "file_search")
+        .unwrap();
+    assert_eq!(
+        file_search_schema["inputSchema"]["$defs"]["FileSearchStartInput"]["properties"]
+            ["paths"]["minItems"],
+        1
+    );
+    assert_eq!(
+        file_search_schema["inputSchema"]["$defs"]["FileCursorInput"]["properties"]["cursor"]
+            ["minLength"],
+        1
+    );
+
+    if expected_tools.contains(&"tmux_input") {
+        for name in ["tmux_input", "tmux_inspect", "tmux_close"] {
+            let tool = catalog.iter().find(|tool| tool["name"] == name).unwrap();
+            assert_eq!(
+                tool["inputSchema"]["anyOf"].as_array().map(Vec::len),
+                Some(2),
+                "{name}: {}",
+                tool["inputSchema"]
+            );
+        }
+        let tmux_run = catalog
+            .iter()
+            .find(|tool| tool["name"] == "tmux_run")
+            .unwrap();
+        assert!(tmux_run["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("Use bash_run for short non-interactive work")));
+        let tmux_create = catalog
+            .iter()
+            .find(|tool| tool["name"] == "tmux_create")
+            .unwrap();
+        assert!(tmux_create["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("main already provides one built-in persistent pane")));
+    }
 
     #[cfg(unix)]
     let command = "printf ready";

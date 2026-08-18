@@ -9,9 +9,11 @@ use crate::tools::artifact::types::ArtifactReference;
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct BashRunParams {
+    #[schemars(length(min = 1))]
     pub command: String,
     #[serde(default)]
     /// Working directory. Use ./ for a workspace-relative path or / for an absolute path.
+    #[schemars(length(min = 1))]
     pub cwd: Option<String>,
     #[serde(default)]
     pub stdin: Option<String>,

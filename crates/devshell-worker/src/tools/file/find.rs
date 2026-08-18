@@ -33,7 +33,7 @@ impl ToolHandler for FileFindTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tools::contract::catalog_entry::<FileFindInput, FileFindOutput>(
             &self.name,
-            "Find files and directories by exact path or glob. Continue result pages with cursor alone. A cursor remains retryable until a later nextCursor derived from it is actually used.".to_string(),
+            "Find files and directories by exact path or glob. Use ./ for workspace-relative paths and / for absolute paths. Continue result pages with cursor alone; a cursor remains retryable until a later nextCursor derived from it is actually used.".to_string(),
             [ToolCapability::Read],
         )
     }

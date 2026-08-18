@@ -25,6 +25,7 @@ pub struct FileReadInput {
     #[serde(default)]
     pub view: FileReadView,
     /// Content selector using N, N-M, N+count, or sorted non-overlapping comma-separated ranges. Append :raw to disable editing-context expansion; a single N still opens the default window, so use N-N:raw for exactly one line. Without :raw, each range includes one preceding line and up to three following lines. Cannot be combined with view=outline.
+    #[schemars(length(min = 1))]
     pub selector: Option<String>,
 }
 
@@ -48,6 +49,7 @@ pub struct FileReadOutput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileChangeSetInput {
     /// Ordered edit document using the *** Begin Edit / *** End Edit format described by this tool.
+    #[schemars(length(min = 1))]
     pub changes: String,
     /// Result detail. Defaults to summary.
     pub result_detail: Option<FileChangeResultDetail>,
@@ -128,13 +130,17 @@ pub struct FileFindStartInput {
     #[schemars(length(min = 1))]
     pub paths: Vec<String>,
     #[serde(rename = "type")]
+    /// Entry type filter. Defaults to any.
     pub entry_type: Option<FindType>,
+    /// Include hidden entries. Defaults to true.
     pub hidden: Option<bool>,
+    /// Respect ignore files. Defaults to true.
     pub gitignore: Option<bool>,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileCursorInput {
+    #[schemars(length(min = 1))]
     pub cursor: String,
 }
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
@@ -171,6 +177,7 @@ pub struct FileSearchStartInput {
     #[schemars(length(min = 1))]
     pub pattern: String,
     /// Paths to search. Defaults to ["./"].
+    #[schemars(length(min = 1))]
     pub paths: Option<Vec<String>>,
     /// Pattern syntax. Defaults to regex.
     pub syntax: Option<SearchSyntax>,

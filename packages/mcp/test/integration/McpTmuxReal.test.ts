@@ -21,12 +21,14 @@ type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string
 test("MCP tmux supports a complete interactive lifecycle when JSON-RPC request ids are reused", tmuxTestOptions(workerBinaryPath), async () => {
     await withTmuxHarness("aromatic-mcp-tmux-lifecycle", async ({ callTool, createContext, listTools }) => {
         const tools = await listTools();
-        for (const toolName of ["tmux_run", "tmux_input", "tmux_read"]) {
+        for (const toolName of ["tmux_run", "tmux_read"]) {
             const tool = tools.find((entry) => entry.name === toolName);
             assert.notEqual(tool, undefined);
             assert.equal(tool?.inputSchema.properties?.timeMs?.minimum, 0);
             assert.equal(tool?.inputSchema.properties?.timeMs?.maximum, 300_000);
         }
+        const inputTool = tools.find((entry) => entry.name === "tmux_input");
+        assert.equal(inputTool?.inputSchema.anyOf?.length, 2);
         const ctxId = await createContext();
         const requestId = "reused-tools-call-id";
         const created = await callTool(requestId, "tmux_create", { ctxId, name: "interactive" });
@@ -35,7 +37,6 @@ test("MCP tmux supports a complete interactive lifecycle when JSON-RPC request i
         const run = await callTool(requestId, "tmux_run", {
             command: "read -r value; printf 'received:%s\\n' \"$value\"",
             ctxId,
-            pane: "interactive",
             wait: "nonblock"
         });
         assert.equal(run.error, undefined, JSON.stringify(run));
@@ -83,7 +84,6 @@ test("MCP tmux lets a refreshed context continue a task while preserving busy ch
         const run = await callTool(requestId, "tmux_run", {
             command: "sleep 10",
             ctxId: firstCtxId,
-            pane: "continued",
             wait: "nonblock"
         });
         assert.equal(run.error, undefined, JSON.stringify(run));
@@ -95,6 +95,14 @@ test("MCP tmux lets a refreshed context continue a task while preserving busy ch
             task
         });
         assert.equal(read.error, undefined, JSON.stringify(read));
+
+        const foreground = await callTool(requestId, "tmux_input", {
+            ctxId: refreshedCtxId,
+            input: "sleep 10^M",
+            pane: "continued"
+        });
+        assert.equal(foreground.error, undefined, JSON.stringify(foreground));
+        await new Promise((resolve) => setTimeout(resolve, 100));
 
         const busyClose = await callTool(requestId, "tmux_close", {
             ctxId: refreshedCtxId,
@@ -111,6 +119,14 @@ test("MCP tmux lets a refreshed context continue a task while preserving busy ch
         assert.equal(interrupted.error, undefined, JSON.stringify(interrupted));
         const finished = await waitForTask(callTool, requestId, refreshedCtxId, task);
         assert.notEqual(finished.task.status, "running");
+
+        const stopForeground = await callTool(requestId, "tmux_input", {
+            ctxId: refreshedCtxId,
+            input: "^C",
+            pane: "continued"
+        });
+        assert.equal(stopForeground.error, undefined, JSON.stringify(stopForeground));
+        await new Promise((resolve) => setTimeout(resolve, 100));
 
         const closed = await callTool(requestId, "tmux_close", {
             ctxId: refreshedCtxId,
@@ -130,7 +146,10 @@ interface ToolStructuredContent {
 }
 
 interface ToolSummary {
-    inputSchema: { properties?: { timeMs?: { maximum?: number; minimum?: number } } };
+    inputSchema: {
+        anyOf?: JsonValue[];
+        properties?: { timeMs?: { maximum?: number; minimum?: number } };
+    };
     name: string;
 }
 

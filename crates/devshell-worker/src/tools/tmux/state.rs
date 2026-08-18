@@ -253,20 +253,21 @@ impl TmuxState {
     ) -> Result<TmuxInputOutput, ToolError> {
         call.check_cancelled()?;
         require_execute(call)?;
-        if params.input.is_empty() {
-            return Err(ToolError::new(
-                "tool.invalidArguments",
-                "input must not be empty",
-            ));
-        }
-        match input_target(params.task.as_deref(), params.pane.as_deref())? {
-            InputTarget::Task(task_id) => {
+        match params {
+            TmuxInputParams::Task(params) => {
+                if params.input.is_empty() {
+                    return Err(ToolError::new(
+                        "tool.invalidArguments",
+                        "input must not be empty",
+                    ));
+                }
+                let task_id = params.task;
                 let time_ms = validate_time(params.time_ms.unwrap_or(DEFAULT_INPUT_TIME_MS))?;
                 let line = validate_line(params.line.unwrap_or(DEFAULT_LINE))?;
-                self.refresh_task(task_id)?;
+                self.refresh_task(&task_id)?;
                 let (pane_id, tmux_pane_id) = {
                     let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
-                    let task = require_task(&tasks, task_id)?;
+                    let task = require_task(&tasks, &task_id)?;
                     if !task.state.is_active() {
                         return Err(ToolError::new(
                             "tmux.taskNotRunning",
@@ -281,10 +282,10 @@ impl TmuxState {
                 let pane_lock = self.pane_lock(&pane_id)?;
                 {
                     let _pane_guard = pane_lock.lock().map_err(|_| lock_error("pane operation"))?;
-                    self.refresh_task(task_id)?;
+                    self.refresh_task(&task_id)?;
                     {
                         let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
-                        let task = require_task(&tasks, task_id)?;
+                        let task = require_task(&tasks, &task_id)?;
                         if !task.state.is_active() {
                             return Err(ToolError::new(
                                 "tmux.taskNotRunning",
@@ -306,19 +307,19 @@ impl TmuxState {
                             "inputDelivered": true
                         })));
                     }
-                    self.refresh_task(task_id)?;
-                    if self.task_has_output(task_id)?
-                        || self.task_is_terminal(task_id)?
+                    self.refresh_task(&task_id)?;
+                    if self.task_has_output(&task_id)?
+                        || self.task_is_terminal(&task_id)?
                         || Instant::now() >= deadline
                     {
                         break;
                     }
                     thread::sleep(Duration::from_millis(50));
                 }
-                let task_output = self.task_output(task_id, line, false)?;
+                let task_output = self.task_output(&task_id, line, false)?;
                 let pane = {
                     let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
-                    let task = require_task(&tasks, task_id)?;
+                    let task = require_task(&tasks, &task_id)?;
                     task.state
                         .is_active()
                         .then(|| task.last_pane.as_ref().map(pane_ref))
@@ -331,11 +332,11 @@ impl TmuxState {
                     warnings: task_output.warnings,
                 })
             }
-            InputTarget::Pane(selector) => {
-                if params.line.is_some() || params.time_ms.is_some_and(|value| value != 0) {
+            TmuxInputParams::Pane(params) => {
+                if params.input.is_empty() {
                     return Err(ToolError::new(
                         "tool.invalidArguments",
-                        "line and nonzero timeMs apply only to task input; use tmux_inspect to observe persistent panes",
+                        "input must not be empty",
                     ));
                 }
                 self.backend.ensure_session()?;
@@ -343,7 +344,10 @@ impl TmuxState {
                 if self.refresh_tasks_with_workspace(&workspace)? {
                     workspace = self.backend.capture_workspace()?;
                 }
-                let pane = self.backend.resolve(&workspace, Some(selector))?.clone();
+                let pane = self
+                    .backend
+                    .resolve(&workspace, Some(&params.pane))?
+                    .clone();
                 if pane.managed_task_id.is_some() {
                     return Err(ToolError::new(
                         "tmux.taskTargetRequired",
@@ -395,14 +399,23 @@ impl TmuxState {
     ) -> Result<TmuxPaneOperationOutput, ToolError> {
         call.check_cancelled()?;
         require_read(call)?;
-        if params.pane.is_some() && params.panes.is_some() {
-            return Err(ToolError::new(
-                "tool.invalidArguments",
-                "pane and panes are mutually exclusive",
-            ));
-        }
-        let start = params.start.unwrap_or(DEFAULT_INSPECT_START);
-        let end = params.end.unwrap_or(DEFAULT_INSPECT_END);
+        let (pane, all, start, end) = match params {
+            TmuxInspectParams::Single(params) => (
+                params.pane,
+                false,
+                params.start.unwrap_or(DEFAULT_INSPECT_START),
+                params.end.unwrap_or(DEFAULT_INSPECT_END),
+            ),
+            TmuxInspectParams::All(params) => {
+                let _ = params.panes;
+                (
+                    None,
+                    true,
+                    params.start.unwrap_or(DEFAULT_INSPECT_START),
+                    params.end.unwrap_or(DEFAULT_INSPECT_END),
+                )
+            }
+        };
         if start >= end || start >= 0 || end > 0 || end - start > MAX_INSPECT_LINES {
             return Err(ToolError::new(
                 "tool.invalidArguments",
@@ -414,14 +427,10 @@ impl TmuxState {
         if self.refresh_tasks_with_workspace(&workspace)? {
             workspace = self.backend.capture_workspace()?;
         }
-        let selected = if params.panes.is_some() {
+        let selected = if all {
             workspace.panes.clone()
         } else {
-            vec![
-                self.backend
-                    .resolve(&workspace, params.pane.as_deref())?
-                    .clone(),
-            ]
+            vec![self.backend.resolve(&workspace, pane.as_deref())?.clone()]
         };
         let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
         let mut panes = Vec::with_capacity(selected.len());
@@ -520,9 +529,9 @@ impl TmuxState {
         params: TmuxCloseParams,
     ) -> Result<TmuxCloseOutput, ToolError> {
         require_execute(call)?;
-        match close_target(params.task.as_deref(), params.pane.as_deref())? {
-            CloseTarget::Task(task_id) => self.close_task(task_id, params.force),
-            CloseTarget::Pane(selector) => self.close_persistent_pane(selector, params.force),
+        match params {
+            TmuxCloseParams::Task(params) => self.close_task(&params.task, params.force),
+            TmuxCloseParams::Pane(params) => self.close_persistent_pane(&params.pane, params.force),
         }
     }
 
@@ -1132,44 +1141,6 @@ impl TmuxState {
     }
 }
 
-enum InputTarget<'a> {
-    Task(&'a str),
-    Pane(&'a str),
-}
-
-enum CloseTarget<'a> {
-    Task(&'a str),
-    Pane(&'a str),
-}
-
-fn input_target<'a>(
-    task: Option<&'a str>,
-    pane: Option<&'a str>,
-) -> Result<InputTarget<'a>, ToolError> {
-    match (task, pane) {
-        (Some(task), None) => Ok(InputTarget::Task(task)),
-        (None, Some(pane)) => Ok(InputTarget::Pane(pane)),
-        _ => Err(ToolError::new(
-            "tool.invalidArguments",
-            "exactly one of task or pane is required",
-        )),
-    }
-}
-
-fn close_target<'a>(
-    task: Option<&'a str>,
-    pane: Option<&'a str>,
-) -> Result<CloseTarget<'a>, ToolError> {
-    match (task, pane) {
-        (Some(task), None) => Ok(CloseTarget::Task(task)),
-        (None, Some(pane)) => Ok(CloseTarget::Pane(pane)),
-        _ => Err(ToolError::new(
-            "tool.invalidArguments",
-            "exactly one of task or pane is required",
-        )),
-    }
-}
-
 fn validate_time(value: u64) -> Result<u64, ToolError> {
     if value > MAX_TIME_MS {
         return Err(ToolError::new(
@@ -1311,19 +1282,9 @@ fn cleanup_warning(task_id: &str, pane_id: Option<&str>, error: &ToolError) -> T
 mod tests {
     use std::fs;
 
-    use super::{close_target, input_target, validate_line, verify_pane_cwd};
+    use super::{validate_line, verify_pane_cwd};
     use crate::security::path::{parse_requested_path, resolve_existing_target};
     use crate::tools::tmux::backend::BackendPane;
-
-    #[test]
-    fn input_and_close_require_exactly_one_target() {
-        assert!(input_target(Some("task"), None).is_ok());
-        assert!(input_target(None, Some("pane")).is_ok());
-        assert!(input_target(None, None).is_err());
-        assert!(input_target(Some("task"), Some("pane")).is_err());
-        assert!(close_target(Some("task"), None).is_ok());
-        assert!(close_target(None, Some("pane")).is_ok());
-    }
 
     #[test]
     fn transcript_line_count_is_bounded() {

@@ -44,7 +44,50 @@ const todoItemSchema: JsonValue = {
     type: "object",
 };
 
-const outputSchema: JsonValue = { type: "object" };
+const todoSummarySchema: JsonValue = {
+    additionalProperties: false,
+    properties: {
+        completed: { minimum: 0, type: "integer" },
+        currentItemId: { minLength: 1, type: "string" },
+        total: { minimum: 0, type: "integer" }
+    },
+    required: ["completed", "total"],
+    type: "object"
+};
+
+const todoTaskSummarySchema: JsonValue = {
+    additionalProperties: false,
+    properties: {
+        completed: { minimum: 0, type: "integer" },
+        ctxId: { minLength: 1, type: "string" },
+        currentItem: { minLength: 1, type: "string" },
+        revision: { minimum: 0, type: "integer" },
+        status: {
+            enum: ["pending", "in_progress", "blocked", "completed", "failed", "cancelled", "none"],
+            type: "string"
+        },
+        taskId: { minLength: 1, type: "string" },
+        title: { minLength: 1, type: "string" },
+        total: { minimum: 0, type: "integer" },
+        updatedAt: { minLength: 1, type: "string" }
+    },
+    required: ["completed", "revision", "status", "taskId", "title", "total", "updatedAt"],
+    type: "object"
+};
+
+const outputSchema: JsonValue = {
+    additionalProperties: false,
+    properties: {
+        items: { items: todoItemSchema, type: "array" },
+        revision: { minimum: 0, type: "integer" },
+        summary: todoSummarySchema,
+        taskId: { minLength: 1, type: "string" },
+        tasks: { items: todoTaskSummarySchema, type: "array" },
+        title: { minLength: 1, type: "string" }
+    },
+    required: ["items", "revision", "summary"],
+    type: "object"
+};
 
 export class McpToolCatalogTodo {
     readonly #definitions: readonly ToolDefinition[] = [
