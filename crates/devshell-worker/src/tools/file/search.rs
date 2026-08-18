@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use regex::RegexBuilder;
-use serde_json::json;
 
 use crate::security::path::ResolvedPath;
 use crate::tools::file::FileToolState;
@@ -48,6 +47,9 @@ pub(crate) struct SearchContinuation {
     seen_candidates: HashSet<PathBuf>,
     pending: Option<MatchedFile>,
     per_file: usize,
+    matcher: regex::Regex,
+    context: Option<usize>,
+    start_line: usize,
 }
 
 enum PreparedSearchSnapshot {
@@ -80,41 +82,68 @@ impl ToolHandler for FileSearchTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tools::contract::catalog_entry::<FileSearchInput, FileSearchOutput>(
             &self.name,
-            "Search text in files, directories, or globs. Returned source lines prepare those lines for file_edit. A returned file includes truncated=true when additional matches in that file were omitted.".to_string(),
+            "Search text in files, directories, or globs. Returned source lines prepare those lines for file_edit. Continue result pages with cursor alone. A truncated file includes nextLine; search that exact file again with startLine=nextLine to continue its matches.".to_string(),
             [ToolCapability::Read],
         )
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
         let input: FileSearchInput = call.parse_params()?;
-        let paths = input.paths.unwrap_or_else(|| vec!["./".to_string()]);
-        let syntax = input.syntax.unwrap_or(SearchSyntax::Regex);
-        let case_sensitive = input.case_sensitive.unwrap_or(true);
-        let expression = match syntax {
-            SearchSyntax::Literal => regex::escape(&input.pattern),
-            SearchSyntax::Regex => input.pattern,
-        };
-        let matcher = RegexBuilder::new(&expression)
-            .case_insensitive(!case_sensitive)
-            .build()
-            .map_err(|error| ToolError::new("file.invalidRegex", error.to_string()))?;
-        let hidden = input.hidden.unwrap_or(true);
-        let gitignore = input.gitignore.unwrap_or(true);
-        let context = input.context;
-        if context.is_some_and(|value| value > 20) {
-            return Err(ToolError::new(
-                "tool.invalidArguments",
-                "context cannot exceed 20",
-            ));
-        }
-        let query = json!({ "pattern": expression, "paths": paths, "caseSensitive": case_sensitive, "hidden": hidden, "gitignore": gitignore, "context": context });
         let mut continuation = if let Some(cursor) = input.cursor.as_deref() {
+            if input.pattern.is_some()
+                || input.paths.is_some()
+                || input.syntax.is_some()
+                || input.case_sensitive.is_some()
+                || input.hidden.is_some()
+                || input.gitignore.is_some()
+                || input.context.is_some()
+                || input.start_line.is_some()
+            {
+                return Err(ToolError::new(
+                    "tool.invalidArguments",
+                    "cursor continuation must be used without pattern, paths, syntax, caseSensitive, hidden, gitignore, context, or startLine",
+                ));
+            }
             self.state
                 .search_cursors
                 .lock()
                 .unwrap()
-                .resolve(&call, cursor, &query)?
+                .resolve(&call, cursor)?
         } else {
+            let pattern = input.pattern.ok_or_else(|| {
+                ToolError::new(
+                    "tool.invalidArguments",
+                    "pattern is required without cursor",
+                )
+            })?;
+            let paths = input.paths.unwrap_or_else(|| vec!["./".to_string()]);
+            let syntax = input.syntax.unwrap_or(SearchSyntax::Regex);
+            let case_sensitive = input.case_sensitive.unwrap_or(true);
+            let expression = match syntax {
+                SearchSyntax::Literal => regex::escape(&pattern),
+                SearchSyntax::Regex => pattern,
+            };
+            let matcher = RegexBuilder::new(&expression)
+                .case_insensitive(!case_sensitive)
+                .build()
+                .map_err(|error| ToolError::new("file.invalidRegex", error.to_string()))?;
+            let hidden = input.hidden.unwrap_or(true);
+            let gitignore = input.gitignore.unwrap_or(true);
+            let context = input.context;
+            if context.is_some_and(|value| value > 20) {
+                return Err(ToolError::new(
+                    "tool.invalidArguments",
+                    "context cannot exceed 20",
+                ));
+            }
+            let single_exact_file = is_single_exact_file(&call, &paths)?;
+            let start_line = input.start_line.unwrap_or(1);
+            if start_line > 1 && !single_exact_file {
+                return Err(ToolError::new(
+                    "tool.invalidArguments",
+                    "startLine is only valid when paths contains one exact file",
+                ));
+            }
             let groups = paths
                 .iter()
                 .map(|path| {
@@ -126,7 +155,7 @@ impl ToolHandler for FileSearchTool {
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let per_file = if is_single_exact_file(&call, &paths)? {
+            let per_file = if single_exact_file {
                 SINGLE_FILE_MATCHES
             } else {
                 MATCHES_PER_FILE
@@ -137,6 +166,9 @@ impl ToolHandler for FileSearchTool {
                 seen_candidates: HashSet::new(),
                 pending: None,
                 per_file,
+                matcher,
+                context,
+                start_line,
             }
         };
 
@@ -146,7 +178,7 @@ impl ToolHandler for FileSearchTool {
             let matched = if let Some(pending) = continuation.pending.take() {
                 Some(pending)
             } else {
-                next_matched_file(&call, &mut continuation, &matcher, context, &self.state)?
+                next_matched_file(&call, &mut continuation, &self.state)?
             };
             let Some(file) = matched else {
                 break;
@@ -175,6 +207,10 @@ impl ToolHandler for FileSearchTool {
             page.push(file);
         }
 
+        if page.len() == FILES_PER_PAGE && continuation.pending.is_none() {
+            continuation.pending = next_matched_file(&call, &mut continuation, &self.state)?;
+        }
+
         let has_more = continuation.pending.is_some()
             || continuation.groups.iter().any(|group| !group.exhausted);
         let next_cursor = has_more.then(|| {
@@ -182,7 +218,7 @@ impl ToolHandler for FileSearchTool {
                 .search_cursors
                 .lock()
                 .unwrap()
-                .issue(&call, &query, continuation)
+                .issue(&call, continuation)
         });
 
         let mut returned = Vec::with_capacity(page.len());
@@ -270,13 +306,14 @@ fn is_single_exact_file(call: &ToolCall, paths: &[String]) -> Result<bool, ToolE
 fn next_matched_file(
     call: &ToolCall,
     continuation: &mut SearchContinuation,
-    matcher: &regex::Regex,
-    context: Option<usize>,
     state: &FileToolState,
 ) -> Result<Option<MatchedFile>, ToolError> {
     if continuation.groups.is_empty() {
         return Ok(None);
     }
+    let matcher = continuation.matcher.clone();
+    let context = continuation.context;
+    let start_line = continuation.start_line;
     loop {
         let mut progressed = false;
         for _ in 0..continuation.groups.len() {
@@ -307,14 +344,15 @@ fn next_matched_file(
             }
             call.check_cancelled()?;
             let ordinal = state.next_snapshot_ordinal();
-            let Ok((metadata, matches, shown, truncated)) = search_stream(
+            let Ok((metadata, matches, shown, next_line)) = search_stream(
                 entry
                     .resolved
                     .open_file()
                     .map_err(|error| ToolError::new("file.notFound", error.to_string()))?,
-                matcher,
+                &matcher,
                 continuation.per_file,
                 context,
+                start_line,
                 &call.cancellation,
             ) else {
                 continue;
@@ -327,7 +365,8 @@ fn next_matched_file(
                 output: FileSearchFile {
                     path: entry.display,
                     content: body,
-                    truncated: truncated.then_some(true),
+                    truncated: next_line.is_some().then_some(true),
+                    next_line,
                 },
                 resolved: entry.resolved,
                 metadata,
@@ -341,13 +380,19 @@ fn next_matched_file(
     }
 }
 
-type SearchStreamResult = (TextMetadata, Vec<usize>, BTreeMap<usize, String>, bool);
+type SearchStreamResult = (
+    TextMetadata,
+    Vec<usize>,
+    BTreeMap<usize, String>,
+    Option<usize>,
+);
 
 fn search_stream(
     file: File,
     matcher: &regex::Regex,
     limit: usize,
     context: Option<usize>,
+    start_line: usize,
     cancellation: &crate::tools::ToolCancellation,
 ) -> Result<SearchStreamResult, ToolError> {
     let mut reader = BufReader::new(file);
@@ -355,7 +400,7 @@ fn search_stream(
     let mut previous = VecDeque::<(usize, String)>::new();
     let mut shown = BTreeMap::new();
     let mut matches = Vec::new();
-    let mut truncated = false;
+    let mut next_line = None;
     let mut pending_after = 0usize;
     let mut buffer = Vec::new();
     let mut line_no = 0usize;
@@ -393,7 +438,7 @@ fn search_stream(
             total_lines += 1;
         }
         if matches.len() < limit {
-            let is_match = matcher.is_match(&line);
+            let is_match = line_no >= start_line && matcher.is_match(&line);
             if is_match {
                 for (number, value) in &previous {
                     shown.entry(*number).or_insert_with(|| value.clone());
@@ -410,10 +455,10 @@ fn search_stream(
                 previous.pop_front();
             }
         } else {
-            if matcher.is_match(&line) {
-                truncated = true;
-            }
-            if pending_after > 0 {
+            if line_no >= start_line && matcher.is_match(&line) {
+                next_line.get_or_insert(line_no);
+                pending_after = 0;
+            } else if pending_after > 0 {
                 shown.insert(line_no, line);
                 pending_after -= 1;
             }
@@ -424,7 +469,7 @@ fn search_stream(
         total_bytes,
         total_lines,
     };
-    Ok((metadata, matches, shown, truncated))
+    Ok((metadata, matches, shown, next_line))
 }
 
 fn format_streamed_content(

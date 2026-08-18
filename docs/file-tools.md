@@ -45,7 +45,7 @@ outline 返回符号的起止行、层级、语言和 `parseStatus`。outline �
 
 `file_find` 按 exact path 或 glob 查找文件和目录，并支持 `file` / `directory` / `any` 类型过滤。
 
-每页最多返回 200 个 entry。出现 `nextCursor` 时，cursor 保存的是实际 traversal continuation，而不是一个输出 offset：目录 DFS 栈、当前 entry index、ignore 规则和已经去重的结果都会随 cursor 保留。下一页从上一次停止的位置继续，不会重新从 glob root 或目录根开始遍历。
+每页最多返回 200 个 entry。出现 `nextCursor` 时，cursor 保存实际 traversal continuation，包括目录 DFS 栈、当前 entry index、ignore 规则、类型过滤条件和去重状态。下一页只传 `cursor`，不再重复 `paths`、`type`、`hidden` 或 `gitignore`；它会从上次停止的位置继续，而不是重新遍历根目录。
 
 所有输入 path / glob root 会在第一页先完成解析、权限和基础合法性检查；continuation 只延迟递归 traversal 本身，不延迟输入错误。
 
@@ -64,7 +64,7 @@ Traversal 使用已经解析并锚定的目录能力。因此第一页之后即�
 }
 ```
 
-一页最多返回 20 个匹配文件。与 `file_find` 相同，`nextCursor` 保存实际 discovery/search continuation；后续页继续扫描尚未访问的候选文件，不会重新 enumerate 和重新搜索前面的树。
+一页最多返回 20 个匹配文件。与 `file_find` 相同，`nextCursor` 保存完整 discovery/search continuation；下一页只传 `cursor`，由它继续扫描尚未访问的候选文件。恰好一页结束时已经没有更多匹配，则不会额外返回一个只会产生空页的 cursor。
 
 为了约束单个文件的返回规模，每个文件最多展示：
 
@@ -79,11 +79,12 @@ directory/glob search       20 matches per file
 {
   "path": "./src/large.rs",
   "content": "...",
-  "truncated": true
+  "truncated": true,
+  "nextLine": 841
 }
 ```
 
-这样“只展示前 N 个匹配”和“总共恰好 N 个匹配”不会被混淆。
+`nextLine` 是第一条未展示的匹配行。继续该文件时，重新对这个 exact file 搜索并传 `startLine=nextLine`。`startLine` 只用于一个 exact file，不用于目录或 glob。这样“只展示前 N 个匹配”和“总共恰好 N 个匹配”不会被混淆，也不会出现知道有遗漏却无法继续读取的断头结果。
 
 搜索结果还受 RPC 序列化输出预算约束。因为预算而留到下一页的文件不会提前建立编辑快照；只有本次真正出现在 `files` 数组中的源码行才算已经被 agent 观察，并进入 `file_edit` coverage。
 

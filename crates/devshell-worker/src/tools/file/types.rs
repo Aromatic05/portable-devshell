@@ -120,14 +120,15 @@ pub struct FileChangeSetOutput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileFindInput {
     #[schemars(length(min = 1))]
-    pub paths: Vec<String>,
+    /// Initial paths to find. Omit when continuing with cursor.
+    pub paths: Option<Vec<String>>,
     #[serde(rename = "type")]
     pub entry_type: Option<FindType>,
     pub hidden: Option<bool>,
     pub gitignore: Option<bool>,
     pub cursor: Option<String>,
 }
-#[derive(Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FindType {
     File,
@@ -153,7 +154,8 @@ pub struct FileFindEntry {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileSearchInput {
     #[schemars(length(min = 1))]
-    pub pattern: String,
+    /// Initial search pattern. Omit when continuing with cursor.
+    pub pattern: Option<String>,
     /// Paths to search. Defaults to ["./"].
     pub paths: Option<Vec<String>>,
     /// Pattern syntax. Defaults to regex.
@@ -166,6 +168,9 @@ pub struct FileSearchInput {
     pub gitignore: Option<bool>,
     #[schemars(range(min = 0, max = 20))]
     pub context: Option<usize>,
+    /// First source line eligible to match. Only valid for one exact file and defaults to 1.
+    #[schemars(range(min = 1))]
+    pub start_line: Option<usize>,
     pub cursor: Option<String>,
 }
 #[derive(Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
@@ -189,6 +194,9 @@ pub struct FileSearchFile {
     #[serde(skip_serializing_if = "Option::is_none")]
     /// Present and true when additional matches existed in this file but were not rendered.
     pub truncated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// First omitted matching line. Search this exact file again with startLine to continue.
+    pub next_line: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

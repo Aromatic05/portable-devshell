@@ -11,7 +11,6 @@ const MAX_CURSORS: usize = 128;
 #[derive(Clone)]
 struct Cursor<T> {
     state: T,
-    query: serde_json::Value,
     ctx_id: String,
     workspace: std::path::PathBuf,
 }
@@ -29,13 +28,12 @@ impl<T> Default for CursorStore<T> {
 }
 
 impl<T: Clone> CursorStore<T> {
-    pub fn issue(&mut self, call: &ToolCall, query: &serde_json::Value, state: T) -> String {
+    pub fn issue(&mut self, call: &ToolCall, state: T) -> String {
         let id = Uuid::new_v4().to_string();
         self.cursors.put(
             id.clone(),
             Cursor {
                 state,
-                query: query.clone(),
                 ctx_id: call.ctx_id.clone(),
                 workspace: call.workspace.clone(),
             },
@@ -43,12 +41,7 @@ impl<T: Clone> CursorStore<T> {
         id
     }
 
-    pub fn resolve(
-        &mut self,
-        call: &ToolCall,
-        id: &str,
-        query: &serde_json::Value,
-    ) -> Result<T, ToolError> {
+    pub fn resolve(&mut self, call: &ToolCall, id: &str) -> Result<T, ToolError> {
         let cursor = self
             .cursors
             .get(id)
@@ -57,12 +50,6 @@ impl<T: Clone> CursorStore<T> {
             return Err(ToolError::new(
                 "file.invalidCursor",
                 "cursor belongs to a different context or workspace",
-            ));
-        }
-        if cursor.query != *query {
-            return Err(ToolError::new(
-                "file.invalidCursor",
-                "cursor does not match this query",
             ));
         }
         Ok(cursor.state.clone())

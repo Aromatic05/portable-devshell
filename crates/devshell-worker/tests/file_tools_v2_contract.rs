@@ -261,12 +261,7 @@ fn file_search_snapshots_only_files_returned_in_the_current_page() {
         "4",
         "ctx-a",
         "file_search",
-        json!({
-            "paths": paths,
-            "pattern": "needle",
-            "syntax": "literal",
-            "cursor": cursor
-        }),
+        json!({ "cursor": cursor }),
     );
     assert_eq!(second_page["ok"], true, "{second_page}");
     assert_eq!(second_page["result"]["files"].as_array().unwrap().len(), 1);
@@ -851,7 +846,7 @@ fn file_info_reports_missing_entries_and_dangling_symlinks_in_one_batch() {
 }
 
 #[test]
-fn file_search_rejects_a_cursor_reused_with_a_different_query() {
+fn file_search_cursor_continuation_rejects_repeated_query_fields() {
     let env = TestEnv::new();
     let instance = "aromatic-file-search-cursor-v2";
     let paths = (1..=21)
@@ -874,22 +869,17 @@ fn file_search_rejects_a_cursor_reused_with_a_different_query() {
     assert_eq!(first_page["ok"], true, "{first_page}");
     let cursor = first_page["result"]["nextCursor"].as_str().unwrap();
 
-    let reused = call(
+    let mixed = call(
         &env,
         instance,
         "2",
         "ctx-a",
         "file_search",
-        json!({
-            "paths": paths,
-            "pattern": "different",
-            "syntax": "literal",
-            "cursor": cursor
-        }),
+        json!({ "pattern": "needle", "cursor": cursor }),
     );
 
-    assert_eq!(reused["ok"], false, "{reused}");
-    assert_eq!(reused["error"]["code"], "file.invalidCursor");
+    assert_eq!(mixed["ok"], false, "{mixed}");
+    assert_eq!(mixed["error"]["code"], "tool.invalidArguments");
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -1044,7 +1034,7 @@ fn file_find_cursor_resumes_the_open_traversal_after_root_replacement() {
         "2",
         "ctx-a",
         "file_find",
-        json!({ "paths": ["./tree"], "type": "file", "cursor": cursor }),
+        json!({ "cursor": cursor }),
     );
     assert_eq!(second["ok"], true, "{second}");
     let entries = second["result"]["entries"].as_array().unwrap();
@@ -1084,7 +1074,7 @@ fn file_find_cursor_is_bound_to_context_and_workspace() {
         "2",
         "ctx-b",
         "file_find",
-        json!({ "paths": ["./tree"], "type": "file", "cursor": cursor }),
+        json!({ "cursor": cursor }),
     );
     assert_eq!(other_context["error"]["code"], "file.invalidCursor");
 
@@ -1096,7 +1086,7 @@ fn file_find_cursor_is_bound_to_context_and_workspace() {
             "type": "request",
             "id": "3",
             "method": "file_find",
-            "params": { "paths": ["./tree"], "type": "file", "cursor": cursor },
+            "params": { "cursor": cursor },
             "context": {
                 "ctxId": "ctx-a",
                 "source": "mcp",
@@ -1150,13 +1140,7 @@ fn file_search_cursor_resumes_the_open_traversal_after_root_replacement() {
         "2",
         "ctx-a",
         "file_search",
-        json!({
-            "paths": ["./search-tree"],
-            "pattern": "needle",
-            "syntax": "literal",
-            "context": 0,
-            "cursor": cursor
-        }),
+        json!({ "cursor": cursor }),
     );
     assert_eq!(second["ok"], true, "{second}");
     let files = second["result"]["files"].as_array().unwrap();
@@ -1197,6 +1181,32 @@ fn file_search_marks_per_file_match_truncation_explicitly() {
     );
     assert_eq!(truncated["ok"], true, "{truncated}");
     assert_eq!(truncated["result"]["files"][0]["truncated"], true);
+    assert_eq!(truncated["result"]["files"][0]["nextLine"], 201);
+
+    let continued = call(
+        &env,
+        instance,
+        "1b",
+        "ctx-a",
+        "file_search",
+        json!({
+            "paths": ["./over.txt"],
+            "pattern": "needle",
+            "syntax": "literal",
+            "context": 0,
+            "startLine": 201
+        }),
+    );
+    assert_eq!(continued["ok"], true, "{continued}");
+    assert!(
+        continued["result"]["files"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("*201:needle 200"),
+        "{continued}"
+    );
+    assert!(continued["result"]["files"][0].get("truncated").is_none());
+    assert!(continued["result"]["files"][0].get("nextLine").is_none());
 
     let exact = call(
         &env,
@@ -1213,6 +1223,38 @@ fn file_search_marks_per_file_match_truncation_explicitly() {
     );
     assert_eq!(exact["ok"], true, "{exact}");
     assert!(exact["result"]["files"][0].get("truncated").is_none());
+    assert!(exact["result"]["files"][0].get("nextLine").is_none());
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_search_exact_page_does_not_return_an_empty_continuation() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-search-exact-page";
+    let root = env.workspace().join("exact-page");
+    fs::create_dir_all(&root).unwrap();
+    for index in 0..20 {
+        fs::write(root.join(format!("file-{index:02}.txt")), "needle\n").unwrap();
+    }
+    start(&env, instance);
+
+    let searched = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_search",
+        json!({
+            "paths": ["./exact-page"],
+            "pattern": "needle",
+            "syntax": "literal",
+            "context": 0
+        }),
+    );
+    assert_eq!(searched["ok"], true, "{searched}");
+    assert_eq!(searched["result"]["files"].as_array().unwrap().len(), 20);
+    assert!(searched["result"].get("nextCursor").is_none(), "{searched}");
 
     env.json_command(&["stop", "--instance", instance]);
 }
