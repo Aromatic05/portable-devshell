@@ -141,7 +141,7 @@ nonblock  task 成功启动后立即返回
 
 `timeMs` 只限制这次 RPC 等待，不停止 task。block wait 超时会返回 `tmux.blockTimeout` warning，task 继续运行。
 
-返回值包含 task 和它当前独占的 pane：
+running task 的返回值包含 task 和它当前独占的 pane：
 
 ```json
 {
@@ -156,7 +156,7 @@ nonblock  task 成功启动后立即返回
 }
 ```
 
-task 结束后 pane 被销毁，因此随后不能再 `tmux_inspect` 该 pane；task id 和 transcript 仍可继续用于 `tmux_read`。
+task 结束后 pane 被销毁，因此完成态返回值不再附带 stale pane ref，也不能再 `tmux_inspect` 该 pane；task id 和 transcript 仍可继续用于 `tmux_read`。
 
 ## `tmux_input`
 
@@ -235,7 +235,7 @@ line < 0  返回最后 N 行，并丢弃更早的未读内容
 
 Transcript 展示层会处理常见 terminal 控制：ANSI control sequence 不作为正文返回，bare CR 表示重绘当前 logical line，backspace 会更新当前 line。完整 terminal screen semantics 不属于 transcript；TUI/curses 应使用 `tmux_inspect`。
 
-已完成 task 最多保留 64 个，默认保留 30 分钟。超过 retention 后返回 `tmux.taskExpired`。Task pane 的销毁不影响这段 retention。
+已完成 task 最多保留 64 个，默认保留 30 分钟。完成态 metadata 与 transcript 一起持久化，因此 worker restart 不会提前打断这段 retention；超过 retention 后返回 `tmux.taskExpired`。Task pane 的销毁不影响这段 retention。
 
 ## `tmux_inspect`: terminal history
 
@@ -282,13 +282,14 @@ running task panes
 ```text
 idle
 running
+terminated
 unknown
 0
 1
 130
 ```
 
-数字字符串是 task 或最近前台 command 的退出状态。
+数字字符串是 task 或最近前台 command 的退出状态。`terminated` 表示 managed task 被显式 `tmux_close(force=true)` 终止；`unknown` 保留给 pane 身份丢失等无法确定最终状态的情况。
 
 `tmux_list` 只返回 compact summary；cwd、command、terminal size 和 history 由 `tmux_inspect` 提供。
 

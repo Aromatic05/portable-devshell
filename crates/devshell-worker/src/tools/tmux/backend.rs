@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -546,6 +547,38 @@ impl TmuxBackend {
 
     pub fn transcript_path(&self, task_id: &str) -> PathBuf {
         self.transcripts_dir.join(format!("{task_id}.log"))
+    }
+
+    pub fn persist_task_record<T: Serialize>(
+        &self,
+        task_id: &str,
+        record: &T,
+    ) -> Result<(), ToolError> {
+        atomic_write_json(
+            &self.transcripts_dir.join(format!("{task_id}.json")),
+            record,
+        )
+    }
+
+    pub fn load_task_records<T: DeserializeOwned>(&self) -> Result<Vec<T>, ToolError> {
+        let mut paths = fs::read_dir(&self.transcripts_dir)
+            .map_err(storage_error)?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "json")
+            })
+            .collect::<Vec<_>>();
+        paths.sort();
+        paths
+            .into_iter()
+            .map(|path| {
+                let bytes = fs::read(path).map_err(storage_error)?;
+                serde_json::from_slice(&bytes)
+                    .map_err(|error| ToolError::new("tmux.storageFailed", error.to_string()))
+            })
+            .collect()
     }
 
     fn transcript_done_path(&self, task_id: &str) -> PathBuf {

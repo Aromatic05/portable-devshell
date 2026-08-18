@@ -106,7 +106,7 @@ impl TmuxStateRegistry {
             &self.socket_paths,
             &self.runtime,
             workspace,
-        )?));
+        )?)?);
         TmuxState::start_reaper(&state);
         states.insert(workspace.to_path_buf(), Arc::clone(&state));
         Ok(state)

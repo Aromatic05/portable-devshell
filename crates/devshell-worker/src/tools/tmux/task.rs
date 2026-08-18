@@ -17,6 +17,7 @@ const TASK_RETENTION_MS: u128 = 30 * 60 * 1_000;
 pub enum TaskState {
     Running,
     Exited(i32),
+    Terminated,
     Lost,
 }
 
@@ -29,6 +30,7 @@ impl TaskState {
         match self {
             Self::Running => "running".to_string(),
             Self::Exited(code) => code.to_string(),
+            Self::Terminated => "terminated".to_string(),
             Self::Lost => "unknown".to_string(),
         }
     }
@@ -42,7 +44,7 @@ pub struct TaskRecord {
     pub state: TaskState,
     pub transcript: TranscriptCursor,
     pub finished_at_ms: Option<u128>,
-    pub last_pane: BackendPane,
+    pub last_pane: Option<BackendPane>,
     pub warnings: Vec<TmuxWarning>,
 }
 
@@ -107,14 +109,15 @@ impl TaskRegistry {
 
     pub fn remove(&mut self, id: &str) {
         if let Some(task) = self.tasks.remove(id) {
-            let _ = std::fs::remove_file(task.transcript.path);
+            let _ = std::fs::remove_file(&task.transcript.path);
+            let _ = std::fs::remove_file(task.transcript.path.with_extension("json"));
         }
         self.order.retain(|candidate| candidate != id);
     }
 }
 
 pub fn refresh_task_record(task: &mut TaskRecord, pane: &BackendPane) {
-    task.last_pane = pane.clone();
+    task.last_pane = Some(pane.clone());
     if pane.status_task_id.as_deref() == Some(&task.id) {
         match pane.status.as_deref() {
             Some("running") => task.state = TaskState::Running,
@@ -247,7 +250,7 @@ mod tests {
             state,
             transcript: TranscriptCursor::new(std::env::temp_dir().join(format!("{id}.log"))),
             finished_at_ms,
-            last_pane: pane(),
+            last_pane: Some(pane()),
             warnings: Vec::new(),
         }
     }

@@ -283,7 +283,11 @@ fn tmux_zero_time_ms_returns_immediate_observations() {
         "input-zero-time",
     );
     assert_eq!(input["ok"], true, "{input}");
-    assert!(input["result"]["pane"]["id"].is_string());
+    if input["result"]["task"]["status"] == "running" {
+        assert!(input["result"]["pane"]["id"].is_string(), "{input}");
+    } else {
+        assert!(input["result"].get("pane").is_none(), "{input}");
+    }
     assert!(input["result"].get("kind").is_none());
     assert!(input["result"].get("observationEpoch").is_none());
     assert!(input["result"].get("observationReset").is_none());
@@ -335,14 +339,7 @@ fn tmux_run_returns_a_task_and_preserves_clean_first_output() {
     assert!(run["result"]["task"].get("paneId").is_none());
     assert!(run["result"]["task"].get("startedAt").is_none());
     assert!(run["result"]["task"].get("finishedAt").is_none());
-    assert!(run["result"]["pane"]["id"].is_string());
-    assert!(
-        run["result"]["pane"]["name"]
-            .as_str()
-            .is_some_and(|name| name.starts_with("task-")),
-        "{run}"
-    );
-    assert!(run["result"]["pane"].get("tmuxPaneId").is_none());
+    assert!(run["result"].get("pane").is_none(), "{run}");
     assert!(run["result"].get("kind").is_none());
     assert!(run["result"].get("warnings").is_none());
     assert!(
@@ -533,6 +530,18 @@ fn tmux_force_close_task_is_not_owned_by_the_creating_context() {
     );
     assert_eq!(closed["ok"], true, "{closed}");
     assert_eq!(closed["result"]["closedTaskId"], task, "{closed}");
+
+    let after_close = call(
+        &env,
+        instance,
+        "3b",
+        "tmux_read",
+        json!({ "task": task }),
+        "ctx-c",
+        "read-after-force-close",
+    );
+    assert_eq!(after_close["ok"], true, "{after_close}");
+    assert_eq!(after_close["result"]["task"]["status"], "terminated");
 
     let stale_input = call(
         &env,
@@ -732,7 +741,7 @@ fn tmux_run_uses_fresh_ephemeral_panes_and_preserves_replay() {
     );
     assert_eq!(second["ok"], true, "{second}");
     assert_eq!(second["result"]["task"]["status"], "0", "{second}");
-    assert_ne!(second["result"]["pane"]["id"], first_pane);
+    assert!(second["result"].get("pane").is_none(), "{second}");
 
     let replay = call_with_identity(
         &env,
@@ -1427,6 +1436,61 @@ fn worker_restart_automatically_adopts_running_tasks() {
     assert_eq!(interrupted["ok"], true, "{interrupted}");
     let finished = wait_for_terminal(&env, instance, task, "ctx-c");
     assert_ne!(finished["result"]["task"]["status"], "running");
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
+fn worker_restart_preserves_completed_task_transcript() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-completed-task-restart";
+    start(&env, instance);
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({
+            "command": "printf 'BEFORE-RESTART\\nAFTER-RESTART\\n'",
+            "wait": "block",
+            "timeMs": 3000,
+            "line": 1
+        }),
+        "ctx-a",
+        "run-completed-before-restart",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
+    assert_eq!(run["result"]["output"][0], "BEFORE-RESTART", "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
+
+    env.json_command(&["stop", "--instance", instance]);
+    assert!(env.tmux_socket_file(instance).exists());
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "2",
+        "tmux_read",
+        json!({ "task": task, "line": 20 }),
+        "ctx-b",
+        "read-completed-after-restart",
+    );
+    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["result"]["task"]["status"], "0", "{read}");
+    assert!(
+        read["result"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line == "AFTER-RESTART"),
+        "{read}"
+    );
     stop(&env, instance);
 }
 

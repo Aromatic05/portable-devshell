@@ -196,7 +196,8 @@ pub struct TmuxTaskOperationOutput {
 pub struct TmuxInputOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task: Option<TmuxTaskView>,
-    pub pane: TmuxPaneRef,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pane: Option<TmuxPaneRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
