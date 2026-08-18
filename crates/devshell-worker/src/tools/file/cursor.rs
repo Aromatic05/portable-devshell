@@ -45,7 +45,12 @@ impl<T: Clone> CursorStore<T> {
         let cursor = self
             .cursors
             .get(id)
-            .ok_or_else(|| ToolError::new("file.invalidCursor", "cursor is not available"))?;
+            .ok_or_else(|| {
+                ToolError::new(
+                    "file.invalidCursor",
+                    "cursor expired, was evicted, or belongs to an earlier worker process; rerun the original query",
+                )
+            })?;
         if cursor.ctx_id != call.ctx_id || cursor.workspace != call.workspace {
             return Err(ToolError::new(
                 "file.invalidCursor",

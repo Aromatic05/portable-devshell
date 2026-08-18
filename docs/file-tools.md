@@ -47,6 +47,8 @@ outline 返回符号的起止行、层级、语言和 `parseStatus`。outline �
 
 每页最多返回 200 个 entry。出现 `nextCursor` 时，cursor 保存实际 traversal continuation，包括目录 DFS 栈、当前 entry index、ignore 规则、类型过滤条件和去重状态。下一页只传 `cursor`，不再重复 `paths`、`type`、`hidden` 或 `gitignore`；它会从上次停止的位置继续，而不是重新遍历根目录。
 
+Cursor 绑定当前 `contextId + workspace + worker process`，并受 LRU 容量限制。跨 context/workspace 使用、worker restart 或 cursor 被淘汰后返回 `file.invalidCursor`；此时重新发起原始查询即可。
+
 所有输入 path / glob root 会在第一页先完成解析、权限和基础合法性检查；continuation 只延迟递归 traversal 本身，不延迟输入错误。
 
 Traversal 使用已经解析并锚定的目录能力。因此第一页之后即使路径名被替换，后续 cursor 仍沿着原来已经打开的目录树继续，而不会静默切换到新目标。
