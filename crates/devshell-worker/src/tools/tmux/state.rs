@@ -549,8 +549,6 @@ impl TmuxState {
         let pane_lock = self.pane_lock(&pane.id)?;
         let _pane_guard = pane_lock.lock().map_err(|_| lock_error("pane operation"))?;
         self.backend.close_pane(&pane)?;
-        self.backend.finish_task_capture(task_id)?;
-        self.backend.remove_task_runtime(task_id);
         {
             let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
             let task = tasks
@@ -559,9 +557,16 @@ impl TmuxState {
                 .ok_or_else(|| task_expired(task_id))?;
             task.state = TaskState::Terminated;
             task.finished_at_ms = Some(unix_time_millis());
-            task.last_pane = None;
         }
         self.persist_task_record(task_id)?;
+        self.backend.finish_task_capture(task_id)?;
+        self.backend.remove_task_runtime(task_id);
+        {
+            let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
+            if let Some(task) = tasks.tasks.get_mut(task_id) {
+                task.last_pane = None;
+            }
+        }
         self.pane_locks
             .lock()
             .map_err(|_| lock_error("tmux pane locks"))?
@@ -648,6 +653,14 @@ impl TmuxState {
         if !task.state.is_active() {
             if let Some(pane) = task.last_pane.as_ref() {
                 self.cleanup_task_pane(task_id, pane)?;
+            } else if self.backend.task_runtime_pending(task_id) {
+                if self.backend.has_session() {
+                    let workspace = self.backend.capture_workspace()?;
+                    self.refresh_tasks_with_workspace(&workspace)?;
+                } else {
+                    self.backend.finish_task_capture(task_id)?;
+                    self.backend.remove_task_runtime(task_id);
+                }
             }
             return Ok(());
         }
@@ -738,6 +751,7 @@ impl TmuxState {
         let mut cleanup = Vec::new();
         let mut finished = Vec::new();
         let mut lost = Vec::new();
+        let mut finalize_only = Vec::new();
         let mut adopted_panes = Vec::new();
         {
             let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
@@ -811,6 +825,12 @@ impl TmuxState {
                 }
                 tasks.insert(task);
             }
+            finalize_only.extend(tasks.tasks.values().filter_map(|task| {
+                (!task.state.is_active()
+                    && task.last_pane.is_none()
+                    && self.backend.task_runtime_pending(&task.id))
+                .then(|| task.id.clone())
+            }));
             tasks.prune();
         }
         let changed = !cleanup.is_empty();
@@ -822,6 +842,10 @@ impl TmuxState {
         }
         for (task_id, pane) in cleanup {
             self.cleanup_task_pane(&task_id, &pane)?;
+        }
+        for task_id in finalize_only {
+            self.backend.finish_task_capture(&task_id)?;
+            self.backend.remove_task_runtime(&task_id);
         }
         for pane_id in adopted_panes {
             self.push_pending_warning(warning(

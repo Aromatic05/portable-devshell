@@ -5,12 +5,12 @@ devshell_tmux_original_debug_command=
 devshell_tmux_armed=0
 
 devshell_tmux_escape_pane() {
-  printf '%s' "${DEVSHELL_TMUX_PANE_ID:-${TMUX_PANE:-unknown}}" | sed -e 's/%/pct_/g' -e 's/[^A-Za-z0-9_.-]/_/g'
+  printf '%s' "${DEVSHELL_TMUX_PANE_ID:-${TMUX_PANE:-unknown}}" | /usr/bin/sed -e 's/%/pct_/g' -e 's/[^A-Za-z0-9_.-]/_/g'
 }
 
 devshell_tmux_init_status_file() {
   if [ -z "$devshell_tmux_status_dir" ]; then return 0; fi
-  mkdir -p "$devshell_tmux_status_dir" 2>/dev/null || return 0
+  /bin/mkdir -p "$devshell_tmux_status_dir" 2>/dev/null || return 0
   escaped=$(devshell_tmux_escape_pane)
   devshell_tmux_status_file="$devshell_tmux_status_dir/$escaped.json"
 }
@@ -22,7 +22,7 @@ devshell_tmux_write_status() {
   if [ -z "$devshell_tmux_status_file" ]; then return 0; fi
   tmp="$devshell_tmux_status_file.${BASHPID:-$$}.$RANDOM.tmp"
   printf '{"state":"%s","exit_code":%s}\n' "$state" "$exit_code" >"$tmp" 2>/dev/null \
-    && mv -f "$tmp" "$devshell_tmux_status_file" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; true; }
+    && /bin/mv -f "$tmp" "$devshell_tmux_status_file" 2>/dev/null || { /bin/rm -f "$tmp" 2>/dev/null || true; true; }
 }
 
 devshell_tmux_preexec_bash() {

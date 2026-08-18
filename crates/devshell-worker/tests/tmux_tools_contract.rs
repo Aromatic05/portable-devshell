@@ -26,6 +26,17 @@ fn start(env: &TestEnv, instance: &str) {
         .success();
 }
 
+fn tmux_workspace_state_root(env: &TestEnv, instance: &str) -> std::path::PathBuf {
+    let instance_root = env.instance_root(instance);
+    let workspace = env.workspace().canonicalize().unwrap();
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(instance_root.as_os_str().as_encoded_bytes());
+    hasher.update(&[0]);
+    hasher.update(workspace.as_os_str().as_encoded_bytes());
+    let key = &hasher.finalize().to_hex()[..16];
+    instance_root.join("tmux").join("workspaces").join(key)
+}
+
 fn call(
     env: &TestEnv,
     instance: &str,
@@ -576,7 +587,10 @@ fn persistent_pane_rejects_close_while_foreground_process_is_running() {
         if status == Some("running") {
             break;
         }
-        assert!(Instant::now() < deadline, "pane never became busy: {listed}");
+        assert!(
+            Instant::now() < deadline,
+            "pane never became busy: {listed}"
+        );
         thread::sleep(Duration::from_millis(25));
     }
 
@@ -1344,6 +1358,74 @@ fn tmux_run_does_not_source_inherited_bash_env() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
+fn tmux_internal_plumbing_does_not_resolve_through_user_path() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let poison = env.home().join("poison-path");
+    std::fs::create_dir_all(&poison).unwrap();
+    for name in ["env", "sleep", "rm", "cat", "mkdir", "mv", "sed"] {
+        let path = poison.join(name);
+        std::fs::write(&path, "#!/bin/sh\nexit 99\n").unwrap();
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(path, permissions).unwrap();
+    }
+    let path = format!(
+        "{}:{}",
+        poison.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let instance = "aromatic-tmux-poison-path";
+    env.command()
+        .env("PATH", path)
+        .env("SHELL", "/bin/bash")
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let created = call(
+        &env,
+        instance,
+        "1",
+        "tmux_create",
+        json!({ "name": "interactive" }),
+        "ctx-path",
+        "create-with-poisoned-path",
+    );
+    assert_eq!(created["ok"], true, "{created}");
+
+    let command = format!(
+        "test \"$(command -v cat)\" = {}/cat\nprintf 'PATH-CLEAN\\n'",
+        poison.display()
+    );
+    let run = call(
+        &env,
+        instance,
+        "2",
+        "tmux_run",
+        json!({ "command": command, "wait": "block", "timeMs": 3000 }),
+        "ctx-path",
+        "run-with-poisoned-path",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
+    assert!(
+        run["result"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line == "PATH-CLEAN"),
+        "{run}"
+    );
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
 fn tmux_run_stays_clean_bash_while_main_uses_user_fish_rc() {
     let fish = Command::new("sh")
         .args(["-c", "command -v fish"])
@@ -1628,6 +1710,11 @@ fn worker_restart_preserves_completed_task_transcript() {
     assert_eq!(run["result"]["task"]["status"], "0", "{run}");
     assert_eq!(run["result"]["output"][0], "BEFORE-RESTART", "{run}");
     let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
+    let state_root = tmux_workspace_state_root(&env, instance);
+    let stale_script = state_root.join("tasks").join(format!("{task}.sh"));
+    let stale_done = state_root.join("transcripts").join(format!("{task}.done"));
+    std::fs::write(&stale_script, "stale runtime\n").unwrap();
+    std::fs::write(&stale_done, "").unwrap();
 
     env.json_command(&["stop", "--instance", instance]);
     assert!(env.tmux_socket_file(instance).exists());
@@ -1648,6 +1735,14 @@ fn worker_restart_preserves_completed_task_transcript() {
         read["result"]["output"].as_array().unwrap(),
         &[json!("AFTER-RESTART")],
         "already-consumed transcript output must not replay after restart: {read}"
+    );
+    assert!(
+        !stale_script.exists(),
+        "completed runtime script was not recovered"
+    );
+    assert!(
+        !stale_done.exists(),
+        "completed transcript marker was not recovered"
     );
     stop(&env, instance);
 }

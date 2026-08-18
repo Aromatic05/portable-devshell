@@ -101,13 +101,7 @@ impl TmuxBackend {
         let status_dir = root.join("status");
         let tasks_dir = root.join("tasks");
         let transcripts_dir = root.join("transcripts");
-        for path in [
-            &root,
-            &shell_dir,
-            &status_dir,
-            &tasks_dir,
-            &transcripts_dir,
-        ] {
+        for path in [&root, &shell_dir, &status_dir, &tasks_dir, &transcripts_dir] {
             ensure_dir(path, 0o700).map_err(|error| ToolError::new("tmux.storageFailed", error))?;
         }
         let observation_reset = session_exists(&socket);
@@ -264,8 +258,8 @@ impl TmuxBackend {
             });
             let cwd = decode_tmux_argument(fields.get(9).copied().unwrap_or_default())?;
             let command = decode_tmux_argument(fields.get(10).copied().unwrap_or_default())?;
-            let interactive_running = managed_task_id.is_none()
-                && !matches!(command.as_str(), "bash" | "zsh" | "fish");
+            let interactive_running =
+                managed_task_id.is_none() && !matches!(command.as_str(), "bash" | "zsh" | "fish");
             panes.push(BackendPane {
                 id: id.to_string(),
                 name: name.to_string(),
@@ -416,14 +410,14 @@ impl TmuxBackend {
         let _ = fs::remove_file(&transcript_done_path);
         atomic_write_bytes(&transcript_path, b"")?;
         let script = format!(
-            "while [ ! -e {} ]; do sleep 0.02; done\nrm -f {}\n{}",
+            "while [ ! -e {} ]; do /bin/sleep 0.02; done\n/bin/rm -f {}\n{}",
             shell_quote(&gate_path.to_string_lossy()),
             shell_quote(&gate_path.to_string_lossy()),
             command,
         );
         atomic_write_bytes(&script_path, script.as_bytes())?;
         let launch = format!(
-            "exec env -u BASH_ENV /bin/bash --noprofile --norc {}",
+            "exec /usr/bin/env -u BASH_ENV /bin/bash --noprofile --norc {}",
             shell_quote(&script_path.to_string_lossy())
         );
         let args = vec![
@@ -463,7 +457,7 @@ impl TmuxBackend {
                 "-t".into(),
                 tmux_pane_id.clone(),
                 format!(
-                    "cat >> {}; : > {}",
+                    "/bin/cat >> {}; : > {}",
                     shell_quote(&transcript_path.to_string_lossy()),
                     shell_quote(&transcript_done_path.to_string_lossy()),
                 ),
@@ -582,6 +576,12 @@ impl TmuxBackend {
         let _ = fs::remove_file(self.tasks_dir.join(format!("{task_id}.sh")));
         let _ = fs::remove_file(self.tasks_dir.join(format!("{task_id}.start")));
         let _ = fs::remove_file(self.transcript_done_path(task_id));
+    }
+
+    pub fn task_runtime_pending(&self, task_id: &str) -> bool {
+        self.tasks_dir.join(format!("{task_id}.sh")).exists()
+            || self.tasks_dir.join(format!("{task_id}.start")).exists()
+            || self.transcript_done_path(task_id).exists()
     }
 
     pub fn remove_pane_metadata(&self, pane_id: &str) {

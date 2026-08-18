@@ -17,7 +17,7 @@ function __devshell_tmux_init_status_file
     if test -z "$__devshell_tmux_status_dir"
         return 0
     end
-    mkdir -p "$__devshell_tmux_status_dir" 2>/dev/null; or return 0
+    /bin/mkdir -p "$__devshell_tmux_status_dir" 2>/dev/null; or return 0
     set -l escaped (__devshell_tmux_escape_pane)
     set -g __devshell_tmux_status_file "$__devshell_tmux_status_dir/$escaped.json"
 end
@@ -33,9 +33,9 @@ function __devshell_tmux_write_status
     end
     set -l tmp "$__devshell_tmux_status_file.$fish_pid."(random)'.tmp'
     printf '{"state":"%s","exit_code":%s}\n' "$state" "$exit_code" >"$tmp" 2>/dev/null
-    and mv -f "$tmp" "$__devshell_tmux_status_file" 2>/dev/null
+    and /bin/mv -f "$tmp" "$__devshell_tmux_status_file" 2>/dev/null
     or begin
-        rm -f "$tmp" 2>/dev/null
+        /bin/rm -f "$tmp" 2>/dev/null
         true
     end
 end

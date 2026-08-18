@@ -58,7 +58,7 @@ fn prepare_bash(
     .map_err(io_error)?;
     Ok(ShellLaunch {
         command: format!(
-            "exec env -u TMUX -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} {} --rcfile {} -i",
+            "exec /usr/bin/env -u TMUX -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} {} --rcfile {} -i",
             quote(status_dir.to_string_lossy().as_ref()),
             quote(pane_id),
             quote(shell.to_string_lossy().as_ref()),
@@ -77,7 +77,7 @@ fn prepare_fish(
     fs::write(&integration, FISH_INTEGRATION).map_err(io_error)?;
     Ok(ShellLaunch {
         command: format!(
-            "exec env -u TMUX -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} DEVSHELL_TMUX_FISH_INTEGRATION={} {} -C {} -i",
+            "exec /usr/bin/env -u TMUX -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} DEVSHELL_TMUX_FISH_INTEGRATION={} {} -C {} -i",
             quote(status_dir.to_string_lossy().as_ref()),
             quote(pane_id),
             quote(integration.to_string_lossy().as_ref()),
@@ -109,7 +109,7 @@ fn prepare_zsh(
     .map_err(io_error)?;
     Ok(ShellLaunch {
         command: format!(
-            "exec env -u TMUX -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} ZDOTDIR={} {} -i",
+            "exec /usr/bin/env -u TMUX -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} ZDOTDIR={} {} -i",
             quote(status_dir.to_string_lossy().as_ref()),
             quote(pane_id),
             quote(zdotdir.to_string_lossy().as_ref()),
