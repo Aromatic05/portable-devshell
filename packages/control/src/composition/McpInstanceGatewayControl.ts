@@ -118,8 +118,11 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return await service.consumePending(ctxId, callId);
     }
 
-    async readTodo(instance: string, title?: string): Promise<JsonValue> {
-        return (await this.#requireDescriptor(instance).todo.read(title)) as unknown as JsonValue;
+    async readTodo(
+        instance: string,
+        input?: import("@portable-devshell/shared").TodoReadInput
+    ): Promise<JsonValue> {
+        return (await this.#requireDescriptor(instance).todo.read(input)) as unknown as JsonValue;
     }
 
     listTools(instance: string): ToolDefinition[] {

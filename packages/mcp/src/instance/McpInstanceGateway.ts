@@ -9,6 +9,7 @@ import type {
 import type {
     ContextMessageReadResult,
     JsonValue,
+    TodoReadInput,
     ToolCallContext,
     ToolDefinition
 } from "@portable-devshell/shared";
@@ -46,7 +47,7 @@ export interface McpInstanceGateway {
     environment(instance: string): McpEndpointEnvironmentHandshake | undefined;
     listInstances(): Promise<JsonValue>;
     consumeContextMessages?(instance: string, ctxId: string, callId: string): Promise<ContextMessageReadResult>;
-    readTodo(instance: string, title?: string): Promise<JsonValue>;
+    readTodo(instance: string, input?: TodoReadInput): Promise<JsonValue>;
     listTools(instance: string): ToolDefinition[];
     prepareWorkspace(instance: string, workspace: string): Promise<{
         projectMemoryAgentFile: string;

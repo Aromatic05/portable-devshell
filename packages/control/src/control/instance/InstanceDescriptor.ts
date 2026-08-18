@@ -3,6 +3,7 @@ import type { TerminalBackend } from "../terminal/TerminalProcess.js";
 import type { ContextMessageQueueInput, ContextMessageReadResult, ContextMessageRecord } from "@portable-devshell/shared";
 import type {
     ActiveTodoSummary,
+    TodoReadInput,
     TodoReadResult,
     TodoWriteInput,
     ToolCallAssociation,
@@ -18,7 +19,7 @@ export interface InstanceContextMessagePort {
 export interface InstanceTodoPort {
     currentAssociation(): ToolCallAssociation | undefined;
     delete(taskId: string): Promise<void>;
-    read(title?: string): Promise<TodoReadResult>;
+    read(input?: TodoReadInput): Promise<TodoReadResult>;
     summaries(): ActiveTodoSummary[];
     write(input: TodoWriteInput, ctxId: string): Promise<TodoReadResult>;
 }

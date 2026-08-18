@@ -7,6 +7,7 @@ import {
     type InstanceEventType,
     type JsonValue,
     type TodoItem,
+    type TodoReadInput,
     type TodoReadResult,
     type TodoState as SharedTodoState,
     type TodoStatus,
@@ -81,7 +82,11 @@ export class TodoState {
 
     transition(document: TodoDocument, input: TodoWriteInput, ctxId: string): TodoTransition {
         const normalized = normalizeInput(input);
-        const previousIndex = document.active.findIndex((entry) => entry.title === normalized.title);
+        const previousIndex = document.active.findIndex((entry) => (
+            normalized.taskId === undefined
+                ? entry.title === normalized.title
+                : entry.taskId === normalized.taskId
+        ));
         const previous = previousIndex === -1 ? undefined : document.active[previousIndex];
         const events: TodoTransition["events"] = [];
         const active = [...document.active];
@@ -89,11 +94,17 @@ export class TodoState {
         let next: SharedTodoState;
 
         if (previous === undefined) {
+            if (normalized.taskId !== undefined) {
+                throw invalidTodo(`todo task ${normalized.taskId} was not found`);
+            }
             requireRevision(normalized.revision, 0);
             next = this.#createState(normalized, ctxId);
             active.push(next);
             events.push(todoEvent("todo.created", next));
         } else {
+            if (previous.title !== normalized.title) {
+                throw invalidTodo(`todo task ${previous.taskId} title is immutable`);
+            }
             requireRevision(normalized.revision, previous.revision);
             next = {
                 ...previous,
@@ -134,12 +145,17 @@ export class TodoState {
         };
     }
 
-    readResult(document: TodoDocument, title?: string): TodoReadResult {
+    readResult(document: TodoDocument, input: TodoReadInput | string = {}): TodoReadResult {
+        const selector = typeof input === "string" ? { title: input } : input;
         const tasks = this.#taskSummaries(document);
-        if (title === undefined) {
+        if (selector.taskId === undefined && selector.title === undefined) {
             return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks };
         }
-        const state = [...document.active, ...document.archived].find((entry) => entry.title === title);
+        const state = [...document.active, ...document.archived].find((entry) => (
+            selector.taskId === undefined
+                ? entry.title === selector.title
+                : entry.taskId === selector.taskId
+        ));
         if (state === undefined) {
             return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks };
         }
@@ -254,6 +270,7 @@ function normalizeInput(input: TodoWriteInput): TodoWriteInput {
     if (!isRecord(input)) throw invalidTodo("todo_write requires an object input");
     return {
         revision: requiredRevision(input.revision),
+        ...(input.taskId === undefined ? {} : { taskId: normalizeText(input.taskId, "taskId") }),
         title: normalizeText(input.title, "title"),
         todos: normalizeItems(input.todos)
     };

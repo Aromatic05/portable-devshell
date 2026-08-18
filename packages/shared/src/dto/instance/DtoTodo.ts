@@ -51,6 +51,11 @@ export interface TodoReadResult {
     tasks?: TodoTaskSummary[];
 }
 
+export interface TodoReadInput {
+    taskId?: string;
+    title?: string;
+}
+
 export interface TodoTaskSummary extends ActiveTodoSummary {
     ctxId?: string;
     updatedAt: string;
@@ -58,6 +63,7 @@ export interface TodoTaskSummary extends ActiveTodoSummary {
 
 export interface TodoWriteInput {
     revision: number;
+    taskId?: string;
     title: string;
     todos: TodoItem[];
 }

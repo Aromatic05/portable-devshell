@@ -93,13 +93,18 @@ export class McpToolCatalogTodo {
     readonly #definitions: readonly ToolDefinition[] = [
         {
             requiredCapabilities: [],
-            description: "Read todo plans. Call with no title to list all live task titles and summaries, which is the recovery entry point after context compression. Call again with a title to read that task's complete plan. Use todo tools only for multi-step tasks.",
+            description: "Read todo plans. Call with no selector to list live tasks and recover their stable taskId values. Read one task by taskId whenever it is known; title remains a compatibility selector. Use todo tools only for multi-step tasks.",
             group: "todo",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
+                    taskId: {
+                        description: "Stable task identifier returned by todo_read or todo_write. Prefer this selector once known.",
+                        minLength: 1,
+                        type: "string"
+                    },
                     title: {
-                        description: "Exact live task title. Omit to list live task titles and summaries.",
+                        description: "Exact task title compatibility selector. Do not pass together with taskId.",
                         minLength: 1,
                         type: "string"
                     }
@@ -111,7 +116,7 @@ export class McpToolCatalogTodo {
         },
         {
             requiredCapabilities: [],
-            description: "Replace one titled task's complete plan; this is not a patch. title is the immutable namespace and must be unique among live tasks. To create a task, use a new title with revision 0. To update one, first call todo_read with its title and pass its latest revision. After context compression, call todo_read without title to recover live titles before reading or updating a task. Each item requires a unique id, content, and status. IDs must be unique. status must be one of pending | in_progress | blocked | completed | failed | cancelled. Allow at most one in_progress item; blocked and failed items require detail. Update the plan promptly when progress changes.",
+            description: "Replace one task's complete plan; this is not a patch. Create with a new immutable title and revision 0. After creation, preserve title and pass taskId on updates so task identity never depends on model memory of the title. Legacy title-only updates remain supported. Each item requires a unique id, content, and status. IDs must be unique. status must be one of pending | in_progress | blocked | completed | failed | cancelled. Allow at most one in_progress item; blocked and failed items require detail. Update the plan promptly when progress changes.",
             group: "todo",
             inputSchema: {
                 additionalProperties: false,
@@ -120,6 +125,11 @@ export class McpToolCatalogTodo {
                         description: "Revision from the latest todo_read result.",
                         minimum: 0,
                         type: "integer"
+                    },
+                    taskId: {
+                        description: "Stable task identifier returned when the task was created. Prefer this on every update; omit when creating revision 0.",
+                        minLength: 1,
+                        type: "string"
                     },
                     title: {
                         description: "Immutable task namespace, unique among live tasks.",

@@ -68,6 +68,34 @@ test("TodoState owns validation, transitions, summaries, and associations", () =
     });
 });
 
+test("TodoState reads and updates an existing task by stable taskId", () => {
+    const state = new TodoState("aromatic-pc", { taskId: () => "task-fixed" });
+    const created = state.transition(state.emptyDocument(), {
+        revision: 0,
+        title: "Stable task",
+        todos: [{ content: "First", id: "first", status: "in_progress" }]
+    }, "ctx-first");
+
+    assert.equal(state.readResult(created.document, { taskId: "task-fixed" }).title, "Stable task");
+    const updated = state.transition(created.document, {
+        revision: 1,
+        taskId: "task-fixed",
+        title: "Stable task",
+        todos: [{ content: "Second", id: "second", status: "in_progress" }]
+    }, "ctx-second");
+
+    assert.deepEqual(state.readResult(updated.document, { taskId: "task-fixed" }).items, [
+        { content: "Second", id: "second", status: "in_progress" }
+    ]);
+    assert.equal(updated.document.active[0]?.activeCtxId, "ctx-second");
+    assert.throws(() => state.transition(updated.document, {
+        revision: 2,
+        taskId: "task-missing",
+        title: "Stable task",
+        todos: []
+    }, "ctx-third"), /task-missing.*not found/);
+});
+
 test("TodoState exposes only actionable work as active todos", () => {
     const state = new TodoState("aromatic-pc", {
         taskId: () => "task-fixed"

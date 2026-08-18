@@ -603,8 +603,8 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
         async releaseAlerts(instance, workspace) {
             await overrides.releaseAlerts?.(instance, workspace);
         },
-        async readTodo(instance, title) {
-            return await (overrides.readTodo?.(instance, title) ?? Promise.resolve({ items: [], revision: 0, summary: { completed: 0, total: 0 } }));
+        async readTodo(instance, input) {
+            return await (overrides.readTodo?.(instance, input) ?? Promise.resolve({ items: [], revision: 0, summary: { completed: 0, total: 0 } }));
         },
         async connectInstance(instance, reference) {
             return await (overrides.connectInstance?.(instance, reference) ?? Promise.resolve({ instance }));
@@ -633,8 +633,8 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
 test("todo tools are control-side, group-controlled, capability-free, and available while the worker is stopped", async () => {
     const calls: string[] = [];
     const gateway = createGateway({
-        async readTodo(instance, title) {
-            calls.push(`read:${instance}:${title ?? "all"}`);
+        async readTodo(instance, input) {
+            calls.push(`read:${instance}:${input?.taskId ?? input?.title ?? "all"}`);
             return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
         },
         async writeTodo(instance, input, callContext) {
@@ -682,8 +682,14 @@ test("todo tools are control-side, group-controlled, capability-free, and availa
     assert.equal(todoWriteSchema.properties?.todos?.minContains, undefined);
     assert.equal(todoWriteSchema.properties?.todos?.maxContains, undefined);
     await endpoint.callTool("todo_read", withContext({ title: "Recover" }), context);
+    await endpoint.callTool("todo_read", withContext({ taskId: "task-recover" }), context);
     await endpoint.callTool("todo_write", withContext({ revision: 0, title: "Recover", todos: [] }), context);
-    assert.deepEqual(calls, ["read:main-pc:all", "read:main-pc:Recover", "write:main-pc:ctx-instance-test:0"]);
+    assert.deepEqual(calls, [
+        "read:main-pc:all",
+        "read:main-pc:Recover",
+        "read:main-pc:task-recover",
+        "write:main-pc:ctx-instance-test:0"
+    ]);
 
     const hidden = new McpEndpointWorker({
         contextRegistry,

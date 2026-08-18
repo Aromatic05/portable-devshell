@@ -243,7 +243,8 @@ function createTodoServer(socketPath: string): {
                     return undefined;
                 },
                 async delete() {},
-                async read(title?: string) {
+                async read(input) {
+                    const title = input?.title;
                     todoReadTitles.push(title);
                     return title === todoFixture.title
                         ? todoFixture
