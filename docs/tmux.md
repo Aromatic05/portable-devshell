@@ -1,8 +1,6 @@
 # tmux 工具
 
-`devshell-worker` 在目标环境中原生提供一组 tmux 工具，用于持续运行任务、交互式输入、多 pane 并行和终端画面检查。
-
-## 工具列表
+`devshell-worker` 原生提供一组 tmux 工具，用于长时间运行的 PTY task 和持久交互终端。
 
 ```text
 tmux_run
@@ -14,93 +12,192 @@ tmux_create
 tmux_close
 ```
 
-一个 portable-devshell instance 对应一个独立 tmux server 和一个固定受管 session。tmux runtime 按需启动，并始终包含一个名为 `main` 的 pane。受管交互 shell 支持 Bash、Zsh 和 Fish，并在读取用户原有 shell 配置后注入 task 状态 hook。
-
-## Pane 与 task
-
-pane 是持久终端，task 是一次由 `tmux_run` 启动的前台命令。
-
-每个 task 在 worker 内部绑定 pane id 和 pane incarnation id；公开 task 结果只返回：
+核心模型只有两类 terminal resource：
 
 ```text
-id
-status: running / numeric exit code / unknown
+managed task
+    tmux_run 创建
+    独占一个全新的临时 pane
+    task 结束后 pane 销毁
+    task metadata 与 transcript 继续保留
+
+persistent interaction
+    main 或 tmux_create 创建的 pane
+    使用用户真实交互 shell
+    pane 独立于其中运行的程序而持续存在
+    只有显式 tmux_close 才销毁
 ```
 
-task 不绑定创建它的 `ctxId`：
+一句话概括：task owns its terminal；interaction owns the terminal itself。
 
-- `tmux_input` 和 `tmux_read` 必须携带 task id；
-- 任意已通过 `environ_info` 获得有效 `ctxId` 的当前上下文，都可以继续读取或控制该 instance 内的 managed task；
-- `ctxId` 仍用于上下文新鲜度检查、审计、重放保护、取消和调度，但不作为 tmux 资源所有权；
-- `taskId` 与 `paneIncarnationId` 防止旧请求落到已经变化的任务或 pane；
-- 运行中的 pane 仍受 `tmux.paneBusy` 保护，不能被新的 `tmux_run` 或非强制 `tmux_close` 覆盖；
-- task 退出后，输出被冻结到 task，pane 立即释放并可运行下一个 task。
+## Pane、task 与程序
 
-MCP/RPC transport session 关闭、模型上下文刷新或 `ctxId` 变化，都不会让长期运行的 tmux task 失去控制。worker 重启时会自动接管 metadata 完整的 managed task，不需要额外的 reclaim 指令。
+pane 是 PTY resource。task 是一次由 `tmux_run` 明确创建并由 worker 跟踪的 managed execution scope。task 内部实际运行的 shell、编译器、REPL、编辑器或子进程只是 terminal-side program，不会自动成为新的 task。
 
-## 运行命令
+只有 `tmux_run` 创建 task：
 
-指定 pane：
+```text
+tmux_run("bash")
+    -> task-A
+
+tmux_input(task-A, "vim foo^M")
+    -> vim 是 task-A 内部程序
+    -> 不创建 task-B
+```
+
+`tmux_input` 不解释输入含义。相同按键既可以是 shell command、REPL 输入、TUI shortcut，也可以只是普通字符。
+
+每个 running task 绑定自己的 pane id 和 pane incarnation id。旧 task control 不会因为 pane 身份变化而落到错误终端。
+
+Task 不绑定创建它的 `ctxId`。MCP/RPC transport session 关闭、上下文刷新或后续获得新的有效 `ctxId`，都不会改变 instance 内 running task 的生命周期或控制权。
+
+## `main` 与 persistent pane
+
+每个受管 session 始终有一个名为 `main` 的 persistent interactive pane。`main` 是 agent 的默认交互终端，不能关闭。
+
+`tmux_create` 创建额外的 persistent interactive pane：
 
 ```json
 {
-    "pane": "server",
-    "command": "cargo test",
-    "wait": "block",
-    "timeMs": 30000,
-    "line": 80
+    "name": "debug",
+    "cwd": "./backend"
 }
 ```
 
-不指定 pane 时，worker 在同一个结构临界区内：
+`main` 和 `tmux_create` pane 都启动用户配置的 `$SHELL`，并读取用户正常的交互 shell 配置。prompt、fastfetch、alias、shell function、virtualenv hook 等都属于 persistent interaction 的真实状态。
 
-1. 优先选择空闲的 `main`；
-2. 否则选择创建时间最早的空闲 `auto-*` pane；
-3. 没有空闲 pane 且未达到容量时，创建 `auto-1`、`auto-2` 等 pane；
-4. 达到容量且没有可复用 pane 时返回 `tmux.capacityReached`。
+程序从 persistent pane 中退出后，pane 本身仍存在：
 
-通过 `tmux_create` 显式命名的 pane 不参与自动复用，只有调用方明确指定名称时才会运行任务。worker 通过持久 metadata 区分自动 pane 与显式 pane，因此显式名称不会因为文本形似 `auto-*` 而被回收。
+```text
+shell -> python -> shell -> vim -> shell
+```
 
-`wait` 支持：
+worker 不尝试把其中每条命令识别为 managed task。
+
+## `tmux_run`
+
+`tmux_run` 用于长时间运行、需要 PTY，或后续可能需要 terminal input 的 task。
+
+```json
+{
+    "command": "set -e\ncargo build\ncargo test",
+    "cwd": "./",
+    "wait": "nonblock"
+}
+```
+
+每次调用都会：
+
+```text
+创建 fresh pane
+-> 在 pane 中直接启动 clean Bash runner
+-> 建立 task transcript capture
+-> 启动用户 shell program
+-> task 独占该 pane
+-> task 结束后冻结状态并销毁 pane
+```
+
+不存在 idle pane reuse、`auto-*` pane pool 或 task pane GC cache。
+
+### Command language
+
+`command` 是 Bash shell program，不是向某个已有 prompt paste 的字符序列，因此天然支持多行、条件、循环和 heredoc。
+
+Unix task runner 使用 clean Bash：
+
+```text
+/bin/bash --noprofile --norc
+```
+
+它继承 worker 的基础 environment，但不会加载用户 `.bashrc`、`.zshrc`、Fish config、prompt 或其他 interactive shell state。
+
+这与 persistent pane 故意不同：
+
+```text
+tmux_run     clean Bash execution environment
+tmux_create  user's interactive shell environment
+main         user's interactive shell environment
+```
+
+### `cwd`
+
+`cwd` 使用与其他 worker path 一致的语义：
+
+```text
+./foo   workspace-relative
+/foo    absolute path
+```
+
+省略时默认当前 workspace。worker 在真正放行 task program 前验证新 pane 的实际 cwd 仍对应已解析目录，避免路径在创建过程中被替换。
+
+### Wait
+
+`wait`：
 
 ```text
 block     等待 task 退出或 timeMs 到期
-nonblock  shell 确认 task 已启动后返回
+nonblock  task 成功启动后立即返回
 ```
 
-等待期间不会持有 pane 操作锁，因此其他有效上下文也可以并发调用 `tmux_input` 发送 `^C`，或调用 `tmux_read` 获取输出。
+`timeMs` 只限制这次 RPC 等待，不停止 task。block wait 超时会返回 `tmux.blockTimeout` warning，task 继续运行。
 
-返回值包含 task id。后续交互不得只依赖 pane：
+返回值包含 task 和它当前独占的 pane：
 
 ```json
 {
     "task": {
         "id": "task-...",
         "status": "running"
+    },
+    "pane": {
+        "id": "pane-...",
+        "name": "task-..."
     }
 }
 ```
 
-## 取消等待
+task 结束后 pane 被销毁，因此随后不能再 `tmux_inspect` 该 pane；task id 和 transcript 仍可继续用于 `tmux_read`。
 
-取消 `tmux_run` 只终止当前 RPC 等待，不向终端发送信号，也不结束已经启动的 task。返回取消后，task 仍保持运行，任意有效上下文都可以继续使用 `tmux_read`、`tmux_input` 或后续 `tmux_inspect` 观察。
+## `tmux_input`
 
-取消 `tmux_read` 会停止等待且不消费本次尚未返回的 task 输出。需要真正中断前台程序时，调用 `tmux_input` 向对应 task 发送 `^C`。
+`tmux_input` 的唯一语义是发送 raw terminal input。调用必须指定且只指定一个 target：
 
-## 交互输入
+```text
+task=<task id>   running managed task
+pane=<pane>      persistent interactive pane
+```
+
+### Managed task input
 
 ```json
 {
     "task": "task-...",
     "input": "^C",
-    "timeMs": 0,
+    "timeMs": 1000,
     "line": 40
 }
 ```
 
-`timeMs` 默认是 `0`，按键发送成功后立即返回。只有希望顺便等待新行式输出时才设置正数；curses 或全屏程序应在发送后调用 `tmux_inspect` 查看重绘后的画面。
+managed task 必须通过 task id 控制。即使调用方知道其临时 pane id，也不能通过 `pane=` 绕过 task identity；这类调用返回 `tmux.taskTargetRequired`。
 
-`input` 使用 caret notation：
+对 task target，`timeMs` 可以等待新的 transcript output，`line` 控制顺便消费多少 transcript 行。
+
+### Persistent pane input
+
+```json
+{
+    "pane": "main",
+    "input": "cd /tmp^M"
+}
+```
+
+persistent pane 通过 pane id/name 控制。输入返回后不会建立 command/task 边界。需要观察结果时使用 `tmux_inspect`。
+
+persistent pane target 不使用 `line`，也不使用非零 `timeMs`。
+
+### Caret notation
+
+输入支持 caret notation：
 
 ```text
 ^M  Enter / CR
@@ -110,9 +207,11 @@ nonblock  shell 确认 task 已启动后返回
 ^I  Tab
 ```
 
-相同 `contextId + requestId` 的副作用调用会返回首次执行结果，不会重复发送命令、按键、创建或关闭 pane。相同 request id 携带不同参数时返回 `tmux.requestIdConflict`。
+相同 `contextId + requestId` 的副作用请求使用 replay protection，不会因为重试重复发送按键。
 
-## 读取 task 输出
+## `tmux_read`: task transcript
+
+`tmux_read` 只接受 task id，并消费该 managed task 的 durable transcript：
 
 ```json
 {
@@ -122,35 +221,63 @@ nonblock  shell 确认 task 已启动后返回
 }
 ```
 
-`tmux_read` 使用 task 级滑动窗口和终端历史 diff：
+Transcript 从 task 自己的 fresh pane 通过 tmux `pipe-pane` 旁路采集。用户 command 不会被包进 `tee`，因此不会改变 pipeline、exit status 或 TTY 判断。
+
+读取语义：
 
 ```text
-line > 0  返回最早的 N 行未读输出
-line = 0  丢弃全部未读输出
-line < 0  只返回最后 N 行，并丢弃更早输出
+line > 0  返回最早的 N 行未读 transcript
+line = 0  丢弃当前未读 transcript
+line < 0  返回最后 N 行，并丢弃更早的未读内容
 ```
 
-每个 task 最多保留 400 行，instance 最多保留 64 个已完成 task，默认保留 30 分钟。超出窗口会返回 `tmux.outputDropped`，过期 task 返回 `tmux.taskExpired`。
+运行中的 task 若最后一行尚未形成完整换行，`tmux_read` 不会提前消费它；task 结束后会允许返回最终 partial line。
 
-这套输出模型面向普通行式命令。进度条覆盖、curses、alternate screen 和其他终端重绘不进行语义 diff，应使用 `tmux_inspect` 查看真实终端画面。
+Transcript 展示层会处理常见 terminal 控制：ANSI control sequence 不作为正文返回，bare CR 表示重绘当前 logical line，backspace 会更新当前 line。完整 terminal screen semantics 不属于 transcript；TUI/curses 应使用 `tmux_inspect`。
 
-## 检查终端画面
+已完成 task 最多保留 64 个，默认保留 30 分钟。超过 retention 后返回 `tmux.taskExpired`。Task pane 的销毁不影响这段 retention。
+
+## `tmux_inspect`: terminal history
+
+`tmux_inspect` 观察 pane，而不是 task：
 
 ```json
 {
-    "pane": "server",
+    "pane": "main",
     "start": -80,
     "end": 0
 }
 ```
 
-`start` / `end` 使用 tmux 相对历史坐标，`0` 表示当前底部，负数表示更早位置。返回内容仍按从早到晚排列。
+可以 inspect：
 
-`tmux_inspect` 不消费 task 输出。可以通过 `panes = "all"` 检查所有受管 pane。
+```text
+main
+显式 tmux_create pane
+仍在运行的 task pane
+```
 
-## Pane 状态
+running task 的 pane ref 来自 `tmux_run` 或 `tmux_list`。task 结束以后临时 pane 已不存在，此时应使用 `tmux_read` 查看 retained transcript。
 
-`tmux_list` 返回 pane 身份、cwd、前台命令、当前 task 和容量。状态保持紧凑字符串：
+`start` / `end` 使用相对 terminal history 坐标，`0` 表示当前底部，负数表示更早位置。单次最多请求 200 行。受管 tmux session 的 history limit 为 10000 行，因此 persistent interaction 可以像普通终端一样通过不同 offset 向上查看较长历史。
+
+`panes = "all"` 可以一次检查所有当前 pane。
+
+`tmux_inspect` 不消费任何 task transcript。
+
+## `tmux_list`
+
+`tmux_list` 返回当前仍存在的 pane：
+
+```text
+main
+persistent tmux_create panes
+running task panes
+```
+
+已完成 task 的 pane 不会继续出现在列表中。
+
+状态保持紧凑字符串：
 
 ```text
 idle
@@ -161,85 +288,90 @@ unknown
 130
 ```
 
-数字字符串就是 task 或最近前台命令的退出码。
+数字字符串是 task 或最近前台 command 的退出状态。
 
-`tmux_list` 返回紧凑 pane summary：
+`tmux_list` 只返回 compact summary；cwd、command、terminal size 和 history 由 `tmux_inspect` 提供。
 
-```text
-id                       稳定逻辑 ID
-name                     instance 内唯一名称
-status                   idle / running / unknown / numeric exit code
-task                     当前运行中的 task，可选
-```
+## `tmux_close`
 
-`tmux_inspect` 才返回 detail；`cwd`、`command`、`size`、`locked`、`task` 和 `lines` 均仅在有值时出现。底层 tmux pane/window ID 不属于公开结果。
+`tmux_close` 必须指定且只指定一个 target。
 
-## 创建与关闭 pane
-
-每个受管 pane 都位于独立的 tmux window 中。window 默认只包含这一个 pane，因此任务始终获得完整终端尺寸，不会因为其他并发任务而被继续切割。
-
-显式创建：
+### Close task
 
 ```json
 {
-    "name": "server",
-    "cwd": "./"
+    "task": "task-...",
+    "force": true
 }
 ```
 
-名称允许字母、数字、点、下划线和连字符。`cwd` 遵循 worker 路径规则和 instance security policy。
+running task 不设置 `force` 时返回 `tmux.paneBusy`。`force=true` 终止 task 并销毁它拥有的临时 pane。Task transcript 仍按 completed-task retention 保留。
 
-运行中 task 的 pane：
+### Close persistent pane
 
-- 不设置 `force` 时返回 `tmux.paneBusy`；
-- 任意有效上下文使用 `force = true` 都可以终止该 task 并关闭 pane；
-- 最后一个受管 pane 不能关闭。
-
-## 并发与容量
-
-结构操作使用全局结构锁，命令和输入只在短临界区内使用 pane 锁。等待输出或退出时不会持锁。
-
-worker 最多同时执行 8 个工具调用，其中普通工具最多占 6 个槽位，剩余容量保留给：
-
-```text
-tmux_input
-tmux_inspect
-tmux_list
+```json
+{
+    "pane": "debug",
+    "force": true
+}
 ```
 
-control scheduler 也允许一项 urgent tmux 调用越过普通 instance/context 并发上限，并优先调度已排队的 urgent 调用。
+persistent pane 有 running foreground process 时需要 `force=true`。`main` 永远不能关闭。
 
-## 自动回收
+managed task pane 不能通过 `pane=` close；必须使用 task id。
 
-worker 只自动回收由 `tmux_run` 创建且在 metadata 中标记为 automatic 的 pane。`main` 和通过 `tmux_create` 显式创建的 pane 永不参与自动回收。
+## 取消语义
 
-自动 pane 必须同时满足：
+取消 `tmux_run` 只停止当前 RPC wait，不向 terminal 发送信号，也不结束已经启动的 task。
 
-- 没有运行中的 task；
-- shell 已处于 idle 或记录了数字退出码；
-- 没有尚未消费的 task 输出。
+取消 `tmux_read` 停止等待，并且不会消费这次尚未返回的 transcript。
 
-回收有两个触发点：
-
-- 后台每 5 分钟扫描一次，连续空闲 30 分钟后回收；
-- `tmux_create` 遇到容量已满时，优先回收最久未使用的安全 auto pane，再决定是否返回 `tmux.capacityReached`。
-
-`tmux_read`、`tmux_input`、`tmux_inspect` 和 task 输出返回都会刷新 pane 的最近使用时间；`tmux_list` 不刷新，因此状态轮询不会阻止 GC。成功回收会通过 `tmux.paneCollected` warning 报告，后台扫描失败则通过 `tmux.gcFailed` 报告。
-
-## 生命周期与存储
-
-worker 正常停止时不会销毁 tmux server 和 pane。重新启动同一个 instance 后，worker 通过 tmux metadata 自动接管原有 pane 和仍在运行的 task；首次后续 tmux 结果会携带一次性的 `tmux.observationReset` warning，提示历史输出可能不完整。
-
-运行时 socket：
+需要正常终止 terminal-side program 时通常发送：
 
 ```text
-$XDG_RUNTIME_DIR/devshell-worker/<instance>/tmux.sock
+tmux_input(task=..., input="^C")
 ```
 
-持久元数据：
+需要无条件销毁 managed execution resource 时使用：
 
 ```text
-~/.devshell/<instance>/tmux/
+tmux_close(task=..., force=true)
 ```
 
-目标环境必须安装 `tmux`。如果 `tmux -V` 不可用，worker 不会注册 tmux 工具。
+## 并发与 replay
+
+每个 running task 独占自己的 pane。对同一个 terminal endpoint 的 input 使用 pane-level operation lock，因此不同 context 的并发 `tmux_input` 不会把单次输入互相穿插。
+
+等待 task 输出或 task 退出时不会长期持有 pane operation lock，其他有效上下文仍可 inspect、read 或 input。
+
+`tmux_run`、`tmux_input`、`tmux_create`、`tmux_close` 保持 request replay protection：相同 request identity 和参数返回首次执行结果；同一 request identity 携带不同参数返回 `tmux.requestIdConflict`。
+
+## 容量
+
+受管 session 的 pane 数量有固定上限。Persistent pane 永不因容量压力自动回收；running task pane 也不会被其他调用抢占。
+
+容量已满时：
+
+```text
+tmux_create -> tmux.capacityReached
+tmux_run    -> tmux.capacityReached
+```
+
+task 正常结束后，其临时 pane 立即释放容量。
+
+## Worker restart
+
+worker 正常停止不会销毁 tmux server。重新启动同一 workspace 后：
+
+- persistent pane 保持原身份和 terminal state；
+- metadata 完整且仍在 running 的 task pane会被自动 adopt；
+- adopted task 继续使用原 task id 与 transcript；
+- 首次观察会通过 warning 提示 observation reset / task adoption。
+
+不需要额外 reclaim 工具。
+
+## 存储
+
+每个 workspace 的 tmux runtime 使用独立 storage/socket scope。持久 metadata、task script 和 transcript 位于 instance 的 tmux state 目录中。
+
+目标环境必须安装 `tmux`。如果 `tmux -V` 不可用，worker 不注册 tmux 工具。

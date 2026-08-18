@@ -24,6 +24,7 @@ use crate::tools::tmux::shell::prepare_shell_launch;
 pub const TMUX_SESSION: &str = "devshell";
 pub const MAX_PANES: usize = 16;
 const PANE_HISTORY_LINES: i64 = 400;
+const TERMINAL_HISTORY_LINES: usize = 10_000;
 const TERMINAL_COLUMNS: usize = 240;
 const TERMINAL_ROWS: usize = 60;
 
@@ -43,8 +44,8 @@ pub struct BackendPane {
     pub command: String,
     pub lines: Vec<String>,
     pub status: Option<String>,
-    pub status_seq: Option<u64>,
     pub status_task_id: Option<String>,
+    pub managed_task_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +73,8 @@ struct PaneRecord {
     name: String,
     #[serde(default)]
     automatic: bool,
+    #[serde(default)]
+    task_id: Option<String>,
     created_at_ms: u128,
 }
 
@@ -91,6 +94,8 @@ pub struct TmuxBackend {
     panes_dir: PathBuf,
     shell_dir: PathBuf,
     status_dir: PathBuf,
+    tasks_dir: PathBuf,
+    transcripts_dir: PathBuf,
     session_file: PathBuf,
     observation_reset: bool,
     session_prepared: AtomicBool,
@@ -111,11 +116,21 @@ impl TmuxBackend {
         workspace: &Path,
     ) -> Result<Self, ToolError> {
         let workspace_key = workspace_key(&instance_paths.instance_root, workspace);
-        let (root, socket) = workspace_storage(instance_paths, socket_paths, workspace, &workspace_key)?;
+        let (root, socket) =
+            workspace_storage(instance_paths, socket_paths, workspace, &workspace_key)?;
         let panes_dir = root.join("panes").join("by-id");
         let shell_dir = root.join("shell");
         let status_dir = root.join("status");
-        for path in [&root, &panes_dir, &shell_dir, &status_dir] {
+        let tasks_dir = root.join("tasks");
+        let transcripts_dir = root.join("transcripts");
+        for path in [
+            &root,
+            &panes_dir,
+            &shell_dir,
+            &status_dir,
+            &tasks_dir,
+            &transcripts_dir,
+        ] {
             ensure_dir(path, 0o700).map_err(|error| ToolError::new("tmux.storageFailed", error))?;
         }
         let observation_reset = session_exists(&socket);
@@ -126,6 +141,8 @@ impl TmuxBackend {
             panes_dir,
             shell_dir,
             status_dir,
+            tasks_dir,
+            transcripts_dir,
             session_file: root.join("session.json"),
             observation_reset,
             session_prepared: AtomicBool::new(false),
@@ -156,7 +173,7 @@ impl TmuxBackend {
         self.clear_stale_pane_records()?;
         let session = self.new_session_record();
         atomic_write_json(&self.session_file, &session)?;
-        let pane = PaneRecord::new("main", false)?;
+        let pane = PaneRecord::new("main", false, None)?;
         let launch = prepare_shell_launch(&self.shell_dir, &self.status_dir, &pane.pane_id)?;
         let args = vec![
             "new-session".to_string(),
@@ -214,6 +231,10 @@ impl TmuxBackend {
             "#{q:pane_current_path}",
             "#{q:pane_current_command}",
             "#{@devshell_worker_automatic}",
+            "#{pane_dead}",
+            "#{pane_dead_status}",
+            "#{@devshell_worker_task_id}",
+            "#{pane_dead_signal}",
         ]
         .join("|");
         let raw = self.run(&[
@@ -249,7 +270,28 @@ impl TmuxBackend {
                 continue;
             }
             let lines = self.capture_lines(tmux_pane_id, -PANE_HISTORY_LINES, 0)?;
-            let status = self.read_status(id);
+            let managed_task_id = fields
+                .get(14)
+                .copied()
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned);
+            let shell_status = self.read_status(id);
+            let task_status = managed_task_id.as_ref().map(|_| {
+                if fields.get(12).copied() == Some("1") {
+                    if let Some(status) = fields.get(13).copied().filter(|value| !value.is_empty())
+                    {
+                        status.to_string()
+                    } else if let Some(signal) =
+                        fields.get(15).and_then(|value| value.parse::<i32>().ok())
+                    {
+                        (128 + signal).to_string()
+                    } else {
+                        "unknown".to_string()
+                    }
+                } else {
+                    "running".to_string()
+                }
+            });
             panes.push(BackendPane {
                 id: id.to_string(),
                 name: name.to_string(),
@@ -273,9 +315,11 @@ impl TmuxBackend {
                 cwd: decode_tmux_argument(fields.get(9).copied().unwrap_or_default())?,
                 command: decode_tmux_argument(fields.get(10).copied().unwrap_or_default())?,
                 lines,
-                status: status.as_ref().map(status_text),
-                status_seq: status.as_ref().map(|record| record.seq),
-                status_task_id: status.and_then(|record| record.task_id),
+                status: task_status.or_else(|| shell_status.as_ref().map(status_text)),
+                status_task_id: managed_task_id
+                    .clone()
+                    .or_else(|| shell_status.and_then(|record| record.task_id)),
+                managed_task_id,
             });
         }
         panes.sort_by_key(|pane| pane.created_at_ms);
@@ -314,32 +358,6 @@ impl TmuxBackend {
         Ok(selected)
     }
 
-    pub fn prepare_task(&self, pane_id: &str, task_id: &str) -> Result<(), ToolError> {
-        let path = self.pending_task_path(pane_id);
-        atomic_write_bytes(&path, format!("{task_id}\n").as_bytes())
-    }
-
-    pub fn clear_pending_task(&self, pane_id: &str) {
-        let _ = fs::remove_file(self.pending_task_path(pane_id));
-    }
-
-    pub fn send_command(&self, tmux_pane_id: &str, command: &str) -> Result<(), ToolError> {
-        self.run(&[
-            "send-keys".into(),
-            "-t".into(),
-            tmux_pane_id.into(),
-            "-l".into(),
-            command.into(),
-        ])?;
-        self.run(&[
-            "send-keys".into(),
-            "-t".into(),
-            tmux_pane_id.into(),
-            "Enter".into(),
-        ])?;
-        Ok(())
-    }
-
     pub fn send_input(&self, tmux_pane_id: &str, input: &str) -> Result<(), ToolError> {
         for chunk in parse_tmux_input(input)? {
             match chunk {
@@ -371,7 +389,7 @@ impl TmuxBackend {
         cwd: &Path,
         automatic: bool,
     ) -> Result<BackendPane, ToolError> {
-        let pane = PaneRecord::new(name, automatic)?;
+        let pane = PaneRecord::new(name, automatic, None)?;
         let launch = prepare_shell_launch(&self.shell_dir, &self.status_dir, &pane.pane_id)?;
         let args = vec![
             "new-window".to_string(),
@@ -419,6 +437,140 @@ impl TmuxBackend {
             .into_iter()
             .find(|candidate| candidate.id == pane.pane_id)
             .ok_or_else(|| ToolError::new("tmux.createFailed", "created pane disappeared"))
+    }
+
+    pub fn create_task_pane(
+        &self,
+        task_id: &str,
+        cwd: &Path,
+        command: &str,
+    ) -> Result<BackendPane, ToolError> {
+        let pane = PaneRecord::new(task_id, true, Some(task_id.to_string()))?;
+        let script_path = self.tasks_dir.join(format!("{task_id}.sh"));
+        let gate_path = self.tasks_dir.join(format!("{task_id}.start"));
+        let transcript_path = self.transcript_path(task_id);
+        let transcript_done_path = self.transcript_done_path(task_id);
+        let _ = fs::remove_file(&gate_path);
+        let _ = fs::remove_file(&transcript_done_path);
+        atomic_write_bytes(&transcript_path, b"")?;
+        let script = format!(
+            "while [ ! -e {} ]; do sleep 0.02; done\nrm -f {}\n{}",
+            shell_quote(&gate_path.to_string_lossy()),
+            shell_quote(&gate_path.to_string_lossy()),
+            command,
+        );
+        atomic_write_bytes(&script_path, script.as_bytes())?;
+        let launch = format!(
+            "exec /bin/bash --noprofile --norc {}",
+            shell_quote(&script_path.to_string_lossy())
+        );
+        let args = vec![
+            "new-window".to_string(),
+            "-d".to_string(),
+            "-P".to_string(),
+            "-F".to_string(),
+            "#{pane_id}".to_string(),
+            "-t".to_string(),
+            format!("{TMUX_SESSION}:"),
+            "-n".to_string(),
+            task_id.to_string(),
+            "-c".to_string(),
+            cwd.to_string_lossy().to_string(),
+            launch,
+        ];
+        let tmux_pane_id = self.run(&args)?.trim().to_string();
+        if tmux_pane_id.is_empty() {
+            self.remove_task_runtime(task_id);
+            return Err(ToolError::new(
+                "tmux.createFailed",
+                "tmux new-window returned an empty task pane id",
+            ));
+        }
+        let setup = (|| {
+            self.mark_pane(&tmux_pane_id, &pane)?;
+            self.persist_pane(&pane)?;
+            self.run(&[
+                "set-option".into(),
+                "-w".into(),
+                "-t".into(),
+                tmux_pane_id.clone(),
+                "remain-on-exit".into(),
+                "on".into(),
+            ])?;
+            self.run(&[
+                "pipe-pane".into(),
+                "-t".into(),
+                tmux_pane_id.clone(),
+                format!(
+                    "cat >> {}; : > {}",
+                    shell_quote(&transcript_path.to_string_lossy()),
+                    shell_quote(&transcript_done_path.to_string_lossy()),
+                ),
+            ])?;
+            Ok::<(), ToolError>(())
+        })();
+        if let Err(error) = setup {
+            let _ = self.run(&["kill-pane".into(), "-t".into(), tmux_pane_id.clone()]);
+            let _ = self.remove_pane_record(&pane.pane_id);
+            self.remove_task_runtime(task_id);
+            let _ = fs::remove_file(&transcript_path);
+            return Err(error);
+        }
+        self.capture_workspace()?
+            .panes
+            .into_iter()
+            .find(|candidate| candidate.id == pane.pane_id)
+            .ok_or_else(|| ToolError::new("tmux.createFailed", "created task pane disappeared"))
+    }
+
+    pub fn start_task_pane(&self, task_id: &str) -> Result<(), ToolError> {
+        let gate_path = self.tasks_dir.join(format!("{task_id}.start"));
+        atomic_write_bytes(&gate_path, b"start\n")?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while gate_path.exists() && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        if gate_path.exists() {
+            return Err(ToolError::retryable(
+                "tmux.taskStartUnconfirmed",
+                "task runner did not consume its start gate",
+            ));
+        }
+        thread::sleep(Duration::from_millis(20));
+        Ok(())
+    }
+
+    pub fn finish_task_capture(&self, task_id: &str) -> Result<(), ToolError> {
+        self.wait_task_capture(task_id)
+    }
+
+    pub fn transcript_path(&self, task_id: &str) -> PathBuf {
+        self.transcripts_dir.join(format!("{task_id}.log"))
+    }
+
+    fn transcript_done_path(&self, task_id: &str) -> PathBuf {
+        self.transcripts_dir.join(format!("{task_id}.done"))
+    }
+
+    fn wait_task_capture(&self, task_id: &str) -> Result<(), ToolError> {
+        let done_path = self.transcript_done_path(task_id);
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while !done_path.exists() {
+            if std::time::Instant::now() >= deadline {
+                return Err(ToolError::retryable(
+                    "tmux.transcriptFinalizeFailed",
+                    "task transcript logger did not confirm completion",
+                ));
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        let _ = fs::remove_file(&done_path);
+        Ok(())
+    }
+
+    pub fn remove_task_runtime(&self, task_id: &str) {
+        let _ = fs::remove_file(self.tasks_dir.join(format!("{task_id}.sh")));
+        let _ = fs::remove_file(self.tasks_dir.join(format!("{task_id}.start")));
     }
 
     pub fn close_pane(&self, pane: &BackendPane) -> Result<(), ToolError> {
@@ -479,6 +631,14 @@ impl TmuxBackend {
     }
 
     fn configure_terminal_size(&self) -> Result<(), ToolError> {
+        self.run(&[
+            "set-option".into(),
+            "-g".into(),
+            "-t".into(),
+            TMUX_SESSION.into(),
+            "history-limit".into(),
+            TERMINAL_HISTORY_LINES.to_string(),
+        ])?;
         self.run(&[
             "set-option".into(),
             "-g".into(),
@@ -559,6 +719,7 @@ impl TmuxBackend {
                 pane_incarnation_id: pane.pane_incarnation_id.clone(),
                 name: pane.name.clone(),
                 automatic: pane.automatic,
+                task_id: pane.managed_task_id.clone(),
                 created_at_ms: pane.created_at_ms,
             })?;
         }
@@ -621,6 +782,10 @@ impl TmuxBackend {
             (
                 "@devshell_worker_automatic",
                 if pane.automatic { "1" } else { "0" }.to_string(),
+            ),
+            (
+                "@devshell_worker_task_id",
+                pane.task_id.clone().unwrap_or_default(),
             ),
         ] {
             self.run(&[
@@ -699,11 +864,6 @@ impl TmuxBackend {
         self.status_dir.join(format!("{}.json", escape_id(pane_id)))
     }
 
-    fn pending_task_path(&self, pane_id: &str) -> PathBuf {
-        self.status_dir
-            .join(format!("{}.pending", escape_id(pane_id)))
-    }
-
     fn persist_pane(&self, pane: &PaneRecord) -> Result<(), ToolError> {
         atomic_write_json(&self.panes_dir.join(format!("{}.json", pane.pane_id)), pane)
     }
@@ -754,7 +914,7 @@ impl TmuxBackend {
 }
 
 impl PaneRecord {
-    fn new(name: &str, automatic: bool) -> Result<Self, ToolError> {
+    fn new(name: &str, automatic: bool, task_id: Option<String>) -> Result<Self, ToolError> {
         validate_pane_name(name)?;
         Ok(Self {
             schema_version: 1,
@@ -762,6 +922,7 @@ impl PaneRecord {
             pane_incarnation_id: Uuid::new_v4().to_string(),
             name: name.to_string(),
             automatic,
+            task_id,
             created_at_ms: unix_time_millis(),
         })
     }
@@ -870,7 +1031,14 @@ fn legacy_session_is_within(socket: &Path, workspace: &Path) -> Result<bool, Too
     let output = Command::new("tmux")
         .arg("-S")
         .arg(socket)
-        .args(["list-panes", "-s", "-t", TMUX_SESSION, "-F", "#{q:pane_current_path}"])
+        .args([
+            "list-panes",
+            "-s",
+            "-t",
+            TMUX_SESSION,
+            "-F",
+            "#{q:pane_current_path}",
+        ])
         .output()
         .map_err(|error| ToolError::new("tmux.inspectFailed", error.to_string()))?;
     if !output.status.success() {
@@ -883,7 +1051,10 @@ fn legacy_session_is_within(socket: &Path, workspace: &Path) -> Result<bool, Too
         saw_pane = true;
         let decoded = decode_tmux_argument(line)?;
         let canonical = PathBuf::from(decoded).canonicalize().map_err(|error| {
-            ToolError::new("tmux.inspectFailed", format!("failed to resolve legacy pane cwd: {error}"))
+            ToolError::new(
+                "tmux.inspectFailed",
+                format!("failed to resolve legacy pane cwd: {error}"),
+            )
         })?;
         if !canonical.starts_with(workspace) {
             return Ok(false);
@@ -972,6 +1143,11 @@ fn new_pane_id() -> String {
     let uuid = Uuid::new_v4().simple().to_string();
     format!("pane-{}", &uuid[..26])
 }
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
 fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), ToolError> {
     let parent = path
         .parent()

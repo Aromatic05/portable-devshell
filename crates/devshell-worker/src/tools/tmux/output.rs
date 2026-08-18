@@ -1,181 +1,260 @@
+use std::collections::VecDeque;
+use std::fs::File;
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::path::PathBuf;
+
 use super::warning;
 
-use crate::tools::tmux::backend::BackendPane;
+use crate::tools::ToolError;
 use crate::tools::tmux::types::TmuxWarning;
 
-const MAX_UNREAD_LINES: usize = 400;
-
-#[derive(Debug, Default, Clone)]
-pub struct OutputWindow {
-    pub anchor: Vec<String>,
-    pub unread: Vec<String>,
+#[derive(Debug, Clone)]
+pub struct TranscriptCursor {
+    pub path: PathBuf,
+    offset: u64,
 }
 
-pub fn refresh_window(
-    window: &mut OutputWindow,
-    pane: &BackendPane,
-    warnings: &mut Vec<TmuxWarning>,
-) {
-    if pane.lines == window.anchor {
-        return;
+impl TranscriptCursor {
+    pub fn new(path: PathBuf) -> Self {
+        Self { path, offset: 0 }
     }
-    if let Some(lines) = changed_output(&window.anchor, &pane.lines) {
-        append_unread(window, &lines, &pane.id, warnings);
-        window.anchor = pane.lines.clone();
-        return;
-    }
-    warnings.push(warning(
-        Some(&pane.id),
-        "tmux.windowResync",
-        "terminal history changed outside the task output window; unread output was resynchronized",
-    ));
-    window.anchor = pane.lines.clone();
-    window.unread.clear();
-}
 
-pub fn take_output(
-    window: &mut OutputWindow,
-    pane_id: &str,
-    warnings: &mut Vec<TmuxWarning>,
-    line: i64,
-) -> Vec<String> {
-    match line.cmp(&0) {
-        std::cmp::Ordering::Equal => {
-            window.unread.clear();
-            Vec::new()
+    pub fn has_output(&self, terminal: bool) -> Result<bool, ToolError> {
+        let Some(mut reader) = self.reader()? else {
+            return Ok(false);
+        };
+        let mut bytes = Vec::new();
+        let count = reader
+            .read_until(b'\n', &mut bytes)
+            .map_err(transcript_error)?;
+        Ok(count > 0 && (terminal || bytes.ends_with(b"\n")))
+    }
+
+    pub fn take_output(
+        &mut self,
+        pane_id: &str,
+        warnings: &mut Vec<TmuxWarning>,
+        line: i64,
+        terminal: bool,
+    ) -> Result<Vec<String>, ToolError> {
+        if line == 0 {
+            self.discard()?;
+            return Ok(Vec::new());
         }
-        std::cmp::Ordering::Greater => {
-            let count = line as usize;
-            let output = window
-                .unread
-                .iter()
-                .take(count)
-                .cloned()
-                .collect::<Vec<_>>();
-            window.unread.drain(..output.len());
-            output
+        if line > 0 {
+            return self.take_oldest(line as usize, terminal);
         }
-        std::cmp::Ordering::Less => {
-            let keep = line.unsigned_abs() as usize;
-            let split = window.unread.len().saturating_sub(keep);
-            if split > 0 {
-                warnings.push(warning(
-                    Some(pane_id),
-                    "tmux.outputSkipped",
-                    "earlier unread task output was discarded; only the requested tail was returned",
-                ));
+        self.take_tail(line.unsigned_abs() as usize, pane_id, warnings, terminal)
+    }
+
+    fn take_oldest(&mut self, limit: usize, terminal: bool) -> Result<Vec<String>, ToolError> {
+        let Some(mut reader) = self.reader()? else {
+            return Ok(Vec::new());
+        };
+        let mut output = Vec::new();
+        let mut committed = self.offset;
+        while output.len() < limit {
+            let mut bytes = Vec::new();
+            let count = reader
+                .read_until(b'\n', &mut bytes)
+                .map_err(transcript_error)?;
+            if count == 0 {
+                break;
             }
-            let output = window
-                .unread
-                .iter()
-                .skip(split)
-                .cloned()
-                .collect::<Vec<_>>();
-            window.unread.clear();
-            output
-        }
-    }
-}
-
-fn changed_output(anchor: &[String], current: &[String]) -> Option<Vec<String>> {
-    if anchor.is_empty() {
-        return Some(current.to_vec());
-    }
-    if current.is_empty() {
-        return Some(Vec::new());
-    }
-    let overlap = suffix_prefix_overlap(anchor, current);
-    if overlap > 0 && overlap < current.len() {
-        return Some(current[overlap..].to_vec());
-    }
-    let prefix = anchor
-        .iter()
-        .zip(current)
-        .take_while(|(left, right)| left == right)
-        .count();
-    let max_suffix = anchor.len().min(current.len()).saturating_sub(prefix);
-    let suffix = (1..=max_suffix)
-        .rev()
-        .find(|length| anchor[anchor.len() - length..] == current[current.len() - length..])
-        .unwrap_or(0);
-    if prefix == 0 && suffix == 0 {
-        if current[0].starts_with(&anchor[0]) {
-            let mut output = Vec::new();
-            let suffix = &current[0][anchor[0].len()..];
-            if !suffix.is_empty() {
-                output.push(suffix.to_string());
+            let complete = bytes.ends_with(b"\n");
+            if !complete && !terminal {
+                break;
             }
-            output.extend(current.iter().skip(1).cloned());
-            return Some(output);
+            committed += count as u64;
+            output.push(render_terminal_record(&bytes));
         }
-        return None;
+        self.offset = committed;
+        Ok(output)
     }
-    let changed_end = current.len().saturating_sub(suffix);
-    let mut output = current[prefix..changed_end].to_vec();
-    if prefix < anchor.len() && !output.is_empty() && output[0].starts_with(&anchor[prefix]) {
-        let remainder = output[0][anchor[prefix].len()..].to_string();
-        if remainder.is_empty() {
-            output.remove(0);
-        } else {
-            output[0] = remainder;
+
+    fn take_tail(
+        &mut self,
+        limit: usize,
+        pane_id: &str,
+        warnings: &mut Vec<TmuxWarning>,
+        terminal: bool,
+    ) -> Result<Vec<String>, ToolError> {
+        let Some(mut reader) = self.reader()? else {
+            return Ok(Vec::new());
+        };
+        let mut tail = VecDeque::with_capacity(limit);
+        let mut committed = self.offset;
+        let mut skipped = false;
+        loop {
+            let mut bytes = Vec::new();
+            let count = reader
+                .read_until(b'\n', &mut bytes)
+                .map_err(transcript_error)?;
+            if count == 0 {
+                break;
+            }
+            let complete = bytes.ends_with(b"\n");
+            if !complete && !terminal {
+                break;
+            }
+            committed += count as u64;
+            if limit == 0 {
+                skipped = true;
+                continue;
+            }
+            if tail.len() == limit {
+                tail.pop_front();
+                skipped = true;
+            }
+            tail.push_back(render_terminal_record(&bytes));
+        }
+        self.offset = committed;
+        if skipped {
+            warnings.push(warning(
+                Some(pane_id),
+                "tmux.outputSkipped",
+                "earlier unread task transcript was discarded; only the requested tail was returned",
+            ));
+        }
+        Ok(tail.into_iter().collect())
+    }
+
+    fn discard(&mut self) -> Result<(), ToolError> {
+        match std::fs::metadata(&self.path) {
+            Ok(metadata) => {
+                self.offset = metadata.len();
+                Ok(())
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(transcript_error(error)),
         }
     }
-    Some(output)
+
+    fn reader(&self) -> Result<Option<BufReader<File>>, ToolError> {
+        let file = match File::open(&self.path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(transcript_error(error)),
+        };
+        let mut reader = BufReader::new(file);
+        reader
+            .seek(SeekFrom::Start(self.offset))
+            .map_err(transcript_error)?;
+        Ok(Some(reader))
+    }
 }
 
-fn suffix_prefix_overlap(anchor: &[String], current: &[String]) -> usize {
-    let max = anchor.len().min(current.len());
-    (1..=max)
-        .rev()
-        .find(|length| anchor[anchor.len() - length..] == current[..*length])
-        .unwrap_or(0)
+fn render_terminal_record(bytes: &[u8]) -> String {
+    let mut value = String::from_utf8_lossy(bytes).into_owned();
+    if value.ends_with('\n') {
+        value.pop();
+    }
+    if value.ends_with('\r') {
+        value.pop();
+    }
+    let chars = value.chars().collect::<Vec<_>>();
+    let mut output = String::new();
+    let mut index = 0;
+    while index < chars.len() {
+        match chars[index] {
+            '\x1b' => index = skip_escape_sequence(&chars, index + 1),
+            '\r' => {
+                output.clear();
+                index += 1;
+            }
+            '\u{0008}' | '\u{007f}' => {
+                output.pop();
+                index += 1;
+            }
+            '\t' => {
+                output.push('\t');
+                index += 1;
+            }
+            ch if !ch.is_control() => {
+                output.push(ch);
+                index += 1;
+            }
+            _ => index += 1,
+        }
+    }
+    output
 }
 
-fn append_unread(
-    window: &mut OutputWindow,
-    lines: &[String],
-    pane_id: &str,
-    warnings: &mut Vec<TmuxWarning>,
-) {
-    window.unread.extend(lines.iter().cloned());
-    let excess = window.unread.len().saturating_sub(MAX_UNREAD_LINES);
-    if excess > 0 {
-        window.unread.drain(..excess);
-        warnings.push(warning(
-            Some(pane_id),
-            "tmux.outputDropped",
-            "oldest unread task output was dropped to keep the output window bounded",
-        ));
+fn skip_escape_sequence(chars: &[char], mut index: usize) -> usize {
+    if index >= chars.len() {
+        return index;
+    }
+    match chars[index] {
+        '[' => {
+            index += 1;
+            while index < chars.len() {
+                let ch = chars[index];
+                if ('@'..='~').contains(&ch) {
+                    return index + 1;
+                }
+                index += 1;
+            }
+            index
+        }
+        ']' | 'P' | '^' | '_' => skip_string_escape(chars, index + 1),
+        _ => index + 1,
     }
 }
+
+fn skip_string_escape(chars: &[char], mut index: usize) -> usize {
+    while index < chars.len() {
+        match chars[index] {
+            '\u{0007}' => return index + 1,
+            '\x1b' if index + 1 < chars.len() && chars[index + 1] == '\\' => return index + 2,
+            _ => index += 1,
+        }
+    }
+    index
+}
+
+fn transcript_error(error: std::io::Error) -> ToolError {
+    ToolError::new("tmux.transcriptFailed", error.to_string())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::changed_output;
+    use std::io::Write;
 
-    fn lines(values: &[&str]) -> Vec<String> {
-        values.iter().map(|value| (*value).to_string()).collect()
+    use super::{TranscriptCursor, render_terminal_record};
+    use crate::testing::temp_dir;
+
+    #[test]
+    fn terminal_record_keeps_latest_carriage_return_render() {
+        assert_eq!(render_terminal_record(b"10%\r20%\r30%\n"), "30%");
+        assert_eq!(render_terminal_record(b"abc\x08d\n"), "abd");
+        assert_eq!(render_terminal_record(b"\x1b[31mred\x1b[0m\n"), "red");
     }
 
     #[test]
-    fn changed_output_extracts_command_output_between_multiline_prompts() {
-        let anchor = lines(&["startup", "prompt-top", "prompt-bottom"]);
-        let current = lines(&[
-            "startup",
-            "command",
-            "REAL-OK",
-            "prompt-top",
-            "prompt-bottom",
-        ]);
+    fn transcript_cursor_does_not_consume_partial_running_line() {
+        let root = temp_dir();
+        let path = root.path().join("task.log");
+        let mut file = std::fs::File::create(&path).unwrap();
+        write!(file, "one\ntwo").unwrap();
+        drop(file);
+
+        let mut cursor = TranscriptCursor::new(path.clone());
+        let mut warnings = Vec::new();
         assert_eq!(
-            changed_output(&anchor, &current),
-            Some(lines(&["command", "REAL-OK"]))
+            cursor
+                .take_output("pane", &mut warnings, 80, false)
+                .unwrap(),
+            vec!["one"]
         );
-    }
+        assert!(!cursor.has_output(false).unwrap());
 
-    #[test]
-    fn changed_output_follows_a_scrolling_history_window() {
-        let anchor = lines(&["old", "shared-one", "shared-two"]);
-        let current = lines(&["shared-one", "shared-two", "new"]);
-        assert_eq!(changed_output(&anchor, &current), Some(lines(&["new"])));
+        let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+        writeln!(file, " continued").unwrap();
+        assert_eq!(
+            cursor
+                .take_output("pane", &mut warnings, 80, false)
+                .unwrap(),
+            vec!["two continued"]
+        );
     }
 }

@@ -13,8 +13,8 @@ pub enum TmuxWaitMode {
 #[serde(rename_all = "camelCase")]
 pub struct TmuxRunParams {
     #[serde(default)]
-    /// Managed pane name returned by tmux_list or tmux_create.
-    pub pane: Option<String>,
+    /// Initial task directory. Use ./ for a workspace-relative path or / for an absolute path.
+    pub cwd: Option<String>,
     pub command: String,
     #[serde(default)]
     /// Wait mode. Defaults to block.
@@ -32,14 +32,19 @@ pub struct TmuxRunParams {
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxInputParams {
-    pub task: String,
+    #[serde(default)]
+    /// Managed task id returned by tmux_run. Exactly one of task or pane is required.
+    pub task: Option<String>,
+    #[serde(default)]
+    /// Persistent pane name or id returned by tmux_list or tmux_create. Exactly one of task or pane is required.
+    pub pane: Option<String>,
     pub input: String,
     #[serde(default)]
-    /// Maximum time this call waits for new output. Defaults to 0, so input returns after send.
+    /// Maximum time this call waits for new task transcript output. Defaults to 0 and applies only to task targets.
     #[schemars(range(min = 0, max = 300000))]
     pub time_ms: Option<u64>,
     #[serde(default)]
-    /// Output lines to consume. Defaults to 80.
+    /// Task transcript lines to consume after sending input. Defaults to 80 and applies only to task targets.
     pub line: Option<i64>,
 }
 
@@ -68,7 +73,7 @@ pub enum TmuxInspectAll {
 #[serde(rename_all = "camelCase")]
 pub struct TmuxInspectParams {
     #[serde(default)]
-    /// Managed pane name returned by tmux_list or tmux_create.
+    /// Managed pane name returned by tmux_list or tmux_create, or a running task pane returned by tmux_run.
     pub pane: Option<String>,
     #[serde(default)]
     pub panes: Option<TmuxInspectAll>,
@@ -104,8 +109,12 @@ pub struct TmuxCreateParams {
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxCloseParams {
-    /// Managed pane name returned by tmux_list or tmux_create.
-    pub pane: String,
+    #[serde(default)]
+    /// Managed task id returned by tmux_run. Exactly one of task or pane is required.
+    pub task: Option<String>,
+    #[serde(default)]
+    /// Persistent pane name or id returned by tmux_list or tmux_create. Exactly one of task or pane is required.
+    pub pane: Option<String>,
     #[serde(default)]
     pub force: bool,
 }
@@ -184,6 +193,18 @@ pub struct TmuxTaskOperationOutput {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct TmuxInputOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<TmuxTaskView>,
+    pub pane: TmuxPaneRef,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warnings: Option<Vec<TmuxWarning>>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct TmuxPaneOperationOutput {
     pub panes: Vec<TmuxPaneDetail>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -209,7 +230,10 @@ pub struct TmuxCreateOutput {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxCloseOutput {
-    pub closed_pane_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closed_task_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closed_pane_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warnings: Option<Vec<TmuxWarning>>,
 }

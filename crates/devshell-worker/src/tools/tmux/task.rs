@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::platform::unix_time_millis;
 use crate::tools::ToolError;
 use crate::tools::tmux::backend::BackendPane;
-use crate::tools::tmux::output::{OutputWindow, refresh_window};
+use crate::tools::tmux::output::TranscriptCursor;
 use crate::tools::tmux::types::{
     TmuxPaneDetail, TmuxPaneRef, TmuxPaneSummary, TmuxTaskView, TmuxTerminalSize, TmuxWarning,
 };
@@ -15,23 +15,21 @@ const TASK_RETENTION_MS: u128 = 30 * 60 * 1_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskState {
-    Pending,
     Running,
     Exited(i32),
-    UnknownActive,
     Lost,
 }
 
 impl TaskState {
     pub fn is_active(&self) -> bool {
-        matches!(self, Self::Pending | Self::Running | Self::UnknownActive)
+        matches!(self, Self::Running)
     }
 
     pub fn text(&self) -> String {
         match self {
-            Self::Pending | Self::Running => "running".to_string(),
+            Self::Running => "running".to_string(),
             Self::Exited(code) => code.to_string(),
-            Self::UnknownActive | Self::Lost => "unknown".to_string(),
+            Self::Lost => "unknown".to_string(),
         }
     }
 }
@@ -42,8 +40,7 @@ pub struct TaskRecord {
     pub pane_id: String,
     pub pane_incarnation_id: String,
     pub state: TaskState,
-    pub window: OutputWindow,
-    pub start_status_seq: Option<u64>,
+    pub transcript: TranscriptCursor,
     pub finished_at_ms: Option<u128>,
     pub last_pane: BackendPane,
     pub warnings: Vec<TmuxWarning>,
@@ -66,22 +63,6 @@ impl TaskRegistry {
         self.tasks
             .values()
             .find(|task| task.pane_id == pane_id && task.state.is_active())
-    }
-
-    pub fn active_for_pane_mut(&mut self, pane_id: &str) -> Option<&mut TaskRecord> {
-        let id = self
-            .tasks
-            .values()
-            .find(|task| task.pane_id == pane_id && task.state.is_active())?
-            .id
-            .clone();
-        self.tasks.get_mut(&id)
-    }
-
-    pub fn has_unread_for_pane(&self, pane_id: &str) -> bool {
-        self.tasks
-            .values()
-            .any(|task| task.pane_id == pane_id && !task.window.unread.is_empty())
     }
 
     pub fn prune(&mut self) {
@@ -125,14 +106,15 @@ impl TaskRegistry {
     }
 
     pub fn remove(&mut self, id: &str) {
-        self.tasks.remove(id);
+        if let Some(task) = self.tasks.remove(id) {
+            let _ = std::fs::remove_file(task.transcript.path);
+        }
         self.order.retain(|candidate| candidate != id);
     }
 }
 
 pub fn refresh_task_record(task: &mut TaskRecord, pane: &BackendPane) {
     task.last_pane = pane.clone();
-    refresh_window(&mut task.window, pane, &mut task.warnings);
     if pane.status_task_id.as_deref() == Some(&task.id) {
         match pane.status.as_deref() {
             Some("running") => task.state = TaskState::Running,
@@ -142,10 +124,7 @@ pub fn refresh_task_record(task: &mut TaskRecord, pane: &BackendPane) {
             }
             _ => {}
         }
-    } else if matches!(task.state, TaskState::Running)
-        && pane.status_seq != task.start_status_seq
-        && pane.status.as_deref() != Some("running")
-    {
+    } else if task.state.is_active() {
         task.state = TaskState::Lost;
         task.finished_at_ms.get_or_insert_with(unix_time_millis);
     }
@@ -232,11 +211,12 @@ pub fn task_expired(task_id: &str) -> ToolError {
 pub fn new_task_id() -> String {
     format!("task-{}", Uuid::new_v4().simple())
 }
+
 #[cfg(test)]
 mod tests {
     use super::{TASK_RETENTION_MS, TaskRecord, TaskRegistry, TaskState, unix_time_millis};
     use crate::tools::tmux::backend::BackendPane;
-    use crate::tools::tmux::output::OutputWindow;
+    use crate::tools::tmux::output::TranscriptCursor;
 
     fn pane() -> BackendPane {
         BackendPane {
@@ -254,8 +234,8 @@ mod tests {
             command: "bash".to_string(),
             lines: Vec::new(),
             status: Some("idle".to_string()),
-            status_seq: Some(1),
             status_task_id: None,
+            managed_task_id: None,
         }
     }
 
@@ -265,8 +245,7 @@ mod tests {
             pane_id: "pane-main".to_string(),
             pane_incarnation_id: "incarnation".to_string(),
             state,
-            window: OutputWindow::default(),
-            start_status_seq: Some(1),
+            transcript: TranscriptCursor::new(std::env::temp_dir().join(format!("{id}.log"))),
             finished_at_ms,
             last_pane: pane(),
             warnings: Vec::new(),

@@ -267,7 +267,7 @@ fn tmux_zero_time_ms_returns_immediate_observations() {
         instance,
         "1",
         "tmux_run",
-        json!({ "pane": "main", "command": "sleep 120", "wait": "nonblock", "timeMs": 0 }),
+        json!({ "command": "sleep 120", "wait": "nonblock", "timeMs": 0 }),
         "ctx-a",
         "run-ready",
     );
@@ -283,7 +283,7 @@ fn tmux_zero_time_ms_returns_immediate_observations() {
         "input-zero-time",
     );
     assert_eq!(input["ok"], true, "{input}");
-    assert!(input["result"].get("pane").is_none());
+    assert!(input["result"]["pane"]["id"].is_string());
     assert!(input["result"].get("kind").is_none());
     assert!(input["result"].get("observationEpoch").is_none());
     assert!(input["result"].get("observationReset").is_none());
@@ -322,8 +322,7 @@ fn tmux_run_returns_a_task_and_preserves_clean_first_output() {
         "1",
         "tmux_run",
         json!({
-            "pane": "main",
-            "command": "printf '\\x4f\\x4b\\n'",
+            "command": "printf '\\x4f\\x4b\\n'\nprintf 'SECOND\\n'",
             "wait": "block",
             "timeMs": 3000,
             "line": 80
@@ -337,7 +336,12 @@ fn tmux_run_returns_a_task_and_preserves_clean_first_output() {
     assert!(run["result"]["task"].get("startedAt").is_none());
     assert!(run["result"]["task"].get("finishedAt").is_none());
     assert!(run["result"]["pane"]["id"].is_string());
-    assert_eq!(run["result"]["pane"]["name"], "main");
+    assert!(
+        run["result"]["pane"]["name"]
+            .as_str()
+            .is_some_and(|name| name.starts_with("task-")),
+        "{run}"
+    );
     assert!(run["result"]["pane"].get("tmuxPaneId").is_none());
     assert!(run["result"].get("kind").is_none());
     assert!(run["result"].get("warnings").is_none());
@@ -349,12 +353,20 @@ fn tmux_run_returns_a_task_and_preserves_clean_first_output() {
             .any(|line| line.as_str() == Some("OK")),
         "{run}"
     );
+    assert!(
+        run["result"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line.as_str() == Some("SECOND")),
+        "{run}"
+    );
     stop(&env, instance);
 }
 
 #[test]
 #[ignore = "requires tmux on PATH"]
-fn tmux_tasks_are_controllable_across_contexts_while_busy_guards_remain() {
+fn tmux_task_and_persistent_pane_controls_remain_separate_across_contexts() {
     assert!(
         tmux_available(),
         "tmux is required to run this ignored contract test"
@@ -362,6 +374,7 @@ fn tmux_tasks_are_controllable_across_contexts_while_busy_guards_remain() {
     let env = TestEnv::new();
     let instance = "aromatic-tmux-cross-context";
     start(&env, instance);
+
     let created = call(
         &env,
         instance,
@@ -372,21 +385,23 @@ fn tmux_tasks_are_controllable_across_contexts_while_busy_guards_remain() {
         "create-server",
     );
     assert_eq!(created["ok"], true, "{created}");
+    let persistent_pane = created["result"]["pane"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
     let run = call(
         &env,
         instance,
         "1",
         "tmux_run",
-        json!({ "pane": "server", "command": "sleep 10", "wait": "nonblock" }),
+        json!({ "command": "sleep 10", "wait": "nonblock" }),
         "ctx-a",
         "run-sleep",
     );
     assert_eq!(run["ok"], true, "{run}");
-    assert!(
-        run["result"]["pane"].get("ownedByCurrentContext").is_none(),
-        "{run}"
-    );
-    let task = run["result"]["task"]["id"].as_str().unwrap();
+    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
+    let task_pane = run["result"]["pane"]["id"].as_str().unwrap().to_string();
 
     let read = call(
         &env,
@@ -404,52 +419,77 @@ fn tmux_tasks_are_controllable_across_contexts_while_busy_guards_remain() {
         instance,
         "3",
         "tmux_inspect",
-        json!({ "pane": "server", "start": -20, "end": 0 }),
+        json!({ "pane": task_pane, "start": -20, "end": 0 }),
         "ctx-b",
-        "inspect-cross-context",
+        "inspect-task-pane",
     );
     assert_eq!(inspect["ok"], true, "{inspect}");
 
-    let busy_close = call(
+    let wrong_target = call(
         &env,
         instance,
         "4",
+        "tmux_input",
+        json!({ "pane": task_pane, "input": "^C" }),
+        "ctx-b",
+        "input-task-via-pane",
+    );
+    assert_eq!(
+        wrong_target["error"]["code"], "tmux.taskTargetRequired",
+        "{wrong_target}"
+    );
+
+    let closed_interactive = call(
+        &env,
+        instance,
+        "5",
         "tmux_close",
         json!({ "pane": "server" }),
         "ctx-b",
-        "close-busy",
+        "close-independent-pane",
     );
-    assert_eq!(busy_close["error"]["code"], "tmux.paneBusy", "{busy_close}");
+    assert_eq!(closed_interactive["ok"], true, "{closed_interactive}");
+    assert_eq!(
+        closed_interactive["result"]["closedPaneId"],
+        persistent_pane
+    );
 
     let interrupted = call(
         &env,
         instance,
-        "5",
+        "6",
         "tmux_input",
         json!({ "task": task, "input": "^C", "timeMs": 1000 }),
-        "ctx-b",
+        "ctx-c",
         "input-cross-context",
     );
     assert_eq!(interrupted["ok"], true, "{interrupted}");
-    let finished = wait_for_terminal(&env, instance, task, "ctx-c");
+    let finished = wait_for_terminal(&env, instance, &task, "ctx-c");
     assert_ne!(finished["result"]["task"]["status"], "running");
 
-    let closed = call(
+    let listed = call(
         &env,
         instance,
-        "6",
-        "tmux_close",
-        json!({ "pane": "server" }),
+        "7",
+        "tmux_list",
+        json!({}),
         "ctx-c",
-        "close-after-finish",
+        "list-after-task",
     );
-    assert_eq!(closed["ok"], true, "{closed}");
+    assert!(
+        listed["result"]["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|pane| pane["id"] != task_pane),
+        "{listed}"
+    );
     stop(&env, instance);
 }
 
 #[test]
 #[ignore = "requires tmux on PATH"]
-fn tmux_force_close_is_not_owned_by_the_creating_context() {
+fn tmux_force_close_task_is_not_owned_by_the_creating_context() {
     assert!(
         tmux_available(),
         "tmux is required to run this ignored contract test"
@@ -457,40 +497,42 @@ fn tmux_force_close_is_not_owned_by_the_creating_context() {
     let env = TestEnv::new();
     let instance = "aromatic-tmux-force-close";
     start(&env, instance);
-    let created = call(
-        &env,
-        instance,
-        "1",
-        "tmux_create",
-        json!({ "name": "server" }),
-        "ctx-a",
-        "create-server",
-    );
-    assert_eq!(created["ok"], true, "{created}");
-    let pane_id = created["result"]["pane"]["id"].as_str().unwrap();
+
     let run = call(
         &env,
         instance,
-        "2",
+        "1",
         "tmux_run",
-        json!({ "pane": "server", "command": "sleep 30", "wait": "nonblock" }),
+        json!({ "command": "sleep 30", "wait": "nonblock" }),
         "ctx-a",
-        "run-server",
+        "run-task",
     );
     assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap();
+    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
+    let task_pane = run["result"]["pane"]["id"].as_str().unwrap().to_string();
+
+    let guarded = call(
+        &env,
+        instance,
+        "2",
+        "tmux_close",
+        json!({ "task": task }),
+        "ctx-b",
+        "close-task-without-force",
+    );
+    assert_eq!(guarded["error"]["code"], "tmux.paneBusy", "{guarded}");
 
     let closed = call(
         &env,
         instance,
         "3",
         "tmux_close",
-        json!({ "pane": "server", "force": true }),
+        json!({ "task": task, "force": true }),
         "ctx-b",
         "force-close-cross-context",
     );
     assert_eq!(closed["ok"], true, "{closed}");
-    assert_eq!(closed["result"]["closedPaneId"], pane_id, "{closed}");
+    assert_eq!(closed["result"]["closedTaskId"], task, "{closed}");
 
     let stale_input = call(
         &env,
@@ -505,6 +547,24 @@ fn tmux_force_close_is_not_owned_by_the_creating_context() {
         stale_input["error"]["code"], "tmux.taskNotRunning",
         "{stale_input}"
     );
+
+    let listed = call(
+        &env,
+        instance,
+        "5",
+        "tmux_list",
+        json!({}),
+        "ctx-c",
+        "list-after-close",
+    );
+    assert!(
+        listed["result"]["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|pane| pane["id"] != task_pane),
+        "{listed}"
+    );
     stop(&env, instance);
 }
 
@@ -518,28 +578,19 @@ fn pane_incarnation_change_invalidates_stale_task_control() {
     let env = TestEnv::new();
     let instance = "aromatic-tmux-incarnation";
     start(&env, instance);
-    let created = call(
-        &env,
-        instance,
-        "1",
-        "tmux_create",
-        json!({ "name": "server" }),
-        "ctx-a",
-        "create-server",
-    );
-    assert_eq!(created["ok"], true, "{created}");
     let run = call(
         &env,
         instance,
-        "2",
+        "1",
         "tmux_run",
-        json!({ "pane": "server", "command": "sleep 30", "wait": "nonblock" }),
+        json!({ "command": "sleep 30", "wait": "nonblock" }),
         "ctx-a",
-        "run-server",
+        "run-task",
     );
     assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap();
-    let tmux_pane_id = tmux_pane_id_by_name(&env, instance, "server");
+    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
+    let task_pane_name = run["result"]["pane"]["name"].as_str().unwrap();
+    let tmux_pane_id = tmux_pane_id_by_name(&env, instance, task_pane_name);
 
     let changed = Command::new("tmux")
         .arg("-S")
@@ -564,7 +615,7 @@ fn pane_incarnation_change_invalidates_stale_task_control() {
     let stale_read = call(
         &env,
         instance,
-        "3",
+        "2",
         "tmux_read",
         json!({ "task": task }),
         "ctx-b",
@@ -579,7 +630,7 @@ fn pane_incarnation_change_invalidates_stale_task_control() {
     let stale_input = call(
         &env,
         instance,
-        "4",
+        "3",
         "tmux_input",
         json!({ "task": task, "input": "^C" }),
         "ctx-c",
@@ -589,17 +640,6 @@ fn pane_incarnation_change_invalidates_stale_task_control() {
         stale_input["error"]["code"], "tmux.taskNotRunning",
         "{stale_input}"
     );
-
-    let closed = call(
-        &env,
-        instance,
-        "5",
-        "tmux_close",
-        json!({ "pane": "server", "force": true }),
-        "ctx-c",
-        "close-reincarnated-pane",
-    );
-    assert_eq!(closed["ok"], true, "{closed}");
     stop(&env, instance);
 }
 
@@ -613,22 +653,22 @@ fn tmux_inspect_honors_nonzero_end_offsets() {
     let env = TestEnv::new();
     let instance = "aromatic-tmux-inspect-range";
     start(&env, instance);
-    let run = call(
+
+    let input = call(
         &env,
         instance,
         "1",
-        "tmux_run",
+        "tmux_input",
         json!({
             "pane": "main",
-            "command": "i=1; while [ $i -le 200 ]; do printf 'LINE-%03d\\n' $i; i=$((i+1)); done",
-            "wait": "block",
-            "timeMs": 3000,
-            "line": 300
+            "input": "i=1; while [ $i -le 200 ]; do printf 'LINE-%03d\\n' $i; i=$((i+1)); done^M"
         }),
         "ctx-a",
-        "fill-history",
+        "fill-main-history",
     );
-    assert_eq!(run["ok"], true, "{run}");
+    assert_eq!(input["ok"], true, "{input}");
+    thread::sleep(Duration::from_millis(300));
+
     let pane_id = tmux_pane_id_by_name(&env, instance, "main");
     let expected = tmux_capture_range(&env, instance, &pane_id, -100, -90);
     assert_eq!(expected.len(), 10, "{expected:?}");
@@ -650,20 +690,20 @@ fn tmux_inspect_honors_nonzero_end_offsets() {
         .map(|line| line.as_str().unwrap().to_string())
         .collect::<Vec<_>>();
     assert_eq!(actual, expected);
-
     stop(&env, instance);
 }
 
 #[test]
 #[ignore = "requires tmux on PATH"]
-fn tmux_run_without_pane_reuses_idle_then_creates_auto_pane() {
+fn tmux_run_uses_fresh_ephemeral_panes_and_preserves_replay() {
     assert!(
         tmux_available(),
         "tmux is required to run this ignored contract test"
     );
     let env = TestEnv::new();
-    let instance = "aromatic-tmux-auto";
+    let instance = "aromatic-tmux-fresh-task-pane";
     start(&env, instance);
+
     let first = call(
         &env,
         instance,
@@ -671,63 +711,56 @@ fn tmux_run_without_pane_reuses_idle_then_creates_auto_pane() {
         "tmux_run",
         json!({ "command": "sleep 10", "wait": "nonblock" }),
         "ctx-a",
-        "run-main",
+        "run-first",
     );
-    assert_eq!(first["result"]["pane"]["name"], "main", "{first}");
-    let first_task = first["result"]["task"]["id"].as_str().unwrap();
-
-    let dedicated = call(
-        &env,
-        instance,
-        "1b",
-        "tmux_create",
-        json!({ "name": "server" }),
-        "ctx-a",
-        "create-dedicated",
-    );
-    assert_eq!(dedicated["ok"], true, "{dedicated}");
+    assert_eq!(first["ok"], true, "{first}");
+    let first_task = first["result"]["task"]["id"].as_str().unwrap().to_string();
+    let first_pane = first["result"]["pane"]["id"].as_str().unwrap().to_string();
+    assert_ne!(first["result"]["pane"]["name"], "main");
 
     let second = call_with_identity(
         &env,
         instance,
         "2",
         "tmux_run",
-        json!({ "command": "printf AUTO\\n", "wait": "block", "timeMs": 3000 }),
+        json!({ "command": "printf 'SECOND\\n'", "wait": "block", "timeMs": 3000 }),
         CallIdentity {
             ctx_id: "ctx-b",
-            operation_id: Some("run-auto-operation"),
-            request_id: "run-auto",
+            operation_id: Some("run-fresh-operation"),
+            request_id: "run-fresh",
         },
     );
     assert_eq!(second["ok"], true, "{second}");
-    assert_eq!(second["result"]["pane"]["name"], "auto-1", "{second}");
+    assert_eq!(second["result"]["task"]["status"], "0", "{second}");
+    assert_ne!(second["result"]["pane"]["id"], first_pane);
 
     let replay = call_with_identity(
         &env,
         instance,
         "3",
         "tmux_run",
-        json!({ "command": "printf AUTO\\n", "wait": "block", "timeMs": 3000 }),
+        json!({ "command": "printf 'SECOND\\n'", "wait": "block", "timeMs": 3000 }),
         CallIdentity {
             ctx_id: "ctx-b",
-            operation_id: Some("run-auto-operation"),
-            request_id: "run-auto",
+            operation_id: Some("run-fresh-operation"),
+            request_id: "run-fresh",
         },
     );
     assert_eq!(
         replay["result"]["task"]["id"],
         second["result"]["task"]["id"]
     );
+
     let conflict = call_with_identity(
         &env,
         instance,
-        "3b",
+        "4",
         "tmux_run",
-        json!({ "command": "printf DIFFERENT\\n", "wait": "block", "timeMs": 3000 }),
+        json!({ "command": "printf 'DIFFERENT\\n'", "wait": "block", "timeMs": 3000 }),
         CallIdentity {
             ctx_id: "ctx-b",
-            operation_id: Some("run-auto-operation"),
-            request_id: "run-auto",
+            operation_id: Some("run-fresh-operation"),
+            request_id: "run-fresh",
         },
     );
     assert_eq!(
@@ -735,16 +768,61 @@ fn tmux_run_without_pane_reuses_idle_then_creates_auto_pane() {
         "{conflict}"
     );
 
-    let _ = call(
+    let listed = call(
         &env,
         instance,
-        "4",
-        "tmux_input",
-        json!({ "task": first_task, "input": "^C" }),
-        "ctx-a",
-        "stop-main",
+        "5",
+        "tmux_list",
+        json!({}),
+        "ctx-b",
+        "list-live-only",
     );
-    let _ = wait_for_terminal(&env, instance, first_task, "ctx-a");
+    let panes = listed["result"]["panes"].as_array().unwrap();
+    assert!(
+        panes.iter().any(|pane| pane["id"] == first_pane),
+        "{listed}"
+    );
+    assert!(
+        panes
+            .iter()
+            .all(|pane| pane["id"] != second["result"]["pane"]["id"]),
+        "{listed}"
+    );
+
+    let interrupted = call(
+        &env,
+        instance,
+        "6",
+        "tmux_input",
+        json!({ "task": first_task, "input": "^C", "timeMs": 1000 }),
+        "ctx-a",
+        "stop-first",
+    );
+    assert_eq!(interrupted["ok"], true, "{interrupted}");
+    let _ = wait_for_terminal(&env, instance, &first_task, "ctx-a");
+    let listed = call(
+        &env,
+        instance,
+        "7",
+        "tmux_list",
+        json!({}),
+        "ctx-a",
+        "list-after-first",
+    );
+    assert!(
+        listed["result"]["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|pane| pane["id"] != first_pane)
+    );
+    assert!(
+        listed["result"]["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|pane| pane["name"] == "main")
+    );
     stop(&env, instance);
 }
 
@@ -921,7 +999,7 @@ fn concurrent_duplicate_run_requests_share_one_in_flight_execution() {
                 instance,
                 "1",
                 "tmux_run",
-                json!({ "pane": "main", "command": "sleep 10", "wait": "nonblock" }),
+                json!({ "command": "sleep 10", "wait": "nonblock" }),
                 CallIdentity {
                     ctx_id: "ctx-a",
                     operation_id: Some("same-run-operation"),
@@ -935,7 +1013,7 @@ fn concurrent_duplicate_run_requests_share_one_in_flight_execution() {
                 instance,
                 "2",
                 "tmux_run",
-                json!({ "pane": "main", "command": "sleep 10", "wait": "nonblock" }),
+                json!({ "command": "sleep 10", "wait": "nonblock" }),
                 CallIdentity {
                     ctx_id: "ctx-a",
                     operation_id: Some("same-run-operation"),
@@ -985,11 +1063,13 @@ fn block_wait_does_not_prevent_same_context_interrupt() {
                 instance,
                 "1",
                 "tmux_run",
-                json!({ "pane": "main", "command": "sleep 10", "wait": "block", "timeMs": 5000 }),
+                json!({ "command": "sleep 10", "wait": "block", "timeMs": 5000 }),
                 "ctx-a",
                 "block-run",
             )
         });
+
+        thread::sleep(Duration::from_millis(100));
 
         let deadline = Instant::now() + Duration::from_secs(3);
         let task = loop {
@@ -999,11 +1079,16 @@ fn block_wait_does_not_prevent_same_context_interrupt() {
                 "2",
                 "tmux_list",
                 json!({}),
-                "ctx-a",
+                "ctx-b",
                 "list-running",
             );
-            if let Some(task) = listed["result"]["panes"][0]["task"]["id"].as_str() {
-                break task.to_string();
+            if let Some(task) = listed["result"]["panes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find_map(|pane| pane["task"]["id"].as_str())
+            {
+                break task.to_owned();
             }
             assert!(Instant::now() < deadline, "task did not appear: {listed}");
             thread::sleep(Duration::from_millis(25));
@@ -1014,7 +1099,7 @@ fn block_wait_does_not_prevent_same_context_interrupt() {
             "3",
             "tmux_input",
             json!({ "task": task, "input": "^C", "timeMs": 1000 }),
-            "ctx-a",
+            "ctx-b",
             "interrupt-block",
         );
         assert_eq!(interrupted["ok"], true, "{interrupted}");
@@ -1028,39 +1113,35 @@ fn block_wait_does_not_prevent_same_context_interrupt() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
-fn bash_shell_preserves_task_identity_through_exit() {
+fn tmux_run_uses_clean_bash_while_main_uses_user_bash_rc() {
     assert!(
         tmux_available(),
         "tmux is required to run this ignored contract test"
     );
-    assert!(
-        Command::new("bash")
-            .arg("--version")
-            .output()
-            .is_ok_and(|output| output.status.success()),
-        "bash is required to run this tmux contract test"
-    );
     let env = TestEnv::new();
+    std::fs::write(
+        env.home().join(".bashrc"),
+        "export DEVSHELL_BASH_CONFIG_MARKER=loaded\n",
+    )
+    .unwrap();
     let instance = "aromatic-tmux-bash";
     env.command_with_env("SHELL", "/bin/bash")
         .current_dir(env.workspace())
         .args(["start", "--instance", instance])
         .assert()
         .success();
+
     let run = call(
         &env,
         instance,
         "1",
         "tmux_run",
         json!({
-            "pane": "main",
-            "command": "printf 'BASH-OK\\n'",
-            "wait": "block",
-            "timeMs": 3000,
-            "line": 80
+            "command": "test -z \"${DEVSHELL_BASH_CONFIG_MARKER:-}\"\nprintf 'BASH-CLEAN\\n'",
+            "wait": "block", "timeMs": 3000, "line": 80
         }),
         "ctx-bash",
-        "run-bash",
+        "run-clean-bash",
     );
     assert_eq!(run["ok"], true, "{run}");
     assert_eq!(run["result"]["task"]["status"], "0", "{run}");
@@ -1069,15 +1150,31 @@ fn bash_shell_preserves_task_identity_through_exit() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|line| line.as_str() == Some("BASH-OK")),
-        "{run}"
+            .any(|line| line == "BASH-CLEAN")
     );
+
+    let input = call(
+        &env,
+        instance,
+        "2",
+        "tmux_input",
+        json!({ "pane": "main", "input": "printf '%s\\n' \"$DEVSHELL_BASH_CONFIG_MARKER\" > bash-interactive-marker.txt^M" }),
+        "ctx-bash",
+        "bash-main-input",
+    );
+    assert_eq!(input["ok"], true, "{input}");
+    let marker = env.workspace().join("bash-interactive-marker.txt");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !marker.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert_eq!(std::fs::read_to_string(marker).unwrap().trim(), "loaded");
     stop(&env, instance);
 }
 
 #[test]
 #[ignore = "requires tmux on PATH"]
-fn fish_shell_preserves_task_identity_through_exit() {
+fn tmux_run_stays_clean_bash_while_main_uses_user_fish_rc() {
     let fish = Command::new("sh")
         .args(["-c", "command -v fish"])
         .output()
@@ -1107,20 +1204,18 @@ fn fish_shell_preserves_task_identity_through_exit() {
         .args(["start", "--instance", instance])
         .assert()
         .success();
+
     let run = call(
         &env,
         instance,
         "1",
         "tmux_run",
         json!({
-            "pane": "main",
-            "command": "test \"$DEVSHELL_FISH_CONFIG_MARKER\" = loaded; and printf 'FISH-OK\\n'",
-            "wait": "block",
-            "timeMs": 3000,
-            "line": 80
+            "command": "test -z \"${DEVSHELL_FISH_CONFIG_MARKER:-}\"\nprintf 'TASK-BASH\\n'",
+            "wait": "block", "timeMs": 3000, "line": 80
         }),
         "ctx-fish",
-        "run-fish",
+        "run-clean-task",
     );
     assert_eq!(run["ok"], true, "{run}");
     assert_eq!(run["result"]["task"]["status"], "0", "{run}");
@@ -1129,9 +1224,25 @@ fn fish_shell_preserves_task_identity_through_exit() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|line| line.as_str() == Some("FISH-OK")),
-        "{run}"
+            .any(|line| line == "TASK-BASH")
     );
+
+    let input = call(
+        &env,
+        instance,
+        "2",
+        "tmux_input",
+        json!({ "pane": "main", "input": "printf '%s\\n' \"$DEVSHELL_FISH_CONFIG_MARKER\" > fish-interactive-marker.txt^M" }),
+        "ctx-fish",
+        "fish-main-input",
+    );
+    assert_eq!(input["ok"], true, "{input}");
+    let marker = env.workspace().join("fish-interactive-marker.txt");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !marker.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert_eq!(std::fs::read_to_string(marker).unwrap().trim(), "loaded");
     stop(&env, instance);
 }
 
@@ -1150,7 +1261,7 @@ fn transport_session_close_does_not_bind_task_control_to_a_ctx_id() {
         instance,
         "1",
         "tmux_run",
-        json!({ "pane": "main", "command": "sleep 10", "wait": "nonblock" }),
+        json!({ "command": "sleep 10", "wait": "nonblock" }),
         "ctx-a",
         "run-before-close",
     );
@@ -1267,7 +1378,7 @@ fn worker_restart_automatically_adopts_running_tasks() {
         instance,
         "1",
         "tmux_run",
-        json!({ "pane": "main", "command": "sleep 30", "wait": "nonblock" }),
+        json!({ "command": "sleep 30", "wait": "nonblock" }),
         "ctx-a",
         "run-before-restart",
     );
@@ -1288,13 +1399,13 @@ fn worker_restart_automatically_adopts_running_tasks() {
         "list-adopted",
     );
     assert_eq!(listed["ok"], true, "{listed}");
-    assert_eq!(listed["result"]["panes"][0]["task"]["id"], task);
-    assert!(
-        listed["result"]["panes"][0]
-            .get("ownedByCurrentContext")
-            .is_none(),
-        "{listed}"
-    );
+    let adopted = listed["result"]["panes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|pane| pane["task"]["id"] == task)
+        .unwrap_or_else(|| panic!("adopted task pane missing: {listed}"));
+    assert!(adopted.get("ownedByCurrentContext").is_none(), "{listed}");
     assert!(
         listed["result"]["warnings"]
             .as_array()
@@ -1321,86 +1432,16 @@ fn worker_restart_automatically_adopts_running_tasks() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
-fn capacity_pressure_collects_only_idle_automatic_panes() {
+fn tmux_capacity_never_collects_persistent_panes() {
     assert!(
         tmux_available(),
         "tmux is required to run this ignored contract test"
     );
     let env = TestEnv::new();
-    let instance = "aromatic-tmux-gc-pressure";
+    let instance = "aromatic-tmux-capacity";
     start(&env, instance);
 
-    let main_task = call(
-        &env,
-        instance,
-        "1",
-        "tmux_run",
-        json!({ "pane": "main", "command": "sleep 30", "wait": "nonblock" }),
-        "ctx-a",
-        "run-main-busy",
-    );
-    assert_eq!(main_task["ok"], true, "{main_task}");
-    let main_task_id = main_task["result"]["task"]["id"].as_str().unwrap();
-
-    let automatic = call(
-        &env,
-        instance,
-        "2",
-        "tmux_run",
-        json!({ "command": "printf 'AUTO-DONE\\n'", "wait": "block", "timeMs": 3000, "line": 100 }),
-        "ctx-a",
-        "run-auto",
-    );
-    assert_eq!(automatic["ok"], true, "{automatic}");
-    assert_eq!(automatic["result"]["pane"]["name"], "auto-1", "{automatic}");
-
-    let interrupted = call(
-        &env,
-        instance,
-        "3",
-        "tmux_input",
-        json!({ "task": main_task_id, "input": "^C", "timeMs": 1000 }),
-        "ctx-b",
-        "stop-main",
-    );
-    assert_eq!(interrupted["ok"], true, "{interrupted}");
-    let _ = wait_for_terminal(&env, instance, main_task_id, "ctx-b");
-
-    env.json_command(&["stop", "--instance", instance]);
-    assert!(env.tmux_socket_file(instance).exists());
-    start(&env, instance);
-    let after_restart = call(
-        &env,
-        instance,
-        "restart-list",
-        "tmux_list",
-        json!({}),
-        "ctx-b",
-        "list-before-pressure-gc",
-    );
-    assert_eq!(after_restart["ok"], true, "{after_restart}");
-    assert!(
-        after_restart["result"]["panes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|pane| pane["name"] == "auto-1"),
-        "{after_restart}"
-    );
-
-    let explicit_auto_name = call(
-        &env,
-        instance,
-        "create-auto-user",
-        "tmux_create",
-        json!({ "name": "auto-user" }),
-        "ctx-a",
-        "create-explicit-auto-name",
-    );
-    assert_eq!(explicit_auto_name["ok"], true, "{explicit_auto_name}");
-
-    let mut collected = None;
-    for index in 1..=64 {
+    for index in 1..16 {
         let created = call(
             &env,
             instance,
@@ -1411,52 +1452,58 @@ fn capacity_pressure_collects_only_idle_automatic_panes() {
             &format!("create-persistent-{index}"),
         );
         assert_eq!(created["ok"], true, "{created}");
-        let pane_collected = created["result"]["warnings"]
-            .as_array()
-            .is_some_and(|warnings| {
-                warnings
-                    .iter()
-                    .any(|warning| warning["code"] == "tmux.paneCollected")
-            });
-        if pane_collected {
-            collected = Some(created);
-            break;
-        }
     }
-    assert!(
-        collected.is_some(),
-        "capacity pressure did not collect the idle automatic pane"
-    );
 
-    let listed = call(
+    let full_create = call(
         &env,
         instance,
-        "11",
-        "tmux_list",
-        json!({}),
-        "ctx-c",
-        "list-after-gc",
-    );
-    assert_eq!(listed["ok"], true, "{listed}");
-    let pane_names = listed["result"]["panes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|pane| pane["name"].as_str().unwrap())
-        .collect::<Vec<_>>();
-    assert!(!pane_names.contains(&"auto-1"), "{listed}");
-    assert!(pane_names.contains(&"auto-user"), "{listed}");
-
-    let full = call(
-        &env,
-        instance,
-        "create-after-capacity",
+        "full-create",
         "tmux_create",
-        json!({ "name": "persistent-after-capacity" }),
-        "ctx-c",
-        "create-without-collectable-pane",
+        json!({ "name": "overflow" }),
+        "ctx-b",
+        "overflow-create",
     );
-    assert_eq!(full["error"]["code"], "tmux.capacityReached", "{full}");
+    assert_eq!(
+        full_create["error"]["code"], "tmux.capacityReached",
+        "{full_create}"
+    );
+
+    let full_task = call(
+        &env,
+        instance,
+        "full-task",
+        "tmux_run",
+        json!({ "command": "printf 'NOPE\\n'", "wait": "block", "timeMs": 3000 }),
+        "ctx-b",
+        "overflow-task",
+    );
+    assert_eq!(
+        full_task["error"]["code"], "tmux.capacityReached",
+        "{full_task}"
+    );
+
+    let closed = call(
+        &env,
+        instance,
+        "close-one",
+        "tmux_close",
+        json!({ "pane": "persistent-1" }),
+        "ctx-b",
+        "close-one",
+    );
+    assert_eq!(closed["ok"], true, "{closed}");
+
+    let task = call(
+        &env,
+        instance,
+        "task-after-close",
+        "tmux_run",
+        json!({ "command": "printf 'ROOM\\n'", "wait": "block", "timeMs": 3000 }),
+        "ctx-b",
+        "task-after-close",
+    );
+    assert_eq!(task["ok"], true, "{task}");
+    assert_eq!(task["result"]["task"]["status"], "0", "{task}");
     stop(&env, instance);
 }
 
@@ -1476,7 +1523,6 @@ fn tmux_input_delivers_ctrl_b_to_foreground_process() {
         "1",
         "tmux_run",
         json!({
-            "pane": "main",
             "command": "stty raw -echo; od -An -t x1 -N 1; stty sane",
             "wait": "nonblock"
         }),
@@ -1516,7 +1562,6 @@ fn tmux_input_returns_immediately_by_default() {
         "1",
         "tmux_run",
         json!({
-            "pane": "main",
             "command": "stty raw -echo; dd bs=1 count=1 of=/dev/null 2>/dev/null; stty sane; sleep 30",
             "wait": "nonblock"
         }),
@@ -1637,7 +1682,7 @@ fn repeated_tmux_list_skips_session_reinitialization() {
         .lines()
         .count();
     assert!(
-        invocation_count <= 11,
+        invocation_count <= 20,
         "repeated full-capacity tmux_list used {invocation_count} tmux commands"
     );
     stop(&env, instance);
@@ -1671,7 +1716,6 @@ fn concurrent_tmux_input_from_distinct_contexts_serializes_on_the_pane() {
         "1",
         "tmux_run",
         json!({
-            "pane": "main",
             "command": "read first; read second; printf 'CONTRACT:%s:%s\\n' \"$first\" \"$second\"",
             "wait": "nonblock"
         }),
@@ -1696,8 +1740,7 @@ fn concurrent_tmux_input_from_distinct_contexts_serializes_on_the_pane() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|pane| pane["name"] == "main")
-        .and_then(|pane| pane["task"]["id"].as_str())
+        .find_map(|pane| pane["task"]["id"].as_str())
         .map(ToOwned::to_owned);
     assert_eq!(listed_task.as_deref(), Some(task.as_str()), "{listed}");
 

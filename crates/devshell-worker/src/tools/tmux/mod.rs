@@ -21,9 +21,9 @@ use crate::storage::InstancePaths;
 use crate::tools::tmux::backend::TmuxBackend;
 use crate::tools::tmux::state::TmuxState;
 use crate::tools::tmux::types::{
-    TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams, TmuxInputParams,
-    TmuxInspectParams, TmuxListOutput, TmuxListParams, TmuxPaneOperationOutput, TmuxReadParams,
-    TmuxRunParams, TmuxTaskOperationOutput, TmuxWarning,
+    TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams, TmuxInputOutput,
+    TmuxInputParams, TmuxInspectParams, TmuxListOutput, TmuxListParams, TmuxPaneOperationOutput,
+    TmuxReadParams, TmuxRunParams, TmuxTaskOperationOutput, TmuxWarning,
 };
 use crate::tools::{
     ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName, ToolRegistry,
@@ -78,7 +78,11 @@ struct TmuxStateRegistry {
 }
 
 impl TmuxStateRegistry {
-    fn new(instance_paths: &InstancePaths, socket_paths: &SocketPaths, runtime: &WorkerRuntimeContext) -> Self {
+    fn new(
+        instance_paths: &InstancePaths,
+        socket_paths: &SocketPaths,
+        runtime: &WorkerRuntimeContext,
+    ) -> Self {
         Self {
             instance_paths: instance_paths.clone(),
             runtime: runtime.clone(),
@@ -89,7 +93,10 @@ impl TmuxStateRegistry {
 
     fn state_for(&self, workspace: &Path) -> Result<Arc<TmuxState>, ToolError> {
         let mut states = self.states.lock().map_err(|_| {
-            ToolError::new("tmux.internalError", "tmux workspace registry lock poisoned")
+            ToolError::new(
+                "tmux.internalError",
+                "tmux workspace registry lock poisoned",
+            )
         })?;
         if let Some(state) = states.get(workspace) {
             return Ok(Arc::clone(state));
@@ -100,7 +107,7 @@ impl TmuxStateRegistry {
             &self.runtime,
             workspace,
         )?));
-        TmuxState::start_gc(&state);
+        TmuxState::start_reaper(&state);
         states.insert(workspace.to_path_buf(), Arc::clone(&state));
         Ok(state)
     }
@@ -136,24 +143,28 @@ pub fn register_tools(
     if !TmuxBackend::available() {
         return Ok(());
     }
-    let states = Arc::new(TmuxStateRegistry::new(instance_paths, socket_paths, runtime));
+    let states = Arc::new(TmuxStateRegistry::new(
+        instance_paths,
+        socket_paths,
+        runtime,
+    ));
     registry.register(tool::<TmuxRunParams, TmuxTaskOperationOutput>(
         ToolName::parse("tmux_run").unwrap(),
-        "Run a long-running or interactive shell task from one shell line. wait defaults to block; timeMs limits only this call's wait and never stops the task. Use wait=nonblock to return after start, then use tmux_read, tmux_input, or tmux_inspect.",
+        "Run a long-running shell program in a fresh managed task pane using clean Bash without user rc files. command may contain multiple lines. cwd defaults to the workspace. The pane exists only while the task runs; task transcript remains readable after exit. wait defaults to block and timeMs limits only this call's wait, never the task.",
         ToolCapability::Execute,
         Arc::clone(&states),
         TmuxState::run,
     ))?;
-    registry.register(tool::<TmuxInputParams, TmuxTaskOperationOutput>(
+    registry.register(tool::<TmuxInputParams, TmuxInputOutput>(
         ToolName::parse("tmux_input").unwrap(),
-        "Send terminal input to a running task. Returns immediately by default; set timeMs to wait for output. Caret notation supports control keys such as ^B, ^C, ^D, ^I, and ^M.",
+        "Send raw terminal input to exactly one target: a running managed task by task id, or a persistent interactive pane by pane id/name. Managed task panes cannot be controlled through pane targeting. Caret notation supports control keys such as ^B, ^C, ^D, ^I, and ^M. line and nonzero timeMs apply only to task targets.",
         ToolCapability::Execute,
         Arc::clone(&states),
         TmuxState::input,
     ))?;
     registry.register(tool::<TmuxReadParams, TmuxTaskOperationOutput>(
         ToolName::parse("tmux_read").unwrap(),
-        "Consume unread terminal output associated with a managed task. Output is derived from terminal history and may include command echo, shell prompts, and terminal-rendered text; it is not raw process stdout. Positive line values return the oldest unread lines, zero discards unread output, and negative values return only the requested tail.",
+        "Consume a managed task's durable terminal transcript. Positive line values return the oldest unread lines, zero discards unread transcript data, and negative values return only the requested tail. Use tmux_inspect for current terminal screen state while the task is running.",
         ToolCapability::Read,
         Arc::clone(&states),
         TmuxState::read,
@@ -174,14 +185,14 @@ pub fn register_tools(
     ))?;
     registry.register(tool::<TmuxCreateParams, TmuxCreateOutput>(
         ToolName::parse("tmux_create").unwrap(),
-        "Create an empty managed pane. Use tmux_run to start a task in it.",
+        "Create a persistent interactive pane using the user's configured shell and shell rc files. The pane remains until tmux_close.",
         ToolCapability::Execute,
         Arc::clone(&states),
         TmuxState::create,
     ))?;
     registry.register(tool::<TmuxCloseParams, TmuxCloseOutput>(
         ToolName::parse("tmux_close").unwrap(),
-        "Close a managed pane. A running pane requires force, and the final pane cannot be closed.",
+        "Close exactly one tmux-owned resource: terminate a running managed task by task id, or close a persistent interactive pane by pane id/name. Active resources require force=true. The main interactive pane cannot be closed.",
         ToolCapability::Execute,
         states,
         TmuxState::close,
