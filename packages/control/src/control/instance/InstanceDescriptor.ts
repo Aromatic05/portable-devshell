@@ -3,11 +3,14 @@ import type { TerminalBackend } from "../terminal/TerminalProcess.js";
 import type { ContextMessageQueueInput, ContextMessageReadResult, ContextMessageRecord } from "@portable-devshell/shared";
 import type {
     ActiveTodoSummary,
+    JsonValue,
     TodoReadInput,
     TodoReadResult,
     TodoWriteInput,
     ToolCallAssociation,
-    ToolCapability
+    ToolCapability,
+    WaitCreateInput,
+    WaitRecord
 } from "@portable-devshell/shared";
 
 export interface InstanceContextMessagePort {
@@ -24,6 +27,16 @@ export interface InstanceTodoPort {
     write(input: TodoWriteInput, ctxId: string): Promise<TodoReadResult>;
 }
 
+export interface InstanceWaitPort {
+    cancel(waitId: string): Promise<WaitRecord>;
+    consume(waitId: string): Promise<WaitRecord>;
+    create(input: WaitCreateInput): Promise<WaitRecord>;
+    detach(waitId: string): Promise<WaitRecord>;
+    get(waitId: string): Promise<WaitRecord | undefined>;
+    list(taskId?: string): Promise<WaitRecord[]>;
+    resolve(waitId: string, result?: JsonValue): Promise<WaitRecord>;
+}
+
 export interface InstanceDescriptor {
     contextMessages?: InstanceContextMessagePort;
     enabled: boolean;
@@ -36,5 +49,6 @@ export interface InstanceDescriptor {
     reverseConnector?: WorkerRpcInboundConnector;
     terminal?: TerminalBackend;
     todo: InstanceTodoPort;
+    wait?: InstanceWaitPort;
     worker: WorkerInstance;
 }

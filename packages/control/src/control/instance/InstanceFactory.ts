@@ -4,6 +4,7 @@ import { asInstanceName, type ControlInstanceConfig } from "@portable-devshell/s
 import type { InstanceDescriptor } from "./InstanceDescriptor.js";
 import { ContextMessageService } from "../../instance/context/ContextMessageService.js";
 import { TodoService } from "../../instance/todo/TodoService.js";
+import { WaitService } from "../../instance/wait/WaitService.js";
 import { WorkerTerminalBackend } from "../terminal/WorkerTerminalBackend.js";
 
 export class InstanceFactory {
@@ -33,6 +34,13 @@ export class InstanceFactory {
             filePath: paths.contextMessagesFile,
             instanceName: instance.name
         });
+        const wait = new WaitService({
+            appendEvent: async (type, data) => {
+                await workerHolder.value?.appendControlEvent(type, data);
+            },
+            filePath: paths.waitsFile,
+            instanceName: instance.name
+        });
         const worker = this.#workerInstanceFactory.create(this.#toWorkerConfig(instance, reverseConnector, homeDirectory), {
             toolCallAssociationProvider: (context) => todo.currentAssociation(context.ctxId)
         });
@@ -51,6 +59,7 @@ export class InstanceFactory {
             ...(reverseConnector === undefined ? {} : { reverseConnector }),
             terminal,
             todo,
+            wait,
             worker
         };
     }
