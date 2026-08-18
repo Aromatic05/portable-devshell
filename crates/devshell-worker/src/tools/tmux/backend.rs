@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
@@ -33,7 +33,6 @@ const TERMINAL_ROWS: usize = 60;
 pub struct BackendPane {
     pub id: String,
     pub name: String,
-    pub automatic: bool,
     pub tmux_pane_id: String,
     pub tmux_window_id: String,
     pub window_panes: usize,
@@ -43,9 +42,7 @@ pub struct BackendPane {
     pub created_at_ms: u128,
     pub cwd: String,
     pub command: String,
-    pub lines: Vec<String>,
     pub status: Option<String>,
-    pub status_task_id: Option<String>,
     pub managed_task_id: Option<String>,
 }
 
@@ -56,25 +53,11 @@ pub struct BackendWorkspace {
     pub foreign_panes: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionRecord {
-    schema_version: u32,
-    session_id: String,
-    instance: String,
-    created_at_ms: u128,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 struct PaneRecord {
-    schema_version: u32,
     pane_id: String,
     pane_incarnation_id: String,
     name: String,
-    #[serde(default)]
-    automatic: bool,
-    #[serde(default)]
     task_id: Option<String>,
     created_at_ms: u128,
 }
@@ -83,21 +66,16 @@ struct PaneRecord {
 struct PaneStatusRecord {
     state: String,
     exit_code: i32,
-    seq: u64,
-    #[serde(default)]
-    task_id: Option<String>,
 }
 
 pub struct TmuxBackend {
     instance: String,
     workspace: PathBuf,
     socket: PathBuf,
-    panes_dir: PathBuf,
     shell_dir: PathBuf,
     status_dir: PathBuf,
     tasks_dir: PathBuf,
     transcripts_dir: PathBuf,
-    session_file: PathBuf,
     observation_reset: bool,
     session_prepared: AtomicBool,
 }
@@ -119,14 +97,12 @@ impl TmuxBackend {
         let workspace_key = workspace_key(&instance_paths.instance_root, workspace);
         let (root, socket) =
             workspace_storage(instance_paths, socket_paths, workspace, &workspace_key)?;
-        let panes_dir = root.join("panes").join("by-id");
         let shell_dir = root.join("shell");
         let status_dir = root.join("status");
         let tasks_dir = root.join("tasks");
         let transcripts_dir = root.join("transcripts");
         for path in [
             &root,
-            &panes_dir,
             &shell_dir,
             &status_dir,
             &tasks_dir,
@@ -139,12 +115,10 @@ impl TmuxBackend {
             instance: runtime.instance.as_str().to_string(),
             workspace: workspace.to_path_buf(),
             socket,
-            panes_dir,
             shell_dir,
             status_dir,
             tasks_dir,
             transcripts_dir,
-            session_file: root.join("session.json"),
             observation_reset,
             session_prepared: AtomicBool::new(false),
         })
@@ -164,17 +138,15 @@ impl TmuxBackend {
                 self.validate_existing_session()?;
                 self.configure_terminal_size()?;
                 self.normalize_managed_windows()?;
-                self.reconcile_registry()?;
                 self.session_prepared.store(true, Ordering::Release);
             }
             return Ok(());
         }
 
         self.session_prepared.store(false, Ordering::Release);
-        self.clear_stale_pane_records()?;
-        let session = self.new_session_record();
-        atomic_write_json(&self.session_file, &session)?;
-        let pane = PaneRecord::new("main", false, None)?;
+        self.clear_stale_status_records()?;
+        let session_id = Uuid::new_v4().to_string();
+        let pane = PaneRecord::new("main", None)?;
         let launch = prepare_shell_launch(&self.shell_dir, &self.status_dir, &pane.pane_id)?;
         let args = vec![
             "new-session".to_string(),
@@ -193,7 +165,7 @@ impl TmuxBackend {
         ];
         self.run(&args)?;
         self.configure_terminal_size()?;
-        self.mark_session(&session)?;
+        self.mark_session(&session_id)?;
         let tmux_pane_id = self
             .run(&[
                 "display-message".into(),
@@ -211,7 +183,6 @@ impl TmuxBackend {
             ));
         }
         self.mark_pane(&tmux_pane_id, &pane)?;
-        self.persist_pane(&pane)?;
         self.wait_until_ready(&pane.pane_id, Duration::from_secs(3))?;
         self.discard_initial_prompt_output(&pane.pane_id, Duration::from_secs(3))?;
         self.session_prepared.store(true, Ordering::Release);
@@ -231,7 +202,6 @@ impl TmuxBackend {
             "#{pane_height}",
             "#{q:pane_current_path}",
             "#{q:pane_current_command}",
-            "#{@devshell_worker_automatic}",
             "#{pane_dead}",
             "#{pane_dead_status}",
             "#{@devshell_worker_task_id}",
@@ -270,20 +240,19 @@ impl TmuxBackend {
                 foreign_panes += 1;
                 continue;
             }
-            let lines = self.capture_lines(tmux_pane_id, -PANE_HISTORY_LINES, 0)?;
             let managed_task_id = fields
-                .get(14)
+                .get(13)
                 .copied()
                 .filter(|value| !value.is_empty())
                 .map(ToOwned::to_owned);
             let shell_status = self.read_status(id);
             let task_status = managed_task_id.as_ref().map(|_| {
-                if fields.get(12).copied() == Some("1") {
-                    if let Some(status) = fields.get(13).copied().filter(|value| !value.is_empty())
+                if fields.get(11).copied() == Some("1") {
+                    if let Some(status) = fields.get(12).copied().filter(|value| !value.is_empty())
                     {
                         status.to_string()
                     } else if let Some(signal) =
-                        fields.get(15).and_then(|value| value.parse::<i32>().ok())
+                        fields.get(14).and_then(|value| value.parse::<i32>().ok())
                     {
                         (128 + signal).to_string()
                     } else {
@@ -293,10 +262,13 @@ impl TmuxBackend {
                     "running".to_string()
                 }
             });
+            let cwd = decode_tmux_argument(fields.get(9).copied().unwrap_or_default())?;
+            let command = decode_tmux_argument(fields.get(10).copied().unwrap_or_default())?;
+            let interactive_running = managed_task_id.is_none()
+                && !matches!(command.as_str(), "bash" | "zsh" | "fish");
             panes.push(BackendPane {
                 id: id.to_string(),
                 name: name.to_string(),
-                automatic: fields.get(11).copied() == Some("1"),
                 tmux_pane_id: tmux_pane_id.to_string(),
                 tmux_window_id: fields.get(5).copied().unwrap_or_default().to_string(),
                 window_panes: fields
@@ -313,13 +285,13 @@ impl TmuxBackend {
                     .unwrap_or_default(),
                 pane_incarnation_id: pane_incarnation_id.to_string(),
                 created_at_ms,
-                cwd: decode_tmux_argument(fields.get(9).copied().unwrap_or_default())?,
-                command: decode_tmux_argument(fields.get(10).copied().unwrap_or_default())?,
-                lines,
-                status: task_status.or_else(|| shell_status.as_ref().map(status_text)),
-                status_task_id: managed_task_id
-                    .clone()
-                    .or_else(|| shell_status.and_then(|record| record.task_id)),
+                cwd,
+                command,
+                status: task_status.or_else(|| {
+                    interactive_running
+                        .then(|| "running".to_string())
+                        .or_else(|| shell_status.as_ref().map(status_text))
+                }),
                 managed_task_id,
             });
         }
@@ -384,13 +356,8 @@ impl TmuxBackend {
         Ok(())
     }
 
-    pub fn create_pane(
-        &self,
-        name: &str,
-        cwd: &Path,
-        automatic: bool,
-    ) -> Result<BackendPane, ToolError> {
-        let pane = PaneRecord::new(name, automatic, None)?;
+    pub fn create_pane(&self, name: &str, cwd: &Path) -> Result<BackendPane, ToolError> {
+        let pane = PaneRecord::new(name, None)?;
         let launch = prepare_shell_launch(&self.shell_dir, &self.status_dir, &pane.pane_id)?;
         let args = vec![
             "new-window".to_string(),
@@ -417,20 +384,14 @@ impl TmuxBackend {
             let _ = self.run(&["kill-pane".into(), "-t".into(), tmux_pane_id.clone()]);
             return Err(error);
         }
-        if let Err(error) = self.persist_pane(&pane) {
-            let _ = self.run(&["kill-pane".into(), "-t".into(), tmux_pane_id.clone()]);
-            return Err(error);
-        }
         if let Err(error) = self.wait_until_ready(&pane.pane_id, Duration::from_secs(3)) {
             let _ = self.run(&["kill-pane".into(), "-t".into(), tmux_pane_id.clone()]);
-            let _ = self.remove_pane_record(&pane.pane_id);
             return Err(error);
         }
         if let Err(error) =
             self.discard_initial_prompt_output(&pane.pane_id, Duration::from_secs(3))
         {
             let _ = self.run(&["kill-pane".into(), "-t".into(), tmux_pane_id.clone()]);
-            let _ = self.remove_pane_record(&pane.pane_id);
             return Err(error);
         }
         self.capture_workspace()?
@@ -446,7 +407,7 @@ impl TmuxBackend {
         cwd: &Path,
         command: &str,
     ) -> Result<BackendPane, ToolError> {
-        let pane = PaneRecord::new(task_id, true, Some(task_id.to_string()))?;
+        let pane = PaneRecord::new(task_id, Some(task_id.to_string()))?;
         let script_path = self.tasks_dir.join(format!("{task_id}.sh"));
         let gate_path = self.tasks_dir.join(format!("{task_id}.start"));
         let transcript_path = self.transcript_path(task_id);
@@ -489,7 +450,6 @@ impl TmuxBackend {
         }
         let setup = (|| {
             self.mark_pane(&tmux_pane_id, &pane)?;
-            self.persist_pane(&pane)?;
             self.run(&[
                 "set-option".into(),
                 "-w".into(),
@@ -512,7 +472,6 @@ impl TmuxBackend {
         })();
         if let Err(error) = setup {
             let _ = self.run(&["kill-pane".into(), "-t".into(), tmux_pane_id.clone()]);
-            let _ = self.remove_pane_record(&pane.pane_id);
             self.remove_task_runtime(task_id);
             let _ = fs::remove_file(&transcript_path);
             return Err(error);
@@ -626,13 +585,11 @@ impl TmuxBackend {
     }
 
     pub fn remove_pane_metadata(&self, pane_id: &str) {
-        let _ = self.remove_pane_record(pane_id);
         let _ = fs::remove_file(self.status_path(pane_id));
     }
 
     pub fn close_pane(&self, pane: &BackendPane) -> Result<(), ToolError> {
         self.run(&["kill-pane".into(), "-t".into(), pane.tmux_pane_id.clone()])?;
-        self.remove_pane_record(&pane.id)?;
         let _ = fs::remove_file(self.status_path(&pane.id));
         Ok(())
     }
@@ -762,53 +719,11 @@ impl TmuxBackend {
         Ok(())
     }
 
-    fn reconcile_registry(&self) -> Result<(), ToolError> {
-        let workspace = self.capture_workspace()?;
-        let live = workspace
-            .panes
-            .iter()
-            .map(|pane| pane.id.as_str())
-            .collect::<HashSet<_>>();
-        for pane in &workspace.panes {
-            self.persist_pane(&PaneRecord {
-                schema_version: 1,
-                pane_id: pane.id.clone(),
-                pane_incarnation_id: pane.pane_incarnation_id.clone(),
-                name: pane.name.clone(),
-                automatic: pane.automatic,
-                task_id: pane.managed_task_id.clone(),
-                created_at_ms: pane.created_at_ms,
-            })?;
-        }
-        for entry in fs::read_dir(&self.panes_dir).map_err(storage_error)? {
-            let entry = entry.map_err(storage_error)?;
-            let path = entry.path();
-            let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
-                continue;
-            };
-            if path.extension().and_then(|extension| extension.to_str()) == Some("json")
-                && !live.contains(stem)
-            {
-                fs::remove_file(path).map_err(storage_error)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn new_session_record(&self) -> SessionRecord {
-        SessionRecord {
-            schema_version: 1,
-            session_id: Uuid::new_v4().to_string(),
-            instance: self.instance.clone(),
-            created_at_ms: unix_time_millis(),
-        }
-    }
-
-    fn mark_session(&self, session: &SessionRecord) -> Result<(), ToolError> {
+    fn mark_session(&self, session_id: &str) -> Result<(), ToolError> {
         for (option, value) in [
             ("@devshell_worker_managed", "1".to_string()),
             ("@devshell_worker_instance", self.instance.clone()),
-            ("@devshell_worker_session_id", session.session_id.clone()),
+            ("@devshell_worker_session_id", session_id.to_string()),
             ("@devshell_worker_schema", "1".to_string()),
         ] {
             self.run(&[
@@ -835,10 +750,6 @@ impl TmuxBackend {
             (
                 "@devshell_worker_created_at",
                 pane.created_at_ms.to_string(),
-            ),
-            (
-                "@devshell_worker_automatic",
-                if pane.automatic { "1" } else { "0" }.to_string(),
             ),
             (
                 "@devshell_worker_task_id",
@@ -895,13 +806,14 @@ impl TmuxBackend {
                 .find(|pane| pane.id == pane_id)
                 .ok_or_else(|| ToolError::new("tmux.paneNotFound", "created pane disappeared"))?;
             let shell_idle = matches!(pane.command.as_str(), "bash" | "zsh" | "fish");
+            let lines = self.capture_lines(&pane.tmux_pane_id, -PANE_HISTORY_LINES, 0)?;
 
-            if previous_lines.as_ref() == Some(&pane.lines) && shell_idle {
+            if previous_lines.as_ref() == Some(&lines) && shell_idle {
                 if unchanged_since.elapsed() >= QUIET_PERIOD {
                     return Ok(());
                 }
             } else {
-                previous_lines = Some(pane.lines.clone());
+                previous_lines = Some(lines);
                 unchanged_since = std::time::Instant::now();
             }
 
@@ -921,25 +833,7 @@ impl TmuxBackend {
         self.status_dir.join(format!("{}.json", escape_id(pane_id)))
     }
 
-    fn persist_pane(&self, pane: &PaneRecord) -> Result<(), ToolError> {
-        atomic_write_json(&self.panes_dir.join(format!("{}.json", pane.pane_id)), pane)
-    }
-
-    fn remove_pane_record(&self, pane_id: &str) -> Result<(), ToolError> {
-        match fs::remove_file(self.panes_dir.join(format!("{pane_id}.json"))) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(storage_error(error)),
-        }
-    }
-
-    fn clear_stale_pane_records(&self) -> Result<(), ToolError> {
-        for entry in fs::read_dir(&self.panes_dir).map_err(storage_error)? {
-            let entry = entry.map_err(storage_error)?;
-            if entry.file_type().map_err(storage_error)?.is_file() {
-                fs::remove_file(entry.path()).map_err(storage_error)?;
-            }
-        }
+    fn clear_stale_status_records(&self) -> Result<(), ToolError> {
         for entry in fs::read_dir(&self.status_dir).map_err(storage_error)? {
             let entry = entry.map_err(storage_error)?;
             if entry.file_type().map_err(storage_error)?.is_file() {
@@ -971,14 +865,12 @@ impl TmuxBackend {
 }
 
 impl PaneRecord {
-    fn new(name: &str, automatic: bool, task_id: Option<String>) -> Result<Self, ToolError> {
+    fn new(name: &str, task_id: Option<String>) -> Result<Self, ToolError> {
         validate_pane_name(name)?;
         Ok(Self {
-            schema_version: 1,
             pane_id: new_pane_id(),
             pane_incarnation_id: Uuid::new_v4().to_string(),
             name: name.to_string(),
-            automatic,
             task_id,
             created_at_ms: unix_time_millis(),
         })

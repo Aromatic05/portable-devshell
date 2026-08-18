@@ -521,6 +521,91 @@ fn tmux_task_and_persistent_pane_controls_remain_separate_across_contexts() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
+fn persistent_pane_rejects_close_while_foreground_process_is_running() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-interactive-busy";
+    env.command_with_env("SHELL", "/bin/bash")
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let created = call(
+        &env,
+        instance,
+        "1",
+        "tmux_create",
+        json!({ "name": "busy" }),
+        "ctx-a",
+        "create-busy-pane",
+    );
+    assert_eq!(created["ok"], true, "{created}");
+
+    let input = call(
+        &env,
+        instance,
+        "2",
+        "tmux_input",
+        json!({ "pane": "busy", "input": "sleep 30^M" }),
+        "ctx-a",
+        "start-busy-command",
+    );
+    assert_eq!(input["ok"], true, "{input}");
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let listed = call(
+            &env,
+            instance,
+            "3",
+            "tmux_list",
+            json!({}),
+            "ctx-b",
+            "list-busy-pane",
+        );
+        let status = listed["result"]["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|pane| pane["name"] == "busy")
+            .and_then(|pane| pane["status"].as_str());
+        if status == Some("running") {
+            break;
+        }
+        assert!(Instant::now() < deadline, "pane never became busy: {listed}");
+        thread::sleep(Duration::from_millis(25));
+    }
+
+    let guarded = call(
+        &env,
+        instance,
+        "4",
+        "tmux_close",
+        json!({ "pane": "busy" }),
+        "ctx-b",
+        "close-busy-pane",
+    );
+    assert_eq!(guarded["error"]["code"], "tmux.paneBusy", "{guarded}");
+
+    let closed = call(
+        &env,
+        instance,
+        "5",
+        "tmux_close",
+        json!({ "pane": "busy", "force": true }),
+        "ctx-b",
+        "force-close-busy-pane",
+    );
+    assert_eq!(closed["ok"], true, "{closed}");
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
 fn tmux_force_close_task_is_not_owned_by_the_creating_context() {
     assert!(
         tmux_available(),
@@ -1569,6 +1654,128 @@ fn worker_restart_preserves_completed_task_transcript() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
+fn worker_restart_finishes_cleanup_for_a_persisted_completed_task() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let real_tmux = Command::new("sh")
+        .args(["-c", "command -v tmux"])
+        .output()
+        .expect("tmux path lookup should run");
+    assert!(real_tmux.status.success());
+    let real_tmux = String::from_utf8(real_tmux.stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+    assert!(!real_tmux.contains('\''));
+
+    let env = TestEnv::new();
+    let bin_dir = env.home().join("tmux-fail-close-bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    let wrapper = bin_dir.join("tmux");
+    let marker = env.home().join("tmux-failed-close-once");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\ncase \" $* \" in\n  *\" kill-pane \"*)\n    if [ ! -e \"$TMUX_FAIL_CLOSE_MARKER\" ]; then\n      : > \"$TMUX_FAIL_CLOSE_MARKER\"\n      exit 1\n    fi\n    ;;\nesac\nexec '{real_tmux}' \"$@\"\n"
+        ),
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&wrapper).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&wrapper, permissions).unwrap();
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let instance = "aromatic-tmux-completed-cleanup-restart";
+    env.command()
+        .env("PATH", path)
+        .env("TMUX_FAIL_CLOSE_MARKER", &marker)
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({
+            "command": "printf 'RECOVERED\\n'",
+            "wait": "block",
+            "timeMs": 3000
+        }),
+        "ctx-a",
+        "run-before-failed-cleanup",
+    );
+    assert_eq!(run["error"]["code"], "tmux.commandFailed", "{run}");
+    assert!(marker.exists());
+
+    let panes = Command::new(&real_tmux)
+        .arg("-S")
+        .arg(env.tmux_socket_file(instance))
+        .args([
+            "list-panes",
+            "-s",
+            "-t",
+            "devshell",
+            "-F",
+            "#{@devshell_worker_task_id}",
+        ])
+        .output()
+        .expect("tmux pane lookup should run");
+    assert!(panes.status.success());
+    let task = String::from_utf8(panes.stdout)
+        .unwrap()
+        .lines()
+        .find(|line| line.starts_with("task-"))
+        .expect("completed task pane should remain after injected close failure")
+        .to_string();
+
+    env.json_command(&["stop", "--instance", instance]);
+    start(&env, instance);
+
+    let listed = call(
+        &env,
+        instance,
+        "2",
+        "tmux_list",
+        json!({}),
+        "ctx-b",
+        "list-after-cleanup-restart",
+    );
+    assert_eq!(listed["ok"], true, "{listed}");
+    assert!(
+        listed["result"]["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|pane| pane["name"] != task),
+        "{listed}"
+    );
+
+    let read = call(
+        &env,
+        instance,
+        "3",
+        "tmux_read",
+        json!({ "task": task, "line": 20 }),
+        "ctx-b",
+        "read-after-cleanup-restart",
+    );
+    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["result"]["task"]["status"], "0", "{read}");
+    assert_eq!(read["result"]["output"][0], "RECOVERED", "{read}");
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
 fn worker_restart_preserves_running_task_transcript_cursor() {
     assert!(
         tmux_available(),
@@ -1931,7 +2138,7 @@ fn repeated_tmux_list_skips_session_reinitialization() {
         .lines()
         .count();
     assert!(
-        invocation_count <= 20,
+        invocation_count <= 8,
         "repeated full-capacity tmux_list used {invocation_count} tmux commands"
     );
     stop(&env, instance);

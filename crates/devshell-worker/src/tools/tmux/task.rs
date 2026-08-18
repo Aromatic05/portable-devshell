@@ -114,7 +114,7 @@ impl TaskRegistry {
 
 pub fn refresh_task_record(task: &mut TaskRecord, pane: &BackendPane) {
     task.last_pane = Some(pane.clone());
-    if pane.status_task_id.as_deref() == Some(&task.id) {
+    if pane.managed_task_id.as_deref() == Some(&task.id) {
         match pane.status.as_deref() {
             Some("running") => task.state = TaskState::Running,
             Some(value) if value.parse::<i32>().is_ok() => {
@@ -221,7 +221,6 @@ mod tests {
         BackendPane {
             id: "pane-main".to_string(),
             name: "main".to_string(),
-            automatic: false,
             tmux_pane_id: "%0".to_string(),
             tmux_window_id: "@0".to_string(),
             window_panes: 1,
@@ -231,9 +230,7 @@ mod tests {
             created_at_ms: 1,
             cwd: "/tmp".to_string(),
             command: "bash".to_string(),
-            lines: Vec::new(),
             status: Some("idle".to_string()),
-            status_task_id: None,
             managed_task_id: None,
         }
     }

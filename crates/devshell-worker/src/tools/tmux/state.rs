@@ -113,6 +113,13 @@ impl TmuxState {
                 let Some(state) = state.upgrade() else {
                     break;
                 };
+                let has_active_task = state
+                    .tasks
+                    .lock()
+                    .is_ok_and(|tasks| tasks.tasks.values().any(|task| task.state.is_active()));
+                if !has_active_task {
+                    continue;
+                }
                 if !state.backend.has_session() {
                     continue;
                 }
@@ -478,9 +485,7 @@ impl TmuxState {
                 format!("tmux pane capacity reached ({MAX_PANES})"),
             ));
         }
-        let pane = self
-            .backend
-            .create_pane(&params.name, &cwd.canonical, false)?;
+        let pane = self.backend.create_pane(&params.name, &cwd.canonical)?;
         if let Err(error) = verify_pane_cwd(&pane, &cwd) {
             let _ = self.backend.close_pane(&pane);
             return Err(error);
@@ -769,10 +774,18 @@ impl TmuxState {
             }
 
             for pane in &workspace.panes {
-                let Some(task_id) = pane.status_task_id.as_ref() else {
+                let Some(task_id) = pane.managed_task_id.as_ref() else {
                     continue;
                 };
-                if tasks.tasks.contains_key(task_id) {
+                if let Some(task) = tasks.tasks.get_mut(task_id) {
+                    if !task.state.is_active()
+                        && task.last_pane.is_none()
+                        && task.pane_id == pane.id
+                    {
+                        task.pane_incarnation_id = pane.pane_incarnation_id.clone();
+                        task.last_pane = Some(pane.clone());
+                        cleanup.push((task.id.clone(), pane.clone()));
+                    }
                     continue;
                 }
                 let mut task = TaskRecord {
@@ -875,11 +888,14 @@ impl TmuxState {
             .get_mut(task_id)
             .ok_or_else(|| task_expired(task_id))?;
         let terminal = !task.state.is_active();
+        let previous_offset = task.transcript.offset();
         let mut transcript = task.transcript.clone();
         let mut task_warnings = task.warnings.clone();
         let output = transcript.take_output(&task.pane_id, &mut task_warnings, line, terminal)?;
-        self.backend
-            .persist_task_offset(task_id, transcript.offset())?;
+        if transcript.offset() != previous_offset {
+            self.backend
+                .persist_task_offset(task_id, transcript.offset())?;
+        }
         task.transcript = transcript;
         task.warnings = task_warnings;
         let mut warnings = std::mem::take(&mut task.warnings);
@@ -1192,7 +1208,6 @@ mod tests {
         BackendPane {
             id: "pane-main".to_string(),
             name: "main".to_string(),
-            automatic: false,
             tmux_pane_id: "%0".to_string(),
             tmux_window_id: "@0".to_string(),
             window_panes: 1,
@@ -1202,9 +1217,7 @@ mod tests {
             created_at_ms: 1,
             cwd: "/tmp".to_string(),
             command: "bash".to_string(),
-            lines: Vec::new(),
             status: Some("idle".to_string()),
-            status_task_id: None,
             managed_task_id: None,
         }
     }
