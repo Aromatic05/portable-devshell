@@ -437,7 +437,7 @@ impl TmuxState {
         for pane in selected {
             let lines = self
                 .backend
-                .capture_lines(&pane.tmux_pane_id, pane.rows, start, end)?;
+                .capture_lines(&pane.tmux_pane_id, start, end)?;
             panes.push(pane_detail(&pane, current_task(&tasks, &pane.id), lines));
         }
         Ok(self.pane_output(panes, self.output_warnings(&workspace)?))

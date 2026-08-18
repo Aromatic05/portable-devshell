@@ -193,7 +193,7 @@ impl TmuxBackend {
                 ));
             }
             self.mark_pane(&tmux_pane_id, &pane)?;
-            self.wait_until_ready(&pane.pane_id, Duration::from_secs(3))?;
+            self.wait_until_ready(&pane.pane_id, Duration::from_secs(5))?;
             self.discard_initial_prompt_output(&pane.pane_id, Duration::from_secs(3))?;
             Ok::<(), ToolError>(())
         })();
@@ -318,18 +318,9 @@ impl TmuxBackend {
     pub fn capture_lines(
         &self,
         tmux_pane_id: &str,
-        rows: usize,
         start: i64,
         end: i64,
     ) -> Result<Vec<String>, ToolError> {
-        let native_range = (rows > 0).then(|| {
-            let rows = rows as i64;
-            ((rows + start).to_string(), (rows + end - 1).to_string())
-        });
-        let (native_start, native_end) = native_range
-            .as_ref()
-            .map(|(start, end)| (start.as_str(), end.as_str()))
-            .unwrap_or(("-", "-"));
         let raw = self.run(&[
             "capture-pane".into(),
             "-p".into(),
@@ -337,17 +328,15 @@ impl TmuxBackend {
             "-t".into(),
             tmux_pane_id.into(),
             "-S".into(),
-            native_start.into(),
+            "-".into(),
             "-E".into(),
-            native_end.into(),
+            "-".into(),
         ])?;
         let sanitized = sanitize_terminal_snapshot(&raw);
         let mut selected = sanitized.lines().map(ToOwned::to_owned).collect::<Vec<_>>();
-        if native_range.is_none() {
-            let logical_start = selected.len().saturating_sub(start.unsigned_abs() as usize);
-            let logical_end = selected.len().saturating_sub(end.unsigned_abs() as usize);
-            selected = selected[logical_start.min(logical_end)..logical_end].to_vec();
-        }
+        let logical_start = selected.len().saturating_sub(start.unsigned_abs() as usize);
+        let logical_end = selected.len().saturating_sub(end.unsigned_abs() as usize);
+        selected = selected[logical_start.min(logical_end)..logical_end].to_vec();
         while selected.last().is_some_and(String::is_empty) {
             selected.pop();
         }
@@ -407,7 +396,7 @@ impl TmuxBackend {
             let _ = self.run(&["kill-pane".into(), "-t".into(), tmux_pane_id.clone()]);
             return Err(error);
         }
-        if let Err(error) = self.wait_until_ready(&pane.pane_id, Duration::from_secs(3)) {
+        if let Err(error) = self.wait_until_ready(&pane.pane_id, Duration::from_secs(5)) {
             let _ = self.run(&["kill-pane".into(), "-t".into(), tmux_pane_id.clone()]);
             return Err(error);
         }
@@ -834,8 +823,7 @@ impl TmuxBackend {
                 .find(|pane| pane.id == pane_id)
                 .ok_or_else(|| ToolError::new("tmux.paneNotFound", "created pane disappeared"))?;
             let shell_idle = matches!(pane.command.as_str(), "bash" | "zsh" | "fish");
-            let lines =
-                self.capture_lines(&pane.tmux_pane_id, pane.rows, -PANE_HISTORY_LINES, 0)?;
+            let lines = self.capture_lines(&pane.tmux_pane_id, -PANE_HISTORY_LINES, 0)?;
 
             if previous_lines.as_ref() == Some(&lines) && shell_idle {
                 if unchanged_since.elapsed() >= QUIET_PERIOD {
@@ -1170,7 +1158,11 @@ fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), ToolError> {
         .parent()
         .ok_or_else(|| ToolError::new("tmux.storageFailed", "tmux state path has no parent"))?;
     ensure_dir(parent, 0o700).map_err(|error| ToolError::new("tmux.storageFailed", error))?;
-    let temporary = path.with_extension(format!("tmp.{}", std::process::id()));
+    let temporary = path.with_extension(format!(
+        "tmp.{}.{}",
+        std::process::id(),
+        Uuid::new_v4().simple()
+    ));
     let mut file = fs::OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -1189,7 +1181,11 @@ fn atomic_write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), ToolErr
         .parent()
         .ok_or_else(|| ToolError::new("tmux.storageFailed", "tmux state path has no parent"))?;
     ensure_dir(parent, 0o700).map_err(|error| ToolError::new("tmux.storageFailed", error))?;
-    let temporary = path.with_extension(format!("json.tmp.{}", std::process::id()));
+    let temporary = path.with_extension(format!(
+        "json.tmp.{}.{}",
+        std::process::id(),
+        Uuid::new_v4().simple()
+    ));
     let mut bytes = serde_json::to_vec_pretty(value)
         .map_err(|error| ToolError::new("tmux.storageFailed", error.to_string()))?;
     bytes.push(b'\n');
