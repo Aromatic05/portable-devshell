@@ -945,10 +945,16 @@ fn tmux_inspect_honors_nonzero_end_offsets() {
         "fill-main-history",
     );
     assert_eq!(input["ok"], true, "{input}");
-    thread::sleep(Duration::from_millis(300));
-
     let pane_id = tmux_pane_id_by_name(&env, instance, "main");
-    let expected = tmux_capture_range(&env, instance, &pane_id, -100, -90);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let expected = loop {
+        let expected = tmux_capture_range(&env, instance, &pane_id, -100, -90);
+        if expected.len() == 10 {
+            break expected;
+        }
+        assert!(Instant::now() < deadline, "{expected:?}");
+        thread::sleep(Duration::from_millis(50));
+    };
     assert_eq!(expected.len(), 10, "{expected:?}");
 
     let inspect = call(

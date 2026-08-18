@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
-use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::ffi::OsStr;
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
 use super::warning;
@@ -9,7 +10,68 @@ use crate::tools::ToolError;
 use crate::tools::tmux::types::TmuxWarning;
 
 pub const MAX_TRANSCRIPT_BYTES: u64 = 4 * 1024 * 1024;
+pub const TRANSCRIPT_LOGGER_MODE: &str = "__tmux-transcript-logger";
 const MAX_RENDERED_RECORD_BYTES: usize = 4096;
+
+pub fn try_run_transcript_logger() -> Option<Result<(), String>> {
+    let mut args = std::env::args_os();
+    let _ = args.next();
+    if args.next().as_deref() != Some(OsStr::new(TRANSCRIPT_LOGGER_MODE)) {
+        return None;
+    }
+    Some((|| {
+        let transcript = PathBuf::from(
+            args.next()
+                .ok_or_else(|| "tmux transcript logger path is missing".to_string())?,
+        );
+        let done = PathBuf::from(
+            args.next()
+                .ok_or_else(|| "tmux transcript logger completion path is missing".to_string())?,
+        );
+        let limit = args
+            .next()
+            .and_then(|value| value.into_string().ok())
+            .ok_or_else(|| "tmux transcript logger byte limit is missing".to_string())?
+            .parse::<u64>()
+            .map_err(|error| format!("tmux transcript logger byte limit is invalid: {error}"))?;
+        if args.next().is_some() {
+            return Err("tmux transcript logger received unexpected arguments".to_string());
+        }
+
+        let mut input = std::io::stdin().lock();
+        let mut output = OpenOptions::new()
+            .append(true)
+            .open(&transcript)
+            .map_err(|error| format!("failed to open {}: {error}", transcript.display()))?;
+        drain_transcript(&mut input, &mut output, limit)
+            .map_err(|error| format!("failed to write {}: {error}", transcript.display()))?;
+        drop(output);
+        std::fs::write(&done, b"done\n")
+            .map_err(|error| format!("failed to write {}: {error}", done.display()))?;
+        Ok(())
+    })())
+}
+
+fn drain_transcript(
+    input: &mut impl Read,
+    output: &mut impl Write,
+    limit: u64,
+) -> std::io::Result<()> {
+    let mut remaining = limit;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = input.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        if remaining > 0 {
+            let persisted = count.min(remaining as usize);
+            output.write_all(&buffer[..persisted])?;
+            remaining -= persisted as u64;
+        }
+    }
+    output.flush()
+}
 
 #[derive(Debug, Clone)]
 pub struct TranscriptCursor {
@@ -300,9 +362,9 @@ fn transcript_error(error: std::io::Error) -> ToolError {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
+    use std::io::{Cursor, Write};
 
-    use super::{MAX_TRANSCRIPT_BYTES, TranscriptCursor, render_terminal_record};
+    use super::{MAX_TRANSCRIPT_BYTES, TranscriptCursor, drain_transcript, render_terminal_record};
     use crate::testing::temp_dir;
 
     #[test]
@@ -363,5 +425,15 @@ mod tests {
         assert_eq!(warnings[0].code, "tmux.outputTruncated");
         cursor.take_output("pane", &mut warnings, 0, true).unwrap();
         assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn transcript_logger_drains_input_after_reaching_its_byte_limit() {
+        let source = vec![b'x'; 16 * 1024];
+        let mut input = Cursor::new(source.clone());
+        let mut output = Vec::new();
+        drain_transcript(&mut input, &mut output, 4096).unwrap();
+        assert_eq!(input.position(), source.len() as u64);
+        assert_eq!(output, source[..4096]);
     }
 }

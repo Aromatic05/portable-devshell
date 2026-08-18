@@ -73,10 +73,21 @@ impl TestEnv {
         hasher.update(workspace.as_os_str().as_encoded_bytes());
         let hash = hasher.finalize().to_hex();
         let workspace_key = &hash[..16];
-        let candidate = self.runtime_root
-            .join("devshell-worker")
-            .join(instance)
-            .join(format!("tmux-{workspace_key}.sock"));
+        let default_runtime_dir = self.runtime_root.join("devshell-worker").join(instance);
+        let instance_runtime_dir = if default_runtime_dir
+            .join("worker.sock")
+            .as_os_str()
+            .as_encoded_bytes()
+            .len()
+            <= 100
+        {
+            default_runtime_dir
+        } else {
+            let identity = format!("{}:{instance}", self.home_root.display());
+            let hash = blake3::hash(identity.as_bytes()).to_hex();
+            PathBuf::from("/tmp").join(format!("devshell-worker-{}", &hash[..16]))
+        };
+        let candidate = instance_runtime_dir.join(format!("tmux-{workspace_key}.sock"));
         if candidate.as_os_str().as_encoded_bytes().len() <= 100 {
             candidate
         } else {

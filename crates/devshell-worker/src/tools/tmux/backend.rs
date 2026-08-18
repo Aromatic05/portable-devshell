@@ -21,13 +21,12 @@ use crate::storage::InstancePaths;
 use crate::storage::permissions::ensure_dir;
 use crate::tools::ToolError;
 use crate::tools::tmux::codec::{TmuxInputChunk, parse_tmux_input, sanitize_terminal_snapshot};
-use crate::tools::tmux::output::MAX_TRANSCRIPT_BYTES;
+use crate::tools::tmux::output::{MAX_TRANSCRIPT_BYTES, TRANSCRIPT_LOGGER_MODE};
 use crate::tools::tmux::shell::prepare_shell_launch;
 
 pub const TMUX_SESSION: &str = "devshell";
 pub const MAX_PANES: usize = 16;
 const TMUX_RUNTIME_SCHEMA: &str = "2";
-const POSIX_FILE_LIMIT_BLOCK_BYTES: u64 = 512;
 const PANE_HISTORY_LINES: i64 = 400;
 const TERMINAL_HISTORY_LINES: usize = 10_000;
 const TERMINAL_COLUMNS: usize = 240;
@@ -261,9 +260,12 @@ impl TmuxBackend {
                 .filter(|value| !value.is_empty())
                 .map(ToOwned::to_owned);
             let shell_status = self.read_status(id);
-            let task_status = managed_task_id.as_ref().map(|_| {
+            let task_status = managed_task_id.as_ref().map(|task_id| {
                 if fields.get(9).copied() == Some("1") {
-                    if let Some(status) = fields.get(10).copied().filter(|value| !value.is_empty())
+                    if let Some(status) = self.read_task_exit_status(task_id) {
+                        status.to_string()
+                    } else if let Some(status) =
+                        fields.get(10).copied().filter(|value| !value.is_empty())
                     {
                         status.to_string()
                     } else if let Some(signal) =
@@ -431,21 +433,24 @@ impl TmuxBackend {
         let pane = PaneRecord::new(task_id, Some(task_id.to_string()))?;
         let script_path = self.tasks_dir.join(format!("{task_id}.sh"));
         let gate_path = self.tasks_dir.join(format!("{task_id}.start"));
+        let exit_path = self.task_exit_path(task_id);
         let transcript_path = self.transcript_path(task_id);
         let transcript_done_path = self.transcript_done_path(task_id);
         let _ = fs::remove_file(&gate_path);
+        let _ = fs::remove_file(&exit_path);
         let _ = fs::remove_file(&transcript_done_path);
         atomic_write_bytes(&transcript_path, b"")?;
-        let script = format!(
-            "while [ ! -e {} ]; do /bin/sleep 0.02; done\n/bin/rm -f {}\n{}",
+        atomic_write_bytes(&script_path, command.as_bytes())?;
+        let runner = format!(
+            "umask 077; while [ ! -e {} ]; do /bin/sleep 0.02; done; /bin/rm -f {}; /bin/bash --noprofile --norc {}; status=$?; printf '%s\\n' \"$status\" > {}; exit \"$status\"",
             shell_quote(&gate_path.to_string_lossy()),
             shell_quote(&gate_path.to_string_lossy()),
-            command,
+            shell_quote(&script_path.to_string_lossy()),
+            shell_quote(&exit_path.to_string_lossy()),
         );
-        atomic_write_bytes(&script_path, script.as_bytes())?;
         let launch = format!(
-            "exec /usr/bin/env -u BASH_ENV -u TMUX -u TMUX_PANE -u TMUX_TMPDIR /bin/bash --noprofile --norc {}",
-            shell_quote(&script_path.to_string_lossy())
+            "exec /usr/bin/env -u BASH_ENV -u TMUX -u TMUX_PANE -u TMUX_TMPDIR /bin/bash --noprofile --norc -c {}",
+            shell_quote(&runner)
         );
         let args = vec![
             "new-window".to_string(),
@@ -484,10 +489,18 @@ impl TmuxBackend {
                 "-t".into(),
                 tmux_pane_id.clone(),
                 format!(
-                    "/bin/sh -c 'ulimit -c 0; ulimit -f \"$1\"; exec /bin/cat >> \"$2\"' sh {} {} 2>/dev/null; /bin/cat >/dev/null; : > {}",
-                    MAX_TRANSCRIPT_BYTES / POSIX_FILE_LIMIT_BLOCK_BYTES,
+                    "exec {} {} {} {} {} 2>/dev/null",
+                    shell_quote(
+                        &std::env::current_exe()
+                            .map_err(|error| {
+                                ToolError::new("tmux.createFailed", error.to_string())
+                            })?
+                            .to_string_lossy()
+                    ),
+                    TRANSCRIPT_LOGGER_MODE,
                     shell_quote(&transcript_path.to_string_lossy()),
                     shell_quote(&transcript_done_path.to_string_lossy()),
+                    MAX_TRANSCRIPT_BYTES,
                 ),
             ])?;
             Ok::<(), ToolError>(())
@@ -584,6 +597,18 @@ impl TmuxBackend {
         self.transcripts_dir.join(format!("{task_id}.done"))
     }
 
+    fn task_exit_path(&self, task_id: &str) -> PathBuf {
+        self.tasks_dir.join(format!("{task_id}.exit"))
+    }
+
+    fn read_task_exit_status(&self, task_id: &str) -> Option<i32> {
+        fs::read_to_string(self.task_exit_path(task_id))
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
+    }
+
     fn wait_task_capture(&self, task_id: &str) -> Result<(), ToolError> {
         let done_path = self.transcript_done_path(task_id);
         let deadline = std::time::Instant::now() + Duration::from_secs(3);
@@ -603,12 +628,14 @@ impl TmuxBackend {
     pub fn remove_task_runtime(&self, task_id: &str) {
         let _ = fs::remove_file(self.tasks_dir.join(format!("{task_id}.sh")));
         let _ = fs::remove_file(self.tasks_dir.join(format!("{task_id}.start")));
+        let _ = fs::remove_file(self.task_exit_path(task_id));
         let _ = fs::remove_file(self.transcript_done_path(task_id));
     }
 
     pub fn task_runtime_pending(&self, task_id: &str) -> bool {
         self.tasks_dir.join(format!("{task_id}.sh")).exists()
             || self.tasks_dir.join(format!("{task_id}.start")).exists()
+            || self.task_exit_path(task_id).exists()
             || self.transcript_done_path(task_id).exists()
     }
 

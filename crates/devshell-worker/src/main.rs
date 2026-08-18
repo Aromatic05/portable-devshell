@@ -29,6 +29,12 @@ fn main() {
 }
 
 fn run() -> Result<String, String> {
+    #[cfg(unix)]
+    if let Some(result) = tools::tmux::output::try_run_transcript_logger() {
+        result?;
+        return Ok(String::new());
+    }
+
     if let Some(raw_instance) = std::env::var_os(daemon::process::INTERNAL_INSTANCE_ENV) {
         let raw_instance = raw_instance
             .into_string()
