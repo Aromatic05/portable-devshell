@@ -1041,7 +1041,7 @@ fn file_find_cursor_resumes_the_open_traversal_after_root_replacement() {
         "2",
         "ctx-a",
         "file_find",
-        json!({ "cursor": cursor }),
+        json!({ "cursor": cursor.clone() }),
     );
     assert_eq!(second["ok"], true, "{second}");
     let entries = second["result"]["entries"].as_array().unwrap();
@@ -1049,6 +1049,16 @@ fn file_find_cursor_resumes_the_open_traversal_after_root_replacement() {
     assert_eq!(entries[0]["path"], "./tree/file-200.txt");
     assert_eq!(entries[49]["path"], "./tree/file-249.txt");
     assert!(second["result"].get("nextCursor").is_none());
+
+    let reused = call(
+        &env,
+        instance,
+        "3",
+        "ctx-a",
+        "file_find",
+        json!({ "cursor": cursor }),
+    );
+    assert_eq!(reused["error"]["code"], "file.invalidCursor", "{reused}");
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -1147,7 +1157,7 @@ fn file_search_cursor_resumes_the_open_traversal_after_root_replacement() {
         "2",
         "ctx-a",
         "file_search",
-        json!({ "cursor": cursor }),
+        json!({ "cursor": cursor.clone() }),
     );
     assert_eq!(second["ok"], true, "{second}");
     let files = second["result"]["files"].as_array().unwrap();
@@ -1155,6 +1165,16 @@ fn file_search_cursor_resumes_the_open_traversal_after_root_replacement() {
     assert_eq!(files[0]["path"], "./search-tree/file-020.txt");
     assert_eq!(files[4]["path"], "./search-tree/file-024.txt");
     assert!(second["result"].get("nextCursor").is_none());
+
+    let reused = call(
+        &env,
+        instance,
+        "3",
+        "ctx-a",
+        "file_search",
+        json!({ "cursor": cursor }),
+    );
+    assert_eq!(reused["error"]["code"], "file.invalidCursor", "{reused}");
 
     env.json_command(&["stop", "--instance", instance]);
 }

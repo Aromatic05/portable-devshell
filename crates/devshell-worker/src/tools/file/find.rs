@@ -33,30 +33,36 @@ impl ToolHandler for FileFindTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tools::contract::catalog_entry::<FileFindInput, FileFindOutput>(
             &self.name,
-            "Find files and directories by exact path or glob.".to_string(),
+            "Find files and directories by exact path or glob. Continue result pages with cursor alone; after a successful continuation, use its nextCursor because the previous cursor is retired.".to_string(),
             [ToolCapability::Read],
         )
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
         let input: FileFindInput = call.parse_params()?;
-        let mut continuation = match input {
-            FileFindInput::Continue(input) => self
-                .state
-                .find_cursors
-                .lock()
-                .unwrap()
-                .resolve(&call, &input.cursor)?,
-            FileFindInput::Start(input) => FindContinuation {
-                discovery: DiscoveryCursor::new(
-                    &call,
-                    &input.paths,
-                    input.hidden.unwrap_or(true),
-                    input.gitignore.unwrap_or(true),
-                )?,
-                pending: None,
-                kind: input.entry_type.unwrap_or(FindType::Any),
-            },
+        let (mut continuation, source_cursor) = match input {
+            FileFindInput::Continue(input) => {
+                let continuation = self
+                    .state
+                    .find_cursors
+                    .lock()
+                    .unwrap()
+                    .resolve(&call, &input.cursor)?;
+                (continuation, Some(input.cursor))
+            }
+            FileFindInput::Start(input) => (
+                FindContinuation {
+                    discovery: DiscoveryCursor::new(
+                        &call,
+                        &input.paths,
+                        input.hidden.unwrap_or(true),
+                        input.gitignore.unwrap_or(true),
+                    )?,
+                    pending: None,
+                    kind: input.entry_type.unwrap_or(FindType::Any),
+                },
+                None,
+            ),
         };
 
         let mut entries = Vec::with_capacity(PAGE_SIZE);
@@ -78,10 +84,14 @@ impl ToolHandler for FileFindTool {
                 .unwrap()
                 .issue(&call, continuation)
         });
-        crate::tools::contract::serialize(FileFindOutput {
+        let output = crate::tools::contract::serialize(FileFindOutput {
             entries,
             next_cursor,
-        })
+        })?;
+        if let Some(cursor) = source_cursor {
+            self.state.find_cursors.lock().unwrap().retire(&cursor);
+        }
+        Ok(output)
     }
 }
 

@@ -82,20 +82,23 @@ impl ToolHandler for FileSearchTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tools::contract::catalog_entry::<FileSearchInput, FileSearchOutput>(
             &self.name,
-            "Search text in files, directories, or globs. Returned source lines prepare those lines for file_edit. Continue result pages with cursor alone. A truncated file includes nextLine; search that exact file again with startLine=nextLine to continue its matches.".to_string(),
+            "Search text in files, directories, or globs. Returned source lines prepare those lines for file_edit. Continue result pages with cursor alone; after a successful continuation, use its nextCursor because the previous cursor is retired. A truncated file includes nextLine; search that exact file again with startLine=nextLine to continue its matches.".to_string(),
             [ToolCapability::Read],
         )
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
         let input: FileSearchInput = call.parse_params()?;
-        let mut continuation = match input {
-            FileSearchInput::Continue(input) => self
-                .state
-                .search_cursors
-                .lock()
-                .unwrap()
-                .resolve(&call, &input.cursor)?,
+        let (mut continuation, source_cursor) = match input {
+            FileSearchInput::Continue(input) => {
+                let continuation = self
+                    .state
+                    .search_cursors
+                    .lock()
+                    .unwrap()
+                    .resolve(&call, &input.cursor)?;
+                (continuation, Some(input.cursor))
+            }
             FileSearchInput::Start(input) => {
                 let paths = input.paths.unwrap_or_else(|| vec!["./".to_string()]);
                 let syntax = input.syntax.unwrap_or(SearchSyntax::Regex);
@@ -140,16 +143,19 @@ impl ToolHandler for FileSearchTool {
                 } else {
                     MATCHES_PER_FILE
                 };
-                SearchContinuation {
-                    groups,
-                    next_group: 0,
-                    seen_candidates: HashSet::new(),
-                    pending: None,
-                    per_file,
-                    matcher,
-                    context,
-                    start_line,
-                }
+                (
+                    SearchContinuation {
+                        groups,
+                        next_group: 0,
+                        seen_candidates: HashSet::new(),
+                        pending: None,
+                        per_file,
+                        matcher,
+                        context,
+                        start_line,
+                    },
+                    None,
+                )
             }
         };
 
@@ -190,14 +196,6 @@ impl ToolHandler for FileSearchTool {
 
         let has_more = continuation.pending.is_some()
             || continuation.groups.iter().any(|group| !group.exhausted);
-        let next_cursor = has_more.then(|| {
-            self.state
-                .search_cursors
-                .lock()
-                .unwrap()
-                .issue(&call, continuation)
-        });
-
         let mut returned = Vec::with_capacity(page.len());
         let mut prepared_snapshots = Vec::with_capacity(page.len());
         for matched in page {
@@ -262,10 +260,21 @@ impl ToolHandler for FileSearchTool {
                 }
             }
         }
-        crate::tools::contract::serialize(FileSearchOutput {
+        let next_cursor = has_more.then(|| {
+            self.state
+                .search_cursors
+                .lock()
+                .unwrap()
+                .issue(&call, continuation)
+        });
+        let output = crate::tools::contract::serialize(FileSearchOutput {
             files: returned,
             next_cursor,
-        })
+        })?;
+        if let Some(cursor) = source_cursor {
+            self.state.search_cursors.lock().unwrap().retire(&cursor);
+        }
+        Ok(output)
     }
 }
 

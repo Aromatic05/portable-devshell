@@ -59,6 +59,10 @@ impl<T: Clone> CursorStore<T> {
         }
         Ok(cursor.state.clone())
     }
+
+    pub fn retire(&mut self, id: &str) {
+        self.cursors.pop(id);
+    }
 }
 
 #[cfg(test)]
