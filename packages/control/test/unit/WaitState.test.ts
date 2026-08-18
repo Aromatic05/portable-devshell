@@ -4,6 +4,7 @@ import test from "node:test";
 
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import { WaitState } from "../../src/instance/wait/WaitState.ts";
+import { WaitService } from "../../src/instance/wait/WaitService.ts";
 import { WaitStore } from "../../src/instance/wait/WaitStore.ts";
 
 test("WaitState preserves detach information through resolution and consumption", () => {
@@ -72,4 +73,28 @@ test("WaitStore persists wait state atomically", async () => {
     await store.write(created.document);
     const reloaded = new WaitStore({ filePath, instanceName: "aromatic-pc", state });
     assert.deepEqual(reloaded.read(), created.document);
+});
+
+test("WaitService lets a detached wait reattach until it resolves", async () => {
+    const root = await createTestTempDirectory("wait-service-");
+    const service = new WaitService({
+        async appendEvent() {},
+        filePath: join(root, "waits.json"),
+        instanceName: "aromatic-pc",
+    });
+    const created = await service.create({
+        createdByCtxId: "ctx-1",
+        kind: "tmux",
+        targetId: "tmux-task-1",
+    });
+    const first = service.waitForResolution(created.waitId);
+
+    await service.detach(created.waitId);
+    await assert.rejects(first, /became detached/u);
+
+    const resumed = service.waitForResolution(created.waitId);
+    const result = { task: { id: "tmux-task-1", status: "0" } };
+    await service.resolve(created.waitId, result);
+
+    assert.deepEqual((await resumed).result, result);
 });

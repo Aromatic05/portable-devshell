@@ -15,7 +15,7 @@ export interface WaitCreateInput {
     ownerCallId?: string;
     payload?: JsonValue;
     targetId: string;
-    taskId: string;
+    taskId?: string;
 }
 
 export interface WaitRecord extends WaitCreateInput {

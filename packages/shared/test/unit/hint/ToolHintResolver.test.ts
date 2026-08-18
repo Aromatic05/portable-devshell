@@ -196,6 +196,7 @@ test("tmux_run block timeout keeps the task running and is not a failure", () =>
         warnings: [{ code: "tmux.blockTimeout", message: "wait timed out" }]
     });
     assert.deepEqual(codes(hints), ["tmux.blockTimeout"]);
+    assert.match(hints[0]?.text ?? "", /tmux_wait/u);
 });
 
 test("tmux_run running task without block timeout yields a task-running diagnostic", () => {
@@ -206,10 +207,12 @@ test("tmux_run running task without block timeout yields a task-running diagnost
         warnings: []
     });
     assert.deepEqual(codes(hints), ["tmux.taskRunning"]);
+    assert.match(hints[0]?.text ?? "", /tmux_wait/u);
 });
 
 test("tmux task terminal status distinguishes success, failure, and unknown", () => {
     assert.deepEqual(resolveResultHints("tmux_read", { task: { status: "0" }, warnings: [] }), []);
+    assert.deepEqual(resolveResultHints("tmux_wait", { task: { status: "0" } }), []);
     assert.deepEqual(codes(resolveResultHints("tmux_read", { task: { status: "3" }, warnings: [] })), ["tmux.taskFailed"]);
     assert.deepEqual(codes(resolveResultHints("tmux_read", { task: { status: "unknown" }, warnings: [] })), ["tmux.taskStatusUnknown"]);
 });

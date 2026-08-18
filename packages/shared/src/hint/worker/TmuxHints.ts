@@ -6,7 +6,7 @@ import { workerCommonErrorHints } from "./WorkerCommonHints.js";
 
 const warningTexts: Record<string, string> = {
     "tmux.blockTimeout":
-        "Task still running; continue with tmux_read.",
+        "Task still running; continue with tmux_wait.",
     "tmux.taskAdopted":
         "Continue using the existing task id.",
     "tmux.outputSkipped":
@@ -72,7 +72,7 @@ export function tmuxTaskResultHints(toolName: string, result: JsonValue): ToolDi
         !hasWarningCode(warnings, "tmux.blockTimeout")) {
         hints.push(diagnosticHint(
             "tmux.taskRunning",
-            "Continue with tmux_read."
+            "Continue with tmux_wait."
         ));
     }
 
@@ -238,7 +238,7 @@ export function tmuxErrorHints(toolName: string, body: ControlErrorBody): ToolDi
         case "tool.cancelled":
             return [errorHint(
                 "tool.cancelled",
-                toolName === "tmux_run" || toolName === "tmux_input" || toolName === "tmux_read"
+                toolName === "tmux_run" || toolName === "tmux_input" || toolName === "tmux_read" || toolName === "tmux_wait"
                     ? "Wait cancelled; continue using the same task id."
                     : "Retry if the result is still needed."
             )];

@@ -23,7 +23,8 @@ use crate::tools::tmux::state::TmuxState;
 use crate::tools::tmux::types::{
     TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams, TmuxInputOutput,
     TmuxInputParams, TmuxInspectParams, TmuxListOutput, TmuxListParams, TmuxPaneOperationOutput,
-    TmuxReadParams, TmuxRunParams, TmuxTaskOperationOutput, TmuxWarning,
+    TmuxReadParams, TmuxRunParams, TmuxTaskOperationOutput, TmuxWaitOutput, TmuxWaitParams,
+    TmuxWarning,
 };
 use crate::tools::{
     ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName, ToolRegistry,
@@ -168,6 +169,13 @@ pub fn register_tools(
         ToolCapability::Read,
         Arc::clone(&states),
         TmuxState::read,
+    ))?;
+    registry.register(tool::<TmuxWaitParams, TmuxWaitOutput>(
+        ToolName::parse("tmux_wait").unwrap(),
+        "Wait until a managed task reaches a terminal state without consuming its durable transcript. This call has no timeout; cancelling the tool call stops only the wait and leaves the task running.",
+        ToolCapability::Read,
+        Arc::clone(&states),
+        TmuxState::wait,
     ))?;
     registry.register(tool::<TmuxInspectParams, TmuxPaneOperationOutput>(
         ToolName::parse("tmux_inspect").unwrap(),

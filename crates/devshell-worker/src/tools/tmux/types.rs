@@ -85,6 +85,14 @@ pub struct TmuxReadParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+pub struct TmuxWaitParams {
+    /// Managed task id returned by tmux_run.
+    pub task: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum TmuxInspectAll {
     All,
@@ -251,6 +259,12 @@ pub struct TmuxTaskOperationOutput {
     pub output: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warnings: Option<Vec<TmuxWarning>>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TmuxWaitOutput {
+    pub task: TmuxTaskView,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

@@ -50,6 +50,7 @@ export interface McpInstanceGateway {
     environment(instance: string): McpEndpointEnvironmentHandshake | undefined;
     listInstances(): Promise<JsonValue>;
     createWait?(instance: string, input: WaitCreateInput): Promise<WaitRecord>;
+    cancelWait?(instance: string, waitId: string): Promise<WaitRecord>;
     detachWait?(instance: string, waitId: string): Promise<WaitRecord>;
     consumeWait?(instance: string, waitId: string): Promise<WaitRecord>;
     resolveWait?(instance: string, waitId: string, result?: JsonValue): Promise<WaitRecord>;
@@ -112,4 +113,15 @@ export function isMcpInteractionGateway(
         gateway.listWaits !== undefined &&
         gateway.listApprovals !== undefined &&
         gateway.decideApproval !== undefined;
+}
+
+export type McpWaitTrackingGateway = McpInteractionGateway & Required<Pick<
+    McpInstanceGateway,
+    "cancelWait"
+>>;
+
+export function isMcpWaitTrackingGateway(
+    gateway: McpInstanceGateway | undefined
+): gateway is McpWaitTrackingGateway {
+    return isMcpInteractionGateway(gateway) && gateway.cancelWait !== undefined;
 }

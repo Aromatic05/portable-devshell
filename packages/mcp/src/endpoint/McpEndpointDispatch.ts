@@ -10,12 +10,12 @@ import {
 } from "@portable-devshell/shared";
 
 import { McpContextRegistry } from "../context/McpContextRegistry.js";
-import type { McpInstanceGateway } from "../instance/McpInstanceGateway.js";
+import { isMcpWaitTrackingGateway, type McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import type { McpToolCatalogArtifactName } from "../tool/catalog/McpToolCatalogArtifact.js";
 import type { McpToolCatalogInstanceName } from "../tool/catalog/McpToolCatalogInstance.js";
 import type { McpToolCatalogInteractionName } from "../tool/catalog/McpToolCatalogInteraction.js";
 import type { McpToolCatalogTodoName } from "../tool/catalog/McpToolCatalogTodo.js";
-import { throwIfMcpEndpointAborted } from "./McpEndpointCancellation.js";
+import { throwIfMcpEndpointAborted, waitForMcpEndpointAbortable } from "./McpEndpointCancellation.js";
 import { attachMcpComments } from "./McpEndpointFeedback.js";
 import type { McpEndpointCatalog, McpEndpointCatalogWorker } from "./McpEndpointCatalog.js";
 import { readMcpContextInput, readMcpRoutedInput } from "./McpEndpointInput.js";
@@ -53,6 +53,7 @@ export class McpEndpointDispatch {
     readonly #instance: McpEndpointHandlerInstance;
     readonly #instanceName: string;
     readonly #interaction: McpEndpointHandlerInteraction;
+    readonly #tmuxWaitTrackers = new Map<string, Promise<JsonValue>>();
     readonly #todo: McpEndpointHandlerTodo;
     readonly #worker: McpEndpointWorkerPort;
     readonly #workerHandler: McpEndpointHandlerWorker;
@@ -163,6 +164,21 @@ export class McpEndpointDispatch {
             );
         }
 
+        if (toolName === "tmux_wait" && isMcpWaitTrackingGateway(this.#gateway)) {
+            const task = readTmuxTaskId(routed.input);
+            if (task !== undefined) {
+                return await this.#callTmuxWait(
+                    task,
+                    input,
+                    context,
+                    selected.definition,
+                    snapshot.instanceRoutingEnabled,
+                    routed.instance,
+                    signal
+                );
+            }
+        }
+
         return await this.#workerHandler.call(
             toolName,
             input,
@@ -172,6 +188,100 @@ export class McpEndpointDispatch {
             signal,
             async (result, callId) => await this.#attachComments(toolName, result, context, callId, routed.instance)
         );
+    }
+
+    async #callTmuxWait(
+        task: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        definition: Parameters<McpEndpointHandlerWorker["call"]>[3],
+        instanceRoutingEnabled: boolean,
+        instance: string,
+        signal?: AbortSignal
+    ): Promise<JsonValue> {
+        const gateway = this.#gateway;
+        if (!isMcpWaitTrackingGateway(gateway) || context.ctxId === undefined) {
+            throw new Error("tmux_wait durable state is unavailable.");
+        }
+        const reusable = (await gateway.listWaits(instance)).find((record) =>
+            record.createdByCtxId === context.ctxId &&
+            record.kind === "tmux" &&
+            record.targetId === task &&
+            record.status !== "cancelled" &&
+            record.status !== "consumed"
+        );
+        const wait = reusable ?? await gateway.createWait(instance, {
+            createdByCtxId: context.ctxId,
+            kind: "tmux",
+            ...(context.requestId === undefined ? {} : { ownerCallId: context.requestId }),
+            targetId: task
+        });
+        const tracked = wait.status === "resolved"
+            ? Promise.resolve(wait.result)
+            : this.#ensureTmuxWaitTracker(
+                wait.waitId,
+                input,
+                context,
+                definition,
+                instanceRoutingEnabled,
+                instance
+            );
+
+        try {
+            const result = await waitForMcpEndpointAbortable(tracked, signal);
+            if (result === undefined) {
+                throw new Error(`tmux wait ${wait.waitId} resolved without a result.`);
+            }
+            await gateway.consumeWait(instance, wait.waitId);
+            return await this.#attachComments(
+                "tmux_wait",
+                result,
+                context,
+                context.requestId ?? wait.waitId,
+                instance
+            );
+        } catch (error) {
+            if (signal?.aborted === true) {
+                await gateway.detachWait(instance, wait.waitId).catch(() => undefined);
+            }
+            throw error;
+        }
+    }
+
+    #ensureTmuxWaitTracker(
+        waitId: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        definition: Parameters<McpEndpointHandlerWorker["call"]>[3],
+        instanceRoutingEnabled: boolean,
+        instance: string
+    ): Promise<JsonValue> {
+        const gateway = this.#gateway;
+        if (!isMcpWaitTrackingGateway(gateway)) {
+            throw new Error("tmux_wait durable state is unavailable.");
+        }
+        const key = `${instance}:${waitId}`;
+        const existing = this.#tmuxWaitTrackers.get(key);
+        if (existing !== undefined) return existing;
+        const tracker = this.#workerHandler.call(
+            "tmux_wait",
+            input,
+            context,
+            definition,
+            instanceRoutingEnabled,
+            undefined
+        ).then(async (result) => {
+            await gateway.resolveWait(instance, waitId, result);
+            return result;
+        }, async (error: unknown) => {
+            await gateway.cancelWait(instance, waitId).catch(() => undefined);
+            throw error;
+        }).finally(() => {
+            this.#tmuxWaitTrackers.delete(key);
+        });
+        this.#tmuxWaitTrackers.set(key, tracker);
+        void tracker.catch(() => undefined);
+        return tracker;
     }
 
     async #attachComments(
@@ -364,6 +474,12 @@ function isAppOnlyInteractionTool(toolName: string): boolean {
     return toolName === "workspace_snapshot" ||
         toolName === "workspace_question_answer" ||
         toolName === "workspace_approval_decide";
+}
+
+function readTmuxTaskId(input: JsonValue): string | undefined {
+    if (typeof input !== "object" || input === null || Array.isArray(input)) return undefined;
+    const task = input.task;
+    return typeof task === "string" && task.trim().length > 0 ? task.trim() : undefined;
 }
 
 function isRecoverableContextTemporaryError(error: unknown): boolean {

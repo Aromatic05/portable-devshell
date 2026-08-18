@@ -6,6 +6,7 @@
 tmux_run
 tmux_input
 tmux_read
+tmux_wait
 tmux_inspect
 tmux_list
 tmux_create
@@ -143,6 +144,8 @@ nonblock  task 成功启动后立即返回（默认）
 
 `timeMs` 只限制这次 RPC 等待，不停止 task。block wait 超时会返回 `tmux.blockTimeout` warning，task 继续运行。
 
+需要等待一个已经启动的 task 直到终态时使用 `tmux_wait`，不要循环调用 `tmux_read` 或 `tmux_list`。
+
 running task 的返回值包含 task 和它当前独占的 pane：
 
 ```json
@@ -245,6 +248,20 @@ Transcript 展示层会处理常见 terminal 控制：ANSI control sequence 不�
 
 `tmux_read` 的已读 offset 也会持久化。worker restart / running-task adoption 后继续读取时，不会把 restart 前已经消费或丢弃的 transcript 当成新输出重复返回。
 
+## `tmux_wait`: task completion
+
+`tmux_wait` 只接受 managed task id：
+
+```json
+{
+    "task": "task-..."
+}
+```
+
+它等待 task 到达终态并返回最终 task metadata，不消费 transcript，也没有 `timeMs` 上限。需要输出时，在完成后再调用一次 `tmux_read`。
+
+在 MCP 入口中，这个等待会绑定 durable Wait record。Host 如果取消或断开当前 tool call，Wait 会变成 detached，而 terminal task 和 Worker-side completion tracker 都继续运行；之后再次对同一个 `ctxId + task id` 调用 `tmux_wait` 会复用该 Wait，而不是创建轮询循环。Control 重启后也可以重新调用同一个 `tmux_wait` 来恢复等待，因为 Worker 操作只观察 task state，不消费 transcript。
+
 ## `tmux_inspect`: terminal history
 
 `tmux_inspect` 观察 pane，而不是 task：
@@ -334,6 +351,8 @@ managed task pane 不能通过 `pane=` close；必须使用 task id。
 取消 `tmux_run` 只停止当前 RPC wait，不向 terminal 发送信号，也不结束已经启动的 task。
 
 取消 `tmux_read` 停止等待，并且不会消费这次尚未返回的 transcript。
+
+取消 `tmux_wait` 只分离当前等待，不停止 managed task，也不消费 transcript；之后可以继续等待同一个 task id。
 
 需要正常终止 terminal-side program 时通常发送：
 

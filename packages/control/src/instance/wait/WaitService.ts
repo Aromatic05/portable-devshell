@@ -75,7 +75,7 @@ export class WaitService {
         const record = this.#store.read().waits.find((entry) => entry.waitId === waitId);
         if (record === undefined) throw new Error(`Wait ${waitId} was not found.`);
         if (record.status === "resolved") return record;
-        if (record.status !== "waiting") {
+        if (record.status !== "waiting" && record.status !== "detached") {
             throw new Error(`Wait ${waitId} cannot be awaited while it is ${record.status}.`);
         }
         return await new Promise<WaitRecord>((resolve, reject) => {
@@ -132,7 +132,7 @@ function eventData(record: WaitRecord): JsonValue {
         ...(record.ownerCallId === undefined ? {} : { ownerCallId: record.ownerCallId }),
         status: record.status,
         targetId: record.targetId,
-        taskId: record.taskId,
+        ...(record.taskId === undefined ? {} : { taskId: record.taskId }),
         updatedAt: record.updatedAt,
         waitId: record.waitId,
     };

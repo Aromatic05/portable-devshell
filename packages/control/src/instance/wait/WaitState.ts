@@ -50,7 +50,7 @@ export class WaitState {
             ...(input.payload === undefined ? {} : { payload: structuredClone(input.payload) }),
             status: "waiting",
             targetId: text(input.targetId, "targetId"),
-            taskId: text(input.taskId, "taskId"),
+            ...(input.taskId === undefined ? {} : { taskId: text(input.taskId, "taskId") }),
             updatedAt: now,
             waitId: this.#waitId(),
         };
@@ -145,7 +145,7 @@ function normalizeRecord(value: unknown): WaitRecord {
         ...("result" in value ? { result: value.result as JsonValue } : {}),
         status,
         targetId: storedText(value.targetId, "targetId"),
-        taskId: storedText(value.taskId, "taskId"),
+        ...(typeof value.taskId === "string" ? { taskId: storedText(value.taskId, "taskId") } : {}),
         updatedAt: storedText(value.updatedAt, "updatedAt"),
         waitId: storedText(value.waitId, "waitId"),
     };
