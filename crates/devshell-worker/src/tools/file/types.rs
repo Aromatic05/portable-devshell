@@ -117,16 +117,25 @@ pub struct FileChangeSetOutput {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum FileFindInput {
+    Start(FileFindStartInput),
+    Continue(FileCursorInput),
+}
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FileFindInput {
+pub struct FileFindStartInput {
     #[schemars(length(min = 1))]
-    /// Initial paths to find. Omit when continuing with cursor.
-    pub paths: Option<Vec<String>>,
+    pub paths: Vec<String>,
     #[serde(rename = "type")]
     pub entry_type: Option<FindType>,
     pub hidden: Option<bool>,
     pub gitignore: Option<bool>,
-    pub cursor: Option<String>,
+}
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FileCursorInput {
+    pub cursor: String,
 }
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -151,11 +160,16 @@ pub struct FileFindEntry {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum FileSearchInput {
+    Start(FileSearchStartInput),
+    Continue(FileCursorInput),
+}
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FileSearchInput {
+pub struct FileSearchStartInput {
     #[schemars(length(min = 1))]
-    /// Initial search pattern. Omit when continuing with cursor.
-    pub pattern: Option<String>,
+    pub pattern: String,
     /// Paths to search. Defaults to ["./"].
     pub paths: Option<Vec<String>>,
     /// Pattern syntax. Defaults to regex.
@@ -171,7 +185,6 @@ pub struct FileSearchInput {
     /// First source line eligible to match. Only valid for one exact file and defaults to 1.
     #[schemars(range(min = 1))]
     pub start_line: Option<usize>,
-    pub cursor: Option<String>,
 }
 #[derive(Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

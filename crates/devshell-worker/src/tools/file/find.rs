@@ -40,34 +40,23 @@ impl ToolHandler for FileFindTool {
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
         let input: FileFindInput = call.parse_params()?;
-        let mut continuation = if let Some(cursor) = input.cursor.as_deref() {
-            if input.paths.is_some()
-                || input.entry_type.is_some()
-                || input.hidden.is_some()
-                || input.gitignore.is_some()
-            {
-                return Err(ToolError::new(
-                    "tool.invalidArguments",
-                    "cursor continuation must be used without paths, type, hidden, or gitignore",
-                ));
-            }
-            self.state
+        let mut continuation = match input {
+            FileFindInput::Continue(input) => self
+                .state
                 .find_cursors
                 .lock()
                 .unwrap()
-                .resolve(&call, cursor)?
-        } else {
-            let paths = input.paths.ok_or_else(|| {
-                ToolError::new("tool.invalidArguments", "paths are required without cursor")
-            })?;
-            let hidden = input.hidden.unwrap_or(true);
-            let gitignore = input.gitignore.unwrap_or(true);
-            let kind = input.entry_type.unwrap_or(FindType::Any);
-            FindContinuation {
-                discovery: DiscoveryCursor::new(&call, &paths, hidden, gitignore)?,
+                .resolve(&call, &input.cursor)?,
+            FileFindInput::Start(input) => FindContinuation {
+                discovery: DiscoveryCursor::new(
+                    &call,
+                    &input.paths,
+                    input.hidden.unwrap_or(true),
+                    input.gitignore.unwrap_or(true),
+                )?,
                 pending: None,
-                kind,
-            }
+                kind: input.entry_type.unwrap_or(FindType::Any),
+            },
         };
 
         let mut entries = Vec::with_capacity(PAGE_SIZE);

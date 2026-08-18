@@ -89,86 +89,67 @@ impl ToolHandler for FileSearchTool {
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
         let input: FileSearchInput = call.parse_params()?;
-        let mut continuation = if let Some(cursor) = input.cursor.as_deref() {
-            if input.pattern.is_some()
-                || input.paths.is_some()
-                || input.syntax.is_some()
-                || input.case_sensitive.is_some()
-                || input.hidden.is_some()
-                || input.gitignore.is_some()
-                || input.context.is_some()
-                || input.start_line.is_some()
-            {
-                return Err(ToolError::new(
-                    "tool.invalidArguments",
-                    "cursor continuation must be used without pattern, paths, syntax, caseSensitive, hidden, gitignore, context, or startLine",
-                ));
-            }
-            self.state
+        let mut continuation = match input {
+            FileSearchInput::Continue(input) => self
+                .state
                 .search_cursors
                 .lock()
                 .unwrap()
-                .resolve(&call, cursor)?
-        } else {
-            let pattern = input.pattern.ok_or_else(|| {
-                ToolError::new(
-                    "tool.invalidArguments",
-                    "pattern is required without cursor",
-                )
-            })?;
-            let paths = input.paths.unwrap_or_else(|| vec!["./".to_string()]);
-            let syntax = input.syntax.unwrap_or(SearchSyntax::Regex);
-            let case_sensitive = input.case_sensitive.unwrap_or(true);
-            let expression = match syntax {
-                SearchSyntax::Literal => regex::escape(&pattern),
-                SearchSyntax::Regex => pattern,
-            };
-            let matcher = RegexBuilder::new(&expression)
-                .case_insensitive(!case_sensitive)
-                .build()
-                .map_err(|error| ToolError::new("file.invalidRegex", error.to_string()))?;
-            let hidden = input.hidden.unwrap_or(true);
-            let gitignore = input.gitignore.unwrap_or(true);
-            let context = input.context;
-            if context.is_some_and(|value| value > 20) {
-                return Err(ToolError::new(
-                    "tool.invalidArguments",
-                    "context cannot exceed 20",
-                ));
-            }
-            let single_exact_file = is_single_exact_file(&call, &paths)?;
-            let start_line = input.start_line.unwrap_or(1);
-            if start_line > 1 && !single_exact_file {
-                return Err(ToolError::new(
-                    "tool.invalidArguments",
-                    "startLine is only valid when paths contains one exact file",
-                ));
-            }
-            let groups = paths
-                .iter()
-                .map(|path| {
-                    DiscoveryCursor::new(&call, std::slice::from_ref(path), hidden, gitignore).map(
-                        |discovery| SearchGroup {
-                            discovery,
-                            exhausted: false,
-                        },
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let per_file = if single_exact_file {
-                SINGLE_FILE_MATCHES
-            } else {
-                MATCHES_PER_FILE
-            };
-            SearchContinuation {
-                groups,
-                next_group: 0,
-                seen_candidates: HashSet::new(),
-                pending: None,
-                per_file,
-                matcher,
-                context,
-                start_line,
+                .resolve(&call, &input.cursor)?,
+            FileSearchInput::Start(input) => {
+                let paths = input.paths.unwrap_or_else(|| vec!["./".to_string()]);
+                let syntax = input.syntax.unwrap_or(SearchSyntax::Regex);
+                let case_sensitive = input.case_sensitive.unwrap_or(true);
+                let expression = match syntax {
+                    SearchSyntax::Literal => regex::escape(&input.pattern),
+                    SearchSyntax::Regex => input.pattern,
+                };
+                let matcher = RegexBuilder::new(&expression)
+                    .case_insensitive(!case_sensitive)
+                    .build()
+                    .map_err(|error| ToolError::new("file.invalidRegex", error.to_string()))?;
+                let hidden = input.hidden.unwrap_or(true);
+                let gitignore = input.gitignore.unwrap_or(true);
+                let context = input.context;
+                if context.is_some_and(|value| value > 20) {
+                    return Err(ToolError::new(
+                        "tool.invalidArguments",
+                        "context cannot exceed 20",
+                    ));
+                }
+                let single_exact_file = is_single_exact_file(&call, &paths)?;
+                let start_line = input.start_line.unwrap_or(1);
+                if start_line > 1 && !single_exact_file {
+                    return Err(ToolError::new(
+                        "tool.invalidArguments",
+                        "startLine is only valid when paths contains one exact file",
+                    ));
+                }
+                let groups = paths
+                    .iter()
+                    .map(|path| {
+                        DiscoveryCursor::new(&call, std::slice::from_ref(path), hidden, gitignore)
+                            .map(|discovery| SearchGroup {
+                                discovery,
+                                exhausted: false,
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let per_file = if single_exact_file {
+                    SINGLE_FILE_MATCHES
+                } else {
+                    MATCHES_PER_FILE
+                };
+                SearchContinuation {
+                    groups,
+                    next_group: 0,
+                    seen_candidates: HashSet::new(),
+                    pending: None,
+                    per_file,
+                    matcher,
+                    context,
+                    start_line,
+                }
             }
         };
 
