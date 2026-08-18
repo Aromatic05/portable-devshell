@@ -11,6 +11,7 @@ class FakeTerminalProcess implements TerminalProcess {
     readonly inputs: string[] = [];
     readonly resizes: Array<{ cols: number; rows: number }> = [];
     disposed = false;
+    exitOnKill?: TerminalProcessExit;
     killed = false;
     readonly #data = new Set<(data: string) => void>();
     readonly #exit = new Set<(exit: TerminalProcessExit) => void>();
@@ -35,8 +36,12 @@ class FakeTerminalProcess implements TerminalProcess {
         for (const listener of [...this.#exit]) listener(exit);
     }
 
-    kill(): void {
+    async kill(): Promise<void> {
         this.killed = true;
+        if (this.exitOnKill !== undefined) {
+            this.exit(this.exitOnKill);
+            await Promise.resolve();
+        }
     }
 
     onData(listener: (data: string) => void): () => void {
@@ -228,6 +233,33 @@ test("terminal exit is durable for later attachments and kill is explicit", asyn
     assert.equal(otherProcess.dataListenerCount, 0);
     assert.equal(otherProcess.exitListenerCount, 0);
     assert.equal(otherProcess.disposed, true);
+});
+
+test("explicit terminal kill wins when process exit arrives before kill resolves", async () => {
+    const process = new FakeTerminalProcess();
+    process.exitOnKill = { exitCode: 0, signal: 15 };
+    const service = new TerminalSessionService({ idFactory: () => "terminal-kill-race" });
+    const opened = await service.open({
+        backend: { open: async () => process },
+        cols: 80,
+        instance: "alpha",
+        workspace: "/workspace",
+        rows: 24,
+    });
+    const exits: TerminalProcessExit[] = [];
+    service.attach({
+        fromSeq: 0,
+        generation: opened.generation,
+        onExit: (exit) => exits.push(exit),
+        onOutput() {},
+        terminalId: opened.terminalId,
+    });
+
+    const killed = await service.kill(opened.terminalId, opened.generation, opened.version);
+
+    assert.equal(killed.state, "killed");
+    assert.equal(service.get(opened.terminalId).state, "killed");
+    assert.deepEqual(exits, [{ exitCode: -1, signal: 0 }]);
 });
 
 test("closing terminal service fences a pending open and cleans the late process", async () => {

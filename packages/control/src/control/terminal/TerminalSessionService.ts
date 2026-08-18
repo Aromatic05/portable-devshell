@@ -25,7 +25,9 @@ interface TerminalSessionRecord {
     exit?: TerminalProcessExit;
     generation: number;
     instance: string;
+    killPending: boolean;
     latestSeq: number;
+    pendingKillExit?: TerminalProcessExit;
     process: TerminalProcess;
     processDisposed: boolean;
     processSubscriptions: Array<() => void>;
@@ -217,10 +219,7 @@ export class TerminalSessionService {
         const session = this.#require(terminalId, generation);
         this.#assertVersion(session, version);
         if (session.state === "running") {
-            await session.process.kill();
-            if (session.state === "running") {
-                this.#completeKilled(session);
-            }
+            await this.#killProcess(session);
         }
         return descriptor(session);
     }
@@ -234,10 +233,7 @@ export class TerminalSessionService {
         for (const session of sessions) {
             if (session.state === "running") {
                 try {
-                    await session.process.kill();
-                    if (session.state === "running") {
-                        this.#completeKilled(session);
-                    }
+                    await this.#killProcess(session);
                 } catch (error) {
                     const failure = error instanceof Error
                         ? error
@@ -307,6 +303,7 @@ export class TerminalSessionService {
             createdAt: backendSession?.identity.createdAt ?? this.#now().toISOString(),
             generation,
             instance,
+            killPending: false,
             latestSeq: 0,
             process,
             processDisposed: false,
@@ -396,6 +393,10 @@ export class TerminalSessionService {
 
     #finishProcess(session: TerminalSessionRecord, exit: TerminalProcessExit): void {
         if (session.exit !== undefined) return;
+        if (session.killPending) {
+            session.pendingKillExit = { ...exit };
+            return;
+        }
         session.exit = { ...exit };
         if (session.state === "running") session.state = "exited";
         session.version += 1;
@@ -404,6 +405,22 @@ export class TerminalSessionService {
         }
         this.#unsubscribeProcess(session);
         this.#disposeProcess(session);
+    }
+
+    async #killProcess(session: TerminalSessionRecord): Promise<void> {
+        session.killPending = true;
+        try {
+            await session.process.kill();
+        } catch (error) {
+            session.killPending = false;
+            const pendingExit = session.pendingKillExit;
+            session.pendingKillExit = undefined;
+            if (pendingExit !== undefined) this.#finishProcess(session, pendingExit);
+            throw error;
+        }
+        session.killPending = false;
+        session.pendingKillExit = undefined;
+        if (session.state === "running") this.#completeKilled(session);
     }
 
     #completeKilled(session: TerminalSessionRecord): void {
