@@ -19,6 +19,14 @@ impl TranscriptCursor {
         Self { path, offset: 0 }
     }
 
+    pub fn restore(path: PathBuf, offset: u64) -> Self {
+        Self { path, offset }
+    }
+
+    pub fn offset(&self) -> u64 {
+        self.offset
+    }
+
     pub fn has_output(&self, terminal: bool) -> Result<bool, ToolError> {
         let Some(mut reader) = self.reader()? else {
             return Ok(false);

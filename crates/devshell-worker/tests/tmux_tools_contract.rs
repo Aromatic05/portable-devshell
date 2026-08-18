@@ -1483,14 +1483,83 @@ fn worker_restart_preserves_completed_task_transcript() {
     );
     assert_eq!(read["ok"], true, "{read}");
     assert_eq!(read["result"]["task"]["status"], "0", "{read}");
-    assert!(
-        read["result"]["output"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|line| line == "AFTER-RESTART"),
-        "{read}"
+    assert_eq!(
+        read["result"]["output"].as_array().unwrap(),
+        &[json!("AFTER-RESTART")],
+        "already-consumed transcript output must not replay after restart: {read}"
     );
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
+fn worker_restart_preserves_running_task_transcript_cursor() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-running-cursor-restart";
+    start(&env, instance);
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({ "command": "sleep 0.3; printf 'CONSUMED\\n'; sleep 30", "wait": "nonblock" }),
+        "ctx-a",
+        "run-before-cursor-restart",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
+
+    let consumed = call(
+        &env,
+        instance,
+        "2",
+        "tmux_read",
+        json!({ "task": task, "line": 1, "timeMs": 1000 }),
+        "ctx-a",
+        "consume-before-restart",
+    );
+    assert_eq!(consumed["ok"], true, "{consumed}");
+    assert_eq!(consumed["result"]["output"][0], "CONSUMED", "{consumed}");
+    assert_eq!(
+        consumed["result"]["task"]["status"], "running",
+        "{consumed}"
+    );
+
+    env.json_command(&["stop", "--instance", instance]);
+    assert!(env.tmux_socket_file(instance).exists());
+    start(&env, instance);
+
+    let after_restart = call(
+        &env,
+        instance,
+        "3",
+        "tmux_read",
+        json!({ "task": task, "line": 20, "timeMs": 0 }),
+        "ctx-b",
+        "read-running-after-restart",
+    );
+    assert_eq!(after_restart["ok"], true, "{after_restart}");
+    assert_eq!(after_restart["result"]["task"]["status"], "running");
+    assert!(
+        after_restart["result"].get("output").is_none(),
+        "{after_restart}"
+    );
+
+    let interrupted = call(
+        &env,
+        instance,
+        "4",
+        "tmux_input",
+        json!({ "task": task, "input": "^C", "timeMs": 1000 }),
+        "ctx-b",
+        "stop-running-after-restart",
+    );
+    assert_eq!(interrupted["ok"], true, "{interrupted}");
+    let _ = wait_for_terminal(&env, instance, &task, "ctx-b");
     stop(&env, instance);
 }
 

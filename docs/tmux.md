@@ -237,6 +237,8 @@ Transcript 展示层会处理常见 terminal 控制：ANSI control sequence 不�
 
 已完成 task 最多保留 64 个，默认保留 30 分钟。完成态 metadata 与 transcript 一起持久化，因此 worker restart 不会提前打断这段 retention；超过 retention 后返回 `tmux.taskExpired`。Task pane 的销毁不影响这段 retention。
 
+`tmux_read` 的已读 offset 也会持久化。worker restart / running-task adoption 后继续读取时，不会把 restart 前已经消费或丢弃的 transcript 当成新输出重复返回。
+
 ## `tmux_inspect`: terminal history
 
 `tmux_inspect` 观察 pane，而不是 task：
@@ -366,7 +368,8 @@ worker 正常停止不会销毁 tmux server。重新启动同一 workspace 后�
 
 - persistent pane 保持原身份和 terminal state；
 - metadata 完整且仍在 running 的 task pane会被自动 adopt；
-- adopted task 继续使用原 task id 与 transcript；
+- adopted task 继续使用原 task id、transcript 与未读 cursor；
+- 已完成 task 在 retention 内同样继续可读，且不会重放已经消费的 transcript；
 - 首次观察会通过 warning 提示 observation reset / task adoption。
 
 不需要额外 reclaim 工具。

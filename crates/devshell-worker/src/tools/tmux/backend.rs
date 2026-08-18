@@ -560,6 +560,24 @@ impl TmuxBackend {
         )
     }
 
+    pub fn persist_task_offset(&self, task_id: &str, offset: u64) -> Result<(), ToolError> {
+        atomic_write_json(
+            &self.transcripts_dir.join(format!("{task_id}.offset")),
+            &offset,
+        )
+    }
+
+    pub fn load_task_offset(&self, task_id: &str) -> Result<u64, ToolError> {
+        let path = self.transcripts_dir.join(format!("{task_id}.offset"));
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(error) => return Err(storage_error(error)),
+        };
+        serde_json::from_slice(&bytes)
+            .map_err(|error| ToolError::new("tmux.storageFailed", error.to_string()))
+    }
+
     pub fn load_task_records<T: DeserializeOwned>(&self) -> Result<Vec<T>, ToolError> {
         let mut paths = fs::read_dir(&self.transcripts_dir)
             .map_err(storage_error)?

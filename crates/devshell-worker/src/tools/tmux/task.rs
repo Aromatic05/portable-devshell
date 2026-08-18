@@ -112,6 +112,7 @@ impl TaskRegistry {
             let _ = std::fs::remove_file(&task.transcript.path);
             let _ = std::fs::remove_file(task.transcript.path.with_extension("json"));
             let _ = std::fs::remove_file(task.transcript.path.with_extension("done"));
+            let _ = std::fs::remove_file(task.transcript.path.with_extension("offset"));
         }
         self.order.retain(|candidate| candidate != id);
     }

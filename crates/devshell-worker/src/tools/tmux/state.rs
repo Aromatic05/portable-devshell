@@ -85,7 +85,10 @@ impl TmuxState {
                 pane_id: record.pane_id,
                 pane_incarnation_id: String::new(),
                 state,
-                transcript: TranscriptCursor::new(backend.transcript_path(&record.task_id)),
+                transcript: TranscriptCursor::restore(
+                    backend.transcript_path(&record.task_id),
+                    backend.load_task_offset(&record.task_id)?,
+                ),
                 finished_at_ms: Some(record.finished_at_ms),
                 last_pane: None,
                 warnings: Vec::new(),
@@ -755,7 +758,10 @@ impl TmuxState {
                     pane_id: pane.id.clone(),
                     pane_incarnation_id: pane.pane_incarnation_id.clone(),
                     state: TaskState::Running,
-                    transcript: TranscriptCursor::new(self.backend.transcript_path(task_id)),
+                    transcript: TranscriptCursor::restore(
+                        self.backend.transcript_path(task_id),
+                        self.backend.load_task_offset(task_id)?,
+                    ),
                     finished_at_ms: None,
                     last_pane: Some(pane.clone()),
                     warnings: Vec::new(),
@@ -819,12 +825,15 @@ impl TmuxState {
         let output =
             task.transcript
                 .take_output(&task.pane_id, &mut task.warnings, line, terminal)?;
+        let transcript_offset = task.transcript.offset();
         let mut warnings = std::mem::take(&mut task.warnings);
         let view = task_view(task);
         let pane = (include_pane && task.state.is_active())
             .then(|| task.last_pane.as_ref().map(pane_ref))
             .flatten();
         drop(tasks);
+        self.backend
+            .persist_task_offset(task_id, transcript_offset)?;
         warnings.append(&mut self.take_pending_warnings()?);
         Ok(TmuxTaskOperationOutput {
             task: view,
