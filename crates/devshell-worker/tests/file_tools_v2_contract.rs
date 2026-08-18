@@ -1058,7 +1058,8 @@ fn file_find_cursor_resumes_the_open_traversal_after_root_replacement() {
         "file_find",
         json!({ "cursor": cursor }),
     );
-    assert_eq!(reused["error"]["code"], "file.invalidCursor", "{reused}");
+    assert_eq!(reused["ok"], true, "{reused}");
+    assert_eq!(reused["result"]["entries"].as_array().unwrap().len(), 50);
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -1174,8 +1175,77 @@ fn file_search_cursor_resumes_the_open_traversal_after_root_replacement() {
         "file_search",
         json!({ "cursor": cursor }),
     );
-    assert_eq!(reused["error"]["code"], "file.invalidCursor", "{reused}");
+    assert_eq!(reused["ok"], true, "{reused}");
+    assert_eq!(reused["result"]["files"].as_array().unwrap().len(), 5);
 
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_find_cursor_retires_parent_only_after_child_is_used() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-find-cursor-ack";
+    let root = env.workspace().join("tree");
+    fs::create_dir_all(&root).unwrap();
+    for index in 0..450 {
+        fs::write(root.join(format!("file-{index:03}.txt")), "value\n").unwrap();
+    }
+    start(&env, instance);
+
+    let first = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_find",
+        json!({ "paths": ["./tree"], "type": "file" }),
+    );
+    assert_eq!(first["ok"], true, "{first}");
+    let first_cursor = first["result"]["nextCursor"].as_str().unwrap().to_string();
+
+    let second = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_find",
+        json!({ "cursor": first_cursor.clone() }),
+    );
+    assert_eq!(second["ok"], true, "{second}");
+    assert_eq!(second["result"]["entries"].as_array().unwrap().len(), 200);
+    let second_cursor = second["result"]["nextCursor"].as_str().unwrap().to_string();
+
+    let retry = call(
+        &env,
+        instance,
+        "3",
+        "ctx-a",
+        "file_find",
+        json!({ "cursor": first_cursor.clone() }),
+    );
+    assert_eq!(retry["ok"], true, "{retry}");
+    assert_eq!(retry["result"]["entries"], second["result"]["entries"]);
+
+    let third = call(
+        &env,
+        instance,
+        "4",
+        "ctx-a",
+        "file_find",
+        json!({ "cursor": second_cursor }),
+    );
+    assert_eq!(third["ok"], true, "{third}");
+    assert_eq!(third["result"]["entries"].as_array().unwrap().len(), 50);
+
+    let retired = call(
+        &env,
+        instance,
+        "5",
+        "ctx-a",
+        "file_find",
+        json!({ "cursor": first_cursor }),
+    );
+    assert_eq!(retired["error"]["code"], "file.invalidCursor", "{retired}");
     env.json_command(&["stop", "--instance", instance]);
 }
 

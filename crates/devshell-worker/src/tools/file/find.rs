@@ -33,7 +33,7 @@ impl ToolHandler for FileFindTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tools::contract::catalog_entry::<FileFindInput, FileFindOutput>(
             &self.name,
-            "Find files and directories by exact path or glob. Continue result pages with cursor alone; after a successful continuation, use its nextCursor because the previous cursor is retired.".to_string(),
+            "Find files and directories by exact path or glob. Continue result pages with cursor alone. A cursor remains retryable until a later nextCursor derived from it is actually used.".to_string(),
             [ToolCapability::Read],
         )
     }
@@ -78,20 +78,16 @@ impl ToolHandler for FileFindTool {
             continuation.pending = next_matching(&call, &mut continuation)?;
         }
         let next_cursor = continuation.pending.is_some().then(|| {
-            self.state
-                .find_cursors
-                .lock()
-                .unwrap()
-                .issue(&call, continuation)
+            self.state.find_cursors.lock().unwrap().issue(
+                &call,
+                continuation,
+                source_cursor.clone(),
+            )
         });
-        let output = crate::tools::contract::serialize(FileFindOutput {
+        crate::tools::contract::serialize(FileFindOutput {
             entries,
             next_cursor,
-        })?;
-        if let Some(cursor) = source_cursor {
-            self.state.find_cursors.lock().unwrap().retire(&cursor);
-        }
-        Ok(output)
+        })
     }
 }
 

@@ -13,6 +13,7 @@ struct Cursor<T> {
     state: T,
     ctx_id: String,
     workspace: std::path::PathBuf,
+    parent: Option<String>,
 }
 
 pub struct CursorStore<T> {
@@ -28,7 +29,7 @@ impl<T> Default for CursorStore<T> {
 }
 
 impl<T: Clone> CursorStore<T> {
-    pub fn issue(&mut self, call: &ToolCall, state: T) -> String {
+    pub fn issue(&mut self, call: &ToolCall, state: T, parent: Option<String>) -> String {
         let id = Uuid::new_v4().to_string();
         self.cursors.put(
             id.clone(),
@@ -36,32 +37,32 @@ impl<T: Clone> CursorStore<T> {
                 state,
                 ctx_id: call.ctx_id.clone(),
                 workspace: call.workspace.clone(),
+                parent,
             },
         );
         id
     }
 
     pub fn resolve(&mut self, call: &ToolCall, id: &str) -> Result<T, ToolError> {
-        let cursor = self
-            .cursors
-            .get(id)
-            .ok_or_else(|| {
+        let (state, parent) = {
+            let cursor = self.cursors.get(id).ok_or_else(|| {
                 ToolError::new(
                     "file.invalidCursor",
                     "cursor expired, was evicted, or belongs to an earlier worker process; rerun the original query",
                 )
             })?;
-        if cursor.ctx_id != call.ctx_id || cursor.workspace != call.workspace {
-            return Err(ToolError::new(
-                "file.invalidCursor",
-                "cursor belongs to a different context or workspace",
-            ));
+            if cursor.ctx_id != call.ctx_id || cursor.workspace != call.workspace {
+                return Err(ToolError::new(
+                    "file.invalidCursor",
+                    "cursor belongs to a different context or workspace",
+                ));
+            }
+            (cursor.state.clone(), cursor.parent.clone())
+        };
+        if let Some(parent) = parent {
+            self.cursors.pop(&parent);
         }
-        Ok(cursor.state.clone())
-    }
-
-    pub fn retire(&mut self, id: &str) {
-        self.cursors.pop(id);
+        Ok(state)
     }
 }
 
