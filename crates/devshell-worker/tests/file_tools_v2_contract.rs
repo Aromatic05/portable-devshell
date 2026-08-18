@@ -1057,6 +1057,59 @@ fn file_find_cursor_resumes_the_open_traversal_after_root_replacement() {
 }
 
 #[test]
+fn file_find_cursor_is_bound_to_context_and_workspace() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-find-cursor-scope";
+    let root = env.workspace().join("tree");
+    fs::create_dir_all(&root).unwrap();
+    for index in 0..250 {
+        fs::write(root.join(format!("file-{index:03}.txt")), "value\n").unwrap();
+    }
+    start(&env, instance);
+
+    let first = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_find",
+        json!({ "paths": ["./tree"], "type": "file" }),
+    );
+    assert_eq!(first["ok"], true, "{first}");
+    let cursor = first["result"]["nextCursor"].as_str().unwrap();
+
+    let other_context = call(
+        &env,
+        instance,
+        "2",
+        "ctx-b",
+        "file_find",
+        json!({ "paths": ["./tree"], "type": "file", "cursor": cursor }),
+    );
+    assert_eq!(other_context["error"]["code"], "file.invalidCursor");
+
+    let other_workspace = env.home().join("other-workspace");
+    fs::create_dir_all(&other_workspace).unwrap();
+    let wrong_workspace = env.rpc(
+        instance,
+        &json!({
+            "type": "request",
+            "id": "3",
+            "method": "file_find",
+            "params": { "paths": ["./tree"], "type": "file", "cursor": cursor },
+            "context": {
+                "ctxId": "ctx-a",
+                "source": "mcp",
+                "workspace": other_workspace
+            }
+        }),
+    );
+    assert_eq!(wrong_workspace["error"]["code"], "file.invalidCursor");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
 fn file_search_cursor_resumes_the_open_traversal_after_root_replacement() {
     let env = TestEnv::new();
     let instance = "aromatic-file-search-continuation";

@@ -51,7 +51,7 @@ impl ToolHandler for FileFindTool {
                 .find_cursors
                 .lock()
                 .unwrap()
-                .resolve(cursor, &query)?
+                .resolve(&call, cursor, &query)?
         } else {
             FindContinuation {
                 discovery: DiscoveryCursor::new(
@@ -87,7 +87,7 @@ impl ToolHandler for FileFindTool {
                 .find_cursors
                 .lock()
                 .unwrap()
-                .issue(&query, continuation)
+                .issue(&call, &query, continuation)
         });
         crate::tools::contract::serialize(FileFindOutput {
             entries,

@@ -3,6 +3,7 @@ use std::num::NonZeroUsize;
 use lru::LruCache;
 use uuid::Uuid;
 
+use crate::tools::ToolCall;
 use crate::tools::ToolError;
 
 const MAX_CURSORS: usize = 128;
@@ -11,6 +12,8 @@ const MAX_CURSORS: usize = 128;
 struct Cursor<T> {
     state: T,
     query: serde_json::Value,
+    ctx_id: String,
+    workspace: std::path::PathBuf,
 }
 
 pub struct CursorStore<T> {
@@ -26,23 +29,36 @@ impl<T> Default for CursorStore<T> {
 }
 
 impl<T: Clone> CursorStore<T> {
-    pub fn issue(&mut self, query: &serde_json::Value, state: T) -> String {
+    pub fn issue(&mut self, call: &ToolCall, query: &serde_json::Value, state: T) -> String {
         let id = Uuid::new_v4().to_string();
         self.cursors.put(
             id.clone(),
             Cursor {
                 state,
                 query: query.clone(),
+                ctx_id: call.ctx_id.clone(),
+                workspace: call.workspace.clone(),
             },
         );
         id
     }
 
-    pub fn resolve(&mut self, id: &str, query: &serde_json::Value) -> Result<T, ToolError> {
+    pub fn resolve(
+        &mut self,
+        call: &ToolCall,
+        id: &str,
+        query: &serde_json::Value,
+    ) -> Result<T, ToolError> {
         let cursor = self
             .cursors
             .get(id)
             .ok_or_else(|| ToolError::new("file.invalidCursor", "cursor is not available"))?;
+        if cursor.ctx_id != call.ctx_id || cursor.workspace != call.workspace {
+            return Err(ToolError::new(
+                "file.invalidCursor",
+                "cursor belongs to a different context or workspace",
+            ));
+        }
         if cursor.query != *query {
             return Err(ToolError::new(
                 "file.invalidCursor",
@@ -55,31 +71,6 @@ impl<T: Clone> CursorStore<T> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
-    use super::CursorStore;
-
-    #[test]
-    fn resolves_cursor_for_the_same_query() {
-        let mut store = CursorStore::default();
-        let query = json!({
-            "pattern": "needle",
-            "paths": ["./a.txt"],
-            "caseSensitive": true
-        });
-        let cursor = store.issue(&query, 20usize);
-
-        assert_eq!(store.resolve(&cursor, &query).unwrap(), 20);
-    }
-
-    #[test]
-    fn rejects_cursor_for_a_different_query() {
-        let mut store = CursorStore::default();
-        let cursor = store.issue(&json!({ "pattern": "needle" }), 20usize);
-        let error = store
-            .resolve(&cursor, &json!({ "pattern": "different" }))
-            .unwrap_err();
-
-        assert_eq!(error.code, "file.invalidCursor");
-    }
+    // Cursor scope is exercised through the file tool contract tests because it is
+    // defined by the complete ToolCall context rather than by the token alone.
 }

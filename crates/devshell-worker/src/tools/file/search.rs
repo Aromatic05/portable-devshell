@@ -113,7 +113,7 @@ impl ToolHandler for FileSearchTool {
                 .search_cursors
                 .lock()
                 .unwrap()
-                .resolve(cursor, &query)?
+                .resolve(&call, cursor, &query)?
         } else {
             let groups = paths
                 .iter()
@@ -182,7 +182,7 @@ impl ToolHandler for FileSearchTool {
                 .search_cursors
                 .lock()
                 .unwrap()
-                .issue(&query, continuation)
+                .issue(&call, &query, continuation)
         });
 
         let mut returned = Vec::with_capacity(page.len());
