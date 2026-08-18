@@ -308,7 +308,7 @@ unknown
 }
 ```
 
-running task 不设置 `force` 时返回 `tmux.paneBusy`。`force=true` 终止 task 并销毁它拥有的临时 pane。Task transcript 仍按 completed-task retention 保留。
+running task 不设置 `force` 时返回 `tmux.taskBusy`。`force=true` 终止 task 并销毁它拥有的临时 pane。Task transcript 仍按 completed-task retention 保留。
 
 ### Close persistent pane
 

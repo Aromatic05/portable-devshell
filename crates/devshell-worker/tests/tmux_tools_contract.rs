@@ -517,7 +517,7 @@ fn tmux_force_close_task_is_not_owned_by_the_creating_context() {
         "ctx-b",
         "close-task-without-force",
     );
-    assert_eq!(guarded["error"]["code"], "tmux.paneBusy", "{guarded}");
+    assert_eq!(guarded["error"]["code"], "tmux.taskBusy", "{guarded}");
 
     let closed = call(
         &env,

@@ -528,7 +528,7 @@ impl TmuxState {
         }
         if !force {
             return Err(ToolError::new(
-                "tmux.paneBusy",
+                "tmux.taskBusy",
                 format!("task {task_id} is running; use force=true to terminate it"),
             ));
         }
