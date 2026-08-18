@@ -96,10 +96,17 @@ impl ReverseConnector {
                     return;
                 }
             };
-            let result = if wss_failures < WSS_FAILURES_BEFORE_SSE {
-                self.run_wss(generation)
+            let (transport, established, result) = if wss_failures < WSS_FAILURES_BEFORE_SSE {
+                match self.connect_wss(generation) {
+                    Ok(socket) => {
+                        wss_failures = 0;
+                        backoff = Duration::from_secs(1);
+                        ("wss", true, self.run_wss(socket))
+                    }
+                    Err(error) => ("wss", false, Err(error)),
+                }
             } else {
-                self.run_sse(&client, generation)
+                ("sse", false, self.run_sse(&client, generation))
             };
 
             match result {
@@ -108,18 +115,13 @@ impl ReverseConnector {
                     backoff = Duration::from_secs(1);
                 }
                 Err(error) => {
-                    let transport = if wss_failures < WSS_FAILURES_BEFORE_SSE {
-                        "wss"
-                    } else {
-                        "sse"
-                    };
                     let _ = append_log(
                         &self.paths,
                         &format!("reverse {transport} connection ended: {error}"),
                     );
-                    if transport == "wss" {
+                    if transport == "wss" && !established {
                         wss_failures = wss_failures.saturating_add(1);
-                    } else {
+                    } else if transport == "sse" {
                         wss_failures = 0;
                     }
                 }
@@ -137,7 +139,10 @@ impl ReverseConnector {
         }
     }
 
-    fn run_wss(&self, generation: u64) -> Result<(), String> {
+    fn connect_wss(
+        &self,
+        generation: u64,
+    ) -> Result<WebSocket<MaybeTlsStream<TcpStream>>, String> {
         let endpoint = reverse_endpoint(&self.config.controller_url, "/reverse/v1/connect", true)?;
         let mut request = endpoint
             .as_str()
@@ -170,7 +175,13 @@ impl ReverseConnector {
             &self.paths,
             &format!("reverse connection established transport=wss generation={generation}"),
         )?;
+        Ok(socket)
+    }
 
+    fn run_wss(
+        &self,
+        mut socket: WebSocket<MaybeTlsStream<TcpStream>>,
+    ) -> Result<(), String> {
         while !self.router.shutdown_requested() {
             self.flush_wss_responses(&mut socket)?;
             match socket.read() {
