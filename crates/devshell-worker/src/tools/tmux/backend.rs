@@ -262,7 +262,7 @@ impl TmuxBackend {
             let shell_status = self.read_status(id);
             let task_status = managed_task_id.as_ref().map(|task_id| {
                 if fields.get(9).copied() == Some("1") {
-                    if let Some(status) = self.read_task_exit_status(task_id) {
+                    if let Some(status) = self.wait_task_exit_status(task_id, Duration::from_millis(250)) {
                         status.to_string()
                     } else if let Some(status) =
                         fields.get(10).copied().filter(|value| !value.is_empty())
@@ -596,6 +596,19 @@ impl TmuxBackend {
             .trim()
             .parse()
             .ok()
+    }
+
+    fn wait_task_exit_status(&self, task_id: &str, timeout: Duration) -> Option<i32> {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if let Some(status) = self.read_task_exit_status(task_id) {
+                return Some(status);
+            }
+            if std::time::Instant::now() >= deadline {
+                return None;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 
     fn wait_task_capture(&self, task_id: &str) -> Result<(), ToolError> {

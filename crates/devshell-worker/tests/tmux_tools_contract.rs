@@ -945,6 +945,30 @@ fn tmux_inspect_honors_nonzero_end_offsets() {
         "fill-main-history",
     );
     assert_eq!(input["ok"], true, "{input}");
+    let idle_deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let listed = call(
+            &env,
+            instance,
+            "1-list",
+            "tmux_list",
+            json!({}),
+            "ctx-a",
+            "wait-main-idle",
+        );
+        assert_eq!(listed["ok"], true, "{listed}");
+        let main_status = listed["result"]["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|pane| pane["name"] == "main")
+            .and_then(|pane| pane["status"].as_str());
+        if main_status == Some("idle") {
+            break;
+        }
+        assert!(Instant::now() < idle_deadline, "{listed}");
+        thread::sleep(Duration::from_millis(25));
+    }
     let pane_id = tmux_pane_id_by_name(&env, instance, "main");
     let deadline = Instant::now() + Duration::from_secs(3);
     let expected = loop {

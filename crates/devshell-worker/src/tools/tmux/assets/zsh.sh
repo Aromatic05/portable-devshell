@@ -41,3 +41,4 @@ devshell_tmux_precmd_zsh() {
 devshell_tmux_init_status_file
 preexec_functions+=(devshell_tmux_preexec_zsh)
 precmd_functions+=(devshell_tmux_precmd_zsh)
+devshell_tmux_write_status idle
