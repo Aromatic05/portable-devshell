@@ -146,11 +146,7 @@ impl TmuxBackend {
         Ok(())
     }
 
-    pub fn ensure_session_for_task(&self) -> Result<(), ToolError> {
-        self.ensure_session_structure()
-    }
-
-    fn ensure_session_structure(&self) -> Result<(), ToolError> {
+    pub fn ensure_session_structure(&self) -> Result<(), ToolError> {
         if self.session_prepared.load(Ordering::Acquire) && session_exists(&self.socket) {
             return Ok(());
         }

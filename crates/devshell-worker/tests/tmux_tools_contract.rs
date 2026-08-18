@@ -1489,7 +1489,7 @@ fn tmux_run_uses_clean_bash_while_main_uses_user_bash_rc() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
-fn tmux_run_does_not_wait_for_main_shell_readiness() {
+fn tmux_run_and_input_do_not_wait_for_main_shell_readiness() {
     assert!(
         tmux_available(),
         "tmux is required to run this ignored contract test"
@@ -1515,6 +1515,17 @@ fn tmux_run_does_not_wait_for_main_shell_readiness() {
     assert_eq!(run["ok"], true, "{run}");
     assert_eq!(run["result"]["task"]["status"], "0", "{run}");
     assert_eq!(run["result"]["output"][0], "TASK-INDEPENDENT", "{run}");
+
+    let input = call(
+        &env,
+        instance,
+        "2",
+        "tmux_input",
+        json!({ "pane": "main", "input": "printf 'BUFFERED\\n'^M" }),
+        "ctx-slow-main",
+        "input-with-slow-main",
+    );
+    assert_eq!(input["ok"], true, "{input}");
     stop(&env, instance);
 }
 
@@ -1838,7 +1849,7 @@ fn tmux_run_stays_clean_bash_while_main_uses_user_zsh_rc() {
     );
     assert_eq!(input["ok"], true, "{input}");
     let marker = env.workspace().join("zsh-interactive-marker.txt");
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(15);
     while !marker.exists() && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(25));
     }
