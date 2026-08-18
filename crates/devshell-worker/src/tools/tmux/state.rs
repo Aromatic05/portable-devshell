@@ -639,10 +639,15 @@ impl TmuxState {
         if !task.state.is_active() {
             return Ok(());
         }
+        if !self.backend.has_session() {
+            self.mark_task_lost(task_id, &task.pane_id)?;
+            return Ok(());
+        }
         let workspace = self.backend.capture_workspace()?;
         let pane = workspace.panes.iter().find(|pane| pane.id == task.pane_id);
         let mut completed_pane = None;
         let mut became_terminal = false;
+        let mut lost = false;
         {
             let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
             let current = tasks
@@ -658,12 +663,14 @@ impl TmuxState {
                     }
                 }
                 _ => {
-                    current.state = TaskState::Lost;
-                    current.finished_at_ms = Some(unix_time_millis());
-                    became_terminal = true;
+                    lost = true;
                 }
             }
             tasks.prune();
+        }
+        if lost {
+            self.mark_task_lost(task_id, &task.pane_id)?;
+            return Ok(());
         }
         if became_terminal {
             self.persist_task_record(task_id)?;
@@ -674,12 +681,42 @@ impl TmuxState {
         Ok(())
     }
 
+    fn mark_task_lost(&self, task_id: &str, pane_id: &str) -> Result<(), ToolError> {
+        {
+            let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
+            let task = tasks
+                .tasks
+                .get_mut(task_id)
+                .ok_or_else(|| task_expired(task_id))?;
+            if !task.state.is_active() {
+                return Ok(());
+            }
+            task.state = TaskState::Lost;
+            task.finished_at_ms = Some(unix_time_millis());
+        }
+        self.persist_task_record(task_id)?;
+        self.cleanup_lost_task(task_id, pane_id)?;
+        Ok(())
+    }
+
+    fn cleanup_lost_task(&self, task_id: &str, pane_id: &str) -> Result<(), ToolError> {
+        let _ = self.backend.finish_task_capture(task_id);
+        self.backend.remove_task_runtime(task_id);
+        self.backend.remove_pane_metadata(pane_id);
+        self.pane_locks
+            .lock()
+            .map_err(|_| lock_error("tmux pane locks"))?
+            .remove(pane_id);
+        Ok(())
+    }
+
     fn refresh_tasks_with_workspace(
         &self,
         workspace: &BackendWorkspace,
     ) -> Result<bool, ToolError> {
         let mut cleanup = Vec::new();
         let mut finished = Vec::new();
+        let mut lost = Vec::new();
         let mut adopted_panes = Vec::new();
         {
             let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
@@ -701,6 +738,7 @@ impl TmuxState {
                         task.state = TaskState::Lost;
                         task.finished_at_ms = Some(unix_time_millis());
                         finished.push(task.id.clone());
+                        lost.push((task.id.clone(), task.pane_id.clone()));
                     }
                 }
             }
@@ -737,6 +775,9 @@ impl TmuxState {
         let changed = !cleanup.is_empty();
         for task_id in finished {
             self.persist_task_record(&task_id)?;
+        }
+        for (task_id, pane_id) in lost {
+            self.cleanup_lost_task(&task_id, &pane_id)?;
         }
         for (task_id, pane) in cleanup {
             self.cleanup_task_pane(&task_id, &pane)?;

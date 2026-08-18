@@ -604,6 +604,12 @@ impl TmuxBackend {
     pub fn remove_task_runtime(&self, task_id: &str) {
         let _ = fs::remove_file(self.tasks_dir.join(format!("{task_id}.sh")));
         let _ = fs::remove_file(self.tasks_dir.join(format!("{task_id}.start")));
+        let _ = fs::remove_file(self.transcript_done_path(task_id));
+    }
+
+    pub fn remove_pane_metadata(&self, pane_id: &str) {
+        let _ = self.remove_pane_record(pane_id);
+        let _ = fs::remove_file(self.status_path(pane_id));
     }
 
     pub fn close_pane(&self, pane: &BackendPane) -> Result<(), ToolError> {

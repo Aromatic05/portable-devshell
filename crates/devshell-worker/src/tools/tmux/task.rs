@@ -111,6 +111,7 @@ impl TaskRegistry {
         if let Some(task) = self.tasks.remove(id) {
             let _ = std::fs::remove_file(&task.transcript.path);
             let _ = std::fs::remove_file(task.transcript.path.with_extension("json"));
+            let _ = std::fs::remove_file(task.transcript.path.with_extension("done"));
         }
         self.order.retain(|candidate| candidate != id);
     }

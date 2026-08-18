@@ -1496,6 +1496,46 @@ fn worker_restart_preserves_completed_task_transcript() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
+fn tmux_read_marks_a_running_task_lost_when_the_tmux_server_disappears() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-server-loss";
+    start(&env, instance);
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({ "command": "printf 'STARTED\\n'; sleep 30", "wait": "nonblock" }),
+        "ctx-a",
+        "run-before-server-loss",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
+
+    kill_tmux_server(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "2",
+        "tmux_read",
+        json!({ "task": task, "timeMs": 0 }),
+        "ctx-b",
+        "read-after-server-loss",
+    );
+    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["result"]["task"]["status"], "unknown", "{read}");
+    assert!(read["result"].get("pane").is_none(), "{read}");
+
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
 fn tmux_capacity_never_collects_persistent_panes() {
     assert!(
         tmux_available(),
