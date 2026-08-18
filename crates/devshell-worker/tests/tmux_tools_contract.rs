@@ -1838,6 +1838,36 @@ fn tmux_run_stays_clean_bash_while_main_uses_user_zsh_rc() {
     assert_eq!(run["ok"], true, "{run}");
     assert_eq!(run["result"]["task"]["status"], "0", "{run}");
 
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        let listed = call(
+            &env,
+            instance,
+            &format!("ready-{attempt}"),
+            "tmux_list",
+            json!({}),
+            "ctx-zsh",
+            &format!("wait-zsh-main-{attempt}"),
+        );
+        if listed["ok"] == true {
+            let main = listed["result"]["panes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|pane| pane["name"] == "main")
+                .unwrap();
+            if main["status"] == "idle" {
+                break;
+            }
+        } else {
+            assert_eq!(listed["error"]["code"], "tmux.paneNotReady", "{listed}");
+        }
+        assert!(Instant::now() < deadline, "main zsh did not become ready: {listed}");
+        thread::sleep(Duration::from_millis(25));
+    }
+
     let input = call(
         &env,
         instance,
@@ -1849,7 +1879,7 @@ fn tmux_run_stays_clean_bash_while_main_uses_user_zsh_rc() {
     );
     assert_eq!(input["ok"], true, "{input}");
     let marker = env.workspace().join("zsh-interactive-marker.txt");
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(3);
     while !marker.exists() && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(25));
     }
