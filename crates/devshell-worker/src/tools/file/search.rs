@@ -156,11 +156,7 @@ impl ToolHandler for FileSearchTool {
         let mut page = Vec::<MatchedFile>::new();
         while page.len() < FILES_PER_PAGE {
             call.check_cancelled()?;
-            let matched = if let Some(pending) = continuation.pending.take() {
-                Some(pending)
-            } else {
-                next_matched_file(&call, &mut continuation, &self.state)?
-            };
+            let matched = next_page_file(&call, &mut continuation, &self.state)?;
             let Some(file) = matched else {
                 break;
             };
@@ -271,6 +267,56 @@ impl ToolHandler for FileSearchTool {
             next_cursor,
         })
     }
+}
+
+fn next_page_file(
+    call: &ToolCall,
+    continuation: &mut SearchContinuation,
+    state: &FileToolState,
+) -> Result<Option<MatchedFile>, ToolError> {
+    if let Some(pending) = continuation.pending.take() {
+        if let Some(matched) = refresh_pending_file(call, continuation, pending, state)? {
+            return Ok(Some(matched));
+        }
+    }
+    next_matched_file(call, continuation, state)
+}
+
+fn refresh_pending_file(
+    call: &ToolCall,
+    continuation: &SearchContinuation,
+    pending: MatchedFile,
+    state: &FileToolState,
+) -> Result<Option<MatchedFile>, ToolError> {
+    let Ok((metadata, matches, shown, next_line)) = search_stream(
+        pending
+            .resolved
+            .open_file()
+            .map_err(|error| ToolError::new("file.notFound", error.to_string()))?,
+        &continuation.matcher,
+        continuation.per_file,
+        continuation.context,
+        continuation.start_line,
+        &call.cancellation,
+    ) else {
+        return Ok(None);
+    };
+    if matches.is_empty() {
+        return Ok(None);
+    }
+    let (body, seen) = format_streamed_content(&matches, &shown);
+    Ok(Some(MatchedFile {
+        output: FileSearchFile {
+            path: pending.output.path,
+            content: body,
+            truncated: next_line.is_some().then_some(true),
+            next_line,
+        },
+        resolved: pending.resolved,
+        metadata,
+        seen,
+        ordinal: state.next_snapshot_ordinal(),
+    }))
 }
 
 fn is_single_exact_file(call: &ToolCall, paths: &[String]) -> Result<bool, ToolError> {

@@ -250,6 +250,7 @@ fn file_search_snapshots_only_files_returned_in_the_current_page() {
         fs::read_to_string(env.workspace().join("result-21.txt")).unwrap(),
         "needle\n"
     );
+    fs::write(env.workspace().join("result-21.txt"), "updated needle\n").unwrap();
 
     let cursor = searched["result"]["nextCursor"]
         .as_str()
@@ -266,6 +267,12 @@ fn file_search_snapshots_only_files_returned_in_the_current_page() {
     assert_eq!(second_page["ok"], true, "{second_page}");
     assert_eq!(second_page["result"]["files"].as_array().unwrap().len(), 1);
     assert_eq!(second_page["result"]["files"][0]["path"], "./result-21.txt");
+    assert!(
+        second_page["result"]["files"][0]["content"]
+            .as_str()
+            .is_some_and(|content| content.contains("updated needle")),
+        "pending lookahead must be refreshed when the next page is consumed: {second_page}"
+    );
 
     let second_page_edit = call(
         &env,
