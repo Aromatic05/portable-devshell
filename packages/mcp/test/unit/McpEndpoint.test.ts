@@ -46,6 +46,44 @@ test("initialize succeeds over SDK transport", async () => {
     }
 });
 
+test("Workspace MCP App resource is listed and served with the MCP Apps MIME type", async () => {
+    const binding = createBinding();
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        const listed = await postJson(server.url, {
+            id: "req-resources-list",
+            jsonrpc: "2.0",
+            method: "resources/list",
+            params: {}
+        }, session.headers);
+        assert.equal(listed.status, 200);
+        assert.deepEqual(listed.body.result?.resources?.map((resource: { mimeType?: string; uri?: string }) => ({
+            mimeType: resource.mimeType,
+            uri: resource.uri
+        })), [{
+            mimeType: "text/html;profile=mcp-app",
+            uri: "ui://portable-devshell/workspace/v1.html"
+        }]);
+
+        const read = await postJson(server.url, {
+            id: "req-resource-read",
+            jsonrpc: "2.0",
+            method: "resources/read",
+            params: { uri: "ui://portable-devshell/workspace/v1.html" }
+        }, session.headers);
+        assert.equal(read.status, 200);
+        assert.equal(read.body.result?.contents?.[0]?.mimeType, "text/html;profile=mcp-app");
+        assert.match(String(read.body.result?.contents?.[0]?.text), /portable-devshell/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /ui\/initialize/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_question_answer/);
+    } finally {
+        await server.close();
+        await binding.close();
+    }
+});
+
 test("session lifecycle emits MCP session events", async () => {
     const harness = createWorkerHarness();
     const binding = createBinding(harness);

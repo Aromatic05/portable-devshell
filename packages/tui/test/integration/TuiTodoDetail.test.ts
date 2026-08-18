@@ -64,7 +64,7 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
                 (box) => box.id === "todo-task:task-1",
             ),
         );
-        assert.equal(server.todoReadTitles().includes(todoFixture.title), false);
+        assert.equal(server.todoReadTaskIds().includes("task-1"), false);
 
         const overviewBoxes = selectMainScreenModel(
             runtime.store.getState(),
@@ -126,7 +126,7 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
                 (box) => box.id === "todo-item:inspect",
             ),
         );
-        assert.equal(server.todoReadTitles().includes(todoFixture.title), true);
+        assert.equal(server.todoReadTaskIds().includes("task-1"), true);
 
         const detailBoxes = selectMainScreenModel(runtime.store.getState()).boxes;
         assert.ok(
@@ -225,10 +225,10 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
 function createTodoServer(socketPath: string): {
     start(): Promise<void>;
     stop(): Promise<void>;
-    todoReadTitles(): Array<string | undefined>;
+    todoReadTaskIds(): Array<string | undefined>;
 } {
     const worker = new FakeWorker("alpha");
-    const todoReadTitles: Array<string | undefined> = [];
+    const todoReadTaskIds: Array<string | undefined> = [];
     const instances = new InstanceRegistry([
         {
             enabled: true,
@@ -244,9 +244,9 @@ function createTodoServer(socketPath: string): {
                 },
                 async delete() {},
                 async read(input) {
-                    const title = input?.title;
-                    todoReadTitles.push(title);
-                    return title === todoFixture.title
+                    const taskId = input?.taskId;
+                    todoReadTaskIds.push(taskId);
+                    return taskId === todoFixture.taskId
                         ? todoFixture
                         : {
                               items: [],
@@ -293,7 +293,7 @@ function createTodoServer(socketPath: string): {
             await server.stop();
             routes.dispose();
         },
-        todoReadTitles: () => [...todoReadTitles],
+        todoReadTaskIds: () => [...todoReadTaskIds],
     };
 }
 

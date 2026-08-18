@@ -3,7 +3,7 @@ import type {
     ToolPolicy
 } from "@portable-devshell/shared";
 
-import type { McpInstanceGateway } from "../instance/McpInstanceGateway.js";
+import { isMcpInteractionGateway, type McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import { McpToolDescriptionEnhancer } from "../tool/McpToolDescriptionEnhancer.js";
 import {
     McpToolSchemaAdapter,
@@ -21,6 +21,7 @@ import {
     mcpEnvironmentToolName
 } from "../tool/catalog/McpToolCatalogEnvironment.js";
 import { McpToolCatalogInstance } from "../tool/catalog/McpToolCatalogInstance.js";
+import { McpToolCatalogInteraction } from "../tool/catalog/McpToolCatalogInteraction.js";
 import { McpToolCatalogTodo } from "../tool/catalog/McpToolCatalogTodo.js";
 import { withMcpCommentOutputSchema } from "./McpEndpointFeedback.js";
 import {
@@ -56,6 +57,7 @@ export class McpEndpointCatalog {
     readonly #gateway?: McpInstanceGateway;
     readonly #instanceName: string;
     readonly #instanceTools = new McpToolCatalogInstance();
+    readonly #interactionTools = new McpToolCatalogInteraction();
     readonly #schemaAdapter = new McpToolSchemaAdapter();
     readonly #todoTools = new McpToolCatalogTodo();
     readonly #worker: McpEndpointCatalogWorker;
@@ -150,6 +152,12 @@ export class McpEndpointCatalog {
                 sources.push({
                     owner: "artifact",
                     tools: artifactTools
+                });
+            }
+            if (isMcpInteractionGateway(this.#gateway)) {
+                sources.push({
+                    owner: "interaction",
+                    tools: this.#interactionTools.list()
                 });
             }
             sources.push(

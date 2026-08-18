@@ -106,6 +106,41 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         }) as unknown as JsonValue;
     }
 
+    async createWait(instance: string, input: import("@portable-devshell/shared").WaitCreateInput) {
+        return await this.#requireWait(instance).create(input);
+    }
+
+    async detachWait(instance: string, waitId: string) {
+        return await this.#requireWait(instance).detach(waitId);
+    }
+
+    async consumeWait(instance: string, waitId: string) {
+        return await this.#requireWait(instance).consume(waitId);
+    }
+
+    async resolveWait(instance: string, waitId: string, result?: JsonValue) {
+        return await this.#requireWait(instance).resolve(waitId, result);
+    }
+
+    async waitForWait(instance: string, waitId: string) {
+        return await this.#requireWait(instance).waitForResolution(waitId);
+    }
+
+    async listWaits(instance: string) {
+        return await this.#requireWait(instance).list();
+    }
+
+    async listApprovals(instance: string) {
+        return await this.#requireDescriptor(instance).worker.listApprovals();
+    }
+
+    async decideApproval(instance: string, approvalId: string, decision: "approve" | "deny") {
+        return await this.#requireDescriptor(instance).worker.decideApproval(approvalId, {
+            decidedBy: "web",
+            decision
+        });
+    }
+
     async consumeContextMessages(instance: string, ctxId: string, callId: string) {
         const service = this.#requireDescriptor(instance).contextMessages;
         if (service === undefined) {
@@ -220,6 +255,18 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             input as unknown as import("@portable-devshell/shared").TodoWriteInput,
             requireCtxId(context)
         )) as unknown as JsonValue;
+    }
+
+    #requireWait(instance: string) {
+        const wait = this.#requireDescriptor(instance).wait;
+        if (wait === undefined) {
+            throw createError({
+                code: errorCodes.envelopeInvalid,
+                message: `Wait service is unavailable for ${instance}.`,
+                retryable: false
+            });
+        }
+        return wait;
     }
 
     #requireDescriptor(instance: string) {

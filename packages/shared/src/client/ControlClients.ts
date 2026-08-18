@@ -37,7 +37,7 @@ import type {
     InstanceRuntimeEnvelope,
 } from "../dto/instance/DtoInstanceRuntime.js";
 import type { InstanceSnapshot } from "../dto/instance/DtoInstanceSnapshot.js";
-import type { TodoRpcEnvelope } from "../dto/instance/DtoTodo.js";
+import type { TodoReadInput, TodoRpcEnvelope } from "../dto/instance/DtoTodo.js";
 import type {
     OAuthApprovalDecision,
     OAuthApprovalRequest,
@@ -179,7 +179,7 @@ export interface ControlClients {
     };
     todo: {
         delete(instance: string, taskId: string): Promise<Record<string, JsonValue>>;
-        get(instance: string, title?: string): Promise<TodoRpcEnvelope>;
+        get(instance: string, input?: TodoReadInput): Promise<TodoRpcEnvelope>;
         subscribe(instance: string, fromSeq: number): Promise<InstanceEventStream>;
     };
     tool: {
@@ -314,8 +314,7 @@ export function createControlClients(
         },
         todo: {
             delete: (name, taskId) => todo.request(name, "delete", { taskId }),
-            get: (name, title) =>
-                todo.request(name, "get", title === undefined ? {} : { title }),
+            get: (name, input) => todo.request(name, "get", input ?? {}),
             subscribe: async (name, fromSeq) =>
                 new InstanceEventStream(
                     asInstanceName(name),

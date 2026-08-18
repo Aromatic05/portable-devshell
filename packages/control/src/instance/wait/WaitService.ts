@@ -16,6 +16,10 @@ export interface WaitServiceOptions {
 
 export class WaitService {
     readonly #appendEvent: WaitServiceOptions["appendEvent"];
+    readonly #pending = new Map<string, {
+        reject(error: Error): void;
+        resolve(record: WaitRecord): void;
+    }>();
     readonly #state: WaitState;
     readonly #store: WaitStore;
     #operation: Promise<void> = Promise.resolve();
@@ -35,11 +39,15 @@ export class WaitService {
     }
 
     async detach(waitId: string): Promise<WaitRecord> {
-        return await this.#commit("wait.detached", (document) => this.#state.detach(document, waitId));
+        const record = await this.#commit("wait.detached", (document) => this.#state.detach(document, waitId));
+        this.#notify(record);
+        return record;
     }
 
     async resolve(waitId: string, result?: JsonValue): Promise<WaitRecord> {
-        return await this.#commit("wait.resolved", (document) => this.#state.resolve(document, waitId, result));
+        const record = await this.#commit("wait.resolved", (document) => this.#state.resolve(document, waitId, result));
+        this.#notify(record);
+        return record;
     }
 
     async consume(waitId: string): Promise<WaitRecord> {
@@ -47,7 +55,9 @@ export class WaitService {
     }
 
     async cancel(waitId: string): Promise<WaitRecord> {
-        return await this.#commit("wait.cancelled", (document) => this.#state.cancel(document, waitId));
+        const record = await this.#commit("wait.cancelled", (document) => this.#state.cancel(document, waitId));
+        this.#notify(record);
+        return record;
     }
 
     async get(waitId: string): Promise<WaitRecord | undefined> {
@@ -58,6 +68,33 @@ export class WaitService {
     async list(taskId?: string): Promise<WaitRecord[]> {
         await this.#operation;
         return this.#store.read().waits.filter((record) => taskId === undefined || record.taskId === taskId);
+    }
+
+    async waitForResolution(waitId: string): Promise<WaitRecord> {
+        await this.#operation;
+        const record = this.#store.read().waits.find((entry) => entry.waitId === waitId);
+        if (record === undefined) throw new Error(`Wait ${waitId} was not found.`);
+        if (record.status === "resolved") return record;
+        if (record.status !== "waiting") {
+            throw new Error(`Wait ${waitId} cannot be awaited while it is ${record.status}.`);
+        }
+        return await new Promise<WaitRecord>((resolve, reject) => {
+            this.#pending.set(waitId, { reject, resolve });
+        });
+    }
+
+    #notify(record: WaitRecord): void {
+        const pending = this.#pending.get(record.waitId);
+        if (pending === undefined) return;
+        if (record.status === "resolved") {
+            this.#pending.delete(record.waitId);
+            pending.resolve(record);
+            return;
+        }
+        if (record.status === "detached" || record.status === "cancelled") {
+            this.#pending.delete(record.waitId);
+            pending.reject(new Error(`Wait ${record.waitId} became ${record.status}.`));
+        }
     }
 
     async #commit(

@@ -7,11 +7,14 @@ import type {
     ArtifactViewImageResult
 } from "@portable-devshell/shared";
 import type {
+    ApprovalRequest,
     ContextMessageReadResult,
     JsonValue,
     TodoReadInput,
     ToolCallContext,
-    ToolDefinition
+    ToolDefinition,
+    WaitCreateInput,
+    WaitRecord
 } from "@portable-devshell/shared";
 import type { McpEndpointEnvironmentHandshake } from "../endpoint/McpEndpointPort.js";
 
@@ -46,6 +49,14 @@ export interface McpInstanceGateway {
     createSshInstance(sourceInstance: string, input: McpSshInstanceCreateInput): Promise<JsonValue>;
     environment(instance: string): McpEndpointEnvironmentHandshake | undefined;
     listInstances(): Promise<JsonValue>;
+    createWait?(instance: string, input: WaitCreateInput): Promise<WaitRecord>;
+    detachWait?(instance: string, waitId: string): Promise<WaitRecord>;
+    consumeWait?(instance: string, waitId: string): Promise<WaitRecord>;
+    resolveWait?(instance: string, waitId: string, result?: JsonValue): Promise<WaitRecord>;
+    waitForWait?(instance: string, waitId: string): Promise<WaitRecord>;
+    listWaits?(instance: string): Promise<WaitRecord[]>;
+    listApprovals?(instance: string): Promise<ApprovalRequest[]>;
+    decideApproval?(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<ApprovalRequest>;
     consumeContextMessages?(instance: string, ctxId: string, callId: string): Promise<ContextMessageReadResult>;
     readTodo(instance: string, input?: TodoReadInput): Promise<JsonValue>;
     listTools(instance: string): ToolDefinition[];
@@ -75,4 +86,30 @@ export interface McpInstanceGateway {
         defaultInstance: string,
         input: ArtifactTransferStartInput | ArtifactTransferLookupInput | ArtifactTransferCancelInput
     ): Promise<JsonValue>;
+}
+
+export type McpInteractionGateway = McpInstanceGateway & Required<Pick<
+    McpInstanceGateway,
+    | "createWait"
+    | "detachWait"
+    | "consumeWait"
+    | "resolveWait"
+    | "waitForWait"
+    | "listWaits"
+    | "listApprovals"
+    | "decideApproval"
+>>;
+
+export function isMcpInteractionGateway(
+    gateway: McpInstanceGateway | undefined
+): gateway is McpInteractionGateway {
+    return gateway !== undefined &&
+        gateway.createWait !== undefined &&
+        gateway.detachWait !== undefined &&
+        gateway.consumeWait !== undefined &&
+        gateway.resolveWait !== undefined &&
+        gateway.waitForWait !== undefined &&
+        gateway.listWaits !== undefined &&
+        gateway.listApprovals !== undefined &&
+        gateway.decideApproval !== undefined;
 }

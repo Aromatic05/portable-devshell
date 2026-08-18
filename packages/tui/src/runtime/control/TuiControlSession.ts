@@ -10,6 +10,7 @@ import {
     type InstanceListEntry,
     type InstanceSnapshot,
     type JsonValue,
+    type TodoReadInput,
 } from "@portable-devshell/shared";
 import {
     createTuiClients as createControlClients,
@@ -179,10 +180,10 @@ export class TuiControlSession {
         instance: string,
         generation = this.#generation,
         signal?: AbortSignal,
-        title?: string,
+        input?: TodoReadInput,
     ): Promise<void> {
         if (this.#canRefresh(generation, signal)) {
-            await this.#model.refreshInstance(instance, ["todo"], title);
+            await this.#model.refreshInstance(instance, ["todo"], input);
         }
     }
 

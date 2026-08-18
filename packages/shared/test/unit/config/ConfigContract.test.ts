@@ -207,6 +207,16 @@ test("obsolete context groups are removed from custom MCP allowlists", () => {
     assert.deepEqual(custom.mcp.tools.groups, ["file", "bash", "todo"]);
 });
 
+test("the v0.5 default MCP allowlist gains the v0.6 interaction group", () => {
+    const upgraded = normalizeConfigInstanceDraft({
+        mcp: { tools: { groups: ["file", "bash", "artifact", "tmux", "todo"] } },
+        name: "upgraded-policy",
+        provider: "local"
+    });
+
+    assert.deepEqual(upgraded.mcp.tools.groups, ["file", "bash", "artifact", "tmux", "todo", "interaction"]);
+});
+
 test("provider changes discard stale provider-specific fields before normalization", () => {
     const current = normalizeConfigInstanceDraft({
         name: "remote-one",

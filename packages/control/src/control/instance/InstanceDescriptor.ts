@@ -35,6 +35,7 @@ export interface InstanceWaitPort {
     get(waitId: string): Promise<WaitRecord | undefined>;
     list(taskId?: string): Promise<WaitRecord[]>;
     resolve(waitId: string, result?: JsonValue): Promise<WaitRecord>;
+    waitForResolution(waitId: string): Promise<WaitRecord>;
 }
 
 export interface InstanceDescriptor {

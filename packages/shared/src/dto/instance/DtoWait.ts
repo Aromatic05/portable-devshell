@@ -13,6 +13,7 @@ export interface WaitCreateInput {
     createdByCtxId: string;
     kind: WaitKind;
     ownerCallId?: string;
+    payload?: JsonValue;
     targetId: string;
     taskId: string;
 }

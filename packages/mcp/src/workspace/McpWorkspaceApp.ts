@@ -1,0 +1,210 @@
+export const workspaceAppResourceUri = "ui://portable-devshell/workspace/v1.html";
+
+export const workspaceAppHtml = String.raw`<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 12px; background: transparent; color: CanvasText; }
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+h1 { font-size: 15px; margin: 0; font-weight: 650; }
+small, .muted { color: color-mix(in srgb, CanvasText 58%, transparent); font-size: 11px; }
+.grid { display: grid; gap: 8px; }
+.card { border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 10px; padding: 10px; background: color-mix(in srgb, Canvas 92%, CanvasText 8%); }
+.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.row.between { justify-content: space-between; }
+.title { font-size: 13px; font-weight: 650; }
+.question { margin: 6px 0 8px; font-size: 13px; line-height: 1.35; }
+button, input { font: inherit; }
+button { border: 1px solid color-mix(in srgb, CanvasText 24%, transparent); border-radius: 8px; padding: 5px 9px; background: Canvas; color: CanvasText; cursor: pointer; }
+button.primary { font-weight: 650; }
+button.danger { color: #c43b3b; }
+button:disabled { opacity: .55; cursor: default; }
+input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, CanvasText 24%, transparent); border-radius: 8px; padding: 6px 8px; background: Canvas; color: CanvasText; }
+.badge { border-radius: 999px; padding: 2px 7px; font-size: 10px; background: color-mix(in srgb, CanvasText 10%, transparent); }
+.empty { padding: 14px 8px; text-align: center; font-size: 12px; color: color-mix(in srgb, CanvasText 55%, transparent); }
+.section-head { margin: 8px 2px 5px; font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; color: color-mix(in srgb, CanvasText 58%, transparent); }
+</style>
+</head>
+<body>
+<header><h1>portable-devshell</h1><small id="status">Connecting…</small></header>
+<div id="root" class="grid"><div class="empty">Waiting for Workspace state…</div></div>
+<script>
+(function () {
+  var root = document.getElementById("root");
+  var status = document.getElementById("status");
+  var pending = new Map();
+  var nextId = 1;
+  var ctxId = "";
+  var appToken = "";
+  var initialized = false;
+  var snapshot = null;
+  var busy = new Set();
+
+  function escapeHtml(value) {
+    return String(value == null ? "" : value)
+      .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+  }
+
+  function request(method, params) {
+    var id = nextId++;
+    window.parent.postMessage({ jsonrpc: "2.0", id: id, method: method, params: params }, "*");
+    return new Promise(function (resolve, reject) { pending.set(id, { resolve: resolve, reject: reject }); });
+  }
+
+  function notify(method, params) {
+    window.parent.postMessage({ jsonrpc: "2.0", method: method, params: params || {} }, "*");
+  }
+
+  function callTool(name, args) {
+    if (!initialized) return Promise.reject(new Error("Workspace App is not initialized"));
+    if (!appToken) return Promise.reject(new Error("Workspace App authorization is unavailable"));
+    return request("tools/call", { name: name, arguments: Object.assign({ ctxId: ctxId, token: appToken }, args || {}) });
+  }
+
+  function structured(result) {
+    return result && result.structuredContent ? result.structuredContent : result;
+  }
+
+  function acceptMeta(meta) {
+    var hidden = meta && meta["portable-devshell/workspace"];
+    if (hidden && hidden.token) appToken = String(hidden.token);
+  }
+
+  async function refresh() {
+    if (!initialized || !ctxId || !appToken) return;
+    try {
+      var result = await callTool("workspace_snapshot", {});
+      snapshot = structured(result);
+      status.textContent = snapshot && snapshot.instance ? snapshot.instance : "Connected";
+      render();
+    } catch (error) {
+      status.textContent = "Reconnecting";
+    }
+  }
+
+  async function connect() {
+    try {
+      await request("ui/initialize", {
+        protocolVersion: "2026-01-26",
+        appInfo: { name: "portable-devshell-workspace", version: "0.6.1" },
+        appCapabilities: {}
+      });
+      notify("ui/notifications/initialized", {});
+      initialized = true;
+      status.textContent = "Connected";
+      await refresh();
+    } catch (error) {
+      status.textContent = "Host bridge unavailable";
+      console.error(error);
+    }
+  }
+
+  async function act(key, name, args) {
+    if (busy.has(key)) return;
+    busy.add(key);
+    render();
+    try {
+      await callTool(name, args);
+      await refresh();
+    } catch (error) {
+      status.textContent = "Action failed";
+      console.error(error);
+    } finally {
+      busy.delete(key);
+      render();
+    }
+  }
+
+  function questionCard(wait) {
+    var payload = wait && wait.payload && typeof wait.payload === "object" ? wait.payload : {};
+    var choices = Array.isArray(payload.choices) ? payload.choices : [];
+    var disabled = busy.has(wait.waitId) ? " disabled" : "";
+    var buttons = choices.map(function (choice) {
+      return '<button class="primary" data-question-choice="' + escapeHtml(wait.waitId) + '" data-answer="' + escapeHtml(choice) + '"' + disabled + '>' + escapeHtml(choice) + '</button>';
+    }).join("");
+    var text = payload.allowText === false ? "" : '<div class="row" style="margin-top:7px"><input data-question-input="' + escapeHtml(wait.waitId) + '" placeholder="Type an answer"><button data-question-submit="' + escapeHtml(wait.waitId) + '"' + disabled + '>Answer</button></div>';
+    return '<div class="card"><div class="row between"><span class="title">Agent needs input</span><span class="badge">' + escapeHtml(wait.status) + '</span></div><div class="question">' + escapeHtml(payload.question || "Question") + '</div><div class="row">' + buttons + '</div>' + text + '</div>';
+  }
+
+  function approvalCard(approval) {
+    var disabled = busy.has(approval.approvalId) ? " disabled" : "";
+    return '<div class="card"><div class="row between"><span class="title">Approval required</span><span class="badge">' + escapeHtml(approval.riskLevel || "") + '</span></div><div class="question"><strong>' + escapeHtml(approval.toolName) + '</strong><br><span class="muted">' + escapeHtml(approval.inputSummary || approval.reason || "") + '</span></div><div class="row"><button class="danger" data-approval="' + escapeHtml(approval.approvalId) + '" data-decision="deny"' + disabled + '>Deny</button><button class="primary" data-approval="' + escapeHtml(approval.approvalId) + '" data-decision="approve"' + disabled + '>Approve</button></div></div>';
+  }
+
+  function taskCard(task) {
+    return '<div class="card"><div class="row between"><span class="title">' + escapeHtml(task.title || task.taskId) + '</span><span class="badge">' + escapeHtml(task.status || "") + '</span></div><div class="muted" style="margin-top:5px">' + escapeHtml(task.currentItem || ((task.completed || 0) + "/" + (task.total || 0))) + '</div></div>';
+  }
+
+  function render() {
+    if (!snapshot) return;
+    var questions = Array.isArray(snapshot.questions) ? snapshot.questions : [];
+    var approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
+    var tasks = Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
+    var html = "";
+    if (questions.length) html += '<div class="section-head">Questions</div>' + questions.map(questionCard).join("");
+    if (approvals.length) html += '<div class="section-head">Approvals</div>' + approvals.map(approvalCard).join("");
+    if (tasks.length) html += '<div class="section-head">Current task</div>' + tasks.map(taskCard).join("");
+    if (!html) html = '<div class="empty">No pending human action.</div>';
+    root.innerHTML = html;
+  }
+
+  root.addEventListener("click", function (event) {
+    var target = event.target.closest("button");
+    if (!target) return;
+    var waitId = target.getAttribute("data-question-choice") || target.getAttribute("data-question-submit");
+    if (waitId) {
+      var answer = target.getAttribute("data-answer");
+      if (answer == null) {
+        var input = root.querySelector('[data-question-input="' + CSS.escape(waitId) + '"]');
+        answer = input ? input.value.trim() : "";
+      }
+      if (answer) void act(waitId, "workspace_question_answer", { waitId: waitId, answer: answer });
+      return;
+    }
+    var approvalId = target.getAttribute("data-approval");
+    if (approvalId) void act(approvalId, "workspace_approval_decide", { approvalId: approvalId, decision: target.getAttribute("data-decision") });
+  });
+
+  window.addEventListener("message", function (event) {
+    if (event.source !== window.parent) return;
+    var message = event.data;
+    if (!message || message.jsonrpc !== "2.0") return;
+    if (message.id !== undefined && pending.has(message.id)) {
+      var waiter = pending.get(message.id);
+      pending.delete(message.id);
+      if (message.error) waiter.reject(message.error); else waiter.resolve(message.result);
+      return;
+    }
+    if (message.method === "ui/notifications/tool-input") {
+      var input = message.params && (message.params.arguments || message.params);
+      if (input && input.ctxId) ctxId = String(input.ctxId);
+    }
+    if (message.method === "ui/notifications/tool-result") {
+      acceptMeta(message.params && message.params._meta);
+      var initial = message.params && message.params.structuredContent;
+      if (initial && initial.ctxId) {
+        ctxId = String(initial.ctxId);
+        snapshot = initial;
+        render();
+      }
+    }
+  }, { passive: true });
+
+  if (window.openai && window.openai.toolInput && window.openai.toolInput.ctxId) ctxId = String(window.openai.toolInput.ctxId);
+  if (window.openai && window.openai.toolResponseMetadata) acceptMeta(window.openai.toolResponseMetadata);
+  if (window.openai && window.openai.toolOutput && window.openai.toolOutput.ctxId) {
+    snapshot = window.openai.toolOutput;
+    ctxId = String(snapshot.ctxId);
+    render();
+  }
+  setInterval(refresh, 1500);
+  void connect();
+})();
+</script>
+</body>
+</html>`;

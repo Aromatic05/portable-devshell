@@ -13,6 +13,7 @@ import { McpContextRegistry } from "../context/McpContextRegistry.js";
 import type { McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import type { McpToolCatalogArtifactName } from "../tool/catalog/McpToolCatalogArtifact.js";
 import type { McpToolCatalogInstanceName } from "../tool/catalog/McpToolCatalogInstance.js";
+import type { McpToolCatalogInteractionName } from "../tool/catalog/McpToolCatalogInteraction.js";
 import type { McpToolCatalogTodoName } from "../tool/catalog/McpToolCatalogTodo.js";
 import { throwIfMcpEndpointAborted } from "./McpEndpointCancellation.js";
 import { attachMcpComments } from "./McpEndpointFeedback.js";
@@ -23,6 +24,7 @@ import { McpNativeToolResult, type McpEndpointResult } from "./McpEndpointResult
 import { McpEndpointHandlerArtifact } from "./handler/McpEndpointHandlerArtifact.js";
 import { McpEndpointHandlerEnvironment } from "./handler/McpEndpointHandlerEnvironment.js";
 import { McpEndpointHandlerInstance } from "./handler/McpEndpointHandlerInstance.js";
+import { McpEndpointHandlerInteraction } from "./handler/McpEndpointHandlerInteraction.js";
 import { McpEndpointHandlerTodo } from "./handler/McpEndpointHandlerTodo.js";
 import { McpEndpointHandlerWorker } from "./handler/McpEndpointHandlerWorker.js";
 import { auditMcpEndpointTool, assertMcpEndpointReady, mcpEndpointToolNotExposed } from "./handler/McpEndpointHandlerSupport.js";
@@ -50,6 +52,7 @@ export class McpEndpointDispatch {
     readonly #gateway?: McpInstanceGateway;
     readonly #instance: McpEndpointHandlerInstance;
     readonly #instanceName: string;
+    readonly #interaction: McpEndpointHandlerInteraction;
     readonly #todo: McpEndpointHandlerTodo;
     readonly #worker: McpEndpointWorkerPort;
     readonly #workerHandler: McpEndpointHandlerWorker;
@@ -74,6 +77,7 @@ export class McpEndpointDispatch {
             ...controlOptions,
             contextRegistry: this.#contextRegistry
         });
+        this.#interaction = new McpEndpointHandlerInteraction(controlOptions);
         this.#todo = new McpEndpointHandlerTodo(controlOptions);
         this.#workerHandler = new McpEndpointHandlerWorker({
             catalog: options.catalog,
@@ -118,6 +122,7 @@ export class McpEndpointDispatch {
 
         const contextInput = readMcpContextInput(input);
         input = contextInput.input;
+        const appOnlyInteraction = selected.owner === "interaction" && isAppOnlyInteractionTool(toolName);
         const routed = selected.owner === "worker" || selected.owner === "artifact"
             ? readMcpRoutedInput(input, snapshot.instanceRoutingEnabled, this.#instanceName)
             : { input, instance: this.#instanceName };
@@ -127,10 +132,25 @@ export class McpEndpointDispatch {
             requestContext,
             routed.instance,
             selected.owner === "worker",
+            !appOnlyInteraction,
             signal
         );
 
-        if (selected.owner === "todo" || selected.owner === "artifact" || selected.owner === "instance") {
+        if (appOnlyInteraction) {
+            this.#catalog.assertAdaptable(selected.definition);
+            return await this.#interaction.call(
+                toolName as McpToolCatalogInteractionName,
+                input,
+                context,
+                context.requestId ?? "workspace-app",
+                signal
+            );
+        }
+
+        if (
+            selected.owner === "todo" || selected.owner === "artifact" ||
+            selected.owner === "instance" || selected.owner === "interaction"
+        ) {
             const owner = selected.owner;
             this.#catalog.assertAdaptable(selected.definition);
             return await this.#auditControlTool(
@@ -183,6 +203,7 @@ export class McpEndpointDispatch {
         requestContext: McpEndpointCallContext,
         instance: string,
         prepareWorkerState: boolean,
+        recordMcpCall: boolean,
         signal?: AbortSignal
     ): Promise<ToolCallContext> {
         const record = await this.#contextRegistry.validateAndTouch(ctxId, {
@@ -200,10 +221,12 @@ export class McpEndpointDispatch {
         if (prepareWorkerState) {
             await this.#touchAlerts(instance, environment!.workspace!);
         }
-        await this.#appendMcpToolCalled(instance, toolName, {
-            ctxId: context.ctxId,
-            requestId: context.requestId
-        });
+        if (recordMcpCall) {
+            await this.#appendMcpToolCalled(instance, toolName, {
+                ctxId: context.ctxId,
+                requestId: context.requestId
+            });
+        }
         throwIfMcpEndpointAborted(signal);
         return context;
     }
@@ -274,7 +297,7 @@ export class McpEndpointDispatch {
     }
 
     async #auditControlTool(
-        owner: "artifact" | "instance" | "todo",
+        owner: "artifact" | "instance" | "interaction" | "todo",
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
@@ -288,10 +311,11 @@ export class McpEndpointDispatch {
             input,
             localInstance: this.#instanceName,
             operation: async (callId) => {
-                const result = await this.#callControlTool(owner, toolName, input, context, signal);
+                const result = await this.#callControlTool(owner, toolName, input, context, callId, signal);
                 if (result instanceof McpNativeToolResult) {
                     const structuredContent = await this.#attachComments(toolName, result.structuredContent, context, callId, instance);
                     nativeResult = new McpNativeToolResult({
+                        ...(result._meta === undefined ? {} : { _meta: result._meta }),
                         content: result.content,
                         isError: result.isError,
                         structuredContent
@@ -309,10 +333,11 @@ export class McpEndpointDispatch {
     }
 
     async #callControlTool(
-        owner: "artifact" | "instance" | "todo",
+        owner: "artifact" | "instance" | "interaction" | "todo",
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
+        callId: string,
         signal?: AbortSignal
     ): Promise<McpEndpointResult> {
         switch (owner) {
@@ -320,11 +345,25 @@ export class McpEndpointDispatch {
                 return await this.#artifact.call(toolName as McpToolCatalogArtifactName, input, context, signal);
             case "instance":
                 return await this.#instance.call(toolName as McpToolCatalogInstanceName, input, context, signal);
+            case "interaction":
+                return await this.#interaction.call(
+                    toolName as McpToolCatalogInteractionName,
+                    input,
+                    context,
+                    callId,
+                    signal
+                );
             case "todo":
                 return await this.#todo.call(toolName as McpToolCatalogTodoName, input, context, signal);
         }
     }
 
+}
+
+function isAppOnlyInteractionTool(toolName: string): boolean {
+    return toolName === "workspace_snapshot" ||
+        toolName === "workspace_question_answer" ||
+        toolName === "workspace_approval_decide";
 }
 
 function isRecoverableContextTemporaryError(error: unknown): boolean {

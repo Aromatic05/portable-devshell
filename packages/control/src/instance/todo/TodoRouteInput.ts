@@ -1,4 +1,4 @@
-import { createError, errorCodes, type JsonValue } from "@portable-devshell/shared";
+import { createError, errorCodes, type JsonValue, type TodoReadInput } from "@portable-devshell/shared";
 
 export function readTodoSubscriptionFromSeq(payload?: JsonValue): number {
     if (!isRecord(payload) || typeof payload.fromSeq !== "number" || !Number.isSafeInteger(payload.fromSeq) || payload.fromSeq < 0) {
@@ -11,7 +11,7 @@ export function readTodoSubscriptionFromSeq(payload?: JsonValue): number {
     return payload.fromSeq;
 }
 
-export function readTodoTitle(payload?: JsonValue): string | undefined {
+export function readTodoInput(payload?: JsonValue): TodoReadInput | undefined {
     if (payload === undefined) return undefined;
     if (!isRecord(payload)) {
         throw createError({
@@ -20,15 +20,25 @@ export function readTodoTitle(payload?: JsonValue): string | undefined {
             retryable: false
         });
     }
-    if (payload.title === undefined) return undefined;
-    if (typeof payload.title !== "string" || payload.title.trim().length === 0) {
+    const keys = Object.keys(payload);
+    if (keys.length === 0) return undefined;
+    if (keys.length !== 1 || (keys[0] !== "taskId" && keys[0] !== "title")) {
         throw createError({
             code: errorCodes.targetInvalid,
-            message: "todo.get title must be a non-empty string.",
+            message: "todo.get accepts only one optional selector: taskId or title.",
             retryable: false
         });
     }
-    return payload.title;
+    const key = keys[0] as "taskId" | "title";
+    const value = payload[key];
+    if (typeof value !== "string" || value.trim().length === 0) {
+        throw createError({
+            code: errorCodes.targetInvalid,
+            message: `todo.get ${key} must be a non-empty string.`,
+            retryable: false
+        });
+    }
+    return { [key]: value.trim() };
 }
 
 export function readTodoTaskId(payload?: JsonValue): string {

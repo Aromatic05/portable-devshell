@@ -3,10 +3,19 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { CallToolRequestSchema, ErrorCode, isInitializeRequest, ListToolsRequestSchema, McpError } from "@modelcontextprotocol/sdk/types.js";
+import {
+    CallToolRequestSchema,
+    ErrorCode,
+    isInitializeRequest,
+    ListResourcesRequestSchema,
+    ListToolsRequestSchema,
+    McpError,
+    ReadResourceRequestSchema
+} from "@modelcontextprotocol/sdk/types.js";
 import { mergeComments, resolveErrorHints, toControlErrorBody, type ControlErrorBody, type JsonValue } from "@portable-devshell/shared";
 
 import { McpToolSchemaUnavailableError } from "../tool/McpToolSchemaAdapter.js";
+import { workspaceAppHtml, workspaceAppResourceUri } from "../workspace/McpWorkspaceApp.js";
 import { McpEndpointWorker } from "./McpEndpointWorker.js";
 import { McpNativeToolResult, type McpEndpointResult } from "./McpEndpointResult.js";
 
@@ -108,6 +117,7 @@ export class McpEndpointBinding {
             },
             {
                 capabilities: {
+                    resources: {},
                     tools: {}
                 }
             }
@@ -139,6 +149,27 @@ export class McpEndpointBinding {
     }
 
     #registerHandlers(server: Server): void {
+        server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+            resources: [{
+                mimeType: "text/html;profile=mcp-app",
+                name: "portable-devshell Workspace",
+                uri: workspaceAppResourceUri
+            }]
+        }));
+
+        server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+            if (request.params.uri !== workspaceAppResourceUri) {
+                throw new McpError(ErrorCode.InvalidParams, `Unknown resource: ${request.params.uri}`);
+            }
+            return {
+                contents: [{
+                    mimeType: "text/html;profile=mcp-app",
+                    text: workspaceAppHtml,
+                    uri: workspaceAppResourceUri
+                }]
+            };
+        });
+
         server.setRequestHandler(ListToolsRequestSchema, async () => {
             try {
                 return {
@@ -273,6 +304,7 @@ function writeJsonRpcError(response: ServerResponse, statusCode: number, code: n
 function toCallToolResult(result: McpEndpointResult) {
     if (result instanceof McpNativeToolResult) {
         return {
+            ...(result._meta === undefined ? {} : { _meta: result._meta }),
             content: result.content,
             isError: result.isError,
             structuredContent: result.structuredContent
