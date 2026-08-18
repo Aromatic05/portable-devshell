@@ -35,6 +35,12 @@ struct MatchedFile {
 }
 
 #[derive(Clone)]
+struct PendingFile {
+    path: String,
+    resolved: ResolvedPath,
+}
+
+#[derive(Clone)]
 struct SearchGroup {
     discovery: DiscoveryCursor,
     exhausted: bool,
@@ -45,7 +51,7 @@ pub(crate) struct SearchContinuation {
     groups: Vec<SearchGroup>,
     next_group: usize,
     seen_candidates: HashSet<PathBuf>,
-    pending: Option<MatchedFile>,
+    pending: Option<PendingFile>,
     per_file: usize,
     matcher: regex::Regex,
     context: Option<usize>,
@@ -184,14 +190,15 @@ impl ToolHandler for FileSearchTool {
                         "one search result file exceeds the serialized output budget",
                     ));
                 }
-                continuation.pending = Some(file);
+                continuation.pending = Some(pending_file(file));
                 break;
             }
             page.push(file);
         }
 
         if page.len() == FILES_PER_PAGE && continuation.pending.is_none() {
-            continuation.pending = next_matched_file(&call, &mut continuation, &self.state)?;
+            continuation.pending =
+                next_matched_file(&call, &mut continuation, &self.state)?.map(pending_file);
         }
 
         let has_more = continuation.pending.is_some()
@@ -294,7 +301,7 @@ fn next_page_file(
 fn refresh_pending_file(
     call: &ToolCall,
     continuation: &SearchContinuation,
-    pending: MatchedFile,
+    pending: PendingFile,
     state: &FileToolState,
 ) -> Result<Option<MatchedFile>, ToolError> {
     let Ok((metadata, matches, shown, next_line)) = search_stream(
@@ -316,7 +323,7 @@ fn refresh_pending_file(
     let (body, seen) = format_streamed_content(&matches, &shown);
     Ok(Some(MatchedFile {
         output: FileSearchFile {
-            path: pending.output.path,
+            path: pending.path,
             content: body,
             truncated: next_line.is_some().then_some(true),
             next_line,
@@ -326,6 +333,13 @@ fn refresh_pending_file(
         seen,
         ordinal: state.next_snapshot_ordinal(),
     }))
+}
+
+fn pending_file(file: MatchedFile) -> PendingFile {
+    PendingFile {
+        path: file.output.path,
+        resolved: file.resolved,
+    }
 }
 
 fn is_single_exact_file(call: &ToolCall, paths: &[String]) -> Result<bool, ToolError> {
