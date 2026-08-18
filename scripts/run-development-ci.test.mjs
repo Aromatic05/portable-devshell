@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { runDevTagGate } from "./run-dev-tag-gate.mjs";
+import { hasDevTagGateProof, runDevTagGate, writeDevTagGateProof } from "./run-dev-tag-gate.mjs";
 import {
     createCommonCiSteps,
     createDevelopmentCiSteps,
@@ -156,17 +156,48 @@ test("development CI entrypoint executes the canonical target plan", () => {
     );
 });
 
-test("local dev tag gate is a quick preflight rather than a second full CI run", () => {
+test("local dev tag gate reproduces the complete Linux x64 development gate", () => {
     const invoked = [];
     const result = runDevTagGate({
         execute(step) {
             invoked.push({ args: step.args, command: step.command, name: step.name });
-            return { status: step.name === "Development version" ? 23 : 0 };
+            return { status: 0 };
         },
+        isWorktreeClean: () => true,
         log() {},
+        arch: "x64",
         platform: "linux",
     });
 
-    assert.deepEqual(invoked.map((step) => step.name), ["Development version"]);
-    assert.deepEqual(result.failures, [{ name: "Development version", status: 23 }]);
+    assert.equal(result.ok, true);
+    assert.deepEqual(
+        invoked,
+        createDevelopmentCiSteps("linux-x64", "linux").map((step) => ({
+            args: step.args,
+            command: step.command,
+            name: step.name,
+        })),
+    );
+});
+
+test("local dev tag gate rejects hosts that cannot reproduce Linux x64 development CI", () => {
+    assert.throws(
+        () => runDevTagGate({ arch: "arm64", platform: "linux" }),
+        /requires a Linux x64 host/u,
+    );
+});
+
+test("dev tag gate proof is bound to the exact full commit SHA", () => {
+    const directory = mkdtempSync(join(tmpdir(), "pds-dev-gate-proof-"));
+    const first = "1111111111111111111111111111111111111111";
+    const second = "2222222222222222222222222222222222222222";
+    try {
+        assert.equal(hasDevTagGateProof(first, directory), false);
+        writeDevTagGateProof(first, directory);
+        assert.equal(readFileSync(join(directory, first), "utf8"), `${first}\n`);
+        assert.equal(hasDevTagGateProof(first, directory), true);
+        assert.equal(hasDevTagGateProof(second, directory), false);
+    } finally {
+        rmSync(directory, { force: true, recursive: true });
+    }
 });

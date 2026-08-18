@@ -1,18 +1,18 @@
 #!/bin/sh
 set -eu
 
-needs_validation=0
+dev_shas=""
 while read -r local_ref local_sha remote_ref remote_sha; do
     case "$remote_ref" in
         refs/tags/dev*)
             if [ "$local_sha" != "0000000000000000000000000000000000000000" ]; then
-                needs_validation=1
+                dev_shas="$dev_shas $local_sha"
             fi
             ;;
     esac
 done
 
-if [ "$needs_validation" -eq 0 ]; then
+if [ -z "$dev_shas" ]; then
     exit 0
 fi
 
@@ -24,5 +24,6 @@ if [ -n "$(git status --porcelain)" ]; then
     exit 1
 fi
 
-echo "running dev tag preflight before dev tag push; exact-commit CI runs on GitHub" >&2
-exec node scripts/run-dev-tag-gate.mjs
+for local_sha in $dev_shas; do
+    node scripts/run-dev-tag-gate.mjs --check "$local_sha"
+done
