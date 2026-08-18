@@ -363,6 +363,41 @@ fn tmux_run_returns_a_task_and_preserves_clean_first_output() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
+fn tmux_run_defaults_to_nonblock_for_long_tasks() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-default-nonblock";
+    start(&env, instance);
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({ "command": "sleep 1" }),
+        "ctx-a",
+        "run-default-nonblock",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    assert_eq!(run["result"]["task"]["status"], "running", "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap();
+    let closed = call(
+        &env,
+        instance,
+        "2",
+        "tmux_close",
+        json!({ "task": task, "force": true }),
+        "ctx-a",
+        "close-default-nonblock",
+    );
+    assert_eq!(closed["ok"], true, "{closed}");
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
 fn tmux_task_and_persistent_pane_controls_remain_separate_across_contexts() {
     assert!(
         tmux_available(),
@@ -1178,6 +1213,47 @@ fn tmux_run_uses_clean_bash_while_main_uses_user_bash_rc() {
         thread::sleep(Duration::from_millis(25));
     }
     assert_eq!(std::fs::read_to_string(marker).unwrap().trim(), "loaded");
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
+fn tmux_run_does_not_source_inherited_bash_env() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let bash_env = env.home().join("task-bash-env.sh");
+    std::fs::write(&bash_env, "export DEVSHELL_BASH_ENV_MARKER=loaded\n").unwrap();
+    let instance = "aromatic-tmux-bash-env";
+    env.command_with_env("BASH_ENV", bash_env.to_string_lossy().as_ref())
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({
+            "command": "test -z \"${DEVSHELL_BASH_ENV_MARKER:-}\"\nprintf 'BASH-ENV-CLEAN\\n'",
+            "wait": "block", "timeMs": 3000, "line": 80
+        }),
+        "ctx-bash-env",
+        "run-clean-bash-env",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
+    assert!(
+        run["result"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line == "BASH-ENV-CLEAN")
+    );
     stop(&env, instance);
 }
 

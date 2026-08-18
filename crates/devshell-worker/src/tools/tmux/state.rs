@@ -150,7 +150,7 @@ impl TmuxState {
             ));
         }
         let cwd = resolve_cwd(call, params.cwd.as_deref())?;
-        let wait = params.wait.unwrap_or(TmuxWaitMode::Block);
+        let wait = params.wait.unwrap_or(TmuxWaitMode::Nonblock);
         let time_ms = validate_time(params.time_ms.unwrap_or(DEFAULT_RUN_TIME_MS))?;
         let line = params.line.unwrap_or(DEFAULT_LINE);
 
@@ -554,6 +554,7 @@ impl TmuxState {
                 .ok_or_else(|| task_expired(task_id))?;
             task.state = TaskState::Terminated;
             task.finished_at_ms = Some(unix_time_millis());
+            task.last_pane = None;
         }
         self.persist_task_record(task_id)?;
         self.pane_locks
@@ -640,6 +641,9 @@ impl TmuxState {
                 .ok_or_else(|| task_expired(task_id))?
         };
         if !task.state.is_active() {
+            if let Some(pane) = task.last_pane.as_ref() {
+                self.cleanup_task_pane(task_id, pane)?;
+            }
             return Ok(());
         }
         if !self.backend.has_session() {
@@ -706,6 +710,15 @@ impl TmuxState {
         let _ = self.backend.finish_task_capture(task_id);
         self.backend.remove_task_runtime(task_id);
         self.backend.remove_pane_metadata(pane_id);
+        if let Some(task) = self
+            .tasks
+            .lock()
+            .map_err(|_| lock_error("tmux tasks"))?
+            .tasks
+            .get_mut(task_id)
+        {
+            task.last_pane = None;
+        }
         self.pane_locks
             .lock()
             .map_err(|_| lock_error("tmux pane locks"))?
@@ -724,6 +737,15 @@ impl TmuxState {
         {
             let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
             tasks.prune();
+            cleanup.extend(tasks.tasks.values().filter_map(|task| {
+                (!task.state.is_active())
+                    .then(|| {
+                        task.last_pane
+                            .as_ref()
+                            .map(|pane| (task.id.clone(), pane.clone()))
+                    })
+                    .flatten()
+            }));
             for task in tasks
                 .tasks
                 .values_mut()
@@ -799,13 +821,44 @@ impl TmuxState {
     }
 
     fn cleanup_task_pane(&self, task_id: &str, pane: &BackendPane) -> Result<(), ToolError> {
-        self.backend.close_pane(pane)?;
+        let pane_lock = self.pane_lock(&pane.id)?;
+        let _pane_guard = pane_lock.lock().map_err(|_| lock_error("pane operation"))?;
+        let needs_cleanup = {
+            let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
+            tasks
+                .tasks
+                .get(task_id)
+                .and_then(|task| task.last_pane.as_ref())
+                .is_some_and(|last| {
+                    last.id == pane.id && last.pane_incarnation_id == pane.pane_incarnation_id
+                })
+        };
+        if !needs_cleanup {
+            return Ok(());
+        }
+        let workspace = self.backend.capture_workspace()?;
+        if let Some(current) = workspace.panes.iter().find(|current| {
+            current.id == pane.id && current.pane_incarnation_id == pane.pane_incarnation_id
+        }) {
+            self.backend.close_pane(current)?;
+        }
         self.backend.finish_task_capture(task_id)?;
         self.backend.remove_task_runtime(task_id);
-        let _ = self
-            .pane_locks
+        self.backend.remove_pane_metadata(&pane.id);
+        {
+            let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
+            if let Some(task) = tasks.tasks.get_mut(task_id) {
+                if task.last_pane.as_ref().is_some_and(|last| {
+                    last.id == pane.id && last.pane_incarnation_id == pane.pane_incarnation_id
+                }) {
+                    task.last_pane = None;
+                }
+            }
+        }
+        self.pane_locks
             .lock()
-            .map(|mut locks| locks.remove(&pane.id));
+            .map_err(|_| lock_error("tmux pane locks"))?
+            .remove(&pane.id);
         Ok(())
     }
 
@@ -822,18 +875,19 @@ impl TmuxState {
             .get_mut(task_id)
             .ok_or_else(|| task_expired(task_id))?;
         let terminal = !task.state.is_active();
-        let output =
-            task.transcript
-                .take_output(&task.pane_id, &mut task.warnings, line, terminal)?;
-        let transcript_offset = task.transcript.offset();
+        let mut transcript = task.transcript.clone();
+        let mut task_warnings = task.warnings.clone();
+        let output = transcript.take_output(&task.pane_id, &mut task_warnings, line, terminal)?;
+        self.backend
+            .persist_task_offset(task_id, transcript.offset())?;
+        task.transcript = transcript;
+        task.warnings = task_warnings;
         let mut warnings = std::mem::take(&mut task.warnings);
         let view = task_view(task);
         let pane = (include_pane && task.state.is_active())
             .then(|| task.last_pane.as_ref().map(pane_ref))
             .flatten();
         drop(tasks);
-        self.backend
-            .persist_task_offset(task_id, transcript_offset)?;
         warnings.append(&mut self.take_pending_warnings()?);
         Ok(TmuxTaskOperationOutput {
             task: view,

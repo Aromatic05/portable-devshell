@@ -150,7 +150,7 @@ pub fn register_tools(
     ));
     registry.register(tool::<TmuxRunParams, TmuxTaskOperationOutput>(
         ToolName::parse("tmux_run").unwrap(),
-        "Run a long-running shell program in a fresh managed task pane using clean Bash without user rc files. command may contain multiple lines. cwd defaults to the workspace. The pane exists only while the task runs; task transcript remains readable after exit. wait defaults to block and timeMs limits only this call's wait, never the task.",
+        "Run a long-running shell program in a fresh managed task pane using clean Bash without user rc files. command may contain multiple lines. cwd defaults to the workspace. The pane exists only while the task runs; task transcript remains readable after exit. wait defaults to nonblock; explicit block waits are limited by timeMs and never stop the task.",
         ToolCapability::Execute,
         Arc::clone(&states),
         TmuxState::run,

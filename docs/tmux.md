@@ -136,7 +136,7 @@ main         user's interactive shell environment
 
 ```text
 block     等待 task 退出或 timeMs 到期
-nonblock  task 成功启动后立即返回
+nonblock  task 成功启动后立即返回（默认）
 ```
 
 `timeMs` 只限制这次 RPC 等待，不停止 task。block wait 超时会返回 `tmux.blockTimeout` warning，task 继续运行。

@@ -17,7 +17,7 @@ pub struct TmuxRunParams {
     pub cwd: Option<String>,
     pub command: String,
     #[serde(default)]
-    /// Wait mode. Defaults to block.
+    /// Wait mode. Defaults to nonblock.
     pub wait: Option<TmuxWaitMode>,
     #[serde(default)]
     /// Maximum time this call waits for output or completion. Defaults to 30000 and does not stop the task.

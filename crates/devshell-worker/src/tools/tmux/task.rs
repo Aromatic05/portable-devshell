@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use uuid::Uuid;
 
@@ -51,12 +51,10 @@ pub struct TaskRecord {
 #[derive(Default)]
 pub struct TaskRegistry {
     pub tasks: HashMap<String, TaskRecord>,
-    order: VecDeque<String>,
 }
 
 impl TaskRegistry {
     pub fn insert(&mut self, task: TaskRecord) {
-        self.order.push_back(task.id.clone());
         self.tasks.insert(task.id.clone(), task);
         self.prune();
     }
@@ -92,14 +90,11 @@ impl TaskRegistry {
             > MAX_COMPLETED_TASKS
         {
             let Some(id) = self
-                .order
+                .tasks
                 .iter()
-                .find(|id| {
-                    self.tasks
-                        .get(*id)
-                        .is_some_and(|task| !task.state.is_active())
-                })
-                .cloned()
+                .filter(|(_, task)| !task.state.is_active())
+                .min_by_key(|(_, task)| task.finished_at_ms.unwrap_or(0))
+                .map(|(id, _)| id.clone())
             else {
                 break;
             };
@@ -114,7 +109,6 @@ impl TaskRegistry {
             let _ = std::fs::remove_file(task.transcript.path.with_extension("done"));
             let _ = std::fs::remove_file(task.transcript.path.with_extension("offset"));
         }
-        self.order.retain(|candidate| candidate != id);
     }
 }
 
@@ -266,5 +260,22 @@ mod tests {
 
         assert!(!registry.tasks.contains_key("completed"));
         assert!(registry.tasks.contains_key("running"));
+    }
+
+    #[test]
+    fn completed_task_cap_evicts_the_oldest_finish_time() {
+        let now = unix_time_millis();
+        let mut registry = TaskRegistry::default();
+        for index in 0..=64u128 {
+            registry.insert(task(
+                &format!("task-{index:02}"),
+                TaskState::Exited(0),
+                Some(now.saturating_sub(index)),
+            ));
+        }
+
+        assert!(registry.tasks.contains_key("task-00"));
+        assert!(!registry.tasks.contains_key("task-64"));
+        assert_eq!(registry.tasks.len(), 64);
     }
 }

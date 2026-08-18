@@ -462,7 +462,7 @@ impl TmuxBackend {
         );
         atomic_write_bytes(&script_path, script.as_bytes())?;
         let launch = format!(
-            "exec /bin/bash --noprofile --norc {}",
+            "exec env -u BASH_ENV /bin/bash --noprofile --norc {}",
             shell_quote(&script_path.to_string_lossy())
         );
         let args = vec![
