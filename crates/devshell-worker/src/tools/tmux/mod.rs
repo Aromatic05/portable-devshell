@@ -171,7 +171,7 @@ pub fn register_tools(
     ))?;
     registry.register(tool::<TmuxInspectParams, TmuxPaneOperationOutput>(
         ToolName::parse("tmux_inspect").unwrap(),
-        "Inspect terminal history without consuming unread output. Use this for curses applications or terminal screen state.",
+        "Inspect a pane's terminal screen/history without consuming managed task transcript data. Use this for curses applications or persistent interactive panes.",
         ToolCapability::Read,
         Arc::clone(&states),
         TmuxState::inspect,

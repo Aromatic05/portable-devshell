@@ -14,16 +14,16 @@ devshell_tmux_init_status_file() {
 }
 
 devshell_tmux_write_status() {
-  local state=$1 exit_code=$2
+  local state=$1
   [[ -z "$DEVSHELL_TMUX_STATUS_FILE" ]] && devshell_tmux_init_status_file
   [[ -z "$DEVSHELL_TMUX_STATUS_FILE" ]] && return 0
-  print -r -- "{\"state\":\"$state\",\"exit_code\":$exit_code}" \
+  print -r -- "{\"state\":\"$state\"}" \
     >"$DEVSHELL_TMUX_STATUS_FILE.tmp" 2>/dev/null && /bin/mv "$DEVSHELL_TMUX_STATUS_FILE.tmp" "$DEVSHELL_TMUX_STATUS_FILE" 2>/dev/null || true
 }
 
 devshell_tmux_preexec_zsh() {
   DEVSHELL_TMUX_ACTIVE=1
-  devshell_tmux_write_status running 0
+  devshell_tmux_write_status running
 }
 
 devshell_tmux_precmd_zsh() {
@@ -31,9 +31,9 @@ devshell_tmux_precmd_zsh() {
   [[ -z "$DEVSHELL_TMUX_STATUS_FILE" ]] && devshell_tmux_init_status_file
   if (( DEVSHELL_TMUX_ACTIVE )); then
     DEVSHELL_TMUX_ACTIVE=0
-    devshell_tmux_write_status exit "$last_status"
-  elif [[ ! -f "$DEVSHELL_TMUX_STATUS_FILE" ]]; then
-    devshell_tmux_write_status idle 0
+    devshell_tmux_write_status idle
+  else
+    devshell_tmux_write_status idle
   fi
   return $last_status
 }

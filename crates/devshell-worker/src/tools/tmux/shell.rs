@@ -19,11 +19,15 @@ pub fn prepare_shell_launch(
     fs::create_dir_all(shell_root).map_err(io_error)?;
     fs::create_dir_all(status_dir).map_err(io_error)?;
     let shell = managed_shell();
-    match shell.file_name().and_then(|name| name.to_str()) {
+    let launch = match shell.file_name().and_then(|name| name.to_str()) {
         Some("fish") => prepare_fish(shell_root, status_dir, pane_id, &shell),
         Some("zsh") => prepare_zsh(shell_root, status_dir, pane_id, &shell),
         _ => prepare_bash(shell_root, status_dir, pane_id, &shell),
-    }
+    }?;
+    let loop_command = format!("while :; do {}; /bin/sleep 0.05; done", launch.command);
+    Ok(ShellLaunch {
+        command: format!("exec /bin/sh -c {}", quote(&loop_command)),
+    })
 }
 
 fn managed_shell() -> PathBuf {
@@ -58,7 +62,7 @@ fn prepare_bash(
     .map_err(io_error)?;
     Ok(ShellLaunch {
         command: format!(
-            "exec /usr/bin/env -u TMUX -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} {} --rcfile {} -i",
+            "/usr/bin/env -u TMUX -u TMUX_PANE -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} {} --rcfile {} -i",
             quote(status_dir.to_string_lossy().as_ref()),
             quote(pane_id),
             quote(shell.to_string_lossy().as_ref()),
@@ -77,7 +81,7 @@ fn prepare_fish(
     fs::write(&integration, FISH_INTEGRATION).map_err(io_error)?;
     Ok(ShellLaunch {
         command: format!(
-            "exec /usr/bin/env -u TMUX -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} DEVSHELL_TMUX_FISH_INTEGRATION={} {} -C {} -i",
+            "/usr/bin/env -u TMUX -u TMUX_PANE -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} DEVSHELL_TMUX_FISH_INTEGRATION={} {} -C {} -i",
             quote(status_dir.to_string_lossy().as_ref()),
             quote(pane_id),
             quote(integration.to_string_lossy().as_ref()),
@@ -109,7 +113,7 @@ fn prepare_zsh(
     .map_err(io_error)?;
     Ok(ShellLaunch {
         command: format!(
-            "exec /usr/bin/env -u TMUX -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} ZDOTDIR={} {} -i",
+            "/usr/bin/env -u TMUX -u TMUX_PANE -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} ZDOTDIR={} {} -i",
             quote(status_dir.to_string_lossy().as_ref()),
             quote(pane_id),
             quote(zdotdir.to_string_lossy().as_ref()),

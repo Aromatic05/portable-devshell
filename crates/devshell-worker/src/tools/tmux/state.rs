@@ -37,7 +37,7 @@ const DEFAULT_INSPECT_START: i64 = -80;
 const DEFAULT_INSPECT_END: i64 = 0;
 const MAX_INSPECT_LINES: i64 = 200;
 const TASK_REAPER_INTERVAL_MS: u64 = 1_000;
-const MAX_PENDING_WARNINGS: usize = 64;
+const MAX_QUEUED_WARNINGS: usize = 64;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,13 +60,6 @@ pub struct TmuxState {
 
 impl TmuxState {
     pub fn new(backend: TmuxBackend) -> Result<Self, ToolError> {
-        let pending_warnings = backend.observation_reset().then(|| {
-            warning(
-                None,
-                "tmux.observationReset",
-                "worker observation restarted; task transcripts remain durable but terminal history may be incomplete",
-            )
-        });
         let mut tasks = TaskRegistry::default();
         for record in backend.load_task_records::<PersistedTaskRecord>()? {
             if record.schema_version != 1 {
@@ -100,7 +93,7 @@ impl TmuxState {
             structure: Mutex::new(()),
             pane_locks: Mutex::new(HashMap::new()),
             tasks: Mutex::new(tasks),
-            pending_warnings: Mutex::new(pending_warnings.into_iter().collect()),
+            pending_warnings: Mutex::new(Vec::new()),
             replays: ReplayCache::default(),
         })
     }
@@ -113,11 +106,14 @@ impl TmuxState {
                 let Some(state) = state.upgrade() else {
                     break;
                 };
-                let has_active_task = state
-                    .tasks
-                    .lock()
-                    .is_ok_and(|tasks| tasks.tasks.values().any(|task| task.state.is_active()));
-                if !has_active_task {
+                let has_lifecycle_work = state.tasks.lock().is_ok_and(|tasks| {
+                    tasks.tasks.values().any(|task| {
+                        task.state.is_active()
+                            || task.last_pane.is_some()
+                            || state.backend.task_runtime_pending(&task.id)
+                    })
+                });
+                if !has_lifecycle_work {
                     continue;
                 }
                 if !state.backend.has_session() {
@@ -237,7 +233,6 @@ impl TmuxState {
             self.refresh_task(&task_id)?;
         }
 
-        call.check_cancelled()?;
         self.task_output(&task_id, line, true)
     }
 
@@ -300,7 +295,16 @@ impl TmuxState {
                 }
                 let deadline = Instant::now() + Duration::from_millis(time_ms);
                 loop {
-                    call.check_cancelled()?;
+                    if call.cancellation.is_cancelled() {
+                        return Err(ToolError::new(
+                            "tool.cancelled",
+                            "tmux_input wait was cancelled after terminal input was delivered.",
+                        )
+                        .with_details(serde_json::json!({
+                            "task": task_id,
+                            "inputDelivered": true
+                        })));
+                    }
                     self.refresh_task(task_id)?;
                     if self.task_has_output(task_id)?
                         || self.task_is_terminal(task_id)?
@@ -421,7 +425,9 @@ impl TmuxState {
         let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
         let mut panes = Vec::with_capacity(selected.len());
         for pane in selected {
-            let lines = self.backend.capture_lines(&pane.tmux_pane_id, start, end)?;
+            let lines = self
+                .backend
+                .capture_lines(&pane.tmux_pane_id, pane.rows, start, end)?;
             panes.push(pane_detail(&pane, current_task(&tasks, &pane.id), lines));
         }
         Ok(self.pane_output(panes, self.output_warnings(&workspace)?))
@@ -547,7 +553,7 @@ impl TmuxState {
             .cloned()
             .ok_or_else(|| ToolError::new("tmux.taskNotRunning", "task pane is unavailable"))?;
         let pane_lock = self.pane_lock(&pane.id)?;
-        let _pane_guard = pane_lock.lock().map_err(|_| lock_error("pane operation"))?;
+        let pane_guard = pane_lock.lock().map_err(|_| lock_error("pane operation"))?;
         self.backend.close_pane(&pane)?;
         {
             let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
@@ -559,18 +565,10 @@ impl TmuxState {
             task.finished_at_ms = Some(unix_time_millis());
         }
         self.persist_task_record(task_id)?;
-        self.backend.finish_task_capture(task_id)?;
-        self.backend.remove_task_runtime(task_id);
-        {
-            let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
-            if let Some(task) = tasks.tasks.get_mut(task_id) {
-                task.last_pane = None;
-            }
+        drop(pane_guard);
+        if let Err(error) = self.cleanup_task_pane(task_id, &pane) {
+            self.push_pending_warning(cleanup_warning(task_id, Some(&pane.id), &error))?;
         }
-        self.pane_locks
-            .lock()
-            .map_err(|_| lock_error("tmux pane locks"))?
-            .remove(&pane.id);
         Ok(TmuxCloseOutput {
             closed_task_id: Some(task_id.to_string()),
             closed_pane_id: None,
@@ -605,15 +603,24 @@ impl TmuxState {
                 "the main interactive pane cannot be closed",
             ));
         }
-        if pane.status.as_deref() == Some("running") && !force {
-            return Err(ToolError::new(
-                "tmux.paneBusy",
-                format!("pane {} has a running foreground process", pane.name),
-            ));
-        }
         let pane_lock = self.pane_lock(&pane.id)?;
         let _pane_guard = pane_lock.lock().map_err(|_| lock_error("pane operation"))?;
-        self.backend.close_pane(&pane)?;
+        let current = self
+            .backend
+            .capture_workspace()?
+            .panes
+            .into_iter()
+            .find(|current| {
+                current.id == pane.id && current.pane_incarnation_id == pane.pane_incarnation_id
+            })
+            .ok_or_else(|| ToolError::new("tmux.paneNotFound", "pane is no longer available"))?;
+        if current.status.as_deref() == Some("running") && !force {
+            return Err(ToolError::new(
+                "tmux.paneBusy",
+                format!("pane {} has a running foreground process", current.name),
+            ));
+        }
+        self.backend.close_pane(&current)?;
         self.pane_locks
             .lock()
             .map_err(|_| lock_error("tmux pane locks"))?
@@ -652,14 +659,18 @@ impl TmuxState {
         };
         if !task.state.is_active() {
             if let Some(pane) = task.last_pane.as_ref() {
-                self.cleanup_task_pane(task_id, pane)?;
+                if let Err(error) = self.cleanup_task_pane(task_id, pane) {
+                    self.push_task_cleanup_warning(task_id, &error)?;
+                }
             } else if self.backend.task_runtime_pending(task_id) {
                 if self.backend.has_session() {
                     let workspace = self.backend.capture_workspace()?;
                     self.refresh_tasks_with_workspace(&workspace)?;
                 } else {
-                    self.backend.finish_task_capture(task_id)?;
-                    self.backend.remove_task_runtime(task_id);
+                    match self.backend.finish_task_capture(task_id) {
+                        Ok(()) => self.backend.remove_task_runtime(task_id),
+                        Err(error) => self.push_task_cleanup_warning(task_id, &error)?,
+                    }
                 }
             }
             return Ok(());
@@ -701,7 +712,9 @@ impl TmuxState {
             self.persist_task_record(task_id)?;
         }
         if let Some(pane) = completed_pane {
-            self.cleanup_task_pane(task_id, &pane)?;
+            if let Err(error) = self.cleanup_task_pane(task_id, &pane) {
+                self.push_task_cleanup_warning(task_id, &error)?;
+            }
         }
         Ok(())
     }
@@ -841,11 +854,15 @@ impl TmuxState {
             self.cleanup_lost_task(&task_id, &pane_id)?;
         }
         for (task_id, pane) in cleanup {
-            self.cleanup_task_pane(&task_id, &pane)?;
+            if let Err(error) = self.cleanup_task_pane(&task_id, &pane) {
+                self.push_pending_warning(cleanup_warning(&task_id, Some(&pane.id), &error))?;
+            }
         }
         for task_id in finalize_only {
-            self.backend.finish_task_capture(&task_id)?;
-            self.backend.remove_task_runtime(&task_id);
+            match self.backend.finish_task_capture(&task_id) {
+                Ok(()) => self.backend.remove_task_runtime(&task_id),
+                Err(error) => self.push_pending_warning(cleanup_warning(&task_id, None, &error))?,
+            }
         }
         for pane_id in adopted_panes {
             self.push_pending_warning(warning(
@@ -911,7 +928,9 @@ impl TmuxState {
             .tasks
             .get_mut(task_id)
             .ok_or_else(|| task_expired(task_id))?;
-        let terminal = !task.state.is_active();
+        let terminal = !task.state.is_active()
+            && task.last_pane.is_none()
+            && !self.backend.task_runtime_pending(task_id);
         let previous_offset = task.transcript.offset();
         let mut transcript = task.transcript.clone();
         let mut task_warnings = task.warnings.clone();
@@ -958,7 +977,10 @@ impl TmuxState {
     fn task_has_output(&self, task_id: &str) -> Result<bool, ToolError> {
         let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
         let task = require_task(&tasks, task_id)?;
-        task.transcript.has_output(!task.state.is_active())
+        let terminal = !task.state.is_active()
+            && task.last_pane.is_none()
+            && !self.backend.task_runtime_pending(task_id);
+        task.transcript.has_output(terminal)
     }
 
     fn task_is_terminal(&self, task_id: &str) -> Result<bool, ToolError> {
@@ -979,9 +1001,31 @@ impl TmuxState {
             .tasks
             .get_mut(task_id)
             .ok_or_else(|| task_expired(task_id))?;
-        task.warnings
-            .push(warning(Some(&task.pane_id), code, message));
+        let value = warning(Some(&task.pane_id), code, message);
+        if task.warnings.iter().any(|existing| {
+            existing.code == value.code
+                && existing.pane == value.pane
+                && existing.message == value.message
+        }) {
+            return Ok(());
+        }
+        task.warnings.push(value);
+        if task.warnings.len() > MAX_QUEUED_WARNINGS {
+            let excess = task.warnings.len() - MAX_QUEUED_WARNINGS;
+            task.warnings.drain(..excess);
+        }
         Ok(())
+    }
+
+    fn push_task_cleanup_warning(&self, task_id: &str, error: &ToolError) -> Result<(), ToolError> {
+        self.push_task_warning(
+            task_id,
+            "tmux.cleanupPending",
+            &format!(
+                "task finished but terminal cleanup is still pending: {}",
+                error.message
+            ),
+        )
     }
 
     fn push_pending_warning(&self, value: TmuxWarning) -> Result<(), ToolError> {
@@ -997,8 +1041,8 @@ impl TmuxState {
             return Ok(());
         }
         warnings.push(value);
-        if warnings.len() > MAX_PENDING_WARNINGS {
-            let excess = warnings.len() - MAX_PENDING_WARNINGS;
+        if warnings.len() > MAX_QUEUED_WARNINGS {
+            let excess = warnings.len() - MAX_QUEUED_WARNINGS;
             warnings.drain(..excess);
         }
         Ok(())
@@ -1015,6 +1059,13 @@ impl TmuxState {
 
     fn output_warnings(&self, workspace: &BackendWorkspace) -> Result<Vec<TmuxWarning>, ToolError> {
         let mut warnings = workspace_warnings(workspace);
+        if self.backend.take_runtime_migrated() {
+            warnings.push(warning(
+                None,
+                "tmux.runtimeMigrated",
+                "an incompatible tmux runtime was replaced; persistent panes and running tasks from the older runtime were reset",
+            ));
+        }
         warnings.append(&mut self.take_pending_warnings()?);
         Ok(warnings)
     }
@@ -1196,6 +1247,17 @@ fn lock_error(name: &str) -> ToolError {
     ToolError::new("tmux.internalError", format!("{name} lock poisoned"))
 }
 
+fn cleanup_warning(task_id: &str, pane_id: Option<&str>, error: &ToolError) -> TmuxWarning {
+    warning(
+        pane_id,
+        "tmux.cleanupPending",
+        &format!(
+            "task {task_id} finished but terminal cleanup is still pending: {}",
+            error.message
+        ),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -1233,8 +1295,6 @@ mod tests {
             id: "pane-main".to_string(),
             name: "main".to_string(),
             tmux_pane_id: "%0".to_string(),
-            tmux_window_id: "@0".to_string(),
-            window_panes: 1,
             columns: 240,
             rows: 60,
             pane_incarnation_id: "incarnation".to_string(),

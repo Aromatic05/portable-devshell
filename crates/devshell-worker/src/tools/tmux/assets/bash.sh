@@ -17,17 +17,16 @@ devshell_tmux_init_status_file() {
 
 devshell_tmux_write_status() {
   state=$1
-  exit_code=$2
   if [ -z "$devshell_tmux_status_file" ]; then devshell_tmux_init_status_file; fi
   if [ -z "$devshell_tmux_status_file" ]; then return 0; fi
   tmp="$devshell_tmux_status_file.${BASHPID:-$$}.$RANDOM.tmp"
-  printf '{"state":"%s","exit_code":%s}\n' "$state" "$exit_code" >"$tmp" 2>/dev/null \
+  printf '{"state":"%s"}\n' "$state" >"$tmp" 2>/dev/null \
     && /bin/mv -f "$tmp" "$devshell_tmux_status_file" 2>/dev/null || { /bin/rm -f "$tmp" 2>/dev/null || true; true; }
 }
 
 devshell_tmux_preexec_bash() {
   if [ "${devshell_tmux_armed:-0}" != 1 ]; then return 0; fi
-  devshell_tmux_write_status running 0
+  devshell_tmux_write_status running
 }
 
 devshell_tmux_install_debug_hook_bash() {
@@ -49,10 +48,10 @@ devshell_tmux_precmd_bash() {
   if [ -z "$devshell_tmux_status_file" ]; then devshell_tmux_init_status_file; fi
   if [ "${devshell_tmux_armed:-0}" != 1 ]; then
     devshell_tmux_armed=1
-    devshell_tmux_write_status idle 0
+    devshell_tmux_write_status idle
     return "$last_status"
   fi
-  devshell_tmux_write_status exit "$last_status"
+  devshell_tmux_write_status idle
   return "$last_status"
 }
 

@@ -72,6 +72,8 @@ Task 不绑定创建它的 `ctxId`。MCP/RPC transport session 关闭、上下�
 shell -> python -> shell -> vim -> shell
 ```
 
+用户 shell 本身执行 `exit` / EOF 也不会销毁 pane；runtime 会在同一个 pane identity 中启动一个新的用户 shell。只有显式 `tmux_close` 才结束额外 persistent pane，`main` 则始终保留。
+
 worker 不尝试把其中每条命令识别为 managed task。
 
 ## `tmux_run`
@@ -156,7 +158,7 @@ running task 的返回值包含 task 和它当前独占的 pane：
 }
 ```
 
-task 结束后 pane 被销毁，因此完成态返回值不再附带 stale pane ref，也不能再 `tmux_inspect` 该 pane；task id 和 transcript 仍可继续用于 `tmux_read`。
+task 结束后 pane 被销毁，因此完成态返回值不再附带 stale pane ref，也不能再 `tmux_inspect` 该 pane；task id 和 transcript 仍可继续用于 `tmux_read`。如果 task 状态已经确定但 pane/transcript 收尾暂时失败，主操作仍返回最终 task 状态并附带 `tmux.cleanupPending` warning；reaper 或后续 tmux 调用会继续完成 cleanup。
 
 ## `tmux_input`
 
@@ -231,7 +233,7 @@ line = 0  丢弃当前未读 transcript
 line < 0  返回最后 N 行，并丢弃更早的未读内容
 ```
 
-运行中的 task 若最后一行尚未形成完整换行，`tmux_read` 不会提前消费它；task 结束后会允许返回最终 partial line。
+运行中的 task 若最后一行尚未形成完整换行，`tmux_read` 不会提前消费它；task 结束且 transcript capture 已完成后，才会把最终 partial line 视为可消费的 terminal output。
 
 Transcript 展示层会处理常见 terminal 控制：ANSI control sequence 不作为正文返回，bare CR 表示重绘当前 logical line，backspace 会更新当前 line。完整 terminal screen semantics 不属于 transcript；TUI/curses 应使用 `tmux_inspect`。
 
@@ -291,7 +293,7 @@ unknown
 130
 ```
 
-数字字符串是 task 或最近前台 command 的退出状态。`terminated` 表示 managed task 被显式 `tmux_close(force=true)` 终止；`unknown` 保留给 pane 身份丢失等无法确定最终状态的情况。
+persistent pane 只使用 `idle` / `running`；上一条交互命令的 exit code 不是 pane lifecycle state。数字字符串只表示 managed task 的退出状态。`terminated` 表示 managed task 被显式 `tmux_close(force=true)` 终止；`unknown` 保留给 pane 身份丢失等无法确定最终状态的情况。
 
 `tmux_list` 只返回 compact summary；cwd、command、terminal size 和 history 由 `tmux_inspect` 提供。
 
@@ -370,12 +372,14 @@ worker 正常停止不会销毁 tmux server。重新启动同一 workspace 后�
 - metadata 完整且仍在 running 的 task pane会被自动 adopt；
 - adopted task 继续使用原 task id、transcript 与未读 cursor；
 - 已完成 task 在 retention 内同样继续可读，且不会重放已经消费的 transcript；
-- 首次观察会通过 warning 提示 observation reset / task adoption。
+- 自动接管 running task 时会通过 `tmux.taskAdopted` warning 明确提示；persistent pane 与 durable transcript 不需要 observation reset。
+
+tmux runtime schema 与当前 worker 不兼容时不会混用新旧 pane 语义。worker 会重建该 workspace 的 tmux session，并在首次结果中返回 `tmux.runtimeMigrated` warning；旧 runtime 的 persistent pane 与仍在运行的 task 会被重置。正常的同版本 worker restart 不触发该迁移。
 
 不需要额外 reclaim 工具。
 
 ## 存储
 
-每个 workspace 的 tmux runtime 使用独立 storage/socket scope。持久 metadata、task script 和 transcript 位于 instance 的 tmux state 目录中。
+每个 workspace 的 tmux runtime 使用独立 storage/socket scope。tmux session/pane identity 由 tmux options 自身保存；instance 的 tmux state 目录只持久化 task completion metadata、task runtime 文件、transcript 与 unread offset。
 
 目标环境必须安装 `tmux`。如果 `tmux -V` 不可用，worker 不注册 tmux 工具。

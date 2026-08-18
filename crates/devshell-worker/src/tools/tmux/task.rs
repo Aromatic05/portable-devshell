@@ -222,8 +222,6 @@ mod tests {
             id: "pane-main".to_string(),
             name: "main".to_string(),
             tmux_pane_id: "%0".to_string(),
-            tmux_window_id: "@0".to_string(),
-            window_panes: 1,
             columns: 240,
             rows: 60,
             pane_incarnation_id: "incarnation".to_string(),
