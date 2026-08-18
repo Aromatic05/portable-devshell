@@ -706,7 +706,7 @@ fn persistent_pane_survives_user_shell_exit() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
-fn failed_main_shell_startup_does_not_leave_a_broken_session() {
+fn failed_main_shell_startup_remains_observable_and_recovers() {
     assert!(
         tmux_available(),
         "tmux is required to run this ignored contract test"
@@ -720,7 +720,7 @@ fn failed_main_shell_startup_does_not_leave_a_broken_session() {
         .assert()
         .success();
 
-    let failed = call(
+    let initial = call(
         &env,
         instance,
         "1",
@@ -729,27 +729,42 @@ fn failed_main_shell_startup_does_not_leave_a_broken_session() {
         "ctx-a",
         "list-with-broken-shell",
     );
-    assert_eq!(failed["error"]["code"], "tmux.paneNotReady", "{failed}");
-
-    std::fs::write(env.home().join(".bashrc"), "export RECOVERED_SHELL=1\n").unwrap();
-    let recovered = call(
-        &env,
-        instance,
-        "2",
-        "tmux_list",
-        json!({}),
-        "ctx-a",
-        "list-after-shell-repair",
-    );
-    assert_eq!(recovered["ok"], true, "{recovered}");
+    assert_eq!(initial["ok"], true, "{initial}");
     assert!(
-        recovered["result"]["panes"]
+        initial["result"]["panes"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|pane| pane["name"] == "main" && pane["status"] == "idle"),
-        "{recovered}"
+            .any(|pane| pane["name"] == "main"),
+        "{initial}"
     );
+
+    std::fs::write(env.home().join(".bashrc"), "export RECOVERED_SHELL=1\n").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        let recovered = call(
+            &env,
+            instance,
+            &format!("recover-{attempt}"),
+            "tmux_list",
+            json!({}),
+            "ctx-a",
+            &format!("list-after-shell-repair-{attempt}"),
+        );
+        assert_eq!(recovered["ok"], true, "{recovered}");
+        if recovered["result"]["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|pane| pane["name"] == "main" && pane["status"] == "idle")
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline, "main shell did not recover: {recovered}");
+        thread::sleep(Duration::from_millis(25));
+    }
     stop(&env, instance);
 }
 
@@ -1489,7 +1504,7 @@ fn tmux_run_uses_clean_bash_while_main_uses_user_bash_rc() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
-fn tmux_run_and_input_do_not_wait_for_main_shell_readiness() {
+fn tmux_tools_do_not_wait_for_main_shell_readiness() {
     assert!(
         tmux_available(),
         "tmux is required to run this ignored contract test"
@@ -1516,10 +1531,40 @@ fn tmux_run_and_input_do_not_wait_for_main_shell_readiness() {
     assert_eq!(run["result"]["task"]["status"], "0", "{run}");
     assert_eq!(run["result"]["output"][0], "TASK-INDEPENDENT", "{run}");
 
-    let input = call(
+    let listed = call(
         &env,
         instance,
         "2",
+        "tmux_list",
+        json!({}),
+        "ctx-slow-main",
+        "list-with-slow-main",
+    );
+    assert_eq!(listed["ok"], true, "{listed}");
+    assert!(
+        listed["result"]["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|pane| pane["name"] == "main"),
+        "{listed}"
+    );
+
+    let inspected = call(
+        &env,
+        instance,
+        "3",
+        "tmux_inspect",
+        json!({ "pane": "main" }),
+        "ctx-slow-main",
+        "inspect-with-slow-main",
+    );
+    assert_eq!(inspected["ok"], true, "{inspected}");
+
+    let input = call(
+        &env,
+        instance,
+        "4",
         "tmux_input",
         json!({ "pane": "main", "input": "printf 'BUFFERED\\n'^M" }),
         "ctx-slow-main",

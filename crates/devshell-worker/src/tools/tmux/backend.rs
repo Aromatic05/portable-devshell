@@ -78,7 +78,6 @@ pub struct TmuxBackend {
     transcripts_dir: PathBuf,
     session_lock: Mutex<()>,
     session_prepared: AtomicBool,
-    main_ready: AtomicBool,
     runtime_migrated: AtomicBool,
 }
 
@@ -116,7 +115,6 @@ impl TmuxBackend {
             transcripts_dir,
             session_lock: Mutex::new(()),
             session_prepared: AtomicBool::new(false),
-            main_ready: AtomicBool::new(false),
             runtime_migrated: AtomicBool::new(false),
         })
     }
@@ -130,23 +128,6 @@ impl TmuxBackend {
     }
 
     pub fn ensure_session(&self) -> Result<(), ToolError> {
-        self.ensure_session_structure()?;
-        if self.main_ready.load(Ordering::Acquire) {
-            return Ok(());
-        }
-        let workspace = self.capture_workspace()?;
-        let main = workspace
-            .panes
-            .iter()
-            .find(|pane| pane.name == "main")
-            .ok_or_else(|| ToolError::new("tmux.paneNotFound", "main pane is unavailable"))?;
-        self.wait_until_ready(&main.id, Duration::from_secs(5))?;
-        self.discard_initial_prompt_output(&main.id, Duration::from_secs(3))?;
-        self.main_ready.store(true, Ordering::Release);
-        Ok(())
-    }
-
-    pub fn ensure_session_structure(&self) -> Result<(), ToolError> {
         if self.session_prepared.load(Ordering::Acquire) && session_exists(&self.socket) {
             return Ok(());
         }
@@ -161,20 +142,17 @@ impl TmuxBackend {
                 if self.validate_existing_session()? {
                     self.configure_terminal_size()?;
                     self.session_prepared.store(true, Ordering::Release);
-                    self.main_ready.store(true, Ordering::Release);
                     return Ok(());
                 }
                 self.run(&["kill-session".into(), "-t".into(), TMUX_SESSION.into()])?;
                 self.clear_unpersisted_task_runtime()?;
                 self.runtime_migrated.store(true, Ordering::Release);
-                self.main_ready.store(false, Ordering::Release);
             } else {
                 return Ok(());
             }
         }
 
         self.session_prepared.store(false, Ordering::Release);
-        self.main_ready.store(false, Ordering::Release);
         self.clear_stale_status_records()?;
         let session_id = Uuid::new_v4().to_string();
         let pane = PaneRecord::new("main", None)?;
