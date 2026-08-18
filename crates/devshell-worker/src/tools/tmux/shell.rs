@@ -113,7 +113,7 @@ fn prepare_zsh(
     .map_err(io_error)?;
     Ok(ShellLaunch {
         command: format!(
-            "/usr/bin/env -u TMUX -u TMUX_PANE -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} ZDOTDIR={} {} -i",
+            "/usr/bin/env -u TMUX -u TMUX_PANE -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} ZDOTDIR={} {} -d -i",
             quote(status_dir.to_string_lossy().as_ref()),
             quote(pane_id),
             quote(zdotdir.to_string_lossy().as_ref()),

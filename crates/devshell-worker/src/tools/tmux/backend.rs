@@ -156,6 +156,12 @@ impl TmuxBackend {
         self.clear_stale_status_records()?;
         let session_id = Uuid::new_v4().to_string();
         let pane = PaneRecord::new("main", None)?;
+        atomic_write_json(
+            &self.status_path(&pane.pane_id),
+            &PaneStatusRecord {
+                state: "running".to_string(),
+            },
+        )?;
         let launch = prepare_shell_launch(&self.shell_dir, &self.status_dir, &pane.pane_id)?;
         let args = vec![
             "new-session".to_string(),
@@ -301,7 +307,6 @@ impl TmuxBackend {
                     interactive_running
                         .then(|| "running".to_string())
                         .or_else(|| shell_status.as_ref().map(status_text))
-                        .or_else(|| Some("idle".to_string()))
                 }),
                 managed_task_id,
             });
@@ -369,6 +374,12 @@ impl TmuxBackend {
 
     pub fn create_pane(&self, name: &str, cwd: &Path) -> Result<BackendPane, ToolError> {
         let pane = PaneRecord::new(name, None)?;
+        atomic_write_json(
+            &self.status_path(&pane.pane_id),
+            &PaneStatusRecord {
+                state: "running".to_string(),
+            },
+        )?;
         let launch = prepare_shell_launch(&self.shell_dir, &self.status_dir, &pane.pane_id)?;
         let args = vec![
             "new-window".to_string(),
