@@ -45,10 +45,9 @@ test("real Chromium opens auth=none WebUI, establishes a session, and boots thro
 
     const page = await guardedPage(browser);
     await page.goto(`${runtime.origin}${runtime.basePath}/`, { waitUntil: "domcontentloaded" });
-    await assertOverview(page);
+    await assertOverview(page, runtime.calls);
 
     assert.equal(runtime.calls.hello > 0, true, "the SPA must complete the real control protocol handshake");
-    assert.equal(runtime.calls.overview > 0, true, "the SPA must load the real Overview read model");
     assert.equal(
         (await page.context().cookies()).some((cookie) => cookie.name === "devshell_web_session"),
         true,
@@ -88,9 +87,8 @@ test("real Chromium rejects a wrong Web token, accepts the configured token, and
 
     await tokenInput.fill(WEB_TOKEN);
     await page.getByRole("button", { name: "Sign in" }).click();
-    await assertOverview(page);
+    await assertOverview(page, runtime.calls);
     assert.equal(runtime.calls.hello > 0, true);
-    assert.equal(runtime.calls.overview > 0, true);
     assert.deepEqual(
         await page.evaluate(() => ({
             local: window.localStorage.getItem("token"),
@@ -138,7 +136,7 @@ test("real Chromium follows Web OAuth redirects, completes both approvals, and r
 
     const approvedKinds = await approveBrowserFlow(page, approvals!, `${runtime.origin}${runtime.basePath}/`);
     assert.deepEqual([...approvedKinds].sort(), ["authorization", "registration"]);
-    await assertOverview(page);
+    await assertOverview(page, runtime.calls);
 
     assert.equal(runtime.calls.hello > 0, true, "the OAuth callback must boot the real control WebSocket client");
     assert.equal(new URL(page.url()).pathname, `${runtime.basePath}/`);
@@ -157,7 +155,7 @@ test("real Chromium preserves a public URL prefix through session bootstrap and 
 
     const page = await guardedPage(browser);
     await page.goto(`${runtime.origin}${runtime.basePath}/`, { waitUntil: "domcontentloaded" });
-    await assertOverview(page);
+    await assertOverview(page, runtime.calls);
 
     assert.equal(new URL(page.url()).pathname, `${runtime.basePath}/`);
     assert.equal(runtime.calls.hello > 0, true);
@@ -413,7 +411,10 @@ function assertPageHealthy(page: GuardedPage): void {
     assert.deepEqual(page.__browserFailures, [], page.__browserResponses.join("\n"));
 }
 
-async function assertOverview(page: Page): Promise<void> {
+async function assertOverview(
+    page: Page,
+    calls: { overview: number },
+): Promise<void> {
     try {
         await page.getByRole("heading", { name: "Overview" }).waitFor({
             state: "visible",
@@ -429,6 +430,11 @@ async function assertOverview(page: Page): Promise<void> {
         );
     }
     await page.getByText("Checking session…").waitFor({ state: "detached" }).catch(() => undefined);
+    const deadline = Date.now() + 5_000;
+    while (calls.overview === 0 && Date.now() < deadline) {
+        await page.waitForTimeout(25);
+    }
+    assert.equal(calls.overview > 0, true, "the SPA must load the real Overview read model");
 }
 
 async function approveBrowserFlow(
