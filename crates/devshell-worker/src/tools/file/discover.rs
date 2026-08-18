@@ -1,8 +1,10 @@
-use std::collections::BTreeMap;
+use std::collections::{HashSet, VecDeque};
+use std::ffi::OsString;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use globset::Glob;
+use globset::{Glob, GlobMatcher};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 
 use crate::security::path::{
@@ -11,73 +13,138 @@ use crate::security::path::{
 use crate::tools::file::{authorize, resolve_existing};
 use crate::tools::{ToolCall, ToolError};
 
+#[derive(Clone)]
 pub struct DiscoveredEntry {
     pub display: String,
     pub resolved: ResolvedPath,
     pub entry_type: &'static str,
 }
 
-pub fn discover(
-    call: &ToolCall,
-    specs: &[String],
-    hidden: bool,
-    gitignore: bool,
-) -> Result<Vec<DiscoveredEntry>, ToolError> {
-    call.check_cancelled()?;
-    if specs.is_empty() {
-        return Err(ToolError::new(
-            "tool.invalidArguments",
-            "paths cannot be empty",
-        ));
-    }
-    let mut found = BTreeMap::<String, DiscoveredEntry>::new();
-    for spec in specs {
-        call.check_cancelled()?;
-        if has_glob(spec) {
-            discover_glob(call, spec, hidden, gitignore, &mut found)?;
-        } else {
-            discover_exact(call, spec, hidden, gitignore, &mut found)?;
-        }
-    }
-    Ok(found.into_values().collect())
+#[derive(Clone)]
+pub struct DiscoveryCursor {
+    pending: VecDeque<DiscoverySource>,
+    seen: HashSet<String>,
 }
 
-fn discover_exact(
+#[derive(Clone)]
+enum DiscoverySource {
+    Single(Option<DiscoveredEntry>),
+    Walk(WalkState),
+}
+
+#[derive(Clone)]
+struct WalkState {
+    root: ResolvedPath,
+    display_root: String,
+    matcher: Option<Arc<GlobMatcher>>,
+    hidden: bool,
+    gitignore: bool,
+    frames: Vec<WalkFrame>,
+}
+
+#[derive(Clone)]
+struct WalkFrame {
+    directory: ResolvedDirectory,
+    relative_directory: PathBuf,
+    names: Arc<Vec<OsString>>,
+    index: usize,
+    ignore_stack: Vec<Arc<Gitignore>>,
+}
+
+impl DiscoveryCursor {
+    pub fn new(
+        call: &ToolCall,
+        specs: &[String],
+        hidden: bool,
+        gitignore: bool,
+    ) -> Result<Self, ToolError> {
+        call.check_cancelled()?;
+        if specs.is_empty() {
+            return Err(ToolError::new(
+                "tool.invalidArguments",
+                "paths cannot be empty",
+            ));
+        }
+        let mut pending = VecDeque::with_capacity(specs.len());
+        for spec in specs {
+            call.check_cancelled()?;
+            pending.push_back(prepare_source(call, spec, hidden, gitignore)?);
+        }
+        Ok(Self {
+            pending,
+            seen: HashSet::new(),
+        })
+    }
+
+    pub fn next(&mut self, call: &ToolCall) -> Result<Option<DiscoveredEntry>, ToolError> {
+        loop {
+            call.check_cancelled()?;
+            let Some(source) = self.pending.front_mut() else {
+                return Ok(None);
+            };
+            let next = match source {
+                DiscoverySource::Single(entry) => entry.take(),
+                DiscoverySource::Walk(walk) => walk.next(call)?,
+            };
+            if let Some(entry) = next {
+                if self.seen.insert(entry.display.clone()) {
+                    return Ok(Some(entry));
+                }
+                continue;
+            }
+            self.pending.pop_front();
+        }
+    }
+}
+
+fn prepare_source(
     call: &ToolCall,
     spec: &str,
     hidden: bool,
     gitignore: bool,
-    found: &mut BTreeMap<String, DiscoveredEntry>,
-) -> Result<(), ToolError> {
+) -> Result<DiscoverySource, ToolError> {
+    if has_glob(spec) {
+        prepare_glob(call, spec, hidden, gitignore)
+    } else {
+        prepare_exact(call, spec, hidden, gitignore)
+    }
+}
+
+fn prepare_exact(
+    call: &ToolCall,
+    spec: &str,
+    hidden: bool,
+    gitignore: bool,
+) -> Result<DiscoverySource, ToolError> {
     let (requested, resolved) = resolve_existing(call, spec, false)?;
     let metadata = resolved
         .metadata()
         .map_err(|error| ToolError::new("file.notFound", error.to_string()))?;
     if metadata.is_file() || metadata.is_symlink() {
-        insert(found, requested.raw, resolved, kind(&metadata));
-        return Ok(());
+        return Ok(DiscoverySource::Single(Some(DiscoveredEntry {
+            display: requested.raw,
+            resolved,
+            entry_type: kind(&metadata),
+        })));
     }
     if !metadata.is_dir() {
-        return Ok(());
+        return Ok(DiscoverySource::Single(None));
     }
-    walk(
-        call,
-        &resolved,
-        &requested.raw,
+    Ok(DiscoverySource::Walk(WalkState::new(
+        resolved,
+        requested.raw,
         None,
         hidden,
         gitignore,
-        found,
-    )
+    )?))
 }
 
-fn discover_glob(
+fn prepare_glob(
     call: &ToolCall,
     spec: &str,
     hidden: bool,
     gitignore: bool,
-    found: &mut BTreeMap<String, DiscoveredEntry>,
-) -> Result<(), ToolError> {
+) -> Result<DiscoverySource, ToolError> {
     let requested = parse_requested_path(spec)?;
     authorize(call, requested.namespace, false)?;
     let wildcard = spec
@@ -103,126 +170,138 @@ fn discover_glob(
             "glob root is not a directory",
         ));
     }
-    let matcher = Glob::new(&pattern)
-        .map_err(|error| ToolError::new("file.invalidPattern", error.to_string()))?
-        .compile_matcher();
-    walk(
-        call,
-        &root,
-        &root_requested.raw,
-        Some(&matcher),
-        hidden,
-        gitignore,
-        found,
-    )
-}
-
-fn walk(
-    call: &ToolCall,
-    root: &ResolvedPath,
-    display_root: &str,
-    matcher: Option<&globset::GlobMatcher>,
-    hidden: bool,
-    gitignore: bool,
-    found: &mut BTreeMap<String, DiscoveredEntry>,
-) -> Result<(), ToolError> {
-    let directory = root
-        .open_directory()
-        .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;
-    let mut ignore_stack = Vec::new();
-    walk_directory(
-        call,
+    let matcher = Arc::new(
+        Glob::new(&pattern)
+            .map_err(|error| ToolError::new("file.invalidPattern", error.to_string()))?
+            .compile_matcher(),
+    );
+    Ok(DiscoverySource::Walk(WalkState::new(
         root,
-        &directory,
-        Path::new(""),
-        display_root,
-        matcher,
+        root_requested.raw,
+        Some(matcher),
         hidden,
         gitignore,
-        &mut ignore_stack,
-        found,
-    )
+    )?))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn walk_directory(
-    call: &ToolCall,
-    root: &ResolvedPath,
-    directory: &ResolvedDirectory,
-    relative_directory: &Path,
-    display_root: &str,
-    matcher: Option<&globset::GlobMatcher>,
-    hidden: bool,
-    gitignore: bool,
-    ignore_stack: &mut Vec<Gitignore>,
-    found: &mut BTreeMap<String, DiscoveredEntry>,
-) -> Result<(), ToolError> {
-    let added_rules = if gitignore {
-        load_ignore_rules(directory, relative_directory, ignore_stack)?
-    } else {
-        0
-    };
+impl WalkState {
+    fn new(
+        root: ResolvedPath,
+        display_root: String,
+        matcher: Option<Arc<GlobMatcher>>,
+        hidden: bool,
+        gitignore: bool,
+    ) -> Result<Self, ToolError> {
+        let directory = root
+            .open_directory()
+            .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;
+        let frame = build_frame(&directory, PathBuf::new(), Vec::new(), gitignore)?;
+        Ok(Self {
+            root,
+            display_root,
+            matcher,
+            hidden,
+            gitignore,
+            frames: vec![frame],
+        })
+    }
 
+    fn next(&mut self, call: &ToolCall) -> Result<Option<DiscoveredEntry>, ToolError> {
+        loop {
+            call.check_cancelled()?;
+            let Some(frame) = self.frames.last_mut() else {
+                return Ok(None);
+            };
+            if frame.index >= frame.names.len() {
+                self.frames.pop();
+                continue;
+            }
+            let name = frame.names[frame.index].clone();
+            frame.index += 1;
+            let directory = frame.directory.clone();
+            let relative_directory = frame.relative_directory.clone();
+            let ignore_stack = frame.ignore_stack.clone();
+
+            let name_text = name.to_string_lossy();
+            if name_text == ".git" {
+                continue;
+            }
+            if !self.hidden && name_text.starts_with('.') {
+                continue;
+            }
+            let relative = relative_directory.join(&name);
+            let metadata = directory
+                .metadata(Path::new(&name), false)
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;
+            if self.gitignore && is_ignored(&ignore_stack, &relative, metadata.is_dir()) {
+                continue;
+            }
+            let relative_text = relative.to_string_lossy().replace('\\', "/");
+            let resolved = self.root.join(&relative);
+            let display = if self.display_root == "./" {
+                format!("./{relative_text}")
+            } else {
+                format!(
+                    "{}/{}",
+                    self.display_root.trim_end_matches('/'),
+                    relative_text
+                )
+            };
+
+            if metadata.is_dir() && !metadata.is_symlink() {
+                let child = directory
+                    .open_directory(Path::new(&name))
+                    .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;
+                self.frames.push(build_frame(
+                    &child,
+                    relative.clone(),
+                    ignore_stack,
+                    self.gitignore,
+                )?);
+            }
+
+            if self
+                .matcher
+                .as_ref()
+                .is_none_or(|matcher| matcher.is_match(&relative_text))
+            {
+                return Ok(Some(DiscoveredEntry {
+                    display,
+                    resolved,
+                    entry_type: kind(&metadata),
+                }));
+            }
+        }
+    }
+}
+
+fn build_frame(
+    directory: &ResolvedDirectory,
+    relative_directory: PathBuf,
+    mut ignore_stack: Vec<Arc<Gitignore>>,
+    gitignore: bool,
+) -> Result<WalkFrame, ToolError> {
+    if gitignore {
+        load_ignore_rules(directory, &relative_directory, &mut ignore_stack)?;
+    }
     let mut names = directory
         .entries()
         .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;
     names.sort_by(|left, right| left.to_string_lossy().cmp(&right.to_string_lossy()));
-
-    for name in names {
-        call.check_cancelled()?;
-        let name_text = name.to_string_lossy();
-        if name_text == ".git" {
-            continue;
-        }
-        if !hidden && name_text.starts_with('.') {
-            continue;
-        }
-        let relative = relative_directory.join(&name);
-        let metadata = directory
-            .metadata(Path::new(&name), false)
-            .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;
-        if gitignore && is_ignored(ignore_stack, &relative, metadata.is_dir()) {
-            continue;
-        }
-        let relative_text = relative.to_string_lossy().replace('\\', "/");
-        let resolved = root.join(&relative);
-        if matcher.is_none_or(|matcher| matcher.is_match(&relative_text)) {
-            let display = if display_root == "./" {
-                format!("./{relative_text}")
-            } else {
-                format!("{}/{}", display_root.trim_end_matches('/'), relative_text)
-            };
-            insert(found, display, resolved, kind(&metadata));
-        }
-        if metadata.is_dir() && !metadata.is_symlink() {
-            let child = directory
-                .open_directory(Path::new(&name))
-                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;
-            walk_directory(
-                call,
-                root,
-                &child,
-                &relative,
-                display_root,
-                matcher,
-                hidden,
-                gitignore,
-                ignore_stack,
-                found,
-            )?;
-        }
-    }
-
-    ignore_stack.truncate(ignore_stack.len().saturating_sub(added_rules));
-    Ok(())
+    Ok(WalkFrame {
+        directory: directory.clone(),
+        relative_directory,
+        names: Arc::new(names),
+        index: 0,
+        ignore_stack,
+    })
 }
 
 fn load_ignore_rules(
     directory: &ResolvedDirectory,
     relative_directory: &Path,
-    ignore_stack: &mut Vec<Gitignore>,
-) -> Result<usize, ToolError> {
-    let mut added = 0usize;
+    ignore_stack: &mut Vec<Arc<Gitignore>>,
+) -> Result<(), ToolError> {
     for file_name in [".gitignore", ".ignore"] {
         let file = match directory.open_file(Path::new(file_name)) {
             Ok(file) => file,
@@ -239,17 +318,14 @@ fn load_ignore_rules(
                 )
                 .map_err(|error| ToolError::new("file.invalidPattern", error.to_string()))?;
         }
-        ignore_stack.push(
-            builder
-                .build()
-                .map_err(|error| ToolError::new("file.invalidPattern", error.to_string()))?,
-        );
-        added += 1;
+        ignore_stack.push(Arc::new(builder.build().map_err(|error| {
+            ToolError::new("file.invalidPattern", error.to_string())
+        })?));
     }
-    Ok(added)
+    Ok(())
 }
 
-fn is_ignored(matchers: &[Gitignore], path: &Path, is_dir: bool) -> bool {
+fn is_ignored(matchers: &[Arc<Gitignore>], path: &Path, is_dir: bool) -> bool {
     let mut ignored = false;
     for matcher in matchers {
         let matched = matcher.matched_path_or_any_parents(path, is_dir);
@@ -260,19 +336,6 @@ fn is_ignored(matchers: &[Gitignore], path: &Path, is_dir: bool) -> bool {
         }
     }
     ignored
-}
-
-fn insert(
-    found: &mut BTreeMap<String, DiscoveredEntry>,
-    display: String,
-    resolved: ResolvedPath,
-    entry_type: &'static str,
-) {
-    found.entry(display.clone()).or_insert(DiscoveredEntry {
-        display,
-        resolved,
-        entry_type,
-    });
 }
 
 fn kind(metadata: &ResolvedMetadata) -> &'static str {

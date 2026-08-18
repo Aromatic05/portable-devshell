@@ -24,7 +24,8 @@ use crate::security::path::{
 use crate::tools::{ToolCall, ToolError};
 
 pub struct FileToolState {
-    pub cursors: Mutex<cursor::CursorStore>,
+    pub find_cursors: Mutex<cursor::CursorStore<find::FindContinuation>>,
+    pub search_cursors: Mutex<cursor::CursorStore<search::SearchContinuation>>,
     pub context_snapshots: Mutex<state::ContextSnapshotStore>,
     snapshot_ordinal: AtomicU64,
     write_locks: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
@@ -32,7 +33,8 @@ pub struct FileToolState {
 impl FileToolState {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            cursors: Mutex::new(cursor::CursorStore::default()),
+            find_cursors: Mutex::new(cursor::CursorStore::default()),
+            search_cursors: Mutex::new(cursor::CursorStore::default()),
             context_snapshots: Mutex::new(state::ContextSnapshotStore::default()),
             snapshot_ordinal: AtomicU64::new(1),
             write_locks: Mutex::new(HashMap::new()),

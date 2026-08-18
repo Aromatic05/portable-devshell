@@ -5,18 +5,19 @@ use uuid::Uuid;
 
 use crate::tools::ToolError;
 
-const MAX_CURSORS: usize = 256;
+const MAX_CURSORS: usize = 128;
 
-struct Cursor {
-    offset: usize,
+#[derive(Clone)]
+struct Cursor<T> {
+    state: T,
     query: serde_json::Value,
 }
 
-pub struct CursorStore {
-    cursors: LruCache<String, Cursor>,
+pub struct CursorStore<T> {
+    cursors: LruCache<String, Cursor<T>>,
 }
 
-impl Default for CursorStore {
+impl<T> Default for CursorStore<T> {
     fn default() -> Self {
         Self {
             cursors: LruCache::new(NonZeroUsize::new(MAX_CURSORS).unwrap()),
@@ -24,20 +25,20 @@ impl Default for CursorStore {
     }
 }
 
-impl CursorStore {
-    pub fn issue(&mut self, query: &serde_json::Value, offset: usize) -> String {
+impl<T: Clone> CursorStore<T> {
+    pub fn issue(&mut self, query: &serde_json::Value, state: T) -> String {
         let id = Uuid::new_v4().to_string();
         self.cursors.put(
             id.clone(),
             Cursor {
-                offset,
+                state,
                 query: query.clone(),
             },
         );
         id
     }
 
-    pub fn resolve(&mut self, id: &str, query: &serde_json::Value) -> Result<usize, ToolError> {
+    pub fn resolve(&mut self, id: &str, query: &serde_json::Value) -> Result<T, ToolError> {
         let cursor = self
             .cursors
             .get(id)
@@ -48,7 +49,7 @@ impl CursorStore {
                 "cursor does not match this query",
             ));
         }
-        Ok(cursor.offset)
+        Ok(cursor.state.clone())
     }
 }
 
@@ -66,7 +67,7 @@ mod tests {
             "paths": ["./a.txt"],
             "caseSensitive": true
         });
-        let cursor = store.issue(&query, 20);
+        let cursor = store.issue(&query, 20usize);
 
         assert_eq!(store.resolve(&cursor, &query).unwrap(), 20);
     }
@@ -74,7 +75,7 @@ mod tests {
     #[test]
     fn rejects_cursor_for_a_different_query() {
         let mut store = CursorStore::default();
-        let cursor = store.issue(&json!({ "pattern": "needle" }), 20);
+        let cursor = store.issue(&json!({ "pattern": "needle" }), 20usize);
         let error = store
             .resolve(&cursor, &json!({ "pattern": "different" }))
             .unwrap_err();

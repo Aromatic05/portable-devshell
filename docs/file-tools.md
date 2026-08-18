@@ -41,6 +41,52 @@ raw
 
 outline 返回符号的起止行、层级、语言和 `parseStatus`。outline 不使用正文分页式 `nextSelector`；根据符号范围再次调用 `view=content` 即可读取实现。
 
+## `file_find`
+
+`file_find` 按 exact path 或 glob 查找文件和目录，并支持 `file` / `directory` / `any` 类型过滤。
+
+每页最多返回 200 个 entry。出现 `nextCursor` 时，cursor 保存的是实际 traversal continuation，而不是一个输出 offset：目录 DFS 栈、当前 entry index、ignore 规则和已经去重的结果都会随 cursor 保留。下一页从上一次停止的位置继续，不会重新从 glob root 或目录根开始遍历。
+
+所有输入 path / glob root 会在第一页先完成解析、权限和基础合法性检查；continuation 只延迟递归 traversal 本身，不延迟输入错误。
+
+Traversal 使用已经解析并锚定的目录能力。因此第一页之后即使路径名被替换，后续 cursor 仍沿着原来已经打开的目录树继续，而不会静默切换到新目标。
+
+## `file_search`
+
+`file_search` 在 exact file、目录或 glob 中搜索 UTF-8 文本：
+
+```json
+{
+  "paths": ["./src"],
+  "pattern": "TODO",
+  "syntax": "literal",
+  "context": 2
+}
+```
+
+一页最多返回 20 个匹配文件。与 `file_find` 相同，`nextCursor` 保存实际 discovery/search continuation；后续页继续扫描尚未访问的候选文件，不会重新 enumerate 和重新搜索前面的树。
+
+为了约束单个文件的返回规模，每个文件最多展示：
+
+```text
+exact single-file search   200 matches
+directory/glob search       20 matches per file
+```
+
+达到上限本身不代表发生信息损失；只有文件中确实存在更多匹配时，该结果才显式返回：
+
+```json
+{
+  "path": "./src/large.rs",
+  "content": "...",
+  "truncated": true
+}
+```
+
+这样“只展示前 N 个匹配”和“总共恰好 N 个匹配”不会被混淆。
+
+搜索结果还受 RPC 序列化输出预算约束。因为预算而留到下一页的文件不会提前建立编辑快照；只有本次真正出现在 `files` 数组中的源码行才算已经被 agent 观察，并进入 `file_edit` coverage。
+
 ## 隐式快照
 
 快照按以下边界隔离：

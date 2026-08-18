@@ -3,11 +3,17 @@ use std::sync::Arc;
 use serde_json::json;
 
 use crate::tools::file::FileToolState;
-use crate::tools::file::discover::discover;
+use crate::tools::file::discover::{DiscoveredEntry, DiscoveryCursor};
 use crate::tools::file::types::{FileFindEntry, FileFindInput, FileFindOutput, FindType};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const PAGE_SIZE: usize = 200;
+
+#[derive(Clone)]
+pub(crate) struct FindContinuation {
+    discovery: DiscoveryCursor,
+    pending: Option<DiscoveredEntry>,
+}
 
 pub struct FileFindTool {
     name: ToolName,
@@ -40,55 +46,80 @@ impl ToolHandler for FileFindTool {
         let kind = input.entry_type.unwrap_or(FindType::Any);
         let query =
             json!({ "paths": input.paths, "type": kind, "hidden": hidden, "gitignore": gitignore });
-        let offset = input.cursor.as_deref().map_or(Ok(0), |cursor| {
-            self.state.cursors.lock().unwrap().resolve(cursor, &query)
-        })?;
-        let entries = discover(
-            &call,
-            query["paths"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|v| v.as_str().unwrap().to_string())
-                .collect::<Vec<_>>()
-                .as_slice(),
-            hidden,
-            gitignore,
-        )?;
-        call.check_cancelled()?;
-        let mut filtered = Vec::new();
-        for (index, entry) in entries.into_iter().enumerate() {
-            if index % 256 == 0 {
-                call.check_cancelled()?;
-            }
-            let matches = match kind {
-                FindType::Any => entry.entry_type != "other",
-                FindType::File => entry.entry_type == "file",
-                FindType::Directory => entry.entry_type == "directory",
-            };
-            if matches {
-                filtered.push(FileFindEntry {
-                    path: entry.display,
-                    entry_type: entry.entry_type.to_string(),
-                });
-            }
-        }
-        let entries = filtered;
-        let next_cursor = (entries.len() > offset + PAGE_SIZE).then(|| {
+        let mut continuation = if let Some(cursor) = input.cursor.as_deref() {
             self.state
-                .cursors
+                .find_cursors
                 .lock()
                 .unwrap()
-                .issue(&query, offset + PAGE_SIZE)
+                .resolve(cursor, &query)?
+        } else {
+            FindContinuation {
+                discovery: DiscoveryCursor::new(
+                    &call,
+                    query["paths"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|value| value.as_str().unwrap().to_string())
+                        .collect::<Vec<_>>()
+                        .as_slice(),
+                    hidden,
+                    gitignore,
+                )?,
+                pending: None,
+            }
+        };
+
+        let mut entries = Vec::with_capacity(PAGE_SIZE);
+        while entries.len() < PAGE_SIZE {
+            call.check_cancelled()?;
+            let Some(entry) = next_matching(&call, &mut continuation, &kind)? else {
+                break;
+            };
+            entries.push(render_entry(entry));
+        }
+
+        if entries.len() == PAGE_SIZE && continuation.pending.is_none() {
+            continuation.pending = next_matching(&call, &mut continuation, &kind)?;
+        }
+        let next_cursor = continuation.pending.is_some().then(|| {
+            self.state
+                .find_cursors
+                .lock()
+                .unwrap()
+                .issue(&query, continuation)
         });
-        let entries = entries
-            .into_iter()
-            .skip(offset)
-            .take(PAGE_SIZE)
-            .collect::<Vec<_>>();
         crate::tools::contract::serialize(FileFindOutput {
             entries,
             next_cursor,
         })
+    }
+}
+
+fn next_matching(
+    call: &ToolCall,
+    continuation: &mut FindContinuation,
+    kind: &FindType,
+) -> Result<Option<DiscoveredEntry>, ToolError> {
+    if continuation.pending.is_some() {
+        return Ok(continuation.pending.take());
+    }
+    while let Some(entry) = continuation.discovery.next(call)? {
+        let matches = match kind {
+            FindType::Any => entry.entry_type != "other",
+            FindType::File => entry.entry_type == "file",
+            FindType::Directory => entry.entry_type == "directory",
+        };
+        if matches {
+            return Ok(Some(entry));
+        }
+    }
+    Ok(None)
+}
+
+fn render_entry(entry: DiscoveredEntry) -> FileFindEntry {
+    FileFindEntry {
+        path: entry.display,
+        entry_type: entry.entry_type.to_string(),
     }
 }

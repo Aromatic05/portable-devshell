@@ -1011,3 +1011,155 @@ fn file_search_keeps_the_serialized_page_within_the_rpc_output_budget() {
 
     env.json_command(&["stop", "--instance", instance]);
 }
+
+#[test]
+fn file_find_cursor_resumes_the_open_traversal_after_root_replacement() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-find-continuation";
+    let root = env.workspace().join("tree");
+    fs::create_dir_all(&root).unwrap();
+    for index in 0..250 {
+        fs::write(root.join(format!("file-{index:03}.txt")), "value\n").unwrap();
+    }
+    start(&env, instance);
+
+    let first = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_find",
+        json!({ "paths": ["./tree"], "type": "file" }),
+    );
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(first["result"]["entries"].as_array().unwrap().len(), 200);
+    let cursor = first["result"]["nextCursor"].as_str().unwrap().to_string();
+
+    fs::rename(&root, env.workspace().join("tree-original")).unwrap();
+    fs::create_dir_all(&root).unwrap();
+
+    let second = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_find",
+        json!({ "paths": ["./tree"], "type": "file", "cursor": cursor }),
+    );
+    assert_eq!(second["ok"], true, "{second}");
+    let entries = second["result"]["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 50, "{second}");
+    assert_eq!(entries[0]["path"], "./tree/file-200.txt");
+    assert_eq!(entries[49]["path"], "./tree/file-249.txt");
+    assert!(second["result"].get("nextCursor").is_none());
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_search_cursor_resumes_the_open_traversal_after_root_replacement() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-search-continuation";
+    let root = env.workspace().join("search-tree");
+    fs::create_dir_all(&root).unwrap();
+    for index in 0..25 {
+        fs::write(
+            root.join(format!("file-{index:03}.txt")),
+            format!("needle {index}\n"),
+        )
+        .unwrap();
+    }
+    start(&env, instance);
+
+    let first = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_search",
+        json!({
+            "paths": ["./search-tree"],
+            "pattern": "needle",
+            "syntax": "literal",
+            "context": 0
+        }),
+    );
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(first["result"]["files"].as_array().unwrap().len(), 20);
+    let cursor = first["result"]["nextCursor"].as_str().unwrap().to_string();
+
+    fs::rename(&root, env.workspace().join("search-tree-original")).unwrap();
+    fs::create_dir_all(&root).unwrap();
+
+    let second = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_search",
+        json!({
+            "paths": ["./search-tree"],
+            "pattern": "needle",
+            "syntax": "literal",
+            "context": 0,
+            "cursor": cursor
+        }),
+    );
+    assert_eq!(second["ok"], true, "{second}");
+    let files = second["result"]["files"].as_array().unwrap();
+    assert_eq!(files.len(), 5, "{second}");
+    assert_eq!(files[0]["path"], "./search-tree/file-020.txt");
+    assert_eq!(files[4]["path"], "./search-tree/file-024.txt");
+    assert!(second["result"].get("nextCursor").is_none());
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_search_marks_per_file_match_truncation_explicitly() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-search-truncated";
+    let over_limit = (0..201)
+        .map(|index| format!("needle {index}\n"))
+        .collect::<String>();
+    let at_limit = (0..200)
+        .map(|index| format!("needle {index}\n"))
+        .collect::<String>();
+    fs::write(env.workspace().join("over.txt"), over_limit).unwrap();
+    fs::write(env.workspace().join("exact.txt"), at_limit).unwrap();
+    start(&env, instance);
+
+    let truncated = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_search",
+        json!({
+            "paths": ["./over.txt"],
+            "pattern": "needle",
+            "syntax": "literal",
+            "context": 0
+        }),
+    );
+    assert_eq!(truncated["ok"], true, "{truncated}");
+    assert_eq!(truncated["result"]["files"][0]["truncated"], true);
+
+    let exact = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_search",
+        json!({
+            "paths": ["./exact.txt"],
+            "pattern": "needle",
+            "syntax": "literal",
+            "context": 0
+        }),
+    );
+    assert_eq!(exact["ok"], true, "{exact}");
+    assert!(exact["result"]["files"][0].get("truncated").is_none());
+
+    env.json_command(&["stop", "--instance", instance]);
+}

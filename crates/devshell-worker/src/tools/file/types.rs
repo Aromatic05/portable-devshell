@@ -141,7 +141,7 @@ pub struct FileFindOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FileFindEntry {
     pub path: String,
@@ -186,6 +186,9 @@ pub struct FileSearchOutput {
 pub struct FileSearchFile {
     pub path: String,
     pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Present and true when additional matches existed in this file but were not rendered.
+    pub truncated: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

@@ -9,7 +9,8 @@ use serde_json::json;
 
 use crate::security::path::ResolvedPath;
 use crate::tools::file::FileToolState;
-use crate::tools::file::discover::discover;
+use crate::tools::file::discover::DiscoveryCursor;
+use crate::tools::file::resolve_existing;
 use crate::tools::file::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
 use crate::tools::file::types::{FileSearchFile, FileSearchInput, FileSearchOutput, SearchSyntax};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
@@ -25,12 +26,28 @@ pub struct FileSearchTool {
     state: Arc<FileToolState>,
 }
 
+#[derive(Clone)]
 struct MatchedFile {
     output: FileSearchFile,
     resolved: ResolvedPath,
     metadata: TextMetadata,
     seen: Vec<usize>,
     ordinal: u64,
+}
+
+#[derive(Clone)]
+struct SearchGroup {
+    discovery: DiscoveryCursor,
+    exhausted: bool,
+}
+
+#[derive(Clone)]
+pub(crate) struct SearchContinuation {
+    groups: Vec<SearchGroup>,
+    next_group: usize,
+    seen_candidates: HashSet<PathBuf>,
+    pending: Option<MatchedFile>,
+    per_file: usize,
 }
 
 enum PreparedSearchSnapshot {
@@ -47,6 +64,7 @@ enum PreparedSearchSnapshot {
         ordinal: u64,
     },
 }
+
 impl FileSearchTool {
     pub fn new(state: Arc<FileToolState>) -> Self {
         Self {
@@ -62,7 +80,7 @@ impl ToolHandler for FileSearchTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tools::contract::catalog_entry::<FileSearchInput, FileSearchOutput>(
             &self.name,
-            "Search text in files, directories, or globs. Returned source lines prepare those lines for file_edit.".to_string(),
+            "Search text in files, directories, or globs. Returned source lines prepare those lines for file_edit. A returned file includes truncated=true when additional matches in that file were omitted.".to_string(),
             [ToolCapability::Read],
         )
     }
@@ -90,84 +108,49 @@ impl ToolHandler for FileSearchTool {
             ));
         }
         let query = json!({ "pattern": expression, "paths": paths, "caseSensitive": case_sensitive, "hidden": hidden, "gitignore": gitignore, "context": context });
-        let offset = input.cursor.as_deref().map_or(Ok(0), |cursor| {
-            self.state.cursors.lock().unwrap().resolve(cursor, &query)
-        })?;
-        let mut discovered_groups = paths
-            .iter()
-            .map(|path| {
-                discover(&call, std::slice::from_ref(path), hidden, gitignore).map(|entries| {
-                    entries
-                        .into_iter()
-                        .filter(|entry| entry.entry_type == "file")
-                        .collect::<Vec<_>>()
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut seen_candidates = HashSet::new();
-        for group in &mut discovered_groups {
-            group.retain(|entry| seen_candidates.insert(entry.resolved.canonical.clone()));
-        }
-        let file_count = discovered_groups.iter().map(Vec::len).sum::<usize>();
-        let per_file = if file_count == 1 {
-            SINGLE_FILE_MATCHES
+        let mut continuation = if let Some(cursor) = input.cursor.as_deref() {
+            self.state
+                .search_cursors
+                .lock()
+                .unwrap()
+                .resolve(cursor, &query)?
         } else {
-            MATCHES_PER_FILE
+            let groups = paths
+                .iter()
+                .map(|path| {
+                    DiscoveryCursor::new(&call, std::slice::from_ref(path), hidden, gitignore).map(
+                        |discovery| SearchGroup {
+                            discovery,
+                            exhausted: false,
+                        },
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let per_file = if is_single_exact_file(&call, &paths)? {
+                SINGLE_FILE_MATCHES
+            } else {
+                MATCHES_PER_FILE
+            };
+            SearchContinuation {
+                groups,
+                next_group: 0,
+                seen_candidates: HashSet::new(),
+                pending: None,
+                per_file,
+            }
         };
 
-        let mut matched_groups = Vec::with_capacity(discovered_groups.len());
-        for group in discovered_groups {
-            let mut matched = VecDeque::new();
-            for entry in group {
-                call.check_cancelled()?;
-                let ordinal = self.state.next_snapshot_ordinal();
-                let Ok((metadata, matches, shown)) = search_stream(
-                    entry
-                        .resolved
-                        .open_file()
-                        .map_err(|error| ToolError::new("file.notFound", error.to_string()))?,
-                    &matcher,
-                    per_file,
-                    context,
-                    &call.cancellation,
-                ) else {
-                    continue;
-                };
-                if matches.is_empty() {
-                    continue;
-                }
-                let (body, seen) = format_streamed_content(&matches, &shown);
-                matched.push_back(MatchedFile {
-                    output: FileSearchFile {
-                        path: entry.display,
-                        content: body,
-                    },
-                    resolved: entry.resolved,
-                    metadata,
-                    seen,
-                    ordinal,
-                });
-            }
-            matched_groups.push(matched);
-        }
-
-        let mut files = Vec::new();
-        loop {
-            let mut progressed = false;
-            for group in &mut matched_groups {
-                if let Some(file) = group.pop_front() {
-                    files.push(file);
-                    progressed = true;
-                }
-            }
-            if !progressed {
-                break;
-            }
-        }
-        let total_files = files.len();
         let mut page = Vec::<MatchedFile>::new();
-        for file in files.into_iter().skip(offset).take(FILES_PER_PAGE) {
+        while page.len() < FILES_PER_PAGE {
             call.check_cancelled()?;
+            let matched = if let Some(pending) = continuation.pending.take() {
+                Some(pending)
+            } else {
+                next_matched_file(&call, &mut continuation, &matcher, context, &self.state)?
+            };
+            let Some(file) = matched else {
+                break;
+            };
             let candidate = page
                 .iter()
                 .map(|matched| matched.output.clone())
@@ -186,18 +169,22 @@ impl ToolHandler for FileSearchTool {
                         "one search result file exceeds the serialized output budget",
                     ));
                 }
+                continuation.pending = Some(file);
                 break;
             }
             page.push(file);
         }
-        let consumed = page.len();
-        let next_cursor = (total_files > offset + consumed).then(|| {
+
+        let has_more = continuation.pending.is_some()
+            || continuation.groups.iter().any(|group| !group.exhausted);
+        let next_cursor = has_more.then(|| {
             self.state
-                .cursors
+                .search_cursors
                 .lock()
                 .unwrap()
-                .issue(&query, offset + consumed)
+                .issue(&query, continuation)
         });
+
         let mut returned = Vec::with_capacity(page.len());
         let mut prepared_snapshots = Vec::with_capacity(page.len());
         for matched in page {
@@ -269,7 +256,92 @@ impl ToolHandler for FileSearchTool {
     }
 }
 
-type SearchStreamResult = (TextMetadata, Vec<usize>, BTreeMap<usize, String>);
+fn is_single_exact_file(call: &ToolCall, paths: &[String]) -> Result<bool, ToolError> {
+    if paths.len() != 1 || paths[0].contains(['*', '?', '[']) {
+        return Ok(false);
+    }
+    let (_, resolved) = resolve_existing(call, &paths[0], false)?;
+    Ok(resolved
+        .metadata()
+        .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?
+        .is_file())
+}
+
+fn next_matched_file(
+    call: &ToolCall,
+    continuation: &mut SearchContinuation,
+    matcher: &regex::Regex,
+    context: Option<usize>,
+    state: &FileToolState,
+) -> Result<Option<MatchedFile>, ToolError> {
+    if continuation.groups.is_empty() {
+        return Ok(None);
+    }
+    loop {
+        let mut progressed = false;
+        for _ in 0..continuation.groups.len() {
+            let index = continuation.next_group % continuation.groups.len();
+            continuation.next_group = (index + 1) % continuation.groups.len();
+            if continuation.groups[index].exhausted {
+                continue;
+            }
+            let candidate = loop {
+                match continuation.groups[index].discovery.next(call)? {
+                    Some(entry) if entry.entry_type == "file" => break Some(entry),
+                    Some(_) => continue,
+                    None => {
+                        continuation.groups[index].exhausted = true;
+                        break None;
+                    }
+                }
+            };
+            let Some(entry) = candidate else {
+                continue;
+            };
+            progressed = true;
+            if !continuation
+                .seen_candidates
+                .insert(entry.resolved.canonical.clone())
+            {
+                continue;
+            }
+            call.check_cancelled()?;
+            let ordinal = state.next_snapshot_ordinal();
+            let Ok((metadata, matches, shown, truncated)) = search_stream(
+                entry
+                    .resolved
+                    .open_file()
+                    .map_err(|error| ToolError::new("file.notFound", error.to_string()))?,
+                matcher,
+                continuation.per_file,
+                context,
+                &call.cancellation,
+            ) else {
+                continue;
+            };
+            if matches.is_empty() {
+                continue;
+            }
+            let (body, seen) = format_streamed_content(&matches, &shown);
+            return Ok(Some(MatchedFile {
+                output: FileSearchFile {
+                    path: entry.display,
+                    content: body,
+                    truncated: truncated.then_some(true),
+                },
+                resolved: entry.resolved,
+                metadata,
+                seen,
+                ordinal,
+            }));
+        }
+        if !progressed {
+            return Ok(None);
+        }
+    }
+}
+
+type SearchStreamResult = (TextMetadata, Vec<usize>, BTreeMap<usize, String>, bool);
 
 fn search_stream(
     file: File,
@@ -283,6 +355,7 @@ fn search_stream(
     let mut previous = VecDeque::<(usize, String)>::new();
     let mut shown = BTreeMap::new();
     let mut matches = Vec::new();
+    let mut truncated = false;
     let mut pending_after = 0usize;
     let mut buffer = Vec::new();
     let mut line_no = 0usize;
@@ -336,9 +409,14 @@ fn search_stream(
             while previous.len() > before {
                 previous.pop_front();
             }
-        } else if pending_after > 0 {
-            shown.insert(line_no, line);
-            pending_after -= 1;
+        } else {
+            if matcher.is_match(&line) {
+                truncated = true;
+            }
+            if pending_after > 0 {
+                shown.insert(line_no, line);
+                pending_after -= 1;
+            }
         }
     }
     let metadata = TextMetadata {
@@ -346,7 +424,7 @@ fn search_stream(
         total_bytes,
         total_lines,
     };
-    Ok((metadata, matches, shown))
+    Ok((metadata, matches, shown, truncated))
 }
 
 fn format_streamed_content(
