@@ -859,7 +859,7 @@ mod tests {
     }
 
     #[test]
-    fn exited_terminal_does_not_permanently_consume_the_session_limit() {
+    fn terminated_terminal_does_not_permanently_consume_the_session_limit() {
         let workspace = crate::testing::temp_dir();
         let manager = TerminalManager::with_limits(
             1024 * 1024,
@@ -876,16 +876,13 @@ mod tests {
             })
             .expect("open first terminal");
         manager
-            .write(TerminalWriteInput {
-                identity: TerminalCommandInput {
-                    terminal_id: first.terminal_id.clone(),
-                    generation: first.generation,
-                    version: first.version,
-                    client_seq: 1,
-                },
-                data: BASE64.encode(b"exit\r"),
+            .kill(TerminalCommandInput {
+                terminal_id: first.terminal_id.clone(),
+                generation: first.generation,
+                version: first.version,
+                client_seq: 1,
             })
-            .expect("request first terminal exit");
+            .expect("terminate first terminal");
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
             let current = manager

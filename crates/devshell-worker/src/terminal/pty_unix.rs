@@ -42,14 +42,24 @@ pub fn spawn(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcErr
     let writer = dup(&opened.master)
         .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
     let slave_fd = opened.slave.as_raw_fd();
-    let shell = std::env::var("SHELL")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "/bin/sh".to_string());
-    let startup = prepare_shell_startup(&shell)?;
+    let shell = if cfg!(test) {
+        "/bin/sh".to_string()
+    } else {
+        std::env::var("SHELL")
+            .ok()
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "/bin/sh".to_string())
+    };
+    let startup = if cfg!(test) {
+        None
+    } else {
+        prepare_shell_startup(&shell)?
+    };
     let mut command = Command::new(&shell);
+    if !cfg!(test) {
+        command.arg("-l");
+    }
     command
-        .arg("-l")
         .current_dir(cwd)
         .stdin(Stdio::from(stdin))
         .stdout(Stdio::from(stdout))
