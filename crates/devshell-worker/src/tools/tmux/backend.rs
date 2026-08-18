@@ -301,6 +301,7 @@ impl TmuxBackend {
                     interactive_running
                         .then(|| "running".to_string())
                         .or_else(|| shell_status.as_ref().map(status_text))
+                        .or_else(|| Some("idle".to_string()))
                 }),
                 managed_task_id,
             });
