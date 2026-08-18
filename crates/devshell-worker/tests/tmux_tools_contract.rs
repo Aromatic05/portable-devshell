@@ -1489,6 +1489,37 @@ fn tmux_run_uses_clean_bash_while_main_uses_user_bash_rc() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
+fn tmux_run_does_not_wait_for_main_shell_readiness() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    std::fs::write(env.home().join(".bashrc"), "/bin/sleep 10\n").unwrap();
+    let instance = "aromatic-tmux-slow-main";
+    env.command_with_env("SHELL", "/bin/bash")
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({ "command": "printf 'TASK-INDEPENDENT\\n'", "wait": "block", "timeMs": 3000 }),
+        "ctx-slow-main",
+        "run-with-slow-main",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
+    assert_eq!(run["result"]["output"][0], "TASK-INDEPENDENT", "{run}");
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
 fn tmux_run_does_not_source_inherited_bash_env() {
     assert!(
         tmux_available(),

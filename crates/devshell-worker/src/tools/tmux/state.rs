@@ -164,7 +164,7 @@ impl TmuxState {
                 .structure
                 .lock()
                 .map_err(|_| lock_error("tmux structure"))?;
-            self.backend.ensure_session()?;
+            self.backend.ensure_session_for_task()?;
             let mut workspace = self.backend.capture_workspace()?;
             if self.refresh_tasks_with_workspace(&workspace)? {
                 workspace = self.backend.capture_workspace()?;
