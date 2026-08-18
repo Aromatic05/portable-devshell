@@ -1184,6 +1184,64 @@ fn managed_panes_use_independent_single_pane_windows() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
+fn concurrent_first_tmux_calls_share_session_initialization() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-session-init-race";
+    start(&env, instance);
+    let barrier = std::sync::Barrier::new(2);
+
+    let (first, second) = thread::scope(|scope| {
+        let first = scope.spawn(|| {
+            barrier.wait();
+            call(
+                &env,
+                instance,
+                "1",
+                "tmux_list",
+                json!({}),
+                "ctx-a",
+                "first-session-init",
+            )
+        });
+        let second = scope.spawn(|| {
+            barrier.wait();
+            call(
+                &env,
+                instance,
+                "2",
+                "tmux_list",
+                json!({}),
+                "ctx-b",
+                "second-session-init",
+            )
+        });
+        (first.join().unwrap(), second.join().unwrap())
+    });
+
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(second["ok"], true, "{second}");
+    let listed = call(
+        &env,
+        instance,
+        "3",
+        "tmux_list",
+        json!({}),
+        "ctx-c",
+        "list-after-session-init-race",
+    );
+    assert_eq!(listed["ok"], true, "{listed}");
+    let panes = listed["result"]["panes"].as_array().unwrap();
+    assert_eq!(panes.len(), 1, "{listed}");
+    assert_eq!(panes[0]["name"], "main", "{listed}");
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
 fn concurrent_duplicate_run_requests_share_one_in_flight_execution() {
     assert!(
         tmux_available(),
@@ -1472,6 +1530,52 @@ fn tmux_run_does_not_expose_internal_tmux_environment() {
             .iter()
             .any(|line| line == "TMUX-ENV-CLEAN"),
         "{run}"
+    );
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
+fn tmux_transcript_capture_is_bounded_without_stopping_the_task() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-transcript-limit";
+    start(&env, instance);
+
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({
+            "command": "/usr/bin/head -c 5242880 /dev/zero",
+            "wait": "block",
+            "timeMs": 5000,
+            "line": 0
+        }),
+        "ctx-transcript-limit",
+        "run-large-transcript",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
+    assert!(
+        run["result"]["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning["code"] == "tmux.outputTruncated"),
+        "{run}"
+    );
+    let task = run["result"]["task"]["id"].as_str().unwrap();
+    let transcript = tmux_workspace_state_root(&env, instance)
+        .join("transcripts")
+        .join(format!("{task}.log"));
+    assert_eq!(
+        std::fs::metadata(transcript).unwrap().len(),
+        4 * 1024 * 1024
     );
     stop(&env, instance);
 }

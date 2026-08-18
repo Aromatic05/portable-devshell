@@ -24,7 +24,8 @@ pub struct TmuxRunParams {
     #[schemars(range(min = 0, max = 300000))]
     pub time_ms: Option<u64>,
     #[serde(default)]
-    /// Output lines to consume. Defaults to 80.
+    /// Output lines to consume. Defaults to 80. Range: -400..=400.
+    #[schemars(range(min = -400, max = 400))]
     pub line: Option<i64>,
 }
 
@@ -44,7 +45,8 @@ pub struct TmuxInputParams {
     #[schemars(range(min = 0, max = 300000))]
     pub time_ms: Option<u64>,
     #[serde(default)]
-    /// Task transcript lines to consume after sending input. Defaults to 80 and applies only to task targets.
+    /// Task transcript lines to consume after sending input. Defaults to 80, range -400..=400, and applies only to task targets.
+    #[schemars(range(min = -400, max = 400))]
     pub line: Option<i64>,
 }
 
@@ -58,7 +60,8 @@ pub struct TmuxReadParams {
     #[schemars(range(min = 0, max = 300000))]
     pub time_ms: Option<u64>,
     #[serde(default)]
-    /// Output lines to consume. Defaults to 80.
+    /// Output lines to consume. Defaults to 80. Range: -400..=400.
+    #[schemars(range(min = -400, max = 400))]
     pub line: Option<i64>,
 }
 

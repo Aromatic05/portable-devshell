@@ -5,6 +5,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
@@ -20,11 +21,13 @@ use crate::storage::InstancePaths;
 use crate::storage::permissions::ensure_dir;
 use crate::tools::ToolError;
 use crate::tools::tmux::codec::{TmuxInputChunk, parse_tmux_input, sanitize_terminal_snapshot};
+use crate::tools::tmux::output::MAX_TRANSCRIPT_BYTES;
 use crate::tools::tmux::shell::prepare_shell_launch;
 
 pub const TMUX_SESSION: &str = "devshell";
 pub const MAX_PANES: usize = 16;
 const TMUX_RUNTIME_SCHEMA: &str = "2";
+const POSIX_FILE_LIMIT_BLOCK_BYTES: u64 = 512;
 const PANE_HISTORY_LINES: i64 = 400;
 const TERMINAL_HISTORY_LINES: usize = 10_000;
 const TERMINAL_COLUMNS: usize = 240;
@@ -74,6 +77,7 @@ pub struct TmuxBackend {
     status_dir: PathBuf,
     tasks_dir: PathBuf,
     transcripts_dir: PathBuf,
+    session_lock: Mutex<()>,
     session_prepared: AtomicBool,
     runtime_migrated: AtomicBool,
 }
@@ -110,6 +114,7 @@ impl TmuxBackend {
             status_dir,
             tasks_dir,
             transcripts_dir,
+            session_lock: Mutex::new(()),
             session_prepared: AtomicBool::new(false),
             runtime_migrated: AtomicBool::new(false),
         })
@@ -124,6 +129,15 @@ impl TmuxBackend {
     }
 
     pub fn ensure_session(&self) -> Result<(), ToolError> {
+        if self.session_prepared.load(Ordering::Acquire) && session_exists(&self.socket) {
+            return Ok(());
+        }
+        let _session_guard = self.session_lock.lock().map_err(|_| {
+            ToolError::new(
+                "tmux.internalError",
+                "tmux session initialization lock poisoned",
+            )
+        })?;
         if session_exists(&self.socket) {
             if !self.session_prepared.load(Ordering::Acquire) {
                 if self.validate_existing_session()? {
@@ -470,7 +484,8 @@ impl TmuxBackend {
                 "-t".into(),
                 tmux_pane_id.clone(),
                 format!(
-                    "/bin/cat >> {}; : > {}",
+                    "/bin/sh -c 'ulimit -c 0; ulimit -f \"$1\"; exec /bin/cat >> \"$2\"' sh {} {} 2>/dev/null; /bin/cat >/dev/null; : > {}",
+                    MAX_TRANSCRIPT_BYTES / POSIX_FILE_LIMIT_BLOCK_BYTES,
                     shell_quote(&transcript_path.to_string_lossy()),
                     shell_quote(&transcript_done_path.to_string_lossy()),
                 ),

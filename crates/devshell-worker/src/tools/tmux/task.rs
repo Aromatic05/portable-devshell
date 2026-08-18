@@ -121,6 +121,10 @@ pub fn refresh_task_record(task: &mut TaskRecord, pane: &BackendPane) {
                 task.state = TaskState::Exited(value.parse().unwrap_or(1));
                 task.finished_at_ms.get_or_insert_with(unix_time_millis);
             }
+            Some("unknown") => {
+                task.state = TaskState::Lost;
+                task.finished_at_ms.get_or_insert_with(unix_time_millis);
+            }
             _ => {}
         }
     } else if task.state.is_active() {
@@ -213,7 +217,10 @@ pub fn new_task_id() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{TASK_RETENTION_MS, TaskRecord, TaskRegistry, TaskState, unix_time_millis};
+    use super::{
+        TASK_RETENTION_MS, TaskRecord, TaskRegistry, TaskState, refresh_task_record,
+        unix_time_millis,
+    };
     use crate::tools::tmux::backend::BackendPane;
     use crate::tools::tmux::output::TranscriptCursor;
 
@@ -272,5 +279,18 @@ mod tests {
         assert!(registry.tasks.contains_key("task-00"));
         assert!(!registry.tasks.contains_key("task-64"));
         assert_eq!(registry.tasks.len(), 64);
+    }
+
+    #[test]
+    fn unknown_managed_pane_marks_running_task_lost() {
+        let mut task = task("task-a", TaskState::Running, None);
+        let mut pane = pane();
+        pane.managed_task_id = Some("task-a".to_string());
+        pane.status = Some("unknown".to_string());
+
+        refresh_task_record(&mut task, &pane);
+
+        assert_eq!(task.state, TaskState::Lost);
+        assert!(task.finished_at_ms.is_some());
     }
 }

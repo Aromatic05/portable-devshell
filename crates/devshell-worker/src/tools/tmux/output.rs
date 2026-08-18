@@ -8,19 +8,31 @@ use super::warning;
 use crate::tools::ToolError;
 use crate::tools::tmux::types::TmuxWarning;
 
+pub const MAX_TRANSCRIPT_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_RENDERED_RECORD_BYTES: usize = 4096;
+
 #[derive(Debug, Clone)]
 pub struct TranscriptCursor {
     pub path: PathBuf,
     offset: u64,
+    truncation_reported: bool,
 }
 
 impl TranscriptCursor {
     pub fn new(path: PathBuf) -> Self {
-        Self { path, offset: 0 }
+        Self {
+            path,
+            offset: 0,
+            truncation_reported: false,
+        }
     }
 
     pub fn restore(path: PathBuf, offset: u64) -> Self {
-        Self { path, offset }
+        Self {
+            path,
+            offset,
+            truncation_reported: false,
+        }
     }
 
     pub fn offset(&self) -> u64 {
@@ -45,17 +57,48 @@ impl TranscriptCursor {
         line: i64,
         terminal: bool,
     ) -> Result<Vec<String>, ToolError> {
+        self.warn_if_truncated(pane_id, warnings)?;
         if line == 0 {
             self.discard()?;
             return Ok(Vec::new());
         }
         if line > 0 {
-            return self.take_oldest(line as usize, terminal);
+            return self.take_oldest(line as usize, pane_id, warnings, terminal);
         }
         self.take_tail(line.unsigned_abs() as usize, pane_id, warnings, terminal)
     }
 
-    fn take_oldest(&mut self, limit: usize, terminal: bool) -> Result<Vec<String>, ToolError> {
+    fn warn_if_truncated(
+        &mut self,
+        pane_id: &str,
+        warnings: &mut Vec<TmuxWarning>,
+    ) -> Result<(), ToolError> {
+        if self.truncation_reported {
+            return Ok(());
+        }
+        let size = match std::fs::metadata(&self.path) {
+            Ok(metadata) => metadata.len(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(transcript_error(error)),
+        };
+        if size >= MAX_TRANSCRIPT_BYTES {
+            warnings.push(warning(
+                Some(pane_id),
+                "tmux.outputTruncated",
+                "task transcript reached the 4 MiB capture limit; terminal output beyond the limit was not persisted",
+            ));
+            self.truncation_reported = true;
+        }
+        Ok(())
+    }
+
+    fn take_oldest(
+        &mut self,
+        limit: usize,
+        pane_id: &str,
+        warnings: &mut Vec<TmuxWarning>,
+        terminal: bool,
+    ) -> Result<Vec<String>, ToolError> {
         let Some(mut reader) = self.reader()? else {
             return Ok(Vec::new());
         };
@@ -74,7 +117,11 @@ impl TranscriptCursor {
                 break;
             }
             committed += count as u64;
-            output.push(render_terminal_record(&bytes));
+            let (record, truncated) = render_terminal_record(&bytes);
+            if truncated {
+                warn_record_truncated(pane_id, warnings);
+            }
+            output.push(record);
         }
         self.offset = committed;
         Ok(output)
@@ -114,7 +161,11 @@ impl TranscriptCursor {
                 tail.pop_front();
                 skipped = true;
             }
-            tail.push_back(render_terminal_record(&bytes));
+            let (record, truncated) = render_terminal_record(&bytes);
+            if truncated {
+                warn_record_truncated(pane_id, warnings);
+            }
+            tail.push_back(record);
         }
         self.offset = committed;
         if skipped {
@@ -152,7 +203,7 @@ impl TranscriptCursor {
     }
 }
 
-fn render_terminal_record(bytes: &[u8]) -> String {
+fn render_terminal_record(bytes: &[u8]) -> (String, bool) {
     let mut value = String::from_utf8_lossy(bytes).into_owned();
     if value.ends_with('\n') {
         value.pop();
@@ -185,7 +236,30 @@ fn render_terminal_record(bytes: &[u8]) -> String {
             _ => index += 1,
         }
     }
-    output
+    let truncated = output.len() > MAX_RENDERED_RECORD_BYTES;
+    if truncated {
+        let mut end = MAX_RENDERED_RECORD_BYTES - '…'.len_utf8();
+        while !output.is_char_boundary(end) {
+            end -= 1;
+        }
+        output.truncate(end);
+        output.push('…');
+    }
+    (output, truncated)
+}
+
+fn warn_record_truncated(pane_id: &str, warnings: &mut Vec<TmuxWarning>) {
+    if warnings
+        .iter()
+        .any(|warning| warning.code == "tmux.lineTruncated")
+    {
+        return;
+    }
+    warnings.push(warning(
+        Some(pane_id),
+        "tmux.lineTruncated",
+        "one or more terminal records exceeded 4096 rendered bytes and were truncated",
+    ));
 }
 
 fn skip_escape_sequence(chars: &[char], mut index: usize) -> usize {
@@ -228,14 +302,22 @@ fn transcript_error(error: std::io::Error) -> ToolError {
 mod tests {
     use std::io::Write;
 
-    use super::{TranscriptCursor, render_terminal_record};
+    use super::{MAX_TRANSCRIPT_BYTES, TranscriptCursor, render_terminal_record};
     use crate::testing::temp_dir;
 
     #[test]
     fn terminal_record_keeps_latest_carriage_return_render() {
-        assert_eq!(render_terminal_record(b"10%\r20%\r30%\n"), "30%");
-        assert_eq!(render_terminal_record(b"abc\x08d\n"), "abd");
-        assert_eq!(render_terminal_record(b"\x1b[31mred\x1b[0m\n"), "red");
+        assert_eq!(render_terminal_record(b"10%\r20%\r30%\n").0, "30%");
+        assert_eq!(render_terminal_record(b"abc\x08d\n").0, "abd");
+        assert_eq!(render_terminal_record(b"\x1b[31mred\x1b[0m\n").0, "red");
+    }
+
+    #[test]
+    fn terminal_record_has_a_rendered_size_bound() {
+        let (record, truncated) = render_terminal_record(&vec![b'x'; 5000]);
+        assert!(truncated);
+        assert!(record.len() <= 4096);
+        assert!(record.ends_with('…'));
     }
 
     #[test]
@@ -264,5 +346,22 @@ mod tests {
                 .unwrap(),
             vec!["two continued"]
         );
+    }
+
+    #[test]
+    fn transcript_cursor_reports_capture_limit_once() {
+        let root = temp_dir();
+        let path = root.path().join("task.log");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(MAX_TRANSCRIPT_BYTES).unwrap();
+        drop(file);
+
+        let mut cursor = TranscriptCursor::new(path);
+        let mut warnings = Vec::new();
+        cursor.take_output("pane", &mut warnings, 0, true).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].code, "tmux.outputTruncated");
+        cursor.take_output("pane", &mut warnings, 0, true).unwrap();
+        assert_eq!(warnings.len(), 1);
     }
 }

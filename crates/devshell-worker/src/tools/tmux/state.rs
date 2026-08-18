@@ -29,6 +29,7 @@ use crate::tools::tmux::types::{
 use crate::tools::{ToolCall, ToolError};
 
 const DEFAULT_LINE: i64 = 80;
+const MAX_OUTPUT_LINES: i64 = 400;
 const DEFAULT_RUN_TIME_MS: u64 = 30_000;
 const DEFAULT_INPUT_TIME_MS: u64 = 0;
 const DEFAULT_READ_TIME_MS: u64 = 0;
@@ -155,7 +156,7 @@ impl TmuxState {
         let cwd = resolve_cwd(call, params.cwd.as_deref())?;
         let wait = params.wait.unwrap_or(TmuxWaitMode::Nonblock);
         let time_ms = validate_time(params.time_ms.unwrap_or(DEFAULT_RUN_TIME_MS))?;
-        let line = params.line.unwrap_or(DEFAULT_LINE);
+        let line = validate_line(params.line.unwrap_or(DEFAULT_LINE))?;
 
         let task_id = new_task_id();
         {
@@ -261,7 +262,7 @@ impl TmuxState {
         match input_target(params.task.as_deref(), params.pane.as_deref())? {
             InputTarget::Task(task_id) => {
                 let time_ms = validate_time(params.time_ms.unwrap_or(DEFAULT_INPUT_TIME_MS))?;
-                let line = params.line.unwrap_or(DEFAULT_LINE);
+                let line = validate_line(params.line.unwrap_or(DEFAULT_LINE))?;
                 self.refresh_task(task_id)?;
                 let (pane_id, tmux_pane_id) = {
                     let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
@@ -370,7 +371,7 @@ impl TmuxState {
         call.check_cancelled()?;
         require_read(call)?;
         let time_ms = validate_time(params.time_ms.unwrap_or(DEFAULT_READ_TIME_MS))?;
-        let line = params.line.unwrap_or(DEFAULT_LINE);
+        let line = validate_line(params.line.unwrap_or(DEFAULT_LINE))?;
         let deadline = Instant::now() + Duration::from_millis(time_ms);
         loop {
             call.check_cancelled()?;
@@ -554,7 +555,43 @@ impl TmuxState {
             .ok_or_else(|| ToolError::new("tmux.taskNotRunning", "task pane is unavailable"))?;
         let pane_lock = self.pane_lock(&pane.id)?;
         let pane_guard = pane_lock.lock().map_err(|_| lock_error("pane operation"))?;
-        self.backend.close_pane(&pane)?;
+        let current = self
+            .backend
+            .capture_workspace()?
+            .panes
+            .into_iter()
+            .find(|current| {
+                current.id == pane.id && current.pane_incarnation_id == pane.pane_incarnation_id
+            });
+        let Some(current) = current else {
+            drop(pane_guard);
+            self.mark_task_lost(task_id, &pane.id)?;
+            return Err(ToolError::new(
+                "tmux.taskNotRunning",
+                "task pane is no longer available",
+            ));
+        };
+        let already_terminal = {
+            let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
+            let task = tasks
+                .tasks
+                .get_mut(task_id)
+                .ok_or_else(|| task_expired(task_id))?;
+            refresh_task_record(task, &current);
+            !task.state.is_active()
+        };
+        if already_terminal {
+            self.persist_task_record(task_id)?;
+            drop(pane_guard);
+            if let Err(error) = self.cleanup_task_pane(task_id, &current) {
+                self.push_pending_warning(cleanup_warning(task_id, Some(&current.id), &error))?;
+            }
+            return Err(ToolError::new(
+                "tmux.taskNotRunning",
+                format!("task {task_id} is no longer running"),
+            ));
+        }
+        self.backend.close_pane(&current)?;
         {
             let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
             let task = tasks
@@ -566,8 +603,8 @@ impl TmuxState {
         }
         self.persist_task_record(task_id)?;
         drop(pane_guard);
-        if let Err(error) = self.cleanup_task_pane(task_id, &pane) {
-            self.push_pending_warning(cleanup_warning(task_id, Some(&pane.id), &error))?;
+        if let Err(error) = self.cleanup_task_pane(task_id, &current) {
+            self.push_pending_warning(cleanup_warning(task_id, Some(&current.id), &error))?;
         }
         Ok(TmuxCloseOutput {
             closed_task_id: Some(task_id.to_string()),
@@ -738,8 +775,10 @@ impl TmuxState {
     }
 
     fn cleanup_lost_task(&self, task_id: &str, pane_id: &str) -> Result<(), ToolError> {
-        let _ = self.backend.finish_task_capture(task_id);
-        self.backend.remove_task_runtime(task_id);
+        match self.backend.finish_task_capture(task_id) {
+            Ok(()) => self.backend.remove_task_runtime(task_id),
+            Err(error) => self.push_task_cleanup_warning(task_id, &error)?,
+        }
         self.backend.remove_pane_metadata(pane_id);
         if let Some(task) = self
             .tasks
@@ -1141,6 +1180,16 @@ fn validate_time(value: u64) -> Result<u64, ToolError> {
     Ok(value)
 }
 
+fn validate_line(value: i64) -> Result<i64, ToolError> {
+    if !(-MAX_OUTPUT_LINES..=MAX_OUTPUT_LINES).contains(&value) {
+        return Err(ToolError::new(
+            "tool.invalidArguments",
+            format!("line must be between -{MAX_OUTPUT_LINES} and {MAX_OUTPUT_LINES}"),
+        ));
+    }
+    Ok(value)
+}
+
 fn require_execute(call: &ToolCall) -> Result<(), ToolError> {
     call.policy
         .check_capability(FilesystemCapability::ProcessExecute)
@@ -1262,7 +1311,7 @@ fn cleanup_warning(task_id: &str, pane_id: Option<&str>, error: &ToolError) -> T
 mod tests {
     use std::fs;
 
-    use super::{close_target, input_target, verify_pane_cwd};
+    use super::{close_target, input_target, validate_line, verify_pane_cwd};
     use crate::security::path::{parse_requested_path, resolve_existing_target};
     use crate::tools::tmux::backend::BackendPane;
 
@@ -1274,6 +1323,20 @@ mod tests {
         assert!(input_target(Some("task"), Some("pane")).is_err());
         assert!(close_target(Some("task"), None).is_ok());
         assert!(close_target(None, Some("pane")).is_ok());
+    }
+
+    #[test]
+    fn transcript_line_count_is_bounded() {
+        assert_eq!(validate_line(-400).unwrap(), -400);
+        assert_eq!(validate_line(400).unwrap(), 400);
+        assert_eq!(
+            validate_line(-401).unwrap_err().code,
+            "tool.invalidArguments"
+        );
+        assert_eq!(
+            validate_line(401).unwrap_err().code,
+            "tool.invalidArguments"
+        );
     }
 
     #[test]

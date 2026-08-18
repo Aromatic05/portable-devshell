@@ -225,6 +225,8 @@ persistent pane target 不使用 `line`，也不使用非零 `timeMs`。
 
 Transcript 从 task 自己的 fresh pane 通过 tmux `pipe-pane` 旁路采集。用户 command 不会被包进 `tee`，因此不会改变 pipeline、exit status 或 TTY 判断。
 
+每个 task 最多持久化 4 MiB terminal transcript。达到上限后 capture logger 继续 drain terminal output，但不再扩展 transcript 文件，因此不会反向阻塞或改变用户程序；`tmux_read` 会返回 `tmux.outputTruncated` warning。Task 仍按正常生命周期继续运行和退出。
+
 读取语义：
 
 ```text
@@ -232,6 +234,8 @@ line > 0  返回最早的 N 行未读 transcript
 line = 0  丢弃当前未读 transcript
 line < 0  返回最后 N 行，并丢弃更早的未读内容
 ```
+
+`line` 的有效范围是 `-400..=400`。单条 terminal record 的展示最多保留 4096 bytes；超过时返回截断后的 record，并附带 `tmux.lineTruncated` warning。这样 transcript 文件大小和单次 RPC 输出都有明确边界。
 
 运行中的 task 若最后一行尚未形成完整换行，`tmux_read` 不会提前消费它；task 结束且 transcript capture 已完成后，才会把最终 partial line 视为可消费的 terminal output。
 
