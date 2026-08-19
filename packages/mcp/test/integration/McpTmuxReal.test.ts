@@ -28,7 +28,14 @@ test("MCP tmux supports a complete interactive lifecycle when JSON-RPC request i
             assert.equal(tool?.inputSchema.properties?.timeMs?.maximum, 300_000);
         }
         const inputTool = tools.find((entry) => entry.name === "tmux_input");
-        assert.equal(inputTool?.inputSchema.anyOf?.length, 2);
+        assert.equal(inputTool?.inputSchema.type, "object");
+        assert.equal(inputTool?.inputSchema.anyOf, undefined);
+        assert.equal(inputTool?.inputSchema.oneOf, undefined);
+        for (const property of ["ctxId", "input", "task", "pane", "timeMs", "line"]) {
+            assert.notEqual(inputTool?.inputSchema.properties?.[property], undefined, property);
+        }
+        assert.equal(inputTool?.inputSchema.required?.includes("ctxId"), true);
+        assert.equal(inputTool?.inputSchema.required?.includes("input"), true);
         const ctxId = await createContext();
         const requestId = "reused-tools-call-id";
         const created = await callTool(requestId, "tmux_create", { ctxId, name: "interactive" });
@@ -148,7 +155,10 @@ interface ToolStructuredContent {
 interface ToolSummary {
     inputSchema: {
         anyOf?: JsonValue[];
-        properties?: { timeMs?: { maximum?: number; minimum?: number } };
+        oneOf?: JsonValue[];
+        properties?: Record<string, { maximum?: number; minimum?: number }>;
+        required?: string[];
+        type?: string;
     };
     name: string;
 }

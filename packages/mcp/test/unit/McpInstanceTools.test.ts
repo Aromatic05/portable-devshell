@@ -73,6 +73,10 @@ test("management-enabled endpoint augments worker schemas for cross-instance rou
         (tools.find((tool) => tool.name === "bash_run")?.inputSchema as { properties?: Record<string, unknown> }).properties?.instance,
         undefined
     );
+    assert.equal(
+        (tools.find((tool) => tool.name === "environ_info")?.inputSchema as { properties?: Record<string, unknown> }).properties?.instance,
+        undefined
+    );
     assert.equal(tools.some((tool) => tool.name === "instance_list"), true);
     const connectSchema = tools.find((tool) => tool.name === "instance_connect")?.inputSchema as {
         properties?: Record<string, unknown>;
@@ -81,6 +85,17 @@ test("management-enabled endpoint augments worker schemas for cross-instance rou
     assert.notEqual(connectSchema.properties?.ctxId, undefined);
     assert.notEqual(connectSchema.properties?.workspace, undefined);
     assert.equal(connectSchema.required?.includes("ctxId"), true);
+});
+
+test("environ_info never accepts a cross-instance target", async () => {
+    await assert.rejects(
+        createManagedEndpoint().callTool(
+            "environ_info",
+            { instance: "remote-server", workspace: "/remote-workspace" },
+            context
+        ),
+        /environ_info accepts only workspace/u
+    );
 });
 
 test("routing fields are injected into strict worker schema union branches", () => {

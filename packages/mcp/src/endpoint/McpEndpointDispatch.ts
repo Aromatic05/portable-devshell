@@ -67,7 +67,6 @@ export class McpEndpointDispatch {
         this.#artifact = new McpEndpointHandlerArtifact(controlOptions);
         this.#environment = new McpEndpointHandlerEnvironment({
             contextRegistry: this.#contextRegistry,
-            gateway: options.gateway,
             instanceName: options.instanceName,
             worker: options.worker
         });
@@ -109,7 +108,6 @@ export class McpEndpointDispatch {
                 input,
                 requestContext,
                 selected !== undefined,
-                snapshot.instanceRoutingEnabled,
                 signal
             );
         }

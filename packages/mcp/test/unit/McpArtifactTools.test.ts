@@ -70,6 +70,16 @@ test("artifact endpoint exposes worker read plus control share and transfer whil
         const schema = tool.inputSchema as { properties?: Record<string, unknown> };
         assert.equal(schema.properties?.instance, undefined, tool.name);
     }
+    for (const name of ["artifact_viewImage", "artifact_share", "artifact_transfer"]) {
+        const schema = endpoint.listTools().find((tool) => tool.name === name)?.inputSchema as {
+            oneOf?: unknown;
+            properties?: Record<string, unknown>;
+            type?: string;
+        };
+        assert.equal(schema.oneOf, undefined, name);
+        assert.equal(schema.type, "object", name);
+        assert.notEqual(schema.properties, undefined, name);
+    }
     assert.deepEqual(await endpoint.callTool("artifact_share", withContext({ path: "./dist" }), context), {
         shareId: "share-1"
     });

@@ -173,7 +173,7 @@ export class McpEndpointCatalog {
     ): ToolDefinition {
         if (
             instanceRoutingEnabled &&
-            (entry.owner === "worker" || entry.owner === "artifact" || entry.owner === "environment")
+            (entry.owner === "worker" || entry.owner === "artifact")
         ) {
             return withMcpInstanceTarget(entry.definition);
         }

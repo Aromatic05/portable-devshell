@@ -178,8 +178,8 @@ export function readMcpInstanceConnectInput(input: JsonValue): { instance: strin
 }
 
 export function readMcpWorkspace(input: JsonValue, toolName: string): string {
-    if (!isRecord(input) || Object.keys(input).length !== 1 || input.workspace === undefined) {
-        throw invalidArguments(`${toolName} requires workspace.`);
+    if (!isRecord(input) || Object.keys(input).some((key) => key !== "workspace")) {
+        throw invalidArguments(`${toolName} accepts only workspace.`);
     }
     return requiredString(input.workspace, "workspace");
 }

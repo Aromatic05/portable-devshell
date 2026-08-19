@@ -165,6 +165,9 @@ test("a routed artifact result consumes Comments from the routed instance Contex
             called.push({ instance, toolName });
         },
         assertReady() {},
+        async connectInstance() {
+            return { instance: "beta", status: "ready" };
+        },
         async auditToolCall<T extends JsonValue>(
             instance: string,
             toolName: string,
@@ -241,9 +244,14 @@ test("a routed artifact result consumes Comments from the routed instance Contex
     });
     const environment = (await dispatch.callTool(
         "environ_info",
-        { instance: "beta", workspace: "/projects/beta" },
-        { principal: "tester", requestId: "environment-beta" },
+        { workspace: "/projects/alpha" },
+        { principal: "tester", requestId: "environment-alpha" },
     )) as { ctxId: string };
+    await dispatch.callTool(
+        "instance_connect",
+        { ctxId: environment.ctxId, instance: "beta", workspace: "/projects/beta" },
+        { principal: "tester", requestId: "connect-beta" },
+    );
 
     const result = await dispatch.callTool(
         "artifact_viewImage",
@@ -263,15 +271,9 @@ test("a routed artifact result consumes Comments from the routed instance Contex
             workspace: "/projects/beta",
         },
     });
-    assert.equal(consumed[0]?.instance, "beta");
-    assert.deepEqual(audited, [
-        { instance: "beta", toolName: "environ_info" },
-        { instance: "beta", toolName: "artifact_viewImage" },
-    ]);
-    assert.deepEqual(called, [
-        { instance: "beta", toolName: "environ_info" },
-        { instance: "beta", toolName: "artifact_viewImage" },
-    ]);
+    assert.equal(consumed.at(-1)?.instance, "beta");
+    assert.deepEqual(audited, [{ instance: "beta", toolName: "artifact_viewImage" }]);
+    assert.deepEqual(called, [{ instance: "beta", toolName: "artifact_viewImage" }]);
 });
 
 async function createContext(

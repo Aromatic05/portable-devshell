@@ -44,7 +44,7 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         instances: [
             {
                 auth: { enabled: false, provider: "none" },
-                policy: { capabilities: ["execute"], groups: ["bash", "tmux"] },
+                policy: { capabilities: ["execute", "read"], groups: ["bash", "file", "tmux"] },
                 name: instanceName,
                 worker: instance
             }
@@ -116,6 +116,19 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
                 type: "string"
             }
         );
+        for (const name of [
+            "file_find",
+            "file_search",
+            ...(tmuxAvailable ? ["tmux_input", "tmux_inspect", "tmux_close"] : [])
+        ]) {
+            const schema = tools.find((tool) => tool.name === name)?.inputSchema;
+            assert.notEqual(schema, undefined, name);
+            assert.equal(schema?.type, "object", name);
+            assert.equal(schema?.anyOf, undefined, name);
+            assert.equal(schema?.oneOf, undefined, name);
+            assert.notEqual(schema?.properties, undefined, name);
+            assert.equal((schema?.required as string[]).includes("ctxId"), true, name);
+        }
 
         const ctxId = await createContext(endpoint, sessionHeaders, selectedWorkspacePath);
         const callRequest = withToolContext(

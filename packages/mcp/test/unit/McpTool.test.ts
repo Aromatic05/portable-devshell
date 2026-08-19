@@ -125,3 +125,45 @@ test("McpToolSchemaAdapter removes non-standard numeric formats", () => {
         type: "object"
     });
 });
+
+test("McpToolSchemaAdapter flattens referenced object unions for MCP clients", () => {
+    const adapter = new McpToolSchemaAdapter();
+    const tool = adapter.toMcpTool({
+        ...bashRun,
+        inputSchema: {
+            $defs: {
+                Pane: {
+                    additionalProperties: false,
+                    properties: {
+                        ctxId: { type: "string" },
+                        input: { type: "string" },
+                        pane: { type: "string" }
+                    },
+                    required: ["pane", "input", "ctxId"],
+                    type: "object"
+                },
+                Task: {
+                    additionalProperties: false,
+                    properties: {
+                        ctxId: { type: "string" },
+                        input: { type: "string" },
+                        task: { type: "string" }
+                    },
+                    required: ["task", "input", "ctxId"],
+                    type: "object"
+                }
+            },
+            anyOf: [{ $ref: "#/$defs/Task" }, { $ref: "#/$defs/Pane" }]
+        }
+    }, "Run shell");
+    const schema = tool.inputSchema as {
+        anyOf?: unknown;
+        properties?: Record<string, unknown>;
+        required?: string[];
+        type?: string;
+    };
+    assert.equal(schema.anyOf, undefined);
+    assert.equal(schema.type, "object");
+    assert.deepEqual(Object.keys(schema.properties ?? {}).sort(), ["ctxId", "input", "pane", "task"]);
+    assert.deepEqual(schema.required, ["input", "ctxId"]);
+});
