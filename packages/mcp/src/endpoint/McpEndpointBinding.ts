@@ -15,7 +15,7 @@ import {
 import { mergeComments, resolveErrorHints, toControlErrorBody, type ControlErrorBody, type JsonValue } from "@portable-devshell/shared";
 
 import { McpToolSchemaUnavailableError } from "../tool/McpToolSchemaAdapter.js";
-import { workspaceAppHtml, workspaceAppResourceUri } from "../workspace/McpWorkspaceApp.js";
+import { workspaceAppHtml, workspaceAppResourceUri, workspaceAppResourceUris } from "../workspace/McpWorkspaceApp.js";
 import { McpEndpointWorker } from "./McpEndpointWorker.js";
 import { McpNativeToolResult, type McpEndpointResult } from "./McpEndpointResult.js";
 
@@ -158,14 +158,14 @@ export class McpEndpointBinding {
         }));
 
         server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-            if (request.params.uri !== workspaceAppResourceUri) {
+            if (!workspaceAppResourceUris.includes(request.params.uri as typeof workspaceAppResourceUris[number])) {
                 throw new McpError(ErrorCode.InvalidParams, `Unknown resource: ${request.params.uri}`);
             }
             return {
                 contents: [{
                     mimeType: "text/html;profile=mcp-app",
                     text: workspaceAppHtml,
-                    uri: workspaceAppResourceUri
+                    uri: request.params.uri
                 }]
             };
         });

@@ -1,6 +1,11 @@
-// Keep this resource identity stable across Workspace markup/runtime upgrades. Mounted hosts may
-// cache the URI from an older tool snapshot and read it again after the server has upgraded.
-export const workspaceAppResourceUri = "ui://portable-devshell/workspace/v1.html";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+export const workspaceAppStableResourceUri = "ui://portable-devshell/workspace/v1.html";
+export const workspaceAppLegacyResourceUris: readonly string[] = [];
+
+const workspaceSdkScript = loadWorkspaceSdkScript();
 
 export const workspaceAppHtml = String.raw`<!doctype html>
 <html>
@@ -42,12 +47,13 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
 <body>
 <header><h1>portable-devshell</h1><small id="status">Connecting…</small></header>
 <div id="root" class="grid"><div class="empty">Waiting for Workspace state…</div></div>
+<script>${workspaceSdkScript}</script>
 <script>
 (function () {
   var root = document.getElementById("root");
   var status = document.getElementById("status");
-  var pending = new Map();
-  var nextId = 1;
+  var App = globalThis.__portableDevshellMcpApp;
+  var app = new App({ name: "portable-devshell-workspace", version: "0.6.8" }, {});
   var ctxId = "";
   var appToken = "";
   var initialized = false;
@@ -58,6 +64,9 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
   var recovering = false;
   var busy = new Set();
   var WIDGET_STATE_KEY = "portableDevshellWorkspace";
+  var bridgeReady = false;
+  var pendingToolResult = null;
+  var initialToolResultResolve = null;
 
   function escapeHtml(value) {
     return String(value == null ? "" : value)
@@ -65,22 +74,12 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
       .replaceAll(">", "&gt;").replaceAll('"', "&quot;");
   }
 
-  function request(method, params) {
-    var id = nextId++;
-    window.parent.postMessage({ jsonrpc: "2.0", id: id, method: method, params: params }, "*");
-    return new Promise(function (resolve, reject) { pending.set(id, { resolve: resolve, reject: reject }); });
-  }
-
-  function notify(method, params) {
-    window.parent.postMessage({ jsonrpc: "2.0", method: method, params: params || {} }, "*");
-  }
-
   function callTool(name, args, requiresToken) {
     if (!initialized) return Promise.reject(new Error("Workspace App is not initialized"));
     if (requiresToken && !appToken) return Promise.reject(new Error("Workspace App authorization is unavailable"));
     var input = Object.assign({ ctxId: ctxId }, args || {});
     if (requiresToken) input.token = appToken;
-    return request("tools/call", { name: name, arguments: input }).then(function (result) {
+    return app.callServerTool({ name: name, arguments: input }).then(function (result) {
       acceptMeta(result && result._meta);
       return result;
     });
@@ -104,10 +103,9 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
     if (!openai) return null;
     var metadata = asRecord(openai.toolResponseMetadata);
     var envelope = metadata && (asRecord(metadata.mcp_tool_result) || asRecord(metadata.call_tool_result));
+    if (!envelope) return null;
     var output = asRecord(openai.toolOutput);
-    if (envelope && output) return Object.assign({}, envelope, { structuredContent: output });
-    if (envelope) return envelope;
-    return output ? { structuredContent: output } : null;
+    return output ? Object.assign({}, envelope, { structuredContent: output }) : envelope;
   }
 
   function workspaceHintFromOpenAiGlobals(globals) {
@@ -191,13 +189,13 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
   async function syncModelContext(extra) {
     if (!initialized || !snapshot) return;
     try {
-      await request("ui/update-model-context", modelContext(extra));
+      await app.updateModelContext(modelContext(extra));
     } catch (_) {}
   }
 
   async function sendModelMessage(text, extra) {
     await syncModelContext(extra);
-    return await request("ui/message", {
+    return await app.sendMessage({
       role: "user",
       content: [{ type: "text", text: text }]
     });
@@ -294,17 +292,68 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
     }
   }
 
+  function waitForInitialToolResult(timeoutMs) {
+    if (pendingToolResult) {
+      var result = pendingToolResult;
+      pendingToolResult = null;
+      return Promise.resolve(result);
+    }
+    return new Promise(function (resolve) {
+      var timer = setTimeout(function () {
+        if (initialToolResultResolve === finish) initialToolResultResolve = null;
+        resolve(null);
+      }, timeoutMs);
+      function finish(result) {
+        clearTimeout(timer);
+        if (initialToolResultResolve === finish) initialToolResultResolve = null;
+        resolve(result);
+      }
+      initialToolResultResolve = finish;
+    });
+  }
+
+  function acceptInitialOrLiveToolResult(result) {
+    if (initialToolResultResolve) {
+      var resolve = initialToolResultResolve;
+      initialToolResultResolve = null;
+      resolve(result);
+      return;
+    }
+    if (!bridgeReady) {
+      pendingToolResult = result;
+      return;
+    }
+    acceptToolResult(result);
+  }
+
+  function stopLive() {
+    watchGeneration += 1;
+    watchStarted = false;
+    initialized = false;
+  }
+
+  app.ontoolinput = function (params) {
+    var input = params && params.arguments;
+    if (input && input.ctxId) activateCtxId(input.ctxId);
+  };
+  app.ontoolresult = acceptInitialOrLiveToolResult;
+  app.ontoolcancelled = function () {
+    status.textContent = "Cancelled";
+  };
+  app.onteardown = async function () {
+    stopLive();
+    return {};
+  };
+
   async function connect() {
     try {
-      await request("ui/initialize", {
-        protocolVersion: "2026-01-26",
-        appInfo: { name: "portable-devshell-workspace", version: "0.6.7" },
-        appCapabilities: {}
-      });
-      notify("ui/notifications/initialized", {});
+      await app.connect();
+      bridgeReady = true;
       initialized = true;
       status.textContent = "Connected";
-      configureFromOpenAiGlobals();
+      var initialResult = await waitForInitialToolResult(300);
+      if (initialResult) acceptToolResult(initialResult);
+      else configureFromOpenAiGlobals();
       if (!ctxId) {
         status.textContent = "Waiting for Workspace identity";
         return;
@@ -444,32 +493,38 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
     }
   });
 
-  window.addEventListener("message", function (event) {
-    if (event.source !== window.parent) return;
-    var message = event.data;
-    if (!message || message.jsonrpc !== "2.0") return;
-    if (message.id !== undefined && pending.has(message.id)) {
-      var waiter = pending.get(message.id);
-      pending.delete(message.id);
-      if (message.error) waiter.reject(message.error); else waiter.resolve(message.result);
-      return;
-    }
-    if (message.method === "ui/notifications/tool-input") {
-      var input = message.params && (message.params.arguments || message.params);
-      if (input && input.ctxId) activateCtxId(input.ctxId);
-    }
-    if (message.method === "ui/notifications/tool-result") {
-      acceptToolResult(message.params);
-    }
-  }, { passive: true });
-
   window.addEventListener("openai:set_globals", function (event) {
     var detail = event && event.detail;
     if (configureFromOpenAiGlobals(detail && detail.globals) && initialized) void startLive();
   });
-  configureFromOpenAiGlobals();
+  window.addEventListener("beforeunload", function () {
+    stopLive();
+    void app.close();
+  });
   void connect();
 })();
 </script>
 </body>
 </html>`;
+
+const workspaceAppDigest = createHash("sha256").update(workspaceAppHtml).digest("hex").slice(0, 16);
+export const workspaceAppResourceUri = `ui://portable-devshell/workspace-${workspaceAppDigest}.html`;
+export const workspaceAppResourceUris = [
+    workspaceAppResourceUri,
+    workspaceAppStableResourceUri,
+    ...workspaceAppLegacyResourceUris,
+] as const;
+
+function loadWorkspaceSdkScript(): string {
+    const path = fileURLToPath(import.meta.resolve("@modelcontextprotocol/ext-apps/app-with-deps"));
+    const source = readFileSync(path, "utf8").trimEnd();
+    const exportBlock = source.match(/export\{([\s\S]+)\};$/);
+    const appExport = exportBlock?.[1].match(/(?:^|,)([$A-Za-z_][$\w]*) as App(?:,|$)/);
+    if (exportBlock?.index === undefined || appExport == null) {
+        throw new Error("Unable to locate App export in @modelcontextprotocol/ext-apps/app-with-deps.");
+    }
+    if (source.toLowerCase().includes("</script")) {
+        throw new Error("MCP Apps browser bundle cannot be embedded safely in Workspace HTML.");
+    }
+    return `${source.slice(0, exportBlock.index)}globalThis.__portableDevshellMcpApp=${appExport[1]};`;
+}

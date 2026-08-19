@@ -379,6 +379,9 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     const adaptedInterrupt = adapter.toMcpTool(interrupt, interrupt.description);
     const adaptedWatch = adapter.toMcpTool(watch, watch.description);
     assert.equal((adaptedOpen._meta as { ui?: { resourceUri?: string } })?.ui?.resourceUri, workspaceAppResourceUri);
+    assert.equal((adaptedOpen._meta as Record<string, unknown>)["ui/resourceUri"], workspaceAppResourceUri);
+    assert.equal((adaptedOpen._meta as Record<string, unknown>)["openai/outputTemplate"], workspaceAppResourceUri);
+    assert.equal((adaptedOpen._meta as Record<string, unknown>)["openai/widgetAccessible"], true);
     assert.deepEqual((adaptedAnswer._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.deepEqual((adaptedInterrupt._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.deepEqual((adaptedWatch._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);

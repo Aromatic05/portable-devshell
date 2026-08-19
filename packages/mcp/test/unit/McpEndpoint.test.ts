@@ -8,7 +8,13 @@ import { fileURLToPath } from "node:url";
 
 import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
 
-import { McpEndpointBinding, McpEndpointWorker, type McpInstanceGateway } from "@portable-devshell/mcp/testing";
+import {
+    McpEndpointBinding,
+    McpEndpointWorker,
+    workspaceAppResourceUri,
+    workspaceAppStableResourceUri,
+    type McpInstanceGateway,
+} from "@portable-devshell/mcp/testing";
 
 const fixturesDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../fixtures");
 type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string]: JsonValue };
@@ -46,7 +52,7 @@ test("initialize succeeds over SDK transport", async () => {
     }
 });
 
-test("Workspace MCP App keeps its stable v1 resource URI and MCP Apps MIME type", async () => {
+test("Workspace MCP App renders from a versioned URI while keeping the stable reader alias", async () => {
     const binding = createBinding();
     const server = await createBindingServer(binding);
 
@@ -64,19 +70,24 @@ test("Workspace MCP App keeps its stable v1 resource URI and MCP Apps MIME type"
             uri: resource.uri
         })), [{
             mimeType: "text/html;profile=mcp-app",
-            uri: "ui://portable-devshell/workspace/v1.html"
+            uri: workspaceAppResourceUri
         }]);
+        assert.match(workspaceAppResourceUri, /^ui:\/\/portable-devshell\/workspace-[0-9a-f]{16}\.html$/);
+        assert.notEqual(workspaceAppResourceUri, workspaceAppStableResourceUri);
 
         const read = await postJson(server.url, {
             id: "req-resource-read",
             jsonrpc: "2.0",
             method: "resources/read",
-            params: { uri: "ui://portable-devshell/workspace/v1.html" }
+            params: { uri: workspaceAppStableResourceUri }
         }, session.headers);
         assert.equal(read.status, 200);
         assert.equal(read.body.result?.contents?.[0]?.mimeType, "text/html;profile=mcp-app");
+        assert.equal(read.body.result?.contents?.[0]?.uri, workspaceAppStableResourceUri);
         assert.match(String(read.body.result?.contents?.[0]?.text), /portable-devshell/);
         assert.match(String(read.body.result?.contents?.[0]?.text), /ui\/initialize/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /ui\/resource-teardown/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /ui\/notifications\/size-changed/);
         assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_question_answer/);
         assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_wait_interrupt/);
         assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_watch/);

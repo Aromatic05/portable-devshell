@@ -67,7 +67,9 @@ export class McpToolCatalogInteraction {
         {
             _meta: {
                 ui: { resourceUri: workspaceAppResourceUri, visibility: ["model", "app"] },
+                "ui/resourceUri": workspaceAppResourceUri,
                 "openai/outputTemplate": workspaceAppResourceUri,
+                "openai/widgetAccessible": true,
             },
             description: "Open the portable-devshell Workspace control surface for the current ctxId. Call once when the user needs persistent visibility or human interaction; ordinary tools do not need to reopen it.",
             group: "interaction",
