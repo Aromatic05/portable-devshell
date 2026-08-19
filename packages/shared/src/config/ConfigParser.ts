@@ -232,8 +232,9 @@ export function parseConfigInstanceTargetRequest(value: unknown): ConfigInstance
 
 function parseControlDraft(value: unknown, path: readonly ConfigPathSegment[]): NonNullable<ConfigGlobalDraft["control"]> {
     const record = readRecord(value, path);
-    assertKnownKeys(record, ["logLevel"], path);
+    assertKnownKeys(record, ["artifactDirectTransfer", "logLevel"], path);
     return {
+        artifactDirectTransfer: readOptionalBoolean(record.artifactDirectTransfer, [...path, "artifactDirectTransfer"]),
         logLevel: readOptionalTrimmedString(record.logLevel, [...path, "logLevel"])
     };
 }

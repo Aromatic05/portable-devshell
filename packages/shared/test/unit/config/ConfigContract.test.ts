@@ -13,7 +13,7 @@ import {
 
 test("config parser trims values and preserves explicit patch removals", () => {
     const parsed = parseConfigDraft({
-        control: { logLevel: " debug " },
+        control: { artifactDirectTransfer: true, logLevel: " debug " },
         mcp: {
             enabled: true
         },
@@ -39,6 +39,7 @@ test("config parser trims values and preserves explicit patch removals", () => {
         ]
     });
 
+    assert.equal(parsed.control?.artifactDirectTransfer, true);
     assert.equal(parsed.control?.logLevel, "debug");
     assert.equal(parsed.instances?.[0]?.name, "local-one");
     assert.equal(parsed.instances?.[0]?.provider, "local");

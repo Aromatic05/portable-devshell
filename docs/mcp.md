@@ -27,6 +27,7 @@ endpoint 出现需要同时满足：
 version = 2
 
 [control]
+artifactDirectTransfer = false
 logLevel = "info"
 
 [mcp]

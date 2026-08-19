@@ -168,6 +168,18 @@ test("global TOML round-trips the independent WebUI enable switch", () => {
     assert.equal(globalDocument.decode(toml.decode(encoded)).web?.enabled, true);
 });
 
+test("global TOML keeps direct artifact transfer opt-in", () => {
+    assert.equal(normalizeConfigGlobalDraft({}).control.artifactDirectTransfer, false);
+
+    const config = normalizeConfigGlobalDraft({
+        control: { artifactDirectTransfer: true }
+    });
+    const encoded = toml.encode(globalDocument.encode(config));
+    assert.match(encoded, /\[control\]\nartifactDirectTransfer = true/u);
+    const decoded = normalizeConfigGlobalDraft(globalDocument.decode(toml.decode(encoded)));
+    assert.equal(decoded.control.artifactDirectTransfer, true);
+});
+
 test("global TOML round-trips web token auth without leaking other modes", () => {
     const token = "a".repeat(48);
     const config = normalizeConfigGlobalDraft({

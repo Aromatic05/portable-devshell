@@ -47,6 +47,7 @@ export function normalizeConfigGlobalDraft(draft: ConfigGlobalDraft): ControlGlo
     const webListenPort = draft.web?.listenPort ?? mcpListenPort;
     return {
         control: {
+            artifactDirectTransfer: draft.control?.artifactDirectTransfer ?? false,
             logLevel: draft.control?.logLevel ?? "info"
         },
         mcp: {

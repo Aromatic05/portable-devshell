@@ -48,6 +48,7 @@ export interface ArtifactServiceEndpoint {
 
 export interface ArtifactServiceOptions {
     chunkBytes?: number;
+    directTransfer?: boolean;
     resolveEndpoint: (instance: string, authorityInstance?: string) => ArtifactServiceEndpoint | undefined;
     schedule?: ArtifactServiceSchedule;
     shareUrl: (token: string) => string;

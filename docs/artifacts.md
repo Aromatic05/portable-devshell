@@ -121,7 +121,16 @@ control 重启后的恢复规则：
 
 ### Worker 之间的 direct fast path
 
-当来源和目标都是不同的 Worker 时，Control 会优先尝试 direct transfer。目标 Worker 为当前 receive 临时打开一个随机 bearer path 的 HTTP receiver，来源 Worker 直接把 raw payload chunk 推到该 receiver；Control 只传递 receiver URL、offset 和 chunk 大小，不再中转 base64 payload 字节。临时 receiver 最长存活 10 分钟，Control 默认申请 5 分钟，并在 transfer 完成或回退时显式关闭。
+direct transfer 默认关闭。只有在 `~/.devshell/control/config.toml` 显式启用后，来源和目标是不同 Worker 时 Control 才会优先尝试 direct fast path：
+
+```toml
+[control]
+artifactDirectTransfer = true
+```
+
+这个 fast path 使用 Worker 之间的明文 HTTP，只应该在由用户确认可信的 VPC、Tailscale/WireGuard overlay 或等价私网中启用。默认 `false` 时，无论 Worker 是否支持 direct RPC，payload bytes 都继续经 Control relay。
+
+启用后，目标 Worker 为当前 receive 临时打开一个随机 bearer path 的 HTTP receiver，来源 Worker 直接把 raw payload chunk 推到该 receiver；Control 只传递 receiver URL、offset 和 chunk 大小，不再中转 base64 payload 字节。临时 receiver 最长存活 10 分钟，Control 默认申请 5 分钟，并在 transfer 完成或回退时显式关闭。
 
 direct receiver 只广告 loopback、RFC1918、link-local 和 `100.64.0.0/10` overlay 地址，不广告 hostname 或公网地址。若两个 Worker 不在可直接互通的私网 / overlay、目标 Worker 版本较旧，或任意 direct chunk 失败，Control 会关闭 receiver、abort 当前 receive、重新 begin 一个干净 receive，然后自动回落到原有 Control relay。取消和 Control shutdown 不会被当成网络失败触发回落。
 

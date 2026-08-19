@@ -19,6 +19,7 @@ import {
 
 interface ArtifactTransferExecutorOptions {
     chunkBytes: number;
+    directTransfer: boolean;
     emitTransferEvent: (transfer: StoredArtifactTransfer, type: ArtifactEventType) => Promise<void>;
     getTransfer: (transferId: string) => StoredArtifactTransfer | undefined;
     isRunActive: (generation: number) => boolean;
@@ -42,6 +43,7 @@ class ArtifactServiceStoppedError extends Error {
 
 export class ArtifactTransferExecutor {
     readonly #chunkBytes: number;
+    readonly #directTransfer: boolean;
     readonly #emitTransferEvent: ArtifactTransferExecutorOptions["emitTransferEvent"];
     readonly #getTransfer: ArtifactTransferExecutorOptions["getTransfer"];
     readonly #isRunActive: ArtifactTransferExecutorOptions["isRunActive"];
@@ -54,6 +56,7 @@ export class ArtifactTransferExecutor {
 
     constructor(options: ArtifactTransferExecutorOptions) {
         this.#chunkBytes = options.chunkBytes;
+        this.#directTransfer = options.directTransfer;
         this.#emitTransferEvent = options.emitTransferEvent;
         this.#getTransfer = options.getTransfer;
         this.#isRunActive = options.isRunActive;
@@ -142,6 +145,7 @@ export class ArtifactTransferExecutor {
             let offsetBytes = receive.nextOffsetBytes;
             let directComplete = false;
             if (
+                this.#directTransfer &&
                 transfer.record.source.instance !== transfer.record.target.instance &&
                 sourceEndpoint.pushArtifactPayloadDirect !== undefined &&
                 targetEndpoint.openArtifactDirectReceive !== undefined &&

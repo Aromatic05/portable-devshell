@@ -20,6 +20,7 @@ MCP client → HTTPS proxy/tunnel → 127.0.0.1:17890 → portable-devshell
 version = 2
 
 [control]
+artifactDirectTransfer = false
 logLevel = "info"
 
 [mcp]

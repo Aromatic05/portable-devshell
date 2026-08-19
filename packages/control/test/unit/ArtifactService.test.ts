@@ -246,6 +246,38 @@ test("artifact transfer returns queued immediately and completes asynchronously"
     assert.ok(target.events.some((event) => event.type === "artifact.transferCompleted"));
 });
 
+test("artifact transfer relays through Control unless direct transfer is explicitly enabled", async (t) => {
+    const storageDir = await createTestTempDirectory("artifact-direct-default");
+    t.after(() => rm(storageDir, { force: true, recursive: true }));
+    const bytes = Buffer.from("relay-by-default");
+    const target = new DirectTargetEndpoint(Buffer.alloc(0));
+    const source = new DirectSourceEndpoint(bytes, target);
+    const service = new ArtifactService({
+        chunkBytes: 4,
+        resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
+        shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
+        storageDir
+    });
+    await service.initialize();
+
+    const started = await service.startTransfer({
+        operation: "start",
+        sourcePath: "./payload.bin",
+        sourceWorkspace: "/source",
+        targetInstance: "target-b",
+        targetPath: "/target/payload.bin",
+        targetWorkspace: "/target"
+    }, "source-a");
+    const completed = await service.waitForTransfer(started.transfer.transferId);
+
+    assert.equal(completed.status, "completed");
+    assert.deepEqual(target.received.get("receive-1"), bytes);
+    assert.equal(source.directPushCalls, 0);
+    assert.equal(source.readPayloadCalls > 0, true);
+    assert.equal(target.writeReceiveCalls > 0, true);
+    assert.deepEqual(target.closedReceivers, []);
+});
+
 test("artifact transfer sends worker payload chunks directly without relaying bytes through Control", async (t) => {
     const storageDir = await createTestTempDirectory("artifact-direct");
     t.after(() => rm(storageDir, { force: true, recursive: true }));
@@ -254,6 +286,7 @@ test("artifact transfer sends worker payload chunks directly without relaying by
     const source = new DirectSourceEndpoint(bytes, target);
     const service = new ArtifactService({
         chunkBytes: 5,
+        directTransfer: true,
         resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
         storageDir
@@ -287,6 +320,7 @@ test("artifact transfer restarts receive and falls back to relay when direct pus
     source.failDirect = true;
     const service = new ArtifactService({
         chunkBytes: 4,
+        directTransfer: true,
         resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
         storageDir
@@ -320,6 +354,7 @@ test("artifact transfer falls back when an older target worker has no direct rec
     const source = new DirectSourceEndpoint(bytes, target);
     const service = new ArtifactService({
         chunkBytes: 4,
+        directTransfer: true,
         resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
         storageDir
