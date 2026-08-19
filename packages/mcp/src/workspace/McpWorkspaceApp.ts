@@ -209,7 +209,7 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
     try {
       await request("ui/initialize", {
         protocolVersion: "2026-01-26",
-        appInfo: { name: "portable-devshell-workspace", version: "0.6.5" },
+        appInfo: { name: "portable-devshell-workspace", version: "0.6.6" },
         appCapabilities: {}
       });
       notify("ui/notifications/initialized", {});

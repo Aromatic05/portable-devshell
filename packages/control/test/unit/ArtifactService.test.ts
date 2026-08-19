@@ -43,6 +43,8 @@ class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
     readonly received = new Map<string, Buffer>();
     readonly openStarted = new Deferred();
     readonly finishStarted = new Deferred();
+    readPayloadCalls = 0;
+    writeReceiveCalls = 0;
     readonly #bytes: Buffer;
     readonly #finishGate?: Deferred;
     readonly #openGate?: Deferred;
@@ -79,6 +81,7 @@ class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
     }
 
     async readArtifactPayload(input: { maxBytes: number; offsetBytes: number; payloadId: string }) {
+        this.readPayloadCalls += 1;
         const chunk = this.#bytes.subarray(input.offsetBytes, input.offsetBytes + input.maxBytes);
         const nextOffsetBytes = input.offsetBytes + chunk.length;
         return {
@@ -105,6 +108,7 @@ class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
     }
 
     async writeArtifactReceive(input: { content: string; offsetBytes: number; receiveId: string }) {
+        this.writeReceiveCalls += 1;
         const current = this.received.get(input.receiveId) ?? Buffer.alloc(0);
         assert.equal(input.offsetBytes, current.length);
         const next = Buffer.concat([current, Buffer.from(input.content, "base64")]);
@@ -129,6 +133,60 @@ class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
 
     async abortArtifactReceive(receiveId: string): Promise<void> {
         this.abortedReceives.push(receiveId);
+    }
+}
+
+class DirectTargetEndpoint extends MemoryArtifactEndpoint {
+    readonly closedReceivers: string[] = [];
+    failDirectOpen = false;
+
+    async openArtifactDirectReceive(input: { expiresAtMs: number; receiveId: string }) {
+        if (this.failDirectOpen) throw new Error("method not found");
+        return {
+            expiresAtMs: input.expiresAtMs,
+            nextOffsetBytes: this.received.get(input.receiveId)?.length ?? 0,
+            receiverId: `receiver-${input.receiveId}`,
+            urls: [`memory://${input.receiveId}`]
+        };
+    }
+
+    async closeArtifactDirectReceive(receiverId: string): Promise<void> {
+        this.closedReceivers.push(receiverId);
+    }
+
+    writeDirect(url: string, offsetBytes: number, bytes: Buffer): number {
+        const receiveId = url.slice("memory://".length);
+        const current = this.received.get(receiveId) ?? Buffer.alloc(0);
+        assert.equal(offsetBytes, current.length);
+        const next = Buffer.concat([current, bytes]);
+        this.received.set(receiveId, next);
+        return next.length;
+    }
+}
+
+class DirectSourceEndpoint extends MemoryArtifactEndpoint {
+    directPushCalls = 0;
+    failDirect = false;
+    readonly #directBytes: Buffer;
+    readonly #target: DirectTargetEndpoint;
+
+    constructor(bytes: Buffer, target: DirectTargetEndpoint) {
+        super(bytes);
+        this.#directBytes = bytes;
+        this.#target = target;
+    }
+
+    async pushArtifactPayloadDirect(input: {
+        maxBytes: number;
+        offsetBytes: number;
+        payloadId: string;
+        urls: string[];
+    }) {
+        this.directPushCalls += 1;
+        if (this.failDirect) throw new Error("direct path unavailable");
+        const chunk = this.#directBytes.subarray(input.offsetBytes, input.offsetBytes + input.maxBytes);
+        const nextOffsetBytes = this.#target.writeDirect(input.urls[0]!, input.offsetBytes, chunk);
+        return { nextOffsetBytes, pushedBytes: chunk.length };
     }
 }
 
@@ -186,6 +244,103 @@ test("artifact transfer returns queued immediately and completes asynchronously"
     assert.deepEqual(source.closedPayloads, ["payload-1"]);
     assert.ok(source.events.some((event) => event.type === "artifact.transferCompleted"));
     assert.ok(target.events.some((event) => event.type === "artifact.transferCompleted"));
+});
+
+test("artifact transfer sends worker payload chunks directly without relaying bytes through Control", async (t) => {
+    const storageDir = await createTestTempDirectory("artifact-direct");
+    t.after(() => rm(storageDir, { force: true, recursive: true }));
+    const bytes = Buffer.from("direct-worker-payload");
+    const target = new DirectTargetEndpoint(Buffer.alloc(0));
+    const source = new DirectSourceEndpoint(bytes, target);
+    const service = new ArtifactService({
+        chunkBytes: 5,
+        resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
+        shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
+        storageDir
+    });
+    await service.initialize();
+
+    const started = await service.startTransfer({
+        operation: "start",
+        sourcePath: "./payload.bin",
+        sourceWorkspace: "/source",
+        targetInstance: "target-b",
+        targetPath: "/target/payload.bin",
+        targetWorkspace: "/target"
+    }, "source-a");
+    const completed = await service.waitForTransfer(started.transfer.transferId);
+
+    assert.equal(completed.status, "completed");
+    assert.deepEqual(target.received.get("receive-1"), bytes);
+    assert.equal(source.directPushCalls > 0, true);
+    assert.equal(source.readPayloadCalls, 0);
+    assert.equal(target.writeReceiveCalls, 0);
+    assert.deepEqual(target.closedReceivers, ["receiver-receive-1"]);
+});
+
+test("artifact transfer restarts receive and falls back to relay when direct push fails", async (t) => {
+    const storageDir = await createTestTempDirectory("artifact-direct-fallback");
+    t.after(() => rm(storageDir, { force: true, recursive: true }));
+    const bytes = Buffer.from("relay-fallback");
+    const target = new DirectTargetEndpoint(Buffer.alloc(0));
+    const source = new DirectSourceEndpoint(bytes, target);
+    source.failDirect = true;
+    const service = new ArtifactService({
+        chunkBytes: 4,
+        resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
+        shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
+        storageDir
+    });
+    await service.initialize();
+
+    const started = await service.startTransfer({
+        operation: "start",
+        sourcePath: "./payload.bin",
+        sourceWorkspace: "/source",
+        targetInstance: "target-b",
+        targetPath: "/target/payload.bin",
+        targetWorkspace: "/target"
+    }, "source-a");
+    const completed = await service.waitForTransfer(started.transfer.transferId);
+
+    assert.equal(completed.status, "completed");
+    assert.deepEqual(target.abortedReceives, ["receive-1"]);
+    assert.deepEqual(target.received.get("receive-2"), bytes);
+    assert.equal(source.directPushCalls, 1);
+    assert.equal(source.readPayloadCalls > 0, true);
+    assert.equal(target.writeReceiveCalls > 0, true);
+});
+
+test("artifact transfer falls back when an older target worker has no direct receiver RPC", async (t) => {
+    const storageDir = await createTestTempDirectory("artifact-direct-old-worker");
+    t.after(() => rm(storageDir, { force: true, recursive: true }));
+    const bytes = Buffer.from("old-worker-relay");
+    const target = new DirectTargetEndpoint(Buffer.alloc(0));
+    target.failDirectOpen = true;
+    const source = new DirectSourceEndpoint(bytes, target);
+    const service = new ArtifactService({
+        chunkBytes: 4,
+        resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
+        shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
+        storageDir
+    });
+    await service.initialize();
+
+    const started = await service.startTransfer({
+        operation: "start",
+        sourcePath: "./payload.bin",
+        sourceWorkspace: "/source",
+        targetInstance: "target-b",
+        targetPath: "/target/payload.bin",
+        targetWorkspace: "/target"
+    }, "source-a");
+    const completed = await service.waitForTransfer(started.transfer.transferId);
+
+    assert.equal(completed.status, "completed");
+    assert.deepEqual(target.abortedReceives, ["receive-1"]);
+    assert.deepEqual(target.received.get("receive-2"), bytes);
+    assert.equal(source.directPushCalls, 0);
+    assert.equal(source.readPayloadCalls > 0, true);
 });
 
 test("artifact image view reads through the payload protocol and always closes the lease", async (t) => {

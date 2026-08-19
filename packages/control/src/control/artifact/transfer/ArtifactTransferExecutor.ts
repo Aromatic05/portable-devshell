@@ -138,40 +138,104 @@ export class ArtifactTransferExecutor {
             await this.#persistTransfer(transfer);
             this.#assertRunActive(generation);
 
+            let receiveId = receive.receiveId;
             let offsetBytes = receive.nextOffsetBytes;
-            while (offsetBytes < opened.descriptor.payloadBytes) {
-                this.#throwIfCancelled(transfer);
-                const chunk = await sourceEndpoint.readArtifactPayload({
-                    maxBytes: Math.min(this.#chunkBytes, opened.descriptor.payloadBytes - offsetBytes),
-                    offsetBytes,
-                    payloadId: opened.payloadId
-                });
-                this.#assertRunActive(generation);
-                validatePayloadChunk(chunk, offsetBytes, opened.descriptor.payloadBytes);
-                const written = await targetEndpoint.writeArtifactReceive({
-                    content: chunk.content,
-                    offsetBytes,
-                    receiveId: receive.receiveId
-                });
-                this.#assertRunActive(generation);
-                if (written.nextOffsetBytes !== offsetBytes + chunk.returnedBytes) {
-                    throw createError({
-                        code: errorCodes.artifactPayloadInvalid,
-                        message: "Artifact receiver returned an unexpected offset.",
-                        retryable: true,
-                        details: {
-                            actual: written.nextOffsetBytes,
-                            expected: offsetBytes + chunk.returnedBytes,
-                            transferId
-                        }
+            let directComplete = false;
+            if (
+                transfer.record.source.instance !== transfer.record.target.instance &&
+                sourceEndpoint.pushArtifactPayloadDirect !== undefined &&
+                targetEndpoint.openArtifactDirectReceive !== undefined &&
+                targetEndpoint.closeArtifactDirectReceive !== undefined
+            ) {
+                let receiverId: string | undefined;
+                try {
+                    const direct = await targetEndpoint.openArtifactDirectReceive({
+                        expiresAtMs: Date.now() + 5 * 60_000,
+                        receiveId
                     });
+                    receiverId = direct.receiverId;
+                    if (direct.urls.length === 0 || direct.nextOffsetBytes !== offsetBytes) {
+                        throw new Error("Artifact direct receiver returned invalid state.");
+                    }
+                    while (offsetBytes < opened.descriptor.payloadBytes) {
+                        this.#throwIfCancelled(transfer);
+                        const pushed = await sourceEndpoint.pushArtifactPayloadDirect({
+                            maxBytes: Math.min(this.#chunkBytes, opened.descriptor.payloadBytes - offsetBytes),
+                            offsetBytes,
+                            payloadId: opened.payloadId,
+                            urls: direct.urls
+                        });
+                        this.#assertRunActive(generation);
+                        if (
+                            pushed.pushedBytes <= 0 ||
+                            pushed.nextOffsetBytes !== offsetBytes + pushed.pushedBytes ||
+                            pushed.nextOffsetBytes > opened.descriptor.payloadBytes
+                        ) {
+                            throw new Error("Artifact direct transfer returned an invalid offset.");
+                        }
+                        offsetBytes = pushed.nextOffsetBytes;
+                        await this.#recordProgress(transfer, offsetBytes);
+                        this.#assertRunActive(generation);
+                    }
+                    directComplete = true;
+                } catch {
+                    this.#throwIfCancelled(transfer);
+                    this.#assertRunActive(generation);
+                    if (receiverId !== undefined) {
+                        await targetEndpoint.closeArtifactDirectReceive(receiverId).catch(() => undefined);
+                        receiverId = undefined;
+                    }
+                    await targetEndpoint.abortArtifactReceive(receiveId);
+                    const restarted = await targetEndpoint.beginArtifactReceive({
+                        descriptor: opened.descriptor,
+                        overwrite: transfer.request.overwrite ?? false,
+                        targetPath: transfer.request.targetPath,
+                        workspace: transfer.request.targetWorkspace
+                    });
+                    receiveId = restarted.receiveId;
+                    transfer.receiveId = receiveId;
+                    offsetBytes = restarted.nextOffsetBytes;
+                    await this.#recordProgress(transfer, offsetBytes);
+                    this.#assertRunActive(generation);
+                } finally {
+                    if (receiverId !== undefined) {
+                        await targetEndpoint.closeArtifactDirectReceive(receiverId).catch(() => undefined);
+                    }
                 }
-                offsetBytes = written.nextOffsetBytes;
-                transfer.record.transferredBytes = offsetBytes;
-                transfer.record.updatedAt = new Date().toISOString();
-                await this.#persistTransfer(transfer);
-                this.#assertRunActive(generation);
-                await this.#emitTransferEvent(transfer, "artifact.transferProgress");
+            }
+
+            if (!directComplete) {
+                while (offsetBytes < opened.descriptor.payloadBytes) {
+                    this.#throwIfCancelled(transfer);
+                    const chunk = await sourceEndpoint.readArtifactPayload({
+                        maxBytes: Math.min(this.#chunkBytes, opened.descriptor.payloadBytes - offsetBytes),
+                        offsetBytes,
+                        payloadId: opened.payloadId
+                    });
+                    this.#assertRunActive(generation);
+                    validatePayloadChunk(chunk, offsetBytes, opened.descriptor.payloadBytes);
+                    const written = await targetEndpoint.writeArtifactReceive({
+                        content: chunk.content,
+                        offsetBytes,
+                        receiveId
+                    });
+                    this.#assertRunActive(generation);
+                    if (written.nextOffsetBytes !== offsetBytes + chunk.returnedBytes) {
+                        throw createError({
+                            code: errorCodes.artifactPayloadInvalid,
+                            message: "Artifact receiver returned an unexpected offset.",
+                            retryable: true,
+                            details: {
+                                actual: written.nextOffsetBytes,
+                                expected: offsetBytes + chunk.returnedBytes,
+                                transferId
+                            }
+                        });
+                    }
+                    offsetBytes = written.nextOffsetBytes;
+                    await this.#recordProgress(transfer, offsetBytes);
+                    this.#assertRunActive(generation);
+                }
             }
 
             this.#throwIfCancelled(transfer);
@@ -186,7 +250,7 @@ export class ArtifactTransferExecutor {
                 resolveCommitBarrier = resolve;
             });
             this.#commitBarriers.add(commitBarrier);
-            const finished = await targetEndpoint.finishArtifactReceive(receive.receiveId);
+            const finished = await targetEndpoint.finishArtifactReceive(receiveId);
             if (
                 finished.bytes !== opened.descriptor.payloadBytes ||
                 finished.blake3 !== opened.descriptor.payloadBlake3
@@ -222,6 +286,13 @@ export class ArtifactTransferExecutor {
                 resolveCommitBarrier?.();
             }
         }
+    }
+
+    async #recordProgress(transfer: StoredArtifactTransfer, offsetBytes: number): Promise<void> {
+        transfer.record.transferredBytes = offsetBytes;
+        transfer.record.updatedAt = new Date().toISOString();
+        await this.#persistTransfer(transfer);
+        await this.#emitTransferEvent(transfer, "artifact.transferProgress");
     }
 
     async #handleFailure(

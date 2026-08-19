@@ -1,4 +1,8 @@
 import type {
+    WorkerArtifactDirectPushInput,
+    WorkerArtifactDirectPushResult,
+    WorkerArtifactDirectReceiveOpenInput,
+    WorkerArtifactDirectReceiveOpenResult,
     WorkerArtifactPayloadOpenInput,
     WorkerArtifactPayloadOpenResult,
     WorkerArtifactPayloadReadInput,
@@ -37,6 +41,9 @@ export interface ArtifactServiceEndpoint {
     openArtifactPayload(input: WorkerArtifactPayloadOpenInput): Promise<WorkerArtifactPayloadOpenResult>;
     readArtifactPayload(input: WorkerArtifactPayloadReadInput): Promise<WorkerArtifactPayloadReadResult>;
     writeArtifactReceive(input: WorkerArtifactReceiveWriteInput): Promise<WorkerArtifactReceiveWriteResult>;
+    openArtifactDirectReceive?(input: WorkerArtifactDirectReceiveOpenInput): Promise<WorkerArtifactDirectReceiveOpenResult>;
+    closeArtifactDirectReceive?(receiverId: string): Promise<void>;
+    pushArtifactPayloadDirect?(input: WorkerArtifactDirectPushInput): Promise<WorkerArtifactDirectPushResult>;
 }
 
 export interface ArtifactServiceOptions {

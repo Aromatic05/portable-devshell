@@ -82,6 +82,17 @@ test("WorkerProtocolClient routes artifact payload and receive lifecycle through
         offsetBytes: 0,
         receiveId: receive.receiveId
     });
+    const direct = await client.openArtifactDirectReceive({
+        expiresAtMs: Date.now() + 60_000,
+        receiveId: receive.receiveId
+    });
+    await client.pushArtifactPayloadDirect({
+        maxBytes: 3,
+        offsetBytes: 0,
+        payloadId: opened.payloadId,
+        urls: direct.urls
+    });
+    await client.closeArtifactDirectReceive(direct.receiverId);
     await client.finishArtifactReceive(receive.receiveId);
     await client.abortArtifactReceive(receive.receiveId);
     await client.closeArtifactPayload(opened.payloadId);
@@ -91,6 +102,9 @@ test("WorkerProtocolClient routes artifact payload and receive lifecycle through
         "artifact.payload.read",
         "artifact.receive.begin",
         "artifact.receive.write",
+        "artifact.receive.direct.open",
+        "artifact.payload.direct.push",
+        "artifact.receive.direct.close",
         "artifact.receive.finish",
         "artifact.receive.abort",
         "artifact.payload.close"
@@ -435,6 +449,33 @@ function createResponse(method: string, id: string): WorkerRpcResponseEnvelope {
             ok: true,
             result: { receiveId: "receive-1", receivedBytes: 3, nextOffsetBytes: 3 }
         };
+    }
+
+    if (method === "artifact.receive.direct.open") {
+        return {
+            type: "response",
+            id,
+            ok: true,
+            result: {
+                receiverId: "receiver-1",
+                urls: ["http://target.test/direct"],
+                nextOffsetBytes: 0,
+                expiresAtMs: Date.now() + 60_000
+            }
+        };
+    }
+
+    if (method === "artifact.payload.direct.push") {
+        return {
+            type: "response",
+            id,
+            ok: true,
+            result: { pushedBytes: 3, nextOffsetBytes: 3 }
+        };
+    }
+
+    if (method === "artifact.receive.direct.close") {
+        return { type: "response", id, ok: true, result: { receiverId: "receiver-1", closed: true } };
     }
 
     if (method === "artifact.receive.finish") {

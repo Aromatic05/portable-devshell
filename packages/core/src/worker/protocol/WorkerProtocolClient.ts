@@ -132,6 +132,30 @@ export interface WorkerArtifactReceiveFinishResult {
     targetPath: string;
 }
 
+export interface WorkerArtifactDirectReceiveOpenInput {
+    expiresAtMs: number;
+    receiveId: string;
+}
+
+export interface WorkerArtifactDirectReceiveOpenResult {
+    expiresAtMs: number;
+    nextOffsetBytes: number;
+    receiverId: string;
+    urls: string[];
+}
+
+export interface WorkerArtifactDirectPushInput {
+    maxBytes: number;
+    offsetBytes: number;
+    payloadId: string;
+    urls: string[];
+}
+
+export interface WorkerArtifactDirectPushResult {
+    nextOffsetBytes: number;
+    pushedBytes: number;
+}
+
 export class WorkerProtocolClient {
     readonly #rpcClient: WorkerRpcClient;
 
@@ -221,6 +245,26 @@ export class WorkerProtocolClient {
 
     async abortArtifactReceive(receiveId: string): Promise<void> {
         await this.#rpcClient.request("artifact.receive.abort", { receiveId });
+    }
+
+    async openArtifactDirectReceive(
+        input: WorkerArtifactDirectReceiveOpenInput
+    ): Promise<WorkerArtifactDirectReceiveOpenResult> {
+        return asObjectResult<WorkerArtifactDirectReceiveOpenResult>(
+            await this.#rpcClient.request("artifact.receive.direct.open", input as unknown as JsonValue)
+        );
+    }
+
+    async closeArtifactDirectReceive(receiverId: string): Promise<void> {
+        await this.#rpcClient.request("artifact.receive.direct.close", { receiverId });
+    }
+
+    async pushArtifactPayloadDirect(
+        input: WorkerArtifactDirectPushInput
+    ): Promise<WorkerArtifactDirectPushResult> {
+        return asObjectResult<WorkerArtifactDirectPushResult>(
+            await this.#rpcClient.request("artifact.payload.direct.push", input as unknown as JsonValue)
+        );
     }
 
     async stop(): Promise<WorkerStopResult> {

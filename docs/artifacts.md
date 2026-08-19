@@ -119,6 +119,14 @@ control 重启后的恢复规则：
 
 来源租约只在任务进入终态后释放。
 
+### Worker 之间的 direct fast path
+
+当来源和目标都是不同的 Worker 时，Control 会优先尝试 direct transfer。目标 Worker 为当前 receive 临时打开一个随机 bearer path 的 HTTP receiver，来源 Worker 直接把 raw payload chunk 推到该 receiver；Control 只传递 receiver URL、offset 和 chunk 大小，不再中转 base64 payload 字节。临时 receiver 最长存活 10 分钟，Control 默认申请 5 分钟，并在 transfer 完成或回退时显式关闭。
+
+direct receiver 只广告 loopback、RFC1918、link-local 和 `100.64.0.0/10` overlay 地址，不广告 hostname 或公网地址。若两个 Worker 不在可直接互通的私网 / overlay、目标 Worker 版本较旧，或任意 direct chunk 失败，Control 会关闭 receiver、abort 当前 receive、重新 begin 一个干净 receive，然后自动回落到原有 Control relay。取消和 Control shutdown 不会被当成网络失败触发回落。
+
+direct 与 relay 共用同一 `ArtifactPayloadStore` snapshot 和 `ArtifactReceiveStore`：raw HTTP chunk 仍执行严格 offset / declared-size 检查并持久化 receive metadata；最终仍由现有 `finish` 校验 payload bytes + BLAKE3，目录还会继续校验 manifest BLAKE3，随后走同一 atomic commit / recovery journal。因此 fast path 只改变 payload bytes 的网络路径，不改变传输状态机、验证规则或 commit 语义。
+
 ## 普通文件传输
 
 普通文件按字节原样传输。用户自己的 `.zip`、`.tar.gz`、`.zst` 等归档仍被视为普通文件，不会自动解包或重新压缩。

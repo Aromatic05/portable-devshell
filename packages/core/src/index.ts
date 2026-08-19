@@ -5,6 +5,10 @@ export type { WorkerInstanceConfig } from "./worker/instance/WorkerInstanceConfi
 export { WorkerInstanceFactory } from "./worker/instance/WorkerInstanceFactory.js";
 export { resolveWorkerHomeDirectory } from "./worker/platform/WorkerHomeDirectory.js";
 export type {
+    WorkerArtifactDirectPushInput,
+    WorkerArtifactDirectPushResult,
+    WorkerArtifactDirectReceiveOpenInput,
+    WorkerArtifactDirectReceiveOpenResult,
     WorkerArtifactPayloadOpenInput,
     WorkerArtifactPayloadOpenResult,
     WorkerArtifactPayloadReadInput,

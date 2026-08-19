@@ -20,6 +20,10 @@ import type { InstanceLogEntry } from "../../log/store/LogStoreInstance.js";
 import type { WorkerCommandClient } from "../command/WorkerCommandClient.js";
 import type { WorkerCommandInteractiveSession } from "../command/WorkerCommandTransport.js";
 import type {
+    WorkerArtifactDirectPushInput,
+    WorkerArtifactDirectPushResult,
+    WorkerArtifactDirectReceiveOpenInput,
+    WorkerArtifactDirectReceiveOpenResult,
     WorkerArtifactPayloadOpenInput,
     WorkerArtifactPayloadOpenResult,
     WorkerArtifactPayloadReadInput,
@@ -269,6 +273,22 @@ export class WorkerInstance {
 
     async abortArtifactReceive(receiveId: string): Promise<void> {
         await this.#artifact.abortReceive(receiveId);
+    }
+
+    async openArtifactDirectReceive(
+        input: WorkerArtifactDirectReceiveOpenInput
+    ): Promise<WorkerArtifactDirectReceiveOpenResult> {
+        return await this.#artifact.openDirectReceive(input);
+    }
+
+    async closeArtifactDirectReceive(receiverId: string): Promise<void> {
+        await this.#artifact.closeDirectReceive(receiverId);
+    }
+
+    async pushArtifactPayloadDirect(
+        input: WorkerArtifactDirectPushInput
+    ): Promise<WorkerArtifactDirectPushResult> {
+        return await this.#artifact.pushPayloadDirect(input);
     }
 
     async start(): Promise<InstanceSnapshot> {

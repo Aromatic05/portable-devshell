@@ -202,13 +202,22 @@ impl ArtifactReceiveStore {
         offset_bytes: u64,
         content: String,
     ) -> Result<ArtifactReceiveWriteResult, ToolError> {
-        validate_id(receive_id)?;
         let bytes = STANDARD.decode(content).map_err(|error| {
             ToolError::new(
                 "artifact.payloadInvalid",
                 format!("invalid base64 chunk: {error}"),
             )
         })?;
+        self.write_bytes(receive_id, offset_bytes, &bytes)
+    }
+
+    pub(crate) fn write_bytes(
+        &self,
+        receive_id: &str,
+        offset_bytes: u64,
+        bytes: &[u8],
+    ) -> Result<ArtifactReceiveWriteResult, ToolError> {
+        validate_id(receive_id)?;
         let _guard = self.lock()?;
         let mut metadata = self.load_metadata(receive_id)?;
         if metadata.phase != ArtifactReceivePhase::Receiving {
@@ -238,7 +247,7 @@ impl ArtifactReceiveStore {
             .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
         file.seek(SeekFrom::Start(offset_bytes))
             .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
-        file.write_all(&bytes)
+        file.write_all(bytes)
             .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
         file.sync_data()
             .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
@@ -249,6 +258,19 @@ impl ArtifactReceiveStore {
             next_offset_bytes: metadata.received_bytes as u64,
             received_bytes: metadata.received_bytes,
         })
+    }
+
+    pub(crate) fn received_bytes(&self, receive_id: &str) -> Result<u64, ToolError> {
+        validate_id(receive_id)?;
+        let _guard = self.lock()?;
+        let metadata = self.load_metadata(receive_id)?;
+        if metadata.phase != ArtifactReceivePhase::Receiving {
+            return Err(ToolError::new(
+                "artifact.receiveStateConflict",
+                "artifact receive is not accepting direct chunks",
+            ));
+        }
+        Ok(metadata.received_bytes as u64)
     }
 
     pub fn finish(&self, receive_id: &str) -> Result<ArtifactReceiveFinishResult, ToolError> {

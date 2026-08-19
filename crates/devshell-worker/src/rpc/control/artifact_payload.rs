@@ -7,6 +7,7 @@ use crate::rpc::error::RpcError;
 use crate::rpc::router::{ControlHandler, control_handler, parse_params, serialize};
 use crate::security::SecurityPolicy;
 use crate::tools::ToolError;
+use crate::tools::artifact::direct::{ArtifactDirectPushInput, ArtifactDirectReceiveOpenInput, ArtifactDirectTransfer};
 use crate::tools::artifact::payload::{ArtifactPayloadDescriptor, ArtifactPayloadStore};
 use crate::tools::artifact::receive::{ArtifactReceiveBeginInput, ArtifactReceiveStore};
 
@@ -55,6 +56,12 @@ struct ArtifactReceiveBeginRpcInput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ArtifactReceiveIdInput {
     receive_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ArtifactDirectReceiverIdInput {
+    receiver_id: String,
 }
 
 pub fn payload_open(
@@ -162,5 +169,30 @@ pub fn receive_abort(receives: Arc<ArtifactReceiveStore>) -> Arc<dyn ControlHand
             "aborted": true,
             "receiveId": input.receive_id
         }))
+    })
+}
+
+pub fn direct_receive_open(direct: Arc<ArtifactDirectTransfer>) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
+        let input: ArtifactDirectReceiveOpenInput = parse_params(request)?;
+        serialize(direct.open_receiver(input).map_err(RpcError::from)?)
+    })
+}
+
+pub fn direct_receive_close(direct: Arc<ArtifactDirectTransfer>) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
+        let input: ArtifactDirectReceiverIdInput = parse_params(request)?;
+        direct.close_receiver(&input.receiver_id).map_err(RpcError::from)?;
+        Ok(serde_json::json!({
+            "closed": true,
+            "receiverId": input.receiver_id
+        }))
+    })
+}
+
+pub fn direct_payload_push(direct: Arc<ArtifactDirectTransfer>) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
+        let input: ArtifactDirectPushInput = parse_params(request)?;
+        serialize(direct.push_chunk(input).map_err(RpcError::from)?)
     })
 }

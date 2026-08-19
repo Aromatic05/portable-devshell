@@ -1,4 +1,8 @@
 import type {
+    WorkerArtifactDirectPushInput,
+    WorkerArtifactDirectPushResult,
+    WorkerArtifactDirectReceiveOpenInput,
+    WorkerArtifactDirectReceiveOpenResult,
     WorkerArtifactPayloadOpenInput,
     WorkerArtifactPayloadOpenResult,
     WorkerArtifactPayloadReadInput,
@@ -58,5 +62,22 @@ export class WorkerInstanceArtifact {
     async abortReceive(receiveId: string): Promise<void> {
         this.#assertReady();
         await this.#protocolClient.abortArtifactReceive(receiveId);
+    }
+
+    async openDirectReceive(
+        input: WorkerArtifactDirectReceiveOpenInput
+    ): Promise<WorkerArtifactDirectReceiveOpenResult> {
+        this.#assertReady();
+        return await this.#protocolClient.openArtifactDirectReceive(input);
+    }
+
+    async closeDirectReceive(receiverId: string): Promise<void> {
+        this.#assertReady();
+        await this.#protocolClient.closeArtifactDirectReceive(receiverId);
+    }
+
+    async pushPayloadDirect(input: WorkerArtifactDirectPushInput): Promise<WorkerArtifactDirectPushResult> {
+        this.#assertReady();
+        return await this.#protocolClient.pushArtifactPayloadDirect(input);
     }
 }
