@@ -516,9 +516,15 @@ test("Windows skill archives assign portable Unix modes from entry type and sheb
 test("ssh transport mirrors control skills to the remote user skill directory", async (t) => {
     const root = await createTestTempDirectory("skills");
     const skillsDirectory = join(root, "skill");
-    await mkdir(join(skillsDirectory, "review", "scripts"), { recursive: true });
-    await writeFile(join(skillsDirectory, "review", "SKILL.md"), "# Review\n");
-    const scriptPath = join(skillsDirectory, "review", "scripts", "run.sh");
+    const reviewDirectory = join(skillsDirectory, "review");
+    const scriptsDirectory = join(reviewDirectory, "scripts");
+    const skillPath = join(reviewDirectory, "SKILL.md");
+    await mkdir(scriptsDirectory, { recursive: true });
+    await chmod(reviewDirectory, 0o755);
+    await chmod(scriptsDirectory, 0o755);
+    await writeFile(skillPath, "# Review\n");
+    await chmod(skillPath, 0o644);
+    const scriptPath = join(scriptsDirectory, "run.sh");
     await writeFile(scriptPath, "#!/bin/sh\nprintf review\n");
     await chmod(scriptPath, 0o755);
     t.after(() => rm(root, { recursive: true, force: true }));
