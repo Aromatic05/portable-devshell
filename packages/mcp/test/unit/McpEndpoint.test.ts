@@ -46,7 +46,7 @@ test("initialize succeeds over SDK transport", async () => {
     }
 });
 
-test("Workspace MCP App resource is listed and served with the MCP Apps MIME type", async () => {
+test("Workspace MCP App keeps its stable v1 resource URI and MCP Apps MIME type", async () => {
     const binding = createBinding();
     const server = await createBindingServer(binding);
 
@@ -145,6 +145,38 @@ test("tools/list uses group and capability filtering", async () => {
         const names = response.body.result?.tools.map((tool: { name: string }) => tool.name) ?? [];
         assert.equal(names.includes("bash_run"), true);
         assert.equal(names.includes("read_logs"), false);
+    } finally {
+        await server.close();
+        await binding.close();
+    }
+});
+
+test("cached removed tool recipients return a structured tombstone over MCP", async () => {
+    const binding = createBinding();
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        const listed = await postJson(server.url, await readFixture("mcp-tools-list.json"), session.headers);
+        const names = listed.body.result?.tools.map((tool: { name: string }) => tool.name) ?? [];
+        assert.equal(names.includes("context_message_read"), false);
+
+        const response = await postJson(server.url, {
+            id: "req-stale-tool",
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: {
+                arguments: {},
+                name: "context_message_read",
+            }
+        }, session.headers);
+
+        assert.equal(response.status, 200);
+        assert.equal(response.body.error, undefined);
+        assert.equal(response.body.result?.isError, false);
+        assert.match(response.body.result?.content?.[0]?.text ?? "", /Cached tool context_message_read was removed/);
+        assert.equal(response.body.result?.structuredContent?.staleToolSnapshot?.name, "context_message_read");
+        assert.equal(response.body.result?.structuredContent?.staleToolSnapshot?.replacement, undefined);
     } finally {
         await server.close();
         await binding.close();

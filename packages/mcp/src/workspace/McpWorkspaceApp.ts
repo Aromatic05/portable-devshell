@@ -1,3 +1,5 @@
+// Keep this resource identity stable across Workspace markup/runtime upgrades. Mounted hosts may
+// cache the URI from an older tool snapshot and read it again after the server has upgraded.
 export const workspaceAppResourceUri = "ui://portable-devshell/workspace/v1.html";
 
 export const workspaceAppHtml = String.raw`<!doctype html>
@@ -207,7 +209,7 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
     try {
       await request("ui/initialize", {
         protocolVersion: "2026-01-26",
-        appInfo: { name: "portable-devshell-workspace", version: "0.6.4" },
+        appInfo: { name: "portable-devshell-workspace", version: "0.6.5" },
         appCapabilities: {}
       });
       notify("ui/notifications/initialized", {});

@@ -16,6 +16,7 @@ import type { McpToolCatalogInstanceName } from "../tool/catalog/McpToolCatalogI
 import type { McpToolCatalogInteractionName } from "../tool/catalog/McpToolCatalogInteraction.js";
 import type { McpToolCatalogTodoName } from "../tool/catalog/McpToolCatalogTodo.js";
 import { throwIfMcpEndpointAborted, waitForMcpEndpointAbortable } from "./McpEndpointCancellation.js";
+import { mcpLegacyToolTombstone, resolveMcpLegacyTool } from "./McpEndpointCompatibility.js";
 import { attachMcpComments } from "./McpEndpointFeedback.js";
 import type { McpEndpointCatalog, McpEndpointCatalogWorker } from "./McpEndpointCatalog.js";
 import { readMcpContextInput, readMcpRoutedInput } from "./McpEndpointInput.js";
@@ -103,6 +104,13 @@ export class McpEndpointDispatch {
         signal?: AbortSignal
     ): Promise<McpEndpointResult> {
         throwIfMcpEndpointAborted(signal);
+        const compatibility = resolveMcpLegacyTool(toolName);
+        if (compatibility?.kind === "tombstone") {
+            return mcpLegacyToolTombstone(toolName, compatibility);
+        }
+        if (compatibility?.kind === "alias") {
+            toolName = compatibility.replacement;
+        }
         const snapshot = this.#catalog.snapshot();
         const known = snapshot.merged.find((entry) => entry.definition.name === toolName);
         const selected = snapshot.exposed.find((entry) => entry.definition.name === toolName);

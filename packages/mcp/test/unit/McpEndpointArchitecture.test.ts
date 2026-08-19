@@ -9,6 +9,7 @@ import type {
 
 import { McpEndpointCatalog } from "../../src/endpoint/McpEndpointCatalog.ts";
 import { McpEndpointDispatch } from "../../src/endpoint/McpEndpointDispatch.ts";
+import { McpNativeToolResult } from "../../src/endpoint/McpEndpointResult.ts";
 import { McpContextRegistry } from "../../src/context/McpContextRegistry.ts";
 
 function workerTool(name: string = "bash_run"): ToolDefinition {
@@ -237,6 +238,99 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
             toolName: "instance_list",
         },
     ]);
+});
+
+test("cached MCP tool names stay callable without re-exposing stale recipients", async () => {
+    const harness = createWorker();
+    const connected: string[] = [];
+    const gateway = {
+        assertReady() {},
+        async callTool(): Promise<JsonValue> { return {}; },
+        async connectInstance(instance: string): Promise<JsonValue> {
+            connected.push(instance);
+            return { state: "ready" };
+        },
+        async createSshInstance(): Promise<JsonValue> { return {}; },
+        async listInstances(): Promise<JsonValue[]> { return []; },
+        listTools: () => [],
+        async readTodo(): Promise<JsonValue> { return { items: [], revision: 0 }; },
+        async statusInstance(): Promise<JsonValue> { return {}; },
+        async stopInstance(): Promise<JsonValue> { return {}; },
+        async writeTodo(): Promise<JsonValue> { return {}; },
+    } as never;
+    const catalog = new McpEndpointCatalog({
+        gateway,
+        instanceName: "demo-local",
+        policy: { capabilities: ["manage"], groups: ["instance"] },
+        worker: harness.worker,
+    });
+    const dispatch = new McpEndpointDispatch({
+        catalog,
+        gateway,
+        instanceName: "demo-local",
+        worker: harness.worker,
+    });
+
+    assert.equal(catalog.listTools().some((tool) => tool.name === "instance_start"), false);
+    assert.equal(catalog.listTools().some((tool) => tool.name === "context_message_read"), false);
+
+    const environment = await dispatch.callTool(
+        "environ_info",
+        { workspace: "/workspace" },
+        { principal: "tester", requestId: "request-environment" },
+    ) as { ctxId: string };
+    assert.deepEqual(await dispatch.callTool(
+        "instance_start",
+        { ctxId: environment.ctxId, instance: "remote" },
+        { principal: "tester", requestId: "request-start" },
+    ), { state: "ready" });
+    assert.deepEqual(connected, ["remote"]);
+
+    const tombstone = await dispatch.callTool(
+        "context_message_read",
+        {},
+        { principal: "tester", requestId: "request-stale" },
+    );
+    assert.ok(tombstone instanceof McpNativeToolResult);
+    assert.deepEqual(tombstone.structuredContent, {
+        staleToolSnapshot: {
+            assistantInstruction: "Queued user Comments are delivered automatically with the next successful ordinary tool result. Do not poll for them.",
+            help: "Queued user Comments are delivered automatically with the next successful ordinary tool result. Do not poll for them.",
+            name: "context_message_read",
+            removedIn: "0.5.1",
+        },
+    });
+    await assert.rejects(
+        dispatch.callTool("unknown_cached_tool", {}, { principal: "tester", requestId: "request-unknown" }),
+    );
+});
+
+test("legacy aliases still obey the current MCP policy", async () => {
+    const harness = createWorker();
+    const gateway = {
+        listTools: () => [],
+    } as never;
+    const catalog = new McpEndpointCatalog({
+        gateway,
+        instanceName: "demo-local",
+        policy: { capabilities: [], groups: [] },
+        worker: harness.worker,
+    });
+    const dispatch = new McpEndpointDispatch({
+        catalog,
+        gateway,
+        instanceName: "demo-local",
+        worker: harness.worker,
+    });
+
+    await assert.rejects(
+        dispatch.callTool(
+            "instance_start",
+            { ctxId: "ctx-cached", instance: "remote" },
+            { principal: "tester", requestId: "request-start" },
+        ),
+        /not exposed/i,
+    );
 });
 
 test("tmux_wait detaches and resumes one durable wait without starting another worker wait", async () => {

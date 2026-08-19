@@ -107,9 +107,13 @@ requiredScopes = ["mcp"]
 
 默认不包含 `instance` group，也不授予 `manage`。`instance_connect` 是幂等的“确保可用”入口：目标未启动时由 Control 启动并连接，已经 ready 时不重复启动；可选 `workspace` 会作为当前 `ctxId` 在该 instance 上的 workspace attachment。`selfManaged` reverse worker 不由 Control 启动，`instance_connect` 只接受已经连入的 worker。`instance_stop` 仍只适用于由 Control 管理生命周期的 worker。用户从 TUI 定向发送给某个 Context 的 Comment 不作为独立 MCP 工具暴露；消息按 `ctxId` 排队，并附着到该 Context 下一次成功的普通工具结果中。
 
+MCP 对已经被 ChatGPT 缓存的旧 recipient 保留一层隐藏兼容。兼容名字永远不重新出现在 `tools/list`：语义仍是当前操作安全超集的 `instance_start` 会透明路由到 `instance_connect`，并继续接受当前 group / capability / Context 校验；无法安全等价转换的 `context_message_read`、`file_write`、`tmux_send`、`tmux_capture`、`tmux_reclaim` 不执行旧操作，而是返回结构化 `staleToolSnapshot`，说明移除版本和当前迁移方式。未知且从未受支持的工具名仍按普通 not-exposed 错误处理。
+
 ## Workspace MCP App 与人工交互
 
 `workspace_open` 是 model-visible 的 Workspace 入口。它绑定当前 `ctxId`，并返回该 Context 的 authoritative snapshot。Workspace 会展示：当前 Todo task、最近工具活动摘要、等待中的 Question / Approval，以及已经进入 durable wait 的 tmux background task。
+
+Workspace 资源 URI `ui://portable-devshell/workspace/v1.html` 是持久兼容标识，不随 HTML/运行时代码升级而改变。已挂载会话可以继续使用旧 tool snapshot 中缓存的同一 URI 重新读取当前 Workspace；只有真正出现第二个历史 URI 时才应增加隐藏 resource alias，而不是为了版本号主动换 URI。
 
 Workspace 内部使用 `workspace_snapshot` 和 `workspace_watch` 保持 live state；这两个 helper 是 app-only，不应由模型主动调用。`workspace_watch` 复用 instance 现有的 event sequence cursor，只在当前 Context 的 `toolCall.*`、`approval.*`、`todo.*`、`wait.*` 事件发生时返回新 snapshot；事件历史出现 gap 或 Control 重启导致 cursor 失效时，直接重新读取 authoritative snapshot。正常无变化时只返回 heartbeat，不使用固定频率 snapshot polling。
 
