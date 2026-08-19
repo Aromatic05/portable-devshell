@@ -12,19 +12,23 @@ export function buildConnectionsOverviewBoxes(state: TuiAppState, instance: stri
     const running = state.readModel.mcpStatus?.running === true;
     const pendingOAuth = state.readModel.oauthApprovals.filter((approval) => approval.status === "pending").length;
     const snapshot = state.readModel.instanceState[instance]?.snapshot;
+    const enabled = entry?.mcpEnabled === true;
+    const runtime = !enabled ? "disabled" : running ? "running" : "stopped";
+    const path = entry?.mcpPath ?? `/${instance}/mcp`;
+    const publicEndpoint = running && enabled ? publicMcpEndpoint(mcp?.publicBaseUrl, path) : "unavailable";
 
     return [
         makeBox(state, "connections", instance, {
             detailLines: [
-                formatField("Enabled", String(entry?.mcpEnabled ?? false)),
-                formatField("Path", entry?.mcpPath ?? `/${instance}/mcp`),
-                formatField("Runtime", running ? "running" : "stopped"),
-                formatField("Public URL", typeof mcp?.publicBaseUrl === "string" ? mcp.publicBaseUrl : "-")
+                formatField("Enabled", String(enabled)),
+                formatField("Path", path),
+                formatField("Runtime", runtime),
+                formatField("Public MCP", publicEndpoint)
             ],
             id: "connections:connector:mcp",
             primaryRoute: { connectorId: "mcp", page: "connections", view: "connector" },
-            status: running ? "ready" : entry?.mcpEnabled === false ? "disabled" : "warning",
-            summaryLines: [compactSummary(["runtime", running ? "running" : "stopped"], ["path", entry?.mcpPath ?? `/${instance}/mcp`])],
+            status: running && enabled ? "ready" : !enabled ? "disabled" : "warning",
+            summaryLines: [compactSummary(["runtime", runtime], ["path", path])],
             title: "Connector"
         }),
         makeBox(state, "connections", instance, {
@@ -39,19 +43,29 @@ export function buildConnectionsOverviewBoxes(state: TuiAppState, instance: stri
             summaryLines: [compactSummary(["provider", authMode], ["pending", String(pendingOAuth)])],
             title: "OAuth Provider"
         }),
-        makeBox(state, "connections", instance, {
+        ...(entry?.provider === "reverse" ? [makeBox(state, "connections", instance, {
             detailLines: [
-                formatField("Provider", entry?.provider ?? "unknown"),
+                formatField("Provider", entry.provider),
                 formatField("Connection", snapshot?.connectionState ?? "unknown"),
                 formatField("Daemon", snapshot?.daemonState ?? "unknown")
             ],
             id: `connections:reverse:${instance}`,
             primaryRoute: { instanceId: instance, page: "connections", view: "reverse" },
             status: snapshot?.connectionState === "connected" ? "ready" : "warning",
-            summaryLines: [compactSummary(["connection", snapshot?.connectionState ?? "unknown"], ["provider", entry?.provider ?? "unknown"])],
+            summaryLines: [compactSummary(["connection", snapshot?.connectionState ?? "unknown"], ["provider", entry.provider])],
             title: "Reverse Connection"
-        })
+        })] : [])
     ];
+}
+
+function publicMcpEndpoint(publicBaseUrl: JsonValue | undefined, path: string): string {
+    if (typeof publicBaseUrl !== "string" || publicBaseUrl.length === 0) return "unavailable";
+    try {
+        const base = publicBaseUrl.endsWith("/") ? publicBaseUrl : `${publicBaseUrl}/`;
+        return new URL(path.startsWith("/") ? path.slice(1) : path, base).toString();
+    } catch {
+        return "unavailable";
+    }
 }
 
 function asRecord(value: JsonValue | undefined): Record<string, JsonValue> | undefined {

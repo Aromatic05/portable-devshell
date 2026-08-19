@@ -1912,7 +1912,7 @@ test("Prompt 3 detail line selection clamps to a valid line after data replaceme
     )!;
     assert.equal(logs.selectedDetailLineId, "logs:log:1");
 });
-test("connector editor presents unavailable endpoints and control runtime limits as user states", () => {
+test("connector editor presents only live endpoints and scopes unsaved feedback", () => {
     const harness = createHarness();
     enterConnectionsRoute(harness, "connector");
     const connector = selectMainScreenModel(harness.store.getState());
@@ -1939,7 +1939,7 @@ test("connector editor presents unavailable endpoints and control runtime limits
         connector.boxes
             .find((box) => box.id === "connection-endpoints")
             ?.collapsedLines.map((line) => line.text),
-        ["local=http://127.0.0.1:3210/alpha/mcp", "public=unavailable"],
+        ["local=unavailable", "public=unavailable"],
     );
 
     harness.store.patchControlReadModel({ configView: {
@@ -1964,7 +1964,21 @@ test("connector editor presents unavailable endpoints and control runtime limits
             publicBaseUrl: "https://example.test/controller",
         },
     } });
-    const configuredEndpoints = selectMainScreenModel(harness.store.getState())
+    let configuredEndpoints = selectMainScreenModel(harness.store.getState())
+        .boxes.find((box) => box.id === "connection-endpoints");
+    assert.deepEqual(
+        configuredEndpoints?.collapsedLines.map((line) => line.text),
+        ["local=unavailable", "public=unavailable"],
+    );
+    assert.equal(
+        configuredEndpoints?.expandedLines.some(
+            (line) => line.text === "Web UI             https://example.test/controller/web",
+        ),
+        true,
+    );
+
+    harness.store.patchControlReadModel({ mcpStatus: { authMode: "none", running: true } });
+    configuredEndpoints = selectMainScreenModel(harness.store.getState())
         .boxes.find((box) => box.id === "connection-endpoints");
     assert.deepEqual(
         configuredEndpoints?.collapsedLines.map((line) => line.text),
@@ -1973,9 +1987,63 @@ test("connector editor presents unavailable endpoints and control runtime limits
             "public=https://example.test/tunnel/alpha/custom-mcp",
         ],
     );
+
+    harness.store.setFormDraft("web", {
+        auth: "none",
+        enabled: true,
+        listenHost: "127.0.0.1",
+        listenPort: 9000,
+        publicBaseUrl: "https://draft.example/preview",
+    }, true);
+    const dirtyConnector = selectMainScreenModel(harness.store.getState());
     assert.equal(
-        configuredEndpoints?.expandedLines.some(
-            (line) => line.text === "Web UI             https://example.test/controller/web",
+        dirtyConnector.boxes.find((box) => box.id === "connection-endpoints")
+            ?.expandedLines.some((line) => line.text === "Web UI             https://example.test/controller/web"),
+        true,
+    );
+    assert.deepEqual(
+        dirtyConnector.boxes.slice(1, 5).map((box) => box.title),
+        [
+            "[Instance] MCP Endpoint",
+            "[Global] Public Base URL",
+            "[Global] Web UI [UNSAVED]",
+            "[Instance] Auth",
+        ],
+    );
+});
+
+test("connections overview hides reverse-only navigation and shows the usable MCP endpoint", () => {
+    const harness = createHarness();
+    harness.store.patchControlReadModel({
+        configView: {
+            instances: [
+                {
+                    enabled: true,
+                    mcp: { enabled: true, path: "/alpha/mcp" },
+                    name: "alpha",
+                    provider: "local",
+                },
+            ],
+            mcp: {
+                enabled: true,
+                listenHost: "127.0.0.1",
+                listenPort: 3210,
+                publicBaseUrl: "https://example.test/tunnel",
+            },
+        },
+        mcpStatus: { authMode: "none", running: true },
+    });
+    harness.store.setSelectedPage("connections");
+
+    const overview = selectMainScreenModel(harness.store.getState());
+    assert.deepEqual(
+        overview.boxes.map((box) => box.title),
+        ["Connector", "OAuth Provider"],
+    );
+    const connector = expandBox(harness, "connections:connector:mcp");
+    assert.equal(
+        connector.expandedLines.some(
+            (line) => line.text.startsWith("Public MCP") && line.text.includes("https://example.test/tunnel/alpha/mcp"),
         ),
         true,
     );

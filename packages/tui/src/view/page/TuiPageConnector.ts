@@ -7,26 +7,36 @@ import { asRecord, editorDraft, readPath } from "../../state/editor/TuiEditorDra
 import { buttonLine, choiceLine, editorErrorLine, fieldLine, secretFieldLine } from "../editor/TuiEditorView.js";
 
 export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
-    const instanceDraft = editorDraft(state, `config:${instanceName}`, selectedInstanceDraft(state, instanceName));
-    const mcpDraft = editorDraft(state, "connector", globalMcpDraft(state));
-    const webDraft = editorDraft(state, "web", globalWebDraft(state));
-    const unsaved = state.ui.dirtyForms["connector"] === true || state.ui.dirtyForms[`config:${instanceName}`] === true || state.ui.dirtyForms["web"] === true ? " [UNSAVED]" : "";
+    const instanceConfig = selectedInstanceDraft(state, instanceName);
+    const mcpConfig = globalMcpDraft(state);
+    const webConfig = globalWebDraft(state);
+    const instanceDraft = editorDraft(state, `config:${instanceName}`, instanceConfig);
+    const mcpDraft = editorDraft(state, "connector", mcpConfig);
+    const webDraft = editorDraft(state, "web", webConfig);
     const instanceDirty = state.ui.dirtyForms[`config:${instanceName}`] === true;
     const globalDirty = state.ui.dirtyForms["connector"] === true;
     const webDirty = state.ui.dirtyForms["web"] === true;
+    const instanceUnsaved = instanceDirty ? " [UNSAVED]" : "";
+    const globalUnsaved = globalDirty ? " [UNSAVED]" : "";
+    const webUnsaved = webDirty ? " [UNSAVED]" : "";
     const affectedScopes = [instanceDirty ? "instance" : undefined, globalDirty ? "mcp" : undefined, webDirty ? "web" : undefined].filter(Boolean).join(" + ") || "none";
-    const endpoint = endpointPreview(mcpDraft, readPath(instanceDraft, "mcp.path"), instanceName);
-    const localEndpoint = localMcpEndpoint(mcpDraft, readPath(instanceDraft, "mcp.path"), instanceName);
-    const webEndpoint = webUiEndpoint(webDraft);
-    const runtime = runtimeStatus(state, instanceDraft, mcpDraft, endpoint);
+    const endpoint = endpointPreview(mcpConfig, readPath(instanceConfig, "mcp.path"), instanceName);
+    const localEndpoint = localMcpEndpoint(mcpConfig, readPath(instanceConfig, "mcp.path"), instanceName);
+    const webEndpoint = webUiEndpoint(webConfig);
+    const runtime = runtimeStatus(state, instanceConfig, mcpConfig, endpoint);
+    const oauthBlocked = state.readModel.mcpStatus?.authMode === "oauth2" && state.readModel.mcpStatus.oauthReady !== true;
+    const localValue = runtime.runtime === "running" && !oauthBlocked ? localEndpoint.value : "unavailable";
+    const publicValue = runtime.runtime === "running" && !oauthBlocked && endpoint.reason === undefined
+        ? endpoint.value.replace(/^endpoint=/, "")
+        : "unavailable";
     const authMode = readPath(instanceDraft, "mcp.auth");
     const webAuthMode = readPath(webDraft, "auth");
 
     return [
         makeBox(state, "connections", instanceName, {
             detailLines: [
-                `Local MCP          ${localEndpoint.value}`,
-                `Public MCP         ${endpoint.value.replace(/^endpoint=/, "")}`,
+                `Local MCP          ${localValue}`,
+                `Public MCP         ${publicValue}`,
                 `Web UI             ${webEndpoint.value}`,
                 `Runtime            ${runtime.runtime}`,
                 `Auth               ${String(authMode ?? "none")}`,
@@ -38,8 +48,8 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             id: "connection-endpoints",
             status: runtime.runtime === "running" ? "ready" : runtime.runtime === "disabled" ? "disabled" : "warning",
             summaryLines: [
-                `local=${localEndpoint.value}`,
-                `public=${endpoint.value.replace(/^endpoint=/, "")}`,
+                `local=${localValue}`,
+                `public=${publicValue}`,
             ],
             title: "Connection Endpoints",
         }),
@@ -52,7 +62,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             id: "mcp-endpoint",
             status: "normal",
             summaryLines: [compactSummary(["enabled", String(readPath(instanceDraft, "mcp.enabled") ?? false)], ["path", String(readPath(instanceDraft, "mcp.path") ?? "-")])],
-            title: `[Instance] MCP Endpoint${unsaved}`
+            title: `[Instance] MCP Endpoint${instanceUnsaved}`
         }),
         makeBox(state, "connections", instanceName, {
             detailLines: [
@@ -63,7 +73,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             ],
             id: "public-base-url",
             summaryLines: [compactSummary(["host", String(readPath(mcpDraft, "listenHost") ?? "-")], ["baseUrl", String(readPath(mcpDraft, "publicBaseUrl") ?? "-")])],
-            title: `[Global] Public Base URL${unsaved}`
+            title: `[Global] Public Base URL${globalUnsaved}`
         }),
         makeBox(state, "connections", instanceName, {
             detailLines: [
@@ -86,7 +96,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             ],
             id: "web",
             summaryLines: [compactSummary(["enabled", String(readPath(webDraft, "enabled") ?? false)], ["listener", `${String(readPath(webDraft, "listenHost") ?? "-")}:${String(readPath(webDraft, "listenPort") ?? "-")}`])],
-            title: `[Global] Web UI${unsaved}`
+            title: `[Global] Web UI${webUnsaved}`
         }),
         makeBox(state, "connections", instanceName, {
             detailLines: [
@@ -105,7 +115,7 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             id: "auth",
             status: "normal",
             summaryLines: [compactSummary(["mode", String(authMode ?? "-")], ["namespace", instanceName])],
-            title: `[Instance] Auth${unsaved}`
+            title: `[Instance] Auth${instanceUnsaved}`
         }),
         makeBox(state, "connections", instanceName, {
             detailLines: [
@@ -155,12 +165,13 @@ function localMcpEndpoint(
 
 function webUiEndpoint(web: Record<string, JsonValue>): { reason?: string; value: string } {
     const disabled = readPath(web, "enabled") !== true;
+    if (disabled) return { reason: "Web UI is disabled", value: "unavailable" };
     const publicBaseUrl = readPath(web, "publicBaseUrl");
     if (typeof publicBaseUrl === "string" && publicBaseUrl.length > 0) {
         try {
             const base = new URL(publicBaseUrl);
             const value = new URL(controlWebBasePath(publicBaseUrl), base.origin).toString().replace(/\/$/u, "");
-            return { ...(disabled ? { reason: "Web UI is disabled" } : {}), value };
+            return { value };
         } catch {
             return { reason: "invalid web.publicBaseUrl", value: "unavailable" };
         }
@@ -172,10 +183,7 @@ function webUiEndpoint(web: Record<string, JsonValue>): { reason?: string; value
     }
     const localHost = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host;
     const authority = localHost.includes(":") ? `[${localHost}]` : localHost;
-    return {
-        ...(disabled ? { reason: "Web UI is disabled" } : {}),
-        value: `http://${authority}:${port}${CONTROL_WEB_BASE_PATH}`,
-    };
+    return { value: `http://${authority}:${port}${CONTROL_WEB_BASE_PATH}` };
 }
 
 function selectedInstanceDraft(state: TuiAppState, instanceName: string): Record<string, JsonValue> {
