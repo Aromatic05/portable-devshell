@@ -118,6 +118,10 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return await this.#requireWait(instance).detach(waitId);
     }
 
+    async reattachWait(instance: string, waitId: string, ownerCallId?: string) {
+        return await this.#requireWait(instance).reattach(waitId, ownerCallId);
+    }
+
     async consumeWait(instance: string, waitId: string) {
         return await this.#requireWait(instance).consume(waitId);
     }

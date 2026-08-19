@@ -69,6 +69,20 @@ export class WaitState {
         });
     }
 
+    reattach(document: WaitDocument, waitId: string, ownerCallId?: string): WaitTransition {
+        return this.#update(document, waitId, (record) => {
+            if (record.status !== "detached") throw invalidTransition(record, "reattach");
+            const { detachedAt: _detachedAt, ownerCallId: _ownerCallId, ...rest } = record;
+            const now = this.#now();
+            return {
+                ...rest,
+                ...(ownerCallId === undefined ? {} : { ownerCallId }),
+                status: "waiting",
+                updatedAt: now,
+            };
+        });
+    }
+
     resolve(document: WaitDocument, waitId: string, result?: JsonValue): WaitTransition {
         return this.#update(document, waitId, (record) => {
             if (record.status !== "waiting" && record.status !== "detached") {

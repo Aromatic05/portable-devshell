@@ -265,6 +265,8 @@ pub struct TmuxTaskOperationOutput {
 #[serde(rename_all = "camelCase")]
 pub struct TmuxWaitOutput {
     pub task: TmuxTaskView,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interrupted: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

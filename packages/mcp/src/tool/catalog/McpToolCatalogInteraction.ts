@@ -8,6 +8,7 @@ export type McpToolCatalogInteractionName =
     | "workspace_snapshot"
     | "workspace_watch"
     | "workspace_question_answer"
+    | "workspace_wait_interrupt"
     | "workspace_task_control"
     | "workspace_wait_recover"
     | "workspace_approval_decide";
@@ -120,6 +121,23 @@ export class McpToolCatalogInteraction {
                 type: "object",
             },
             name: "workspace_question_answer",
+            outputSchema: objectOutput,
+            requiredCapabilities: [],
+        },
+        {
+            _meta: appOnlyMeta,
+            description: "Interrupt one active tmux_wait without stopping the tmux task. The held model tool call returns as interrupted and this wait ends; a later tmux_wait creates a new wait for the still-running task. App-only human action; models must not call it.",
+            group: "interaction",
+            inputSchema: {
+                additionalProperties: false,
+                properties: {
+                    token: { minLength: 1, type: "string" },
+                    waitId: { minLength: 1, type: "string" },
+                },
+                required: ["waitId", "token"],
+                type: "object",
+            },
+            name: "workspace_wait_interrupt",
             outputSchema: objectOutput,
             requiredCapabilities: [],
         },

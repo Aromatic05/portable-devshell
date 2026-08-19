@@ -333,19 +333,23 @@ test("legacy aliases still obey the current MCP policy", async () => {
     );
 });
 
-test("tmux_wait detaches and resumes one durable wait without starting another worker wait", async () => {
-    let finishWorker!: (result: JsonValue) => void;
-    const workerResult = new Promise<JsonValue>((resolve) => {
-        finishWorker = resolve;
-    });
+test("tmux_wait distinguishes host detach from explicit Workspace interruption", async () => {
     let workerWaitCalls = 0;
+    let workerWaitAborts = 0;
+    const workerResolvers: Array<(result: JsonValue) => void> = [];
     const harness = createWorker({ tools: [tmuxWaitTool()] });
     const worker = {
         ...harness.worker,
-        async callTool(toolName: string): Promise<JsonValue> {
+        async callTool(toolName: string, _input: JsonValue, _context: ToolCallContext, signal?: AbortSignal): Promise<JsonValue> {
             assert.equal(toolName, "tmux_wait");
             workerWaitCalls += 1;
-            return await workerResult;
+            return await new Promise<JsonValue>((resolve, reject) => {
+                workerResolvers.push(resolve);
+                signal?.addEventListener("abort", () => {
+                    workerWaitAborts += 1;
+                    reject(new Error("worker tmux_wait aborted"));
+                }, { once: true });
+            });
         },
     };
     type Wait = {
@@ -402,6 +406,16 @@ test("tmux_wait detaches and resumes one durable wait without starting another w
         async listApprovals() { return []; },
         async listWaits() { return waits; },
         listTools: () => [],
+        async reattachWait(_instance: string, waitId: string, ownerCallId?: string) {
+            const wait = waits.find((entry) => entry.waitId === waitId);
+            if (wait === undefined || wait.status !== "detached") throw new Error(`cannot reattach ${waitId}`);
+            delete wait.detachedAt;
+            wait.status = "waiting";
+            wait.updatedAt = new Date().toISOString();
+            if (ownerCallId === undefined) delete wait.ownerCallId;
+            else wait.ownerCallId = ownerCallId;
+            return wait;
+        },
         async readTodo() {
             return {
                 items: [],
@@ -423,7 +437,7 @@ test("tmux_wait detaches and resumes one durable wait without starting another w
     const catalog = new McpEndpointCatalog({
         gateway,
         instanceName: "demo-local",
-        policy: { capabilities: ["read"], groups: ["tmux"] },
+        policy: { capabilities: ["read"], groups: ["interaction", "tmux"] },
         worker,
     });
     const dispatch = new McpEndpointDispatch({ catalog, gateway, instanceName: "demo-local", worker });
@@ -444,6 +458,7 @@ test("tmux_wait detaches and resumes one durable wait without starting another w
     abort.abort("host remount");
     await assert.rejects(first, /cancelled by the client/u);
     assert.equal(waits[0]?.status, "detached");
+    assert.equal(workerWaitAborts, 0);
 
     const resumed = dispatch.callTool(
         "tmux_wait",
@@ -454,9 +469,45 @@ test("tmux_wait detaches and resumes one durable wait without starting another w
     assert.equal(waits.length, 1);
     assert.equal(workerWaitCalls, 1);
 
-    finishWorker({ task: { id: "task-1", status: "0" } });
-    assert.deepEqual(await resumed, { task: { id: "task-1", status: "0" } });
-    assert.equal(waits[0]?.status, "consumed");
+    await waitUntil(() => pending.has(waits[0]!.waitId));
+    const opened = await dispatch.callTool(
+        "workspace_open",
+        { ctxId: environment.ctxId },
+        { principal: "tester", requestId: "workspace-open" },
+    );
+    assert.ok(opened instanceof McpNativeToolResult);
+    const token = (opened._meta?.["portable-devshell/workspace"] as { token?: string } | undefined)?.token;
+    if (typeof token !== "string") throw new Error("workspace token missing");
+    const waitId = waits[0]!.waitId;
+    const interruptedByUser = await dispatch.callTool(
+        "workspace_wait_interrupt",
+        { ctxId: environment.ctxId, token, waitId },
+        { principal: "tester", requestId: "workspace-interrupt" },
+    );
+    assert.deepEqual(interruptedByUser, {
+        interrupted: true,
+        status: "cancelled",
+        tmuxTaskId: "task-1",
+        waitId,
+    });
+    assert.deepEqual(await resumed, {
+        interrupted: true,
+        task: { id: "task-1", status: "running" },
+    });
+    await waitUntil(() => workerWaitAborts === 1);
+    assert.equal(waits[0]?.status, "cancelled");
+
+    const resumedAgain = dispatch.callTool(
+        "tmux_wait",
+        { ctxId: environment.ctxId, task: "task-1" },
+        { principal: "tester", requestId: "wait-3" },
+    );
+    await waitUntil(() => workerWaitCalls === 2 && waits.length === 2);
+    assert.equal(waits[1]?.status, "waiting");
+
+    workerResolvers[1]!({ task: { id: "task-1", status: "0" } });
+    assert.deepEqual(await resumedAgain, { task: { id: "task-1", status: "0" } });
+    assert.equal(waits[1]?.status, "consumed");
 });
 
 test("environ_info rolls back an undisclosed Context when post-create event recording fails", async () => {

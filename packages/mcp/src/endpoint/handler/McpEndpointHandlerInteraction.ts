@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+    ApprovalRequest,
     InstanceEvent,
     JsonValue,
     TodoTaskControlAction,
@@ -11,6 +12,7 @@ import type {
 
 import {
     isMcpInteractionGateway,
+    isMcpWaitTrackingGateway,
     isMcpWorkspaceGateway,
     type McpInstanceGateway,
     type McpInteractionGateway
@@ -49,6 +51,9 @@ export class McpEndpointHandlerInteraction {
             case "workspace_question_answer":
                 this.#assertAppToken(input, context);
                 return await this.#answerQuestion(gateway, input, context);
+            case "workspace_wait_interrupt":
+                this.#assertAppToken(input, context);
+                return await this.#interruptWait(gateway, input, context);
             case "workspace_task_control":
                 this.#assertAppToken(input, context);
                 return await this.#controlTask(gateway, input, context);
@@ -200,6 +205,31 @@ export class McpEndpointHandlerInteraction {
         };
     }
 
+    async #interruptWait(
+        gateway: McpInteractionGateway,
+        input: JsonValue,
+        context: ToolCallContext,
+    ): Promise<JsonValue> {
+        if (!isMcpWaitTrackingGateway(gateway)) {
+            throw new Error(`Workspace wait interruption is unavailable for ${this.options.instanceName}.`);
+        }
+        const waitId = readWaitId(input, "workspace_wait_interrupt");
+        const wait = (await gateway.listWaits(this.options.instanceName)).find((entry) => entry.waitId === waitId);
+        if (
+            wait === undefined || wait.createdByCtxId !== requireCtxId(context) ||
+            wait.kind !== "tmux" || wait.status !== "waiting"
+        ) {
+            throw new Error(`Interruptible tmux wait ${waitId} was not found for this ctxId.`);
+        }
+        const cancelled = await gateway.cancelWait(this.options.instanceName, waitId);
+        return {
+            interrupted: true,
+            status: cancelled.status,
+            tmuxTaskId: cancelled.targetId,
+            waitId: cancelled.waitId,
+        };
+    }
+
     async #controlTask(
         gateway: McpInteractionGateway,
         input: JsonValue,
@@ -279,13 +309,14 @@ export class McpEndpointHandlerInteraction {
             ? todoRecord.tasks.filter((task) => asRecord(task)?.ctxId === ctxId)
             : [];
         const ownedWaits = waits.filter((wait) => wait.createdByCtxId === ctxId);
+        const ownedApprovals = approvals.filter((approval) => approval.ctxId === ctxId && approval.status === "pending");
         return {
             activity: activity
                 .filter((record) => !record.toolName.startsWith("workspace_"))
                 .slice()
                 .reverse()
                 .map(workspaceActivity),
-            approvals: approvals.filter((approval) => approval.ctxId === ctxId && approval.status === "pending"),
+            approvals: ownedApprovals,
             background: ownedWaits
                 .filter((wait) => wait.kind === "tmux" && wait.status !== "consumed" && wait.status !== "cancelled")
                 .map((wait) => ({
@@ -297,6 +328,7 @@ export class McpEndpointHandlerInteraction {
                     waitId: wait.waitId,
                 })),
             ctxId,
+            currentEvent: workspaceCurrentEvent(ownedWaits, ownedApprovals),
             cursor: eventSlice.lastSeq,
             instance: this.options.instanceName,
             questions: ownedWaits.filter((wait) => wait.kind === "question" && (wait.status === "waiting" || wait.status === "detached")),
@@ -313,6 +345,64 @@ export class McpEndpointHandlerInteraction {
             throw new Error("Workspace App authorization is invalid for this ctxId.");
         }
     }
+}
+
+function workspaceCurrentEvent(waits: WaitRecord[], approvals: ApprovalRequest[]): JsonValue {
+    const candidates: Array<{ rank: number; updatedAt: string; value: JsonValue }> = [];
+    for (const approval of approvals) {
+        candidates.push({
+            rank: 0,
+            updatedAt: approval.createdAt,
+            value: {
+                eventName: "approval.decision",
+                approvalId: approval.approvalId,
+                inputSummary: approval.inputSummary,
+                kind: "approval",
+                name: approval.toolName,
+                reason: approval.reason,
+                riskLevel: approval.riskLevel,
+                status: "waiting",
+                toolName: approval.toolName,
+                updatedAt: approval.createdAt,
+            },
+        });
+    }
+    for (const wait of waits) {
+        if (wait.kind === "question" && (wait.status === "waiting" || wait.status === "detached")) {
+            candidates.push({
+                rank: wait.status === "waiting" ? 0 : 1,
+                updatedAt: wait.updatedAt,
+                value: {
+                    eventName: "user.answer",
+                    kind: "question",
+                    name: "ask_question",
+                    ...(wait.payload === undefined ? {} : { payload: wait.payload }),
+                    status: wait.status,
+                    ...(wait.taskId === undefined ? {} : { taskId: wait.taskId }),
+                    updatedAt: wait.updatedAt,
+                    waitId: wait.waitId,
+                },
+            });
+        }
+        if (wait.kind === "tmux" && wait.status === "waiting") {
+            candidates.push({
+                rank: 0,
+                updatedAt: wait.updatedAt,
+                value: {
+                    eventName: "tmux.task.completed",
+                    kind: "tmux",
+                    name: "tmux_wait",
+                    status: wait.status,
+                    ...(wait.taskId === undefined ? {} : { taskId: wait.taskId }),
+                    tmuxTaskId: wait.targetId,
+                    updatedAt: wait.updatedAt,
+                    waitId: wait.waitId,
+                },
+            });
+        }
+    }
+    candidates.sort((left, right) => left.rank - right.rank || right.updatedAt.localeCompare(left.updatedAt));
+    return candidates[0]?.value ?? null;
 }
 
 function requireInteractionGateway(

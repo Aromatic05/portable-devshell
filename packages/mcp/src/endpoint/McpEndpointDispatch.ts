@@ -54,7 +54,7 @@ export class McpEndpointDispatch {
     readonly #instance: McpEndpointHandlerInstance;
     readonly #instanceName: string;
     readonly #interaction: McpEndpointHandlerInteraction;
-    readonly #tmuxWaitTrackers = new Map<string, Promise<JsonValue>>();
+    readonly #tmuxWaitTrackers = new Map<string, { controller: AbortController; promise: Promise<JsonValue> }>();
     readonly #todo: McpEndpointHandlerTodo;
     readonly #worker: McpEndpointWorkerPort;
     readonly #workerHandler: McpEndpointHandlerWorker;
@@ -147,13 +147,18 @@ export class McpEndpointDispatch {
 
         if (appOnlyInteraction) {
             this.#catalog.assertAdaptable(selected.definition);
-            return await this.#interaction.call(
+            const result = await this.#interaction.call(
                 toolName as McpToolCatalogInteractionName,
                 input,
                 context,
                 context.requestId ?? "workspace-app",
                 signal
             );
+            if (toolName === "workspace_wait_interrupt") {
+                const waitId = readWorkspaceWaitId(input);
+                if (waitId !== undefined) this.#interruptTmuxWaitTracker(this.#instanceName, waitId);
+            }
+            return result;
         }
 
         if (
@@ -219,6 +224,9 @@ export class McpEndpointDispatch {
             record.status !== "consumed"
         );
         let wait = reusable;
+        if (wait?.status === "detached") {
+            wait = await gateway.reattachWait(instance, wait.waitId, context.requestId);
+        }
         if (wait === undefined) {
             const taskId = await this.#currentTaskId(instance, context.ctxId);
             wait = await gateway.createWait(instance, {
@@ -229,9 +237,8 @@ export class McpEndpointDispatch {
                 targetId: task
             });
         }
-        const tracked = wait.status === "resolved"
-            ? Promise.resolve(wait.result)
-            : this.#ensureTmuxWaitTracker(
+        if (wait.status !== "resolved") {
+            this.#ensureTmuxWaitTracker(
                 wait.waitId,
                 input,
                 context,
@@ -239,9 +246,13 @@ export class McpEndpointDispatch {
                 instanceRoutingEnabled,
                 instance
             );
+        }
 
         try {
-            const result = await waitForMcpEndpointAbortable(tracked, signal);
+            const resolved = wait.status === "resolved"
+                ? wait
+                : await waitForMcpEndpointAbortable(gateway.waitForWait(instance, wait.waitId), signal);
+            const result = resolved.result;
             if (result === undefined) {
                 throw new Error(`tmux wait ${wait.waitId} resolved without a result.`);
             }
@@ -256,6 +267,20 @@ export class McpEndpointDispatch {
         } catch (error) {
             if (signal?.aborted === true) {
                 await gateway.detachWait(instance, wait.waitId).catch(() => undefined);
+                throw error;
+            }
+            const current = (await gateway.listWaits(instance)).find((record) => record.waitId === wait.waitId);
+            if (current?.status === "cancelled") {
+                return await this.#attachComments(
+                    "tmux_wait",
+                    {
+                    interrupted: true,
+                    task: { id: task, status: "running" },
+                    },
+                    context,
+                    context.requestId ?? wait.waitId,
+                    instance
+                );
             }
             throw error;
         }
@@ -293,26 +318,33 @@ export class McpEndpointDispatch {
         }
         const key = `${instance}:${waitId}`;
         const existing = this.#tmuxWaitTrackers.get(key);
-        if (existing !== undefined) return existing;
+        if (existing !== undefined) return existing.promise;
+        const controller = new AbortController();
         const tracker = this.#workerHandler.call(
             "tmux_wait",
             input,
             context,
             definition,
             instanceRoutingEnabled,
-            undefined
+            controller.signal
         ).then(async (result) => {
             await gateway.resolveWait(instance, waitId, result);
             return result;
         }, async (error: unknown) => {
-            await gateway.cancelWait(instance, waitId).catch(() => undefined);
+            if (!controller.signal.aborted) {
+                await gateway.cancelWait(instance, waitId).catch(() => undefined);
+            }
             throw error;
         }).finally(() => {
             this.#tmuxWaitTrackers.delete(key);
         });
-        this.#tmuxWaitTrackers.set(key, tracker);
+        this.#tmuxWaitTrackers.set(key, { controller, promise: tracker });
         void tracker.catch(() => undefined);
         return tracker;
+    }
+
+    #interruptTmuxWaitTracker(instance: string, waitId: string): void {
+        this.#tmuxWaitTrackers.get(`${instance}:${waitId}`)?.controller.abort("Workspace interrupted tmux_wait");
     }
 
     async #attachComments(
@@ -505,6 +537,7 @@ function isAppOnlyInteractionTool(toolName: string): boolean {
     return toolName === "workspace_snapshot" ||
         toolName === "workspace_watch" ||
         toolName === "workspace_question_answer" ||
+        toolName === "workspace_wait_interrupt" ||
         toolName === "workspace_task_control" ||
         toolName === "workspace_wait_recover" ||
         toolName === "workspace_approval_decide";
@@ -514,6 +547,12 @@ function readTmuxTaskId(input: JsonValue): string | undefined {
     if (typeof input !== "object" || input === null || Array.isArray(input)) return undefined;
     const task = input.task;
     return typeof task === "string" && task.trim().length > 0 ? task.trim() : undefined;
+}
+
+function readWorkspaceWaitId(input: JsonValue): string | undefined {
+    if (typeof input !== "object" || input === null || Array.isArray(input)) return undefined;
+    const waitId = input.waitId;
+    return typeof waitId === "string" && waitId.trim().length > 0 ? waitId.trim() : undefined;
 }
 
 function isRecoverableContextTemporaryError(error: unknown): boolean {

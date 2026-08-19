@@ -78,9 +78,11 @@ test("Workspace MCP App keeps its stable v1 resource URI and MCP Apps MIME type"
         assert.match(String(read.body.result?.contents?.[0]?.text), /portable-devshell/);
         assert.match(String(read.body.result?.contents?.[0]?.text), /ui\/initialize/);
         assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_question_answer/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_wait_interrupt/);
         assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_watch/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /Background/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /Activity/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /tmux\.task\.completed/);
+        assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /Current tasks/);
+        assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /section-head/);
         assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /setInterval\(refresh/);
     } finally {
         await server.close();

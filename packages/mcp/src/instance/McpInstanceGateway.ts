@@ -61,6 +61,7 @@ export interface McpInstanceGateway {
     createWait?(instance: string, input: WaitCreateInput): Promise<WaitRecord>;
     cancelWait?(instance: string, waitId: string): Promise<WaitRecord>;
     detachWait?(instance: string, waitId: string): Promise<WaitRecord>;
+    reattachWait?(instance: string, waitId: string, ownerCallId?: string): Promise<WaitRecord>;
     consumeWait?(instance: string, waitId: string): Promise<WaitRecord>;
     resolveWait?(instance: string, waitId: string, result?: JsonValue): Promise<WaitRecord>;
     waitForWait?(instance: string, waitId: string): Promise<WaitRecord>;
@@ -129,13 +130,14 @@ export function isMcpInteractionGateway(
 
 export type McpWaitTrackingGateway = McpInteractionGateway & Required<Pick<
     McpInstanceGateway,
-    "cancelWait"
+    "cancelWait" | "reattachWait"
 >>;
 
 export function isMcpWaitTrackingGateway(
     gateway: McpInstanceGateway | undefined
 ): gateway is McpWaitTrackingGateway {
-    return isMcpInteractionGateway(gateway) && gateway.cancelWait !== undefined;
+    return isMcpInteractionGateway(gateway) &&
+        gateway.cancelWait !== undefined && gateway.reattachWait !== undefined;
 }
 
 export type McpWorkspaceGateway = McpInteractionGateway & Required<Pick<

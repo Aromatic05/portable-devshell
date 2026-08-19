@@ -44,6 +44,10 @@ export class WaitService {
         return record;
     }
 
+    async reattach(waitId: string, ownerCallId?: string): Promise<WaitRecord> {
+        return await this.#commit("wait.reattached", (document) => this.#state.reattach(document, waitId, ownerCallId));
+    }
+
     async resolve(waitId: string, result?: JsonValue): Promise<WaitRecord> {
         const record = await this.#commit("wait.resolved", (document) => this.#state.resolve(document, waitId, result));
         this.#notify(record);

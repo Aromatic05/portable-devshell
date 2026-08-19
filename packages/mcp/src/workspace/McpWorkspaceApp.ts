@@ -10,26 +10,33 @@ export const workspaceAppHtml = String.raw`<!doctype html>
 <style>
 :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
 * { box-sizing: border-box; }
-body { margin: 0; padding: 12px; background: transparent; color: CanvasText; }
-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
-h1 { font-size: 15px; margin: 0; font-weight: 650; }
+body { margin: 0; padding: 8px; background: transparent; color: CanvasText; }
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+h1 { font-size: 13px; margin: 0; font-weight: 650; }
 small, .muted { color: color-mix(in srgb, CanvasText 58%, transparent); font-size: 11px; }
-.grid { display: grid; gap: 8px; }
-.card { border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 10px; padding: 10px; background: color-mix(in srgb, Canvas 92%, CanvasText 8%); }
+.grid { display: grid; }
+.card { border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 9px; overflow: hidden; background: color-mix(in srgb, Canvas 94%, CanvasText 6%); }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 9px 6px; }
+.card-body { padding: 0 9px 8px; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .row.between { justify-content: space-between; }
 .title { font-size: 13px; font-weight: 650; }
-.question { margin: 6px 0 8px; font-size: 13px; line-height: 1.35; }
+.event-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 650; }
+.question { margin: 3px 0 7px; font-size: 13px; line-height: 1.35; }
 button, input { font: inherit; }
-button { border: 1px solid color-mix(in srgb, CanvasText 24%, transparent); border-radius: 8px; padding: 5px 9px; background: Canvas; color: CanvasText; cursor: pointer; }
+button { border: 1px solid color-mix(in srgb, CanvasText 24%, transparent); border-radius: 7px; padding: 4px 8px; background: Canvas; color: CanvasText; cursor: pointer; }
 button.primary { font-weight: 650; }
 button.danger { color: #c43b3b; }
 button:disabled { opacity: .55; cursor: default; }
-input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, CanvasText 24%, transparent); border-radius: 8px; padding: 6px 8px; background: Canvas; color: CanvasText; }
+input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in srgb, CanvasText 14%, transparent); padding: 8px 9px; background: transparent; color: CanvasText; outline: none; }
 .badge { border-radius: 999px; padding: 2px 7px; font-size: 10px; background: color-mix(in srgb, CanvasText 10%, transparent); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
-.empty { padding: 14px 8px; text-align: center; font-size: 12px; color: color-mix(in srgb, CanvasText 55%, transparent); }
-.section-head { margin: 8px 2px 5px; font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; color: color-mix(in srgb, CanvasText 58%, transparent); }
+.empty { padding: 8px 9px; text-align: left; font-size: 11px; color: color-mix(in srgb, CanvasText 55%, transparent); }
+.choice-list { max-height: 170px; overflow: auto; }
+.choice-row, .action-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 34px; padding: 7px 9px; border-top: 1px solid color-mix(in srgb, CanvasText 14%, transparent); cursor: pointer; font-size: 12px; }
+.choice-row:hover, .action-row:hover { background: color-mix(in srgb, CanvasText 6%, transparent); }
+.choice-row[aria-disabled="true"], .action-row[aria-disabled="true"] { opacity: .55; cursor: default; }
+.danger-row { color: #c43b3b; }
 </style>
 </head>
 <body>
@@ -47,8 +54,10 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
   var snapshot = null;
   var cursor = 0;
   var watchGeneration = 0;
+  var watchStarted = false;
   var recovering = false;
   var busy = new Set();
+  var WIDGET_STATE_KEY = "portableDevshellWorkspace";
 
   function escapeHtml(value) {
     return String(value == null ? "" : value)
@@ -84,6 +93,71 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
   function acceptMeta(meta) {
     var hidden = meta && meta["portable-devshell/workspace"];
     if (hidden && hidden.token) appToken = String(hidden.token);
+  }
+
+  function asRecord(value) {
+    return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  }
+
+  function toolResultFromOpenAiGlobals(globals) {
+    var openai = asRecord(globals);
+    if (!openai) return null;
+    var metadata = asRecord(openai.toolResponseMetadata);
+    var envelope = metadata && (asRecord(metadata.mcp_tool_result) || asRecord(metadata.call_tool_result));
+    var output = asRecord(openai.toolOutput);
+    if (envelope && output) return Object.assign({}, envelope, { structuredContent: output });
+    if (envelope) return envelope;
+    return output ? { structuredContent: output } : null;
+  }
+
+  function workspaceHintFromOpenAiGlobals(globals) {
+    var openai = asRecord(globals);
+    var widgetState = asRecord(openai && openai.widgetState);
+    var stored = asRecord(widgetState && widgetState[WIDGET_STATE_KEY]);
+    return stored && stored.ctxId ? String(stored.ctxId) : "";
+  }
+
+  function persistWorkspaceHint() {
+    if (!ctxId) return;
+    var openai = asRecord(window.openai);
+    if (!openai || typeof openai.setWidgetState !== "function") return;
+    var state = Object.assign({}, asRecord(openai.widgetState) || {});
+    state[WIDGET_STATE_KEY] = { ctxId: ctxId };
+    try {
+      var result = openai.setWidgetState(state);
+      if (result && typeof result.catch === "function") result.catch(function () {});
+    } catch (_) {}
+  }
+
+  function activateCtxId(value) {
+    if (!value) return false;
+    var nextCtxId = String(value);
+    if (ctxId && ctxId !== nextCtxId) {
+      watchGeneration += 1;
+      watchStarted = false;
+      snapshot = null;
+      cursor = 0;
+    }
+    ctxId = nextCtxId;
+    persistWorkspaceHint();
+    if (initialized) void startLive();
+    return true;
+  }
+
+  function acceptToolResult(result) {
+    if (!result) return false;
+    acceptMeta(result._meta);
+    var initial = asRecord(result.structuredContent);
+    if (!initial || !initial.ctxId) return false;
+    return activateCtxId(initial.ctxId);
+  }
+
+  function configureFromOpenAiGlobals(globals) {
+    var source = globals || window.openai;
+    var result = toolResultFromOpenAiGlobals(source);
+    var configured = acceptToolResult(result);
+    if (!ctxId) configured = activateCtxId(workspaceHintFromOpenAiGlobals(source)) || configured;
+    return configured || !!ctxId;
   }
 
   function modelContext(extra) {
@@ -161,7 +235,9 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
 
   async function applySnapshot(nextSnapshot, allowRecovery) {
     snapshot = nextSnapshot;
+    if (snapshot && snapshot.ctxId) ctxId = String(snapshot.ctxId);
     if (snapshot && Number.isSafeInteger(snapshot.cursor)) cursor = snapshot.cursor;
+    persistWorkspaceHint();
     render();
     await syncModelContext();
     if (allowRecovery !== false) void recoverDetachedWait();
@@ -188,6 +264,7 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
     while (generation === watchGeneration) {
       try {
         var result = await callTool("workspace_watch", { cursor: cursor }, false);
+        if (generation !== watchGeneration) return;
         var update = structured(result) || {};
         if (Number.isSafeInteger(update.cursor)) cursor = update.cursor;
         if (update.changed && update.snapshot) {
@@ -205,18 +282,34 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
     }
   }
 
+  async function startLive() {
+    if (!initialized || !ctxId || watchStarted) return;
+    watchStarted = true;
+    try {
+      await refresh();
+      void watch();
+    } catch (error) {
+      watchStarted = false;
+      throw error;
+    }
+  }
+
   async function connect() {
     try {
       await request("ui/initialize", {
         protocolVersion: "2026-01-26",
-        appInfo: { name: "portable-devshell-workspace", version: "0.6.6" },
+        appInfo: { name: "portable-devshell-workspace", version: "0.6.7" },
         appCapabilities: {}
       });
       notify("ui/notifications/initialized", {});
       initialized = true;
       status.textContent = "Connected";
-      await refresh();
-      void watch();
+      configureFromOpenAiGlobals();
+      if (!ctxId) {
+        status.textContent = "Waiting for Workspace identity";
+        return;
+      }
+      await startLive();
     } catch (error) {
       status.textContent = "Host bridge unavailable";
       console.error(error);
@@ -241,34 +334,6 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
     }
   }
 
-  async function controlTask(taskId, action) {
-    var result = await act(taskId, "workspace_task_control", { taskId: taskId, action: action });
-    if (result && action === "resume") {
-      await sendModelMessage(
-        "Resume the portable-devshell task from its durable checkpoint. Do not repeat completed work.",
-        { resumedTaskId: taskId }
-      );
-    }
-  }
-
-  async function askTask(taskId) {
-    if (busy.has(taskId)) return;
-    busy.add(taskId);
-    render();
-    try {
-      await sendModelMessage(
-        "Review the current portable-devshell task checkpoint and tell me what needs attention or what should happen next.",
-        { askedTaskId: taskId }
-      );
-    } catch (error) {
-      status.textContent = "Ask failed";
-      console.error(error);
-    } finally {
-      busy.delete(taskId);
-      render();
-    }
-  }
-
   async function answerQuestion(waitId, answer) {
     var result = await act(waitId, "workspace_question_answer", { waitId: waitId, answer: answer });
     var task = result && result.taskId ? findTask(result.taskId) : null;
@@ -280,115 +345,103 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
     }
   }
 
-  async function resumeBackground(taskId) {
-    if (busy.has(taskId)) return;
-    busy.add(taskId);
-    render();
-    try {
-      await sendModelMessage(
-        "Resume the portable-devshell task from its durable checkpoint. Reattach to any detached wait instead of repeating completed work.",
-        { resumedTaskId: taskId }
-      );
-    } catch (error) {
-      status.textContent = "Resume failed";
-      console.error(error);
-    } finally {
-      busy.delete(taskId);
-      render();
-    }
+  function visibleEvent() {
+    if (!snapshot) return null;
+    if (snapshot.currentEvent && typeof snapshot.currentEvent === "object") return snapshot.currentEvent;
+    var questions = Array.isArray(snapshot.questions) ? snapshot.questions : [];
+    if (questions.length) return Object.assign({ kind: "question", name: "ask_question", eventName: "user.answer" }, questions[0]);
+    var approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
+    if (approvals.length) return Object.assign({ kind: "approval", name: approvals[0].toolName, eventName: "approval.decision" }, approvals[0]);
+    var background = Array.isArray(snapshot.background) ? snapshot.background : [];
+    var tmux = background.find(function (item) { return item.status === "waiting"; });
+    if (tmux) return Object.assign({ kind: "tmux", name: "tmux_wait", eventName: "tmux.task.completed" }, tmux);
+    return null;
   }
 
-  function questionCard(wait) {
-    var payload = wait && wait.payload && typeof wait.payload === "object" ? wait.payload : {};
+  function eventHead(item) {
+    return '<div class="card-head"><span class="event-name">' + escapeHtml(item.name || item.kind || "event") + '</span><span class="badge">' + escapeHtml(item.status || "waiting") + '</span></div>';
+  }
+
+  function questionCard(item) {
+    var payload = item && item.payload && typeof item.payload === "object" ? item.payload : {};
     var choices = Array.isArray(payload.choices) ? payload.choices : [];
-    var disabled = busy.has(wait.waitId) ? " disabled" : "";
-    var buttons = choices.map(function (choice) {
-      return '<button class="primary" data-question-choice="' + escapeHtml(wait.waitId) + '" data-answer="' + escapeHtml(choice) + '"' + disabled + '>' + escapeHtml(choice) + '</button>';
+    var disabled = busy.has(item.waitId);
+    var rows = choices.map(function (choice) {
+      return '<div class="choice-row" role="button" tabindex="0" aria-disabled="' + disabled + '" data-question-choice="' + escapeHtml(item.waitId) + '" data-answer="' + escapeHtml(choice) + '"><span>' + escapeHtml(choice) + '</span><span class="muted">›</span></div>';
     }).join("");
-    var text = payload.allowText === false ? "" : '<div class="row" style="margin-top:7px"><input data-question-input="' + escapeHtml(wait.waitId) + '" placeholder="Type an answer"><button data-question-submit="' + escapeHtml(wait.waitId) + '"' + disabled + '>Answer</button></div>';
-    return '<div class="card"><div class="row between"><span class="title">Agent needs input</span><span class="badge">' + escapeHtml(wait.status) + '</span></div><div class="question">' + escapeHtml(payload.question || "Question") + '</div><div class="row">' + buttons + '</div>' + text + '</div>';
+    var text = payload.allowText === false ? "" : '<input data-question-input="' + escapeHtml(item.waitId) + '" placeholder="Type an answer · Enter"' + (disabled ? ' disabled' : '') + '>';
+    return '<div class="card">' + eventHead(item) + '<div class="card-body"><div class="muted">event · ' + escapeHtml(item.eventName || "user.answer") + '</div><div class="question">' + escapeHtml(payload.question || "Question") + '</div></div><div class="choice-list">' + rows + '</div>' + text + '</div>';
   }
 
-  function approvalCard(approval) {
-    var disabled = busy.has(approval.approvalId) ? " disabled" : "";
-    return '<div class="card"><div class="row between"><span class="title">Approval required</span><span class="badge">' + escapeHtml(approval.riskLevel || "") + '</span></div><div class="question"><strong>' + escapeHtml(approval.toolName) + '</strong><br><span class="muted">' + escapeHtml(approval.inputSummary || approval.reason || "") + '</span></div><div class="row"><button class="danger" data-approval="' + escapeHtml(approval.approvalId) + '" data-decision="deny"' + disabled + '>Deny</button><button class="primary" data-approval="' + escapeHtml(approval.approvalId) + '" data-decision="approve"' + disabled + '>Approve</button></div></div>';
+  function approvalCard(item) {
+    var disabled = busy.has(item.approvalId) ? " disabled" : "";
+    return '<div class="card">' + eventHead(item) + '<div class="card-body"><div class="muted">event · ' + escapeHtml(item.eventName || "approval.decision") + '</div><div class="question"><strong>' + escapeHtml(item.toolName || item.name) + '</strong><br><span class="muted">' + escapeHtml(item.inputSummary || item.reason || "") + '</span></div><div class="row"><button class="danger" data-approval="' + escapeHtml(item.approvalId) + '" data-decision="deny"' + disabled + '>Deny</button><button class="primary" data-approval="' + escapeHtml(item.approvalId) + '" data-decision="approve"' + disabled + '>Approve</button></div></div></div>';
   }
 
-  function taskCard(task) {
-    var disabled = busy.has(task.taskId) ? " disabled" : "";
-    var checkpoint = task.checkpoint && task.checkpoint.summary
-      ? '<div class="question">' + escapeHtml(task.checkpoint.summary) + '</div>'
-      : '';
-    var control = task.status === "paused"
-      ? '<button class="primary" data-task-action="resume" data-task-id="' + escapeHtml(task.taskId) + '"' + disabled + '>Resume</button>'
-      : '<button data-task-action="pause" data-task-id="' + escapeHtml(task.taskId) + '"' + disabled + '>Pause</button>';
-    return '<div class="card"><div class="row between"><span class="title">' + escapeHtml(task.title || task.taskId) + '</span><span class="badge">' + escapeHtml(task.status || "") + '</span></div><div class="muted" style="margin-top:5px">' + escapeHtml(task.currentItem || ((task.completed || 0) + "/" + (task.total || 0))) + '</div>' + checkpoint + '<div class="row" style="margin-top:8px"><button data-task-ask="' + escapeHtml(task.taskId) + '"' + disabled + '>Ask</button>' + control + '<button class="danger" data-task-action="cancel" data-task-id="' + escapeHtml(task.taskId) + '"' + disabled + '>Cancel</button></div></div>';
-  }
-
-  function backgroundCard(item) {
-    var task = item.taskId ? findTask(item.taskId) : null;
-    var disabled = item.taskId && busy.has(item.taskId) ? " disabled" : "";
-    var resume = item.detachedAt && task && task.status !== "paused" && item.status !== "resolved"
-      ? '<div class="row" style="margin-top:8px"><button class="primary" data-background-resume="' + escapeHtml(item.taskId) + '"' + disabled + '>Resume agent</button></div>'
-      : '';
-    return '<div class="card"><div class="row between"><span class="title">Background task</span><span class="badge">' + escapeHtml(item.status || "") + '</span></div><div class="mono" style="margin-top:5px">' + escapeHtml(item.tmuxTaskId || "") + '</div>' + (item.detachedAt ? '<div class="muted" style="margin-top:4px">Detached from the previous host call</div>' : '') + resume + '</div>';
-  }
-
-  function activityCard(item) {
-    var completed = item.completedAt ? ' · ' + escapeHtml(item.completedAt) : '';
-    var detail = item.inputSummary ? '<div class="muted" style="margin-top:5px">' + escapeHtml(item.inputSummary) + '</div>' : '';
-    var error = item.error ? '<div class="muted" style="margin-top:4px">' + escapeHtml(item.error) + '</div>' : '';
-    return '<div class="card"><div class="row between"><span class="title mono">' + escapeHtml(item.toolName || "tool") + '</span><span class="badge">' + escapeHtml(item.status || "") + '</span></div>' + detail + error + '<div class="muted" style="margin-top:5px">' + escapeHtml(item.startedAt || "") + completed + '</div></div>';
+  function tmuxWaitCard(item) {
+    var key = item.waitId || item.taskId || item.tmuxTaskId;
+    var disabled = busy.has(key);
+    var action = "";
+    if (item.status === "waiting") {
+      action = '<div class="action-row danger-row" role="button" tabindex="0" aria-disabled="' + disabled + '" data-wait-interrupt="' + escapeHtml(item.waitId) + '"><span>Interrupt wait</span><span class="muted">task keeps running</span></div>';
+    }
+    return '<div class="card">' + eventHead(item) + '<div class="card-body"><div class="muted">event · ' + escapeHtml(item.eventName || "tmux.task.completed") + '</div><div class="question">Waiting for task completion</div><div class="mono">' + escapeHtml(item.tmuxTaskId || "") + '</div></div>' + action + '</div>';
   }
 
   function render() {
     if (!snapshot) return;
-    var questions = Array.isArray(snapshot.questions) ? snapshot.questions : [];
-    var approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
-    var tasks = Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
-    var background = Array.isArray(snapshot.background) ? snapshot.background : [];
-    var activity = Array.isArray(snapshot.activity) ? snapshot.activity : [];
-    var html = "";
-    if (questions.length) html += '<div class="section-head">Questions</div>' + questions.map(questionCard).join("");
-    if (approvals.length) html += '<div class="section-head">Approvals</div>' + approvals.map(approvalCard).join("");
-    if (tasks.length) html += '<div class="section-head">Current tasks</div>' + tasks.map(taskCard).join("");
-    if (background.length) html += '<div class="section-head">Background</div>' + background.map(backgroundCard).join("");
-    if (activity.length) html += '<div class="section-head">Activity</div>' + activity.map(activityCard).join("");
-    if (!html) html = '<div class="empty">No active work for this Context.</div>';
-    root.innerHTML = html;
+    var item = visibleEvent();
+    if (!item) {
+      root.innerHTML = '<div class="card"><div class="empty">No blocking event.</div></div>';
+      return;
+    }
+    root.innerHTML = item.kind === "question" ? questionCard(item)
+      : item.kind === "approval" ? approvalCard(item)
+      : item.kind === "tmux" ? tmuxWaitCard(item)
+      : '<div class="card"><div class="empty">Unknown event.</div></div>';
   }
 
   root.addEventListener("click", function (event) {
+    var choice = event.target.closest("[data-question-choice]");
+    if (choice && choice.getAttribute("aria-disabled") !== "true") {
+      void answerQuestion(choice.getAttribute("data-question-choice"), choice.getAttribute("data-answer"));
+      return;
+    }
     var target = event.target.closest("button");
-    if (!target) return;
-    var waitId = target.getAttribute("data-question-choice") || target.getAttribute("data-question-submit");
-    if (waitId) {
-      var answer = target.getAttribute("data-answer");
-      if (answer == null) {
-        var input = root.querySelector('[data-question-input="' + CSS.escape(waitId) + '"]');
-        answer = input ? input.value.trim() : "";
+    if (target) {
+      var approvalId = target.getAttribute("data-approval");
+      if (approvalId) {
+        void act(approvalId, "workspace_approval_decide", { approvalId: approvalId, decision: target.getAttribute("data-decision") });
+        return;
       }
-      if (answer) void answerQuestion(waitId, answer);
+    }
+    var interrupt = event.target.closest("[data-wait-interrupt]");
+    if (interrupt && interrupt.getAttribute("aria-disabled") !== "true") {
+      var waitId = interrupt.getAttribute("data-wait-interrupt");
+      void act(waitId, "workspace_wait_interrupt", { waitId: waitId });
       return;
     }
-    var approvalId = target.getAttribute("data-approval");
-    if (approvalId) {
-      void act(approvalId, "workspace_approval_decide", { approvalId: approvalId, decision: target.getAttribute("data-decision") });
+  });
+
+  root.addEventListener("keydown", function (event) {
+    var choice = event.target.closest && event.target.closest("[data-question-choice]");
+    if (choice && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      choice.click();
       return;
     }
-    var taskId = target.getAttribute("data-task-id");
-    var taskAction = target.getAttribute("data-task-action");
-    if (taskId && taskAction) {
-      void controlTask(taskId, taskAction);
+    var action = event.target.closest && event.target.closest("[data-wait-interrupt]");
+    if (action && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      action.click();
       return;
     }
-    var askTaskId = target.getAttribute("data-task-ask");
-    if (askTaskId) {
-      void askTask(askTaskId);
-      return;
+    var input = event.target.closest && event.target.closest("[data-question-input]");
+    if (input && event.key === "Enter") {
+      var answer = input.value.trim();
+      var waitId = input.getAttribute("data-question-input");
+      if (answer && waitId) void answerQuestion(waitId, answer);
     }
-    var resumeTaskId = target.getAttribute("data-background-resume");
-    if (resumeTaskId) void resumeBackground(resumeTaskId);
   });
 
   window.addEventListener("message", function (event) {
@@ -403,26 +456,18 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
     }
     if (message.method === "ui/notifications/tool-input") {
       var input = message.params && (message.params.arguments || message.params);
-      if (input && input.ctxId) ctxId = String(input.ctxId);
+      if (input && input.ctxId) activateCtxId(input.ctxId);
     }
     if (message.method === "ui/notifications/tool-result") {
-      acceptMeta(message.params && message.params._meta);
-      var initial = message.params && message.params.structuredContent;
-      if (initial && initial.ctxId) {
-        ctxId = String(initial.ctxId);
-        snapshot = initial;
-        render();
-      }
+      acceptToolResult(message.params);
     }
   }, { passive: true });
 
-  if (window.openai && window.openai.toolInput && window.openai.toolInput.ctxId) ctxId = String(window.openai.toolInput.ctxId);
-  if (window.openai && window.openai.toolResponseMetadata) acceptMeta(window.openai.toolResponseMetadata);
-  if (window.openai && window.openai.toolOutput && window.openai.toolOutput.ctxId) {
-    snapshot = window.openai.toolOutput;
-    ctxId = String(snapshot.ctxId);
-    render();
-  }
+  window.addEventListener("openai:set_globals", function (event) {
+    var detail = event && event.detail;
+    if (configureFromOpenAiGlobals(detail && detail.globals) && initialized) void startLive();
+  });
+  configureFromOpenAiGlobals();
   void connect();
 })();
 </script>

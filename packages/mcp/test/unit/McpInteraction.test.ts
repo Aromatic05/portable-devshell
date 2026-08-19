@@ -150,14 +150,47 @@ test("Workspace snapshot projects live activity and background tasks without ful
     const snapshot = result.structuredContent as {
         activity?: Array<Record<string, unknown>>;
         background?: Array<Record<string, unknown>>;
+        currentEvent?: Record<string, unknown> | null;
         cursor?: number;
     };
     assert.equal(snapshot.cursor, 7);
     assert.equal(snapshot.background?.[0]?.tmuxTaskId, "tmux-task-1");
     assert.equal(snapshot.background?.[0]?.taskId, "task-1");
+    assert.equal(snapshot.currentEvent, null);
     assert.equal(snapshot.activity?.[0]?.toolName, "bash_run");
     assert.equal("input" in (snapshot.activity?.[0] ?? {}), false);
     assert.equal("output" in (snapshot.activity?.[0] ?? {}), false);
+});
+
+test("Workspace can interrupt a held tmux wait without cancelling the tmux task", async () => {
+    const fake = createInteractionGateway();
+    const now = new Date().toISOString();
+    fake.waits.push({
+        createdAt: now,
+        createdByCtxId: context.ctxId!,
+        kind: "tmux",
+        ownerCallId: "call-tmux-wait",
+        status: "waiting",
+        targetId: "tmux-task-1",
+        taskId: "task-1",
+        updatedAt: now,
+        waitId: "wait-tmux",
+    });
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
+
+    assert.deepEqual(await handler.call(
+        "workspace_wait_interrupt",
+        { token, waitId: "wait-tmux" },
+        context,
+        "call-app",
+    ), {
+        interrupted: true,
+        status: "cancelled",
+        tmuxTaskId: "tmux-task-1",
+        waitId: "wait-tmux",
+    });
+    assert.equal(fake.waits[0]?.status, "cancelled");
 });
 
 test("Workspace task control and detached-wait recovery use durable server state", async () => {
@@ -332,18 +365,22 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     const adapter = new McpToolSchemaAdapter();
     const open = definitions.find((definition) => definition.name === "workspace_open");
     const answer = definitions.find((definition) => definition.name === "workspace_question_answer");
+    const interrupt = definitions.find((definition) => definition.name === "workspace_wait_interrupt");
     const watch = definitions.find((definition) => definition.name === "workspace_watch");
     const ask = definitions.find((definition) => definition.name === "ask_question");
 
     assert.ok(open);
     assert.ok(answer);
+    assert.ok(interrupt);
     assert.ok(watch);
     assert.ok(ask);
     const adaptedOpen = adapter.toMcpTool(open, open.description);
     const adaptedAnswer = adapter.toMcpTool(answer, answer.description);
+    const adaptedInterrupt = adapter.toMcpTool(interrupt, interrupt.description);
     const adaptedWatch = adapter.toMcpTool(watch, watch.description);
     assert.equal((adaptedOpen._meta as { ui?: { resourceUri?: string } })?.ui?.resourceUri, workspaceAppResourceUri);
     assert.deepEqual((adaptedAnswer._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
+    assert.deepEqual((adaptedInterrupt._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.deepEqual((adaptedWatch._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.equal(ask._meta, undefined);
 });
@@ -398,6 +435,16 @@ function createInteractionGateway(): {
         async listWaits() {
             return structuredClone(waits);
         },
+        async reattachWait(_instance: string, waitId: string, ownerCallId?: string) {
+            const record = requireWait(waits, waitId);
+            if (record.status !== "detached") throw new Error(`Wait ${waitId} is not detached.`);
+            delete record.detachedAt;
+            if (ownerCallId === undefined) delete record.ownerCallId;
+            else record.ownerCallId = ownerCallId;
+            record.status = "waiting";
+            record.updatedAt = new Date().toISOString();
+            return structuredClone(record);
+        },
         async resolveWait(_instance: string, waitId: string, result?: JsonValue) {
             const record = requireWait(waits, waitId);
             Object.assign(record, {
@@ -417,6 +464,17 @@ function createInteractionGateway(): {
                 status: "consumed" as const,
                 updatedAt: new Date().toISOString(),
             });
+            return structuredClone(record);
+        },
+        async cancelWait(_instance: string, waitId: string) {
+            const record = requireWait(waits, waitId);
+            Object.assign(record, {
+                cancelledAt: new Date().toISOString(),
+                status: "cancelled" as const,
+                updatedAt: new Date().toISOString(),
+            });
+            pending.get(waitId)?.reject(new Error(`Wait ${waitId} became cancelled.`));
+            pending.delete(waitId);
             return structuredClone(record);
         },
         async detachWait(_instance: string, waitId: string) {

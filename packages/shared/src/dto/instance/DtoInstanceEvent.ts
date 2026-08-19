@@ -44,6 +44,7 @@ export type InstanceEventType = ArtifactEventType
     | "todo.deleted"
     | "wait.created"
     | "wait.detached"
+    | "wait.reattached"
     | "wait.resolved"
     | "wait.consumed"
     | "wait.cancelled";

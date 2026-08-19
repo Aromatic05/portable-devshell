@@ -80,7 +80,7 @@ test("WaitStore persists wait state atomically and detaches orphaned calls after
     assert.equal(recovered?.targetId, created.record.targetId);
 });
 
-test("WaitService lets a detached wait reattach until it resolves", async () => {
+test("WaitService reattaches durable ownership before waiting again", async () => {
     const root = await createTestTempDirectory("wait-service-");
     const service = new WaitService({
         async appendEvent() {},
@@ -97,6 +97,10 @@ test("WaitService lets a detached wait reattach until it resolves", async () => 
     await service.detach(created.waitId);
     await assert.rejects(first, /became detached/u);
 
+    const reattached = await service.reattach(created.waitId, "call-2");
+    assert.equal(reattached.status, "waiting");
+    assert.equal(reattached.detachedAt, undefined);
+    assert.equal(reattached.ownerCallId, "call-2");
     const resumed = service.waitForResolution(created.waitId);
     const result = { task: { id: "tmux-task-1", status: "0" } };
     await service.resolve(created.waitId, result);

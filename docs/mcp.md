@@ -111,21 +111,25 @@ MCP 对已经被 ChatGPT 缓存的旧 recipient 保留一层隐藏兼容。兼�
 
 ## Workspace MCP App 与人工交互
 
-`workspace_open` 是 model-visible 的 Workspace 入口。它绑定当前 `ctxId`，并返回该 Context 的 authoritative snapshot。Workspace 会展示：当前 Todo task、最近工具活动摘要、等待中的 Question / Approval，以及已经进入 durable wait 的 tmux background task。
+`workspace_open` 是 model-visible 的 Workspace 入口。它绑定当前 `ctxId`，并返回该 Context 的 authoritative snapshot。Workspace 可见区域保持为一个紧凑的 current-event view，同一时刻最多展示一个需要人类关注的事件，而不是任务仪表盘：`ask_question` 对应 `user.answer`，Approval 对应 `approval.decision`，正在阻塞的 `tmux_wait` 对应 `tmux.task.completed`。Todo/checkpoint、后台 Wait 与 activity 仍保留在 snapshot/model context 中供恢复逻辑使用，但不同时堆进可见 UI。
 
 Workspace 资源 URI `ui://portable-devshell/workspace/v1.html` 是持久兼容标识，不随 HTML/运行时代码升级而改变。已挂载会话可以继续使用旧 tool snapshot 中缓存的同一 URI 重新读取当前 Workspace；只有真正出现第二个历史 URI 时才应增加隐藏 resource alias，而不是为了版本号主动换 URI。
 
 Workspace 内部使用 `workspace_snapshot` 和 `workspace_watch` 保持 live state；这两个 helper 是 app-only，不应由模型主动调用。`workspace_watch` 复用 instance 现有的 event sequence cursor，只在当前 Context 的 `toolCall.*`、`approval.*`、`todo.*`、`wait.*` 事件发生时返回新 snapshot；事件历史出现 gap 或 Control 重启导致 cursor 失效时，直接重新读取 authoritative snapshot。正常无变化时只返回 heartbeat，不使用固定频率 snapshot polling。
 
-iframe remount 或 MCP/Control 重启后，读路径可以仅凭有效 `ctxId` 重新 snapshot/watch，并从返回 metadata 获得新的 app token；旧 token 不需要持久化。`workspace_question_answer` 和 `workspace_approval_decide` 属于人工写操作，仍必须携带当前隐藏 app token，并再次校验 `ctxId` 与目标 Question / Approval 的归属。
+iframe remount 或 MCP/Control 重启后，读路径可以仅凭有效 `ctxId` 重新 snapshot/watch，并从返回 metadata 获得新的 app token；旧 token 不需要持久化。ChatGPT remount 时优先使用 `window.openai.toolOutput` 的当前 structured output，而不是 metadata envelope 中可能缓存的旧 output；App 同时只把 `ctxId` 写入 `window.openai.widgetState` 作为 remount hint。即使 Host 没有重放原始 tool-input，App 也可以凭该 hint 重新 snapshot 并获取新 token。`workspace_question_answer`、`workspace_wait_interrupt` 和 `workspace_approval_decide` 属于人工写操作，仍必须携带当前隐藏 app token，并再次校验 `ctxId` 与目标对象归属。
 
 `ask_question` 用于模型确实需要人类输入时挂起当前调用。调用前必须已经对同一 `ctxId` 执行过 `workspace_open`，并传入 durable `taskId`。Question 自身存入 durable Wait；Host 取消原 tool call 时等待会变成 detached，iframe remount 本身不会强制取消仍存活的调用。MCP/Control 进程重建时，持久化为 `waiting` 的 Wait 会统一按 orphaned owner call 恢复成 detached，因此旧 Question 不会假装仍有可返回的 tool call，用户之后回答时可以走 model re-entry 恢复。
 
 Todo task 现在同时承担 model re-entry checkpoint。模型在 `todo_write` 更新计划时可以写 `checkpoint.summary`，并可附带 `next` 与 `blockers`；checkpoint 与 taskId 一起持久化，后续 Workspace snapshot 会把它投影给 Host。Workspace 每次拿到 authoritative snapshot 后使用 MCP Apps 的 `ui/update-model-context` 覆盖该 View 的模型上下文；这个操作不会主动触发新的模型回合。
 
-Workspace 的 Pause / Resume / Cancel 是 task-level 人工控制，只影响 durable task 与自动 model re-entry，不会隐式向 tmux 进程发送信号。Pause 后 task 不再参与当前 tool-call association，也不会自动恢复 detached wait；Resume 重新绑定当前 `ctxId` 并由用户显式触发一次 `ui/message`；Cancel 将 task 归档并保留原 Todo item 与 checkpoint 历史。
+Todo runtime 仍保留 task-level Pause / Resume / Cancel 语义，用于 durable task 生命周期和兼容已经挂载的旧 Workspace App；当前紧凑 Workspace 不再把 task controls 作为常驻面板展示。它们不会隐式向 tmux 进程发送信号。
 
-`tmux_wait` 首次建立 durable Wait 时，会在当前 Context 恰好只有一个 `in_progress` Todo task 的情况下记录其 `taskId`。Host 取消当前等待或 MCP/Control 重建后，Wait 都按 detached 处理；Control 重建会丢失内存中的 Worker completion tracker，因此模型需要重新调用同一个 `tmux_wait` 才会重新 attach tracker，但 managed task 与 transcript 不受影响。如果原 Host 调用已经 detached，而 tmux wait 后来完成，Workspace 只会对“仍 active、未 paused、归属同一 Context、且带 taskId”的 resolved wait 做一次 claim，然后先用 `ui/update-model-context` 写入 checkpoint / wait result，再用 `ui/message` 恢复模型。普通 live activity、后台任务状态变化和仍存活的 Question 回答不会触发主动 `ui/message`。
+`tmux_wait` 首次建立 durable Wait 时，会在当前 Context 恰好只有一个 `in_progress` Todo task 的情况下记录其 `taskId`。Host 取消当前调用或 MCP/Control 重建后，Wait 按 detached 处理；模型再次调用同一个 `tmux_wait` 时会把该 durable Wait 明确 reattach 为 `waiting`、更新新的 owner call，再继续等待。Control 重建会丢失内存中的 Worker completion tracker，因此 reattach 时会建立新的 Worker waiter，但 managed task 与 transcript 不受影响。
+
+用户在 Workspace 对当前 `tmux_wait` 选择 `Interrupt wait` 时，语义与 Host detach 不同：Wait 直接进入 cancelled，MCP 同时取消内部 Worker waiter；Worker 的取消只停止 `tmux_wait` 本身，绝不会停止对应 tmux task。原模型 tool call 正常返回 `{ interrupted: true, task: { id, status: "running" } }`，因此不会把人工中断伪装成系统错误，也不会在 task 后来完成时偷偷触发自动 model re-entry。模型如果仍需等待，可再次显式调用 `tmux_wait` 建立新的 Wait。
+
+只有非人工中断产生的 detached wait 才参与灾备恢复。如果这种 wait 在原 Host call 消失后完成，Workspace 会对“仍 active、未 paused、归属同一 Context、且带 taskId”的 resolved wait 做一次 claim，然后先用 `ui/update-model-context` 写入 checkpoint / wait result，再用 `ui/message` 恢复模型。普通 live activity、后台任务状态变化和仍存活的 Question 回答不会触发主动 `ui/message`。
 
 ## Skills 与项目记忆提示
 

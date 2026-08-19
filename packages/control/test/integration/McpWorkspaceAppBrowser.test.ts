@@ -31,38 +31,39 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     }, workspaceAppHtml);
 
     const app = page.frameLocator("#workspace");
-    await app.getByText("Activity", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("Background", { exact: true }).waitFor({ state: "visible" });
-    await app.locator(".title.mono").filter({ hasText: "bash_run" }).waitFor({ state: "visible" });
-    await app.getByText("task-browser", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("Live Workspace is connected", { exact: true }).waitFor({ state: "visible" });
     await app.getByText("Continue the task?", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("Approval required", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("ask_question", { exact: true }).waitFor({ state: "visible" });
+    const choice = app.locator('[data-question-choice="wait-question"]');
+    await choice.first().waitFor({ state: "visible" });
+    assert.equal(await choice.count(), 12);
+    const choiceListSize = await app.locator(".choice-list").evaluate((element) => ({
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+    }));
+    assert.equal(choiceListSize.clientHeight <= 170, true);
+    assert.equal(choiceListSize.scrollHeight > choiceListSize.clientHeight, true);
+    assert.equal(await app.getByRole("button", { name: "Continue", exact: true }).count(), 0);
+    assert.equal(await app.getByText("Activity", { exact: true }).count(), 0);
+    assert.equal(await app.getByText("Background", { exact: true }).count(), 0);
     await page.waitForFunction("(window.__modelContextUpdates || []).length >= 2");
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
 
+    await choice.first().click();
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_question_answer')");
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
+
+    await app.getByText("approval.decision", { exact: false }).waitFor({ state: "visible" });
     await app.getByRole("button", { name: "Approve", exact: true }).click();
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_approval_decide')");
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
 
-    await app.getByRole("button", { name: "Pause" }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task_control' && call.arguments.action === 'pause')");
-    await app.getByRole("button", { name: "Resume", exact: true }).waitFor({ state: "visible" });
+    await app.getByText("tmux_wait", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("event · tmux.task.completed", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("task-browser", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("Interrupt wait", { exact: true }).click();
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_wait_interrupt')");
+    await app.getByText("No blocking event.", { exact: true }).waitFor({ state: "visible" });
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
-    assert.equal(await app.getByRole("button", { name: "Resume agent", exact: true }).count(), 0);
-
-    await app.getByRole("button", { name: "Continue" }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_question_answer')");
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
-
-    await app.getByRole("button", { name: "Resume", exact: true }).click();
-    await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await app.getByRole("button", { name: "Ask", exact: true }).click();
-    await page.waitForFunction("(window.__modelMessages || []).length === 2");
-
-    await app.getByRole("button", { name: "Cancel", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task_control' && call.arguments.action === 'cancel')");
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 2);
 
     const calls = await page.evaluate("window.__workspaceCalls || []") as Array<{
         arguments?: Record<string, unknown>;
@@ -72,7 +73,7 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     const watchCall = calls.find((call) => call.name === "workspace_watch");
     const answerCall = calls.find((call) => call.name === "workspace_question_answer");
     const approvalCall = calls.find((call) => call.name === "workspace_approval_decide");
-    const taskCalls = calls.filter((call) => call.name === "workspace_task_control");
+    const interruptCall = calls.find((call) => call.name === "workspace_wait_interrupt");
 
     assert.equal(snapshotCall?.arguments?.token, undefined);
     assert.equal(watchCall?.arguments?.token, undefined);
@@ -81,12 +82,8 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     assert.equal(answerCall?.arguments?.waitId, "wait-question");
     assert.equal(approvalCall?.arguments?.token, "browser-secret-token");
     assert.equal(approvalCall?.arguments?.decision, "approve");
-    assert.deepEqual(taskCalls.map((call) => call.arguments?.action), ["pause", "resume", "cancel"]);
-    assert.equal(taskCalls.every((call) => call.arguments?.token === "browser-secret-token"), true);
-    const bridgeEvents = await page.evaluate("window.__bridgeEvents || []") as string[];
-    assert.equal(bridgeEvents.at(-1), "context");
-    const messageIndex = bridgeEvents.indexOf("message");
-    assert.equal(messageIndex > 0 && bridgeEvents[messageIndex - 1] === "context", true);
+    assert.equal(interruptCall?.arguments?.token, "browser-secret-token");
+    assert.equal(interruptCall?.arguments?.waitId, "wait-background");
     assert.deepEqual(browserFailures, []);
 });
 
@@ -123,7 +120,7 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     assert.equal(recoverCall.arguments?.waitId, "wait-recovery");
 });
 
-test("Workspace explicit Resume does not double-trigger passive detached-wait recovery", BROWSER_TEST_OPTIONS, async (t) => {
+test("Workspace does not surface a detached tmux wait as another blocking event", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
 
@@ -137,19 +134,12 @@ test("Workspace explicit Resume does not double-trigger passive detached-wait re
     }, workspaceAppHtml);
 
     const app = page.frameLocator("#workspace");
-    const resume = app.getByRole("button", { name: "Resume", exact: true });
-    await resume.waitFor({ state: "visible" });
+    await app.getByText("No blocking event.", { exact: true }).waitFor({ state: "visible" });
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
-    assert.equal(await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"), 0);
-
-    await resume.click();
-    await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForTimeout(100);
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
     assert.equal(await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"), 0);
 });
 
-test("Workspace re-enters after a detached answer and guards manual background resume", BROWSER_TEST_OPTIONS, async (t) => {
+test("Workspace re-enters after a detached answer without surfacing detached tmux state", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
 
@@ -163,17 +153,42 @@ test("Workspace re-enters after a detached answer and guards manual background r
     }, workspaceAppHtml);
 
     const app = page.frameLocator("#workspace");
-    await app.getByRole("button", { name: "Continue", exact: true }).click();
+    await app.locator('[data-question-choice="wait-question-detached"]').click();
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-
-    const resume = app.getByRole("button", { name: "Resume agent", exact: true });
-    await resume.waitFor({ state: "visible" });
-    await resume.click({ noWaitAfter: true });
-    await app.getByRole("button", { name: "Resume agent", exact: true }).waitFor({ state: "visible" });
-    assert.equal(await app.getByRole("button", { name: "Resume agent", exact: true }).isDisabled(), true);
-    await page.waitForFunction("(window.__modelMessages || []).length === 2");
+    await app.getByText("No blocking event.", { exact: true }).waitFor({ state: "visible" });
+    assert.equal(await app.getByRole("button", { name: "Resume agent", exact: true }).count(), 0);
     await page.waitForTimeout(100);
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 2);
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
+});
+
+test("Workspace remount follows current ChatGPT tool output and falls back to widget state", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:320px"></iframe>');
+    await page.evaluate(REMOUNT_BRIDGE_SCRIPT);
+    const mount = async (globals: string) => await page.evaluate(({ html, globals }) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html.replace("<script>", `<script>window.openai = ${globals};<\/script><script>`);
+    }, { html: workspaceAppHtml, globals });
+
+    await mount(`{
+        widgetState: { portableDevshellWorkspace: { ctxId: "ctx-widget-stale" } },
+        toolResponseMetadata: { mcp_tool_result: { structuredContent: { ctxId: "ctx-stale" } } },
+        toolOutput: { ctxId: "ctx-current" },
+        setWidgetState: function (state) { this.widgetState = state; }
+    }`);
+    await page.waitForFunction("(window.__remountCalls || []).some(call => call.name === 'workspace_snapshot' && call.arguments.ctxId === 'ctx-current')");
+
+    await page.evaluate("window.__remountCalls = []");
+    await mount(`{
+        widgetState: { portableDevshellWorkspace: { ctxId: "ctx-widget-only" } },
+        setWidgetState: function (state) { this.widgetState = state; }
+    }`);
+    await page.waitForFunction("(window.__remountCalls || []).some(call => call.name === 'workspace_snapshot' && call.arguments.ctxId === 'ctx-widget-only')");
+    assert.equal(await page.evaluate("(window.__remountCalls || []).some(call => call.arguments.ctxId === 'ctx-stale')"), false);
 });
 
 async function launchBrowser(): Promise<Browser> {
@@ -200,10 +215,46 @@ function resolveChromiumExecutable(): string | undefined {
     return candidates.find((candidate) => existsSync(candidate));
 }
 
+const REMOUNT_BRIDGE_SCRIPT = String.raw`
+window.__remountCalls = [];
+window.addEventListener("message", function (event) {
+    if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
+    var source = event.source;
+    var message = event.data;
+    function reply(result) {
+        if (message.id === undefined) return;
+        source.postMessage({ id: message.id, jsonrpc: "2.0", result: result }, "*");
+    }
+    if (message.method === "ui/initialize") {
+        reply({ protocolVersion: "2026-01-26" });
+        return;
+    }
+    if (message.method === "ui/update-model-context") {
+        reply({});
+        return;
+    }
+    if (message.method !== "tools/call") return;
+    var call = message.params || {};
+    window.__remountCalls.push(call);
+    if (call.name === "workspace_snapshot") {
+        reply({
+            _meta: { "portable-devshell/workspace": { token: "remount-token" } },
+            structuredContent: {
+                activity: [], approvals: [], background: [], currentEvent: null, questions: [], tasks: [], waits: [],
+                ctxId: call.arguments.ctxId, cursor: 1, instance: "browser-instance"
+            }
+        });
+        return;
+    }
+    if (call.name === "workspace_watch") return;
+});
+`;
+
 const BRIDGE_SCRIPT = String.raw`
 window.__workspaceCalls = [];
 window.__workspaceQuestionAnswered = false;
 window.__workspaceApprovalPending = true;
+window.__workspaceWaitInterrupted = false;
 window.__workspaceWatchCount = 0;
 window.__modelContextUpdates = [];
 window.__modelMessages = [];
@@ -211,6 +262,53 @@ window.__bridgeEvents = [];
 window.__taskStatus = "in_progress";
 
 function snapshot(withQuestion) {
+    var question = {
+        createdAt: "2026-08-19T01:00:00.000Z",
+        createdByCtxId: "ctx-browser",
+        eventName: "user.answer",
+        kind: "question",
+        name: "ask_question",
+        payload: {
+            allowText: false,
+            choices: [
+                "Continue", "Option 2", "Option 3", "Option 4", "Option 5", "Option 6",
+                "Option 7", "Option 8", "Option 9", "Option 10", "Option 11", "Option 12"
+            ],
+            question: "Continue the task?"
+        },
+        status: "waiting",
+        targetId: "question-browser",
+        updatedAt: "2026-08-19T01:00:00.000Z",
+        waitId: "wait-question"
+    };
+    var approval = {
+        approvalId: "approval-browser",
+        createdAt: "2026-08-19T01:00:01.000Z",
+        ctxId: "ctx-browser",
+        eventName: "approval.decision",
+        inputSummary: "git push origin v0.6.7",
+        kind: "approval",
+        name: "bash_run",
+        riskLevel: "high",
+        status: "waiting",
+        toolName: "bash_run",
+        updatedAt: "2026-08-19T01:00:01.000Z"
+    };
+    var tmux = {
+        eventName: "tmux.task.completed",
+        kind: "tmux",
+        name: "tmux_wait",
+        status: "waiting",
+        taskId: "task-plan",
+        tmuxTaskId: "task-browser",
+        updatedAt: "2026-08-19T01:00:02.000Z",
+        waitId: "wait-background"
+    };
+    var currentEvent = withQuestion && !window.__workspaceQuestionAnswered
+        ? question
+        : window.__workspaceApprovalPending
+            ? approval
+            : window.__workspaceWaitInterrupted ? null : tmux;
     return {
         activity: [{
             callId: "call-1",
@@ -219,14 +317,7 @@ function snapshot(withQuestion) {
             status: "running",
             toolName: "bash_run"
         }],
-        approvals: window.__workspaceApprovalPending ? [{
-            approvalId: "approval-browser",
-            ctxId: "ctx-browser",
-            inputSummary: "git push origin v0.6.6",
-            riskLevel: "high",
-            status: "pending",
-            toolName: "bash_run"
-        }] : [],
+        approvals: window.__workspaceApprovalPending ? [approval] : [],
         background: [{
             detachedAt: "2026-08-19T01:00:01.000Z",
             status: "detached",
@@ -236,22 +327,10 @@ function snapshot(withQuestion) {
             waitId: "wait-background"
         }],
         ctxId: "ctx-browser",
+        currentEvent: currentEvent,
         cursor: 2,
         instance: "browser-instance",
-        questions: withQuestion ? [{
-            createdAt: "2026-08-19T01:00:00.000Z",
-            createdByCtxId: "ctx-browser",
-            kind: "question",
-            payload: {
-                allowText: false,
-                choices: ["Continue"],
-                question: "Continue the task?"
-            },
-            status: "waiting",
-            targetId: "question-browser",
-            updatedAt: "2026-08-19T01:00:00.000Z",
-            waitId: "wait-question"
-        }] : [],
+        questions: withQuestion && !window.__workspaceQuestionAnswered ? [question] : [],
         tasks: [{
             checkpoint: {
                 next: "Finish re-entry controls",
@@ -308,7 +387,7 @@ window.addEventListener("message", function (event) {
             _meta: { "portable-devshell/workspace": { token: "browser-secret-token" } },
             structuredContent: window.__workspaceWatchCount > 0
                 ? snapshot(!window.__workspaceQuestionAnswered)
-                : Object.assign(snapshot(false), { activity: [], background: [], cursor: 1 })
+                : Object.assign(snapshot(false), { activity: [], approvals: [], background: [], currentEvent: null, cursor: 1 })
         });
         return;
     }
@@ -324,7 +403,7 @@ window.addEventListener("message", function (event) {
     }
     if (call.name === "workspace_question_answer") {
         window.__workspaceQuestionAnswered = true;
-        reply({ structuredContent: { answer: "Continue", detached: true, taskId: "task-plan", waitId: "wait-question" } });
+        reply({ structuredContent: { answer: "Continue", detached: false, taskId: "task-plan", waitId: "wait-question" } });
         return;
     }
     if (call.name === "workspace_approval_decide") {
@@ -332,11 +411,10 @@ window.addEventListener("message", function (event) {
         reply({ structuredContent: { approvalId: call.arguments.approvalId, status: "approved" } });
         return;
     }
-    if (call.name === "workspace_task_control") {
-        if (call.arguments.action === "pause") window.__taskStatus = "paused";
-        if (call.arguments.action === "resume") window.__taskStatus = "in_progress";
-        if (call.arguments.action === "cancel") window.__taskStatus = "cancelled";
-        reply({ structuredContent: { taskId: call.arguments.taskId } });
+    if (call.name === "workspace_wait_interrupt") {
+        window.__workspaceWaitInterrupted = true;
+        reply({ structuredContent: { interrupted: true, status: "cancelled", tmuxTaskId: "task-browser", waitId: "wait-background" } });
+        return;
     }
 });
 `;
@@ -441,14 +519,14 @@ window.addEventListener("message", function (event) {
 const RESUME_BRIDGE_SCRIPT = String.raw`
 window.__workspaceCalls = [];
 window.__modelMessages = [];
-window.__taskStatus = "paused";
+window.__taskStatus = "in_progress";
 
 function resumeSnapshot() {
     return {
         activity: [], approvals: [], questions: [], waits: [],
         background: [{
             detachedAt: "2026-08-19T01:00:01.000Z",
-            status: "resolved",
+            status: "detached",
             taskId: "task-resume",
             tmuxTaskId: "tmux-resume",
             updatedAt: "2026-08-19T01:00:02.000Z",
@@ -509,11 +587,6 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (call.name === "workspace_watch") return;
-    if (call.name === "workspace_task_control") {
-        window.__taskStatus = "in_progress";
-        reply({ structuredContent: { taskId: "task-resume" } });
-        return;
-    }
     if (call.name === "workspace_wait_recover") {
         reply({ structuredContent: { taskId: "task-resume", waitId: "wait-resume" } });
     }
