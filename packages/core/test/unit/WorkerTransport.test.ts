@@ -491,8 +491,8 @@ test("ssh transport runs installWorker probe via remote shell", async () => {
 });
 
 
-test("Windows skill archives assign portable Unix modes from entry type and shebang", async (t) => {
-    const root = await createTestTempDirectory("windows-skill-mode");
+test("skill archives assign portable Unix modes from entry type and shebang", async (t) => {
+    const root = await createTestTempDirectory("skill-mode");
     const skillsDirectory = join(root, "skill");
     await mkdir(join(skillsDirectory, "review", "scripts"), { recursive: true });
     await writeFile(join(skillsDirectory, "review", "SKILL.md"), "# Review\n");
@@ -500,7 +500,7 @@ test("Windows skill archives assign portable Unix modes from entry type and sheb
     await writeFile(join(skillsDirectory, "review", "scripts", "helper.py"), "print('review')\n");
     t.after(() => rm(root, { recursive: true, force: true }));
 
-    const archive = await createWorkerSkillArchive(skillsDirectory, "win32");
+    const archive = await createWorkerSkillArchive(skillsDirectory);
     assert.notEqual(archive, undefined);
     const entries = await readTarEntries(archive!.bytes);
 

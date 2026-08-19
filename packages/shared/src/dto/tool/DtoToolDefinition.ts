@@ -1,6 +1,7 @@
 import type { JsonValue } from "../../type/TypeJsonValue.js";
 
 export interface ToolDefinition {
+    _meta?: JsonValue;
     description: string;
     group: string;
     inputSchema: JsonValue;

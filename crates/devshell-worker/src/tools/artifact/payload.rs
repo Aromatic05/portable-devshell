@@ -270,6 +270,27 @@ impl ArtifactPayloadStore {
         offset_bytes: u64,
         max_bytes: usize,
     ) -> Result<ArtifactPayloadReadResult, ToolError> {
+        let (bytes, total_bytes) = self.read_bytes(payload_id, offset_bytes, max_bytes)?;
+        let next = offset_bytes.saturating_add(bytes.len() as u64);
+        let eof = next >= total_bytes as u64;
+        Ok(ArtifactPayloadReadResult {
+            payload_id: payload_id.to_string(),
+            offset_bytes,
+            returned_bytes: bytes.len(),
+            total_bytes,
+            content: STANDARD.encode(bytes),
+            encoding: "base64",
+            eof,
+            next_offset_bytes: (!eof).then_some(next),
+        })
+    }
+
+    pub(crate) fn read_bytes(
+        &self,
+        payload_id: &str,
+        offset_bytes: u64,
+        max_bytes: usize,
+    ) -> Result<(Vec<u8>, usize), ToolError> {
         validate_id(payload_id)?;
         if max_bytes == 0 || max_bytes > MAX_READ_BYTES {
             return Err(ToolError::new(
@@ -304,18 +325,7 @@ impl ArtifactPayloadStore {
         let mut bytes = vec![0; requested];
         file.read_exact(&mut bytes)
             .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
-        let next = offset_bytes.saturating_add(bytes.len() as u64);
-        let eof = next >= total_bytes as u64;
-        Ok(ArtifactPayloadReadResult {
-            payload_id: payload_id.to_string(),
-            offset_bytes,
-            returned_bytes: bytes.len(),
-            total_bytes,
-            content: STANDARD.encode(bytes),
-            encoding: "base64",
-            eof,
-            next_offset_bytes: (!eof).then_some(next),
-        })
+        Ok((bytes, total_bytes))
     }
 
     pub fn close(&self, payload_id: &str) -> Result<(), ToolError> {

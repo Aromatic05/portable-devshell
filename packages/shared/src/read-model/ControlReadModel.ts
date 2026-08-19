@@ -9,7 +9,7 @@ import type { InstanceEvent } from "../dto/instance/DtoInstanceEvent.js";
 import type { InstanceListEntry } from "../dto/instance/DtoInstanceRuntime.js";
 import type { InstanceLogEntry } from "../dto/instance/DtoInstanceLog.js";
 import type { InstanceSnapshot } from "../dto/instance/DtoInstanceSnapshot.js";
-import type { TodoReadResult } from "../dto/instance/DtoTodo.js";
+import type { TodoReadInput, TodoReadResult } from "../dto/instance/DtoTodo.js";
 import type { OAuthApprovalRequest } from "../dto/oauth/DtoOAuthApproval.js";
 import type { OperationalOverview } from "../dto/overview/DtoOperationalOverview.js";
 import type { ApprovalRequest } from "../dto/tool/DtoToolApproval.js";
@@ -308,11 +308,11 @@ export class ControlReadModel {
     async refreshInstance(
         instance: string,
         keys: readonly ControlInstanceReadKey[] = instanceKeys,
-        todoTitle?: string,
+        todoInput?: TodoReadInput,
         epoch = this.#epoch,
     ): Promise<number | undefined> {
         await Promise.all(keys.map(async (key) => {
-            await this.#refreshInstanceKey(instance, key, todoTitle, epoch);
+            await this.#refreshInstanceKey(instance, key, todoInput, epoch);
         }));
         return this.#current(epoch)
             ? this.#state.instanceState[instance]?.sequence
@@ -435,13 +435,13 @@ export class ControlReadModel {
     async #refreshInstanceKey(
         instance: string,
         key: ControlInstanceReadKey,
-        todoTitle: string | undefined,
+        todoInput: TodoReadInput | undefined,
         epoch: number,
     ): Promise<void> {
         const versionKey = this.#instanceVersionKey(instance, key);
         const version = this.#nextVersion(versionKey);
         try {
-            const value = await this.#request(this.#readInstanceKey(instance, key, todoTitle), `${key}:${instance}`);
+            const value = await this.#request(this.#readInstanceKey(instance, key, todoInput), `${key}:${instance}`);
             if (!this.#valid(versionKey, version, epoch)) return;
             this.#applyInstanceValue(instance, key, value);
             this.#clearFailure(this.failureKey(instance, key));
@@ -461,7 +461,7 @@ export class ControlReadModel {
     async #readInstanceKey(
         instance: string,
         key: ControlInstanceReadKey,
-        todoTitle?: string,
+        todoInput?: TodoReadInput,
     ): Promise<InstanceReadValue> {
         switch (key) {
             case "snapshot": {
@@ -473,7 +473,7 @@ export class ControlReadModel {
             case "approvals":
                 return await this.#clients.tool.listApprovals(instance);
             case "todo":
-                return (await this.#clients.todo.get(instance, todoTitle)).todo;
+                return (await this.#clients.todo.get(instance, todoInput)).todo;
             case "toolCalls":
                 return await this.#clients.tool.listCalls(instance, { limit: 200 });
             case "comments": {

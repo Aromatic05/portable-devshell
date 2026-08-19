@@ -27,6 +27,7 @@ endpoint 出现需要同时满足：
 version = 2
 
 [control]
+artifactDirectTransfer = false
 logLevel = "info"
 
 [mcp]
@@ -54,7 +55,7 @@ auth = "none"
 path = "/demo-local/mcp"
 
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo"]
+groups = ["file", "bash", "artifact", "tmux", "todo", "interaction"]
 capabilities = ["read", "write", "execute"]
 ```
 
@@ -100,11 +101,36 @@ requiredScopes = ["mcp"]
 | `bash`     | `bash_run`                                                                               | `execute`         |
 | `file`     | `file_read`、`file_edit`、`file_find`、`file_search`、`file_info`          | `read`、`write`   |
 | `artifact` | `artifact_read`、`artifact_viewImage`、`artifact_share`、`artifact_transfer`             | `read`、`write`   |
-| `tmux`     | `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_list`、`tmux_create`、`tmux_close`    | `read`、`execute` |
+| `tmux`     | `tmux_run`、`tmux_wait`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_list`、`tmux_create`、`tmux_close` | `read`、`execute` |
 | `todo`     | `todo_read`、`todo_write`                                                                | 无硬性 capability |
+| `interaction` | `workspace_open`、`ask_question`；另含仅 Workspace App 可调用的内部 helper               | 无硬性 capability |
 | `instance` | `instance_list`、`instance_status`、`instance_create`、`instance_connect`、`instance_stop` | `manage`          |
 
 默认不包含 `instance` group，也不授予 `manage`。`instance_connect` 是幂等的“确保可用”入口：目标未启动时由 Control 启动并连接，已经 ready 时不重复启动；可选 `workspace` 会作为当前 `ctxId` 在该 instance 上的 workspace attachment。`selfManaged` reverse worker 不由 Control 启动，`instance_connect` 只接受已经连入的 worker。`instance_stop` 仍只适用于由 Control 管理生命周期的 worker。用户从 TUI 定向发送给某个 Context 的 Comment 不作为独立 MCP 工具暴露；消息按 `ctxId` 排队，并附着到该 Context 下一次成功的普通工具结果中。
+
+MCP 对已经被 ChatGPT 缓存的旧 recipient 保留一层隐藏兼容。兼容名字永远不重新出现在 `tools/list`：语义仍是当前操作安全超集的 `instance_start` 会透明路由到 `instance_connect`，并继续接受当前 group / capability / Context 校验；无法安全等价转换的 `context_message_read`、`file_write`、`tmux_send`、`tmux_capture`、`tmux_reclaim` 不执行旧操作，而是返回结构化 `staleToolSnapshot`，说明移除版本和当前迁移方式。未知且从未受支持的工具名仍按普通 not-exposed 错误处理。
+
+## Workspace MCP App 与人工交互
+
+`workspace_open` 是 model-visible 的 Workspace 入口。它绑定当前 `ctxId`，并返回该 Context 的 authoritative snapshot。Workspace 可见区域保持为一个紧凑的 current-event view，同一时刻最多展示一个需要人类关注的事件，而不是任务仪表盘：`ask_question` 对应 `user.answer`，Approval 对应 `approval.decision`，正在阻塞的 `tmux_wait` 对应 `tmux.task.completed`。Todo/checkpoint、后台 Wait 与 activity 仍保留在 snapshot/model context 中供恢复逻辑使用，但不同时堆进可见 UI。
+
+Workspace 的 Host 协议由官方 `@modelcontextprotocol/ext-apps` `App` 实现，portable-devshell 不再自行维护 postMessage JSON-RPC bridge。实际 render URI 根据完整 HTML 内容生成 hash，例如 `ui://portable-devshell/workspace-<hash>.html`，因此 ChatGPT 的 template/render cache 会在内容变化时获得新的 cache key。`ui://portable-devshell/workspace/v1.html` 只作为稳定 reader alias 保留；已经发布过的历史 hash URI也必须继续作为隐藏 alias 可读，不能让旧会话因升级失去模板。
+
+Workspace 内部使用 `workspace_snapshot` 和 `workspace_watch` 保持 live state；这两个 helper 是 app-only，不应由模型主动调用。`workspace_watch` 复用 instance 现有的 event sequence cursor，只在当前 Context 的 `toolCall.*`、`approval.*`、`todo.*`、`wait.*` 事件发生时返回新 snapshot；事件历史出现 gap 或 Control 重启导致 cursor 失效时，直接重新读取 authoritative snapshot。正常无变化时只返回 heartbeat，不使用固定频率 snapshot polling。
+
+iframe remount 或 MCP/Control 重启后，读路径可以仅凭有效 `ctxId` 重新 snapshot/watch，并从返回 metadata 获得新的 app token；旧 token 不需要持久化。ChatGPT remount 时只有存在 `toolResponseMetadata.mcp_tool_result` / `call_tool_result` envelope 时才接受 `window.openai.toolOutput` 覆盖其中可能缓存的旧 structured output，不能把一个孤立的全局 `toolOutput` 当成 Workspace 身份来源。App 同时只把 `ctxId` 写入 `window.openai.widgetState` 作为 remount hint，并在 connect 后短暂等待真实 initial tool result，再回退到该 hint。`workspace_question_answer`、`workspace_wait_interrupt` 和 `workspace_approval_decide` 属于人工写操作，仍必须携带当前隐藏 app token，并再次校验 `ctxId` 与目标对象归属。
+
+`ask_question` 用于模型确实需要人类输入时挂起当前调用，并传入 durable `taskId`。新的 held call 只允许在 Workspace App 最近仍活跃时建立：`workspace_open`、`workspace_snapshot` 和正常的 `workspace_watch` heartbeat 会刷新 60 秒 liveness lease；lease 过期后 `ask_question` fail fast，要求重新 `workspace_open`，避免在 iframe 已经消失时制造无人能回答的阻塞调用。已经建立的 held call 不设置 portable-devshell 自己的固定超时，仍优先保持当前模型回合；Host 取消原 tool call 时等待会变成 detached。MCP/Control 进程重建时，持久化为 `waiting` 的 Wait 会统一按 orphaned owner call 恢复成 detached，因此旧 Question 不会假装仍有可返回的 tool call，用户之后回答时可以走 model re-entry 恢复。
+
+Todo task 现在同时承担 model re-entry checkpoint。模型在 `todo_write` 更新计划时可以写 `checkpoint.summary`，并可附带 `next` 与 `blockers`；checkpoint 与 taskId 一起持久化，后续 Workspace snapshot 会把它投影给 Host。Workspace 每次拿到 authoritative snapshot 后使用 MCP Apps 的 `ui/update-model-context` 覆盖该 View 的模型上下文；这个操作不会主动触发新的模型回合。
+
+Todo runtime 仍保留 task-level Pause / Resume / Cancel 语义，用于 durable task 生命周期和兼容已经挂载的旧 Workspace App；当前紧凑 Workspace 不再把 task controls 作为常驻面板展示。它们不会隐式向 tmux 进程发送信号。
+
+`tmux_wait` 首次建立 durable Wait 时，会在当前 Context 恰好只有一个 `in_progress` Todo task 的情况下记录其 `taskId`。Host 取消当前调用或 MCP/Control 重建后，Wait 按 detached 处理；模型再次调用同一个 `tmux_wait` 时会把该 durable Wait 明确 reattach 为 `waiting`、更新新的 owner call，再继续等待。Control 重建会丢失内存中的 Worker completion tracker，因此 reattach 时会建立新的 Worker waiter，但 managed task 与 transcript 不受影响。
+
+用户在 Workspace 对当前 `tmux_wait` 选择 `Interrupt wait` 时，语义与 Host detach 不同：Wait 直接进入 cancelled，MCP 同时取消内部 Worker waiter；Worker 的取消只停止 `tmux_wait` 本身，绝不会停止对应 tmux task。原模型 tool call 正常返回 `{ interrupted: true, task: { id, status: "running" } }`，因此不会把人工中断伪装成系统错误，也不会在 task 后来完成时偷偷触发自动 model re-entry。模型如果仍需等待，可再次显式调用 `tmux_wait` 建立新的 Wait。
+
+只有非人工中断产生的 detached wait 才参与灾备恢复。如果这种 wait 在原 Host call 消失后完成，Workspace 会对“仍 active、未 paused、归属同一 Context、且带 taskId”的 resolved wait 做短租约 claim，然后先用 `ui/update-model-context` 写入 checkpoint / wait result，再用 `ui/message` 恢复模型；消息成功后才 complete/consume 该 Wait，消息发送失败则 release claim 让后续 remount 重试。并发 App 不能同时 claim 同一个 Wait。普通 live activity、后台任务状态变化和仍存活的 Question 回答不会触发主动 `ui/message`。
 
 ## Skills 与项目记忆提示
 
@@ -205,6 +231,7 @@ artifact_viewImage 在 payload 分块读取边界停止，并关闭临时 lease
 control 侧工具     立即停止 MCP 等待；已经开始的生命周期或原子操作继续完成
 tmux_run           停止等待，已经启动的 task 继续运行
 tmux_read          停止等待且不消费尚未返回的输出
+tmux_wait          只分离当前等待；task 继续运行，transcript 不被消费，之后可继续等待同一 task id
 ```
 
 worker handshake 返回 `cancel = true`。本地 RPC、WSS 和 SSE + HTTPS POST 反向连接都允许取消请求在长工具运行期间到达 worker。工具调用历史使用 `cancelled`，等待审批时还会产生 `approval.cancelled`。

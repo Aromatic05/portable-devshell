@@ -36,6 +36,9 @@ test("MCP tmux supports a complete interactive lifecycle when JSON-RPC request i
         }
         assert.equal(inputTool?.inputSchema.required?.includes("ctxId"), true);
         assert.equal(inputTool?.inputSchema.required?.includes("input"), true);
+        const waitTool = tools.find((entry) => entry.name === "tmux_wait");
+        assert.notEqual(waitTool, undefined);
+        assert.equal(waitTool?.inputSchema.properties?.timeMs, undefined);
         const ctxId = await createContext();
         const requestId = "reused-tools-call-id";
         const created = await callTool(requestId, "tmux_create", { ctxId, name: "interactive" });
@@ -88,6 +91,13 @@ test("MCP tmux lets a refreshed context continue a task while preserving busy ch
         });
         assert.equal(created.error, undefined, JSON.stringify(created));
 
+        const paneInput = await callTool(requestId, "tmux_input", {
+            ctxId: firstCtxId,
+            input: "sleep 10^M",
+            pane: "continued"
+        });
+        assert.equal(paneInput.error, undefined, JSON.stringify(paneInput));
+
         const run = await callTool(requestId, "tmux_run", {
             command: "sleep 10",
             ctxId: firstCtxId,
@@ -137,6 +147,7 @@ test("MCP tmux lets a refreshed context continue a task while preserving busy ch
 
         const closed = await callTool(requestId, "tmux_close", {
             ctxId: refreshedCtxId,
+            force: true,
             pane: "continued"
         });
         assert.equal(closed.error, undefined, JSON.stringify(closed));
@@ -291,22 +302,17 @@ async function waitForTask(
     ctxId: string,
     task: string
 ): Promise<{ output: string[]; task: { status: string } }> {
-    const output: string[] = [];
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-        const response = await callTool(requestId, "tmux_read", {
-            ctxId,
-            line: 200,
-            task,
-            timeMs: 100
-        });
-        assert.equal(response.error, undefined, JSON.stringify(response));
-        output.push(...(response.result?.structuredContent?.output ?? []));
-        const status = readString(response.result?.structuredContent?.task?.status, "tmux_read task status");
-        if (status !== "running") {
-            return { output, task: { status } };
-        }
-    }
-    throw new Error(`Timed out waiting for tmux task ${task}`);
+    const waited = await callTool(requestId, "tmux_wait", { ctxId, task });
+    assert.equal(waited.error, undefined, JSON.stringify(waited));
+    const status = readString(waited.result?.structuredContent?.task?.status, "tmux_wait task status");
+    assert.notEqual(status, "running");
+
+    const read = await callTool(requestId, "tmux_read", { ctxId, line: 200, task });
+    assert.equal(read.error, undefined, JSON.stringify(read));
+    return {
+        output: [...(read.result?.structuredContent?.output ?? [])],
+        task: { status }
+    };
 }
 
 function readString(value: unknown, name: string): string {

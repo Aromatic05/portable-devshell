@@ -9,6 +9,7 @@ import type {
 
 import { McpEndpointCatalog } from "../../src/endpoint/McpEndpointCatalog.ts";
 import { McpEndpointDispatch } from "../../src/endpoint/McpEndpointDispatch.ts";
+import { McpNativeToolResult } from "../../src/endpoint/McpEndpointResult.ts";
 import { McpContextRegistry } from "../../src/context/McpContextRegistry.ts";
 
 function workerTool(name: string = "bash_run"): ToolDefinition {
@@ -35,6 +36,22 @@ function workerTool(name: string = "bash_run"): ToolDefinition {
             type: "object"
         },
         requiredCapabilities: ["execute"]
+    };
+}
+
+function tmuxWaitTool(): ToolDefinition {
+    return {
+        description: "Wait for a managed tmux task.",
+        group: "tmux",
+        inputSchema: {
+            additionalProperties: false,
+            properties: { task: { type: "string" } },
+            required: ["task"],
+            type: "object",
+        },
+        name: "tmux_wait",
+        outputSchema: { type: "object" },
+        requiredCapabilities: ["read"],
     };
 }
 
@@ -223,6 +240,276 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
     ]);
 });
 
+test("cached MCP tool names stay callable without re-exposing stale recipients", async () => {
+    const harness = createWorker();
+    const connected: string[] = [];
+    const gateway = {
+        assertReady() {},
+        async callTool(): Promise<JsonValue> { return {}; },
+        async connectInstance(instance: string): Promise<JsonValue> {
+            connected.push(instance);
+            return { state: "ready" };
+        },
+        async createSshInstance(): Promise<JsonValue> { return {}; },
+        async listInstances(): Promise<JsonValue[]> { return []; },
+        listTools: () => [],
+        async readTodo(): Promise<JsonValue> { return { items: [], revision: 0 }; },
+        async statusInstance(): Promise<JsonValue> { return {}; },
+        async stopInstance(): Promise<JsonValue> { return {}; },
+        async writeTodo(): Promise<JsonValue> { return {}; },
+    } as never;
+    const catalog = new McpEndpointCatalog({
+        gateway,
+        instanceName: "demo-local",
+        policy: { capabilities: ["manage"], groups: ["instance"] },
+        worker: harness.worker,
+    });
+    const dispatch = new McpEndpointDispatch({
+        catalog,
+        gateway,
+        instanceName: "demo-local",
+        worker: harness.worker,
+    });
+
+    assert.equal(catalog.listTools().some((tool) => tool.name === "instance_start"), false);
+    assert.equal(catalog.listTools().some((tool) => tool.name === "context_message_read"), false);
+
+    const environment = await dispatch.callTool(
+        "environ_info",
+        { workspace: "/workspace" },
+        { principal: "tester", requestId: "request-environment" },
+    ) as { ctxId: string };
+    assert.deepEqual(await dispatch.callTool(
+        "instance_start",
+        { ctxId: environment.ctxId, instance: "remote" },
+        { principal: "tester", requestId: "request-start" },
+    ), { state: "ready" });
+    assert.deepEqual(connected, ["remote"]);
+
+    const tombstone = await dispatch.callTool(
+        "context_message_read",
+        {},
+        { principal: "tester", requestId: "request-stale" },
+    );
+    assert.ok(tombstone instanceof McpNativeToolResult);
+    assert.deepEqual(tombstone.structuredContent, {
+        staleToolSnapshot: {
+            assistantInstruction: "Queued user Comments are delivered automatically with the next successful ordinary tool result. Do not poll for them.",
+            help: "Queued user Comments are delivered automatically with the next successful ordinary tool result. Do not poll for them.",
+            name: "context_message_read",
+            removedIn: "0.5.1",
+        },
+    });
+    await assert.rejects(
+        dispatch.callTool("unknown_cached_tool", {}, { principal: "tester", requestId: "request-unknown" }),
+    );
+});
+
+test("legacy aliases still obey the current MCP policy", async () => {
+    const harness = createWorker();
+    const gateway = {
+        listTools: () => [],
+    } as never;
+    const catalog = new McpEndpointCatalog({
+        gateway,
+        instanceName: "demo-local",
+        policy: { capabilities: [], groups: [] },
+        worker: harness.worker,
+    });
+    const dispatch = new McpEndpointDispatch({
+        catalog,
+        gateway,
+        instanceName: "demo-local",
+        worker: harness.worker,
+    });
+
+    await assert.rejects(
+        dispatch.callTool(
+            "instance_start",
+            { ctxId: "ctx-cached", instance: "remote" },
+            { principal: "tester", requestId: "request-start" },
+        ),
+        /not exposed/i,
+    );
+});
+
+test("tmux_wait distinguishes host detach from explicit Workspace interruption", async () => {
+    let workerWaitCalls = 0;
+    let workerWaitAborts = 0;
+    const workerResolvers: Array<(result: JsonValue) => void> = [];
+    const harness = createWorker({ tools: [tmuxWaitTool()] });
+    const worker = {
+        ...harness.worker,
+        async callTool(toolName: string, _input: JsonValue, _context: ToolCallContext, signal?: AbortSignal): Promise<JsonValue> {
+            assert.equal(toolName, "tmux_wait");
+            workerWaitCalls += 1;
+            return await new Promise<JsonValue>((resolve, reject) => {
+                workerResolvers.push(resolve);
+                signal?.addEventListener("abort", () => {
+                    workerWaitAborts += 1;
+                    reject(new Error("worker tmux_wait aborted"));
+                }, { once: true });
+            });
+        },
+    };
+    type Wait = {
+        createdAt: string;
+        createdByCtxId: string;
+        detachedAt?: string;
+        kind: "tmux";
+        ownerCallId?: string;
+        result?: JsonValue;
+        status: "waiting" | "detached" | "resolved" | "consumed" | "cancelled";
+        taskId?: string;
+        targetId: string;
+        updatedAt: string;
+        waitId: string;
+    };
+    const waits: Wait[] = [];
+    const pending = new Map<string, { reject(error: Error): void; resolve(wait: Wait): void }>();
+    const update = (waitId: string, status: Wait["status"], result?: JsonValue): Wait => {
+        const wait = waits.find((entry) => entry.waitId === waitId);
+        if (wait === undefined) throw new Error(`missing wait ${waitId}`);
+        Object.assign(wait, {
+            ...(status === "detached" ? { detachedAt: new Date().toISOString() } : {}),
+            ...(result === undefined ? {} : { result }),
+            status,
+            updatedAt: new Date().toISOString(),
+        });
+        const waiter = pending.get(waitId);
+        if (waiter !== undefined) {
+            pending.delete(waitId);
+            if (status === "resolved") waiter.resolve(wait);
+            if (status === "detached" || status === "cancelled") {
+                waiter.reject(new Error(`Wait ${waitId} became ${status}.`));
+            }
+        }
+        return wait;
+    };
+    const gateway = {
+        async cancelWait(_instance: string, waitId: string) { return update(waitId, "cancelled"); },
+        async consumeWait(_instance: string, waitId: string) { return update(waitId, "consumed"); },
+        async createWait(_instance: string, input: { createdByCtxId: string; kind: "tmux"; ownerCallId?: string; taskId?: string; targetId: string }) {
+            const now = new Date().toISOString();
+            const wait: Wait = {
+                ...input,
+                createdAt: now,
+                status: "waiting",
+                updatedAt: now,
+                waitId: `wait-${waits.length + 1}`,
+            };
+            waits.push(wait);
+            return wait;
+        },
+        async decideApproval() { throw new Error("unused"); },
+        async detachWait(_instance: string, waitId: string) { return update(waitId, "detached"); },
+        async listApprovals() { return []; },
+        async listWaits() { return waits; },
+        listTools: () => [],
+        async reattachWait(_instance: string, waitId: string, ownerCallId?: string) {
+            const wait = waits.find((entry) => entry.waitId === waitId);
+            if (wait === undefined || wait.status !== "detached") throw new Error(`cannot reattach ${waitId}`);
+            delete wait.detachedAt;
+            wait.status = "waiting";
+            wait.updatedAt = new Date().toISOString();
+            if (ownerCallId === undefined) delete wait.ownerCallId;
+            else wait.ownerCallId = ownerCallId;
+            return wait;
+        },
+        async readTodo() {
+            return {
+                items: [],
+                revision: 0,
+                tasks: [{ ctxId: environment.ctxId, status: "in_progress", taskId: "todo-task-1" }],
+            };
+        },
+        async resolveWait(_instance: string, waitId: string, result?: JsonValue) { return update(waitId, "resolved", result); },
+        async waitForWait(_instance: string, waitId: string): Promise<Wait> {
+            const wait = waits.find((entry) => entry.waitId === waitId);
+            if (wait === undefined) throw new Error(`missing wait ${waitId}`);
+            if (wait.status === "resolved") return wait;
+            if (wait.status !== "waiting" && wait.status !== "detached") {
+                throw new Error(`cannot wait while ${wait.status}`);
+            }
+            return await new Promise<Wait>((resolve, reject) => pending.set(waitId, { reject, resolve }));
+        },
+    } as never;
+    const catalog = new McpEndpointCatalog({
+        gateway,
+        instanceName: "demo-local",
+        policy: { capabilities: ["read"], groups: ["interaction", "tmux"] },
+        worker,
+    });
+    const dispatch = new McpEndpointDispatch({ catalog, gateway, instanceName: "demo-local", worker });
+    const environment = await dispatch.callTool(
+        "environ_info",
+        { workspace: "/workspace" },
+        { principal: "tester", requestId: "request-environment" },
+    ) as { ctxId: string };
+    const abort = new AbortController();
+    const first = dispatch.callTool(
+        "tmux_wait",
+        { ctxId: environment.ctxId, task: "task-1" },
+        { principal: "tester", requestId: "wait-1" },
+        abort.signal,
+    );
+    await waitUntil(() => waits.length === 1 && workerWaitCalls === 1);
+    assert.equal(waits[0]?.taskId, "todo-task-1");
+    abort.abort("host remount");
+    await assert.rejects(first, /cancelled by the client/u);
+    assert.equal(waits[0]?.status, "detached");
+    assert.equal(workerWaitAborts, 0);
+
+    const resumed = dispatch.callTool(
+        "tmux_wait",
+        { ctxId: environment.ctxId, task: "task-1" },
+        { principal: "tester", requestId: "wait-2" },
+    );
+    await waitUntil(() => workerWaitCalls === 1);
+    assert.equal(waits.length, 1);
+    assert.equal(workerWaitCalls, 1);
+
+    await waitUntil(() => pending.has(waits[0]!.waitId));
+    const opened = await dispatch.callTool(
+        "workspace_open",
+        { ctxId: environment.ctxId },
+        { principal: "tester", requestId: "workspace-open" },
+    );
+    assert.ok(opened instanceof McpNativeToolResult);
+    const token = (opened._meta?.["portable-devshell/workspace"] as { token?: string } | undefined)?.token;
+    if (typeof token !== "string") throw new Error("workspace token missing");
+    const waitId = waits[0]!.waitId;
+    const interruptedByUser = await dispatch.callTool(
+        "workspace_wait_interrupt",
+        { ctxId: environment.ctxId, token, waitId },
+        { principal: "tester", requestId: "workspace-interrupt" },
+    );
+    assert.deepEqual(interruptedByUser, {
+        interrupted: true,
+        status: "cancelled",
+        tmuxTaskId: "task-1",
+        waitId,
+    });
+    assert.deepEqual(await resumed, {
+        interrupted: true,
+        task: { id: "task-1", status: "running" },
+    });
+    await waitUntil(() => workerWaitAborts === 1);
+    assert.equal(waits[0]?.status, "cancelled");
+
+    const resumedAgain = dispatch.callTool(
+        "tmux_wait",
+        { ctxId: environment.ctxId, task: "task-1" },
+        { principal: "tester", requestId: "wait-3" },
+    );
+    await waitUntil(() => workerWaitCalls === 2 && waits.length === 2);
+    assert.equal(waits[1]?.status, "waiting");
+
+    workerResolvers[1]!({ task: { id: "task-1", status: "0" } });
+    assert.deepEqual(await resumedAgain, { task: { id: "task-1", status: "0" } });
+    assert.equal(waits[1]?.status, "consumed");
+});
+
 test("environ_info rolls back an undisclosed Context when post-create event recording fails", async () => {
     const harness = createWorker({ failToolCalled: true });
     const registry = new McpContextRegistry({ idFactory: () => "ctx-rollback" });
@@ -288,3 +575,11 @@ test("environ_info rollback keeps alerts leased by another Context attachment", 
     assert.deepEqual((await registry.list()).map(({ ctxId }) => ctxId), [existing.ctxId]);
     assert.deepEqual(harness.releasedAlerts, []);
 });
+
+async function waitUntil(predicate: () => boolean): Promise<void> {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (predicate()) return;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    throw new Error("timed out waiting for test state");
+}

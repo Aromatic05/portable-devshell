@@ -21,6 +21,7 @@ use crate::rpc::router::{ActiveToolCallRegistry, ControlHandler};
 use crate::security::SecurityPolicy;
 use crate::terminal::TerminalManager;
 use crate::tools::ToolRegistry;
+use crate::tools::artifact::direct::ArtifactDirectTransfer;
 use crate::tools::artifact::payload::ArtifactPayloadStore;
 use crate::tools::artifact::receive::ArtifactReceiveStore;
 
@@ -39,6 +40,19 @@ pub fn register_control_handlers(
     terminals: TerminalManager,
     alerts: Arc<alerts::AlertService>,
 ) {
+    let direct = ArtifactDirectTransfer::new(Arc::clone(&payloads), Arc::clone(&receives));
+    handlers.insert(
+        "artifact.receive.direct.open".to_string(),
+        artifact_payload::direct_receive_open(Arc::clone(&direct)),
+    );
+    handlers.insert(
+        "artifact.receive.direct.close".to_string(),
+        artifact_payload::direct_receive_close(Arc::clone(&direct)),
+    );
+    handlers.insert(
+        "artifact.payload.direct.push".to_string(),
+        artifact_payload::direct_payload_push(direct),
+    );
     handlers.insert(
         "artifact.receive.begin".to_string(),
         artifact_payload::receive_begin(

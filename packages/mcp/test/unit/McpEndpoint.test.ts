@@ -8,7 +8,13 @@ import { fileURLToPath } from "node:url";
 
 import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
 
-import { McpEndpointBinding, McpEndpointWorker, type McpInstanceGateway } from "@portable-devshell/mcp/testing";
+import {
+    McpEndpointBinding,
+    McpEndpointWorker,
+    workspaceAppResourceUri,
+    workspaceAppStableResourceUri,
+    type McpInstanceGateway,
+} from "@portable-devshell/mcp/testing";
 
 const fixturesDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../fixtures");
 type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string]: JsonValue };
@@ -40,6 +46,55 @@ test("initialize succeeds over SDK transport", async () => {
         assert.equal(response.body.result?.serverInfo?.name, "portable-devshell-mcp");
         assert.equal(response.body.result?.serverInfo?.version, "9.8.7");
         assert.equal(typeof response.headers.get("mcp-session-id"), "string");
+    } finally {
+        await server.close();
+        await binding.close();
+    }
+});
+
+test("Workspace MCP App renders from a versioned URI while keeping the stable reader alias", async () => {
+    const binding = createBinding();
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        const listed = await postJson(server.url, {
+            id: "req-resources-list",
+            jsonrpc: "2.0",
+            method: "resources/list",
+            params: {}
+        }, session.headers);
+        assert.equal(listed.status, 200);
+        assert.deepEqual(listed.body.result?.resources?.map((resource: { mimeType?: string; uri?: string }) => ({
+            mimeType: resource.mimeType,
+            uri: resource.uri
+        })), [{
+            mimeType: "text/html;profile=mcp-app",
+            uri: workspaceAppResourceUri
+        }]);
+        assert.match(workspaceAppResourceUri, /^ui:\/\/portable-devshell\/workspace-[0-9a-f]{16}\.html$/);
+        assert.notEqual(workspaceAppResourceUri, workspaceAppStableResourceUri);
+
+        const read = await postJson(server.url, {
+            id: "req-resource-read",
+            jsonrpc: "2.0",
+            method: "resources/read",
+            params: { uri: workspaceAppStableResourceUri }
+        }, session.headers);
+        assert.equal(read.status, 200);
+        assert.equal(read.body.result?.contents?.[0]?.mimeType, "text/html;profile=mcp-app");
+        assert.equal(read.body.result?.contents?.[0]?.uri, workspaceAppStableResourceUri);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /portable-devshell/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /ui\/initialize/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /ui\/resource-teardown/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /ui\/notifications\/size-changed/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_question_answer/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_wait_interrupt/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_watch/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /tmux\.task\.completed/);
+        assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /Current tasks/);
+        assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /section-head/);
+        assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /setInterval\(refresh/);
     } finally {
         await server.close();
         await binding.close();
@@ -103,6 +158,38 @@ test("tools/list uses group and capability filtering", async () => {
         const names = response.body.result?.tools.map((tool: { name: string }) => tool.name) ?? [];
         assert.equal(names.includes("bash_run"), true);
         assert.equal(names.includes("read_logs"), false);
+    } finally {
+        await server.close();
+        await binding.close();
+    }
+});
+
+test("cached removed tool recipients return a structured tombstone over MCP", async () => {
+    const binding = createBinding();
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        const listed = await postJson(server.url, await readFixture("mcp-tools-list.json"), session.headers);
+        const names = listed.body.result?.tools.map((tool: { name: string }) => tool.name) ?? [];
+        assert.equal(names.includes("context_message_read"), false);
+
+        const response = await postJson(server.url, {
+            id: "req-stale-tool",
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: {
+                arguments: {},
+                name: "context_message_read",
+            }
+        }, session.headers);
+
+        assert.equal(response.status, 200);
+        assert.equal(response.body.error, undefined);
+        assert.equal(response.body.result?.isError, false);
+        assert.match(response.body.result?.content?.[0]?.text ?? "", /Cached tool context_message_read was removed/);
+        assert.equal(response.body.result?.structuredContent?.staleToolSnapshot?.name, "context_message_read");
+        assert.equal(response.body.result?.structuredContent?.staleToolSnapshot?.replacement, undefined);
     } finally {
         await server.close();
         await binding.close();

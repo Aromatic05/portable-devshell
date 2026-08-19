@@ -41,7 +41,15 @@ export type InstanceEventType = ArtifactEventType
     | "todo.updated"
     | "todo.completed"
     | "todo.archived"
-    | "todo.deleted";
+    | "todo.deleted"
+    | "wait.created"
+    | "wait.detached"
+    | "wait.reattached"
+    | "wait.resolved"
+    | "wait.recoveryClaimed"
+    | "wait.recoveryReleased"
+    | "wait.consumed"
+    | "wait.cancelled";
 
 export interface InstanceEvent {
     at: string;

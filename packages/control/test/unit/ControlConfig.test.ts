@@ -138,7 +138,7 @@ test("version 2 instance documents migrate to version 3 without workspace", asyn
         const config = await new ControlConfigStore().readOrCreate(homeDirectory);
         assert.deepEqual(
             config.instances.find((instance) => instance.name === "legacy-default")?.mcp.tools.groups,
-            ["file", "bash", "artifact", "tmux", "todo"]
+            ["file", "bash", "artifact", "tmux", "todo", "interaction"]
         );
         assert.deepEqual(
             config.instances.find((instance) => instance.name === "custom-policy")?.mcp.tools.groups,
@@ -166,6 +166,18 @@ test("global TOML round-trips the independent WebUI enable switch", () => {
     const encoded = toml.encode(globalDocument.encode(config));
     assert.match(encoded, /\[web\]\nauth = "none"\nenabled = true/u);
     assert.equal(globalDocument.decode(toml.decode(encoded)).web?.enabled, true);
+});
+
+test("global TOML keeps direct artifact transfer opt-in", () => {
+    assert.equal(normalizeConfigGlobalDraft({}).control.artifactDirectTransfer, false);
+
+    const config = normalizeConfigGlobalDraft({
+        control: { artifactDirectTransfer: true }
+    });
+    const encoded = toml.encode(globalDocument.encode(config));
+    assert.match(encoded, /\[control\]\nartifactDirectTransfer = true/u);
+    const decoded = normalizeConfigGlobalDraft(globalDocument.decode(toml.decode(encoded)));
+    assert.equal(decoded.control.artifactDirectTransfer, true);
 });
 
 test("global TOML round-trips web token auth without leaking other modes", () => {

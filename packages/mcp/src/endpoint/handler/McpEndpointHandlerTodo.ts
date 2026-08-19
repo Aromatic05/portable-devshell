@@ -1,4 +1,4 @@
-import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
+import type { JsonValue, TodoReadInput, ToolCallContext } from "@portable-devshell/shared";
 
 import type { McpInstanceGateway } from "../../instance/McpInstanceGateway.js";
 import type { McpToolCatalogTodoName } from "../../tool/catalog/McpToolCatalogTodo.js";
@@ -13,7 +13,7 @@ export class McpEndpointHandlerTodo {
         switch (toolName) {
             case "todo_read":
                 return await waitForMcpEndpointAbortable(
-                    gateway.readTodo(this.options.instanceName, readTodoTitle(input)),
+                    gateway.readTodo(this.options.instanceName, readTodoInput(input)),
                     signal
                 );
             case "todo_write":
@@ -22,14 +22,19 @@ export class McpEndpointHandlerTodo {
     }
 }
 
-function readTodoTitle(input: JsonValue): string | undefined {
+function readTodoInput(input: JsonValue): TodoReadInput | undefined {
     if (typeof input !== "object" || input === null || Array.isArray(input)) {
         throw new Error("todo_read requires an object input.");
     }
-    const title = input.title;
-    if (title === undefined) return undefined;
-    if (typeof title !== "string" || title.trim().length === 0 || Object.keys(input).length !== 1) {
-        throw new Error("todo_read accepts only an optional non-empty title.");
+    const keys = Object.keys(input);
+    if (keys.length === 0) return undefined;
+    if (keys.length !== 1 || (keys[0] !== "taskId" && keys[0] !== "title")) {
+        throw new Error("todo_read accepts only one optional selector: taskId or title.");
     }
-    return title.trim();
+    const key = keys[0] as "taskId" | "title";
+    const value = input[key];
+    if (typeof value !== "string" || value.trim().length === 0) {
+        throw new Error(`todo_read ${key} must be a non-empty string.`);
+    }
+    return { [key]: value.trim() };
 }

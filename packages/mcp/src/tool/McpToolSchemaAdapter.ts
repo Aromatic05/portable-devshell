@@ -24,6 +24,7 @@ export class McpToolSchemaAdapter {
         }
 
         return {
+            ...(tool._meta === undefined ? {} : { _meta: tool._meta }),
             description,
             inputSchema: normalizeModelInputSchema(tool.inputSchema),
             name: tool.name,

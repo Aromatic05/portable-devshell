@@ -24,7 +24,8 @@ use crate::tools::tmux::task::{
 use crate::tools::tmux::types::{
     TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams, TmuxInputOutput,
     TmuxInputParams, TmuxInspectParams, TmuxListOutput, TmuxPaneDetail, TmuxPaneOperationOutput,
-    TmuxReadParams, TmuxRunParams, TmuxTaskOperationOutput, TmuxWaitMode, TmuxWarning,
+    TmuxReadParams, TmuxRunParams, TmuxTaskOperationOutput, TmuxWaitMode, TmuxWaitOutput,
+    TmuxWaitParams, TmuxWarning,
 };
 use crate::tools::{ToolCall, ToolError};
 
@@ -390,6 +391,29 @@ impl TmuxState {
         }
         call.check_cancelled()?;
         self.task_output(&params.task, line, false)
+    }
+
+    pub fn wait(
+        &self,
+        call: &ToolCall,
+        params: TmuxWaitParams,
+    ) -> Result<TmuxWaitOutput, ToolError> {
+        call.check_cancelled()?;
+        require_read(call)?;
+        loop {
+            call.check_cancelled()?;
+            self.refresh_task(&params.task)?;
+            if self.task_is_terminal(&params.task)? {
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        call.check_cancelled()?;
+        let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
+        Ok(TmuxWaitOutput {
+            task: task_view(require_task(&tasks, &params.task)?),
+            interrupted: None,
+        })
     }
 
     pub fn inspect(

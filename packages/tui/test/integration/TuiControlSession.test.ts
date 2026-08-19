@@ -523,6 +523,9 @@ function createServer(
             name: "alpha",
             provider: "local",
             todo: {
+                async control() {
+                    return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
+                },
                 currentAssociation() {
                     return undefined;
                 },

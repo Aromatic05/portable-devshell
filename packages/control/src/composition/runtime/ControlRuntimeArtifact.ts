@@ -44,6 +44,7 @@ export class ControlRuntimeArtifact {
         await bridge.initialize();
         this.#bridge = bridge;
         const service = new ArtifactService({
+            directTransfer: this.#config().control.artifactDirectTransfer,
             resolveEndpoint: (name, authorityInstance) => this.#resolveEndpoint(name, authorityInstance),
             shareUrl: (token) => artifactShareUrl(this.#config(), token),
             storageDir: this.#controlPaths.artifactsDir

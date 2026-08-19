@@ -92,6 +92,7 @@ export type {
     TodoReadResult,
     TodoRpcEnvelope
 } from "./dto/instance/DtoTodo.js";
+export type { WaitKind, WaitRecord, WaitStatus } from "./dto/instance/DtoWait.js";
 export type {
     OAuthApprovalDecision,
     OAuthApprovalRequest

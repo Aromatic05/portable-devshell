@@ -106,6 +106,81 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         }) as unknown as JsonValue;
     }
 
+    async createWait(instance: string, input: import("@portable-devshell/shared").WaitCreateInput) {
+        return await this.#requireWait(instance).create(input);
+    }
+
+    async cancelWait(instance: string, waitId: string) {
+        return await this.#requireWait(instance).cancel(waitId);
+    }
+
+    async claimWaitRecovery(instance: string, waitId: string, claimId: string) {
+        return await this.#requireWait(instance).claimRecovery(waitId, claimId);
+    }
+
+    async completeWaitRecovery(instance: string, waitId: string, claimId: string) {
+        return await this.#requireWait(instance).completeRecovery(waitId, claimId);
+    }
+
+    async detachWait(instance: string, waitId: string) {
+        return await this.#requireWait(instance).detach(waitId);
+    }
+
+    async reattachWait(instance: string, waitId: string, ownerCallId?: string) {
+        return await this.#requireWait(instance).reattach(waitId, ownerCallId);
+    }
+
+    async releaseWaitRecovery(instance: string, waitId: string, claimId: string) {
+        return await this.#requireWait(instance).releaseRecovery(waitId, claimId);
+    }
+
+    async consumeWait(instance: string, waitId: string) {
+        return await this.#requireWait(instance).consume(waitId);
+    }
+
+    async resolveWait(instance: string, waitId: string, result?: JsonValue) {
+        return await this.#requireWait(instance).resolve(waitId, result);
+    }
+
+    async waitForWait(instance: string, waitId: string) {
+        return await this.#requireWait(instance).waitForResolution(waitId);
+    }
+
+    async listWaits(instance: string) {
+        return await this.#requireWait(instance).list();
+    }
+
+    async listApprovals(instance: string) {
+        return await this.#requireDescriptor(instance).worker.listApprovals();
+    }
+
+    async readToolCalls(instance: string, ctxId: string, limit: number) {
+        return await this.#requireDescriptor(instance).worker.readToolCalls({ ctxId, limit });
+    }
+
+    async readWorkspaceEvents(instance: string, fromSeq: number) {
+        const result = this.#requireDescriptor(instance).worker.subscribe(fromSeq);
+        return result.kind === "gap"
+            ? { events: [], gap: true, lastSeq: result.lastSeq }
+            : { events: result.events, gap: false, lastSeq: result.lastSeq };
+    }
+
+    async controlTodo(
+        instance: string,
+        taskId: string,
+        action: import("@portable-devshell/shared").TodoTaskControlAction,
+        ctxId: string
+    ): Promise<JsonValue> {
+        return (await this.#requireDescriptor(instance).todo.control(taskId, action, ctxId)) as unknown as JsonValue;
+    }
+
+    async decideApproval(instance: string, approvalId: string, decision: "approve" | "deny") {
+        return await this.#requireDescriptor(instance).worker.decideApproval(approvalId, {
+            decidedBy: "web",
+            decision
+        });
+    }
+
     async consumeContextMessages(instance: string, ctxId: string, callId: string) {
         const service = this.#requireDescriptor(instance).contextMessages;
         if (service === undefined) {
@@ -118,8 +193,11 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return await service.consumePending(ctxId, callId);
     }
 
-    async readTodo(instance: string, title?: string): Promise<JsonValue> {
-        return (await this.#requireDescriptor(instance).todo.read(title)) as unknown as JsonValue;
+    async readTodo(
+        instance: string,
+        input?: import("@portable-devshell/shared").TodoReadInput
+    ): Promise<JsonValue> {
+        return (await this.#requireDescriptor(instance).todo.read(input)) as unknown as JsonValue;
     }
 
     listTools(instance: string): ToolDefinition[] {
@@ -217,6 +295,18 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             input as unknown as import("@portable-devshell/shared").TodoWriteInput,
             requireCtxId(context)
         )) as unknown as JsonValue;
+    }
+
+    #requireWait(instance: string) {
+        const wait = this.#requireDescriptor(instance).wait;
+        if (wait === undefined) {
+            throw createError({
+                code: errorCodes.envelopeInvalid,
+                message: `Wait service is unavailable for ${instance}.`,
+                retryable: false
+            });
+        }
+        return wait;
     }
 
     #requireDescriptor(instance: string) {

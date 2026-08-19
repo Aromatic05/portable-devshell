@@ -13,6 +13,9 @@ export function createTestTodoPort(): InstanceTodoPort {
         summary: { completed: 0, total: 0 }
     };
     return {
+        async control() {
+            return empty;
+        },
         currentAssociation() {
             return undefined;
         },

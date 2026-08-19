@@ -52,6 +52,7 @@ export class ArtifactService {
         });
         this.#transferService = new ArtifactTransferService({
             chunkBytes: options.chunkBytes,
+            directTransfer: options.directTransfer,
             recordStore: this.#recordStore,
             resolveEndpoint: options.resolveEndpoint,
             schedule: options.schedule,

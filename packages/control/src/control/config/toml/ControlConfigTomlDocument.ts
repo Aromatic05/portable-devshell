@@ -40,6 +40,7 @@ export class ControlGlobalTomlDocument {
         return compact({
             version: 2,
             control: {
+                artifactDirectTransfer: config.control.artifactDirectTransfer,
                 logLevel: config.control.logLevel
             },
             mcp: {

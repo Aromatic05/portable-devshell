@@ -2,7 +2,9 @@ import type {
     ActiveTodoSummary,
     InstanceEventType,
     JsonValue,
+    TodoReadInput,
     TodoReadResult,
+    TodoTaskControlAction,
     TodoWriteInput,
     ToolCallAssociation
 } from "@portable-devshell/shared";
@@ -35,9 +37,9 @@ export class TodoService {
         });
     }
 
-    async read(title?: string): Promise<TodoReadResult> {
+    async read(input?: TodoReadInput | string): Promise<TodoReadResult> {
         await this.#operation;
-        return this.#readDocument(this.#store.read(), title);
+        return this.#readDocument(this.#store.read(), input);
     }
 
     summaries(): ActiveTodoSummary[] {
@@ -56,7 +58,22 @@ export class TodoService {
             const transition = this.#createTransition(input, ctxId);
             await this.#persistTransition(transition);
             await this.#emitTransition(transition);
-            const { tasks: _tasks, ...result } = this.#readDocument(transition.document, input.title);
+            const { tasks: _tasks, ...result } = this.#readDocument(transition.document, {
+                ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
+                title: input.title
+            });
+            return result;
+        });
+    }
+
+    async control(taskId: string, action: TodoTaskControlAction, ctxId: string): Promise<TodoReadResult> {
+        return await this.#runExclusive(async () => {
+            const transition = this.#state.control(this.#store.read(), taskId, action, ctxId);
+            if (transition.events.length > 0) {
+                await this.#persistTransition(transition);
+                await this.#emitTransition(transition);
+            }
+            const { tasks: _tasks, ...result } = this.#readDocument(transition.document, { taskId });
             return result;
         });
     }
@@ -90,8 +107,8 @@ export class TodoService {
         }
     }
 
-    #readDocument(document: TodoDocument, title?: string): TodoReadResult {
-        return this.#state.readResult(document, title);
+    #readDocument(document: TodoDocument, input?: TodoReadInput | string): TodoReadResult {
+        return this.#state.readResult(document, input);
     }
 
     async #runExclusive<T>(

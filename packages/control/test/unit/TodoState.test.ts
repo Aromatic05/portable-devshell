@@ -29,6 +29,7 @@ test("TodoState owns validation, transitions, summaries, and associations", () =
 
     assert.equal(created.document.active[0]?.taskId, "task-fixed");
     assert.deepEqual(created.events.map((event) => event.type), ["todo.created"]);
+    assert.equal((created.events[0]?.data as { ctxId?: string }).ctxId, "ctx-1");
     assert.deepEqual(state.readResult(created.document, "Implement"), {
         items: [
             { content: "Inspect", id: "inspect", status: "completed" },
@@ -66,6 +67,95 @@ test("TodoState owns validation, transitions, summaries, and associations", () =
         taskId: "task-fixed",
         todoItemId: "implement"
     });
+});
+
+test("TodoState reads and updates an existing task by stable taskId", () => {
+    const state = new TodoState("aromatic-pc", { taskId: () => "task-fixed" });
+    const created = state.transition(state.emptyDocument(), {
+        revision: 0,
+        title: "Stable task",
+        todos: [{ content: "First", id: "first", status: "in_progress" }]
+    }, "ctx-first");
+
+    assert.equal(state.readResult(created.document, { taskId: "task-fixed" }).title, "Stable task");
+    const updated = state.transition(created.document, {
+        revision: 1,
+        taskId: "task-fixed",
+        title: "Stable task",
+        todos: [{ content: "Second", id: "second", status: "in_progress" }]
+    }, "ctx-second");
+
+    assert.deepEqual(state.readResult(updated.document, { taskId: "task-fixed" }).items, [
+        { content: "Second", id: "second", status: "in_progress" }
+    ]);
+    assert.equal(updated.document.active[0]?.activeCtxId, "ctx-second");
+    assert.throws(() => state.transition(updated.document, {
+        revision: 2,
+        taskId: "task-missing",
+        title: "Stable task",
+        todos: []
+    }, "ctx-third"), /task-missing.*not found/);
+});
+
+test("TodoState persists checkpoints and task controls model re-entry without rewriting items", () => {
+    const times = [
+        "2026-08-19T01:00:00.000Z",
+        "2026-08-19T01:01:00.000Z",
+        "2026-08-19T01:02:00.000Z",
+        "2026-08-19T01:03:00.000Z",
+        "2026-08-19T01:04:00.000Z",
+    ];
+    const state = new TodoState("aromatic-pc", {
+        now: () => times.shift() ?? "2026-08-19T01:05:00.000Z",
+        taskId: () => "task-fixed",
+    });
+    const items = [
+        { content: "Done", id: "done", status: "completed" as const },
+        { content: "Continue", id: "continue", status: "in_progress" as const },
+    ];
+    const created = state.transition(state.emptyDocument(), {
+        checkpoint: { next: "Continue implementation", summary: "Core path is ready" },
+        revision: 0,
+        title: "Checkpointed",
+        todos: items,
+    }, "ctx-1");
+
+    assert.deepEqual(state.readResult(created.document, { taskId: "task-fixed" }).checkpoint, {
+        next: "Continue implementation",
+        summary: "Core path is ready",
+        updatedAt: "2026-08-19T01:00:00.000Z",
+    });
+
+    const paused = state.control(created.document, "task-fixed", "pause", "ctx-1");
+    assert.equal(state.readResult(paused.document).tasks?.[0]?.status, "paused");
+    assert.equal(state.currentAssociation(paused.document, "ctx-1"), undefined);
+    assert.deepEqual(paused.document.active[0]?.items, items);
+
+    const resumed = state.control(paused.document, "task-fixed", "resume", "ctx-2");
+    assert.equal(state.readResult(resumed.document).tasks?.[0]?.status, "in_progress");
+    assert.deepEqual(state.currentAssociation(resumed.document, "ctx-2"), {
+        taskId: "task-fixed",
+        todoItemId: "continue",
+    });
+
+    const updated = state.transition(resumed.document, {
+        revision: 3,
+        taskId: "task-fixed",
+        title: "Checkpointed",
+        todos: items,
+    }, "ctx-2");
+    assert.equal(
+        state.readResult(updated.document, { taskId: "task-fixed" }).checkpoint?.summary,
+        "Core path is ready",
+    );
+
+    const cancelled = state.control(updated.document, "task-fixed", "cancel", "ctx-2");
+    const archived = state.readResult(cancelled.document, { taskId: "task-fixed" });
+    assert.equal(cancelled.document.active.length, 0);
+    assert.equal(cancelled.document.archived.length, 1);
+    assert.equal(archived.checkpoint?.summary, "Core path is ready");
+    assert.equal(archived.cancelledAt, "2026-08-19T01:04:00.000Z");
+    assert.deepEqual(archived.items, items);
 });
 
 test("TodoState exposes only actionable work as active todos", () => {

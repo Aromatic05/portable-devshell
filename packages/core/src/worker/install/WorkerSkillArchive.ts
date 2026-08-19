@@ -11,15 +11,11 @@ export interface WorkerSkillArchive {
 
 interface SkillEntry {
     absolutePath: string;
-    mode: number;
     relativePath: string;
     type: "directory" | "file";
 }
 
-export async function createWorkerSkillArchive(
-    sourceDirectory: string,
-    platform = process.platform,
-): Promise<WorkerSkillArchive | undefined> {
+export async function createWorkerSkillArchive(sourceDirectory: string): Promise<WorkerSkillArchive | undefined> {
     let source;
     try {
         source = await lstat(sourceDirectory);
@@ -50,7 +46,7 @@ export async function createWorkerSkillArchive(
                     archive,
                     skillHeader(
                         entry,
-                        portableSkillMode(entry, undefined, platform),
+                        portableSkillMode(entry),
                     ),
                 );
             } else {
@@ -59,7 +55,7 @@ export async function createWorkerSkillArchive(
                     archive,
                     skillHeader(
                         entry,
-                        portableSkillMode(entry, content, platform),
+                        portableSkillMode(entry, content),
                     ),
                     content,
                 );
@@ -116,7 +112,6 @@ async function collectSkillEntries(
         if (metadata.isDirectory()) {
             output.push({
                 absolutePath,
-                mode: metadata.mode & 0o777,
                 relativePath,
                 type: "directory",
             });
@@ -126,7 +121,6 @@ async function collectSkillEntries(
         if (metadata.isFile()) {
             output.push({
                 absolutePath,
-                mode: metadata.mode & 0o777,
                 relativePath,
                 type: "file",
             });
@@ -140,12 +134,8 @@ async function collectSkillEntries(
 
 function portableSkillMode(
     entry: SkillEntry,
-    content: Buffer | undefined,
-    platform: NodeJS.Platform,
+    content?: Buffer,
 ): number {
-    if (platform !== "win32") {
-        return entry.mode;
-    }
     if (entry.type === "directory") {
         return 0o755;
     }

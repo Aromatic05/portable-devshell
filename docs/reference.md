@@ -73,6 +73,7 @@ devshell todo --help
 version = 2
 
 [control]
+artifactDirectTransfer = false
 logLevel = "info"
 
 [mcp]

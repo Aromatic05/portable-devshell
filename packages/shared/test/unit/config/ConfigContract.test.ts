@@ -13,7 +13,7 @@ import {
 
 test("config parser trims values and preserves explicit patch removals", () => {
     const parsed = parseConfigDraft({
-        control: { logLevel: " debug " },
+        control: { artifactDirectTransfer: true, logLevel: " debug " },
         mcp: {
             enabled: true
         },
@@ -39,6 +39,7 @@ test("config parser trims values and preserves explicit patch removals", () => {
         ]
     });
 
+    assert.equal(parsed.control?.artifactDirectTransfer, true);
     assert.equal(parsed.control?.logLevel, "debug");
     assert.equal(parsed.instances?.[0]?.name, "local-one");
     assert.equal(parsed.instances?.[0]?.provider, "local");
@@ -205,6 +206,16 @@ test("obsolete context groups are removed from custom MCP allowlists", () => {
     });
 
     assert.deepEqual(custom.mcp.tools.groups, ["file", "bash", "todo"]);
+});
+
+test("the v0.5 default MCP allowlist gains the v0.6 interaction group", () => {
+    const upgraded = normalizeConfigInstanceDraft({
+        mcp: { tools: { groups: ["file", "bash", "artifact", "tmux", "todo"] } },
+        name: "upgraded-policy",
+        provider: "local"
+    });
+
+    assert.deepEqual(upgraded.mcp.tools.groups, ["file", "bash", "artifact", "tmux", "todo", "interaction"]);
 });
 
 test("provider changes discard stale provider-specific fields before normalization", () => {

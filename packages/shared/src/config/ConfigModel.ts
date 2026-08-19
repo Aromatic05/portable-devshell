@@ -152,6 +152,7 @@ export type ControlWebAuthConfig =
 
 export interface ControlGlobalConfig {
     control: {
+        artifactDirectTransfer: boolean;
         logLevel: string;
     };
     mcp: {
@@ -269,6 +270,7 @@ export type ConfigMcpAuthDraft =
 
 export interface ConfigGlobalDraft {
     control?: {
+        artifactDirectTransfer?: boolean;
         logLevel?: string;
     };
     mcp?: {
@@ -343,6 +345,7 @@ export interface ConfigWebPatch {
 
 export interface ConfigPatch {
     control?: {
+        artifactDirectTransfer?: boolean;
         logLevel?: string;
     };
     mcp?: ConfigMcpPatch;
@@ -421,6 +424,7 @@ export const defaultMcpToolGroups = [
     "artifact",
     "tmux",
     "todo",
+    "interaction",
 ] as const;
 
 export const defaultConfigNormalizeContext: ConfigNormalizeContext = {

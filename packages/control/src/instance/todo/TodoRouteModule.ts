@@ -7,7 +7,7 @@ import type {
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../../route/ControlRouteFactory.js";
-import { readTodoSubscriptionFromSeq, readTodoTaskId, readTodoTitle } from "./TodoRouteInput.js";
+import { readTodoInput, readTodoSubscriptionFromSeq, readTodoTaskId } from "./TodoRouteInput.js";
 import type { TodoService } from "./TodoService.js";
 
 export interface TodoRouteSubscriptionPort {
@@ -33,7 +33,7 @@ export function createTodoRouteModule(
     return routeModule("todo", {
         get: async (request) => ({
             lastSeq: instance.worker.snapshot().lastSeq,
-            todo: await instance.todo.read(readTodoTitle(request.payload))
+            todo: await instance.todo.read(readTodoInput(request.payload))
         }) as unknown as JsonValue,
         delete: async (request) => {
             await instance.todo.delete(readTodoTaskId(request.payload));

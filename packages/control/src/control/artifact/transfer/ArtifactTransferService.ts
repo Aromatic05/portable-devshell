@@ -32,6 +32,7 @@ import { ArtifactTransferExecutor } from "./ArtifactTransferExecutor.js";
 
 export interface ArtifactTransferServiceOptions {
     chunkBytes?: number;
+    directTransfer?: boolean;
     recordStore: ArtifactRecordStore;
     resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
     schedule?: ArtifactServiceOptions["schedule"];
@@ -62,6 +63,7 @@ export class ArtifactTransferService {
         this.#terminalHistoryLimit = options.terminalHistoryLimit;
         this.#transferExecutor = new ArtifactTransferExecutor({
             chunkBytes,
+            directTransfer: options.directTransfer ?? false,
             emitTransferEvent: async (transfer, type) => {
                 await this.#emitTransferEvent(transfer, type);
             },

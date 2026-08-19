@@ -182,6 +182,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             "tmux_list",
             "tmux_read",
             "tmux_run",
+            "tmux_wait",
         ]);
     }
     assert_eq!(
@@ -1432,6 +1433,9 @@ fn internal_artifact_payload_rpc_is_persistent_and_not_listed_as_a_tool() {
     assert!(!names.contains(&"artifact.receive.write"));
     assert!(!names.contains(&"artifact.receive.finish"));
     assert!(!names.contains(&"artifact.receive.abort"));
+    assert!(!names.contains(&"artifact.receive.direct.open"));
+    assert!(!names.contains(&"artifact.receive.direct.close"));
+    assert!(!names.contains(&"artifact.payload.direct.push"));
 
     let expires_at_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1516,6 +1520,73 @@ fn internal_artifact_payload_rpc_is_persistent_and_not_listed_as_a_tool() {
     assert_eq!(finished["ok"], true, "{finished}");
     assert_eq!(
         fs::read(env.workspace().join("received.txt")).unwrap(),
+        b"rpc payload"
+    );
+
+    let direct_begun = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "direct-receive-begin",
+            "method": "artifact.receive.begin",
+            "params": {
+                "descriptor": opened["result"]["descriptor"].clone(),
+                "overwrite": false,
+                "targetPath": "./direct-received.txt",
+                "workspace": env.workspace()
+            }
+        }),
+    );
+    assert_eq!(direct_begun["ok"], true, "{direct_begun}");
+    let direct_receive_id = direct_begun["result"]["receiveId"].as_str().unwrap();
+    let direct_open = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "direct-open",
+            "method": "artifact.receive.direct.open",
+            "params": { "receiveId": direct_receive_id, "expiresAtMs": expires_at_ms }
+        }),
+    );
+    assert_eq!(direct_open["ok"], true, "{direct_open}");
+    let direct_push = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "direct-push",
+            "method": "artifact.payload.direct.push",
+            "params": {
+                "payloadId": payload_id,
+                "offsetBytes": 0,
+                "maxBytes": 1024,
+                "urls": direct_open["result"]["urls"].clone()
+            }
+        }),
+    );
+    assert_eq!(direct_push["ok"], true, "{direct_push}");
+    assert_eq!(direct_push["result"]["nextOffsetBytes"], 11);
+    let direct_close = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "direct-close",
+            "method": "artifact.receive.direct.close",
+            "params": { "receiverId": direct_open["result"]["receiverId"].clone() }
+        }),
+    );
+    assert_eq!(direct_close["ok"], true, "{direct_close}");
+    let direct_finished = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "direct-finish",
+            "method": "artifact.receive.finish",
+            "params": { "receiveId": direct_receive_id }
+        }),
+    );
+    assert_eq!(direct_finished["ok"], true, "{direct_finished}");
+    assert_eq!(
+        fs::read(env.workspace().join("direct-received.txt")).unwrap(),
         b"rpc payload"
     );
 
