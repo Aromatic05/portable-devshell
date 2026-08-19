@@ -130,12 +130,25 @@ export async function runTestspaceWebSmoke({
         }
     } finally {
         browser.kill("SIGTERM");
-        await delay(100);
-        if (browser.exitCode === null && browser.signalCode === null) {
+        if (!await waitForProcessExit(browser, 1_000)) {
             browser.kill("SIGKILL");
+            await waitForProcessExit(browser, 1_000);
         }
-        await rm(profile, { recursive: true, force: true });
+        await rm(profile, {
+            recursive: true,
+            force: true,
+            maxRetries: 10,
+            retryDelay: 100,
+        });
     }
+}
+
+async function waitForProcessExit(process, timeoutMs) {
+    if (process.exitCode !== null || process.signalCode !== null) return true;
+    return await Promise.race([
+        new Promise((resolve) => process.once("exit", () => resolve(true))),
+        delay(timeoutMs).then(() => false),
+    ]);
 }
 
 async function exerciseInstanceLifecycle(devtools, instanceName, timeoutMs) {
