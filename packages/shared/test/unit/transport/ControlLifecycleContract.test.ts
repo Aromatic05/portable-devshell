@@ -211,7 +211,7 @@ test("control lifecycle start failure includes the latest daemon log tail", asyn
             spawnFunction() {
                 return Object.assign(new EventEmitter(), { pid: 999_999_999, unref() {} }) as never;
             },
-            waitTimeoutMs: 1
+            waitTimeoutMs: 100
         });
 
         await assert.rejects(
