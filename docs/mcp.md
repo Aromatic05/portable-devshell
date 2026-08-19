@@ -98,6 +98,8 @@ requiredScopes = ["mcp"]
 - `explicit`（默认）：`environ_info` 返回 `ctxId`，后续工具显式携带 `ctxId`。适用于任意 MCP client。
 - `openai-session`：仅用于会在每次 tool call 的 `_meta["openai/session"]` 中提供 ChatGPT session 标识的 Host。`environ_info` 不向模型返回 `ctxId`，后续工具 schema 也不包含 `ctxId`；服务端使用 `openai/session` 选择内部 Context。该值只用于 Context 选择，不用于授权。
 
+两种模式最终都解析到同一个内部 `ctxId`。`ctxId` 是 portable-devshell 的 canonical runtime key，Todo、Wait、Approval、Comments、audit 与 instance/workspace attachment 始终只依赖它；外部 selector 仅存在于 MCP 边界。实现通过 `McpContextSelector` 接口把请求携带的外部身份解析到内部 Context，因此未来接入其他 Host 时不需要给这些子系统增加平台专用 ID 字段。MCP transport 的 `mcp-session-id` 与 Context selector 继续保持独立。
+
 如果 endpoint 配置为 `openai-session`，但 client 没有提供 `openai/session`，调用会 fail closed；不会退回 MCP transport session，也不会自动切换成 explicit 模式。
 
 `openai-session` 只能配合 `auth = "none"` 或 `auth = "oauth2"`。portable-devshell 的静态 `auth = "token"` 仍可供通用 MCP client 使用，但 ChatGPT 不支持把自定义 API key / 静态 bearer secret 作为插件认证方式，因此该组合在配置校验阶段直接拒绝。
@@ -122,13 +124,13 @@ MCP 对已经被 ChatGPT 缓存的旧 recipient 保留一层隐藏兼容。兼�
 
 ## Workspace MCP App 与人工交互
 
-`workspace_open` 是 model-visible 的 Workspace 入口。它绑定当前 `ctxId`，并返回该 Context 的 authoritative snapshot。Workspace 可见区域保持为一个紧凑的 current-event view，同一时刻最多展示一个需要人类关注的事件，而不是任务仪表盘：`ask_question` 对应 `user.answer`，Approval 对应 `approval.decision`，正在阻塞的 `tmux_wait` 对应 `tmux.task.completed`。Todo/checkpoint、后台 Wait 与 activity 仍保留在 snapshot/model context 中供恢复逻辑使用，但不同时堆进可见 UI。
+`workspace_open` 是 model-visible 的 Workspace 入口。MCP 边界先用当前 selector 得到内部 Context，再返回该 Context 的 authoritative snapshot；在 `explicit` 模式中 App 需要携带 `ctxId`，在 Host-managed selector 模式中 App 不接触 `ctxId`，后续 app tool call 由 Host metadata 重新解析到同一内部 Context。Workspace 可见区域保持为一个紧凑的 current-event view，同一时刻最多展示一个需要人类关注的事件，而不是任务仪表盘：`ask_question` 对应 `user.answer`，Approval 对应 `approval.decision`，正在阻塞的 `tmux_wait` 对应 `tmux.task.completed`。Todo/checkpoint、后台 Wait 与 activity 仍保留在 snapshot/model context 中供恢复逻辑使用，但不同时堆进可见 UI。
 
 Workspace 的 Host 协议由官方 `@modelcontextprotocol/ext-apps` `App` 实现，portable-devshell 不再自行维护 postMessage JSON-RPC bridge。实际 render URI 根据完整 HTML 内容生成 hash，例如 `ui://portable-devshell/workspace-<hash>.html`，因此 ChatGPT 的 template/render cache 会在内容变化时获得新的 cache key。`ui://portable-devshell/workspace/v1.html` 只作为稳定 reader alias 保留；已经发布过的历史 hash URI也必须继续作为隐藏 alias 可读，不能让旧会话因升级失去模板。
 
 Workspace 内部使用 `workspace_snapshot` 和 `workspace_watch` 保持 live state；这两个 helper 是 app-only，不应由模型主动调用。`workspace_watch` 复用 instance 现有的 event sequence cursor，只在当前 Context 的 `toolCall.*`、`approval.*`、`todo.*`、`wait.*` 事件发生时返回新 snapshot；事件历史出现 gap 或 Control 重启导致 cursor 失效时，直接重新读取 authoritative snapshot。正常无变化时只返回 heartbeat，不使用固定频率 snapshot polling。
 
-iframe remount 或 MCP/Control 重启后，读路径可以仅凭有效 `ctxId` 重新 snapshot/watch，并从返回 metadata 获得新的 app token；旧 token 不需要持久化。ChatGPT remount 时只有存在 `toolResponseMetadata.mcp_tool_result` / `call_tool_result` envelope 时才接受 `window.openai.toolOutput` 覆盖其中可能缓存的旧 structured output，不能把一个孤立的全局 `toolOutput` 当成 Workspace 身份来源。App 同时只把 `ctxId` 写入 `window.openai.widgetState` 作为 remount hint，并在 connect 后短暂等待真实 initial tool result，再回退到该 hint。`workspace_question_answer`、`workspace_wait_interrupt` 和 `workspace_approval_decide` 属于人工写操作，仍必须携带当前隐藏 app token，并再次校验 `ctxId` 与目标对象归属。
+iframe remount 或 MCP/Control 重启后，读路径会重新通过当前 selector 解析内部 Context，并从 snapshot metadata 获得新的 app token；旧 token 不需要持久化。`explicit` 模式把 `ctxId` 放进 `window.openai.widgetState` 作为 remount hint；Host-managed selector 模式只记录“无需显式 ctxId”这一能力位，不把内部 ctxId 暴露给 iframe。ChatGPT remount 时只有存在 `toolResponseMetadata.mcp_tool_result` / `call_tool_result` envelope 时才接受 `window.openai.toolOutput` 覆盖其中可能缓存的旧 structured output，不能把一个孤立的全局 `toolOutput` 当成 Workspace 身份来源。App 在 connect 后短暂等待真实 initial tool result，再回退到 widget state。`workspace_question_answer`、`workspace_wait_interrupt` 和 `workspace_approval_decide` 属于人工写操作，仍必须携带当前隐藏 app token；服务端最终仍以解析得到的内部 `ctxId` 校验目标对象归属。
 
 `ask_question` 用于模型确实需要人类输入时挂起当前调用，并传入 durable `taskId`。新的 held call 只允许在 Workspace App 最近仍活跃时建立：`workspace_open`、`workspace_snapshot` 和正常的 `workspace_watch` heartbeat 会刷新 60 秒 liveness lease；lease 过期后 `ask_question` fail fast，要求重新 `workspace_open`，避免在 iframe 已经消失时制造无人能回答的阻塞调用。已经建立的 held call 不设置 portable-devshell 自己的固定超时，仍优先保持当前模型回合；Host 取消原 tool call 时等待会变成 detached。MCP/Control 进程重建时，持久化为 `waiting` 的 Wait 会统一按 orphaned owner call 恢复成 detached，因此旧 Question 不会假装仍有可返回的 tool call，用户之后回答时可以走 model re-entry 恢复。
 

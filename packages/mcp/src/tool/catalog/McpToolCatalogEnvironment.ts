@@ -1,14 +1,14 @@
-import type { ControlMcpContextMode, ToolDefinition } from "@portable-devshell/shared";
+import type { ToolDefinition } from "@portable-devshell/shared";
 
 export const mcpEnvironmentToolName = "environ_info" as const;
 
 export class McpToolCatalogEnvironment {
-    list(contextMode: ControlMcpContextMode = "explicit"): ToolDefinition[] {
-        const explicit = contextMode === "explicit";
+    list(requiresExplicitContextId = true): ToolDefinition[] {
+        const explicit = requiresExplicitContextId;
         return [{
             description: explicit
                 ? "Create a workspace session context on the current instance. Call before other tools, then pass ctxId to later tools; create a new context only when the previous ctxId is unavailable or expired."
-                : "Create the workspace environment for the current ChatGPT session. Call before other tools; later tools reuse it automatically and do not require ctxId. Do not call again unless you intentionally need a fresh environment because a successful call replaces the current session environment context.",
+                : "Create the workspace environment for the current host session. Call before other tools; later tools reuse it automatically and do not require ctxId. Do not call again unless you intentionally need a fresh environment because a successful call replaces the current session environment context.",
             group: "environment",
             inputSchema: {
                 additionalProperties: false,

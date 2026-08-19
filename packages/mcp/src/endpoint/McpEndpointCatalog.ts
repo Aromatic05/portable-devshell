@@ -1,9 +1,6 @@
-import type {
-    ControlMcpContextMode,
-    ToolDefinition,
-    ToolPolicy
-} from "@portable-devshell/shared";
+import type { ToolDefinition, ToolPolicy } from "@portable-devshell/shared";
 
+import { createMcpContextSelector, type McpContextSelector } from "../context/McpContextSelector.js";
 import { isMcpInteractionGateway, type McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import { mcpToolAnnotations } from "../tool/McpToolAnnotations.js";
 import { McpToolDescriptionEnhancer } from "../tool/McpToolDescriptionEnhancer.js";
@@ -39,7 +36,7 @@ export interface McpEndpointCatalogWorker {
 }
 
 export interface McpEndpointCatalogOptions {
-    contextMode?: ControlMcpContextMode;
+    contextSelector?: McpContextSelector;
     gateway?: McpInstanceGateway;
     instanceName: string;
     policy: ToolPolicy;
@@ -56,7 +53,7 @@ export interface McpEndpointCatalogSnapshot {
 export class McpEndpointCatalog {
     readonly #artifactTools = new McpToolCatalogArtifact();
     readonly #catalog: McpToolCatalogEndpoint;
-    readonly #contextMode: ControlMcpContextMode;
+    readonly #contextSelector: McpContextSelector;
     readonly #descriptionEnhancer = new McpToolDescriptionEnhancer();
     readonly #environmentTools = new McpToolCatalogEnvironment();
     readonly #gateway?: McpInstanceGateway;
@@ -69,7 +66,7 @@ export class McpEndpointCatalog {
 
     constructor(options: McpEndpointCatalogOptions) {
         this.#catalog = new McpToolCatalogEndpoint(options.policy);
-        this.#contextMode = options.contextMode ?? "explicit";
+        this.#contextSelector = options.contextSelector ?? createMcpContextSelector("explicit");
         this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
         this.#worker = options.worker;
@@ -125,7 +122,7 @@ export class McpEndpointCatalog {
         const exposed = tool.name === mcpEnvironmentToolName
             ? tool
             : withMcpCommentOutputSchema(
-                  this.#contextMode === "explicit" ? withMcpContextId(tool) : tool
+                  this.#contextSelector.requiresExplicitContextId ? withMcpContextId(tool) : tool
               );
         return {
             ...this.#schemaAdapter.toMcpTool(
@@ -144,7 +141,7 @@ export class McpEndpointCatalog {
     #sources(hasWorkerSchema: boolean): McpToolCatalogEndpointSource[] {
         const sources: McpToolCatalogEndpointSource[] = [{
             owner: "environment",
-            tools: this.#environmentTools.list(this.#contextMode)
+            tools: this.#environmentTools.list(this.#contextSelector.requiresExplicitContextId)
         }];
 
         if (hasWorkerSchema) {
@@ -169,7 +166,7 @@ export class McpEndpointCatalog {
             if (isMcpInteractionGateway(this.#gateway)) {
                 sources.push({
                     owner: "interaction",
-                    tools: this.#interactionTools.list(this.#contextMode)
+                    tools: this.#interactionTools.list(this.#contextSelector.requiresExplicitContextId)
                 });
             }
             sources.push(

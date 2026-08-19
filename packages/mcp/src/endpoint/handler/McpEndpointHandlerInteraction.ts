@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 
 import type {
     ApprovalRequest,
-    ControlMcpContextMode,
     InstanceEvent,
     JsonValue,
     TodoTaskControlAction,
@@ -11,6 +10,7 @@ import type {
     WaitRecord
 } from "@portable-devshell/shared";
 
+import { createMcpContextSelector, type McpContextSelector } from "../../context/McpContextSelector.js";
 import {
     isMcpInteractionGateway,
     isMcpWaitRecoveryGateway,
@@ -25,16 +25,19 @@ import { McpNativeToolResult, type McpEndpointResult } from "../McpEndpointResul
 
 export class McpEndpointHandlerInteraction {
     readonly #appStates = new Map<string, { lastSeenAt: number; token: string }>();
+    readonly #contextSelector: McpContextSelector;
 
     constructor(private readonly options: {
-        contextMode?: ControlMcpContextMode;
+        contextSelector?: McpContextSelector;
         gateway?: McpInstanceGateway;
         instanceName: string;
         now?: () => number;
         watchHeartbeatMs?: number;
         watchPollMs?: number;
         workspaceLivenessMs?: number;
-    }) {}
+    }) {
+        this.#contextSelector = options.contextSelector ?? createMcpContextSelector("explicit");
+    }
 
     async call(
         toolName: McpToolCatalogInteractionName,
@@ -83,9 +86,9 @@ export class McpEndpointHandlerInteraction {
         const app = this.#appStates.get(ctxId);
         const now = (this.options.now ?? Date.now)();
         if (app === undefined || now - app.lastSeenAt > (this.options.workspaceLivenessMs ?? 60_000)) {
-            const selector = this.options.contextMode === "openai-session"
-                ? "the current ChatGPT session"
-                : "this ctxId";
+            const selector = this.#contextSelector.requiresExplicitContextId
+                ? "this ctxId"
+                : "the current host session";
             throw new Error(`ask_question requires an active Workspace App for ${selector}; call workspace_open again.`);
         }
         const task = await gateway.readTodo(this.options.instanceName, { taskId: request.taskId });
@@ -130,13 +133,7 @@ export class McpEndpointHandlerInteraction {
         context: ToolCallContext,
     ): Promise<McpNativeToolResult> {
         const ctxId = requireCtxId(context);
-        if (this.options.contextMode === "openai-session") {
-            return this.#workspaceResult(ctxId, { contextMode: "openai-session" }, [
-                { type: "text", text: "portable-devshell Workspace opened." }
-            ]);
-        }
-        const snapshot = await this.#snapshot(gateway, context);
-        return this.#workspaceResult(ctxId, snapshot, [
+        return this.#workspaceResult(ctxId, await this.#snapshot(gateway, context), [
             { type: "text", text: "portable-devshell Workspace opened." }
         ]);
     }
@@ -364,7 +361,10 @@ export class McpEndpointHandlerInteraction {
                     updatedAt: wait.updatedAt,
                     waitId: wait.waitId,
                 })),
-            ctxId,
+            contextSelector: {
+                requiresExplicitContextId: this.#contextSelector.requiresExplicitContextId,
+            },
+            ...(this.#contextSelector.requiresExplicitContextId ? { ctxId } : {}),
             currentEvent: workspaceCurrentEvent(ownedWaits, ownedApprovals),
             cursor: eventSlice.lastSeq,
             instance: this.options.instanceName,

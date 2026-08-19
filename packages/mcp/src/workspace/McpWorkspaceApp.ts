@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 export const workspaceAppStableResourceUri = "ui://portable-devshell/workspace/v1.html";
 export const workspaceAppLegacyResourceUris: readonly string[] = [
     "ui://portable-devshell/workspace-03c4911b6d185e3c.html",
+    "ui://portable-devshell/workspace-c978585dba4e38c7.html",
 ];
 
 export const workspaceAppResourceMeta = {
@@ -66,7 +67,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
   var status = document.getElementById("status");
   var App = globalThis.__portableDevshellMcpApp;
   var app = new App({ name: "portable-devshell-workspace", version: "0.6.8" }, {});
-  var contextMode = "explicit";
+  var requiresExplicitContextId = true;
   var ctxId = "";
   var appToken = "";
   var initialized = false;
@@ -90,9 +91,9 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
   function callTool(name, args, requiresToken) {
     if (!initialized) return Promise.reject(new Error("Workspace App is not initialized"));
     if (requiresToken && !appToken) return Promise.reject(new Error("Workspace App authorization is unavailable"));
-    if (contextMode === "explicit" && !ctxId) return Promise.reject(new Error("Workspace context is unavailable"));
+    if (requiresExplicitContextId && !ctxId) return Promise.reject(new Error("Workspace context is unavailable"));
     var input = Object.assign({}, args || {});
-    if (contextMode === "explicit") input.ctxId = ctxId;
+    if (requiresExplicitContextId) input.ctxId = ctxId;
     if (requiresToken) input.token = appToken;
     return app.callServerTool({ name: name, arguments: input }).then(function (result) {
       acceptMeta(result && result._meta);
@@ -133,9 +134,9 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
     var openai = asRecord(window.openai);
     if (!openai || typeof openai.setWidgetState !== "function") return;
     var state = Object.assign({}, asRecord(openai.widgetState) || {});
-    state[WIDGET_STATE_KEY] = contextMode === "explicit"
-      ? { contextMode: contextMode, ctxId: ctxId }
-      : { contextMode: contextMode };
+    state[WIDGET_STATE_KEY] = requiresExplicitContextId
+      ? { requiresExplicitContextId: true, ctxId: ctxId }
+      : { requiresExplicitContextId: false };
     try {
       var result = openai.setWidgetState(state);
       if (result && typeof result.catch === "function") result.catch(function () {});
@@ -143,7 +144,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
   }
 
   function activateCtxId(value) {
-    if (contextMode !== "explicit" || !value) return false;
+    if (!requiresExplicitContextId || !value) return false;
     var nextCtxId = String(value);
     if (ctxId && ctxId !== nextCtxId) {
       watchGeneration += 1;
@@ -162,10 +163,12 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
     acceptMeta(result._meta);
     var initial = asRecord(result.structuredContent);
     if (!initial) return false;
-    if (initial.contextMode === "openai-session" || initial.contextMode === "explicit") {
-      contextMode = initial.contextMode;
+    var selector = asRecord(initial.contextSelector);
+    if (selector && typeof selector.requiresExplicitContextId === "boolean") {
+      requiresExplicitContextId = selector.requiresExplicitContextId;
     }
-    if (contextMode === "openai-session") {
+    if (!requiresExplicitContextId) {
+      ctxId = "";
       persistWorkspaceHint();
       return true;
     }
@@ -178,23 +181,23 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
     var configured = acceptToolResult(result);
     var hint = workspaceHintFromOpenAiGlobals(source);
     if (!configured && hint) {
-      if (hint.contextMode === "openai-session" || hint.contextMode === "explicit") {
-        contextMode = hint.contextMode;
-        if (contextMode === "openai-session") configured = true;
+      if (typeof hint.requiresExplicitContextId === "boolean") {
+        requiresExplicitContextId = hint.requiresExplicitContextId;
+        if (!requiresExplicitContextId) configured = true;
         else configured = activateCtxId(hint.ctxId);
       } else if (hint.ctxId) {
-        contextMode = "explicit";
+        requiresExplicitContextId = true;
         configured = activateCtxId(hint.ctxId);
       }
     }
-    return configured || contextMode === "openai-session" || !!ctxId;
+    return configured || !requiresExplicitContextId || !!ctxId;
   }
 
   function modelContext(extra) {
     var tasks = snapshot && Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
     var background = snapshot && Array.isArray(snapshot.background) ? snapshot.background : [];
     var state = {
-      ...(contextMode === "explicit" ? { ctxId: ctxId } : {}),
+      ...(requiresExplicitContextId ? { ctxId: ctxId } : {}),
       instance: snapshot && snapshot.instance,
       tasks: tasks.map(function (task) { return {
         taskId: task.taskId,
@@ -288,7 +291,12 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
 
   async function applySnapshot(nextSnapshot, allowRecovery) {
     snapshot = nextSnapshot;
-    if (contextMode === "explicit" && snapshot && snapshot.ctxId) ctxId = String(snapshot.ctxId);
+    var selector = asRecord(snapshot && snapshot.contextSelector);
+    if (selector && typeof selector.requiresExplicitContextId === "boolean") {
+      requiresExplicitContextId = selector.requiresExplicitContextId;
+    }
+    if (requiresExplicitContextId && snapshot && snapshot.ctxId) ctxId = String(snapshot.ctxId);
+    if (!requiresExplicitContextId) ctxId = "";
     if (snapshot && Number.isSafeInteger(snapshot.cursor)) cursor = snapshot.cursor;
     persistWorkspaceHint();
     render();
@@ -297,7 +305,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
   }
 
   async function refresh(allowRecovery) {
-    if (!initialized || (contextMode === "explicit" && !ctxId)) return;
+    if (!initialized || (requiresExplicitContextId && !ctxId)) return;
     try {
       var result = await callTool("workspace_snapshot", {}, false);
       await applySnapshot(structured(result), allowRecovery);
@@ -336,7 +344,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
   }
 
   async function startLive() {
-    if (!initialized || (contextMode === "explicit" && !ctxId) || watchStarted) return;
+    if (!initialized || (requiresExplicitContextId && !ctxId) || watchStarted) return;
     watchStarted = true;
     try {
       await refresh();
@@ -389,7 +397,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
 
   app.ontoolinput = function (params) {
     var input = params && params.arguments;
-    if (contextMode === "explicit" && input && input.ctxId) activateCtxId(input.ctxId);
+    if (requiresExplicitContextId && input && input.ctxId) activateCtxId(input.ctxId);
   };
   app.ontoolresult = acceptInitialOrLiveToolResult;
   app.ontoolcancelled = function () {
@@ -409,7 +417,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
       var initialResult = await waitForInitialToolResult(300);
       if (initialResult) acceptToolResult(initialResult);
       else configureFromOpenAiGlobals();
-      if (contextMode === "explicit" && !ctxId) {
+      if (requiresExplicitContextId && !ctxId) {
         status.textContent = "Waiting for Workspace identity";
         return;
       }

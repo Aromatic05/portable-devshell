@@ -33,9 +33,11 @@ test("Control-owned MCP tools describe their structured output instead of generi
         "connectionState", "daemonState", "lastSeq", "name", "ready", "status", "workspace"
     ]);
 
-    assertAnyOf(definition(definitions, "workspace_open").outputSchema, 2);
+    assertProperties(definition(definitions, "workspace_open").outputSchema, [
+        "activity", "approvals", "background", "contextSelector", "ctxId", "currentEvent", "cursor", "instance", "questions", "tasks", "waits"
+    ]);
     assertProperties(definition(definitions, "workspace_snapshot").outputSchema, [
-        "activity", "approvals", "background", "ctxId", "currentEvent", "cursor", "instance", "questions", "tasks", "waits"
+        "activity", "approvals", "background", "contextSelector", "ctxId", "currentEvent", "cursor", "instance", "questions", "tasks", "waits"
     ]);
     assertAnyOf(definition(definitions, "workspace_watch").outputSchema, 2);
     assert.deepEqual(required(definition(definitions, "workspace_question_answer").outputSchema), [
@@ -52,7 +54,7 @@ test("Control-owned MCP tools describe their structured output instead of generi
     const adapter = new McpToolSchemaAdapter();
     const workspaceOpen = definition(definitions, "workspace_open");
     const adaptedOpen = adapter.toMcpTool(workspaceOpen, workspaceOpen.description);
-    assertAnyOf(adaptedOpen.outputSchema, 2);
+    assertProperties(adaptedOpen.outputSchema, ["contextSelector", "currentEvent", "cursor", "instance"]);
     const transfer = definition(definitions, "artifact_transfer");
     const adaptedTransfer = adapter.toMcpTool(transfer, transfer.description);
     assertProperties(adaptedTransfer.outputSchema, ["operation", "transfer"]);

@@ -1,5 +1,4 @@
 import {
-    type ControlMcpContextMode,
     createError,
     errorCodes,
     mergeComments,
@@ -11,6 +10,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { McpContextRegistry } from "../context/McpContextRegistry.js";
+import { createMcpContextSelector, type McpContextSelector } from "../context/McpContextSelector.js";
 import { isMcpWaitTrackingGateway, type McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import type { McpToolCatalogArtifactName } from "../tool/catalog/McpToolCatalogArtifact.js";
 import type { McpToolCatalogInstanceName } from "../tool/catalog/McpToolCatalogInstance.js";
@@ -20,7 +20,7 @@ import { throwIfMcpEndpointAborted, waitForMcpEndpointAbortable } from "./McpEnd
 import { mcpLegacyToolTombstone, resolveMcpLegacyTool } from "./McpEndpointCompatibility.js";
 import { attachMcpComments } from "./McpEndpointFeedback.js";
 import type { McpEndpointCatalog, McpEndpointCatalogWorker } from "./McpEndpointCatalog.js";
-import { readMcpContextInput, readMcpRoutedInput } from "./McpEndpointInput.js";
+import { readMcpRoutedInput } from "./McpEndpointInput.js";
 import type { McpEndpointCallContext, McpEndpointWorkerPort } from "./McpEndpointPort.js";
 import { McpNativeToolResult, type McpEndpointResult } from "./McpEndpointResult.js";
 import { McpEndpointHandlerArtifact } from "./handler/McpEndpointHandlerArtifact.js";
@@ -40,7 +40,7 @@ export type {
 export interface McpEndpointDispatchOptions {
     catalog: McpEndpointCatalog;
     contextRegistry?: McpContextRegistry;
-    contextMode?: ControlMcpContextMode;
+    contextSelector?: McpContextSelector;
     gateway?: McpInstanceGateway;
     instanceName: string;
     readyWaitMs?: number;
@@ -51,7 +51,7 @@ export class McpEndpointDispatch {
     readonly #artifact: McpEndpointHandlerArtifact;
     readonly #catalog: McpEndpointCatalog;
     readonly #contextRegistry: McpContextRegistry;
-    readonly #contextMode: ControlMcpContextMode;
+    readonly #contextSelector: McpContextSelector;
     readonly #environment: McpEndpointHandlerEnvironment;
     readonly #gateway?: McpInstanceGateway;
     readonly #instance: McpEndpointHandlerInstance;
@@ -65,7 +65,7 @@ export class McpEndpointDispatch {
     constructor(options: McpEndpointDispatchOptions) {
         this.#catalog = options.catalog;
         this.#contextRegistry = options.contextRegistry ?? new McpContextRegistry();
-        this.#contextMode = options.contextMode ?? "explicit";
+        this.#contextSelector = options.contextSelector ?? createMcpContextSelector("explicit");
         this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
         this.#worker = options.worker;
@@ -76,7 +76,7 @@ export class McpEndpointDispatch {
         this.#artifact = new McpEndpointHandlerArtifact(controlOptions);
         this.#environment = new McpEndpointHandlerEnvironment({
             contextRegistry: this.#contextRegistry,
-            contextMode: options.contextMode ?? "explicit",
+            contextSelector: this.#contextSelector,
             gateway: options.gateway,
             instanceName: options.instanceName,
             worker: options.worker
@@ -87,7 +87,7 @@ export class McpEndpointDispatch {
         });
         this.#interaction = new McpEndpointHandlerInteraction({
             ...controlOptions,
-            contextMode: options.contextMode
+            contextSelector: this.#contextSelector
         });
         this.#todo = new McpEndpointHandlerTodo(controlOptions);
         this.#workerHandler = new McpEndpointHandlerWorker({
@@ -138,19 +138,20 @@ export class McpEndpointDispatch {
             throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
         }
 
-        let ctxId: string | undefined;
-        if (this.#contextMode === "explicit") {
-            const contextInput = readMcpContextInput(input);
-            ctxId = contextInput.ctxId;
-            input = contextInput.input;
-        }
+        const resolvedContext = await this.#contextSelector.resolve(
+            this.#contextRegistry,
+            input,
+            requestContext,
+            this.#instanceName,
+        );
+        input = resolvedContext.input;
         const appOnlyInteraction = selected.owner === "interaction" && isAppOnlyInteractionTool(toolName);
         const routed = selected.owner === "worker" || selected.owner === "artifact"
             ? readMcpRoutedInput(input, snapshot.instanceRoutingEnabled, this.#instanceName)
             : { input, instance: this.#instanceName };
         const context = await this.#createToolContext(
             toolName,
-            ctxId,
+            resolvedContext.record,
             requestContext,
             routed.instance,
             selected.owner === "worker",
@@ -385,24 +386,13 @@ export class McpEndpointDispatch {
 
     async #createToolContext(
         toolName: string,
-        ctxId: string | undefined,
+        record: McpContextRecord,
         requestContext: McpEndpointCallContext,
         instance: string,
         prepareWorkerState: boolean,
         recordMcpCall: boolean,
         signal?: AbortSignal
     ): Promise<ToolCallContext> {
-        const record = this.#contextMode === "explicit"
-            ? await this.#contextRegistry.validateAndTouch(ctxId!, {
-                  principal: requestContext.principal
-              })
-            : await this.#contextRegistry.validateAndTouchOpenAiSession(
-                  requireOpenAiSessionId(requestContext),
-                  {
-                      instance: this.#instanceName,
-                      principal: requestContext.principal
-                  }
-              );
         const environment = prepareWorkerState
             ? await this.#ensureContextWorkerState(record, instance)
             : contextEnvironment(record, instance);
@@ -562,15 +552,6 @@ function isAppOnlyInteractionTool(toolName: string): boolean {
         toolName === "workspace_task_control" ||
         toolName === "workspace_wait_recover" ||
         toolName === "workspace_approval_decide";
-}
-
-function requireOpenAiSessionId(context: McpEndpointCallContext): string {
-    if (context.openAiSessionId !== undefined) return context.openAiSessionId;
-    throw createError({
-        code: errorCodes.mcpContextInvalid,
-        message: "This endpoint uses OpenAI session context mode, but the client did not provide _meta['openai/session'].",
-        retryable: false
-    });
 }
 
 function readTmuxTaskId(input: JsonValue): string | undefined {

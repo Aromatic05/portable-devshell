@@ -363,10 +363,15 @@ const workspaceCurrentEventSchema: JsonValue = {
     ],
 };
 
+const workspaceContextSelectorSchema = objectSchema({
+    requiresExplicitContextId: { type: "boolean" },
+}, ["requiresExplicitContextId"]);
+
 export const workspaceSnapshotOutputSchema = objectSchema({
     activity: arraySchema(workspaceActivitySchema),
     approvals: arraySchema(approvalRequestOutputSchema),
     background: arraySchema(workspaceBackgroundSchema),
+    contextSelector: workspaceContextSelectorSchema,
     ctxId: nonEmptyString,
     currentEvent: workspaceCurrentEventSchema,
     cursor: nonNegativeInteger,
@@ -374,14 +379,9 @@ export const workspaceSnapshotOutputSchema = objectSchema({
     questions: arraySchema(waitRecordOutputSchema),
     tasks: arraySchema(todoTaskSummaryOutputSchema),
     waits: arraySchema(waitRecordOutputSchema),
-}, ["activity", "approvals", "background", "ctxId", "currentEvent", "cursor", "instance", "questions", "tasks", "waits"]);
+}, ["activity", "approvals", "background", "contextSelector", "currentEvent", "cursor", "instance", "questions", "tasks", "waits"]);
 
-export const workspaceOpenOutputSchema: JsonValue = {
-    anyOf: [
-        objectSchema({ contextMode: { const: "openai-session", type: "string" } }, ["contextMode"]),
-        workspaceSnapshotOutputSchema,
-    ],
-};
+export const workspaceOpenOutputSchema: JsonValue = workspaceSnapshotOutputSchema;
 
 export const workspaceWatchOutputSchema: JsonValue = {
     anyOf: [

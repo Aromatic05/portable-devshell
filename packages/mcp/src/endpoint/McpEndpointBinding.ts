@@ -183,9 +183,10 @@ export class McpEndpointBinding {
 
         server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
             try {
+                const requestMeta = readRequestMeta(request.params._meta);
                 const context = {
-                    ...readOpenAiSession(request.params._meta),
                     principal: readPrincipal(extra.authInfo),
+                    ...(requestMeta === undefined ? {} : { requestMeta }),
                     requestId: toRequestId(extra.requestId)
                 };
                 const requestSignal =
@@ -219,10 +220,9 @@ function readPrincipal(authInfo: { clientId: string; extra?: Record<string, unkn
     return authInfo?.clientId ?? "local";
 }
 
-function readOpenAiSession(meta: unknown): { openAiSessionId?: string } {
-    if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return {};
-    const session = (meta as Record<string, unknown>)["openai/session"];
-    return typeof session === "string" && session.length > 0 ? { openAiSessionId: session } : {};
+function readRequestMeta(meta: unknown): Record<string, unknown> | undefined {
+    if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return undefined;
+    return meta as Record<string, unknown>;
 }
 
 function requestSignalKey(sessionId: string, requestId: string): string {

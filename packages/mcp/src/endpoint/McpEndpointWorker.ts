@@ -6,6 +6,7 @@ import type {
 } from "@portable-devshell/shared";
 
 import { McpContextRegistry } from "../context/McpContextRegistry.js";
+import { createMcpContextSelector } from "../context/McpContextSelector.js";
 import type { McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import type { McpTool } from "../tool/McpToolSchemaAdapter.js";
 import { McpEndpointCatalog } from "./McpEndpointCatalog.js";
@@ -39,8 +40,9 @@ export class McpEndpointWorker {
     readonly #worker: McpEndpointWorkerPort;
 
     constructor(options: McpEndpointWorkerOptions) {
+        const contextSelector = createMcpContextSelector(options.contextMode ?? "explicit");
         this.#catalog = new McpEndpointCatalog({
-            contextMode: options.contextMode ?? "explicit",
+            contextSelector,
             gateway: options.gateway,
             instanceName: options.instanceName,
             policy: options.policy,
@@ -49,7 +51,7 @@ export class McpEndpointWorker {
         this.#dispatch = new McpEndpointDispatch({
             catalog: this.#catalog,
             contextRegistry: options.contextRegistry,
-            contextMode: options.contextMode ?? "explicit",
+            contextSelector,
             gateway: options.gateway,
             instanceName: options.instanceName,
             readyWaitMs: options.readyWaitMs,

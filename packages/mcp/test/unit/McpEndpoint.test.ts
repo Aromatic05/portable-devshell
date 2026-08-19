@@ -99,18 +99,21 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
         assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /section-head/);
         assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /setInterval\(refresh/);
         assert.deepEqual(workspaceAppLegacyResourceUris, [
-            "ui://portable-devshell/workspace-03c4911b6d185e3c.html"
+            "ui://portable-devshell/workspace-03c4911b6d185e3c.html",
+            "ui://portable-devshell/workspace-c978585dba4e38c7.html"
         ]);
-        const legacy = await postJson(server.url, {
-            id: "req-resource-read-legacy",
-            jsonrpc: "2.0",
-            method: "resources/read",
-            params: { uri: workspaceAppLegacyResourceUris[0] }
-        }, session.headers);
-        assert.equal(legacy.status, 200);
-        assert.equal(legacy.body.result?.contents?.[0]?.uri, workspaceAppLegacyResourceUris[0]);
-        assert.equal(legacy.body.result?.contents?.[0]?.text, read.body.result?.contents?.[0]?.text);
-        assert.deepEqual(legacy.body.result?.contents?.[0]?._meta, workspaceAppResourceMeta);
+        for (const [index, uri] of workspaceAppLegacyResourceUris.entries()) {
+            const legacy = await postJson(server.url, {
+                id: `req-resource-read-legacy-${index}`,
+                jsonrpc: "2.0",
+                method: "resources/read",
+                params: { uri }
+            }, session.headers);
+            assert.equal(legacy.status, 200);
+            assert.equal(legacy.body.result?.contents?.[0]?.uri, uri);
+            assert.equal(legacy.body.result?.contents?.[0]?.text, read.body.result?.contents?.[0]?.text);
+            assert.deepEqual(legacy.body.result?.contents?.[0]?._meta, workspaceAppResourceMeta);
+        }
     } finally {
         await server.close();
         await binding.close();
@@ -418,8 +421,8 @@ test("openai-session context mode removes ctxId and resolves the current ChatGPT
     assert.equal((environmentTool?.outputSchema as { properties?: Record<string, unknown> }).properties?.ctxId, undefined);
 
     const requestContext = {
-        openAiSessionId: "chat-session-1",
         principal: "subject-1",
+        requestMeta: { "openai/session": "chat-session-1" },
         requestId: "request-session-mode"
     };
     const environment = await endpoint.callTool("environ_info", { workspace: "/workspace" }, requestContext);
@@ -432,7 +435,7 @@ test("openai-session context mode removes ctxId and resolves the current ChatGPT
     await assert.rejects(
         endpoint.callTool("bash_run", { command: "pwd" }, {
             ...requestContext,
-            openAiSessionId: "chat-session-2"
+            requestMeta: { "openai/session": "chat-session-2" }
         }),
         (error: unknown) => (error as { code?: string }).code === "mcp.contextInvalid"
     );

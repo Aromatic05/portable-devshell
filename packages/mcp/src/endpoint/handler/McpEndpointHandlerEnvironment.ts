@@ -1,6 +1,7 @@
-import { createError, errorCodes, type ControlMcpContextMode, type JsonValue, type McpContextRecord, type ToolCallContext } from "@portable-devshell/shared";
+import { createError, errorCodes, type JsonValue, type McpContextRecord, type ToolCallContext } from "@portable-devshell/shared";
 
 import { McpContextRegistry } from "../../context/McpContextRegistry.js";
+import type { McpContextSelector } from "../../context/McpContextSelector.js";
 import type { McpInstanceGateway } from "../../instance/McpInstanceGateway.js";
 import { readMcpWorkspace } from "../McpEndpointInput.js";
 import type { McpEndpointCallContext, McpEndpointWorkerPort } from "../McpEndpointPort.js";
@@ -12,20 +13,20 @@ import {
 
 export class McpEndpointHandlerEnvironment {
     readonly #contextRegistry: McpContextRegistry;
-    readonly #contextMode: ControlMcpContextMode;
+    readonly #contextSelector: McpContextSelector;
     readonly #gateway?: McpInstanceGateway;
     readonly #instanceName: string;
     readonly #worker: McpEndpointWorkerPort;
 
     constructor(options: {
         contextRegistry: McpContextRegistry;
-        contextMode: ControlMcpContextMode;
+        contextSelector: McpContextSelector;
         gateway?: McpInstanceGateway;
         instanceName: string;
         worker: McpEndpointWorkerPort;
     }) {
         this.#contextRegistry = options.contextRegistry;
-        this.#contextMode = options.contextMode;
+        this.#contextSelector = options.contextSelector;
         this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
         this.#worker = options.worker;
@@ -42,9 +43,7 @@ export class McpEndpointHandlerEnvironment {
             throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
         }
         const workspace = readMcpWorkspace(input, toolName);
-        const openAiSessionId = this.#contextMode === "openai-session"
-            ? requireOpenAiSessionId(requestContext)
-            : undefined;
+        const externalSelector = this.#contextSelector.binding(requestContext);
         const { alerts, environment, prepared } = await this.#prepareEnvironment(workspace);
         const record = await this.#contextRegistry.create({
             instance: this.#instanceName,
@@ -68,7 +67,7 @@ export class McpEndpointHandlerEnvironment {
                 input: {},
                 localInstance: this.#instanceName,
                 operation: async () => ({
-                    ...(this.#contextMode === "explicit" ? { ctxId: record.ctxId } : {}),
+                    ...this.#contextSelector.expose(record),
                     expiresAt: record.expiresAt,
                     comment: [
                         `Read ${prepared.projectMemoryAgentFile} before working.`,
@@ -95,8 +94,8 @@ export class McpEndpointHandlerEnvironment {
                 toolName,
                 worker: this.#worker,
             });
-            if (openAiSessionId !== undefined) {
-                const binding = await this.#contextRegistry.bindOpenAiSession(record.ctxId, openAiSessionId, {
+            if (externalSelector !== undefined) {
+                const binding = await this.#contextRegistry.bindSelector(record.ctxId, externalSelector, {
                     instance: this.#instanceName,
                     principal: requestContext.principal
                 });
@@ -167,15 +166,6 @@ export class McpEndpointHandlerEnvironment {
         if (hasOtherActiveContext) return;
         await this.#worker.releaseAlerts?.(workspace);
     }
-}
-
-function requireOpenAiSessionId(context: McpEndpointCallContext): string {
-    if (context.openAiSessionId !== undefined) return context.openAiSessionId;
-    throw createError({
-        code: errorCodes.mcpContextInvalid,
-        message: "This endpoint uses OpenAI session context mode, but the client did not provide _meta['openai/session'].",
-        retryable: false
-    });
 }
 
 function workspacePreparationUnavailable(instance: string) {

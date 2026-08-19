@@ -304,6 +304,7 @@ window.addEventListener("message", function (event) {
             _meta: { "portable-devshell/workspace": { token: "remount-token" } },
             structuredContent: {
                 activity: [], approvals: [], background: [], currentEvent: null, questions: [], tasks: [], waits: [],
+                contextSelector: { requiresExplicitContextId: true },
                 ctxId: call.arguments.ctxId, cursor: 1, instance: "browser-instance"
             }
         });
@@ -389,6 +390,7 @@ function snapshot(withQuestion) {
             updatedAt: "2026-08-19T01:00:02.000Z",
             waitId: "wait-background"
         }],
+        contextSelector: { requiresExplicitContextId: true },
         ctxId: "ctx-browser",
         currentEvent: currentEvent,
         cursor: 2,
@@ -507,7 +509,7 @@ function sessionModeSnapshot() {
         activity: [],
         approvals: [],
         background: [],
-        ctxId: "ctx-internal-hidden",
+        contextSelector: { requiresExplicitContextId: false },
         currentEvent: window.__sessionModeAnswered ? null : question,
         cursor: 1,
         instance: "browser-instance",
@@ -543,7 +545,7 @@ window.addEventListener("message", function (event) {
             params: {
                 _meta: { "portable-devshell/workspace": { token: "session-mode-token" } },
                 content: [{ type: "text", text: "portable-devshell Workspace opened." }],
-                structuredContent: { contextMode: "openai-session" }
+                structuredContent: sessionModeSnapshot()
             }
         }, "*");
         return;

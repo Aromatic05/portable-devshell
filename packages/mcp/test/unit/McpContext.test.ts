@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -72,10 +72,11 @@ test("McpContextRegistry persists active contexts and renews their sliding expir
     }
 });
 
-test("McpContextRegistry keeps OpenAI session selectors private and durable", async () => {
-    const root = await createTestTempDirectory("context-openai-session");
+test("McpContextRegistry keeps external selectors private and durable", async () => {
+    const root = await createTestTempDirectory("context-external-selector");
     const filePath = join(root, "contexts.json");
     const ids = ["ctx-session-old", "ctx-session-current"];
+    const selector = { kind: "test/session", value: "chat-session-1" };
     let index = 0;
 
     try {
@@ -89,30 +90,30 @@ test("McpContextRegistry keeps OpenAI session selectors private and durable", as
             principal: "subject-1",
             workspace: "/old"
         });
-        await registry.bindOpenAiSession(oldContext.ctxId, "chat-session-1", {
+        await registry.bindSelector(oldContext.ctxId, selector, {
             instance: "demo-local",
             principal: "subject-1"
         });
         assert.equal(
-            (await registry.validateAndTouchOpenAiSession("chat-session-1", {
+            (await registry.validateAndTouchSelector(selector, {
                 instance: "demo-local",
                 principal: "subject-1"
             })).ctxId,
             oldContext.ctxId
         );
-        assert.equal("openAiSessionId" in (await registry.list())[0]!, false);
+        assert.equal("externalSelector" in (await registry.list())[0]!, false);
 
         const current = await registry.create({
             instance: "demo-local",
             principal: "subject-1",
             workspace: "/current"
         });
-        await registry.bindOpenAiSession(current.ctxId, "chat-session-1", {
+        await registry.bindSelector(current.ctxId, selector, {
             instance: "demo-local",
             principal: "subject-1"
         });
         assert.equal(
-            (await registry.validateAndTouchOpenAiSession("chat-session-1", {
+            (await registry.validateAndTouchSelector(selector, {
                 instance: "demo-local",
                 principal: "subject-1"
             })).ctxId,
@@ -120,9 +121,9 @@ test("McpContextRegistry keeps OpenAI session selectors private and durable", as
         );
         const publicContexts = await registry.list();
         assert.equal(publicContexts.find(({ ctxId }) => ctxId === oldContext.ctxId)?.status, "disabled");
-        assert.equal(publicContexts.some((record) => "openAiSessionId" in record), false);
+        assert.equal(publicContexts.some((record) => "externalSelector" in record), false);
         await assert.rejects(
-            registry.validateAndTouchOpenAiSession("chat-session-1", {
+            registry.validateAndTouchSelector(selector, {
                 instance: "demo-local",
                 principal: "subject-2"
             }),
@@ -132,14 +133,50 @@ test("McpContextRegistry keeps OpenAI session selectors private and durable", as
         const reloaded = new McpContextRegistry({ filePath });
         await reloaded.initialize();
         assert.equal(
-            (await reloaded.validateAndTouchOpenAiSession("chat-session-1", {
+            (await reloaded.validateAndTouchSelector(selector, {
                 instance: "demo-local",
                 principal: "subject-1"
             })).ctxId,
             current.ctxId
         );
+        assert.match(await readFile(filePath, "utf8"), /test\/session/u);
         assert.match(await readFile(filePath, "utf8"), /chat-session-1/u);
-        assert.equal("openAiSessionId" in (await reloaded.list())[1]!, false);
+        assert.equal("externalSelector" in (await reloaded.list())[1]!, false);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("McpContextRegistry migrates persisted OpenAI session selectors to generic external selectors", async () => {
+    const root = await createTestTempDirectory("context-legacy-openai-selector");
+    const filePath = join(root, "contexts.json");
+    try {
+        await writeFile(filePath, JSON.stringify({
+            contexts: [{
+                createdAt: "2026-08-19T00:00:00.000Z",
+                ctxId: "ctx-legacy-session",
+                environments: [{ instance: "demo-local", workspace: "/workspace" }],
+                expiresAt: "2026-08-21T00:00:00.000Z",
+                instance: "demo-local",
+                lastAccessedAt: "2026-08-19T00:00:00.000Z",
+                openAiSessionId: "chat-session-legacy",
+                principal: "subject-1",
+                status: "active",
+                workspace: "/workspace"
+            }],
+            version: 1
+        }));
+        const registry = new McpContextRegistry({
+            filePath,
+            now: () => Date.parse("2026-08-20T00:00:00.000Z")
+        });
+        await registry.initialize();
+        const selected = await registry.validateAndTouchSelector(
+            { kind: "openai/session", value: "chat-session-legacy" },
+            { instance: "demo-local", principal: "subject-1" }
+        );
+        assert.equal(selected.ctxId, "ctx-legacy-session");
+        assert.equal("externalSelector" in (await registry.list())[0]!, false);
     } finally {
         await rm(root, { force: true, recursive: true });
     }

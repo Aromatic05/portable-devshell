@@ -11,6 +11,7 @@ import { McpEndpointCatalog } from "../../src/endpoint/McpEndpointCatalog.ts";
 import { McpEndpointDispatch } from "../../src/endpoint/McpEndpointDispatch.ts";
 import { McpNativeToolResult } from "../../src/endpoint/McpEndpointResult.ts";
 import { McpContextRegistry } from "../../src/context/McpContextRegistry.ts";
+import { createMcpContextSelector } from "../../src/context/McpContextSelector.ts";
 
 function workerTool(name: string = "bash_run"): ToolDefinition {
     return {
@@ -513,28 +514,30 @@ test("tmux_wait distinguishes host detach from explicit Workspace interruption",
     assert.equal(waits[1]?.status, "consumed");
 });
 
-test("OpenAI session Context replacement happens only after audited environ_info succeeds", async () => {
+test("OpenAI session selector replacement happens only after audited environ_info succeeds", async () => {
     const ids = ["ctx-session-old", "ctx-session-new"];
     const registry = new McpContextRegistry({ idFactory: () => ids.shift()! });
+    const externalSelector = { kind: "openai/session", value: "chat-session" };
     const oldContext = await registry.create({
         instance: "demo-local",
         principal: "tester",
         workspace: "/projects/old"
     });
-    await registry.bindOpenAiSession(oldContext.ctxId, "chat-session", {
+    await registry.bindSelector(oldContext.ctxId, externalSelector, {
         instance: "demo-local",
         principal: "tester"
     });
     const harness = createWorker({ failAuditAfterOperation: true });
+    const contextSelector = createMcpContextSelector("openai-session");
     const catalog = new McpEndpointCatalog({
-        contextMode: "openai-session",
+        contextSelector,
         instanceName: "demo-local",
         policy: { capabilities: ["read"], groups: ["file"] },
         worker: harness.worker,
     });
     const dispatch = new McpEndpointDispatch({
         catalog,
-        contextMode: "openai-session",
+        contextSelector,
         contextRegistry: registry,
         instanceName: "demo-local",
         worker: harness.worker,
@@ -544,13 +547,13 @@ test("OpenAI session Context replacement happens only after audited environ_info
         dispatch.callTool(
             "environ_info",
             { workspace: "/projects/new" },
-            { openAiSessionId: "chat-session", principal: "tester", requestId: "request-session" },
+            { principal: "tester", requestId: "request-session", requestMeta: { "openai/session": "chat-session" } },
         ),
         /audit finalize failed/u,
     );
 
     assert.equal(
-        (await registry.validateAndTouchOpenAiSession("chat-session", {
+        (await registry.validateAndTouchSelector(externalSelector, {
             instance: "demo-local",
             principal: "tester"
         })).ctxId,
@@ -562,28 +565,30 @@ test("OpenAI session Context replacement happens only after audited environ_info
     assert.deepEqual(harness.releasedAlerts, ["/projects/new"]);
 });
 
-test("successful OpenAI session Context replacement retires the old environment", async () => {
+test("successful OpenAI session selector replacement retires the old environment", async () => {
     const ids = ["ctx-session-old", "ctx-session-new"];
     const registry = new McpContextRegistry({ idFactory: () => ids.shift()! });
+    const externalSelector = { kind: "openai/session", value: "chat-session" };
     const oldContext = await registry.create({
         instance: "demo-local",
         principal: "tester",
         workspace: "/projects/old"
     });
-    await registry.bindOpenAiSession(oldContext.ctxId, "chat-session", {
+    await registry.bindSelector(oldContext.ctxId, externalSelector, {
         instance: "demo-local",
         principal: "tester"
     });
     const harness = createWorker();
+    const contextSelector = createMcpContextSelector("openai-session");
     const catalog = new McpEndpointCatalog({
-        contextMode: "openai-session",
+        contextSelector,
         instanceName: "demo-local",
         policy: { capabilities: ["read"], groups: ["file"] },
         worker: harness.worker,
     });
     const dispatch = new McpEndpointDispatch({
         catalog,
-        contextMode: "openai-session",
+        contextSelector,
         contextRegistry: registry,
         instanceName: "demo-local",
         worker: harness.worker,
@@ -592,10 +597,10 @@ test("successful OpenAI session Context replacement retires the old environment"
     await dispatch.callTool(
         "environ_info",
         { workspace: "/projects/new" },
-        { openAiSessionId: "chat-session", principal: "tester", requestId: "request-session" },
+        { principal: "tester", requestId: "request-session", requestMeta: { "openai/session": "chat-session" } },
     );
 
-    const selected = await registry.validateAndTouchOpenAiSession("chat-session", {
+    const selected = await registry.validateAndTouchSelector(externalSelector, {
         instance: "demo-local",
         principal: "tester"
     });
