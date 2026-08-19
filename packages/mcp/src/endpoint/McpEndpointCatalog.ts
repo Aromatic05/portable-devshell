@@ -7,6 +7,7 @@ import type {
 import { isMcpInteractionGateway, type McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import { mcpToolAnnotations } from "../tool/McpToolAnnotations.js";
 import { McpToolDescriptionEnhancer } from "../tool/McpToolDescriptionEnhancer.js";
+import { mcpToolTitle } from "../tool/McpToolTitle.js";
 import {
     McpToolSchemaAdapter,
     McpToolSchemaUnavailableError,
@@ -132,6 +133,7 @@ export class McpEndpointCatalog {
                 this.#descriptionEnhancer.enhance(exposed.description)
             ),
             annotations: mcpToolAnnotations(exposed.name),
+            title: mcpToolTitle(exposed.name),
         };
     }
 

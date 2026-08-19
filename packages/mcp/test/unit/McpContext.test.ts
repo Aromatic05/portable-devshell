@@ -436,6 +436,8 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
     const environmentTool = tools.find((tool) => tool.name === "environ_info");
     const bashSchema = bashTool?.inputSchema as { properties?: Record<string, unknown>; required?: string[] };
     assert.ok(bashSchema.properties?.ctxId);
+    assert.equal(bashTool?.title, "Run shell command");
+    assert.equal(environmentTool?.title, "Create environment");
     assert.deepEqual(bashTool?.annotations, {
         destructiveHint: true,
         idempotentHint: false,

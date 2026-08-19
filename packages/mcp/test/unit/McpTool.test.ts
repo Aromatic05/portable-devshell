@@ -6,7 +6,8 @@ import {
     McpToolDescriptionEnhancer,
     McpToolFilter,
     McpToolSchemaAdapter,
-    mcpToolAnnotations
+    mcpToolAnnotations,
+    mcpToolTitle
 } from "@portable-devshell/mcp/testing";
 import type { ToolDefinition } from "@portable-devshell/shared";
 
@@ -74,6 +75,13 @@ test("MCP safety annotations are explicit for known semantics and conservative f
         openWorldHint: true,
         readOnlyHint: false,
     });
+});
+
+test("MCP tools expose concise human-readable titles with a safe fallback", () => {
+    assert.equal(mcpToolTitle("bash_run"), "Run shell command");
+    assert.equal(mcpToolTitle("workspace_open"), "Open Workspace");
+    assert.equal(mcpToolTitle("artifact_viewImage"), "View image");
+    assert.equal(mcpToolTitle("future_unknown_tool"), "Future unknown tool");
 });
 
 test("McpToolFilter requires the group and every required capability", () => {

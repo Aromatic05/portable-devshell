@@ -20,6 +20,7 @@ export * from "./tool/McpToolDescriptionEnhancer.js";
 export * from "./tool/McpToolFilter.js";
 export * from "./tool/McpToolSchemaAdapter.js";
 export * from "./tool/McpToolAnnotations.js";
+export * from "./tool/McpToolTitle.js";
 export * from "./tool/catalog/McpToolCatalogTodo.js";
 
 export * from "./context/McpContextRegistry.js";
