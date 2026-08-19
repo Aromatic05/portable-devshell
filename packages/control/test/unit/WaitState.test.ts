@@ -58,7 +58,7 @@ test("WaitState cancels unresolved waits and rejects invalid transitions", () =>
     );
 });
 
-test("WaitStore persists wait state atomically", async () => {
+test("WaitStore persists wait state atomically and detaches orphaned calls after restart", async () => {
     const root = await createTestTempDirectory("wait-store-");
     const filePath = join(root, "waits.json");
     const state = new WaitState({ waitId: () => "wait-fixed" });
@@ -66,13 +66,18 @@ test("WaitStore persists wait state atomically", async () => {
     const created = state.create(store.read(), {
         createdByCtxId: "ctx-1",
         kind: "approval",
+        ownerCallId: "call-1",
         targetId: "approval-1",
         taskId: "task-1",
     });
 
     await store.write(created.document);
     const reloaded = new WaitStore({ filePath, instanceName: "aromatic-pc", state });
-    assert.deepEqual(reloaded.read(), created.document);
+    const recovered = reloaded.read().waits[0];
+    assert.equal(recovered?.status, "detached");
+    assert.equal(typeof recovered?.detachedAt, "string");
+    assert.equal(recovered?.ownerCallId, created.record.ownerCallId);
+    assert.equal(recovered?.targetId, created.record.targetId);
 });
 
 test("WaitService lets a detached wait reattach until it resolves", async () => {

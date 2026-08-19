@@ -34,7 +34,14 @@ export class WaitStore {
     #load(): WaitDocument {
         if (!existsSync(this.#filePath)) return this.#state.emptyDocument();
         try {
-            return this.#state.normalizeDocument(JSON.parse(readFileSync(this.#filePath, "utf8")) as unknown);
+            const document = this.#state.normalizeDocument(JSON.parse(readFileSync(this.#filePath, "utf8")) as unknown);
+            const detachedAt = new Date().toISOString();
+            return {
+                ...document,
+                waits: document.waits.map((record) => record.status === "waiting"
+                    ? { ...record, detachedAt, status: "detached", updatedAt: detachedAt }
+                    : record),
+            };
         } catch (error) {
             throw createError({
                 cause: error,
