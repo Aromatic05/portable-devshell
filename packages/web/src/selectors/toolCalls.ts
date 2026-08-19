@@ -14,6 +14,7 @@ export interface ToolCallFilters {
     query: string;
     result: ToolCallResult;
     tool: string;
+    workspace: string;
 }
 
 export interface ToolCallSelection {
@@ -34,6 +35,7 @@ export const emptyToolCallFilters: ToolCallFilters = {
     query: "",
     result: "all",
     tool: "all",
+    workspace: "",
 };
 
 export function toolCallResult(
@@ -50,6 +52,7 @@ export function selectToolCalls(
     limit = 100,
 ): ToolCallSelection {
     const query = filters.query.trim().toLowerCase();
+    const workspace = filters.workspace.trim().toLowerCase();
     const minTime =
         filters.period === "1h"
             ? now - 3_600_000
@@ -70,6 +73,7 @@ export function selectToolCalls(
         ) continue;
         if (filters.tool !== "all" && call.toolName !== filters.tool) continue;
         if (filters.result !== "all" && toolCallResult(call) !== filters.result) continue;
+        if (workspace.length > 0 && !(call.workspace ?? "").toLowerCase().includes(workspace)) continue;
         if (minTime !== undefined && Date.parse(call.startedAt) < minTime) continue;
         if (query.length > 0 && !callSearchText(call).includes(query)) continue;
         total += 1;

@@ -25,6 +25,7 @@ const calls: ToolCallRecord[] = [
         startedAt: "2026-07-31T08:30:00Z",
         status: "completed",
         toolName: "file_read",
+        workspace: "/projects/docs",
     },
     {
         callId: "call-failed",
@@ -37,6 +38,7 @@ const calls: ToolCallRecord[] = [
         startedAt: "2026-07-31T09:30:00Z",
         status: "failed",
         toolName: "bash_run",
+        workspace: "/projects/alpha",
     },
     {
         callId: "call-pending",
@@ -46,11 +48,12 @@ const calls: ToolCallRecord[] = [
         startedAt: "2026-07-31T09:45:00Z",
         status: "pendingApproval",
         toolName: "artifact_transfer",
+        workspace: "/projects/beta",
     },
 ];
 
 describe("tool call activity read model", () => {
-    it("applies text, instance, context, result, tool, and time filters together", () => {
+    it("applies text, workspace, instance, context, result, tool, and time filters together", () => {
         expect(
             filterToolCalls(
                 calls,
@@ -62,6 +65,7 @@ describe("tool call activity read model", () => {
                     query: "command failed",
                     result: "failure",
                     tool: "bash_run",
+                    workspace: "projects/alpha",
                 },
                 Date.parse("2026-07-31T10:00:00Z"),
             ),
@@ -77,6 +81,7 @@ describe("tool call activity read model", () => {
                     query: "",
                     result: "pending",
                     tool: "all",
+                    workspace: "",
                 },
                 Date.parse("2026-07-31T10:00:00Z"),
             ),
@@ -100,6 +105,7 @@ describe("tool call activity read model", () => {
                     query: "",
                     result: "all",
                     tool: "all",
+                    workspace: "",
                 },
             ),
         ).toEqual([calls[2]]);
@@ -114,6 +120,7 @@ describe("tool call activity read model", () => {
                     query: "",
                     result: "all",
                     tool: "all",
+                    workspace: "",
                 },
             ),
         ).toEqual([scoped]);
@@ -159,6 +166,7 @@ describe("bounded Tool Call presentation", () => {
             period: "all" as const,
             result: "all" as const,
             tool: "all",
+            workspace: "",
         };
         expect(filterToolCalls([call], { ...base, query: "unique-input-token" })).toEqual([call]);
         expect(filterToolCalls([call], { ...base, query: "unique-output-token" })).toEqual([call]);
@@ -206,6 +214,7 @@ it("reports the full match count separately from the display limit", () => {
         query: "",
         result: "all",
         tool: "all",
+        workspace: "",
     });
 
     expect(items).toHaveLength(100);
@@ -226,6 +235,7 @@ it("returns the requested page of matching calls", () => {
         query: "",
         result: "all",
         tool: "all",
+        workspace: "",
     }, Date.now(), 100);
 
     expect(items).toHaveLength(50);

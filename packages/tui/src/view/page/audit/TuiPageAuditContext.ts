@@ -2,6 +2,7 @@ import type {
     ApprovalRequest,
     ToolCallRecord,
 } from "@portable-devshell/shared";
+import { workspaceFolderName } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
 import { selectTuiLogs, type TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
@@ -56,6 +57,10 @@ function callBox(
     );
     return makeBox(state, "audit", instance, {
         detailLines: [
+            formatField(
+                "Context",
+                key.kind === "unscoped" ? "unscoped" : key.ctxId,
+            ),
             formatField("Call", call.callId),
             formatField("Tool", call.toolName),
             formatField("Status", call.status),
@@ -91,11 +96,11 @@ function callBox(
         summaryLines: [
             compactSummary(
                 ["status", call.status],
+                ["workspace", workspaceFolderName(call.workspace)],
                 ["duration", duration(call)],
-                ["operation", call.requestId ?? "-"],
             ),
         ],
-        title: `${call.toolName} · ${call.status}`,
+        title: `${call.toolName} · ${workspaceFolderName(call.workspace)}`,
     });
 }
 
@@ -125,10 +130,10 @@ function approvalBox(
             compactSummary(
                 ["approval", approval.status],
                 ["risk", approval.riskLevel],
-                ["tool", approval.toolName],
+                ["workspace", workspaceFolderName(approval.workspace)],
             ),
         ],
-        title: `Approval · ${approval.toolName}`,
+        title: `Approval · ${approval.toolName} · ${workspaceFolderName(approval.workspace)}`,
     });
 }
 

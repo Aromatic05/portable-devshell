@@ -1,3 +1,4 @@
+import { workspaceFolderName } from "@portable-devshell/shared";
 import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
 import { compactSummary, formatField, makeBox } from "../TuiPageBoxSupport.js";
@@ -24,12 +25,10 @@ export function buildAuditContextListBoxes(
     return contexts.map((context) =>
         makeBox(state, "audit", instance, {
             detailLines: [
+                formatField("Workspace", context.workspace ?? "-"),
                 formatField("Context", context.label),
                 formatField("Calls", String(context.calls.length)),
                 formatField("Approvals", String(context.approvals.length)),
-                ...(context.workspace === undefined
-                    ? []
-                    : [formatField("Workspace", context.workspace)]),
                 formatField("Latest", context.latestActivityAt),
                 formatField("Latest call", context.latestCall?.toolName ?? "-"),
                 ...(context.contextStatus === undefined
@@ -89,7 +88,9 @@ export function buildAuditContextListBoxes(
                 ),
                 context.latestActivityAt,
             ],
-            title: context.label,
+            title: context.workspace === undefined
+                ? context.label
+                : workspaceFolderName(context.workspace),
         }),
     );
 }

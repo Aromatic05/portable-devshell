@@ -132,10 +132,12 @@ it("filters structured tool calls by ctxId and queues a Comment for the selected
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
 
-    fireEvent.change(screen.getByLabelText("Search"), {
-        target: { value: "/projects/alpha" },
+    fireEvent.change(screen.getByLabelText("Workspace"), {
+        target: { value: "projects/alpha" },
     });
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByText("alpha · alpha")).toBeInTheDocument();
+    expect(screen.getByText("ctx ctx-alpha")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
 
     fireEvent.change(screen.getByLabelText("Instance"), {
@@ -378,7 +380,7 @@ it("does not render large Tool Call details until the row is expanded", () => {
     render(<ToolCalls state={largeState} store={{ queueContextMessage: vi.fn() } as unknown as WebStore} />);
 
     expect(screen.queryByText(new RegExp(token))).not.toBeInTheDocument();
-    const details = screen.getByText("alpha · mcp · ctx-alpha").closest("details")!;
+    const details = screen.getByText("alpha · alpha").closest("details")!;
     details.open = true;
     fireEvent(details, new Event("toggle"));
     expect(screen.getByText(new RegExp(token))).toBeInTheDocument();

@@ -3,6 +3,7 @@ import type {
     InstanceLogEntry,
     ToolCallRecord,
 } from "@portable-devshell/shared/browser";
+import { workspaceFolderName } from "@portable-devshell/shared/browser";
 
 import {
     formatRelativeTime,
@@ -26,7 +27,7 @@ export function ToolCallEntry({
     const [open, setOpen] = useState(false);
     return <li className="activity-record tool-call-record">
         <details onToggle={(event) => setOpen(event.currentTarget.open)}>
-            <summary><time dateTime={call.startedAt} title={call.startedAt}>{formatRelativeTime(call.startedAt)}</time><strong>{call.toolName}</strong><span>{call.instance} · {call.source} · {call.ctxId ?? "unscoped"}</span><span className={`result ${toolCallResult(call)}`}>{call.status}</span></summary>
+            <summary><time dateTime={call.startedAt} title={call.startedAt}>{formatRelativeTime(call.startedAt)}</time><strong>{call.toolName}</strong><span>{workspaceFolderName(call.workspace)} · {call.instance}</span><span>ctx {call.ctxId ?? "unscoped"}</span><span className={`result ${toolCallResult(call)}`}>{call.status}</span></summary>
             {open ? <ToolCallDetails call={call} disabled={disabled} logs={logs} onRefresh={onRefresh} /> : null}
         </details>
     </li>;

@@ -25,6 +25,7 @@ export function ToolCallFilters({
 }) {
     return <div className="filters activity-filters">
         <label>Search<input onChange={(event) => onChange({ ...filters, query: event.target.value })} placeholder="Tool, call, input, or error" type="search" value={filters.query} /></label>
+        <label>Workspace<input onChange={(event) => onChange({ ...filters, workspace: event.target.value })} placeholder="Path or folder" type="search" value={filters.workspace} /></label>
         <label>Instance<select disabled={instanceLocked} onChange={(event) => onChange({ ...filters, instance: event.target.value })} value={filters.instance}><option value="all">All instances</option>{instances.map((instance) => <option key={instance} value={instance}>{instance}</option>)}</select></label>
         <label>Context status<select onChange={(event) => onChange({ ...filters, contextStatus: event.target.value as ContextStatusFilter })} value={filters.contextStatus}><option value="active">Active</option><option value="expired">Expired</option><option value="disabled">Disabled</option><option value="all">All statuses</option></select></label>
         <label>Context<select onChange={(event) => onChange({ ...filters, ctxId: event.target.value })} value={filters.ctxId}><option value="all">All contexts</option><option value="unscoped">Unscoped</option>{contexts.map((ctxId) => <option key={ctxId} value={contextFilterValue(ctxId)}>{ctxId}</option>)}</select></label>

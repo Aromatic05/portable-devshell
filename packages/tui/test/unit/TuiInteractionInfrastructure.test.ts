@@ -312,8 +312,13 @@ test("Audit requires confirmation before disabling a Context", async () => {
     }] });
     harness.store.setSelectedPage("audit");
     const context = expandBox(harness, "audit-context:ctx-alpha");
+    assert.equal(context.title, "alpha");
     assert.equal(
         context.expandedLines.some((line) => line.text.includes("/workspace/alpha")),
+        true,
+    );
+    assert.equal(
+        context.expandedLines.some((line) => line.text.includes("ctx-alpha")),
         true,
     );
     harness.store.setMainFocusId(context.id);
@@ -1653,6 +1658,7 @@ test("Audit Call detail page opens complete Input and Output content", async () 
         view: "call",
     });
     const detail = expandBox(harness, "audit-call-detail:call-detail");
+    assert.equal(detail.title, "bash_run · detail");
     assert.equal(
         detail.expandedLines.some((line) => line.text.includes("/projects/detail")),
         true,

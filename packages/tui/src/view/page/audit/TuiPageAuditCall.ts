@@ -1,3 +1,4 @@
+import { workspaceFolderName } from "@portable-devshell/shared";
 import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
 import { selectTuiLogs, type TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
 import type { TuiAuditContextKey } from "./TuiAuditContextProjection.js";
@@ -57,9 +58,10 @@ export function buildAuditCallBoxes(
             id: `audit-call-detail:${call.callId}`,
             status: toolCallStatus(call),
             summaryLines: [
+                `workspace ${workspaceFolderName(call.workspace)}`,
                 `${call.startedAt} → ${call.completedAt ?? "running"}`,
             ],
-            title: `${call.toolName} · ${call.callId}`,
+            title: `${call.toolName} · ${workspaceFolderName(call.workspace)}`,
         }),
     ];
 }
