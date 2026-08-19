@@ -246,7 +246,11 @@ export function assertWebSmokeState(pageState, failures = [], expectedInstance =
     if (!pageState.body.includes("Online") || pageState.body.includes("Offline")) {
         throw new Error(`Web SPA did not connect to Control.\n${pageState.body}`);
     }
-    if (!pageState.body.includes("Overview") || !pageState.body.includes(expectedInstance)) {
+    if (
+        !pageState.body.includes("Overview") ||
+        !pageState.body.includes("Audit") ||
+        !pageState.body.includes(expectedInstance)
+    ) {
         throw new Error(`Web SPA did not render the real testspace read model.\n${pageState.body}`);
     }
     if (pageState.alerts.length > 0) {

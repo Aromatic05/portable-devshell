@@ -34,6 +34,7 @@ import {
     runConnectorLoop,
 } from "./testspace/TestspaceConnector.mjs";
 import {
+    assertWebSmokeState,
     chromiumLaunchArguments,
     resolveChromiumExecutable,
 } from "./testspace/TestspaceWebSmoke.mjs";
@@ -61,6 +62,25 @@ test("Web smoke disables the Chromium sandbox only for Linux CI", () => {
         chromiumLaunchArguments({ environment: { CI: "true" }, platform: "darwin" })
             .includes("--no-sandbox"),
         false,
+    );
+});
+
+test("Web smoke requires the current Audit navigation contract", () => {
+    const pageState = {
+        alerts: [],
+        body: `portable-devshell\nOverview\nAudit\n${TESTSPACE_INSTANCE}\nOnline`,
+        randomUuidType: "undefined",
+        secureContext: false,
+    };
+
+    assert.doesNotThrow(() => assertWebSmokeState(pageState, [], TESTSPACE_INSTANCE));
+    assert.throws(
+        () => assertWebSmokeState(
+            { ...pageState, body: pageState.body.replace("Audit", "Tool Calls") },
+            [],
+            TESTSPACE_INSTANCE,
+        ),
+        /did not render the real testspace read model/u,
     );
 });
 
