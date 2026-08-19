@@ -32,7 +32,7 @@ export function renderInstanceTodo(todo: TodoReadResult): string {
 }
 
 function renderTaskSummary(task: TodoTaskSummary): string {
-    const symbol = task.status === "none" ? "·" : symbols[task.status];
+    const symbol = task.status === "none" ? "·" : task.status === "paused" ? "Ⅱ" : symbols[task.status];
     const current = task.currentItem === undefined ? "" : ` — ${task.currentItem}`;
     return `${symbol} ${task.title} [${task.completed}/${task.total}]${current}`;
 }

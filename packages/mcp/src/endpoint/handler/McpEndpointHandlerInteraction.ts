@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto";
 
-import type { InstanceEvent, JsonValue, ToolCallContext, ToolCallRecord, WaitRecord } from "@portable-devshell/shared";
+import type {
+    InstanceEvent,
+    JsonValue,
+    TodoTaskControlAction,
+    ToolCallContext,
+    ToolCallRecord,
+    WaitRecord
+} from "@portable-devshell/shared";
 
 import {
     isMcpInteractionGateway,
@@ -42,6 +49,12 @@ export class McpEndpointHandlerInteraction {
             case "workspace_question_answer":
                 this.#assertAppToken(input, context);
                 return await this.#answerQuestion(gateway, input, context);
+            case "workspace_task_control":
+                this.#assertAppToken(input, context);
+                return await this.#controlTask(gateway, input, context);
+            case "workspace_wait_recover":
+                this.#assertAppToken(input, context);
+                return await this.#recoverWait(gateway, input, context);
             case "workspace_approval_decide":
                 this.#assertAppToken(input, context);
                 return await this.#decideApproval(gateway, input, context);
@@ -178,7 +191,59 @@ export class McpEndpointHandlerInteraction {
         }
         validateQuestionAnswer(wait, answer);
         const resolved = await gateway.resolveWait(this.options.instanceName, waitId, { answer });
-        return { answer, questionId: resolved.targetId, waitId: resolved.waitId };
+        return {
+            answer,
+            detached: wait.status === "detached",
+            questionId: resolved.targetId,
+            ...(resolved.taskId === undefined ? {} : { taskId: resolved.taskId }),
+            waitId: resolved.waitId,
+        };
+    }
+
+    async #controlTask(
+        gateway: McpInteractionGateway,
+        input: JsonValue,
+        context: ToolCallContext,
+    ): Promise<JsonValue> {
+        if (gateway.controlTodo === undefined) {
+            throw new Error(`Workspace task control is unavailable for ${this.options.instanceName}.`);
+        }
+        const { action, taskId } = readTaskControl(input);
+        return await gateway.controlTodo(this.options.instanceName, taskId, action, requireCtxId(context));
+    }
+
+    async #recoverWait(
+        gateway: McpInteractionGateway,
+        input: JsonValue,
+        context: ToolCallContext,
+    ): Promise<JsonValue> {
+        const waitId = readWaitId(input, "workspace_wait_recover");
+        const wait = (await gateway.listWaits(this.options.instanceName)).find((entry) => entry.waitId === waitId);
+        if (
+            wait === undefined || wait.createdByCtxId !== requireCtxId(context) ||
+            wait.kind !== "tmux" || wait.detachedAt === undefined || wait.status !== "resolved"
+        ) {
+            throw new Error(`Recoverable detached wait ${waitId} was not found for this ctxId.`);
+        }
+        if (wait.taskId === undefined) {
+            throw new Error(`Recoverable detached wait ${waitId} is not attached to a durable task.`);
+        }
+        const todo = asRecord(await gateway.readTodo(this.options.instanceName));
+        const task = Array.isArray(todo?.tasks)
+            ? todo.tasks.map(asRecord).find((entry) => (
+                entry?.taskId === wait.taskId && entry?.ctxId === requireCtxId(context)
+            ))
+            : undefined;
+        if (task === undefined || task.status === "paused") {
+            throw new Error(`Durable task ${wait.taskId} is not available for automatic recovery.`);
+        }
+        const consumed = await gateway.consumeWait(this.options.instanceName, waitId);
+        return {
+            ...(consumed.result === undefined ? {} : { result: consumed.result }),
+            ...(consumed.taskId === undefined ? {} : { taskId: consumed.taskId }),
+            tmuxTaskId: consumed.targetId,
+            waitId: consumed.waitId,
+        };
     }
 
     async #decideApproval(
@@ -226,6 +291,7 @@ export class McpEndpointHandlerInteraction {
                 .map((wait) => ({
                     ...(wait.detachedAt === undefined ? {} : { detachedAt: wait.detachedAt }),
                     status: wait.status,
+                    ...(wait.taskId === undefined ? {} : { taskId: wait.taskId }),
                     tmuxTaskId: wait.targetId,
                     updatedAt: wait.updatedAt,
                     waitId: wait.waitId,
@@ -286,6 +352,22 @@ function readApprovalDecision(input: JsonValue): { approvalId: string; decision:
     const decision = record.decision;
     if (decision !== "approve" && decision !== "deny") throw new Error("decision must be approve or deny.");
     return { approvalId: text(record.approvalId, "approvalId"), decision };
+}
+
+function readTaskControl(input: JsonValue): { action: TodoTaskControlAction; taskId: string } {
+    const record = asRecord(input);
+    if (record === undefined) throw new Error("workspace_task_control requires an object input.");
+    const action = record.action;
+    if (action !== "pause" && action !== "resume" && action !== "cancel") {
+        throw new Error("action must be pause, resume, or cancel.");
+    }
+    return { action, taskId: text(record.taskId, "taskId") };
+}
+
+function readWaitId(input: JsonValue, toolName: string): string {
+    const record = asRecord(input);
+    if (record === undefined) throw new Error(`${toolName} requires an object input.`);
+    return text(record.waitId, "waitId");
 }
 
 function readWorkspaceCursor(input: JsonValue): number {

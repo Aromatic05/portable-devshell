@@ -55,15 +55,29 @@ const todoSummarySchema: JsonValue = {
     type: "object"
 };
 
+const checkpointOutputSchema: JsonValue = {
+    additionalProperties: false,
+    properties: {
+        blockers: { items: { minLength: 1, type: "string" }, type: "array" },
+        next: { minLength: 1, type: "string" },
+        summary: { minLength: 1, type: "string" },
+        updatedAt: { minLength: 1, type: "string" },
+    },
+    required: ["summary", "updatedAt"],
+    type: "object",
+};
+
 const todoTaskSummarySchema: JsonValue = {
     additionalProperties: false,
     properties: {
+        checkpoint: checkpointOutputSchema,
         completed: { minimum: 0, type: "integer" },
         ctxId: { minLength: 1, type: "string" },
         currentItem: { minLength: 1, type: "string" },
+        pausedAt: { minLength: 1, type: "string" },
         revision: { minimum: 0, type: "integer" },
         status: {
-            enum: ["pending", "in_progress", "blocked", "completed", "failed", "cancelled", "none"],
+            enum: ["pending", "in_progress", "blocked", "completed", "failed", "cancelled", "paused", "none"],
             type: "string"
         },
         taskId: { minLength: 1, type: "string" },
@@ -78,7 +92,10 @@ const todoTaskSummarySchema: JsonValue = {
 const outputSchema: JsonValue = {
     additionalProperties: false,
     properties: {
+        cancelledAt: { minLength: 1, type: "string" },
+        checkpoint: checkpointOutputSchema,
         items: { items: todoItemSchema, type: "array" },
+        pausedAt: { minLength: 1, type: "string" },
         revision: { minimum: 0, type: "integer" },
         summary: todoSummarySchema,
         taskId: { minLength: 1, type: "string" },
@@ -116,11 +133,22 @@ export class McpToolCatalogTodo {
         },
         {
             requiredCapabilities: [],
-            description: "Replace one task's complete plan; this is not a patch. Create with a new immutable title and revision 0. After creation, preserve title and pass taskId on updates so task identity never depends on model memory of the title. Legacy title-only updates remain supported. Each item requires a unique id, content, and status. IDs must be unique. status must be one of pending | in_progress | blocked | completed | failed | cancelled. Allow at most one in_progress item; blocked and failed items require detail. Update the plan promptly when progress changes.",
+            description: "Replace one task's complete plan; this is not a patch. Create with a new immutable title and revision 0. After creation, preserve title and pass taskId on updates so task identity never depends on model memory of the title. Legacy title-only updates remain supported. Each item requires a unique id, content, and status. IDs must be unique. status must be one of pending | in_progress | blocked | completed | failed | cancelled. Allow at most one in_progress item; blocked and failed items require detail. checkpoint is optional durable handoff context; update it at meaningful progress boundaries with a concise summary and next action. Update the plan promptly when progress changes.",
             group: "todo",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
+                    checkpoint: {
+                        additionalProperties: false,
+                        description: "Optional durable handoff checkpoint. Omit to preserve the previous checkpoint.",
+                        properties: {
+                            blockers: { items: { minLength: 1, type: "string" }, type: "array" },
+                            next: { minLength: 1, type: "string" },
+                            summary: { minLength: 1, type: "string" },
+                        },
+                        required: ["summary"],
+                        type: "object",
+                    },
                     revision: {
                         description: "Revision from the latest todo_read result.",
                         minimum: 0,

@@ -8,6 +8,8 @@ export type McpToolCatalogInteractionName =
     | "workspace_snapshot"
     | "workspace_watch"
     | "workspace_question_answer"
+    | "workspace_task_control"
+    | "workspace_wait_recover"
     | "workspace_approval_decide";
 
 const objectOutput: JsonValue = { type: "object" };
@@ -118,6 +120,41 @@ export class McpToolCatalogInteraction {
                 type: "object",
             },
             name: "workspace_question_answer",
+            outputSchema: objectOutput,
+            requiredCapabilities: [],
+        },
+        {
+            _meta: appOnlyMeta,
+            description: "Pause, resume, or cancel one durable task from the Workspace. This controls model re-entry state only; it does not signal terminal processes. App-only human action; models must not call it.",
+            group: "interaction",
+            inputSchema: {
+                additionalProperties: false,
+                properties: {
+                    action: { enum: ["pause", "resume", "cancel"], type: "string" },
+                    taskId: { minLength: 1, type: "string" },
+                    token: { minLength: 1, type: "string" },
+                },
+                required: ["taskId", "action", "token"],
+                type: "object",
+            },
+            name: "workspace_task_control",
+            outputSchema: objectOutput,
+            requiredCapabilities: [],
+        },
+        {
+            _meta: appOnlyMeta,
+            description: "Claim one resolved detached wait before the Workspace asks the model to resume. App-only recovery helper; models must not call it.",
+            group: "interaction",
+            inputSchema: {
+                additionalProperties: false,
+                properties: {
+                    token: { minLength: 1, type: "string" },
+                    waitId: { minLength: 1, type: "string" },
+                },
+                required: ["waitId", "token"],
+                type: "object",
+            },
+            name: "workspace_wait_recover",
             outputSchema: objectOutput,
             requiredCapabilities: [],
         },

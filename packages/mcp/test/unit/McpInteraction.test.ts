@@ -54,7 +54,7 @@ test("ask_question holds the original call until the Workspace app answers", asy
 test("ask_question detaches durable wait state when the host cancels the held call", async () => {
     const fake = createInteractionGateway();
     const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
-    await openWorkspace(handler);
+    const token = await openWorkspace(handler);
     const controller = new AbortController();
     const held = handler.call(
         "ask_question",
@@ -68,6 +68,18 @@ test("ask_question detaches durable wait state when the host cancels the held ca
     controller.abort("host closed request");
     await assert.rejects(held, /cancelled by the client/i);
     assert.equal(fake.waits.find((entry) => entry.waitId === wait.waitId)?.status, "detached");
+    assert.deepEqual(await handler.call(
+        "workspace_question_answer",
+        { answer: "yes", token, waitId: wait.waitId },
+        context,
+        "call-answer",
+    ), {
+        answer: "yes",
+        detached: true,
+        questionId: wait.targetId,
+        taskId: "task-1",
+        waitId: wait.waitId,
+    });
 });
 
 test("Workspace authorization stays in hidden metadata and gates app-only tools", async () => {
@@ -107,10 +119,12 @@ test("Workspace snapshot projects live activity and background tasks without ful
         kind: "tmux",
         status: "detached",
         targetId: "tmux-task-1",
+        taskId: "task-1",
         updatedAt: now,
         waitId: "wait-tmux",
     });
     const gateway = Object.assign(fake.gateway, {
+        async controlTodo() { return {}; },
         async readToolCalls() {
             return [{
                 callId: "call-1",
@@ -140,15 +154,96 @@ test("Workspace snapshot projects live activity and background tasks without ful
     };
     assert.equal(snapshot.cursor, 7);
     assert.equal(snapshot.background?.[0]?.tmuxTaskId, "tmux-task-1");
+    assert.equal(snapshot.background?.[0]?.taskId, "task-1");
     assert.equal(snapshot.activity?.[0]?.toolName, "bash_run");
     assert.equal("input" in (snapshot.activity?.[0] ?? {}), false);
     assert.equal("output" in (snapshot.activity?.[0] ?? {}), false);
+});
+
+test("Workspace task control and detached-wait recovery use durable server state", async () => {
+    const fake = createInteractionGateway();
+    const now = new Date().toISOString();
+    fake.waits.push({
+        createdAt: now,
+        createdByCtxId: context.ctxId!,
+        detachedAt: now,
+        kind: "tmux",
+        resolvedAt: now,
+        result: { task: { status: "0" } },
+        status: "resolved",
+        targetId: "tmux-task-1",
+        taskId: "task-1",
+        updatedAt: now,
+        waitId: "wait-recover",
+    });
+    let controlled: { action?: string; ctxId?: string; taskId?: string } = {};
+    let taskStatus = "in_progress";
+    const gateway = Object.assign(fake.gateway, {
+        async controlTodo(_instance: string, taskId: string, action: string, ctxId: string) {
+            controlled = { action, ctxId, taskId };
+            if (action === "pause") taskStatus = "paused";
+            if (action === "resume") taskStatus = "in_progress";
+            return { taskId };
+        },
+        async readTodo(_instance: string, input?: { taskId?: string }) {
+            if (input?.taskId === "task-1") {
+                return { items: [], revision: 1, summary: { completed: 0, total: 1 }, taskId: "task-1", title: "Task" };
+            }
+            return {
+                items: [],
+                revision: 0,
+                summary: { completed: 0, total: 0 },
+                tasks: [{ ctxId: context.ctxId, status: taskStatus, taskId: "task-1" }],
+            };
+        },
+        async readToolCalls() { return []; },
+        async readWorkspaceEvents() { return { events: [], gap: false, lastSeq: 1 }; },
+    }) as McpWorkspaceGateway;
+    const handler = new McpEndpointHandlerInteraction({ gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
+
+    await handler.call(
+        "workspace_task_control",
+        { action: "pause", taskId: "task-1", token },
+        context,
+        "call-control",
+    );
+    assert.deepEqual(controlled, { action: "pause", ctxId: context.ctxId, taskId: "task-1" });
+
+    await assert.rejects(handler.call(
+        "workspace_wait_recover",
+        { token, waitId: "wait-recover" },
+        context,
+        "call-recover-paused",
+    ), /not available for automatic recovery/);
+
+    await handler.call(
+        "workspace_task_control",
+        { action: "resume", taskId: "task-1", token },
+        context,
+        "call-resume",
+    );
+
+    const recovered = await handler.call(
+        "workspace_wait_recover",
+        { token, waitId: "wait-recover" },
+        context,
+        "call-recover",
+    );
+    assert.deepEqual(recovered, {
+        result: { task: { status: "0" } },
+        taskId: "task-1",
+        tmuxTaskId: "tmux-task-1",
+        waitId: "wait-recover",
+    });
+    assert.equal(fake.waits.find((entry) => entry.waitId === "wait-recover")?.status, "consumed");
 });
 
 test("workspace_watch skips unrelated events and returns on the current Context event", async () => {
     const fake = createInteractionGateway();
     let watchReads = 0;
     const gateway = Object.assign(fake.gateway, {
+        async controlTodo() { return {}; },
         async readToolCalls() { return []; },
         async readWorkspaceEvents(_instance: string, fromSeq: number) {
             if (fromSeq === Number.MAX_SAFE_INTEGER) {
@@ -200,6 +295,7 @@ test("workspace_watch skips unrelated events and returns on the current Context 
 test("workspace_watch heartbeat advances its cursor without forcing a snapshot", async () => {
     const fake = createInteractionGateway();
     const gateway = Object.assign(fake.gateway, {
+        async controlTodo() { return {}; },
         async readToolCalls() { return []; },
         async readWorkspaceEvents() {
             return { events: [], gap: false, lastSeq: 11 };

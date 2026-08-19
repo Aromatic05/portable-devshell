@@ -210,12 +210,17 @@ export class McpEndpointDispatch {
             record.status !== "cancelled" &&
             record.status !== "consumed"
         );
-        const wait = reusable ?? await gateway.createWait(instance, {
-            createdByCtxId: context.ctxId,
-            kind: "tmux",
-            ...(context.requestId === undefined ? {} : { ownerCallId: context.requestId }),
-            targetId: task
-        });
+        let wait = reusable;
+        if (wait === undefined) {
+            const taskId = await this.#currentTaskId(instance, context.ctxId);
+            wait = await gateway.createWait(instance, {
+                createdByCtxId: context.ctxId,
+                kind: "tmux",
+                ...(context.requestId === undefined ? {} : { ownerCallId: context.requestId }),
+                ...(taskId === undefined ? {} : { taskId }),
+                targetId: task
+            });
+        }
         const tracked = wait.status === "resolved"
             ? Promise.resolve(wait.result)
             : this.#ensureTmuxWaitTracker(
@@ -246,6 +251,24 @@ export class McpEndpointDispatch {
             }
             throw error;
         }
+    }
+
+    async #currentTaskId(instance: string, ctxId: string): Promise<string | undefined> {
+        const gateway = this.#gateway;
+        if (gateway === undefined) return undefined;
+        const todo = await gateway.readTodo(instance);
+        if (typeof todo !== "object" || todo === null || Array.isArray(todo) || !Array.isArray(todo.tasks)) {
+            return undefined;
+        }
+        const active = todo.tasks.filter((task) => (
+            typeof task === "object" && task !== null && !Array.isArray(task) &&
+            task.ctxId === ctxId && task.status === "in_progress" && typeof task.taskId === "string"
+        ));
+        if (active.length !== 1) return undefined;
+        const task = active[0];
+        return typeof task === "object" && task !== null && !Array.isArray(task)
+            ? task.taskId as string
+            : undefined;
     }
 
     #ensureTmuxWaitTracker(
@@ -474,6 +497,8 @@ function isAppOnlyInteractionTool(toolName: string): boolean {
     return toolName === "workspace_snapshot" ||
         toolName === "workspace_watch" ||
         toolName === "workspace_question_answer" ||
+        toolName === "workspace_task_control" ||
+        toolName === "workspace_wait_recover" ||
         toolName === "workspace_approval_decide";
 }
 

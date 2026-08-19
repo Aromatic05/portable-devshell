@@ -262,6 +262,7 @@ test("tmux_wait detaches and resumes one durable wait without starting another w
         ownerCallId?: string;
         result?: JsonValue;
         status: "waiting" | "detached" | "resolved" | "consumed" | "cancelled";
+        taskId?: string;
         targetId: string;
         updatedAt: string;
         waitId: string;
@@ -290,7 +291,7 @@ test("tmux_wait detaches and resumes one durable wait without starting another w
     const gateway = {
         async cancelWait(_instance: string, waitId: string) { return update(waitId, "cancelled"); },
         async consumeWait(_instance: string, waitId: string) { return update(waitId, "consumed"); },
-        async createWait(_instance: string, input: { createdByCtxId: string; kind: "tmux"; ownerCallId?: string; targetId: string }) {
+        async createWait(_instance: string, input: { createdByCtxId: string; kind: "tmux"; ownerCallId?: string; taskId?: string; targetId: string }) {
             const now = new Date().toISOString();
             const wait: Wait = {
                 ...input,
@@ -307,7 +308,13 @@ test("tmux_wait detaches and resumes one durable wait without starting another w
         async listApprovals() { return []; },
         async listWaits() { return waits; },
         listTools: () => [],
-        async readTodo() { return { items: [], revision: 0 }; },
+        async readTodo() {
+            return {
+                items: [],
+                revision: 0,
+                tasks: [{ ctxId: environment.ctxId, status: "in_progress", taskId: "todo-task-1" }],
+            };
+        },
         async resolveWait(_instance: string, waitId: string, result?: JsonValue) { return update(waitId, "resolved", result); },
         async waitForWait(_instance: string, waitId: string): Promise<Wait> {
             const wait = waits.find((entry) => entry.waitId === waitId);
@@ -339,6 +346,7 @@ test("tmux_wait detaches and resumes one durable wait without starting another w
         abort.signal,
     );
     await waitUntil(() => waits.length === 1 && workerWaitCalls === 1);
+    assert.equal(waits[0]?.taskId, "todo-task-1");
     abort.abort("host remount");
     await assert.rejects(first, /cancelled by the client/u);
     assert.equal(waits[0]?.status, "detached");

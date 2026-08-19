@@ -239,6 +239,9 @@ function createTodoServer(socketPath: string): {
             name: "alpha",
             provider: "local",
             todo: {
+                async control() {
+                    return todoFixture;
+                },
                 currentAssociation() {
                     return undefined;
                 },

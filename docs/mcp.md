@@ -117,6 +117,12 @@ iframe remount 或 MCP/Control 重启后，读路径可以仅凭有效 `ctxId` �
 
 `ask_question` 用于模型确实需要人类输入时挂起当前调用。调用前必须已经对同一 `ctxId` 执行过 `workspace_open`，并传入 durable `taskId`。Question 自身存入 durable Wait；Host 取消或 iframe remount 只会让等待 detached，不会丢失 Question，用户之后仍可在 Workspace 中回答。
 
+Todo task 现在同时承担 model re-entry checkpoint。模型在 `todo_write` 更新计划时可以写 `checkpoint.summary`，并可附带 `next` 与 `blockers`；checkpoint 与 taskId 一起持久化，后续 Workspace snapshot 会把它投影给 Host。Workspace 每次拿到 authoritative snapshot 后使用 MCP Apps 的 `ui/update-model-context` 覆盖该 View 的模型上下文；这个操作不会主动触发新的模型回合。
+
+Workspace 的 Pause / Resume / Cancel 是 task-level 人工控制，只影响 durable task 与自动 model re-entry，不会隐式向 tmux 进程发送信号。Pause 后 task 不再参与当前 tool-call association，也不会自动恢复 detached wait；Resume 重新绑定当前 `ctxId` 并由用户显式触发一次 `ui/message`；Cancel 将 task 归档并保留原 Todo item 与 checkpoint 历史。
+
+`tmux_wait` 首次建立 durable Wait 时，会在当前 Context 恰好只有一个 `in_progress` Todo task 的情况下记录其 `taskId`。如果原 Host 调用已经 detached，而 tmux wait 后来完成，Workspace 只会对“仍 active、未 paused、归属同一 Context、且带 taskId”的 resolved wait 做一次 claim，然后先用 `ui/update-model-context` 写入 checkpoint / wait result，再用 `ui/message` 恢复模型。普通 live activity、后台任务状态变化和仍存活的 Question 回答不会触发主动 `ui/message`。
+
 ## Skills 与项目记忆提示
 
 Control 机器上的 Skill 目录固定为：

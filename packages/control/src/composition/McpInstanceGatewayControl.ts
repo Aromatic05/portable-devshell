@@ -149,6 +149,15 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             : { events: result.events, gap: false, lastSeq: result.lastSeq };
     }
 
+    async controlTodo(
+        instance: string,
+        taskId: string,
+        action: import("@portable-devshell/shared").TodoTaskControlAction,
+        ctxId: string
+    ): Promise<JsonValue> {
+        return (await this.#requireDescriptor(instance).todo.control(taskId, action, ctxId)) as unknown as JsonValue;
+    }
+
     async decideApproval(instance: string, approvalId: string, decision: "approve" | "deny") {
         return await this.#requireDescriptor(instance).worker.decideApproval(approvalId, {
             decidedBy: "web",

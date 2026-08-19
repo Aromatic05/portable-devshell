@@ -6,6 +6,7 @@ import type {
     JsonValue,
     TodoReadInput,
     TodoReadResult,
+    TodoTaskControlAction,
     TodoWriteInput,
     ToolCallAssociation,
     ToolCapability,
@@ -20,6 +21,7 @@ export interface InstanceContextMessagePort {
 }
 
 export interface InstanceTodoPort {
+    control(taskId: string, action: TodoTaskControlAction, ctxId: string): Promise<TodoReadResult>;
     currentAssociation(): ToolCallAssociation | undefined;
     delete(taskId: string): Promise<void>;
     read(input?: TodoReadInput): Promise<TodoReadResult>;

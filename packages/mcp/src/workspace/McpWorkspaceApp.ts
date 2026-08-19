@@ -45,6 +45,7 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
   var snapshot = null;
   var cursor = 0;
   var watchGeneration = 0;
+  var recovering = false;
   var busy = new Set();
 
   function escapeHtml(value) {
@@ -83,14 +84,93 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
     if (hidden && hidden.token) appToken = String(hidden.token);
   }
 
-  async function refresh() {
+  function modelContext(extra) {
+    var tasks = snapshot && Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
+    var background = snapshot && Array.isArray(snapshot.background) ? snapshot.background : [];
+    var state = {
+      ctxId: ctxId,
+      instance: snapshot && snapshot.instance,
+      tasks: tasks.map(function (task) { return {
+        taskId: task.taskId,
+        title: task.title,
+        status: task.status,
+        currentItem: task.currentItem,
+        checkpoint: task.checkpoint
+      }; }),
+      background: background.map(function (item) { return {
+        taskId: item.taskId,
+        tmuxTaskId: item.tmuxTaskId,
+        status: item.status,
+        detachedAt: item.detachedAt
+      }; }),
+      extra: extra || undefined
+    };
+    var cleanState = JSON.parse(JSON.stringify(state));
+    return {
+      content: [{ type: "text", text: "portable-devshell durable task checkpoint:\n" + JSON.stringify(cleanState, null, 2) }],
+      structuredContent: { portableDevshellWorkspace: cleanState }
+    };
+  }
+
+  async function syncModelContext(extra) {
+    if (!initialized || !snapshot) return;
+    try {
+      await request("ui/update-model-context", modelContext(extra));
+    } catch (_) {}
+  }
+
+  async function sendModelMessage(text, extra) {
+    await syncModelContext(extra);
+    return await request("ui/message", {
+      role: "user",
+      content: [{ type: "text", text: text }]
+    });
+  }
+
+  function findTask(taskId) {
+    var tasks = snapshot && Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
+    return tasks.find(function (task) { return task.taskId === taskId; });
+  }
+
+  async function recoverDetachedWait() {
+    if (recovering || !appToken || !snapshot) return;
+    var background = Array.isArray(snapshot.background) ? snapshot.background : [];
+    var item = background.find(function (entry) {
+      if (entry.status !== "resolved" || !entry.detachedAt || !entry.taskId) return false;
+      var task = findTask(entry.taskId);
+      return task && task.status !== "paused";
+    });
+    if (!item) return;
+    recovering = true;
+    try {
+      var claimed = structured(await callTool("workspace_wait_recover", { waitId: item.waitId }, true));
+      await sendModelMessage(
+        "Resume the portable-devshell task from its durable checkpoint. A detached background wait completed; do not repeat completed work.",
+        { recoveredWait: claimed }
+      );
+      await refresh(false);
+    } catch (error) {
+      status.textContent = "Resume available";
+      console.error(error);
+    } finally {
+      recovering = false;
+    }
+  }
+
+  async function applySnapshot(nextSnapshot, allowRecovery) {
+    snapshot = nextSnapshot;
+    if (snapshot && Number.isSafeInteger(snapshot.cursor)) cursor = snapshot.cursor;
+    render();
+    await syncModelContext();
+    if (allowRecovery !== false) void recoverDetachedWait();
+  }
+
+  async function refresh(allowRecovery) {
     if (!initialized || !ctxId) return;
     try {
       var result = await callTool("workspace_snapshot", {}, false);
-      snapshot = structured(result);
-      if (snapshot && Number.isSafeInteger(snapshot.cursor)) cursor = snapshot.cursor;
+      await applySnapshot(structured(result), allowRecovery);
       status.textContent = snapshot && snapshot.instance ? snapshot.instance + " · live" : "Connected";
-      render();
     } catch (error) {
       status.textContent = "Reconnecting";
       throw error;
@@ -109,9 +189,7 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
         var update = structured(result) || {};
         if (Number.isSafeInteger(update.cursor)) cursor = update.cursor;
         if (update.changed && update.snapshot) {
-          snapshot = update.snapshot;
-          if (Number.isSafeInteger(snapshot.cursor)) cursor = snapshot.cursor;
-          render();
+          await applySnapshot(update.snapshot, true);
         }
         status.textContent = snapshot && snapshot.instance ? snapshot.instance + " · live" : "Connected";
       } catch (error) {
@@ -129,7 +207,7 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
     try {
       await request("ui/initialize", {
         protocolVersion: "2026-01-26",
-        appInfo: { name: "portable-devshell-workspace", version: "0.6.3" },
+        appInfo: { name: "portable-devshell-workspace", version: "0.6.4" },
         appCapabilities: {}
       });
       notify("ui/notifications/initialized", {});
@@ -144,18 +222,59 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
   }
 
   async function act(key, name, args) {
-    if (busy.has(key)) return;
+    if (busy.has(key)) return null;
     busy.add(key);
     render();
     try {
-      await callTool(name, args, true);
-      await refresh();
+      var result = structured(await callTool(name, args, true));
+      await refresh(false);
+      return result;
     } catch (error) {
       status.textContent = "Action failed";
       console.error(error);
+      return null;
     } finally {
       busy.delete(key);
       render();
+    }
+  }
+
+  async function controlTask(taskId, action) {
+    var result = await act(taskId, "workspace_task_control", { taskId: taskId, action: action });
+    if (result && action === "resume") {
+      await sendModelMessage(
+        "Resume the portable-devshell task from its durable checkpoint. Do not repeat completed work.",
+        { resumedTaskId: taskId }
+      );
+    }
+  }
+
+  async function askTask(taskId) {
+    if (busy.has(taskId)) return;
+    busy.add(taskId);
+    render();
+    try {
+      await sendModelMessage(
+        "Review the current portable-devshell task checkpoint and tell me what needs attention or what should happen next.",
+        { askedTaskId: taskId }
+      );
+    } catch (error) {
+      status.textContent = "Ask failed";
+      console.error(error);
+    } finally {
+      busy.delete(taskId);
+      render();
+    }
+  }
+
+  async function answerQuestion(waitId, answer) {
+    var result = await act(waitId, "workspace_question_answer", { waitId: waitId, answer: answer });
+    var task = result && result.taskId ? findTask(result.taskId) : null;
+    if (result && result.detached && task && task.status !== "paused") {
+      await sendModelMessage(
+        "Resume the portable-devshell task from its durable checkpoint. The user answered the detached question; use that answer and continue without repeating completed work.",
+        { answeredQuestion: result }
+      );
     }
   }
 
@@ -176,11 +295,22 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
   }
 
   function taskCard(task) {
-    return '<div class="card"><div class="row between"><span class="title">' + escapeHtml(task.title || task.taskId) + '</span><span class="badge">' + escapeHtml(task.status || "") + '</span></div><div class="muted" style="margin-top:5px">' + escapeHtml(task.currentItem || ((task.completed || 0) + "/" + (task.total || 0))) + '</div></div>';
+    var disabled = busy.has(task.taskId) ? " disabled" : "";
+    var checkpoint = task.checkpoint && task.checkpoint.summary
+      ? '<div class="question">' + escapeHtml(task.checkpoint.summary) + '</div>'
+      : '';
+    var control = task.status === "paused"
+      ? '<button class="primary" data-task-action="resume" data-task-id="' + escapeHtml(task.taskId) + '"' + disabled + '>Resume</button>'
+      : '<button data-task-action="pause" data-task-id="' + escapeHtml(task.taskId) + '"' + disabled + '>Pause</button>';
+    return '<div class="card"><div class="row between"><span class="title">' + escapeHtml(task.title || task.taskId) + '</span><span class="badge">' + escapeHtml(task.status || "") + '</span></div><div class="muted" style="margin-top:5px">' + escapeHtml(task.currentItem || ((task.completed || 0) + "/" + (task.total || 0))) + '</div>' + checkpoint + '<div class="row" style="margin-top:8px"><button data-task-ask="' + escapeHtml(task.taskId) + '"' + disabled + '>Ask</button>' + control + '<button class="danger" data-task-action="cancel" data-task-id="' + escapeHtml(task.taskId) + '"' + disabled + '>Cancel</button></div></div>';
   }
 
   function backgroundCard(item) {
-    return '<div class="card"><div class="row between"><span class="title">Background task</span><span class="badge">' + escapeHtml(item.status || "") + '</span></div><div class="mono" style="margin-top:5px">' + escapeHtml(item.tmuxTaskId || "") + '</div>' + (item.detachedAt ? '<div class="muted" style="margin-top:4px">Detached from the previous host call</div>' : '') + '</div>';
+    var task = item.taskId ? findTask(item.taskId) : null;
+    var resume = item.detachedAt && task && task.status !== "paused" && item.status !== "resolved"
+      ? '<div class="row" style="margin-top:8px"><button class="primary" data-background-resume="' + escapeHtml(item.taskId) + '">Resume agent</button></div>'
+      : '';
+    return '<div class="card"><div class="row between"><span class="title">Background task</span><span class="badge">' + escapeHtml(item.status || "") + '</span></div><div class="mono" style="margin-top:5px">' + escapeHtml(item.tmuxTaskId || "") + '</div>' + (item.detachedAt ? '<div class="muted" style="margin-top:4px">Detached from the previous host call</div>' : '') + resume + '</div>';
   }
 
   function activityCard(item) {
@@ -217,11 +347,30 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
         var input = root.querySelector('[data-question-input="' + CSS.escape(waitId) + '"]');
         answer = input ? input.value.trim() : "";
       }
-      if (answer) void act(waitId, "workspace_question_answer", { waitId: waitId, answer: answer });
+      if (answer) void answerQuestion(waitId, answer);
       return;
     }
     var approvalId = target.getAttribute("data-approval");
-    if (approvalId) void act(approvalId, "workspace_approval_decide", { approvalId: approvalId, decision: target.getAttribute("data-decision") });
+    if (approvalId) {
+      void act(approvalId, "workspace_approval_decide", { approvalId: approvalId, decision: target.getAttribute("data-decision") });
+      return;
+    }
+    var taskId = target.getAttribute("data-task-id");
+    var taskAction = target.getAttribute("data-task-action");
+    if (taskId && taskAction) {
+      void controlTask(taskId, taskAction);
+      return;
+    }
+    var askTaskId = target.getAttribute("data-task-ask");
+    if (askTaskId) {
+      void askTask(askTaskId);
+      return;
+    }
+    var resumeTaskId = target.getAttribute("data-background-resume");
+    if (resumeTaskId) void sendModelMessage(
+      "Resume the portable-devshell task from its durable checkpoint. Reattach to any detached wait instead of repeating completed work.",
+      { resumedTaskId: resumeTaskId }
+    );
   });
 
   window.addEventListener("message", function (event) {

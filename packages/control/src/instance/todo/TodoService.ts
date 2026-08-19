@@ -4,6 +4,7 @@ import type {
     JsonValue,
     TodoReadInput,
     TodoReadResult,
+    TodoTaskControlAction,
     TodoWriteInput,
     ToolCallAssociation
 } from "@portable-devshell/shared";
@@ -61,6 +62,18 @@ export class TodoService {
                 ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
                 title: input.title
             });
+            return result;
+        });
+    }
+
+    async control(taskId: string, action: TodoTaskControlAction, ctxId: string): Promise<TodoReadResult> {
+        return await this.#runExclusive(async () => {
+            const transition = this.#state.control(this.#store.read(), taskId, action, ctxId);
+            if (transition.events.length > 0) {
+                await this.#persistTransition(transition);
+                await this.#emitTransition(transition);
+            }
+            const { tasks: _tasks, ...result } = this.#readDocument(transition.document, { taskId });
             return result;
         });
     }

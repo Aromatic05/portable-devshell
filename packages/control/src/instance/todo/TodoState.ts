@@ -6,12 +6,15 @@ import {
     type ActiveTodoSummary,
     type InstanceEventType,
     type JsonValue,
+    type TodoCheckpoint,
+    type TodoCheckpointInput,
     type TodoItem,
     type TodoReadInput,
     type TodoReadResult,
     type TodoState as SharedTodoState,
     type TodoStatus,
     type TodoSummary,
+    type TodoTaskControlAction,
     type TodoTaskSummary,
     type TodoWriteInput,
     type ToolCallAssociation
@@ -106,12 +109,16 @@ export class TodoState {
                 throw invalidTodo(`todo task ${previous.taskId} title is immutable`);
             }
             requireRevision(normalized.revision, previous.revision);
+            const updatedAt = this.#now();
             next = {
                 ...previous,
                 activeCtxId: ctxId,
+                ...(normalized.checkpoint === undefined
+                    ? {}
+                    : { checkpoint: checkpoint(normalized.checkpoint, updatedAt) }),
                 items: normalized.todos,
                 revision: previous.revision + 1,
-                updatedAt: this.#now()
+                updatedAt
             };
             events.push(todoEvent(
                 !isCompleted(previous) && isCompleted(next) ? "todo.completed" : "todo.updated",
@@ -128,6 +135,64 @@ export class TodoState {
             events.push(todoEvent("todo.archived", archivedState));
         }
         return { document: { active, archived, version: 4 }, events };
+    }
+
+    control(
+        document: TodoDocument,
+        taskId: string,
+        action: TodoTaskControlAction,
+        ctxId: string
+    ): TodoTransition {
+        const previousIndex = document.active.findIndex((entry) => entry.taskId === taskId);
+        if (previousIndex === -1) {
+            const archived = document.archived.find((entry) => entry.taskId === taskId);
+            if (action === "cancel" && archived?.cancelledAt !== undefined) {
+                return { document, events: [] };
+            }
+            throw invalidTodo(`todo task ${taskId} is not active`);
+        }
+
+        const previous = document.active[previousIndex]!;
+        if (action === "pause" && previous.pausedAt !== undefined) return { document, events: [] };
+        if (action === "resume" && previous.pausedAt === undefined) return { document, events: [] };
+
+        const now = this.#now();
+        const active = [...document.active];
+        const archived = [...document.archived];
+        let next: SharedTodoState;
+        if (action === "resume") {
+            const { pausedAt: _pausedAt, ...rest } = previous;
+            next = {
+                ...rest,
+                activeCtxId: ctxId,
+                revision: previous.revision + 1,
+                updatedAt: now
+            };
+        } else {
+            next = {
+                ...previous,
+                activeCtxId: ctxId,
+                ...(action === "pause" ? { pausedAt: now } : { cancelledAt: now }),
+                revision: previous.revision + 1,
+                updatedAt: now
+            };
+        }
+
+        if (action === "cancel") {
+            active.splice(previousIndex, 1);
+            const archivedState = { ...next, archivedAt: now };
+            archived.push(archivedState);
+            return {
+                document: { active, archived, version: 4 },
+                events: [todoEvent("todo.updated", next), todoEvent("todo.archived", archivedState)]
+            };
+        }
+
+        active[previousIndex] = next;
+        return {
+            document: { active, archived, version: 4 },
+            events: [todoEvent("todo.updated", next)]
+        };
     }
 
     delete(document: TodoDocument, taskId: string): TodoTransition {
@@ -160,7 +225,10 @@ export class TodoState {
             return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks };
         }
         return {
+            ...(state.cancelledAt === undefined ? {} : { cancelledAt: state.cancelledAt }),
+            ...(state.checkpoint === undefined ? {} : { checkpoint: { ...state.checkpoint } }),
             items: state.items.map((item) => ({ ...item })),
+            ...(state.pausedAt === undefined ? {} : { pausedAt: state.pausedAt }),
             revision: state.revision,
             summary: summarize(state.items),
             taskId: state.taskId,
@@ -171,7 +239,7 @@ export class TodoState {
 
     activeSummaries(document: TodoDocument): ActiveTodoSummary[] {
         return document.active.flatMap((state) => {
-            const status = deriveStatus(state.items);
+            const status = deriveStateStatus(state);
             if (status === "completed" || status === "cancelled" || status === "none") {
                 return [];
             }
@@ -181,7 +249,9 @@ export class TodoState {
                 : state.items.find((item) => item.id === summary.currentItemId);
             return [{
                 completed: summary.completed,
+                ...(state.checkpoint === undefined ? {} : { checkpoint: { ...state.checkpoint } }),
                 currentItem: current?.content,
+                ...(state.pausedAt === undefined ? {} : { pausedAt: state.pausedAt }),
                 revision: state.revision,
                 status,
                 taskId: state.taskId,
@@ -195,6 +265,7 @@ export class TodoState {
         if (ctxId === undefined) return undefined;
         const associations = document.active.flatMap((active) => {
             if (active.activeCtxId !== ctxId) return [];
+            if (active.pausedAt !== undefined || active.cancelledAt !== undefined) return [];
             const current = active.items.find((item) => item.status === "in_progress");
             return current === undefined
                 ? []
@@ -207,6 +278,7 @@ export class TodoState {
         const now = this.#now();
         return {
             activeCtxId: ctxId,
+            ...(input.checkpoint === undefined ? {} : { checkpoint: checkpoint(input.checkpoint, now) }),
             createdAt: now,
             createdByCtxId: ctxId,
             items: input.todos,
@@ -222,11 +294,16 @@ export class TodoState {
         if (!isRecord(value)) throw new Error("todo state must be an object");
         const activeCtxId = optionalString(value.activeCtxId ?? value.activeSessionId);
         const archivedAt = optionalString(value.archivedAt);
+        const cancelledAt = optionalString(value.cancelledAt);
+        const storedCheckpoint = value.checkpoint === undefined ? undefined : normalizeStoredCheckpoint(value.checkpoint);
+        const pausedAt = optionalString(value.pausedAt);
         const taskId = requiredString(value.taskId, "taskId");
         const title = optionalString(value.title) ?? (allowMissingTitle ? taskId : requiredString(value.title, "title"));
         const state: SharedTodoState = {
             ...(activeCtxId === undefined ? {} : { activeCtxId }),
             ...(archivedAt === undefined ? {} : { archivedAt }),
+            ...(cancelledAt === undefined ? {} : { cancelledAt }),
+            ...(storedCheckpoint === undefined ? {} : { checkpoint: storedCheckpoint }),
             createdAt: requiredString(value.createdAt, "createdAt"),
             createdByCtxId: requiredString(
                 value.createdByCtxId ?? value.createdBySessionId,
@@ -234,6 +311,7 @@ export class TodoState {
             ),
             items: normalizeItems(value.items),
             originInstance: requiredString(value.originInstance, "originInstance"),
+            ...(pausedAt === undefined ? {} : { pausedAt }),
             revision: requiredRevision(value.revision),
             taskId,
             title,
@@ -253,10 +331,12 @@ export class TodoState {
                 : state.items.find((item) => item.id === summary.currentItemId);
             return {
                 completed: summary.completed,
+                ...(state.checkpoint === undefined ? {} : { checkpoint: { ...state.checkpoint } }),
                 ...(state.activeCtxId === undefined ? {} : { ctxId: state.activeCtxId }),
                 currentItem: current?.content,
+                ...(state.pausedAt === undefined ? {} : { pausedAt: state.pausedAt }),
                 revision: state.revision,
-                status: deriveStatus(state.items),
+                status: deriveStateStatus(state),
                 taskId: state.taskId,
                 title: state.title,
                 total: summary.total,
@@ -269,6 +349,7 @@ export class TodoState {
 function normalizeInput(input: TodoWriteInput): TodoWriteInput {
     if (!isRecord(input)) throw invalidTodo("todo_write requires an object input");
     return {
+        ...(input.checkpoint === undefined ? {} : { checkpoint: normalizeCheckpointInput(input.checkpoint) }),
         revision: requiredRevision(input.revision),
         ...(input.taskId === undefined ? {} : { taskId: normalizeText(input.taskId, "taskId") }),
         title: normalizeText(input.title, "title"),
@@ -300,6 +381,33 @@ function normalizeItems(value: unknown): TodoItem[] {
     });
 }
 
+function normalizeCheckpointInput(value: unknown): TodoCheckpointInput {
+    if (!isRecord(value)) throw invalidTodo("checkpoint must be an object");
+    const blockers = value.blockers === undefined
+        ? undefined
+        : normalizeTextArray(value.blockers, "checkpoint.blockers");
+    const next = value.next === undefined ? undefined : normalizeText(value.next, "checkpoint.next");
+    return {
+        ...(blockers === undefined ? {} : { blockers }),
+        ...(next === undefined ? {} : { next }),
+        summary: normalizeText(value.summary, "checkpoint.summary")
+    };
+}
+
+function normalizeStoredCheckpoint(value: unknown): TodoCheckpoint {
+    const input = normalizeCheckpointInput(value);
+    return { ...input, updatedAt: requiredString((value as Record<string, unknown>).updatedAt, "checkpoint.updatedAt") };
+}
+
+function checkpoint(input: TodoCheckpointInput, updatedAt: string): TodoCheckpoint {
+    return { ...input, updatedAt };
+}
+
+function normalizeTextArray(value: unknown, field: string): string[] {
+    if (!Array.isArray(value)) throw invalidTodo(`${field} must be an array`);
+    return value.map((entry, index) => normalizeText(entry, `${field}[${index}]`));
+}
+
 function summarize(items: readonly TodoItem[]): TodoSummary {
     const included = items.filter((item) => item.status !== "cancelled");
     const current = items.find((item) => item.status === "in_progress");
@@ -320,11 +428,18 @@ function deriveStatus(items: readonly TodoItem[]): ActiveTodoSummary["status"] {
     return "none";
 }
 
+function deriveStateStatus(state: SharedTodoState): ActiveTodoSummary["status"] {
+    if (state.cancelledAt !== undefined) return "cancelled";
+    if (state.pausedAt !== undefined) return "paused";
+    return deriveStatus(state.items);
+}
+
 function isCompleted(state: SharedTodoState): boolean {
     return isCompletedItems(state.items);
 }
 
 function isTerminal(state: SharedTodoState): boolean {
+    if (state.cancelledAt !== undefined) return true;
     return !state.items.some(
         (item) => item.status === "pending" || item.status === "in_progress" || item.status === "blocked"
     );

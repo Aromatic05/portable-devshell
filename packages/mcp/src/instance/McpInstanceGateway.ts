@@ -12,6 +12,7 @@ import type {
     InstanceEvent,
     JsonValue,
     TodoReadInput,
+    TodoTaskControlAction,
     ToolCallContext,
     ToolCallRecord,
     ToolDefinition,
@@ -68,6 +69,7 @@ export interface McpInstanceGateway {
     decideApproval?(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<ApprovalRequest>;
     readToolCalls?(instance: string, ctxId: string, limit: number): Promise<ToolCallRecord[]>;
     readWorkspaceEvents?(instance: string, fromSeq: number): Promise<McpWorkspaceEventSlice>;
+    controlTodo?(instance: string, taskId: string, action: TodoTaskControlAction, ctxId: string): Promise<JsonValue>;
     consumeContextMessages?(instance: string, ctxId: string, callId: string): Promise<ContextMessageReadResult>;
     readTodo(instance: string, input?: TodoReadInput): Promise<JsonValue>;
     listTools(instance: string): ToolDefinition[];
