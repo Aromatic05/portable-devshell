@@ -311,6 +311,26 @@ test("a real MCP SDK OAuth consumer completes registration, PKCE authorization, 
         const approvals = host.oauthApprovals;
         assert.notEqual(approvals, undefined);
 
+        const challenge = await fetch(endpoint, {
+            body: JSON.stringify({
+                id: "anonymous-initialize",
+                jsonrpc: "2.0",
+                method: "initialize",
+                params: {
+                    capabilities: {},
+                    clientInfo,
+                    protocolVersion: "2025-06-18"
+                }
+            }),
+            headers: { "content-type": "application/json" },
+            method: "POST"
+        });
+        assert.equal(challenge.status, 401);
+        const wwwAuthenticate = challenge.headers.get("www-authenticate") ?? "";
+        assert.match(wwwAuthenticate, /^Bearer /u);
+        assert.match(wwwAuthenticate, /scope="mcp"/u);
+        assert.match(wwwAuthenticate, /resource_metadata="https?:\/\//u);
+
         const provider = new InMemoryOAuthClientProvider();
 
         const anonymous = new Client(clientInfo);
