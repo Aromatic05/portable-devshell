@@ -531,12 +531,27 @@ test("config editor reconciles instance MCP bindings from patches without restar
         groups: ["file", "bash", "artifact", "instance"]
     });
     assert.deepEqual(registered[0]?.auth, { enabled: false, provider: "none" });
+    assert.equal(registered[0]?.contextMode, "explicit");
+
+    await service.updateInstanceConfig({
+        instanceName: "demo-local",
+        patch: { mcp: { contextMode: "openai-session" } }
+    });
+    assert.equal(registered[1]?.contextMode, "openai-session");
+    assert.equal(registry.get("demo-local")?.mcpContextMode, "openai-session");
 
     const authUpdate = await service.updateInstanceConfig({
         instanceName: "demo-local",
-        patch: { mcp: { auth: "token", token: "0123456789abcdef0123456789abcdef" } }
+        patch: {
+            mcp: {
+                auth: "token",
+                contextMode: "explicit",
+                token: "0123456789abcdef0123456789abcdef"
+            }
+        }
     }) as { appliedChanges: Array<{ kind: string; target: string }> };
-    assert.deepEqual(registered[1]?.auth, {
+    assert.equal(registered[2]?.contextMode, "explicit");
+    assert.deepEqual(registered[2]?.auth, {
         enabled: true,
         provider: "token",
         token: "0123456789abcdef0123456789abcdef"
@@ -548,7 +563,7 @@ test("config editor reconciles instance MCP bindings from patches without restar
     await service.disableInstance({ instanceName: "demo-local" });
     assert.deepEqual(unregistered, ["demo-local"]);
     await service.enableInstance({ instanceName: "demo-local" });
-    assert.equal(registered.length, 3);
+    assert.equal(registered.length, 4);
     await service.deleteInstance({ instanceName: "demo-local" });
     assert.deepEqual(unregistered, ["demo-local", "demo-local"]);
     assert.equal(registry.get("demo-local"), undefined);

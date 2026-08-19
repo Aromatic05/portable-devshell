@@ -435,6 +435,7 @@ export class ConfigEditorCoordinator {
             try {
                 await descriptor.worker.reconfigure(toWorkerReconfigureInput(existing));
                 descriptor.mcpCapabilities = [...existing.mcp.tools.capabilities];
+                descriptor.mcpContextMode = existing.mcp.contextMode;
                 descriptor.mcpGroups = [...existing.mcp.tools.groups];
                 descriptor.enabled = existing.enabled;
                 descriptor.mcpEnabled = existing.mcp.enabled;
@@ -476,6 +477,7 @@ export class ConfigEditorCoordinator {
         }
         await descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
         descriptor.mcpCapabilities = [...instance.mcp.tools.capabilities];
+        descriptor.mcpContextMode = instance.mcp.contextMode;
         descriptor.mcpGroups = [...instance.mcp.tools.groups];
         descriptor.enabled = instance.enabled;
         descriptor.mcpEnabled = instance.mcp.enabled;
