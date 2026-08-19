@@ -29,29 +29,48 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
     const publicValue = runtime.runtime === "running" && !oauthBlocked && endpoint.reason === undefined
         ? endpoint.value.replace(/^endpoint=/, "")
         : "unavailable";
+    const currentAuthMode = readPath(instanceConfig, "mcp.auth");
     const authMode = readPath(instanceDraft, "mcp.auth");
     const webAuthMode = readPath(webDraft, "auth");
+    const restartPending = state.ui.controlRestartRequired;
+    const configuredPublicValue = endpoint.reason === undefined
+        ? endpoint.value.replace(/^endpoint=/, "")
+        : "unavailable";
 
     return [
         makeBox(state, "connections", instanceName, {
-            detailLines: [
-                `Local MCP          ${localValue}`,
-                `Public MCP         ${publicValue}`,
-                `Web UI             ${webEndpoint.value}`,
-                `Runtime            ${runtime.runtime}`,
-                `Auth               ${String(authMode ?? "none")}`,
-                ...(runtime.reason === "ready" ? [] : [`Runtime reason     ${runtime.reason}`]),
-                ...(localEndpoint.reason === undefined ? [] : [`Local reason       ${localEndpoint.reason}`]),
-                ...(endpoint.reason === undefined ? [] : [`Public reason      ${endpoint.reason}`]),
-                ...(webEndpoint.reason === undefined ? [] : [`Web reason         ${webEndpoint.reason}`]),
-            ],
+            detailLines: restartPending
+                ? [
+                      `Configured local   ${localEndpoint.value}`,
+                      `Configured public  ${configuredPublicValue}`,
+                      `Configured Web UI  ${webEndpoint.value}`,
+                      `Configured auth    ${String(currentAuthMode ?? "none")}`,
+                      "State              saved configuration is not live",
+                      "Action             Restart Control to apply endpoint changes",
+                  ]
+                : [
+                      `Local MCP          ${localValue}`,
+                      `Public MCP         ${publicValue}`,
+                      `Web UI             ${webEndpoint.value}`,
+                      `Runtime            ${runtime.runtime}`,
+                      `Auth               ${String(currentAuthMode ?? "none")}`,
+                      ...(runtime.reason === "ready" ? [] : [`Runtime reason     ${runtime.reason}`]),
+                      ...(localEndpoint.reason === undefined ? [] : [`Local reason       ${localEndpoint.reason}`]),
+                      ...(endpoint.reason === undefined ? [] : [`Public reason      ${endpoint.reason}`]),
+                      ...(webEndpoint.reason === undefined ? [] : [`Web reason         ${webEndpoint.reason}`]),
+                  ],
             id: "connection-endpoints",
-            status: runtime.runtime === "running" ? "ready" : runtime.runtime === "disabled" ? "disabled" : "warning",
-            summaryLines: [
-                `local=${localValue}`,
-                `public=${publicValue}`,
-            ],
-            title: "Connection Endpoints",
+            status: restartPending
+                ? "warning"
+                : runtime.runtime === "running" && runtime.reason === "ready"
+                  ? "ready"
+                  : runtime.runtime === "disabled"
+                    ? "disabled"
+                    : "warning",
+            summaryLines: restartPending
+                ? ["saved configuration pending Control restart"]
+                : [`local=${localValue}`, `public=${publicValue}`],
+            title: `Connection Endpoints${restartPending ? " [RESTART REQUIRED]" : ""}`,
         }),
         makeBox(state, "connections", instanceName, {
             detailLines: [

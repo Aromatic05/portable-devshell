@@ -7,15 +7,25 @@ import { compactSummary, formatField, makeBox } from "../TuiPageBoxSupport.js";
 export function buildConnectionsOverviewBoxes(state: TuiAppState, instance: string): BoxModel[] {
     const entry = state.instances.find((candidate) => candidate.name === instance);
     const mcp = asRecord(state.readModel.configView?.mcp);
-    const auth = asRecord(mcp?.auth);
-    const authMode = typeof auth?.mode === "string" ? auth.mode : "none";
+    const instanceConfig = Array.isArray(state.readModel.configView?.instances)
+        ? state.readModel.configView.instances.find((candidate) => asRecord(candidate)?.name === instance)
+        : undefined;
+    const instanceMcp = asRecord(asRecord(instanceConfig)?.mcp);
+    const authMode = typeof instanceMcp?.auth === "string" ? instanceMcp.auth : "none";
     const running = state.readModel.mcpStatus?.running === true;
     const pendingOAuth = state.readModel.oauthApprovals.filter((approval) => approval.status === "pending").length;
     const snapshot = state.readModel.instanceState[instance]?.snapshot;
     const enabled = entry?.mcpEnabled === true;
-    const runtime = !enabled ? "disabled" : running ? "running" : "stopped";
+    const restartPending = state.ui.controlRestartRequired;
+    const runtime = restartPending ? "restart required" : !enabled ? "disabled" : running ? "running" : "stopped";
     const path = entry?.mcpPath ?? `/${instance}/mcp`;
-    const publicEndpoint = running && enabled ? publicMcpEndpoint(mcp?.publicBaseUrl, path) : "unavailable";
+    const oauthBlocked = authMode === "oauth2" && state.readModel.mcpStatus?.oauthReady !== true;
+    const usable = !restartPending && running && enabled && !oauthBlocked;
+    const publicEndpoint = restartPending
+        ? "pending Control restart"
+        : usable
+          ? publicMcpEndpoint(mcp?.publicBaseUrl, path)
+          : "unavailable";
 
     return [
         makeBox(state, "connections", instance, {
@@ -27,22 +37,22 @@ export function buildConnectionsOverviewBoxes(state: TuiAppState, instance: stri
             ],
             id: "connections:connector:mcp",
             primaryRoute: { connectorId: "mcp", page: "connections", view: "connector" },
-            status: running && enabled ? "ready" : !enabled ? "disabled" : "warning",
+            status: usable ? "ready" : !restartPending && !enabled ? "disabled" : "warning",
             summaryLines: [compactSummary(["runtime", runtime], ["path", path])],
             title: "Connector"
         }),
-        makeBox(state, "connections", instance, {
+        ...(authMode === "oauth2" ? [makeBox(state, "connections", instance, {
             detailLines: [
                 formatField("Provider", authMode),
-                formatField("Ready", String(state.readModel.mcpStatus?.oauthReady === true)),
+                formatField("Ready", restartPending ? "pending Control restart" : String(state.readModel.mcpStatus?.oauthReady === true)),
                 formatField("Pending", String(pendingOAuth))
             ],
             id: "connections:oauth:default",
             primaryRoute: { page: "connections", providerId: "default", view: "oauth" },
-            status: authMode !== "oauth2" ? "disabled" : state.readModel.mcpStatus?.oauthReady === true ? "ready" : "failed",
+            status: restartPending ? "warning" : state.readModel.mcpStatus?.oauthReady === true ? "ready" : "failed",
             summaryLines: [compactSummary(["provider", authMode], ["pending", String(pendingOAuth)])],
             title: "OAuth Provider"
-        }),
+        })] : []),
         ...(entry?.provider === "reverse" ? [makeBox(state, "connections", instance, {
             detailLines: [
                 formatField("Provider", entry.provider),

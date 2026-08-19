@@ -2010,6 +2010,47 @@ test("connector editor presents only live endpoints and scopes unsaved feedback"
             "[Instance] Auth",
         ],
     );
+
+    harness.store.setFormDraft("config:alpha", {
+        mcp: {
+            auth: "oauth2",
+            enabled: true,
+            oauth2: { requiredScopes: ["mcp"], resourceName: "alpha" },
+            path: "/alpha/custom-mcp",
+        },
+        name: "alpha",
+        provider: "local",
+    }, true);
+    const dirtyInstance = selectMainScreenModel(harness.store.getState());
+    assert.equal(
+        dirtyInstance.boxes.find((box) => box.id === "connection-endpoints")
+            ?.expandedLines.some((line) => line.text.startsWith("Auth") && line.text.includes("none")),
+        true,
+    );
+    assert.deepEqual(
+        dirtyInstance.boxes.slice(1, 5).map((box) => box.title),
+        [
+            "[Instance] MCP Endpoint [UNSAVED]",
+            "[Global] Public Base URL",
+            "[Global] Web UI [UNSAVED]",
+            "[Instance] Auth [UNSAVED]",
+        ],
+    );
+
+    harness.store.setControlRestartRequired(true);
+    const restartPending = selectMainScreenModel(harness.store.getState())
+        .boxes.find((box) => box.id === "connection-endpoints");
+    assert.equal(restartPending?.title, "Connection Endpoints [RESTART REQUIRED]");
+    assert.deepEqual(
+        restartPending?.collapsedLines.map((line) => line.text),
+        ["saved configuration pending Control restart"],
+    );
+    assert.equal(
+        restartPending?.expandedLines.some(
+            (line) => line.text === "State              saved configuration is not live",
+        ),
+        true,
+    );
 });
 
 test("connections overview hides reverse-only navigation and shows the usable MCP endpoint", () => {
@@ -2019,7 +2060,7 @@ test("connections overview hides reverse-only navigation and shows the usable MC
             instances: [
                 {
                     enabled: true,
-                    mcp: { enabled: true, path: "/alpha/mcp" },
+                    mcp: { auth: "oauth2", enabled: true, path: "/alpha/mcp" },
                     name: "alpha",
                     provider: "local",
                 },
@@ -2031,7 +2072,7 @@ test("connections overview hides reverse-only navigation and shows the usable MC
                 publicBaseUrl: "https://example.test/tunnel",
             },
         },
-        mcpStatus: { authMode: "none", running: true },
+        mcpStatus: { authMode: "oauth2", oauthReady: true, running: true },
     });
     harness.store.setSelectedPage("connections");
 
@@ -2046,6 +2087,86 @@ test("connections overview hides reverse-only navigation and shows the usable MC
             (line) => line.text.startsWith("Public MCP") && line.text.includes("https://example.test/tunnel/alpha/mcp"),
         ),
         true,
+    );
+    const oauth = expandBox(harness, "connections:oauth:default");
+    assert.equal(
+        oauth.expandedLines.some(
+            (line) => line.text.startsWith("Provider") && line.text.includes("oauth2"),
+        ),
+        true,
+    );
+
+    harness.store.patchControlReadModel({
+        mcpStatus: { authMode: "oauth2", oauthReady: false, running: true },
+    });
+    const blockedOverview = selectMainScreenModel(harness.store.getState());
+    const blockedConnector = blockedOverview.boxes.find(
+        (box) => box.id === "connections:connector:mcp",
+    );
+    assert.equal(blockedConnector?.status, "warning");
+    assert.equal(
+        blockedConnector?.expandedLines.some(
+            (line) => line.text.startsWith("Public MCP") && line.text.includes("unavailable"),
+        ),
+        true,
+    );
+    assert.equal(
+        blockedOverview.boxes.find((box) => box.id === "connections:oauth:default")?.status,
+        "failed",
+    );
+
+    harness.store.setControlRestartRequired(true);
+    const restartOverview = selectMainScreenModel(harness.store.getState());
+    const restartConnector = restartOverview.boxes.find(
+        (box) => box.id === "connections:connector:mcp",
+    );
+    assert.equal(restartConnector?.status, "warning");
+    assert.equal(
+        restartConnector?.expandedLines.some(
+            (line) => line.text.startsWith("Runtime") && line.text.includes("restart required"),
+        ),
+        true,
+    );
+    assert.equal(
+        restartConnector?.expandedLines.some(
+            (line) => line.text.startsWith("Public MCP") && line.text.includes("pending Control restart"),
+        ),
+        true,
+    );
+    const restartOAuth = restartOverview.boxes.find(
+        (box) => box.id === "connections:oauth:default",
+    );
+    assert.equal(restartOAuth?.status, "warning");
+    assert.equal(
+        restartOAuth?.expandedLines.some(
+            (line) => line.text.startsWith("Ready") && line.text.includes("pending Control restart"),
+        ),
+        true,
+    );
+    harness.store.setControlRestartRequired(false);
+
+    harness.store.patchControlReadModel({
+        configView: {
+            instances: [
+                {
+                    enabled: true,
+                    mcp: { auth: "none", enabled: true, path: "/alpha/mcp" },
+                    name: "alpha",
+                    provider: "local",
+                },
+            ],
+            mcp: {
+                enabled: true,
+                listenHost: "127.0.0.1",
+                listenPort: 3210,
+                publicBaseUrl: "https://example.test/tunnel",
+            },
+        },
+        mcpStatus: { authMode: "none", oauthReady: false, running: true },
+    });
+    assert.deepEqual(
+        selectMainScreenModel(harness.store.getState()).boxes.map((box) => box.title),
+        ["Connector"],
     );
 });
 test("connector page actions send all affected scopes in one configuration transaction", async () => {
