@@ -18,7 +18,7 @@ export function Instances({
     const model = state.readModel;
     const [selected, setSelected] = useState<string>();
     const [confirmation, setConfirmation] = useState<{
-        action: "Start" | "Stop";
+        action: "Stop";
         instance: string;
     }>();
     const entry = model.instances.find(({ name }) => name === selected);
@@ -36,13 +36,14 @@ export function Instances({
             ? undefined
             : (entry.snapshot.status === "stopped" ? "Start" : "Stop");
 
-    return <section>
+    return <section className="instances-view">
         <h2>Instances</h2>
         {model.instances.length === 0
             ? <p className="empty">No instances are available.</p>
-            : <div className="instances">
+            : <div className={`instances${entry === undefined ? "" : " has-selection"}`}>
                 {model.instances.map((item) => <button
-                    className="instance card"
+                    aria-pressed={selected === item.name}
+                    className={`instance card${selected === item.name ? " selected" : ""}`}
                     key={item.name}
                     onClick={() => {
                         setSelected(item.name);
@@ -79,12 +80,17 @@ export function Instances({
                         state.operations[`start:${entry.name}`] !== undefined ||
                         state.operations[`stop:${entry.name}`] !== undefined
                     }
-                    onClick={() => setConfirmation({
-                        action: lifecycleAction,
-                        instance: entry.name,
-                    })}
+                    onClick={() => {
+                        if (lifecycleAction === "Start") {
+                            void store.start(entry.name);
+                            return;
+                        }
+                        setConfirmation({ action: "Stop", instance: entry.name });
+                    }}
                 >
-                    {lifecycleAction}
+                    {lifecycleAction === "Start" && state.operations[`start:${entry.name}`] !== undefined
+                        ? "Starting…"
+                        : lifecycleAction}
                 </button>}
             </div>
             <h4>Recent logs</h4>
@@ -98,9 +104,7 @@ export function Instances({
             description={`${confirmation.action} ${confirmation.instance}?`}
             onCancel={() => setConfirmation(undefined)}
             onConfirm={() => {
-                const request = confirmation.action === "Start"
-                    ? store.start(confirmation.instance)
-                    : store.stop(confirmation.instance);
+                const request = store.stop(confirmation.instance);
                 void request.finally(() => setConfirmation(undefined));
             }}
         />}

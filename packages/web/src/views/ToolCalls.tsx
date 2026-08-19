@@ -254,7 +254,7 @@ export function ToolCalls({
 
     return <section>
         <div className="audit-heading">
-            <h2>Tool Calls</h2>
+            <h2>Audit · Tool Calls</h2>
             <div className="actions audit-actions">
                 <button disabled={!interactive || refreshing} onClick={() => void refreshAll()} type="button">
                     {refreshing ? "Refreshing…" : "Refresh all"}

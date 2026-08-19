@@ -21,6 +21,7 @@ export function Login({
     return <main className="session">
         <form onSubmit={(event) => void submit(event)}>
             <h1>portable-devshell</h1>
+            <p className="hint">Enter the access token configured for the Web UI in TUI → Connections → Connector.</p>
             <label>
                 Access token
                 <input

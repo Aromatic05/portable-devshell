@@ -174,7 +174,6 @@ async function exerciseInstanceLifecycle(devtools, instanceName, timeoutMs) {
     );
 
     await clickButton(devtools, "Start", { outsideDialog: true });
-    await clickButton(devtools, "Start", { insideDialog: true });
     await waitForCondition(
         devtools,
         `document.body?.innerText.includes('Runtime: ready') === true`,
@@ -230,7 +229,11 @@ async function waitForCondition(devtools, expression, timeoutMs, message) {
         }
         await delay(100);
     }
-    throw new Error(message);
+    const page = await devtools.send("Runtime.evaluate", {
+        expression: "document.body?.innerText ?? ''",
+        returnByValue: true,
+    });
+    throw new Error(`${message}\n${String(page.result?.value ?? "")}`);
 }
 
 export function assertWebSmokeState(pageState, failures = [], expectedInstance = "testspace-local") {
