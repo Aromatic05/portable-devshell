@@ -23,13 +23,15 @@ import { waitForMcpEndpointAbortable } from "../McpEndpointCancellation.js";
 import { McpNativeToolResult, type McpEndpointResult } from "../McpEndpointResult.js";
 
 export class McpEndpointHandlerInteraction {
-    readonly #appTokens = new Map<string, string>();
+    readonly #appStates = new Map<string, { lastSeenAt: number; token: string }>();
 
     constructor(private readonly options: {
         gateway?: McpInstanceGateway;
         instanceName: string;
+        now?: () => number;
         watchHeartbeatMs?: number;
         watchPollMs?: number;
+        workspaceLivenessMs?: number;
     }) {}
 
     async call(
@@ -76,8 +78,10 @@ export class McpEndpointHandlerInteraction {
     ): Promise<JsonValue> {
         const request = readQuestion(input);
         const ctxId = requireCtxId(context);
-        if (!this.#appTokens.has(ctxId)) {
-            throw new Error("ask_question requires workspace_open to be called first for this ctxId.");
+        const app = this.#appStates.get(ctxId);
+        const now = (this.options.now ?? Date.now)();
+        if (app === undefined || now - app.lastSeenAt > (this.options.workspaceLivenessMs ?? 60_000)) {
+            throw new Error("ask_question requires an active Workspace App for this ctxId; call workspace_open again.");
         }
         const task = await gateway.readTodo(this.options.instanceName, { taskId: request.taskId });
         const taskRecord = asRecord(task);
@@ -173,11 +177,12 @@ export class McpEndpointHandlerInteraction {
         structuredContent: JsonValue,
         content: McpNativeToolResult["content"] = [],
     ): McpNativeToolResult {
-        let token = this.#appTokens.get(ctxId);
-        if (token === undefined) {
-            token = randomUUID();
-            this.#appTokens.set(ctxId, token);
-        }
+        const existing = this.#appStates.get(ctxId);
+        const token = existing?.token ?? randomUUID();
+        this.#appStates.set(ctxId, {
+            lastSeenAt: (this.options.now ?? Date.now)(),
+            token,
+        });
         return new McpNativeToolResult({
             _meta: { "portable-devshell/workspace": { token } },
             content,
@@ -363,7 +368,7 @@ export class McpEndpointHandlerInteraction {
         const ctxId = requireCtxId(context);
         const record = asRecord(input);
         const token = record === undefined ? undefined : record.token;
-        if (typeof token !== "string" || token !== this.#appTokens.get(ctxId)) {
+        if (typeof token !== "string" || token !== this.#appStates.get(ctxId)?.token) {
             throw new Error("Workspace App authorization is invalid for this ctxId.");
         }
     }

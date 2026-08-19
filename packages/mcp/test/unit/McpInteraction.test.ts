@@ -399,6 +399,30 @@ test("ask_question refuses to hold a call before Workspace is open", async () =>
     );
 });
 
+test("ask_question refuses to create a held call after the Workspace App lease expires", async () => {
+    const fake = createInteractionGateway();
+    let now = 1_000;
+    const handler = new McpEndpointHandlerInteraction({
+        gateway: fake.gateway,
+        instanceName: "demo",
+        now: () => now,
+        workspaceLivenessMs: 60_000,
+    });
+    await openWorkspace(handler);
+    now += 60_001;
+
+    await assert.rejects(
+        handler.call(
+            "ask_question",
+            { question: "Is anyone still there?", taskId: "task-1" },
+            context,
+            "call-agent-stale",
+        ),
+        /active Workspace App/i,
+    );
+    assert.equal(fake.waits.length, 0);
+});
+
 test("Workspace tool metadata uses one render tool and app-only action tools", () => {
     const definitions = new McpToolCatalogInteraction().list();
     const adapter = new McpToolSchemaAdapter();

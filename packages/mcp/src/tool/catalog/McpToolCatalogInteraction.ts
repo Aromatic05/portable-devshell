@@ -23,7 +23,7 @@ const appOnlyMeta: JsonValue = {
 export class McpToolCatalogInteraction {
     readonly #definitions: readonly ToolDefinition[] = [
         {
-            description: "Ask the user one question and wait for their answer without ending the current model turn. The Workspace must already have been opened once with workspace_open for this ctxId. Use this only when progress genuinely requires human input. The taskId must identify the durable task being worked on.",
+            description: "Ask the user one question and wait for their answer without ending the current model turn. An active Workspace App is required for this ctxId; call workspace_open again if the App is no longer active. Use this only when progress genuinely requires human input. The taskId must identify the durable task being worked on.",
             group: "interaction",
             inputSchema: {
                 additionalProperties: false,
