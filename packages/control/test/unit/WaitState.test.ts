@@ -58,6 +58,34 @@ test("WaitState cancels unresolved waits and rejects invalid transitions", () =>
     );
 });
 
+test("WaitState keeps resolved waits recoverable until model re-entry completes", () => {
+    const state = new WaitState({ waitId: () => "wait-fixed" });
+    const created = state.create(state.emptyDocument(), {
+        createdByCtxId: "ctx-1",
+        kind: "tmux",
+        targetId: "tmux-task-1",
+        taskId: "task-1",
+    });
+    const detached = state.detach(created.document, created.record.waitId);
+    const resolved = state.resolve(detached.document, created.record.waitId, { exitCode: 0 });
+    const claimed = state.claimRecovery(resolved.document, created.record.waitId, "claim-1");
+
+    assert.equal(claimed.record.status, "resolved");
+    assert.equal(claimed.record.recoveryClaimId, "claim-1");
+    assert.throws(
+        () => state.claimRecovery(claimed.document, created.record.waitId, "claim-2"),
+        /already claimed/u,
+    );
+
+    const released = state.releaseRecovery(claimed.document, created.record.waitId, "claim-1");
+    assert.equal(released.record.status, "resolved");
+    assert.equal(released.record.recoveryClaimId, undefined);
+    const reclaimed = state.claimRecovery(released.document, created.record.waitId, "claim-2");
+    const completed = state.completeRecovery(reclaimed.document, created.record.waitId, "claim-2");
+    assert.equal(completed.record.status, "consumed");
+    assert.equal(completed.record.recoveryClaimId, undefined);
+});
+
 test("WaitStore persists wait state atomically and detaches orphaned calls after restart", async () => {
     const root = await createTestTempDirectory("wait-store-");
     const filePath = join(root, "waits.json");

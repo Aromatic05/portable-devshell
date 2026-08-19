@@ -23,6 +23,8 @@ export interface WaitRecord extends WaitCreateInput {
     consumedAt?: string;
     createdAt: string;
     detachedAt?: string;
+    recoveryClaimedAt?: string;
+    recoveryClaimId?: string;
     resolvedAt?: string;
     result?: JsonValue;
     status: WaitStatus;

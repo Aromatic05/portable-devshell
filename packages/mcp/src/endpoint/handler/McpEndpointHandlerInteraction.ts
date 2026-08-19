@@ -12,6 +12,7 @@ import type {
 
 import {
     isMcpInteractionGateway,
+    isMcpWaitRecoveryGateway,
     isMcpWaitTrackingGateway,
     isMcpWorkspaceGateway,
     type McpInstanceGateway,
@@ -247,13 +248,31 @@ export class McpEndpointHandlerInteraction {
         input: JsonValue,
         context: ToolCallContext,
     ): Promise<JsonValue> {
-        const waitId = readWaitId(input, "workspace_wait_recover");
+        if (!isMcpWaitRecoveryGateway(gateway)) {
+            throw new Error(`Workspace recovery is unavailable for ${this.options.instanceName}.`);
+        }
+        const recovery = readWaitRecovery(input);
+        const waitId = recovery.waitId;
         const wait = (await gateway.listWaits(this.options.instanceName)).find((entry) => entry.waitId === waitId);
         if (
             wait === undefined || wait.createdByCtxId !== requireCtxId(context) ||
-            wait.kind !== "tmux" || wait.detachedAt === undefined || wait.status !== "resolved"
+            (wait.kind !== "tmux" && wait.kind !== "question") ||
+            wait.detachedAt === undefined || wait.status !== "resolved"
         ) {
             throw new Error(`Recoverable detached wait ${waitId} was not found for this ctxId.`);
+        }
+        if (recovery.action === "release") {
+            await gateway.releaseWaitRecovery(this.options.instanceName, waitId, recovery.claimId);
+            return { released: true, waitId };
+        }
+        if (recovery.action === "complete") {
+            const consumed = await gateway.completeWaitRecovery(this.options.instanceName, waitId, recovery.claimId);
+            return {
+                completed: true,
+                kind: consumed.kind,
+                targetId: consumed.targetId,
+                waitId: consumed.waitId,
+            };
         }
         if (wait.taskId === undefined) {
             throw new Error(`Recoverable detached wait ${waitId} is not attached to a durable task.`);
@@ -267,12 +286,15 @@ export class McpEndpointHandlerInteraction {
         if (task === undefined || task.status === "paused") {
             throw new Error(`Durable task ${wait.taskId} is not available for automatic recovery.`);
         }
-        const consumed = await gateway.consumeWait(this.options.instanceName, waitId);
+        const claimId = `recovery-${randomUUID()}`;
+        const claimed = await gateway.claimWaitRecovery(this.options.instanceName, waitId, claimId);
         return {
-            ...(consumed.result === undefined ? {} : { result: consumed.result }),
-            ...(consumed.taskId === undefined ? {} : { taskId: consumed.taskId }),
-            tmuxTaskId: consumed.targetId,
-            waitId: consumed.waitId,
+            claimId,
+            kind: claimed.kind,
+            ...(claimed.result === undefined ? {} : { result: claimed.result }),
+            ...(claimed.taskId === undefined ? {} : { taskId: claimed.taskId }),
+            targetId: claimed.targetId,
+            waitId: claimed.waitId,
         };
     }
 
@@ -458,6 +480,20 @@ function readWaitId(input: JsonValue, toolName: string): string {
     const record = asRecord(input);
     if (record === undefined) throw new Error(`${toolName} requires an object input.`);
     return text(record.waitId, "waitId");
+}
+
+function readWaitRecovery(input: JsonValue):
+    | { action: "claim"; waitId: string }
+    | { action: "complete" | "release"; claimId: string; waitId: string } {
+    const record = asRecord(input);
+    if (record === undefined) throw new Error("workspace_wait_recover requires an object input.");
+    const action = record.action;
+    const waitId = text(record.waitId, "waitId");
+    if (action === "claim") return { action, waitId };
+    if (action === "complete" || action === "release") {
+        return { action, claimId: text(record.claimId, "claimId"), waitId };
+    }
+    throw new Error("action must be claim, complete, or release.");
 }
 
 function readWorkspaceCursor(input: JsonValue): number {

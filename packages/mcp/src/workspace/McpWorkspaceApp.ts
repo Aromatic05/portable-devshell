@@ -206,6 +206,29 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
     return tasks.find(function (task) { return task.taskId === taskId; });
   }
 
+  async function dispatchRecovery(waitId, message, extra) {
+    var claimed = structured(await callTool("workspace_wait_recover", { action: "claim", waitId: waitId }, true));
+    var dispatched = false;
+    try {
+      await sendModelMessage(message, Object.assign({}, extra || {}, { recoveredWait: claimed }));
+      dispatched = true;
+      await callTool("workspace_wait_recover", {
+        action: "complete",
+        claimId: claimed.claimId,
+        waitId: waitId
+      }, true);
+    } catch (error) {
+      if (!dispatched && claimed && claimed.claimId) {
+        await callTool("workspace_wait_recover", {
+          action: "release",
+          claimId: claimed.claimId,
+          waitId: waitId
+        }, true).catch(function () {});
+      }
+      throw error;
+    }
+  }
+
   async function recoverDetachedWait() {
     if (recovering || !appToken || !snapshot) return;
     var background = Array.isArray(snapshot.background) ? snapshot.background : [];
@@ -217,10 +240,10 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
     if (!item) return;
     recovering = true;
     try {
-      var claimed = structured(await callTool("workspace_wait_recover", { waitId: item.waitId }, true));
-      await sendModelMessage(
+      await dispatchRecovery(
+        item.waitId,
         "Resume the portable-devshell task from its durable checkpoint. A detached background wait completed; do not repeat completed work.",
-        { recoveredWait: claimed }
+        { backgroundWait: item }
       );
       await refresh(false);
     } catch (error) {
@@ -387,10 +410,12 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
     var result = await act(waitId, "workspace_question_answer", { waitId: waitId, answer: answer });
     var task = result && result.taskId ? findTask(result.taskId) : null;
     if (result && result.detached && task && task.status !== "paused") {
-      await sendModelMessage(
+      await dispatchRecovery(
+        result.waitId,
         "Resume the portable-devshell task from its durable checkpoint. The user answered the detached question; use that answer and continue without repeating completed work.",
         { answeredQuestion: result }
       );
+      await refresh(false);
     }
   }
 

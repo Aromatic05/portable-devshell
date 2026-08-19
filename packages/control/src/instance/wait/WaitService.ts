@@ -54,6 +54,27 @@ export class WaitService {
         return record;
     }
 
+    async claimRecovery(waitId: string, claimId: string): Promise<WaitRecord> {
+        return await this.#commit(
+            "wait.recoveryClaimed",
+            (document) => this.#state.claimRecovery(document, waitId, claimId),
+        );
+    }
+
+    async releaseRecovery(waitId: string, claimId: string): Promise<WaitRecord> {
+        return await this.#commit(
+            "wait.recoveryReleased",
+            (document) => this.#state.releaseRecovery(document, waitId, claimId),
+        );
+    }
+
+    async completeRecovery(waitId: string, claimId: string): Promise<WaitRecord> {
+        return await this.#commit(
+            "wait.consumed",
+            (document) => this.#state.completeRecovery(document, waitId, claimId),
+        );
+    }
+
     async consume(waitId: string): Promise<WaitRecord> {
         return await this.#commit("wait.consumed", (document) => this.#state.consume(document, waitId));
     }

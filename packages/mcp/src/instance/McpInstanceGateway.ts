@@ -60,8 +60,11 @@ export interface McpInstanceGateway {
     listInstances(): Promise<JsonValue>;
     createWait?(instance: string, input: WaitCreateInput): Promise<WaitRecord>;
     cancelWait?(instance: string, waitId: string): Promise<WaitRecord>;
+    claimWaitRecovery?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
+    completeWaitRecovery?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
     detachWait?(instance: string, waitId: string): Promise<WaitRecord>;
     reattachWait?(instance: string, waitId: string, ownerCallId?: string): Promise<WaitRecord>;
+    releaseWaitRecovery?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
     consumeWait?(instance: string, waitId: string): Promise<WaitRecord>;
     resolveWait?(instance: string, waitId: string, result?: JsonValue): Promise<WaitRecord>;
     waitForWait?(instance: string, waitId: string): Promise<WaitRecord>;
@@ -126,6 +129,20 @@ export function isMcpInteractionGateway(
         gateway.listWaits !== undefined &&
         gateway.listApprovals !== undefined &&
         gateway.decideApproval !== undefined;
+}
+
+export type McpWaitRecoveryGateway = McpInteractionGateway & Required<Pick<
+    McpInstanceGateway,
+    "claimWaitRecovery" | "completeWaitRecovery" | "releaseWaitRecovery"
+>>;
+
+export function isMcpWaitRecoveryGateway(
+    gateway: McpInstanceGateway | undefined
+): gateway is McpWaitRecoveryGateway {
+    return isMcpInteractionGateway(gateway) &&
+        gateway.claimWaitRecovery !== undefined &&
+        gateway.completeWaitRecovery !== undefined &&
+        gateway.releaseWaitRecovery !== undefined;
 }
 
 export type McpWaitTrackingGateway = McpInteractionGateway & Required<Pick<

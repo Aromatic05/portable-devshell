@@ -46,6 +46,8 @@ export type InstanceEventType = ArtifactEventType
     | "wait.detached"
     | "wait.reattached"
     | "wait.resolved"
+    | "wait.recoveryClaimed"
+    | "wait.recoveryReleased"
     | "wait.consumed"
     | "wait.cancelled";
 

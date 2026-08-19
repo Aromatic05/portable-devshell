@@ -245,7 +245,7 @@ test("Workspace task control and detached-wait recovery use durable server state
 
     await assert.rejects(handler.call(
         "workspace_wait_recover",
-        { token, waitId: "wait-recover" },
+        { action: "claim", token, waitId: "wait-recover" },
         context,
         "call-recover-paused",
     ), /not available for automatic recovery/);
@@ -259,17 +259,56 @@ test("Workspace task control and detached-wait recovery use durable server state
 
     const recovered = await handler.call(
         "workspace_wait_recover",
-        { token, waitId: "wait-recover" },
+        { action: "claim", token, waitId: "wait-recover" },
         context,
         "call-recover",
-    );
-    assert.deepEqual(recovered, {
+    ) as { claimId: string; kind: string; result: JsonValue; targetId: string; taskId: string; waitId: string };
+    assert.match(recovered.claimId, /^recovery-/u);
+    assert.deepEqual({ ...recovered, claimId: "<claim>" }, {
+        claimId: "<claim>",
+        kind: "tmux",
         result: { task: { status: "0" } },
         taskId: "task-1",
-        tmuxTaskId: "tmux-task-1",
+        targetId: "tmux-task-1",
         waitId: "wait-recover",
     });
-    assert.equal(fake.waits.find((entry) => entry.waitId === "wait-recover")?.status, "consumed");
+    const claimed = fake.waits.find((entry) => entry.waitId === "wait-recover");
+    assert.equal(claimed?.status, "resolved");
+    assert.equal(claimed?.recoveryClaimId, recovered.claimId);
+
+    await assert.rejects(handler.call(
+        "workspace_wait_recover",
+        { action: "claim", token, waitId: "wait-recover" },
+        context,
+        "call-recover-duplicate",
+    ), /already claimed/u);
+
+    assert.deepEqual(await handler.call(
+        "workspace_wait_recover",
+        { action: "release", claimId: recovered.claimId, token, waitId: "wait-recover" },
+        context,
+        "call-recover-release",
+    ), { released: true, waitId: "wait-recover" });
+    assert.equal(claimed?.recoveryClaimId, undefined);
+
+    const reclaimed = await handler.call(
+        "workspace_wait_recover",
+        { action: "claim", token, waitId: "wait-recover" },
+        context,
+        "call-recover-again",
+    ) as { claimId: string };
+    assert.deepEqual(await handler.call(
+        "workspace_wait_recover",
+        { action: "complete", claimId: reclaimed.claimId, token, waitId: "wait-recover" },
+        context,
+        "call-recover-complete",
+    ), {
+        completed: true,
+        kind: "tmux",
+        targetId: "tmux-task-1",
+        waitId: "wait-recover",
+    });
+    assert.equal(claimed?.status, "consumed");
 });
 
 test("workspace_watch skips unrelated events and returns on the current Context event", async () => {
@@ -467,6 +506,37 @@ function createInteractionGateway(): {
                 status: "consumed" as const,
                 updatedAt: new Date().toISOString(),
             });
+            return structuredClone(record);
+        },
+        async claimWaitRecovery(_instance: string, waitId: string, claimId: string) {
+            const record = requireWait(waits, waitId);
+            if (record.status !== "resolved" || record.detachedAt === undefined) {
+                throw new Error(`Wait ${waitId} cannot be recovered.`);
+            }
+            if (record.recoveryClaimId !== undefined && record.recoveryClaimId !== claimId) {
+                throw new Error(`Wait ${waitId} recovery is already claimed.`);
+            }
+            record.recoveryClaimId = claimId;
+            record.recoveryClaimedAt = new Date().toISOString();
+            record.updatedAt = record.recoveryClaimedAt;
+            return structuredClone(record);
+        },
+        async releaseWaitRecovery(_instance: string, waitId: string, claimId: string) {
+            const record = requireWait(waits, waitId);
+            if (record.recoveryClaimId !== claimId) throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            delete record.recoveryClaimId;
+            delete record.recoveryClaimedAt;
+            record.updatedAt = new Date().toISOString();
+            return structuredClone(record);
+        },
+        async completeWaitRecovery(_instance: string, waitId: string, claimId: string) {
+            const record = requireWait(waits, waitId);
+            if (record.recoveryClaimId !== claimId) throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            delete record.recoveryClaimId;
+            delete record.recoveryClaimedAt;
+            record.consumedAt = new Date().toISOString();
+            record.status = "consumed";
+            record.updatedAt = record.consumedAt;
             return structuredClone(record);
         },
         async cancelWait(_instance: string, waitId: string) {

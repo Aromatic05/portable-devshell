@@ -31,12 +31,15 @@ export interface InstanceTodoPort {
 
 export interface InstanceWaitPort {
     cancel(waitId: string): Promise<WaitRecord>;
+    claimRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
+    completeRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
     consume(waitId: string): Promise<WaitRecord>;
     create(input: WaitCreateInput): Promise<WaitRecord>;
     detach(waitId: string): Promise<WaitRecord>;
     get(waitId: string): Promise<WaitRecord | undefined>;
     list(taskId?: string): Promise<WaitRecord[]>;
     reattach(waitId: string, ownerCallId?: string): Promise<WaitRecord>;
+    releaseRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
     resolve(waitId: string, result?: JsonValue): Promise<WaitRecord>;
     waitForResolution(waitId: string): Promise<WaitRecord>;
 }

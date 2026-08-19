@@ -102,7 +102,7 @@ test("Workspace App claims a resolved detached wait before one automatic model r
 
     await mount();
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 1");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 2");
 
     const firstEvents = await page.evaluate("window.__bridgeEvents || []") as string[];
     const firstMessage = firstEvents.indexOf("message");
@@ -111,13 +111,16 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     await mount();
     await page.waitForTimeout(100);
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
-    assert.equal(await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"), 1);
+    assert.equal(await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"), 2);
 
-    const recoverCall = await page.evaluate(
-        "(window.__workspaceCalls || []).find(call => call.name === 'workspace_wait_recover')",
-    ) as { arguments?: Record<string, unknown> };
-    assert.equal(recoverCall.arguments?.token, "recovery-secret-token");
-    assert.equal(recoverCall.arguments?.waitId, "wait-recovery");
+    const recoverCalls = await page.evaluate(
+        "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover')",
+    ) as Array<{ arguments?: Record<string, unknown> }>;
+    assert.equal(recoverCalls[0]?.arguments?.action, "claim");
+    assert.equal(recoverCalls[0]?.arguments?.token, "recovery-secret-token");
+    assert.equal(recoverCalls[0]?.arguments?.waitId, "wait-recovery");
+    assert.equal(recoverCalls[1]?.arguments?.action, "complete");
+    assert.equal(recoverCalls[1]?.arguments?.claimId, "recovery-claim");
 });
 
 test("Workspace does not surface a detached tmux wait as another blocking event", BROWSER_TEST_OPTIONS, async (t) => {
@@ -226,7 +229,12 @@ window.addEventListener("message", function (event) {
         source.postMessage({ id: message.id, jsonrpc: "2.0", result: result }, "*");
     }
     if (message.method === "ui/initialize") {
-        reply({ protocolVersion: "2026-01-26" });
+        reply({
+            hostCapabilities: {},
+            hostContext: {},
+            hostInfo: { name: "test-host", version: "1.0.0" },
+            protocolVersion: "2026-01-26"
+        });
         return;
     }
     if (message.method === "ui/update-model-context") {
@@ -363,7 +371,12 @@ window.addEventListener("message", function (event) {
             method: "ui/notifications/tool-input",
             params: { arguments: { ctxId: "ctx-browser" } }
         }, "*");
-        reply({ protocolVersion: "2026-01-26" });
+        reply({
+            hostCapabilities: {},
+            hostContext: {},
+            hostInfo: { name: "test-host", version: "1.0.0" },
+            protocolVersion: "2026-01-26"
+        });
         return;
     }
     if (message.method === "ui/update-model-context") {
@@ -473,7 +486,12 @@ window.addEventListener("message", function (event) {
             method: "ui/notifications/tool-input",
             params: { arguments: { ctxId: "ctx-recovery" } }
         }, "*");
-        reply({ protocolVersion: "2026-01-26" });
+        reply({
+            hostCapabilities: {},
+            hostContext: {},
+            hostInfo: { name: "test-host", version: "1.0.0" },
+            protocolVersion: "2026-01-26"
+        });
         return;
     }
     if (message.method === "ui/update-model-context") {
@@ -503,15 +521,25 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (call.name === "workspace_wait_recover") {
-        window.__recovered = true;
-        reply({
-            structuredContent: {
+        if (call.arguments.action === "claim") {
+            reply({ structuredContent: {
+                claimId: "recovery-claim",
+                kind: "tmux",
                 result: { task: { status: "0" } },
                 taskId: "task-recovery",
-                tmuxTaskId: "tmux-recovery",
+                targetId: "tmux-recovery",
                 waitId: "wait-recovery"
-            }
-        });
+            } });
+            return;
+        }
+        if (call.arguments.action === "complete") {
+            window.__recovered = true;
+            reply({ structuredContent: { completed: true, kind: "tmux", targetId: "tmux-recovery", waitId: "wait-recovery" } });
+            return;
+        }
+        if (call.arguments.action === "release") {
+            reply({ structuredContent: { released: true, waitId: "wait-recovery" } });
+        }
     }
 });
 `;
@@ -564,7 +592,12 @@ window.addEventListener("message", function (event) {
             method: "ui/notifications/tool-input",
             params: { arguments: { ctxId: "ctx-resume" } }
         }, "*");
-        reply({ protocolVersion: "2026-01-26" });
+        reply({
+            hostCapabilities: {},
+            hostContext: {},
+            hostInfo: { name: "test-host", version: "1.0.0" },
+            protocolVersion: "2026-01-26"
+        });
         return;
     }
     if (message.method === "ui/update-model-context") {
@@ -647,7 +680,12 @@ window.addEventListener("message", function (event) {
             method: "ui/notifications/tool-input",
             params: { arguments: { ctxId: "ctx-detached" } }
         }, "*");
-        reply({ protocolVersion: "2026-01-26" });
+        reply({
+            hostCapabilities: {},
+            hostContext: {},
+            hostInfo: { name: "test-host", version: "1.0.0" },
+            protocolVersion: "2026-01-26"
+        });
         return;
     }
     if (message.method === "ui/update-model-context") {
@@ -680,6 +718,27 @@ window.addEventListener("message", function (event) {
             taskId: "task-detached",
             waitId: "wait-question-detached"
         } });
+        return;
+    }
+    if (call.name === "workspace_wait_recover") {
+        if (call.arguments.action === "claim") {
+            reply({ structuredContent: {
+                claimId: "detached-recovery-claim",
+                kind: "question",
+                result: { answer: "Continue" },
+                taskId: "task-detached",
+                targetId: "question-detached",
+                waitId: "wait-question-detached"
+            } });
+            return;
+        }
+        if (call.arguments.action === "complete") {
+            reply({ structuredContent: { completed: true, kind: "question", targetId: "question-detached", waitId: "wait-question-detached" } });
+            return;
+        }
+        if (call.arguments.action === "release") {
+            reply({ structuredContent: { released: true, waitId: "wait-question-detached" } });
+        }
     }
 });
 `;

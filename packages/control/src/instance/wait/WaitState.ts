@@ -9,6 +9,7 @@ import type {
 } from "@portable-devshell/shared";
 
 const MAX_TERMINAL_WAITS = 1_000;
+const RECOVERY_CLAIM_TTL_MS = 5 * 60_000;
 
 export interface WaitDocument {
     version: 1;
@@ -99,11 +100,58 @@ export class WaitState {
         });
     }
 
+    claimRecovery(document: WaitDocument, waitId: string, claimId: string): WaitTransition {
+        return this.#update(document, waitId, (record) => {
+            if (record.status !== "resolved" || record.detachedAt === undefined) {
+                throw invalidTransition(record, "claim recovery for");
+            }
+            const normalizedClaimId = text(claimId, "recoveryClaimId");
+            if (record.recoveryClaimId === normalizedClaimId) return record;
+            const now = this.#now();
+            const claimedAt = record.recoveryClaimedAt === undefined ? Number.NaN : Date.parse(record.recoveryClaimedAt);
+            if (
+                record.recoveryClaimId !== undefined && Number.isFinite(claimedAt) &&
+                Date.parse(now) - claimedAt < RECOVERY_CLAIM_TTL_MS
+            ) {
+                throw new Error(`Wait ${waitId} recovery is already claimed.`);
+            }
+            return {
+                ...record,
+                recoveryClaimedAt: now,
+                recoveryClaimId: normalizedClaimId,
+                updatedAt: now,
+            };
+        });
+    }
+
+    releaseRecovery(document: WaitDocument, waitId: string, claimId: string): WaitTransition {
+        return this.#update(document, waitId, (record) => {
+            if (record.status !== "resolved" || record.recoveryClaimId !== claimId) {
+                throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            }
+            const { recoveryClaimedAt: _claimedAt, recoveryClaimId: _claimId, ...rest } = record;
+            const now = this.#now();
+            return { ...rest, updatedAt: now };
+        });
+    }
+
+    completeRecovery(document: WaitDocument, waitId: string, claimId: string): WaitTransition {
+        return this.#update(document, waitId, (record) => {
+            if (record.status !== "resolved" || record.recoveryClaimId !== claimId) {
+                throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            }
+            const { recoveryClaimedAt: _claimedAt, recoveryClaimId: _claimId, ...rest } = record;
+            const now = this.#now();
+            return { ...rest, consumedAt: now, status: "consumed", updatedAt: now };
+        });
+    }
+
     consume(document: WaitDocument, waitId: string): WaitTransition {
         return this.#update(document, waitId, (record) => {
             if (record.status !== "resolved") throw invalidTransition(record, "consume");
+            const { recoveryClaimedAt: _claimedAt, recoveryClaimId: _claimId, ...rest } = record;
             const now = this.#now();
-            return { ...record, consumedAt: now, status: "consumed", updatedAt: now };
+            return { ...rest, consumedAt: now, status: "consumed", updatedAt: now };
         });
     }
 
@@ -155,6 +203,8 @@ function normalizeRecord(value: unknown): WaitRecord {
         kind: kind(value.kind),
         ...(typeof value.ownerCallId === "string" ? { ownerCallId: value.ownerCallId } : {}),
         ...("payload" in value ? { payload: value.payload as JsonValue } : {}),
+        ...(typeof value.recoveryClaimedAt === "string" ? { recoveryClaimedAt: value.recoveryClaimedAt } : {}),
+        ...(typeof value.recoveryClaimId === "string" ? { recoveryClaimId: value.recoveryClaimId } : {}),
         ...(typeof value.resolvedAt === "string" ? { resolvedAt: value.resolvedAt } : {}),
         ...("result" in value ? { result: value.result as JsonValue } : {}),
         status,

@@ -114,12 +114,24 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return await this.#requireWait(instance).cancel(waitId);
     }
 
+    async claimWaitRecovery(instance: string, waitId: string, claimId: string) {
+        return await this.#requireWait(instance).claimRecovery(waitId, claimId);
+    }
+
+    async completeWaitRecovery(instance: string, waitId: string, claimId: string) {
+        return await this.#requireWait(instance).completeRecovery(waitId, claimId);
+    }
+
     async detachWait(instance: string, waitId: string) {
         return await this.#requireWait(instance).detach(waitId);
     }
 
     async reattachWait(instance: string, waitId: string, ownerCallId?: string) {
         return await this.#requireWait(instance).reattach(waitId, ownerCallId);
+    }
+
+    async releaseWaitRecovery(instance: string, waitId: string, claimId: string) {
+        return await this.#requireWait(instance).releaseRecovery(waitId, claimId);
     }
 
     async consumeWait(instance: string, waitId: string) {
