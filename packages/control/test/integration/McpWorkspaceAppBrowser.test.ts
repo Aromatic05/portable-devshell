@@ -33,11 +33,16 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     const app = page.frameLocator("#workspace");
     await app.getByText("Activity", { exact: true }).waitFor({ state: "visible" });
     await app.getByText("Background", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("bash_run", { exact: true }).waitFor({ state: "visible" });
+    await app.locator(".title.mono").filter({ hasText: "bash_run" }).waitFor({ state: "visible" });
     await app.getByText("task-browser", { exact: true }).waitFor({ state: "visible" });
     await app.getByText("Live Workspace is connected", { exact: true }).waitFor({ state: "visible" });
     await app.getByText("Continue the task?", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("Approval required", { exact: true }).waitFor({ state: "visible" });
     await page.waitForFunction("(window.__modelContextUpdates || []).length >= 2");
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
+
+    await app.getByRole("button", { name: "Approve", exact: true }).click();
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_approval_decide')");
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
 
     await app.getByRole("button", { name: "Pause" }).click();
@@ -66,6 +71,7 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     const snapshotCall = calls.find((call) => call.name === "workspace_snapshot");
     const watchCall = calls.find((call) => call.name === "workspace_watch");
     const answerCall = calls.find((call) => call.name === "workspace_question_answer");
+    const approvalCall = calls.find((call) => call.name === "workspace_approval_decide");
     const taskCalls = calls.filter((call) => call.name === "workspace_task_control");
 
     assert.equal(snapshotCall?.arguments?.token, undefined);
@@ -73,6 +79,8 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     assert.equal(answerCall?.arguments?.token, "browser-secret-token");
     assert.equal(answerCall?.arguments?.ctxId, "ctx-browser");
     assert.equal(answerCall?.arguments?.waitId, "wait-question");
+    assert.equal(approvalCall?.arguments?.token, "browser-secret-token");
+    assert.equal(approvalCall?.arguments?.decision, "approve");
     assert.deepEqual(taskCalls.map((call) => call.arguments?.action), ["pause", "resume", "cancel"]);
     assert.equal(taskCalls.every((call) => call.arguments?.token === "browser-secret-token"), true);
     const bridgeEvents = await page.evaluate("window.__bridgeEvents || []") as string[];
@@ -141,6 +149,33 @@ test("Workspace explicit Resume does not double-trigger passive detached-wait re
     assert.equal(await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"), 0);
 });
 
+test("Workspace re-enters after a detached answer and guards manual background resume", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
+    await page.evaluate(DETACHED_INTERACTION_BRIDGE_SCRIPT);
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    const app = page.frameLocator("#workspace");
+    await app.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.waitForFunction("(window.__modelMessages || []).length === 1");
+
+    const resume = app.getByRole("button", { name: "Resume agent", exact: true });
+    await resume.waitFor({ state: "visible" });
+    await resume.click({ noWaitAfter: true });
+    await app.getByRole("button", { name: "Resume agent", exact: true }).waitFor({ state: "visible" });
+    assert.equal(await app.getByRole("button", { name: "Resume agent", exact: true }).isDisabled(), true);
+    await page.waitForFunction("(window.__modelMessages || []).length === 2");
+    await page.waitForTimeout(100);
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 2);
+});
+
 async function launchBrowser(): Promise<Browser> {
     if (CHROMIUM_EXECUTABLE === undefined) {
         throw new Error("A Chromium executable is required for this browser test.");
@@ -168,6 +203,7 @@ function resolveChromiumExecutable(): string | undefined {
 const BRIDGE_SCRIPT = String.raw`
 window.__workspaceCalls = [];
 window.__workspaceQuestionAnswered = false;
+window.__workspaceApprovalPending = true;
 window.__workspaceWatchCount = 0;
 window.__modelContextUpdates = [];
 window.__modelMessages = [];
@@ -183,7 +219,14 @@ function snapshot(withQuestion) {
             status: "running",
             toolName: "bash_run"
         }],
-        approvals: [],
+        approvals: window.__workspaceApprovalPending ? [{
+            approvalId: "approval-browser",
+            ctxId: "ctx-browser",
+            inputSummary: "git push origin v0.6.6",
+            riskLevel: "high",
+            status: "pending",
+            toolName: "bash_run"
+        }] : [],
         background: [{
             detachedAt: "2026-08-19T01:00:01.000Z",
             status: "detached",
@@ -282,6 +325,11 @@ window.addEventListener("message", function (event) {
     if (call.name === "workspace_question_answer") {
         window.__workspaceQuestionAnswered = true;
         reply({ structuredContent: { answer: "Continue", detached: true, taskId: "task-plan", waitId: "wait-question" } });
+        return;
+    }
+    if (call.name === "workspace_approval_decide") {
+        window.__workspaceApprovalPending = false;
+        reply({ structuredContent: { approvalId: call.arguments.approvalId, status: "approved" } });
         return;
     }
     if (call.name === "workspace_task_control") {
@@ -468,6 +516,97 @@ window.addEventListener("message", function (event) {
     }
     if (call.name === "workspace_wait_recover") {
         reply({ structuredContent: { taskId: "task-resume", waitId: "wait-resume" } });
+    }
+});
+`;
+const DETACHED_INTERACTION_BRIDGE_SCRIPT = String.raw`
+window.__modelMessages = [];
+window.__questionAnswered = false;
+
+function detachedInteractionSnapshot() {
+    return {
+        activity: [], approvals: [], waits: [],
+        background: [{
+            detachedAt: "2026-08-19T01:00:01.000Z",
+            status: "detached",
+            taskId: "task-detached",
+            tmuxTaskId: "tmux-detached",
+            updatedAt: "2026-08-19T01:00:02.000Z",
+            waitId: "wait-background-detached"
+        }],
+        ctxId: "ctx-detached",
+        cursor: 1,
+        instance: "browser-instance",
+        questions: window.__questionAnswered ? [] : [{
+            createdAt: "2026-08-19T01:00:00.000Z",
+            createdByCtxId: "ctx-detached",
+            kind: "question",
+            payload: { allowText: false, choices: ["Continue"], question: "Continue after restart?" },
+            status: "detached",
+            targetId: "question-detached",
+            taskId: "task-detached",
+            updatedAt: "2026-08-19T01:00:00.000Z",
+            waitId: "wait-question-detached"
+        }],
+        tasks: [{
+            checkpoint: { summary: "Recovered after host restart", updatedAt: "2026-08-19T01:00:00.000Z" },
+            completed: 1,
+            currentItem: "Continue recovered work",
+            status: "in_progress",
+            taskId: "task-detached",
+            title: "Detached interaction task",
+            total: 2
+        }]
+    };
+}
+
+window.addEventListener("message", function (event) {
+    if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
+    var source = event.source;
+    var message = event.data;
+    function reply(result) {
+        if (message.id === undefined) return;
+        source.postMessage({ id: message.id, jsonrpc: "2.0", result: result }, "*");
+    }
+    if (message.method === "ui/initialize") {
+        source.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-input",
+            params: { arguments: { ctxId: "ctx-detached" } }
+        }, "*");
+        reply({ protocolVersion: "2026-01-26" });
+        return;
+    }
+    if (message.method === "ui/update-model-context") {
+        reply({});
+        return;
+    }
+    if (message.method === "ui/message") {
+        window.__modelMessages.push(message.params || {});
+        setTimeout(function () { reply({}); }, 250);
+        return;
+    }
+    if (message.method !== "tools/call") return;
+    var call = message.params || {};
+    if (call.name === "workspace_snapshot") {
+        reply({
+            _meta: { "portable-devshell/workspace": { token: "detached-secret-token" } },
+            structuredContent: detachedInteractionSnapshot()
+        });
+        return;
+    }
+    if (call.name === "workspace_watch") {
+        reply({ structuredContent: { changed: false, cursor: 1 } });
+        return;
+    }
+    if (call.name === "workspace_question_answer") {
+        window.__questionAnswered = true;
+        reply({ structuredContent: {
+            answer: call.arguments.answer,
+            detached: true,
+            taskId: "task-detached",
+            waitId: "wait-question-detached"
+        } });
     }
 });
 `;

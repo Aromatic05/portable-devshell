@@ -280,6 +280,24 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
     }
   }
 
+  async function resumeBackground(taskId) {
+    if (busy.has(taskId)) return;
+    busy.add(taskId);
+    render();
+    try {
+      await sendModelMessage(
+        "Resume the portable-devshell task from its durable checkpoint. Reattach to any detached wait instead of repeating completed work.",
+        { resumedTaskId: taskId }
+      );
+    } catch (error) {
+      status.textContent = "Resume failed";
+      console.error(error);
+    } finally {
+      busy.delete(taskId);
+      render();
+    }
+  }
+
   function questionCard(wait) {
     var payload = wait && wait.payload && typeof wait.payload === "object" ? wait.payload : {};
     var choices = Array.isArray(payload.choices) ? payload.choices : [];
@@ -309,8 +327,9 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
 
   function backgroundCard(item) {
     var task = item.taskId ? findTask(item.taskId) : null;
+    var disabled = item.taskId && busy.has(item.taskId) ? " disabled" : "";
     var resume = item.detachedAt && task && task.status !== "paused" && item.status !== "resolved"
-      ? '<div class="row" style="margin-top:8px"><button class="primary" data-background-resume="' + escapeHtml(item.taskId) + '">Resume agent</button></div>'
+      ? '<div class="row" style="margin-top:8px"><button class="primary" data-background-resume="' + escapeHtml(item.taskId) + '"' + disabled + '>Resume agent</button></div>'
       : '';
     return '<div class="card"><div class="row between"><span class="title">Background task</span><span class="badge">' + escapeHtml(item.status || "") + '</span></div><div class="mono" style="margin-top:5px">' + escapeHtml(item.tmuxTaskId || "") + '</div>' + (item.detachedAt ? '<div class="muted" style="margin-top:4px">Detached from the previous host call</div>' : '') + resume + '</div>';
   }
@@ -369,10 +388,7 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
       return;
     }
     var resumeTaskId = target.getAttribute("data-background-resume");
-    if (resumeTaskId) void sendModelMessage(
-      "Resume the portable-devshell task from its durable checkpoint. Reattach to any detached wait instead of repeating completed work.",
-      { resumedTaskId: resumeTaskId }
-    );
+    if (resumeTaskId) void resumeBackground(resumeTaskId);
   });
 
   window.addEventListener("message", function (event) {
