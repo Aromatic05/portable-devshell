@@ -102,6 +102,7 @@ export function Instances({
             actionLabel={confirmation.action}
             busy={operation !== undefined && state.operations[operation] !== undefined}
             description={`${confirmation.action} ${confirmation.instance}?`}
+            disabled={!interactive}
             onCancel={() => setConfirmation(undefined)}
             onConfirm={() => {
                 const request = store.stop(confirmation.instance);

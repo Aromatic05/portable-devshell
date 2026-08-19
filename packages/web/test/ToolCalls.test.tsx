@@ -289,6 +289,20 @@ it("locks the instance from the selected Context", () => {
     expect(queueContextMessage).not.toHaveBeenCalled();
 });
 
+it("shows Context renewal as pending and prevents duplicate renewal", () => {
+    const renewContext = vi.fn(async () => true);
+    const store = { renewContext } as unknown as WebStore;
+    render(<ToolCalls
+        state={{ ...state, operations: { "context-renew:ctx-alpha": "pending" } }}
+        store={store}
+    />);
+
+    fireEvent.change(screen.getByLabelText("Context"), { target: { value: "context:ctx-alpha" } });
+
+    expect(screen.getByRole("button", { name: "Renewing…" })).toBeDisabled();
+    expect(renewContext).not.toHaveBeenCalled();
+});
+
 it("keeps the instance selectable when one Context is attached to multiple instances", () => {
     const multiInstanceState: WebState = {
         ...state,

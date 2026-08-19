@@ -46,3 +46,35 @@ it("identifies the exact instance and task before permanently deleting a Todo pr
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(deleteTodo).toHaveBeenCalledWith("alpha", "task-1"));
 });
+
+it("disables Todo deletion during a session-level operation", () => {
+    const state: WebState = {
+        connection: "online",
+        operations: {},
+        readModel: {
+            ...createInitialControlReadModelState(),
+            instances: [{ mcpEnabled: true, name: "alpha" }],
+            instanceState: {
+                alpha: {
+                    approvals: [],
+                    commentCalls: [],
+                    contextMessages: [],
+                    logs: [],
+                    sequence: 0,
+                    toolCalls: [],
+                    todo: {
+                        items: [{ content: "Ship", id: "ship", status: "in_progress" }],
+                        revision: 3,
+                        summary: { completed: 0, currentItemId: "ship", total: 1 },
+                        taskId: "task-1",
+                        title: "Release portable-devshell",
+                    },
+                },
+            },
+        },
+    };
+
+    render(<Todos disabled state={state} store={{} as WebStore} />);
+
+    expect(screen.getByRole("button", { name: "Delete project" })).toBeDisabled();
+});

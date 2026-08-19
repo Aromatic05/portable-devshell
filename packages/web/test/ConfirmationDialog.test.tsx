@@ -28,6 +28,18 @@ describe("ConfirmationDialog", () => {
         fireEvent.click(deny);
         expect(confirm).toHaveBeenCalledOnce();
     });
+
+    it("treats permanent deletion as destructive and keeps Cancel available when confirmation is disabled", () => {
+        const cancel = vi.fn();
+        render(<ConfirmationDialog actionLabel="Delete" busy={false} description="Delete project?" disabled onCancel={cancel} onConfirm={vi.fn()} />);
+
+        const cancelButton = screen.getByRole("button", { name: "Cancel" });
+        expect(cancelButton).toHaveFocus();
+        expect(cancelButton).toBeEnabled();
+        expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
+        fireEvent.click(cancelButton);
+        expect(cancel).toHaveBeenCalledOnce();
+    });
 });
 
 it("keeps focus inside the dialog while an operation is busy", () => {

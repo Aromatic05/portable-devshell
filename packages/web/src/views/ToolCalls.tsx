@@ -193,6 +193,8 @@ export function ToolCalls({
     const disableOperation = disableConfirmation === undefined
         ? undefined
         : `context-disable:${disableConfirmation.ctxId}`;
+    const renewOperation = concreteContext ? `context-renew:${ctxId}` : undefined;
+    const renewing = renewOperation !== undefined && state.operations[renewOperation] !== undefined;
 
     useEffect(() => {
         if (
@@ -297,11 +299,11 @@ export function ToolCalls({
                         Disable Context
                     </button>{" "}
                     <button
-                        disabled={!interactive}
+                        disabled={!interactive || renewing}
                         onClick={() => void store.renewContext(ctxId)}
                         type="button"
                     >
-                        Renew Context
+                        {renewing ? "Renewing…" : "Renew Context"}
                     </button>
                 </p> : null}
                 {contextRecord?.status === "active" ? <form onSubmit={(event) => void submit(event)}>
@@ -373,6 +375,7 @@ export function ToolCalls({
             actionLabel="Disable"
             busy={disableOperation !== undefined && state.operations[disableOperation] !== undefined}
             description={`Disable Context ${disableConfirmation.ctxId}${disableConfirmation.workspace === undefined ? "" : ` from workspace ${disableConfirmation.workspace}`} across all attached instances? This cannot be renewed; the client must establish a new Context.`}
+            disabled={!interactive}
             onCancel={() => setDisableConfirmation(undefined)}
             onConfirm={() => {
                 const request = store.disableContext(disableConfirmation.ctxId);

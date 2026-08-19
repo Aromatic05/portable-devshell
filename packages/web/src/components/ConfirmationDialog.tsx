@@ -4,19 +4,21 @@ export function ConfirmationDialog({
     actionLabel,
     busy,
     description,
+    disabled = false,
     onCancel,
     onConfirm,
 }: {
     actionLabel: string;
     busy: boolean;
     description: string;
+    disabled?: boolean;
     onCancel(): void;
     onConfirm(): void;
 }) {
     const cancelRef = useRef<HTMLButtonElement>(null);
     const confirmRef = useRef<HTMLButtonElement>(null);
     const dialogRef = useRef<HTMLElement>(null);
-    const destructive = actionLabel === "Deny" || actionLabel === "Disable" || actionLabel === "Stop";
+    const destructive = actionLabel === "Delete" || actionLabel === "Deny" || actionLabel === "Disable" || actionLabel === "Stop";
     const progressLabel = actionProgressLabel(actionLabel);
 
     useEffect(() => {
@@ -81,7 +83,7 @@ export function ConfirmationDialog({
                     <button disabled={busy} onClick={onCancel} ref={cancelRef}>Cancel</button>
                     <button
                         className={destructive ? "danger" : "primary"}
-                        disabled={busy}
+                        disabled={busy || disabled}
                         onClick={onConfirm}
                         ref={confirmRef}
                     >

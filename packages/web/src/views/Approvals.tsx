@@ -55,6 +55,7 @@ export function Approvals({
             actionLabel={selection.decision === "approve" ? "Approve" : "Deny"}
             busy={operation !== undefined && state.operations[operation] !== undefined}
             description={`${selection.decision === "approve" ? "Approve" : "Deny"} ${selection.label}?`}
+            disabled={controlsDisabled}
             onCancel={() => setSelection(undefined)}
             onConfirm={() => {
                 const request = selection.kind === "tool"
