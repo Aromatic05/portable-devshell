@@ -472,6 +472,7 @@ export class McpEndpointDispatch {
 
 function isAppOnlyInteractionTool(toolName: string): boolean {
     return toolName === "workspace_snapshot" ||
+        toolName === "workspace_watch" ||
         toolName === "workspace_question_answer" ||
         toolName === "workspace_approval_decide";
 }

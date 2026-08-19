@@ -9,9 +9,11 @@ import type {
 import type {
     ApprovalRequest,
     ContextMessageReadResult,
+    InstanceEvent,
     JsonValue,
     TodoReadInput,
     ToolCallContext,
+    ToolCallRecord,
     ToolDefinition,
     WaitCreateInput,
     WaitRecord
@@ -24,6 +26,12 @@ export interface McpSshInstanceCreateInput {
     name: string;
     port?: number;
     user?: string;
+}
+
+export interface McpWorkspaceEventSlice {
+    events: InstanceEvent[];
+    gap: boolean;
+    lastSeq: number;
 }
 
 export interface McpInstanceGateway {
@@ -58,6 +66,8 @@ export interface McpInstanceGateway {
     listWaits?(instance: string): Promise<WaitRecord[]>;
     listApprovals?(instance: string): Promise<ApprovalRequest[]>;
     decideApproval?(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<ApprovalRequest>;
+    readToolCalls?(instance: string, ctxId: string, limit: number): Promise<ToolCallRecord[]>;
+    readWorkspaceEvents?(instance: string, fromSeq: number): Promise<McpWorkspaceEventSlice>;
     consumeContextMessages?(instance: string, ctxId: string, callId: string): Promise<ContextMessageReadResult>;
     readTodo(instance: string, input?: TodoReadInput): Promise<JsonValue>;
     listTools(instance: string): ToolDefinition[];
@@ -124,4 +134,17 @@ export function isMcpWaitTrackingGateway(
     gateway: McpInstanceGateway | undefined
 ): gateway is McpWaitTrackingGateway {
     return isMcpInteractionGateway(gateway) && gateway.cancelWait !== undefined;
+}
+
+export type McpWorkspaceGateway = McpInteractionGateway & Required<Pick<
+    McpInstanceGateway,
+    "readToolCalls" | "readWorkspaceEvents"
+>>;
+
+export function isMcpWorkspaceGateway(
+    gateway: McpInstanceGateway | undefined
+): gateway is McpWorkspaceGateway {
+    return isMcpInteractionGateway(gateway) &&
+        gateway.readToolCalls !== undefined &&
+        gateway.readWorkspaceEvents !== undefined;
 }

@@ -6,6 +6,7 @@ export type McpToolCatalogInteractionName =
     | "ask_question"
     | "workspace_open"
     | "workspace_snapshot"
+    | "workspace_watch"
     | "workspace_question_answer"
     | "workspace_approval_decide";
 
@@ -79,10 +80,26 @@ export class McpToolCatalogInteraction {
             inputSchema: {
                 additionalProperties: false,
                 properties: { token: { minLength: 1, type: "string" } },
-                required: ["token"],
                 type: "object"
             },
             name: "workspace_snapshot",
+            outputSchema: objectOutput,
+            requiredCapabilities: [],
+        },
+        {
+            _meta: appOnlyMeta,
+            description: "Wait for relevant Workspace state changes after a cursor. App-only helper; models should not call it.",
+            group: "interaction",
+            inputSchema: {
+                additionalProperties: false,
+                properties: {
+                    cursor: { minimum: 0, type: "integer" },
+                    token: { minLength: 1, type: "string" },
+                },
+                required: ["cursor"],
+                type: "object",
+            },
+            name: "workspace_watch",
             outputSchema: objectOutput,
             requiredCapabilities: [],
         },

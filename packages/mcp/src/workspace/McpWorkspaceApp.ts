@@ -25,6 +25,7 @@ button.danger { color: #c43b3b; }
 button:disabled { opacity: .55; cursor: default; }
 input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, CanvasText 24%, transparent); border-radius: 8px; padding: 6px 8px; background: Canvas; color: CanvasText; }
 .badge { border-radius: 999px; padding: 2px 7px; font-size: 10px; background: color-mix(in srgb, CanvasText 10%, transparent); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
 .empty { padding: 14px 8px; text-align: center; font-size: 12px; color: color-mix(in srgb, CanvasText 55%, transparent); }
 .section-head { margin: 8px 2px 5px; font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; color: color-mix(in srgb, CanvasText 58%, transparent); }
 </style>
@@ -42,6 +43,8 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
   var appToken = "";
   var initialized = false;
   var snapshot = null;
+  var cursor = 0;
+  var watchGeneration = 0;
   var busy = new Set();
 
   function escapeHtml(value) {
@@ -60,10 +63,15 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
     window.parent.postMessage({ jsonrpc: "2.0", method: method, params: params || {} }, "*");
   }
 
-  function callTool(name, args) {
+  function callTool(name, args, requiresToken) {
     if (!initialized) return Promise.reject(new Error("Workspace App is not initialized"));
-    if (!appToken) return Promise.reject(new Error("Workspace App authorization is unavailable"));
-    return request("tools/call", { name: name, arguments: Object.assign({ ctxId: ctxId, token: appToken }, args || {}) });
+    if (requiresToken && !appToken) return Promise.reject(new Error("Workspace App authorization is unavailable"));
+    var input = Object.assign({ ctxId: ctxId }, args || {});
+    if (requiresToken) input.token = appToken;
+    return request("tools/call", { name: name, arguments: input }).then(function (result) {
+      acceptMeta(result && result._meta);
+      return result;
+    });
   }
 
   function structured(result) {
@@ -76,14 +84,44 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
   }
 
   async function refresh() {
-    if (!initialized || !ctxId || !appToken) return;
+    if (!initialized || !ctxId) return;
     try {
-      var result = await callTool("workspace_snapshot", {});
+      var result = await callTool("workspace_snapshot", {}, false);
       snapshot = structured(result);
-      status.textContent = snapshot && snapshot.instance ? snapshot.instance : "Connected";
+      if (snapshot && Number.isSafeInteger(snapshot.cursor)) cursor = snapshot.cursor;
+      status.textContent = snapshot && snapshot.instance ? snapshot.instance + " · live" : "Connected";
       render();
     } catch (error) {
       status.textContent = "Reconnecting";
+      throw error;
+    }
+  }
+
+  function sleep(milliseconds) {
+    return new Promise(function (resolve) { setTimeout(resolve, milliseconds); });
+  }
+
+  async function watch() {
+    var generation = ++watchGeneration;
+    while (generation === watchGeneration) {
+      try {
+        var result = await callTool("workspace_watch", { cursor: cursor }, false);
+        var update = structured(result) || {};
+        if (Number.isSafeInteger(update.cursor)) cursor = update.cursor;
+        if (update.changed && update.snapshot) {
+          snapshot = update.snapshot;
+          if (Number.isSafeInteger(snapshot.cursor)) cursor = snapshot.cursor;
+          render();
+        }
+        status.textContent = snapshot && snapshot.instance ? snapshot.instance + " · live" : "Connected";
+      } catch (error) {
+        if (generation !== watchGeneration) return;
+        status.textContent = "Reconnecting";
+        console.error(error);
+        await sleep(1000);
+        if (generation !== watchGeneration) return;
+        try { await refresh(); } catch (_) {}
+      }
     }
   }
 
@@ -91,13 +129,14 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
     try {
       await request("ui/initialize", {
         protocolVersion: "2026-01-26",
-        appInfo: { name: "portable-devshell-workspace", version: "0.6.1" },
+        appInfo: { name: "portable-devshell-workspace", version: "0.6.3" },
         appCapabilities: {}
       });
       notify("ui/notifications/initialized", {});
       initialized = true;
       status.textContent = "Connected";
       await refresh();
+      void watch();
     } catch (error) {
       status.textContent = "Host bridge unavailable";
       console.error(error);
@@ -109,7 +148,7 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
     busy.add(key);
     render();
     try {
-      await callTool(name, args);
+      await callTool(name, args, true);
       await refresh();
     } catch (error) {
       status.textContent = "Action failed";
@@ -140,16 +179,31 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
     return '<div class="card"><div class="row between"><span class="title">' + escapeHtml(task.title || task.taskId) + '</span><span class="badge">' + escapeHtml(task.status || "") + '</span></div><div class="muted" style="margin-top:5px">' + escapeHtml(task.currentItem || ((task.completed || 0) + "/" + (task.total || 0))) + '</div></div>';
   }
 
+  function backgroundCard(item) {
+    return '<div class="card"><div class="row between"><span class="title">Background task</span><span class="badge">' + escapeHtml(item.status || "") + '</span></div><div class="mono" style="margin-top:5px">' + escapeHtml(item.tmuxTaskId || "") + '</div>' + (item.detachedAt ? '<div class="muted" style="margin-top:4px">Detached from the previous host call</div>' : '') + '</div>';
+  }
+
+  function activityCard(item) {
+    var completed = item.completedAt ? ' · ' + escapeHtml(item.completedAt) : '';
+    var detail = item.inputSummary ? '<div class="muted" style="margin-top:5px">' + escapeHtml(item.inputSummary) + '</div>' : '';
+    var error = item.error ? '<div class="muted" style="margin-top:4px">' + escapeHtml(item.error) + '</div>' : '';
+    return '<div class="card"><div class="row between"><span class="title mono">' + escapeHtml(item.toolName || "tool") + '</span><span class="badge">' + escapeHtml(item.status || "") + '</span></div>' + detail + error + '<div class="muted" style="margin-top:5px">' + escapeHtml(item.startedAt || "") + completed + '</div></div>';
+  }
+
   function render() {
     if (!snapshot) return;
     var questions = Array.isArray(snapshot.questions) ? snapshot.questions : [];
     var approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
     var tasks = Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
+    var background = Array.isArray(snapshot.background) ? snapshot.background : [];
+    var activity = Array.isArray(snapshot.activity) ? snapshot.activity : [];
     var html = "";
     if (questions.length) html += '<div class="section-head">Questions</div>' + questions.map(questionCard).join("");
     if (approvals.length) html += '<div class="section-head">Approvals</div>' + approvals.map(approvalCard).join("");
-    if (tasks.length) html += '<div class="section-head">Current task</div>' + tasks.map(taskCard).join("");
-    if (!html) html = '<div class="empty">No pending human action.</div>';
+    if (tasks.length) html += '<div class="section-head">Current tasks</div>' + tasks.map(taskCard).join("");
+    if (background.length) html += '<div class="section-head">Background</div>' + background.map(backgroundCard).join("");
+    if (activity.length) html += '<div class="section-head">Activity</div>' + activity.map(activityCard).join("");
+    if (!html) html = '<div class="empty">No active work for this Context.</div>';
     root.innerHTML = html;
   }
 
@@ -202,7 +256,6 @@ input { flex: 1 1 180px; min-width: 0; border: 1px solid color-mix(in srgb, Canv
     ctxId = String(snapshot.ctxId);
     render();
   }
-  setInterval(refresh, 1500);
   void connect();
 })();
 </script>

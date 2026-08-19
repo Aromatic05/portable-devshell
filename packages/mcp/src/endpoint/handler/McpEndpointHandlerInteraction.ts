@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import type { JsonValue, ToolCallContext, WaitRecord } from "@portable-devshell/shared";
+import type { InstanceEvent, JsonValue, ToolCallContext, ToolCallRecord, WaitRecord } from "@portable-devshell/shared";
 
 import {
     isMcpInteractionGateway,
+    isMcpWorkspaceGateway,
     type McpInstanceGateway,
     type McpInteractionGateway
 } from "../../instance/McpInstanceGateway.js";
@@ -14,7 +15,12 @@ import { McpNativeToolResult, type McpEndpointResult } from "../McpEndpointResul
 export class McpEndpointHandlerInteraction {
     readonly #appTokens = new Map<string, string>();
 
-    constructor(private readonly options: { gateway?: McpInstanceGateway; instanceName: string }) {}
+    constructor(private readonly options: {
+        gateway?: McpInstanceGateway;
+        instanceName: string;
+        watchHeartbeatMs?: number;
+        watchPollMs?: number;
+    }) {}
 
     async call(
         toolName: McpToolCatalogInteractionName,
@@ -30,8 +36,9 @@ export class McpEndpointHandlerInteraction {
             case "workspace_open":
                 return await this.#openWorkspace(gateway, context);
             case "workspace_snapshot":
-                this.#assertAppToken(input, context);
-                return await this.#snapshot(gateway, context);
+                return await this.#readWorkspace(gateway, context);
+            case "workspace_watch":
+                return await this.#watchWorkspace(gateway, input, context, signal);
             case "workspace_question_answer":
                 this.#assertAppToken(input, context);
                 return await this.#answerQuestion(gateway, input, context);
@@ -95,18 +102,67 @@ export class McpEndpointHandlerInteraction {
         context: ToolCallContext,
     ): Promise<McpNativeToolResult> {
         const ctxId = requireCtxId(context);
+        const snapshot = await this.#snapshot(gateway, context);
+        return this.#workspaceResult(ctxId, snapshot, [
+            { type: "text", text: "portable-devshell Workspace opened." }
+        ]);
+    }
+
+    async #readWorkspace(
+        gateway: McpInteractionGateway,
+        context: ToolCallContext,
+    ): Promise<McpNativeToolResult> {
+        const ctxId = requireCtxId(context);
+        return this.#workspaceResult(ctxId, await this.#snapshot(gateway, context));
+    }
+
+    async #watchWorkspace(
+        gateway: McpInteractionGateway,
+        input: JsonValue,
+        context: ToolCallContext,
+        signal?: AbortSignal,
+    ): Promise<McpNativeToolResult> {
+        if (!isMcpWorkspaceGateway(gateway)) {
+            throw new Error(`Workspace live events are unavailable for ${this.options.instanceName}.`);
+        }
+        const ctxId = requireCtxId(context);
+        const startedAt = Date.now();
+        const heartbeatMs = this.options.watchHeartbeatMs ?? 20_000;
+        const pollMs = this.options.watchPollMs ?? 250;
+        let cursor = readWorkspaceCursor(input);
+
+        while (true) {
+            const batch = await gateway.readWorkspaceEvents(this.options.instanceName, cursor + 1);
+            const changed = batch.gap || batch.lastSeq < cursor || batch.events.some((event) => workspaceEventBelongsTo(event, ctxId));
+            cursor = batch.lastSeq;
+            if (changed) {
+                return this.#workspaceResult(ctxId, {
+                    changed: true,
+                    cursor,
+                    snapshot: await this.#snapshot(gateway, context),
+                });
+            }
+            if (Date.now() - startedAt >= heartbeatMs) {
+                return this.#workspaceResult(ctxId, { changed: false, cursor });
+            }
+            await waitForMcpEndpointAbortable(delay(pollMs), signal);
+        }
+    }
+
+    #workspaceResult(
+        ctxId: string,
+        structuredContent: JsonValue,
+        content: McpNativeToolResult["content"] = [],
+    ): McpNativeToolResult {
         let token = this.#appTokens.get(ctxId);
         if (token === undefined) {
             token = randomUUID();
             this.#appTokens.set(ctxId, token);
         }
-        const snapshot = await this.#snapshot(gateway, context);
         return new McpNativeToolResult({
-            _meta: {
-                "portable-devshell/workspace": { token }
-            },
-            content: [{ type: "text", text: "portable-devshell Workspace opened." }],
-            structuredContent: snapshot
+            _meta: { "portable-devshell/workspace": { token } },
+            content,
+            structuredContent,
         });
     }
 
@@ -141,10 +197,17 @@ export class McpEndpointHandlerInteraction {
 
     async #snapshot(gateway: McpInteractionGateway, context: ToolCallContext): Promise<JsonValue> {
         const ctxId = requireCtxId(context);
-        const [todo, waits, approvals] = await Promise.all([
+        const workspaceGateway = isMcpWorkspaceGateway(gateway) ? gateway : undefined;
+        const [todo, waits, approvals, activity, eventSlice] = await Promise.all([
             gateway.readTodo(this.options.instanceName),
             gateway.listWaits(this.options.instanceName),
             gateway.listApprovals(this.options.instanceName),
+            workspaceGateway?.readToolCalls(this.options.instanceName, ctxId, 30) ?? [],
+            workspaceGateway?.readWorkspaceEvents(this.options.instanceName, Number.MAX_SAFE_INTEGER) ?? {
+                events: [],
+                gap: false,
+                lastSeq: 0,
+            },
         ]);
         const todoRecord = asRecord(todo);
         const tasks = Array.isArray(todoRecord?.tasks)
@@ -152,8 +215,23 @@ export class McpEndpointHandlerInteraction {
             : [];
         const ownedWaits = waits.filter((wait) => wait.createdByCtxId === ctxId);
         return {
+            activity: activity
+                .filter((record) => !record.toolName.startsWith("workspace_"))
+                .slice()
+                .reverse()
+                .map(workspaceActivity),
             approvals: approvals.filter((approval) => approval.ctxId === ctxId && approval.status === "pending"),
+            background: ownedWaits
+                .filter((wait) => wait.kind === "tmux" && wait.status !== "consumed" && wait.status !== "cancelled")
+                .map((wait) => ({
+                    ...(wait.detachedAt === undefined ? {} : { detachedAt: wait.detachedAt }),
+                    status: wait.status,
+                    tmuxTaskId: wait.targetId,
+                    updatedAt: wait.updatedAt,
+                    waitId: wait.waitId,
+                })),
             ctxId,
+            cursor: eventSlice.lastSeq,
             instance: this.options.instanceName,
             questions: ownedWaits.filter((wait) => wait.kind === "question" && (wait.status === "waiting" || wait.status === "detached")),
             tasks,
@@ -210,6 +288,34 @@ function readApprovalDecision(input: JsonValue): { approvalId: string; decision:
     return { approvalId: text(record.approvalId, "approvalId"), decision };
 }
 
+function readWorkspaceCursor(input: JsonValue): number {
+    const record = asRecord(input);
+    const cursor = record?.cursor;
+    if (typeof cursor !== "number" || !Number.isSafeInteger(cursor) || cursor < 0) {
+        throw new Error("workspace_watch cursor must be a non-negative integer.");
+    }
+    return cursor;
+}
+
+function workspaceEventBelongsTo(event: InstanceEvent, ctxId: string): boolean {
+    const data = asRecord(event.data);
+    return data?.ctxId === ctxId || data?.createdByCtxId === ctxId;
+}
+
+function workspaceActivity(record: ToolCallRecord): JsonValue {
+    return {
+        callId: record.callId,
+        ...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
+        ...(record.error === undefined ? {} : { error: record.error }),
+        inputSummary: record.inputSummary,
+        startedAt: record.startedAt,
+        status: record.status,
+        ...(record.taskId === undefined ? {} : { taskId: record.taskId }),
+        ...(record.todoItemId === undefined ? {} : { todoItemId: record.todoItemId }),
+        toolName: record.toolName,
+    };
+}
+
 function validateQuestionAnswer(wait: WaitRecord, answer: string): void {
     const payload = asRecord(wait.payload) ?? {};
     const choices = Array.isArray(payload.choices)
@@ -249,4 +355,8 @@ function asRecord(value: unknown): { [key: string]: JsonValue } | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
         ? value as { [key: string]: JsonValue }
         : undefined;
+}
+
+async function delay(milliseconds: number): Promise<void> {
+    await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }

@@ -8,6 +8,7 @@ import {
     McpToolCatalogInteraction,
     McpToolSchemaAdapter,
     type McpInteractionGateway,
+    type McpWorkspaceGateway,
     workspaceAppResourceUri,
 } from "@portable-devshell/mcp/testing";
 
@@ -77,17 +78,143 @@ test("Workspace authorization stays in hidden metadata and gates app-only tools"
     const meta = opened._meta?.["portable-devshell/workspace"] as { token?: unknown } | undefined;
     if (typeof meta?.token !== "string") throw new Error("workspace token missing");
     assert.equal(JSON.stringify(opened.structuredContent).includes(meta.token), false);
-    await assert.rejects(
-        handler.call("workspace_snapshot", {}, context, "call-app"),
-        /authorization is invalid/i,
-    );
     const snapshot = await handler.call(
         "workspace_snapshot",
-        { token: meta.token },
+        {},
         context,
         "call-app",
     );
-    assert.equal((snapshot as { ctxId?: string }).ctxId, context.ctxId);
+    assert.ok(snapshot instanceof McpNativeToolResult);
+    assert.equal((snapshot.structuredContent as { ctxId?: string }).ctxId, context.ctxId);
+    assert.equal(JSON.stringify(snapshot.structuredContent).includes(meta.token), false);
+    await assert.rejects(
+        handler.call(
+            "workspace_approval_decide",
+            { approvalId: "approval-1", decision: "approve" },
+            context,
+            "call-app",
+        ),
+        /authorization is invalid/i,
+    );
+});
+
+test("Workspace snapshot projects live activity and background tasks without full tool payloads", async () => {
+    const fake = createInteractionGateway();
+    const now = new Date().toISOString();
+    fake.waits.push({
+        createdAt: now,
+        createdByCtxId: context.ctxId!,
+        kind: "tmux",
+        status: "detached",
+        targetId: "tmux-task-1",
+        updatedAt: now,
+        waitId: "wait-tmux",
+    });
+    const gateway = Object.assign(fake.gateway, {
+        async readToolCalls() {
+            return [{
+                callId: "call-1",
+                ctxId: context.ctxId,
+                input: { command: "secret full input" },
+                inputSummary: "bash_run command",
+                instance: "demo",
+                output: { stdout: "secret full output" },
+                source: "mcp" as const,
+                startedAt: now,
+                status: "running" as const,
+                toolName: "bash_run",
+            }];
+        },
+        async readWorkspaceEvents() {
+            return { events: [], gap: false, lastSeq: 7 };
+        },
+    }) as McpWorkspaceGateway;
+    const handler = new McpEndpointHandlerInteraction({ gateway, instanceName: "demo" });
+
+    const result = await handler.call("workspace_snapshot", {}, context, "call-app");
+    assert.ok(result instanceof McpNativeToolResult);
+    const snapshot = result.structuredContent as {
+        activity?: Array<Record<string, unknown>>;
+        background?: Array<Record<string, unknown>>;
+        cursor?: number;
+    };
+    assert.equal(snapshot.cursor, 7);
+    assert.equal(snapshot.background?.[0]?.tmuxTaskId, "tmux-task-1");
+    assert.equal(snapshot.activity?.[0]?.toolName, "bash_run");
+    assert.equal("input" in (snapshot.activity?.[0] ?? {}), false);
+    assert.equal("output" in (snapshot.activity?.[0] ?? {}), false);
+});
+
+test("workspace_watch skips unrelated events and returns on the current Context event", async () => {
+    const fake = createInteractionGateway();
+    let watchReads = 0;
+    const gateway = Object.assign(fake.gateway, {
+        async readToolCalls() { return []; },
+        async readWorkspaceEvents(_instance: string, fromSeq: number) {
+            if (fromSeq === Number.MAX_SAFE_INTEGER) {
+                return { events: [], gap: false, lastSeq: 2 };
+            }
+            watchReads += 1;
+            if (fromSeq === 1) {
+                return {
+                    events: [{
+                        at: new Date().toISOString(),
+                        data: { ctxId: "ctx-other" },
+                        instanceName: "demo",
+                        seq: 1,
+                        type: "toolCall.running" as const,
+                    }],
+                    gap: false,
+                    lastSeq: 1,
+                };
+            }
+            return {
+                events: [{
+                    at: new Date().toISOString(),
+                    data: { createdByCtxId: context.ctxId },
+                    instanceName: "demo",
+                    seq: 2,
+                    type: "wait.created" as const,
+                }],
+                gap: false,
+                lastSeq: 2,
+            };
+        },
+    }) as McpWorkspaceGateway;
+    const handler = new McpEndpointHandlerInteraction({
+        gateway,
+        instanceName: "demo",
+        watchHeartbeatMs: 100,
+        watchPollMs: 1,
+    });
+
+    const result = await handler.call("workspace_watch", { cursor: 0 }, context, "call-watch");
+    assert.ok(result instanceof McpNativeToolResult);
+    const update = result.structuredContent as { changed?: boolean; cursor?: number; snapshot?: { cursor?: number } };
+    assert.equal(update.changed, true);
+    assert.equal(update.cursor, 2);
+    assert.equal(update.snapshot?.cursor, 2);
+    assert.equal(watchReads, 2);
+});
+
+test("workspace_watch heartbeat advances its cursor without forcing a snapshot", async () => {
+    const fake = createInteractionGateway();
+    const gateway = Object.assign(fake.gateway, {
+        async readToolCalls() { return []; },
+        async readWorkspaceEvents() {
+            return { events: [], gap: false, lastSeq: 11 };
+        },
+    }) as McpWorkspaceGateway;
+    const handler = new McpEndpointHandlerInteraction({
+        gateway,
+        instanceName: "demo",
+        watchHeartbeatMs: 0,
+        watchPollMs: 1,
+    });
+
+    const result = await handler.call("workspace_watch", { cursor: 7 }, context, "call-watch");
+    assert.ok(result instanceof McpNativeToolResult);
+    assert.deepEqual(result.structuredContent, { changed: false, cursor: 11 });
 });
 
 test("ask_question refuses to hold a call before Workspace is open", async () => {
@@ -109,15 +236,19 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     const adapter = new McpToolSchemaAdapter();
     const open = definitions.find((definition) => definition.name === "workspace_open");
     const answer = definitions.find((definition) => definition.name === "workspace_question_answer");
+    const watch = definitions.find((definition) => definition.name === "workspace_watch");
     const ask = definitions.find((definition) => definition.name === "ask_question");
 
     assert.ok(open);
     assert.ok(answer);
+    assert.ok(watch);
     assert.ok(ask);
     const adaptedOpen = adapter.toMcpTool(open, open.description);
     const adaptedAnswer = adapter.toMcpTool(answer, answer.description);
+    const adaptedWatch = adapter.toMcpTool(watch, watch.description);
     assert.equal((adaptedOpen._meta as { ui?: { resourceUri?: string } })?.ui?.resourceUri, workspaceAppResourceUri);
     assert.deepEqual((adaptedAnswer._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
+    assert.deepEqual((adaptedWatch._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.equal(ask._meta, undefined);
 });
 

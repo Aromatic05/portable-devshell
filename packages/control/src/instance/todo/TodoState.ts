@@ -341,6 +341,7 @@ function todoEvent(
 ): TodoTransition["events"][number] {
     return {
         data: {
+            ...(state.activeCtxId === undefined ? {} : { ctxId: state.activeCtxId }),
             revision: state.revision,
             summary: summarize(state.items),
             taskId: state.taskId,

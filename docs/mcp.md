@@ -54,7 +54,7 @@ auth = "none"
 path = "/demo-local/mcp"
 
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo"]
+groups = ["file", "bash", "artifact", "tmux", "todo", "interaction"]
 capabilities = ["read", "write", "execute"]
 ```
 
@@ -100,11 +100,22 @@ requiredScopes = ["mcp"]
 | `bash`     | `bash_run`                                                                               | `execute`         |
 | `file`     | `file_read`、`file_edit`、`file_find`、`file_search`、`file_info`          | `read`、`write`   |
 | `artifact` | `artifact_read`、`artifact_viewImage`、`artifact_share`、`artifact_transfer`             | `read`、`write`   |
-| `tmux`     | `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_list`、`tmux_create`、`tmux_close`    | `read`、`execute` |
+| `tmux`     | `tmux_run`、`tmux_wait`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_list`、`tmux_create`、`tmux_close` | `read`、`execute` |
 | `todo`     | `todo_read`、`todo_write`                                                                | 无硬性 capability |
+| `interaction` | `workspace_open`、`ask_question`；另含仅 Workspace App 可调用的内部 helper               | 无硬性 capability |
 | `instance` | `instance_list`、`instance_status`、`instance_create`、`instance_connect`、`instance_stop` | `manage`          |
 
 默认不包含 `instance` group，也不授予 `manage`。`instance_connect` 是幂等的“确保可用”入口：目标未启动时由 Control 启动并连接，已经 ready 时不重复启动；可选 `workspace` 会作为当前 `ctxId` 在该 instance 上的 workspace attachment。`selfManaged` reverse worker 不由 Control 启动，`instance_connect` 只接受已经连入的 worker。`instance_stop` 仍只适用于由 Control 管理生命周期的 worker。用户从 TUI 定向发送给某个 Context 的 Comment 不作为独立 MCP 工具暴露；消息按 `ctxId` 排队，并附着到该 Context 下一次成功的普通工具结果中。
+
+## Workspace MCP App 与人工交互
+
+`workspace_open` 是 model-visible 的 Workspace 入口。它绑定当前 `ctxId`，并返回该 Context 的 authoritative snapshot。Workspace 会展示：当前 Todo task、最近工具活动摘要、等待中的 Question / Approval，以及已经进入 durable wait 的 tmux background task。
+
+Workspace 内部使用 `workspace_snapshot` 和 `workspace_watch` 保持 live state；这两个 helper 是 app-only，不应由模型主动调用。`workspace_watch` 复用 instance 现有的 event sequence cursor，只在当前 Context 的 `toolCall.*`、`approval.*`、`todo.*`、`wait.*` 事件发生时返回新 snapshot；事件历史出现 gap 或 Control 重启导致 cursor 失效时，直接重新读取 authoritative snapshot。正常无变化时只返回 heartbeat，不使用固定频率 snapshot polling。
+
+iframe remount 或 MCP/Control 重启后，读路径可以仅凭有效 `ctxId` 重新 snapshot/watch，并从返回 metadata 获得新的 app token；旧 token 不需要持久化。`workspace_question_answer` 和 `workspace_approval_decide` 属于人工写操作，仍必须携带当前隐藏 app token，并再次校验 `ctxId` 与目标 Question / Approval 的归属。
+
+`ask_question` 用于模型确实需要人类输入时挂起当前调用。调用前必须已经对同一 `ctxId` 执行过 `workspace_open`，并传入 durable `taskId`。Question 自身存入 durable Wait；Host 取消或 iframe remount 只会让等待 detached，不会丢失 Question，用户之后仍可在 Workspace 中回答。
 
 ## Skills 与项目记忆提示
 
@@ -205,6 +216,7 @@ artifact_viewImage 在 payload 分块读取边界停止，并关闭临时 lease
 control 侧工具     立即停止 MCP 等待；已经开始的生命周期或原子操作继续完成
 tmux_run           停止等待，已经启动的 task 继续运行
 tmux_read          停止等待且不消费尚未返回的输出
+tmux_wait          只分离当前等待；task 继续运行，transcript 不被消费，之后可继续等待同一 task id
 ```
 
 worker handshake 返回 `cancel = true`。本地 RPC、WSS 和 SSE + HTTPS POST 反向连接都允许取消请求在长工具运行期间到达 worker。工具调用历史使用 `cancelled`，等待审批时还会产生 `approval.cancelled`。

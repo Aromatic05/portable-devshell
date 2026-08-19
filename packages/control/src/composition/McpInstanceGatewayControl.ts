@@ -138,6 +138,17 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return await this.#requireDescriptor(instance).worker.listApprovals();
     }
 
+    async readToolCalls(instance: string, ctxId: string, limit: number) {
+        return await this.#requireDescriptor(instance).worker.readToolCalls({ ctxId, limit });
+    }
+
+    async readWorkspaceEvents(instance: string, fromSeq: number) {
+        const result = this.#requireDescriptor(instance).worker.subscribe(fromSeq);
+        return result.kind === "gap"
+            ? { events: [], gap: true, lastSeq: result.lastSeq }
+            : { events: result.events, gap: false, lastSeq: result.lastSeq };
+    }
+
     async decideApproval(instance: string, approvalId: string, decision: "approve" | "deny") {
         return await this.#requireDescriptor(instance).worker.decideApproval(approvalId, {
             decidedBy: "web",

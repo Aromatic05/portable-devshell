@@ -78,6 +78,10 @@ test("Workspace MCP App resource is listed and served with the MCP Apps MIME typ
         assert.match(String(read.body.result?.contents?.[0]?.text), /portable-devshell/);
         assert.match(String(read.body.result?.contents?.[0]?.text), /ui\/initialize/);
         assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_question_answer/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_watch/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /Background/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /Activity/);
+        assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /setInterval\(refresh/);
     } finally {
         await server.close();
         await binding.close();

@@ -29,6 +29,7 @@ test("TodoState owns validation, transitions, summaries, and associations", () =
 
     assert.equal(created.document.active[0]?.taskId, "task-fixed");
     assert.deepEqual(created.events.map((event) => event.type), ["todo.created"]);
+    assert.equal((created.events[0]?.data as { ctxId?: string }).ctxId, "ctx-1");
     assert.deepEqual(state.readResult(created.document, "Implement"), {
         items: [
             { content: "Inspect", id: "inspect", status: "completed" },
