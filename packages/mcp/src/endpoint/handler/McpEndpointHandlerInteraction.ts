@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type {
     ApprovalRequest,
+    ControlMcpContextMode,
     InstanceEvent,
     JsonValue,
     TodoTaskControlAction,
@@ -26,6 +27,7 @@ export class McpEndpointHandlerInteraction {
     readonly #appStates = new Map<string, { lastSeenAt: number; token: string }>();
 
     constructor(private readonly options: {
+        contextMode?: ControlMcpContextMode;
         gateway?: McpInstanceGateway;
         instanceName: string;
         now?: () => number;
@@ -81,7 +83,10 @@ export class McpEndpointHandlerInteraction {
         const app = this.#appStates.get(ctxId);
         const now = (this.options.now ?? Date.now)();
         if (app === undefined || now - app.lastSeenAt > (this.options.workspaceLivenessMs ?? 60_000)) {
-            throw new Error("ask_question requires an active Workspace App for this ctxId; call workspace_open again.");
+            const selector = this.options.contextMode === "openai-session"
+                ? "the current ChatGPT session"
+                : "this ctxId";
+            throw new Error(`ask_question requires an active Workspace App for ${selector}; call workspace_open again.`);
         }
         const task = await gateway.readTodo(this.options.instanceName, { taskId: request.taskId });
         const taskRecord = asRecord(task);
@@ -125,6 +130,11 @@ export class McpEndpointHandlerInteraction {
         context: ToolCallContext,
     ): Promise<McpNativeToolResult> {
         const ctxId = requireCtxId(context);
+        if (this.options.contextMode === "openai-session") {
+            return this.#workspaceResult(ctxId, { contextMode: "openai-session" }, [
+                { type: "text", text: "portable-devshell Workspace opened." }
+            ]);
+        }
         const snapshot = await this.#snapshot(gateway, context);
         return this.#workspaceResult(ctxId, snapshot, [
             { type: "text", text: "portable-devshell Workspace opened." }

@@ -1,4 +1,4 @@
-import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
+import type { ControlMcpContextMode, JsonValue, ToolDefinition } from "@portable-devshell/shared";
 
 import { workspaceAppResourceUri } from "../../workspace/McpWorkspaceApp.js";
 
@@ -200,7 +200,22 @@ export class McpToolCatalogInteraction {
         },
     ];
 
-    list(): ToolDefinition[] {
-        return this.#definitions.map((definition) => ({ ...definition }));
+    list(contextMode: ControlMcpContextMode = "explicit"): ToolDefinition[] {
+        return this.#definitions.map((definition) => {
+            if (contextMode !== "openai-session") return { ...definition };
+            if (definition.name === "ask_question") {
+                return {
+                    ...definition,
+                    description: "Ask the user one question and wait for their answer without ending the current model turn. An active Workspace App is required for the current ChatGPT session. Use this only when progress genuinely requires human input. The taskId must identify the durable task being worked on."
+                };
+            }
+            if (definition.name === "workspace_open") {
+                return {
+                    ...definition,
+                    description: "Open the portable-devshell Workspace control surface for the current ChatGPT session. Call once when the user needs persistent visibility or human interaction; ordinary tools do not need to reopen it."
+                };
+            }
+            return { ...definition };
+        });
     }
 }

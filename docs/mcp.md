@@ -52,6 +52,7 @@ provider = "local"
 [mcp]
 enabled = true
 auth = "none"
+contextMode = "explicit"
 path = "/demo-local/mcp"
 
 [mcp.tools]
@@ -91,6 +92,13 @@ requiredScopes = ["mcp"]
 ```
 
 工具策略只通过 `[mcp.tools]` 下的 `groups` 和 `capabilities` 表达。`path` 固定为 `/<instance>/mcp`，由 instance 名生成。
+
+`[mcp].contextMode` 决定环境 Context 的外部 selector：
+
+- `explicit`（默认）：`environ_info` 返回 `ctxId`，后续工具显式携带 `ctxId`。适用于任意 MCP client。
+- `openai-session`：仅用于会在每次 tool call 的 `_meta["openai/session"]` 中提供 ChatGPT session 标识的 Host。`environ_info` 不向模型返回 `ctxId`，后续工具 schema 也不包含 `ctxId`；服务端使用 `openai/session` 选择内部 Context。该值只用于 Context 选择，不用于授权。
+
+如果 endpoint 配置为 `openai-session`，但 client 没有提供 `openai/session`，调用会 fail closed；不会退回 MCP transport session，也不会自动切换成 explicit 模式。
 
 ## 工具组与能力
 

@@ -57,6 +57,7 @@ function tmuxWaitTool(): ToolDefinition {
 
 function createWorker(options: {
     cached?: boolean;
+    failAuditAfterOperation?: boolean;
     failToolCalled?: boolean;
     ready?: boolean;
     tools?: ToolDefinition[];
@@ -77,7 +78,9 @@ function createWorker(options: {
             operation: (callId: string) => Promise<T>
         ): Promise<T> {
             audited.push({ context, toolName });
-            return await operation("call-test");
+            const result = await operation("call-test");
+            if (options.failAuditAfterOperation === true) throw new Error("audit finalize failed");
+            return result;
         },
         async appendMcpSessionClosed(sessionId: string): Promise<void> {
             events.push({ data: { sessionId }, type: "closed" });
@@ -508,6 +511,100 @@ test("tmux_wait distinguishes host detach from explicit Workspace interruption",
     workerResolvers[1]!({ task: { id: "task-1", status: "0" } });
     assert.deepEqual(await resumedAgain, { task: { id: "task-1", status: "0" } });
     assert.equal(waits[1]?.status, "consumed");
+});
+
+test("OpenAI session Context replacement happens only after audited environ_info succeeds", async () => {
+    const ids = ["ctx-session-old", "ctx-session-new"];
+    const registry = new McpContextRegistry({ idFactory: () => ids.shift()! });
+    const oldContext = await registry.create({
+        instance: "demo-local",
+        principal: "tester",
+        workspace: "/projects/old"
+    });
+    await registry.bindOpenAiSession(oldContext.ctxId, "chat-session", {
+        instance: "demo-local",
+        principal: "tester"
+    });
+    const harness = createWorker({ failAuditAfterOperation: true });
+    const catalog = new McpEndpointCatalog({
+        contextMode: "openai-session",
+        instanceName: "demo-local",
+        policy: { capabilities: ["read"], groups: ["file"] },
+        worker: harness.worker,
+    });
+    const dispatch = new McpEndpointDispatch({
+        catalog,
+        contextMode: "openai-session",
+        contextRegistry: registry,
+        instanceName: "demo-local",
+        worker: harness.worker,
+    });
+
+    await assert.rejects(
+        dispatch.callTool(
+            "environ_info",
+            { workspace: "/projects/new" },
+            { openAiSessionId: "chat-session", principal: "tester", requestId: "request-session" },
+        ),
+        /audit finalize failed/u,
+    );
+
+    assert.equal(
+        (await registry.validateAndTouchOpenAiSession("chat-session", {
+            instance: "demo-local",
+            principal: "tester"
+        })).ctxId,
+        oldContext.ctxId
+    );
+    assert.deepEqual((await registry.list()).map(({ ctxId, status }) => ({ ctxId, status })), [
+        { ctxId: oldContext.ctxId, status: "active" }
+    ]);
+    assert.deepEqual(harness.releasedAlerts, ["/projects/new"]);
+});
+
+test("successful OpenAI session Context replacement retires the old environment", async () => {
+    const ids = ["ctx-session-old", "ctx-session-new"];
+    const registry = new McpContextRegistry({ idFactory: () => ids.shift()! });
+    const oldContext = await registry.create({
+        instance: "demo-local",
+        principal: "tester",
+        workspace: "/projects/old"
+    });
+    await registry.bindOpenAiSession(oldContext.ctxId, "chat-session", {
+        instance: "demo-local",
+        principal: "tester"
+    });
+    const harness = createWorker();
+    const catalog = new McpEndpointCatalog({
+        contextMode: "openai-session",
+        instanceName: "demo-local",
+        policy: { capabilities: ["read"], groups: ["file"] },
+        worker: harness.worker,
+    });
+    const dispatch = new McpEndpointDispatch({
+        catalog,
+        contextMode: "openai-session",
+        contextRegistry: registry,
+        instanceName: "demo-local",
+        worker: harness.worker,
+    });
+
+    await dispatch.callTool(
+        "environ_info",
+        { workspace: "/projects/new" },
+        { openAiSessionId: "chat-session", principal: "tester", requestId: "request-session" },
+    );
+
+    const selected = await registry.validateAndTouchOpenAiSession("chat-session", {
+        instance: "demo-local",
+        principal: "tester"
+    });
+    assert.equal(selected.workspace, "/projects/new");
+    assert.deepEqual((await registry.list()).map(({ ctxId, status }) => ({ ctxId, status })), [
+        { ctxId: oldContext.ctxId, status: "disabled" },
+        { ctxId: selected.ctxId, status: "active" }
+    ]);
+    assert.deepEqual(harness.releasedAlerts, ["/projects/old"]);
 });
 
 test("environ_info rolls back an undisclosed Context when post-create event recording fails", async () => {

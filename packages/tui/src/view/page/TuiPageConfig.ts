@@ -47,6 +47,7 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
         makeBox(state, "config", instanceName, {
             detailLines: [
                 choiceLine("mcp.enabled", "mcp.enabled", readPath(draft, "mcp.enabled")),
+                choiceLine("mcp.contextMode", "mcp.contextMode", readPath(draft, "mcp.contextMode")),
                 { id: "mcp-path", text: `mcp.path           ${stringValue(readPath(draft, "mcp.path"), `/${instanceName}/mcp`)} (fixed)` },
                 fieldLine("mcp.tools.groups", "groups", readPath(draft, "mcp.tools.groups")),
                 fieldLine("mcp.tools.capabilities", "capabilities", readPath(draft, "mcp.tools.capabilities")),
@@ -279,7 +280,7 @@ function instanceDraft(state: TuiAppState, instanceName: string): Record<string,
 
     return record === undefined ? {
         enabled: true,
-        mcp: { auth: "none", enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } },
+        mcp: { auth: "none", contextMode: "explicit", enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } },
         name: instanceName,
         provider: "local",
         security: { mode: "disabled" }

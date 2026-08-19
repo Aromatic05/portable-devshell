@@ -63,6 +63,20 @@ test("valid global and instance documents are assembled into canonical config", 
     }
 });
 
+test("instance TOML preserves MCP context selection mode", () => {
+    const instance = normalizeConfigInstanceDraft({
+        mcp: { contextMode: "openai-session" },
+        name: "chatgpt-local",
+        provider: "local"
+    });
+    const encoded = toml.encode(instanceDocument.encode(instance));
+    assert.match(encoded, /contextMode = "openai-session"/u);
+    assert.equal(
+        instanceDocument.decode(toml.decode(encoded)).mcp?.contextMode,
+        "openai-session"
+    );
+});
+
 test("version 1 global MCP auth migrates to each enabled namespace and writes version 2", async () => {
     const homeDirectory = await createTestTempDirectory("control-home");
     const token = "0123456789abcdef0123456789abcdef";

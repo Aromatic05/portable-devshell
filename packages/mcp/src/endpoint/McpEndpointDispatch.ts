@@ -1,4 +1,5 @@
 import {
+    type ControlMcpContextMode,
     createError,
     errorCodes,
     mergeComments,
@@ -39,6 +40,7 @@ export type {
 export interface McpEndpointDispatchOptions {
     catalog: McpEndpointCatalog;
     contextRegistry?: McpContextRegistry;
+    contextMode?: ControlMcpContextMode;
     gateway?: McpInstanceGateway;
     instanceName: string;
     readyWaitMs?: number;
@@ -49,6 +51,7 @@ export class McpEndpointDispatch {
     readonly #artifact: McpEndpointHandlerArtifact;
     readonly #catalog: McpEndpointCatalog;
     readonly #contextRegistry: McpContextRegistry;
+    readonly #contextMode: ControlMcpContextMode;
     readonly #environment: McpEndpointHandlerEnvironment;
     readonly #gateway?: McpInstanceGateway;
     readonly #instance: McpEndpointHandlerInstance;
@@ -62,6 +65,7 @@ export class McpEndpointDispatch {
     constructor(options: McpEndpointDispatchOptions) {
         this.#catalog = options.catalog;
         this.#contextRegistry = options.contextRegistry ?? new McpContextRegistry();
+        this.#contextMode = options.contextMode ?? "explicit";
         this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
         this.#worker = options.worker;
@@ -72,6 +76,8 @@ export class McpEndpointDispatch {
         this.#artifact = new McpEndpointHandlerArtifact(controlOptions);
         this.#environment = new McpEndpointHandlerEnvironment({
             contextRegistry: this.#contextRegistry,
+            contextMode: options.contextMode ?? "explicit",
+            gateway: options.gateway,
             instanceName: options.instanceName,
             worker: options.worker
         });
@@ -79,7 +85,10 @@ export class McpEndpointDispatch {
             ...controlOptions,
             contextRegistry: this.#contextRegistry
         });
-        this.#interaction = new McpEndpointHandlerInteraction(controlOptions);
+        this.#interaction = new McpEndpointHandlerInteraction({
+            ...controlOptions,
+            contextMode: options.contextMode
+        });
         this.#todo = new McpEndpointHandlerTodo(controlOptions);
         this.#workerHandler = new McpEndpointHandlerWorker({
             catalog: options.catalog,
@@ -129,15 +138,19 @@ export class McpEndpointDispatch {
             throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
         }
 
-        const contextInput = readMcpContextInput(input);
-        input = contextInput.input;
+        let ctxId: string | undefined;
+        if (this.#contextMode === "explicit") {
+            const contextInput = readMcpContextInput(input);
+            ctxId = contextInput.ctxId;
+            input = contextInput.input;
+        }
         const appOnlyInteraction = selected.owner === "interaction" && isAppOnlyInteractionTool(toolName);
         const routed = selected.owner === "worker" || selected.owner === "artifact"
             ? readMcpRoutedInput(input, snapshot.instanceRoutingEnabled, this.#instanceName)
             : { input, instance: this.#instanceName };
         const context = await this.#createToolContext(
             toolName,
-            contextInput.ctxId,
+            ctxId,
             requestContext,
             routed.instance,
             selected.owner === "worker",
@@ -372,16 +385,24 @@ export class McpEndpointDispatch {
 
     async #createToolContext(
         toolName: string,
-        ctxId: string,
+        ctxId: string | undefined,
         requestContext: McpEndpointCallContext,
         instance: string,
         prepareWorkerState: boolean,
         recordMcpCall: boolean,
         signal?: AbortSignal
     ): Promise<ToolCallContext> {
-        const record = await this.#contextRegistry.validateAndTouch(ctxId, {
-            principal: requestContext.principal
-        });
+        const record = this.#contextMode === "explicit"
+            ? await this.#contextRegistry.validateAndTouch(ctxId!, {
+                  principal: requestContext.principal
+              })
+            : await this.#contextRegistry.validateAndTouchOpenAiSession(
+                  requireOpenAiSessionId(requestContext),
+                  {
+                      instance: this.#instanceName,
+                      principal: requestContext.principal
+                  }
+              );
         const environment = prepareWorkerState
             ? await this.#ensureContextWorkerState(record, instance)
             : contextEnvironment(record, instance);
@@ -541,6 +562,15 @@ function isAppOnlyInteractionTool(toolName: string): boolean {
         toolName === "workspace_task_control" ||
         toolName === "workspace_wait_recover" ||
         toolName === "workspace_approval_decide";
+}
+
+function requireOpenAiSessionId(context: McpEndpointCallContext): string {
+    if (context.openAiSessionId !== undefined) return context.openAiSessionId;
+    throw createError({
+        code: errorCodes.mcpContextInvalid,
+        message: "This endpoint uses OpenAI session context mode, but the client did not provide _meta['openai/session'].",
+        retryable: false
+    });
 }
 
 function readTmuxTaskId(input: JsonValue): string | undefined {

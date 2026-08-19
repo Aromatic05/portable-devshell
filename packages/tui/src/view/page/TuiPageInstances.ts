@@ -180,6 +180,7 @@ function wizardFields(step: number, draft: Record<string, JsonValue>): Array<str
             const auth = readPath(draft, "mcp.auth");
             return [
                 choiceLine("mcp.enabled", "mcp.enabled", readPath(draft, "mcp.enabled")),
+                choiceLine("mcp.contextMode", "mcp.contextMode", readPath(draft, "mcp.contextMode")),
                 choiceLine("mcp.auth", "mcp.auth", auth),
                 ...(auth === "token"
                     ? [secretFieldLine("mcp.token", "token", readPath(draft, "mcp.token"))]

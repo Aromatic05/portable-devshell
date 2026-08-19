@@ -72,6 +72,79 @@ test("McpContextRegistry persists active contexts and renews their sliding expir
     }
 });
 
+test("McpContextRegistry keeps OpenAI session selectors private and durable", async () => {
+    const root = await createTestTempDirectory("context-openai-session");
+    const filePath = join(root, "contexts.json");
+    const ids = ["ctx-session-old", "ctx-session-current"];
+    let index = 0;
+
+    try {
+        const registry = new McpContextRegistry({
+            filePath,
+            idFactory: () => ids[index++]!
+        });
+        await registry.initialize();
+        const oldContext = await registry.create({
+            instance: "demo-local",
+            principal: "subject-1",
+            workspace: "/old"
+        });
+        await registry.bindOpenAiSession(oldContext.ctxId, "chat-session-1", {
+            instance: "demo-local",
+            principal: "subject-1"
+        });
+        assert.equal(
+            (await registry.validateAndTouchOpenAiSession("chat-session-1", {
+                instance: "demo-local",
+                principal: "subject-1"
+            })).ctxId,
+            oldContext.ctxId
+        );
+        assert.equal("openAiSessionId" in (await registry.list())[0]!, false);
+
+        const current = await registry.create({
+            instance: "demo-local",
+            principal: "subject-1",
+            workspace: "/current"
+        });
+        await registry.bindOpenAiSession(current.ctxId, "chat-session-1", {
+            instance: "demo-local",
+            principal: "subject-1"
+        });
+        assert.equal(
+            (await registry.validateAndTouchOpenAiSession("chat-session-1", {
+                instance: "demo-local",
+                principal: "subject-1"
+            })).ctxId,
+            current.ctxId
+        );
+        const publicContexts = await registry.list();
+        assert.equal(publicContexts.find(({ ctxId }) => ctxId === oldContext.ctxId)?.status, "disabled");
+        assert.equal(publicContexts.some((record) => "openAiSessionId" in record), false);
+        await assert.rejects(
+            registry.validateAndTouchOpenAiSession("chat-session-1", {
+                instance: "demo-local",
+                principal: "subject-2"
+            }),
+            hasCode("mcp.contextInvalid")
+        );
+
+        const reloaded = new McpContextRegistry({ filePath });
+        await reloaded.initialize();
+        assert.equal(
+            (await reloaded.validateAndTouchOpenAiSession("chat-session-1", {
+                instance: "demo-local",
+                principal: "subject-1"
+            })).ctxId,
+            current.ctxId
+        );
+        assert.match(await readFile(filePath, "utf8"), /chat-session-1/u);
+        assert.equal("openAiSessionId" in (await reloaded.list())[1]!, false);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
 test("McpContextRegistry rolls back in-memory mutations when persistence fails", async () => {
     const root = await createTestTempDirectory("context-persist-failure");
     const binding = {
@@ -359,8 +432,22 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
     });
 
     const tools = endpoint.listTools();
-    const bashSchema = tools.find((tool) => tool.name === "bash_run")?.inputSchema as { properties?: Record<string, unknown>; required?: string[] };
+    const bashTool = tools.find((tool) => tool.name === "bash_run");
+    const environmentTool = tools.find((tool) => tool.name === "environ_info");
+    const bashSchema = bashTool?.inputSchema as { properties?: Record<string, unknown>; required?: string[] };
     assert.ok(bashSchema.properties?.ctxId);
+    assert.deepEqual(bashTool?.annotations, {
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+        readOnlyHint: false,
+    });
+    assert.deepEqual(environmentTool?.annotations, {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+        readOnlyHint: false,
+    });
     assert.equal(bashSchema.required?.includes("ctxId"), true);
     assert.equal(bashSchema.required?.includes("command"), true);
 

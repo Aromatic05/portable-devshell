@@ -3,6 +3,7 @@ import type { TerminalBackend } from "../terminal/TerminalProcess.js";
 import type { ContextMessageQueueInput, ContextMessageReadResult, ContextMessageRecord } from "@portable-devshell/shared";
 import type {
     ActiveTodoSummary,
+    ControlMcpContextMode,
     JsonValue,
     TodoReadInput,
     TodoReadResult,
@@ -48,6 +49,7 @@ export interface InstanceDescriptor {
     contextMessages?: InstanceContextMessagePort;
     enabled: boolean;
     mcpCapabilities: readonly ToolCapability[];
+    mcpContextMode?: ControlMcpContextMode;
     mcpEnabled: boolean;
     mcpGroups: readonly string[];
     mcpPath: string;

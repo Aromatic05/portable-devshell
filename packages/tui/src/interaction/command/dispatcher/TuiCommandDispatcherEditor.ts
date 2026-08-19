@@ -50,6 +50,7 @@ export class TuiCommandDispatcherEditor {
                     enabled: schema.defaultEnabled,
                     mcp: {
                         auth: "none",
+                        contextMode: schema.defaultMcpContextMode ?? "explicit",
                         enabled: schema.defaultMcpEnabled,
                         tools: {
                             capabilities: [...schema.defaultMcpCapabilities],
@@ -250,6 +251,9 @@ export class TuiCommandDispatcherEditor {
             if (field === "mcp.auth") {
                 return ["none", "token", "oauth2"];
             }
+            if (field === "mcp.contextMode") {
+                return ["explicit", "openai-session"];
+            }
             if (field === "security.mode") {
                 return ["disabled", "workspace"];
             }
@@ -276,6 +280,8 @@ export class TuiCommandDispatcherEditor {
             case "enabled":
             case "mcp.enabled":
                 return [true, false];
+            case "mcp.contextMode":
+                return ["explicit", "openai-session"];
             case "container.mode":
                 return ["preset", "dockerfile", "compose", "existingImage", "existingStoppedContainer"];
             case "security.mode":
@@ -544,7 +550,7 @@ export class TuiCommandDispatcherEditor {
             ? entries.find((value) => asRecord(value)?.name === instanceName)
             : undefined;
         return toTuiInstanceEditorRecord(
-            cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { auth: "none", enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } }, name: instanceName, provider: "local", security: { mode: "disabled" } })
+            cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { auth: "none", contextMode: "explicit", enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } }, name: instanceName, provider: "local", security: { mode: "disabled" } })
         );
     }
 

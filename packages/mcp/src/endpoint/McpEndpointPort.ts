@@ -60,6 +60,7 @@ export interface McpEndpointEnvironmentHandshake {
 }
 
 export interface McpEndpointCallContext {
+    openAiSessionId?: string;
     principal: string;
     requestId?: string;
 }

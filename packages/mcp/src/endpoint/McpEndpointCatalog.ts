@@ -1,9 +1,11 @@
 import type {
+    ControlMcpContextMode,
     ToolDefinition,
     ToolPolicy
 } from "@portable-devshell/shared";
 
 import { isMcpInteractionGateway, type McpInstanceGateway } from "../instance/McpInstanceGateway.js";
+import { mcpToolAnnotations } from "../tool/McpToolAnnotations.js";
 import { McpToolDescriptionEnhancer } from "../tool/McpToolDescriptionEnhancer.js";
 import {
     McpToolSchemaAdapter,
@@ -36,6 +38,7 @@ export interface McpEndpointCatalogWorker {
 }
 
 export interface McpEndpointCatalogOptions {
+    contextMode?: ControlMcpContextMode;
     gateway?: McpInstanceGateway;
     instanceName: string;
     policy: ToolPolicy;
@@ -52,6 +55,7 @@ export interface McpEndpointCatalogSnapshot {
 export class McpEndpointCatalog {
     readonly #artifactTools = new McpToolCatalogArtifact();
     readonly #catalog: McpToolCatalogEndpoint;
+    readonly #contextMode: ControlMcpContextMode;
     readonly #descriptionEnhancer = new McpToolDescriptionEnhancer();
     readonly #environmentTools = new McpToolCatalogEnvironment();
     readonly #gateway?: McpInstanceGateway;
@@ -64,6 +68,7 @@ export class McpEndpointCatalog {
 
     constructor(options: McpEndpointCatalogOptions) {
         this.#catalog = new McpToolCatalogEndpoint(options.policy);
+        this.#contextMode = options.contextMode ?? "explicit";
         this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
         this.#worker = options.worker;
@@ -118,11 +123,16 @@ export class McpEndpointCatalog {
     adapt(tool: ToolDefinition): McpTool {
         const exposed = tool.name === mcpEnvironmentToolName
             ? tool
-            : withMcpCommentOutputSchema(withMcpContextId(tool));
-        return this.#schemaAdapter.toMcpTool(
-            exposed,
-            this.#descriptionEnhancer.enhance(exposed.description)
-        );
+            : withMcpCommentOutputSchema(
+                  this.#contextMode === "explicit" ? withMcpContextId(tool) : tool
+              );
+        return {
+            ...this.#schemaAdapter.toMcpTool(
+                exposed,
+                this.#descriptionEnhancer.enhance(exposed.description)
+            ),
+            annotations: mcpToolAnnotations(exposed.name),
+        };
     }
 
     assertAdaptable(tool: ToolDefinition): void {
@@ -132,7 +142,7 @@ export class McpEndpointCatalog {
     #sources(hasWorkerSchema: boolean): McpToolCatalogEndpointSource[] {
         const sources: McpToolCatalogEndpointSource[] = [{
             owner: "environment",
-            tools: this.#environmentTools.list()
+            tools: this.#environmentTools.list(this.#contextMode)
         }];
 
         if (hasWorkerSchema) {
@@ -157,7 +167,7 @@ export class McpEndpointCatalog {
             if (isMcpInteractionGateway(this.#gateway)) {
                 sources.push({
                     owner: "interaction",
-                    tools: this.#interactionTools.list()
+                    tools: this.#interactionTools.list(this.#contextMode)
                 });
             }
             sources.push(

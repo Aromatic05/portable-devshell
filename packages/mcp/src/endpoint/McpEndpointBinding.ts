@@ -15,7 +15,7 @@ import {
 import { mergeComments, resolveErrorHints, toControlErrorBody, type ControlErrorBody, type JsonValue } from "@portable-devshell/shared";
 
 import { McpToolSchemaUnavailableError } from "../tool/McpToolSchemaAdapter.js";
-import { workspaceAppHtml, workspaceAppResourceUri, workspaceAppResourceUris } from "../workspace/McpWorkspaceApp.js";
+import { workspaceAppHtml, workspaceAppResourceMeta, workspaceAppResourceUri, workspaceAppResourceUris } from "../workspace/McpWorkspaceApp.js";
 import { McpEndpointWorker } from "./McpEndpointWorker.js";
 import { McpNativeToolResult, type McpEndpointResult } from "./McpEndpointResult.js";
 
@@ -163,6 +163,7 @@ export class McpEndpointBinding {
             }
             return {
                 contents: [{
+                    _meta: workspaceAppResourceMeta,
                     mimeType: "text/html;profile=mcp-app",
                     text: workspaceAppHtml,
                     uri: request.params.uri
@@ -183,6 +184,7 @@ export class McpEndpointBinding {
         server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
             try {
                 const context = {
+                    ...readOpenAiSession(request.params._meta),
                     principal: readPrincipal(extra.authInfo),
                     requestId: toRequestId(extra.requestId)
                 };
@@ -215,6 +217,12 @@ function readPrincipal(authInfo: { clientId: string; extra?: Record<string, unkn
         return subject;
     }
     return authInfo?.clientId ?? "local";
+}
+
+function readOpenAiSession(meta: unknown): { openAiSessionId?: string } {
+    if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return {};
+    const session = (meta as Record<string, unknown>)["openai/session"];
+    return typeof session === "string" && session.length > 0 ? { openAiSessionId: session } : {};
 }
 
 function requestSignalKey(sessionId: string, requestId: string): string {

@@ -1,4 +1,5 @@
 import type {
+    ControlMcpContextMode,
     JsonValue,
     ToolDefinition,
     ToolPolicy
@@ -23,6 +24,7 @@ export type {
 
 export interface McpEndpointWorkerOptions {
     contextRegistry?: McpContextRegistry;
+    contextMode?: ControlMcpContextMode;
     gateway?: McpInstanceGateway;
     instanceName: string;
     policy: ToolPolicy;
@@ -38,6 +40,7 @@ export class McpEndpointWorker {
 
     constructor(options: McpEndpointWorkerOptions) {
         this.#catalog = new McpEndpointCatalog({
+            contextMode: options.contextMode ?? "explicit",
             gateway: options.gateway,
             instanceName: options.instanceName,
             policy: options.policy,
@@ -46,6 +49,7 @@ export class McpEndpointWorker {
         this.#dispatch = new McpEndpointDispatch({
             catalog: this.#catalog,
             contextRegistry: options.contextRegistry,
+            contextMode: options.contextMode ?? "explicit",
             gateway: options.gateway,
             instanceName: options.instanceName,
             readyWaitMs: options.readyWaitMs,

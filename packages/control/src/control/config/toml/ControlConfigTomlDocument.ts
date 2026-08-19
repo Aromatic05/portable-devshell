@@ -95,6 +95,7 @@ export class ControlInstanceTomlDocument {
             alerts: instance.alerts,
             mcp: {
                 auth: instance.mcp.auth.mode,
+                contextMode: instance.mcp.contextMode,
                 enabled: instance.mcp.enabled,
                 oauth2: instance.mcp.auth.mode === "oauth2" ? compact(instance.mcp.auth.oauth2) : undefined,
                 path: instance.mcp.path,

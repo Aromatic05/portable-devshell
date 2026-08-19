@@ -34,6 +34,7 @@ const instanceCreateSchema: InstanceCreateSchema = {
         presets: containerPresets
     },
     defaultMcpCapabilities: defaultConfigNormalizeContext.defaultMcpCapabilities,
+    defaultMcpContextMode: "explicit",
     defaultMcpGroups: defaultConfigNormalizeContext.defaultMcpGroups,
     defaultEnabled: defaultConfigNormalizeContext.defaultEnabled,
     defaultMcpEnabled: defaultConfigNormalizeContext.defaultMcpEnabled,
@@ -342,6 +343,7 @@ function toSummary(instance: ControlInstanceConfig): InstanceCreateSummary {
                     ? { oauth2: structuredClone(instance.mcp.auth.oauth2) }
                     : {})
             },
+            contextMode: instance.mcp.contextMode,
             enabled: instance.mcp.enabled,
             path: instance.mcp.path,
             tools: {

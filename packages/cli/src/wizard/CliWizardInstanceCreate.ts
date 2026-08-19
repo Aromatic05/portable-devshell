@@ -7,6 +7,7 @@ import type {
     ControlInstanceLogsConfig,
     ControlInstanceToolsConfig,
     ControlMcpAuthMode,
+    ControlMcpContextMode,
     InstanceContainerConfig,
     InstanceContainerMountConfig,
     InstanceContainerPresetSchema,
@@ -67,6 +68,14 @@ export class CliWizardInstanceCreate {
         this.#output.write("MCP\n");
         const mcpEnabled = await this.#confirm(lines, "MCP enabled", schema.defaultMcpEnabled);
         const mcpAuth = mcpEnabled ? await this.#mcpAuth(lines) : { auth: "none" as const };
+        const mcpContextMode = mcpEnabled
+            ? await this.#choice<ControlMcpContextMode>(
+                  lines,
+                  "MCP context mode",
+                  ["explicit", "openai-session"],
+                  schema.defaultMcpContextMode ?? "explicit"
+              )
+            : (schema.defaultMcpContextMode ?? "explicit");
         const mcpGroups = await this.#stringList(lines, "MCP tool groups", schema.defaultMcpGroups);
         const mcpCapabilities = await this.#stringList(lines, "MCP capabilities", schema.defaultMcpCapabilities);
 
@@ -91,6 +100,7 @@ export class CliWizardInstanceCreate {
             enabled,
             mcp: {
                 ...mcpAuth,
+                contextMode: mcpContextMode,
                 enabled: mcpEnabled,
                 tools: {
                     capabilities: mcpCapabilities as InstanceCreateDraft["mcp"] extends { tools?: { capabilities?: infer T } } ? T : never,
@@ -574,6 +584,7 @@ export class CliWizardInstanceCreate {
 
         this.#output.write(`mcp enabled: ${summary.mcp.enabled}\n`);
         this.#output.write(`mcp auth: ${summary.mcp.auth.mode}\n`);
+        this.#output.write(`mcp context mode: ${summary.mcp.contextMode ?? "explicit"}\n`);
         if (summary.mcp.auth.oauth2 !== undefined) {
             this.#output.write(`oauth resource: ${summary.mcp.auth.oauth2.resourceName}\n`);
             this.#output.write(`oauth scopes: ${summary.mcp.auth.oauth2.requiredScopes.join(",")}\n`);

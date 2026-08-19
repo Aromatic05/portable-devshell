@@ -209,7 +209,7 @@ function selectedInstanceDraft(state: TuiAppState, instanceName: string): Record
     const entry = Array.isArray(state.readModel.configView?.instances)
         ? state.readModel.configView.instances.find((value) => asRecord(value)?.name === instanceName)
         : undefined;
-    return asRecord(entry) ?? { mcp: { auth: "none", enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } }, name: instanceName };
+    return asRecord(entry) ?? { mcp: { auth: "none", contextMode: "explicit", enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } }, name: instanceName };
 }
 
 function globalMcpDraft(state: TuiAppState): Record<string, JsonValue> {

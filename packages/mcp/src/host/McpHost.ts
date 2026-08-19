@@ -1,4 +1,4 @@
-import type { JsonValue, McpContextRecord, ToolCallContext, ToolDefinition, ToolPolicy } from "@portable-devshell/shared";
+import type { ControlMcpContextMode, JsonValue, McpContextRecord, ToolCallContext, ToolDefinition, ToolPolicy } from "@portable-devshell/shared";
 import { type McpAuthConfig } from "../auth/McpAuthConfig.js";
 import { McpContextRegistry } from "../context/McpContextRegistry.js";
 import type { McpInstanceGateway } from "../instance/McpInstanceGateway.js";
@@ -43,6 +43,7 @@ interface WorkerInstanceLike {
 
 export interface McpHostInstanceConfig {
     auth?: McpAuthConfig;
+    contextMode?: ControlMcpContextMode;
     gateway?: McpInstanceGateway;
     policy: ToolPolicy;
     name: string;
@@ -125,6 +126,7 @@ export class McpHost {
         const binding = new McpEndpointBinding(
             new McpEndpointWorker({
                 contextRegistry: this.#contextRegistry,
+                contextMode: instance.contextMode ?? "explicit",
                 gateway: instance.gateway,
                 policy: instance.policy,
                 instanceName: instance.name,

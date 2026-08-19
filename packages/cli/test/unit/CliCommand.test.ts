@@ -890,6 +890,7 @@ test("CliMain runs interactive instance create through control rpc", async () =>
             "\n",
             "\n",
             "\n",
+            "\n",
             "\n"
         ]),
         stderr,

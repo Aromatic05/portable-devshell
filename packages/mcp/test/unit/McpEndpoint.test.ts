@@ -11,6 +11,8 @@ import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
 import {
     McpEndpointBinding,
     McpEndpointWorker,
+    workspaceAppLegacyResourceUris,
+    workspaceAppResourceMeta,
     workspaceAppResourceUri,
     workspaceAppStableResourceUri,
     type McpInstanceGateway,
@@ -84,6 +86,7 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
         assert.equal(read.status, 200);
         assert.equal(read.body.result?.contents?.[0]?.mimeType, "text/html;profile=mcp-app");
         assert.equal(read.body.result?.contents?.[0]?.uri, workspaceAppStableResourceUri);
+        assert.deepEqual(read.body.result?.contents?.[0]?._meta, workspaceAppResourceMeta);
         assert.match(String(read.body.result?.contents?.[0]?.text), /portable-devshell/);
         assert.match(String(read.body.result?.contents?.[0]?.text), /ui\/initialize/);
         assert.match(String(read.body.result?.contents?.[0]?.text), /ui\/resource-teardown/);
@@ -95,6 +98,19 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
         assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /Current tasks/);
         assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /section-head/);
         assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /setInterval\(refresh/);
+        assert.deepEqual(workspaceAppLegacyResourceUris, [
+            "ui://portable-devshell/workspace-03c4911b6d185e3c.html"
+        ]);
+        const legacy = await postJson(server.url, {
+            id: "req-resource-read-legacy",
+            jsonrpc: "2.0",
+            method: "resources/read",
+            params: { uri: workspaceAppLegacyResourceUris[0] }
+        }, session.headers);
+        assert.equal(legacy.status, 200);
+        assert.equal(legacy.body.result?.contents?.[0]?.uri, workspaceAppLegacyResourceUris[0]);
+        assert.equal(legacy.body.result?.contents?.[0]?.text, read.body.result?.contents?.[0]?.text);
+        assert.deepEqual(legacy.body.result?.contents?.[0]?._meta, workspaceAppResourceMeta);
     } finally {
         await server.close();
         await binding.close();
@@ -385,6 +401,82 @@ test("environment and control-owned tools execute through the endpoint audit pat
             }
         ]
     );
+});
+
+test("openai-session context mode removes ctxId and resolves the current ChatGPT session", async () => {
+    const harness = createWorkerHarness();
+    const endpoint = new McpEndpointWorker({
+        contextMode: "openai-session",
+        instanceName: "demo",
+        policy: { capabilities: ["execute"], groups: ["bash"] },
+        worker: harness.worker
+    });
+    const bashTool = endpoint.listTools().find((tool) => tool.name === "bash_run");
+    assert.notEqual(bashTool, undefined);
+    assert.equal((bashTool?.inputSchema as { properties?: Record<string, unknown> }).properties?.ctxId, undefined);
+    const environmentTool = endpoint.listTools().find((tool) => tool.name === "environ_info");
+    assert.equal((environmentTool?.outputSchema as { properties?: Record<string, unknown> }).properties?.ctxId, undefined);
+
+    const requestContext = {
+        openAiSessionId: "chat-session-1",
+        principal: "subject-1",
+        requestId: "request-session-mode"
+    };
+    const environment = await endpoint.callTool("environ_info", { workspace: "/workspace" }, requestContext);
+    assert.equal((environment as { ctxId?: unknown }).ctxId, undefined);
+
+    await endpoint.callTool("bash_run", { command: "pwd" }, requestContext);
+    assert.equal(typeof harness.calls[0]?.ctxId, "string");
+    assert.deepEqual(harness.calls[0]?.input, { command: "pwd" });
+
+    await assert.rejects(
+        endpoint.callTool("bash_run", { command: "pwd" }, {
+            ...requestContext,
+            openAiSessionId: "chat-session-2"
+        }),
+        (error: unknown) => (error as { code?: string }).code === "mcp.contextInvalid"
+    );
+});
+
+test("HTTP tools/call forwards openai/session metadata into session context selection", async () => {
+    const harness = createWorkerHarness();
+    const binding = createBinding(harness, { contextMode: "openai-session" });
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        const meta = { "openai/session": "chat-http-1" };
+        const environment = await postJson(server.url, {
+            id: "req-session-environ",
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: { _meta: meta, arguments: { workspace: "/workspace" }, name: "environ_info" }
+        }, session.headers);
+        assert.equal(environment.status, 200);
+        assert.equal(environment.body.result?.structuredContent?.ctxId, undefined);
+
+        const run = await postJson(server.url, {
+            id: "req-session-run",
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: { _meta: meta, arguments: { command: "pwd" }, name: "bash_run" }
+        }, session.headers);
+        assert.equal(run.status, 200);
+        assert.equal(run.body.error, undefined, JSON.stringify(run.body));
+        assert.equal(typeof harness.calls[0]?.ctxId, "string");
+        assert.deepEqual(harness.calls[0]?.input, { command: "pwd" });
+
+        const missingMeta = await postJson(server.url, {
+            id: "req-session-missing-meta",
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: { arguments: { command: "pwd" }, name: "bash_run" }
+        }, session.headers);
+        assert.match(String(missingMeta.body.error?.message), /openai\/session/u);
+    } finally {
+        await server.close();
+        await binding.close();
+    }
 });
 
 test("notifications/cancelled aborts an in-flight tools/call handler", async () => {
@@ -755,10 +847,11 @@ test("tools/call waits for a transiently not-ready instance before executing", a
 
 function createBinding(
     harness = createWorkerHarness(),
-    options?: { readyWaitMs?: number; serverVersion?: string }
+    options?: { contextMode?: "explicit" | "openai-session"; readyWaitMs?: number; serverVersion?: string }
 ): McpEndpointBinding {
     return new McpEndpointBinding(
         new McpEndpointWorker({
+            contextMode: options?.contextMode,
             policy: { capabilities: ["execute"], groups: ["bash"] },
             instanceName: "demo",
             readyWaitMs: options?.readyWaitMs,

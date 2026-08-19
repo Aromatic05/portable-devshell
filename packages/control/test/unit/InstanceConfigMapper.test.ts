@@ -47,7 +47,7 @@ test("instance config mapper passes effective security mode, worker env, and app
             maxBytes: 33_554_432,
             retentionDays: 14
         },
-        mcp: { auth: { mode: "none" }, enabled: true, path: "/demo-local/mcp", tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
+        mcp: { auth: { mode: "none" }, contextMode: "explicit", enabled: true, path: "/demo-local/mcp", tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
         name: "demo-local",
         provider: "local",
         security: {
@@ -130,7 +130,7 @@ test("controller-managed terminals use the instance Worker RPC surface", async (
     });
     const descriptor = mapper.map({
         enabled: true,
-        mcp: { auth: { mode: "none" }, enabled: false, path: "/demo-local/mcp", tools: { capabilities: [], groups: [] } },
+        mcp: { auth: { mode: "none" }, contextMode: "explicit", enabled: false, path: "/demo-local/mcp", tools: { capabilities: [], groups: [] } },
         name: "demo-local",
         provider: "local",
         security: { mode: "workspace" },

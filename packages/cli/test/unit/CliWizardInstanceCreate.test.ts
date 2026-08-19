@@ -28,6 +28,7 @@ const schema: InstanceCreateSchema = {
     },
     defaultEnabled: true,
     defaultMcpCapabilities: ["read", "write", "execute"],
+    defaultMcpContextMode: "explicit",
     defaultMcpEnabled: true,
     defaultMcpGroups: ["file", "bash", "artifact"],
     defaultProvider: "local",
@@ -45,6 +46,7 @@ test("instance wizard retries invalid basic answers, deduplicates lists, and sup
             "maybe",
             "",
             "cloud",
+            "",
             "",
             "",
             "",
@@ -70,6 +72,7 @@ test("instance wizard retries invalid basic answers, deduplicates lists, and sup
     assert.equal(validated?.name, "demo-local");
     assert.equal(validated?.provider, "local");
     assert.equal(validated?.security?.mode, "workspace");
+    assert.equal(validated?.mcp?.contextMode, "explicit");
     assert.deepEqual(validated?.mcp?.tools?.groups, ["file", "bash"]);
     assert.deepEqual(validated?.mcp?.tools?.capabilities, ["read", "execute"]);
 });
@@ -102,6 +105,7 @@ test("instance wizard collects SSH configuration and accepts validated creation"
         enabled: true,
         mcp: {
             auth: "none",
+            contextMode: "explicit",
             enabled: false,
             tools: {
                 capabilities: ["read", "write", "execute"],
@@ -127,6 +131,7 @@ test("instance wizard collects complete OAuth, approval, environment, log, and s
             "complete-resource",
             "mcp profile",
             "https://docs.example.test/mcp",
+            "openai-session",
             "file bash",
             "read write execute",
             "workspace",
@@ -157,6 +162,7 @@ test("instance wizard collects complete OAuth, approval, environment, log, and s
     assert.notEqual(result, undefined);
     assert.deepEqual(result?.draft.mcp, {
         auth: "oauth2",
+        contextMode: "openai-session",
         enabled: true,
         oauth2: {
             documentationUrl: "https://docs.example.test/mcp",
@@ -228,6 +234,7 @@ test("instance wizard validates and collects a managed Docker preset", async () 
             "",
             "",
             "",
+            "",
             "y"
         ],
         output
@@ -281,6 +288,7 @@ function summaryFor(draft: InstanceCreateDraft): InstanceCreateSummary {
                     ? { oauth2: structuredClone(instance.mcp.auth.oauth2) }
                     : {})
             },
+            contextMode: instance.mcp.contextMode,
             enabled: instance.mcp.enabled,
             path: instance.mcp.path,
             tools: {

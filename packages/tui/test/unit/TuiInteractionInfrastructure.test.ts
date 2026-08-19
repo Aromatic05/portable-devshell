@@ -1405,6 +1405,42 @@ test("config separates MCP tool access and hot-applies it without a worker resta
     );
 });
 
+test("MCP context mode is selectable in create and config editors", async () => {
+    const harness = createHarness();
+    await openCreateWizard(harness);
+    harness.store.setEditor({ ...harness.store.getState().interaction.editor!, step: 3 });
+    const wizard = selectMainScreenModel(harness.store.getState()).boxes[0]!;
+    const createMode = wizard.expandedLines.find((line) => line.id?.includes(":field:mcp.contextMode"));
+    assert.equal(createMode?.editableValue?.value, "explicit");
+    assert.ok(createMode?.id);
+    harness.store.setSelectedDetailLine(wizard.expandedKey, createMode.id);
+    await harness.dispatch({ direction: "right", type: "editor.cursorMove" });
+    let draft = harness.store.getState().ui.formDrafts.create as { mcp?: { contextMode?: string } };
+    assert.equal(draft.mcp?.contextMode, "openai-session");
+
+    harness.store.setSelectedPage("config");
+    openEditorForBox(harness, "config", "mcp-tools");
+    harness.store.setFormDraft("config:alpha", {
+        ...(harness.store.getState().ui.formDrafts["config:alpha"] as Record<string, JsonValue>),
+        mcp: {
+            contextMode: "explicit",
+            enabled: true,
+            path: "/alpha/mcp",
+            tools: { capabilities: ["read"], groups: ["file"] },
+        },
+    });
+    const mcpTools = expandBox(harness, "mcp-tools");
+    const configMode = mcpTools.expandedLines.find((line) => line.id?.includes(":field:mcp.contextMode"));
+    assert.equal(configMode?.editableValue?.value, "explicit");
+    assert.ok(configMode?.id);
+    harness.store.setMainFocusId("mcp-tools");
+    harness.store.setFocusScope("form");
+    harness.store.setSelectedDetailLine(mcpTools.expandedKey, configMode.id);
+    await harness.dispatch({ direction: "right", type: "editor.cursorMove" });
+    draft = harness.store.getState().ui.formDrafts["config:alpha"] as { mcp?: { contextMode?: string } };
+    assert.equal(draft.mcp?.contextMode, "openai-session");
+});
+
 test("self-managed reverse hides Control lifecycle actions and requires remote restart for rebuild changes", () => {
     const harness = createHarness();
     const state = harness.store.getState();

@@ -31,8 +31,16 @@ export interface McpContextValidationBinding {
     principal: string;
 }
 
+export interface McpOpenAiSessionValidationBinding extends McpContextValidationBinding {
+    instance: string;
+}
+
+interface McpContextStoredRecord extends McpContextRecord {
+    openAiSessionId?: string;
+}
+
 interface McpContextDocument {
-    contexts: McpContextRecord[];
+    contexts: McpContextStoredRecord[];
     version: 1;
 }
 
@@ -45,7 +53,7 @@ export interface McpContextRegistryOptions {
 }
 
 export class McpContextRegistry {
-    readonly #contexts = new Map<string, McpContextRecord>();
+    readonly #contexts = new Map<string, McpContextStoredRecord>();
     readonly #filePath?: string;
     readonly #idFactory: () => string;
     readonly #maxTerminalContexts: number;
@@ -100,7 +108,7 @@ export class McpContextRegistry {
                 ctxId = `ctx-${randomUUID()}`;
             }
             const at = new Date(now).toISOString();
-            const record: McpContextRecord = {
+            const record: McpContextStoredRecord = {
                 ...binding,
                 createdAt: at,
                 ctxId,
@@ -117,6 +125,45 @@ export class McpContextRegistry {
                 this.#contexts.set(ctxId, record);
             });
             return cloneRecord(record);
+        });
+    }
+
+    async bindOpenAiSession(
+        ctxId: string,
+        openAiSessionId: string,
+        binding: McpOpenAiSessionValidationBinding
+    ): Promise<{ replaced: McpContextRecord[] }> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            if (!isCtxId(ctxId) || openAiSessionId.length === 0) {
+                throw invalidOpenAiSessionContext();
+            }
+            const record = this.#contexts.get(ctxId);
+            if (
+                record === undefined ||
+                record.status !== "active" ||
+                record.principal !== binding.principal ||
+                record.instance !== binding.instance
+            ) {
+                throw invalidOpenAiSessionContext();
+            }
+            const replaced: McpContextStoredRecord[] = [];
+            await this.#mutateAndPersist(() => {
+                for (const existing of this.#contexts.values()) {
+                    if (
+                        existing.ctxId !== ctxId &&
+                        existing.openAiSessionId === openAiSessionId &&
+                        existing.principal === binding.principal &&
+                        existing.instance === binding.instance
+                    ) {
+                        existing.openAiSessionId = undefined;
+                        if (existing.status === "active") existing.status = "disabled";
+                        replaced.push(existing);
+                    }
+                }
+                record.openAiSessionId = openAiSessionId;
+            });
+            return { replaced: replaced.map(cloneRecord) };
         });
     }
 
@@ -144,6 +191,44 @@ export class McpContextRegistry {
             }
             if (record.principal !== binding.principal) {
                 throw invalidContext(ctxId);
+            }
+            await this.#mutateAndPersist(() => {
+                record.lastAccessedAt = new Date(now).toISOString();
+                record.expiresAt = new Date(now + this.#ttlMs).toISOString();
+            });
+            return cloneRecord(record);
+        });
+    }
+
+    async validateAndTouchOpenAiSession(
+        openAiSessionId: string,
+        binding: McpOpenAiSessionValidationBinding
+    ): Promise<McpContextRecord> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            if (openAiSessionId.length === 0) {
+                throw invalidOpenAiSessionContext();
+            }
+            const matches = [...this.#contexts.values()].filter((record) =>
+                record.openAiSessionId === openAiSessionId &&
+                record.principal === binding.principal &&
+                record.instance === binding.instance
+            );
+            if (matches.length !== 1) {
+                throw invalidOpenAiSessionContext();
+            }
+            const record = matches[0]!;
+            const now = this.#now();
+            if (record.status === "disabled") {
+                throw disabledOpenAiSessionContext();
+            }
+            if (record.status === "expired" || Date.parse(record.expiresAt) <= now) {
+                if (record.status !== "expired") {
+                    await this.#mutateAndPersist(() => {
+                        record.status = "expired";
+                    });
+                }
+                throw expiredOpenAiSessionContext(record.expiresAt);
             }
             await this.#mutateAndPersist(() => {
                 record.lastAccessedAt = new Date(now).toISOString();
@@ -438,6 +523,31 @@ function invalidContext(ctxId: string) {
     });
 }
 
+function invalidOpenAiSessionContext() {
+    return createError({
+        code: errorCodes.mcpContextInvalid,
+        message: "The current ChatGPT session has no valid environment context. Call environ_info first.",
+        retryable: false
+    });
+}
+
+function expiredOpenAiSessionContext(expiresAt: string) {
+    return createError({
+        code: errorCodes.mcpContextExpired,
+        details: { expiresAt },
+        message: "The current ChatGPT session environment context has expired. Call environ_info again.",
+        retryable: false
+    });
+}
+
+function disabledOpenAiSessionContext() {
+    return createError({
+        code: errorCodes.mcpContextDisabled,
+        message: "The current ChatGPT session environment context is disabled. Call environ_info again.",
+        retryable: false
+    });
+}
+
 function expiredContext(ctxId: string, expiresAt: string) {
     return createError({
         code: errorCodes.mcpContextExpired,
@@ -460,7 +570,15 @@ function isCtxId(value: string): boolean {
     return value.startsWith("ctx-") && value.length > 4;
 }
 
-function cloneRecord(record: McpContextRecord): McpContextRecord {
+function cloneRecord(record: McpContextStoredRecord): McpContextRecord {
+    const { openAiSessionId: _openAiSessionId, ...publicRecord } = record;
+    return {
+        ...publicRecord,
+        environments: record.environments.map((environment) => ({ ...environment }))
+    };
+}
+
+function cloneStoredRecord(record: McpContextStoredRecord): McpContextStoredRecord {
     return {
         ...record,
         environments: record.environments.map((environment) => ({ ...environment }))
@@ -472,18 +590,18 @@ function contextEnvironment(record: McpContextRecord, instance: string): McpCont
 }
 
 function cloneContextMap(
-    contexts: ReadonlyMap<string, McpContextRecord>
-): Map<string, McpContextRecord> {
-    return new Map([...contexts].map(([ctxId, record]) => [ctxId, cloneRecord(record)]));
+    contexts: ReadonlyMap<string, McpContextStoredRecord>
+): Map<string, McpContextStoredRecord> {
+    return new Map([...contexts].map(([ctxId, record]) => [ctxId, cloneStoredRecord(record)]));
 }
 
 function restoreContextMap(
-    contexts: Map<string, McpContextRecord>,
-    previous: ReadonlyMap<string, McpContextRecord>
+    contexts: Map<string, McpContextStoredRecord>,
+    previous: ReadonlyMap<string, McpContextStoredRecord>
 ): void {
     contexts.clear();
     for (const [ctxId, record] of previous) {
-        contexts.set(ctxId, cloneRecord(record));
+        contexts.set(ctxId, cloneStoredRecord(record));
     }
 }
 
@@ -492,15 +610,16 @@ function isDocument(value: unknown): value is McpContextDocument {
         (value as { version?: unknown }).version === 1 && Array.isArray((value as { contexts?: unknown }).contexts);
 }
 
-function parseRecord(value: unknown): McpContextRecord | undefined {
+function parseRecord(value: unknown): McpContextStoredRecord | undefined {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
         return undefined;
     }
-    const record = value as Partial<McpContextRecord>;
+    const record = value as Partial<McpContextStoredRecord>;
     if (typeof record.ctxId !== "string" || !isCtxId(record.ctxId) ||
         typeof record.principal !== "string" || typeof record.instance !== "string" ||
         typeof record.workspace !== "string" || typeof record.createdAt !== "string" ||
         typeof record.lastAccessedAt !== "string" || typeof record.expiresAt !== "string" ||
+        (record.openAiSessionId !== undefined && (typeof record.openAiSessionId !== "string" || record.openAiSessionId.length === 0)) ||
         (record.temporaryDirectory !== undefined && typeof record.temporaryDirectory !== "string") ||
         (record.status !== "active" && record.status !== "expired" && record.status !== "disabled")) {
         return undefined;
@@ -527,6 +646,7 @@ function parseRecord(value: unknown): McpContextRecord | undefined {
         expiresAt: record.expiresAt,
         instance: record.instance,
         lastAccessedAt: record.lastAccessedAt,
+        openAiSessionId: record.openAiSessionId,
         principal: record.principal,
         status: record.status,
         temporaryDirectory: record.temporaryDirectory,

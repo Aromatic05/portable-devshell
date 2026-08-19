@@ -77,6 +77,24 @@ test("config parser trims values and preserves explicit patch removals", () => {
     });
 });
 
+test("instance MCP context mode defaults to explicit and accepts openai-session", () => {
+    const explicit = normalizeConfigInstanceDraft({ name: "explicit", provider: "local" });
+    assert.equal(explicit.mcp.contextMode, "explicit");
+
+    const parsed = parseConfigDraft({
+        instances: [{
+            mcp: { contextMode: "openai-session" },
+            name: "chatgpt",
+            provider: "local"
+        }]
+    });
+    assert.equal(parsed.instances?.[0]?.mcp?.contextMode, "openai-session");
+    assert.equal(normalizeConfigDraft(parsed).instances[0]?.mcp.contextMode, "openai-session");
+
+    const patched = applyConfigInstancePatch(explicit, { mcp: { contextMode: "openai-session" } });
+    assert.equal(normalizeConfigInstanceDraft(patched).mcp.contextMode, "openai-session");
+});
+
 test("instance configuration has no persistent workspace authority", () => {
     const instance = normalizeConfigInstanceDraft({
         name: "local-one",

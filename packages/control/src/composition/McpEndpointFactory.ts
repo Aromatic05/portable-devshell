@@ -7,6 +7,7 @@ export class McpEndpointFactory {
     map(descriptor: InstanceDescriptor, gateway?: McpInstanceGateway, auth: ControlMcpAuthConfig = { mode: "none" }): McpHostInstanceConfig {
         return {
             auth: toMcpAuthConfig(auth),
+            contextMode: descriptor.mcpContextMode ?? "explicit",
             ...(gateway === undefined ? {} : { gateway }),
             policy: {
                 capabilities: descriptor.mcpCapabilities,

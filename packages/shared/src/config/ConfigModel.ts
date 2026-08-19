@@ -11,6 +11,7 @@ export type RawConfig = unknown;
 export type ControlProviderKind =
     "docker" | "local" | "podman" | "reverse" | "ssh";
 export type ControlMcpAuthMode = "none" | "oauth2" | "token";
+export type ControlMcpContextMode = "explicit" | "openai-session";
 export type ControlWebAuthMode = "none" | "oauth2" | "token";
 export type ControlSecurityMode = "disabled" | "workspace";
 
@@ -53,6 +54,7 @@ export interface ControlInstanceToolsConfig {
 
 export interface ControlInstanceMcpConfig {
     auth: ControlMcpAuthConfig;
+    contextMode: ControlMcpContextMode;
     enabled: boolean;
     path: string;
     tools: {
@@ -220,6 +222,7 @@ export type ConfigContainerDraft =
 
 export interface ConfigInstanceMcpDraft {
     auth?: ControlMcpAuthMode;
+    contextMode?: ControlMcpContextMode;
     enabled?: boolean;
     oauth2?: ConfigMcpOAuth2Draft;
     path?: string;
@@ -306,6 +309,7 @@ export interface ConfigInstancePatch {
     logs?: ConfigNullable<ControlInstanceLogsConfig>;
     mcp?: {
         auth?: ControlMcpAuthMode;
+        contextMode?: ControlMcpContextMode;
         enabled?: boolean;
         oauth2?: ConfigMcpOAuth2Draft;
         path?: ConfigNullable<string>;

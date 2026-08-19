@@ -396,7 +396,7 @@ function parseMcpOAuth2Draft(value: unknown, path: readonly ConfigPathSegment[])
 
 function parseInstanceMcpDraft(value: unknown, path: readonly ConfigPathSegment[]): NonNullable<ConfigInstanceDraft["mcp"]> {
     const record = readRecord(value, path);
-    assertKnownKeys(record, ["auth", "enabled", "oauth2", "path", "token", "tools"], path);
+    assertKnownKeys(record, ["auth", "contextMode", "enabled", "oauth2", "path", "token", "tools"], path);
 
     const tools = record.tools === undefined ? undefined : readRecord(record.tools, [...path, "tools"]);
     if (tools !== undefined) {
@@ -405,6 +405,10 @@ function parseInstanceMcpDraft(value: unknown, path: readonly ConfigPathSegment[
 
     return {
         ...parseMcpNamespaceAuth(record, path),
+        contextMode:
+            record.contextMode === undefined
+                ? undefined
+                : readEnum(record.contextMode, [...path, "contextMode"], ["explicit", "openai-session"] as const),
         enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
         path: readOptionalTrimmedString(record.path, [...path, "path"]),
         tools:
@@ -425,7 +429,7 @@ function parseInstanceMcpDraft(value: unknown, path: readonly ConfigPathSegment[
 
 function parseInstanceMcpPatch(value: unknown, path: readonly ConfigPathSegment[]): NonNullable<ConfigInstancePatch["mcp"]> {
     const record = readRecord(value, path);
-    assertKnownKeys(record, ["auth", "enabled", "oauth2", "path", "token", "tools"], path);
+    assertKnownKeys(record, ["auth", "contextMode", "enabled", "oauth2", "path", "token", "tools"], path);
     const tools = record.tools === undefined ? undefined : readRecord(record.tools, [...path, "tools"]);
     if (tools !== undefined) {
         assertKnownKeys(tools, ["capabilities", "groups"], [...path, "tools"]);
@@ -433,6 +437,10 @@ function parseInstanceMcpPatch(value: unknown, path: readonly ConfigPathSegment[
 
     return {
         ...parseMcpNamespaceAuth(record, path),
+        contextMode:
+            record.contextMode === undefined
+                ? undefined
+                : readEnum(record.contextMode, [...path, "contextMode"], ["explicit", "openai-session"] as const),
         enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
         path: readNullable(record.path, (entry) => readRequiredTrimmedString(entry, [...path, "path"])),
         tools:

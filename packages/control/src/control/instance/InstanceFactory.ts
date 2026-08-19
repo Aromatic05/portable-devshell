@@ -50,6 +50,7 @@ export class InstanceFactory {
         return {
             contextMessages,
             mcpCapabilities: instance.mcp.tools.capabilities,
+            mcpContextMode: instance.mcp.contextMode,
             mcpGroups: instance.mcp.tools.groups,
             enabled: instance.enabled,
             mcpEnabled: instance.mcp.enabled,

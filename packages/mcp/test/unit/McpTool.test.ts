@@ -5,7 +5,8 @@ import {
     McpToolCatalogEndpoint,
     McpToolDescriptionEnhancer,
     McpToolFilter,
-    McpToolSchemaAdapter
+    McpToolSchemaAdapter,
+    mcpToolAnnotations
 } from "@portable-devshell/mcp/testing";
 import type { ToolDefinition } from "@portable-devshell/shared";
 
@@ -35,6 +36,45 @@ const fileSync: ToolDefinition = {
     outputSchema: { type: "object" },
     requiredCapabilities: ["read", "write"]
 };
+
+test("MCP safety annotations are explicit for known semantics and conservative for unknown tools", () => {
+    assert.deepEqual(mcpToolAnnotations("file_read"), {
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+        readOnlyHint: true,
+    });
+    assert.deepEqual(mcpToolAnnotations("tmux_read"), {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+        readOnlyHint: false,
+    });
+    assert.deepEqual(mcpToolAnnotations("instance_connect"), {
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+        readOnlyHint: false,
+    });
+    assert.deepEqual(mcpToolAnnotations("todo_write"), {
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false,
+        readOnlyHint: false,
+    });
+    assert.deepEqual(mcpToolAnnotations("workspace_approval_decide"), {
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+        readOnlyHint: false,
+    });
+    assert.deepEqual(mcpToolAnnotations("future_unknown_tool"), {
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+        readOnlyHint: false,
+    });
+});
 
 test("McpToolFilter requires the group and every required capability", () => {
     const partial = new McpToolFilter({

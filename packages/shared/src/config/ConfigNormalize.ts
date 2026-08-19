@@ -88,6 +88,7 @@ export function normalizeConfigInstanceDraft(
         logs: cloneOptionalRecord(draft.logs),
         mcp: {
             auth: normalizeInstanceMcpAuth(draft.mcp),
+            contextMode: draft.mcp?.contextMode ?? "explicit",
             enabled: draft.mcp?.enabled ?? context.defaultMcpEnabled,
             path: expectedMcpPath,
             tools: {
@@ -198,6 +199,7 @@ export function applyConfigInstancePatch(
                                     token: mcpPatch.token
                                 })
                       ),
+                      contextMode: mcpPatch.contextMode ?? base.mcp?.contextMode,
                       enabled: mcpPatch.enabled ?? base.mcp?.enabled,
                       path: applyNullable(mcpPatch.path, base.mcp?.path),
                       tools:
@@ -312,6 +314,7 @@ export function toConfigInstanceDraft(instance: ControlInstanceConfig): ConfigIn
         logs: cloneOptionalRecord(instance.logs),
         mcp: {
             ...toInstanceMcpAuthDraft(instance.mcp.auth),
+            contextMode: instance.mcp.contextMode,
             enabled: instance.mcp.enabled,
             path: instance.mcp.path,
             tools: {
