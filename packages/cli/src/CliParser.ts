@@ -59,6 +59,8 @@ export class CliParser {
         if (argv.length === 0) {
             return { kind: "control.status" };
         }
+        const trailingHelp = this.#trailingHelp(argv);
+        if (trailingHelp !== undefined) return trailingHelp;
 
         switch (argv[0]) {
             case "help":
@@ -99,6 +101,28 @@ export class CliParser {
                 return this.#parseWatch(argv.slice(1));
             default:
                 throw CliRenderError.usage(`Unknown command: ${argv[0]}\n\n${renderCliUsage()}`);
+        }
+    }
+
+    #trailingHelp(argv: readonly string[]): CliParsedCommand | undefined {
+        const last = argv.at(-1);
+        if (argv.length < 2 || (last !== "--help" && last !== "-h")) return undefined;
+        switch (argv[0]) {
+            case "instance":
+                return { kind: "instance.help" };
+            case "watch":
+                return { kind: "watch.help" };
+            case "artifact":
+                return { args: ["--help"], kind: "artifact" };
+            case "config":
+            case "approval":
+            case "oauth":
+            case "context":
+            case "tool":
+            case "todo":
+                return { kind: "help", topic: argv[0] };
+            default:
+                return { kind: "help" };
         }
     }
 

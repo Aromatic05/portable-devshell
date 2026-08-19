@@ -26,7 +26,7 @@ export function renderCliUsage(): string {
         "  artifact <command>             Manage artifact shares and transfers",
         "  help                           Show this help",
         "",
-        "Run `devshell <command> --help` for command-specific usage.",
+        "Run `devshell <command> --help` for related usage.",
     ].join("\n");
 }
 

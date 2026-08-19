@@ -29,6 +29,16 @@ test("CliParser rejects invalid command shapes", () => {
     assert.throws(() => parser.parse(["instance", "unknown"]));
 });
 
+test("CliParser accepts trailing help consistently across command levels", () => {
+    const parser = new CliParser();
+
+    assert.deepEqual(parser.parse(["status", "--help"]), { kind: "help" });
+    assert.deepEqual(parser.parse(["instance", "status", "--help"]), { kind: "instance.help" });
+    assert.deepEqual(parser.parse(["artifact", "share", "--help"]), { args: ["--help"], kind: "artifact" });
+    assert.deepEqual(parser.parse(["config", "update", "--help"]), { kind: "help", topic: "config" });
+    assert.deepEqual(parser.parse(["approval", "approve", "-h"]), { kind: "help", topic: "approval" });
+});
+
 
 test("CliParser routes artifact arguments through the normal command pipeline", () => {
     const parser = new CliParser();
