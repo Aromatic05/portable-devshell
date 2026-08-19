@@ -1,4 +1,4 @@
-import { defaultMcpToolGroups, type JsonValue } from "@portable-devshell/shared";
+import { CONTROL_WEB_BASE_PATH, controlWebBasePath, defaultMcpToolGroups, type JsonValue } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
@@ -16,6 +16,8 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
     const webDirty = state.ui.dirtyForms["web"] === true;
     const affectedScopes = [instanceDirty ? "instance" : undefined, globalDirty ? "mcp" : undefined, webDirty ? "web" : undefined].filter(Boolean).join(" + ") || "none";
     const endpoint = endpointPreview(mcpDraft, readPath(instanceDraft, "mcp.path"), instanceName);
+    const localEndpoint = localMcpEndpoint(mcpDraft, readPath(instanceDraft, "mcp.path"), instanceName);
+    const webEndpoint = webUiEndpoint(webDraft);
     const runtime = runtimeStatus(state, instanceDraft, mcpDraft, endpoint);
     const authMode = readPath(instanceDraft, "mcp.auth");
     const webAuthMode = readPath(webDraft, "auth");
@@ -23,15 +25,32 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
     return [
         makeBox(state, "connections", instanceName, {
             detailLines: [
+                `Local MCP          ${localEndpoint.value}`,
+                `Public MCP         ${endpoint.value.replace(/^endpoint=/, "")}`,
+                `Web UI             ${webEndpoint.value}`,
+                `Runtime            ${runtime.runtime}`,
+                `Auth               ${String(authMode ?? "none")}`,
+                ...(runtime.reason === "ready" ? [] : [`Runtime reason     ${runtime.reason}`]),
+                ...(localEndpoint.reason === undefined ? [] : [`Local reason       ${localEndpoint.reason}`]),
+                ...(endpoint.reason === undefined ? [] : [`Public reason      ${endpoint.reason}`]),
+                ...(webEndpoint.reason === undefined ? [] : [`Web reason         ${webEndpoint.reason}`]),
+            ],
+            id: "connection-endpoints",
+            status: runtime.runtime === "running" ? "ready" : runtime.runtime === "disabled" ? "disabled" : "warning",
+            summaryLines: [
+                `local=${localEndpoint.value}`,
+                `public=${endpoint.value.replace(/^endpoint=/, "")}`,
+            ],
+            title: "Connection Endpoints",
+        }),
+        makeBox(state, "connections", instanceName, {
+            detailLines: [
                 choiceLine("instance.mcp.enabled", "mcp.enabled", readPath(instanceDraft, "mcp.enabled")),
                 fieldLine("instance.mcp.path", "mcp.path", readPath(instanceDraft, "mcp.path")),
                 ...editorErrorLine(state, "connector", "mcp-endpoint", ["mcp"]),
-                `MCP runtime        ${runtime.runtime}`,
-                `Public endpoint    ${runtime.publicEndpoint}`,
-                `Reason             ${runtime.reason}`
             ],
             id: "mcp-endpoint",
-            status: runtime.runtime === "running" ? "ready" : runtime.runtime === "disabled" ? "disabled" : "failed",
+            status: "normal",
             summaryLines: [compactSummary(["enabled", String(readPath(instanceDraft, "mcp.enabled") ?? false)], ["path", String(readPath(instanceDraft, "mcp.path") ?? "-")])],
             title: `[Instance] MCP Endpoint${unsaved}`
         }),
@@ -109,13 +128,6 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             title: "Page Actions"
         }),
         makeBox(state, "connections", instanceName, {
-            detailLines: [endpoint.value, ...(endpoint.reason === undefined ? [] : [`reason=${endpoint.reason}`])],
-            id: "endpoint-preview",
-            status: endpoint.reason === undefined ? "normal" : "warning",
-            summaryLines: [endpoint.value, ...(endpoint.reason === undefined ? [] : [`reason=${endpoint.reason}`])],
-            title: "Configured Endpoint"
-        }),
-        makeBox(state, "connections", instanceName, {
             detailLines: ["validation=available before save"],
             id: "validation",
             status: "normal",
@@ -123,6 +135,47 @@ export function buildConnectorPageBoxes(state: TuiAppState, instanceName: string
             title: "Configuration Validation"
         })
     ];
+}
+
+function localMcpEndpoint(
+    mcp: Record<string, JsonValue>,
+    configuredPath: JsonValue | undefined,
+    instanceName: string,
+): { reason?: string; value: string } {
+    const host = readPath(mcp, "listenHost");
+    const port = readPath(mcp, "listenPort");
+    if (typeof host !== "string" || typeof port !== "number" || !Number.isInteger(port) || port < 1) {
+        return { reason: "listener host/port unavailable", value: "unavailable" };
+    }
+    const localHost = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host;
+    const authority = localHost.includes(":") ? `[${localHost}]` : localHost;
+    const path = typeof configuredPath === "string" && configuredPath.length > 0 ? configuredPath : `/${instanceName}/mcp`;
+    return { value: `http://${authority}:${port}${path.startsWith("/") ? path : `/${path}`}` };
+}
+
+function webUiEndpoint(web: Record<string, JsonValue>): { reason?: string; value: string } {
+    const disabled = readPath(web, "enabled") !== true;
+    const publicBaseUrl = readPath(web, "publicBaseUrl");
+    if (typeof publicBaseUrl === "string" && publicBaseUrl.length > 0) {
+        try {
+            const base = new URL(publicBaseUrl);
+            const value = new URL(controlWebBasePath(publicBaseUrl), base.origin).toString().replace(/\/$/u, "");
+            return { ...(disabled ? { reason: "Web UI is disabled" } : {}), value };
+        } catch {
+            return { reason: "invalid web.publicBaseUrl", value: "unavailable" };
+        }
+    }
+    const host = readPath(web, "listenHost");
+    const port = readPath(web, "listenPort");
+    if (typeof host !== "string" || typeof port !== "number" || !Number.isInteger(port) || port < 1) {
+        return { reason: "listener host/port unavailable", value: "unavailable" };
+    }
+    const localHost = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host;
+    const authority = localHost.includes(":") ? `[${localHost}]` : localHost;
+    return {
+        ...(disabled ? { reason: "Web UI is disabled" } : {}),
+        value: `http://${authority}:${port}${CONTROL_WEB_BASE_PATH}`,
+    };
 }
 
 function selectedInstanceDraft(state: TuiAppState, instanceName: string): Record<string, JsonValue> {
@@ -164,19 +217,19 @@ function runtimeStatus(
     instance: Record<string, JsonValue>,
     mcp: Record<string, JsonValue>,
     endpoint: { reason?: string; value: string }
-): { publicEndpoint: string; reason: string; runtime: string } {
+): { reason: string; runtime: string } {
     if (readPath(instance, "mcp.enabled") !== true || readPath(mcp, "enabled") !== true) {
-        return { publicEndpoint: "unavailable", reason: "MCP is disabled", runtime: "disabled" };
+        return { reason: "MCP is disabled", runtime: "disabled" };
     }
     const status = state.readModel.mcpStatus;
     if (status?.running !== true) {
-        return { publicEndpoint: "unavailable", reason: typeof status?.reason === "string" ? status.reason : "MCP host is not listening", runtime: "stopped" };
+        return { reason: typeof status?.reason === "string" ? status.reason : "MCP host is not listening", runtime: "stopped" };
     }
     if (status.authMode === "oauth2" && status.oauthReady !== true) {
-        return { publicEndpoint: "unavailable", reason: "OAuth runtime is not ready", runtime: "running" };
+        return { reason: "OAuth runtime is not ready", runtime: "running" };
     }
     if (endpoint.reason !== undefined) {
-        return { publicEndpoint: "unavailable", reason: endpoint.reason, runtime: "running" };
+        return { reason: endpoint.reason, runtime: "running" };
     }
-    return { publicEndpoint: endpoint.value.replace(/^endpoint=/, ""), reason: "ready", runtime: "running" };
+    return { reason: "ready", runtime: "running" };
 }

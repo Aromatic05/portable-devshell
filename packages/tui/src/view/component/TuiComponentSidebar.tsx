@@ -21,9 +21,9 @@ export function TuiComponentSidebar(props: TuiComponentSidebarProps) {
 
     return (
         <Box borderStyle="single" flexDirection="column" paddingX={1} width="100%">
-            <SidebarSection items={props.model.pages} />
+            <SidebarSection items={props.model.pages} kind="page" />
             <Box height={1} />
-            <SidebarSection items={props.model.instances} />
+            <SidebarSection items={props.model.instances} kind="instance" />
         </Box>
     );
 }
@@ -38,14 +38,22 @@ function compactInstanceLabel(item: TuiSidebarModel["instances"][number], index:
     return `${item.selected ? "▶" : " "}S${index + 1}:${item.label}`;
 }
 
-function SidebarSection(props: { items: TuiSidebarModel["pages"] }) {
+function SidebarSection(props: {
+    items: TuiSidebarModel["pages"] | TuiSidebarModel["instances"];
+    kind: "instance" | "page";
+}) {
     return (
         <Box flexDirection="column">
-            {props.items.map((item, index) => (
-                <Text bold={item.selected} inverse={item.focused} key={`${item.id}-${index}`}>
-                    {`${item.selected ? "▶" : " "}${item.label}`}
-                </Text>
-            ))}
+            {props.items.map((item, index) => {
+                const shortcut = props.kind === "page"
+                    ? tuiPageShortcut(item.id as TuiPageId)
+                    : index < 9 ? `⇧${index + 1}` : undefined;
+                return (
+                    <Text bold={item.selected} inverse={item.focused} key={`${item.id}-${index}`}>
+                        {`${item.selected ? "▶" : " "}${shortcut === undefined ? "" : `${shortcut} `}${item.label}`}
+                    </Text>
+                );
+            })}
         </Box>
     );
 }

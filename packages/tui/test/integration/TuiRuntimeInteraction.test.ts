@@ -39,6 +39,11 @@ test("real Ink runtime handles keyboard navigation, search, redraw, and terminal
         await waitUntil(
             () => runtime.store.getState().connection.status === "connected",
         );
+        assert.equal(runtime.store.getState().ui.selectedPage, "overview");
+        terminal.write("1");
+        await waitUntil(
+            () => runtime.store.getState().ui.selectedPage === "instances",
+        );
         await waitUntil(() => terminal.output.includes("Create Instance"));
 
         await waitUntil(() => terminal.rawModes.includes(true));
@@ -326,6 +331,10 @@ test("real Ink runtime buffers split mouse input and enters then discards the cr
             () => runtime.store.getState().connection.status === "connected",
         );
 
+        terminal.write("1");
+        await waitUntil(
+            () => runtime.store.getState().ui.selectedPage === "instances",
+        );
         terminal.write("\t");
         await waitUntil(
             () =>
@@ -482,7 +491,7 @@ test("real Ink runtime handles sidebar mouse buttons and viewport wheel scrollin
         terminal.write(mouseSequence(0, helpRegion.x, helpRegion.y, "release"));
         terminal.write(mouseSequence(1, helpRegion.x, helpRegion.y, "press"));
         await yieldEventLoop();
-        assert.equal(runtime.store.getState().ui.selectedPage, "instances");
+        assert.equal(runtime.store.getState().ui.selectedPage, "overview");
 
         terminal.write(mouseSequence(0, helpRegion.x, helpRegion.y, "press"));
         await waitUntil(
@@ -763,6 +772,7 @@ test("real Ink runtime routes Open Terminal without suspending the TUI", async (
             ready: true,
             status: "ready",
         });
+        runtime.store.setSelectedPage("instances");
 
         await waitUntil(() =>
             selectMainScreenModel(runtime.store.getState()).boxes.some(
@@ -880,6 +890,7 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
             ],
         } as never });
         runtime.store.setSelectedInstance("alpha");
+        runtime.store.setSelectedPage("instances");
 
         host.write("8");
         await waitUntil(
@@ -1256,6 +1267,7 @@ test("real Ink runtime renders artifact_viewImage audit output in the detail pan
             },
         ] });
         runtime.store.setSelectedInstance("alpha");
+        runtime.store.setSelectedPage("instances");
         runtime.store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [
             {
                 callId: "image-call",

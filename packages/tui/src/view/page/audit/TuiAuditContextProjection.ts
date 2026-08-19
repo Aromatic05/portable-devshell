@@ -113,6 +113,9 @@ function toSummary(
               temporaryDirectory: registryRecord.temporaryDirectory,
               workspace: registryRecord.workspace,
           }]).find((candidate) => candidate.instance === instance);
+    const latestApproval = [...context.approvals].sort((left, right) =>
+        right.createdAt.localeCompare(left.createdAt),
+    )[0];
 
     return {
         approvals: [...context.approvals].sort((left, right) =>
@@ -125,7 +128,7 @@ function toSummary(
         latestActivityAt,
         latestCall,
         status: contextStatus(sortedCalls, context.approvals),
-        workspace: environment?.workspace,
+        workspace: environment?.workspace ?? latestCall?.workspace ?? latestApproval?.workspace,
     };
 }
 

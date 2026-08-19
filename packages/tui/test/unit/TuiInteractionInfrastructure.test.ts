@@ -212,6 +212,13 @@ test("audit structured filters and persistent filter controls work", async () =>
         ),
         ["audit-filter-status", "audit-context:ctx-alpha"],
     );
+    harness.store.setSearchQuery("audit", "workspace:/projects/alpha");
+    assert.deepEqual(
+        selectMainScreenModel(harness.store.getState()).boxes.map(
+            (box) => box.id,
+        ),
+        ["audit-filter-status", "audit-context:ctx-alpha"],
+    );
     const filter = expandBox(harness, "audit-filter-status");
     harness.store.setMainFocusId(filter.id);
     harness.store.setFocusScope("boxDetail");
@@ -1912,27 +1919,27 @@ test("connector editor presents unavailable endpoints and control runtime limits
     assert.deepEqual(
         connector.boxes.map((box) => box.title),
         [
+            "Connection Endpoints",
             "[Instance] MCP Endpoint",
             "[Global] Public Base URL",
             "[Global] Web UI",
             "[Instance] Auth",
             "Page Actions",
-            "Configured Endpoint",
             "Configuration Validation",
         ],
     );
-    const endpoint = expandBox(harness, "mcp-endpoint");
+    const endpoint = expandBox(harness, "connection-endpoints");
     assert.equal(
         endpoint.expandedLines.some(
-            (line) => line.text === "MCP runtime        stopped",
+            (line) => line.text === "Runtime            stopped",
         ),
         true,
     );
     assert.deepEqual(
         connector.boxes
-            .find((box) => box.id === "endpoint-preview")
+            .find((box) => box.id === "connection-endpoints")
             ?.collapsedLines.map((line) => line.text),
-        ["endpoint=unavailable", "reason=missing publicBaseUrl"],
+        ["local=http://127.0.0.1:3210/alpha/mcp", "public=unavailable"],
     );
 
     harness.store.patchControlReadModel({ configView: {
@@ -1949,12 +1956,28 @@ test("connector editor presents unavailable endpoints and control runtime limits
             listenPort: 3210,
             publicBaseUrl: "https://example.test/tunnel",
         },
+        web: {
+            auth: "none",
+            enabled: true,
+            listenHost: "127.0.0.1",
+            listenPort: 3211,
+            publicBaseUrl: "https://example.test/controller",
+        },
     } });
+    const configuredEndpoints = selectMainScreenModel(harness.store.getState())
+        .boxes.find((box) => box.id === "connection-endpoints");
     assert.deepEqual(
-        selectMainScreenModel(harness.store.getState())
-            .boxes.find((box) => box.id === "endpoint-preview")
-            ?.collapsedLines.map((line) => line.text),
-        ["endpoint=https://example.test/tunnel/alpha/custom-mcp"],
+        configuredEndpoints?.collapsedLines.map((line) => line.text),
+        [
+            "local=http://127.0.0.1:3210/alpha/custom-mcp",
+            "public=https://example.test/tunnel/alpha/custom-mcp",
+        ],
+    );
+    assert.equal(
+        configuredEndpoints?.expandedLines.some(
+            (line) => line.text === "Web UI             https://example.test/controller/web",
+        ),
+        true,
     );
 });
 test("connector page actions send all affected scopes in one configuration transaction", async () => {

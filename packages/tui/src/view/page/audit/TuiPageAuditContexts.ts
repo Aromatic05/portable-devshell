@@ -65,7 +65,7 @@ export function buildAuditContextListBoxes(
                       },
             searchText: [
                 context.label,
-                context.workspace ?? "",
+                `workspace ${context.workspace ?? ""}`,
                 ...context.calls.flatMap((call) => [
                     `status ${call.status}`,
                     `source ${call.source}`,

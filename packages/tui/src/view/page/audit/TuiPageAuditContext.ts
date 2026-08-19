@@ -91,7 +91,7 @@ function callBox(
                       view: "call",
                   }
                 : undefined,
-        searchText: `${call.toolName} ${call.status} ${call.callId} ${call.workspace ?? ""}`,
+        searchText: `${call.toolName} ${call.status} ${call.callId} workspace ${call.workspace ?? ""}`,
         status: toolCallStatus(call),
         summaryLines: [
             compactSummary(
@@ -123,7 +123,7 @@ function approvalBox(
             },
         ],
         id: `approval-${approval.approvalId}`,
-        searchText: `status ${approval.status} risk ${approval.riskLevel} source ${approval.source} tool ${approval.toolName} ${approval.approvalId} ${approval.workspace ?? ""}`,
+        searchText: `status ${approval.status} risk ${approval.riskLevel} source ${approval.source} tool ${approval.toolName} ${approval.approvalId} workspace ${approval.workspace ?? ""}`,
         severity: approval.riskLevel === "high" ? "danger" : "warning",
         status: approval.status === "pending" ? "pending" : "normal",
         summaryLines: [

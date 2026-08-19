@@ -101,7 +101,7 @@ function filterStatusBox(
             `Total              ${total}`,
             ...(page === "audit"
                 ? [
-                      "Syntax             status: risk: source: tool: after: before:",
+                      "Syntax             status: risk: source: tool: workspace: after: before:",
                   ]
                 : []),
             buttonLine("clear-filter", "Clear Filter"),
@@ -138,6 +138,9 @@ function filterAuditBoxes(boxes: BoxModel[], query: string): BoxModel[] {
                 return timestamps.some(
                     (timestamp) => timestamp <= token.slice(separator + 1),
                 );
+            if (field === "workspace") {
+                return text.includes(`workspace ${value}`);
+            }
             if (
                 field === "status" ||
                 field === "risk" ||

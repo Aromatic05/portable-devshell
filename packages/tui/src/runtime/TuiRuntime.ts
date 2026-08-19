@@ -354,6 +354,7 @@ export class TuiRuntime {
     }
 
     async run(): Promise<void> {
+        this.store.setSelectedPage("overview");
         this.#alternateScreen.enter();
         this.#startInput();
         this.#startCursorBlink();
