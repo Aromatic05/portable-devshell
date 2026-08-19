@@ -167,3 +167,71 @@ test("McpToolSchemaAdapter flattens referenced object unions for MCP clients", (
     assert.deepEqual(Object.keys(schema.properties ?? {}).sort(), ["ctxId", "input", "pane", "task"]);
     assert.deepEqual(schema.required, ["input", "ctxId"]);
 });
+
+test("McpToolSchemaAdapter removes model-unsupported composition constraints recursively", () => {
+    const adapter = new McpToolSchemaAdapter();
+    const tool = adapter.toMcpTool({
+        ...bashRun,
+        inputSchema: {
+            additionalProperties: false,
+            properties: {
+                items: {
+                    contains: { properties: { status: { const: "active" } }, type: "object" },
+                    items: {
+                        additionalProperties: false,
+                        allOf: [{
+                            if: { properties: { status: { const: "blocked" } } },
+                            then: { required: ["detail"] }
+                        }],
+                        properties: {
+                            detail: { type: "string" },
+                            id: { type: "string" },
+                            status: { enum: ["active", "blocked"], type: "string" }
+                        },
+                        required: ["id", "status"],
+                        type: "object"
+                    },
+                    maxContains: 1,
+                    minContains: 0,
+                    type: "array"
+                }
+            },
+            required: ["items"],
+            type: "object"
+        },
+        outputSchema: {
+            additionalProperties: false,
+            properties: {
+                source: {
+                    additionalProperties: false,
+                    oneOf: [
+                        { not: { required: ["path"] }, required: ["handle"] },
+                        { not: { required: ["handle"] }, required: ["path"] }
+                    ],
+                    properties: {
+                        handle: { type: "string" },
+                        path: { type: "string" }
+                    },
+                    type: "object"
+                }
+            },
+            required: ["source"],
+            type: "object"
+        }
+    }, "Run shell");
+
+    const input = tool.inputSchema as {
+        properties?: { items?: { contains?: unknown; items?: Record<string, unknown>; maxContains?: unknown; minContains?: unknown } };
+    };
+    const item = input.properties?.items?.items;
+    assert.notEqual(item, undefined);
+    assert.equal(item?.allOf, undefined);
+    assert.deepEqual(Object.keys((item?.properties as Record<string, unknown>) ?? {}).sort(), ["detail", "id", "status"]);
+    assert.equal(input.properties?.items?.contains, undefined);
+    assert.equal(input.properties?.items?.minContains, undefined);
+    assert.equal(input.properties?.items?.maxContains, undefined);
+
+    const output = tool.outputSchema as { properties?: { source?: Record<string, unknown> } };
+    assert.equal(output.properties?.source?.oneOf, undefined);
+    assert.deepEqual(Object.keys((output.properties?.source?.properties as Record<string, unknown>) ?? {}).sort(), ["handle", "path"]);
+});

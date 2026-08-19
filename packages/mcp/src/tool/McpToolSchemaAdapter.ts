@@ -25,14 +25,19 @@ export class McpToolSchemaAdapter {
 
         return {
             description,
-            inputSchema: flattenInputUnion(normalizeSchema(tool.inputSchema)),
+            inputSchema: normalizeModelInputSchema(tool.inputSchema),
             name: tool.name,
-            outputSchema: normalizeSchema(tool.outputSchema)
+            outputSchema: normalizeModelSchema(tool.outputSchema)
         };
     }
 }
 
-function flattenInputUnion(value: JsonValue): JsonValue {
+function normalizeModelInputSchema(value: JsonValue): JsonValue {
+    const normalized = normalizeModelSchema(value);
+    return flattenRootObjectUnion(normalized);
+}
+
+function flattenRootObjectUnion(value: JsonValue): JsonValue {
     if (!isRecord(value)) return value;
     const union = Array.isArray(value.anyOf)
         ? value.anyOf
@@ -66,6 +71,39 @@ function flattenInputUnion(value: JsonValue): JsonValue {
         ...(required.length === 0 ? {} : { required }),
         type: "object"
     };
+}
+
+function normalizeModelSchema(value: JsonValue): JsonValue {
+    if (Array.isArray(value)) {
+        return value.map(normalizeModelSchema);
+    }
+    if (!isRecord(value)) {
+        return value;
+    }
+
+    const numeric = isNumericType(value.type);
+    const objectWithProperties = isRecord(value.properties);
+    const normalized: Record<string, JsonValue> = {};
+    for (const [key, entry] of Object.entries(value)) {
+        if (numeric && key === "format") continue;
+        if (objectWithProperties && key === "oneOf") continue;
+        if (unsupportedModelSchemaKey(key)) continue;
+        normalized[key] = normalizeModelSchema(entry);
+    }
+    return normalized;
+}
+
+function unsupportedModelSchemaKey(key: string): boolean {
+    return key === "allOf" ||
+        key === "not" ||
+        key === "dependentRequired" ||
+        key === "dependentSchemas" ||
+        key === "if" ||
+        key === "then" ||
+        key === "else" ||
+        key === "contains" ||
+        key === "minContains" ||
+        key === "maxContains";
 }
 
 function resolveObjectVariant(
@@ -103,26 +141,6 @@ function readRequired(schema: Record<string, JsonValue>): string[] {
     return Array.isArray(schema.required)
         ? schema.required.filter((entry): entry is string => typeof entry === "string")
         : [];
-}
-
-function normalizeSchema(value: JsonValue): JsonValue {
-    if (Array.isArray(value)) {
-        return value.map(normalizeSchema);
-    }
-    if (value === null || typeof value !== "object") {
-        return value;
-    }
-
-    const source = value as Record<string, JsonValue>;
-    const numeric = isNumericType(source.type);
-    const normalized: Record<string, JsonValue> = {};
-    for (const [key, entry] of Object.entries(source)) {
-        if (numeric && key === "format") {
-            continue;
-        }
-        normalized[key] = normalizeSchema(entry);
-    }
-    return normalized;
 }
 
 function isNumericType(value: JsonValue | undefined): boolean {

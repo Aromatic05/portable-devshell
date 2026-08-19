@@ -663,6 +663,24 @@ test("todo tools are control-side, group-controlled, capability-free, and availa
     assert.notEqual(todoReadSchema.properties?.items, undefined);
     assert.notEqual(todoReadSchema.properties?.summary, undefined);
     assert.notEqual(todoReadSchema.properties?.tasks, undefined);
+    const todoWriteSchema = endpoint.listTools().find((tool) => tool.name === "todo_write")?.inputSchema as {
+        properties?: {
+            todos?: {
+                contains?: unknown;
+                items?: { allOf?: unknown; properties?: Record<string, unknown> };
+                maxContains?: unknown;
+                minContains?: unknown;
+            };
+        };
+    };
+    assert.deepEqual(
+        Object.keys(todoWriteSchema.properties?.todos?.items?.properties ?? {}).sort(),
+        ["content", "detail", "id", "status"]
+    );
+    assert.equal(todoWriteSchema.properties?.todos?.items?.allOf, undefined);
+    assert.equal(todoWriteSchema.properties?.todos?.contains, undefined);
+    assert.equal(todoWriteSchema.properties?.todos?.minContains, undefined);
+    assert.equal(todoWriteSchema.properties?.todos?.maxContains, undefined);
     await endpoint.callTool("todo_read", withContext({ title: "Recover" }), context);
     await endpoint.callTool("todo_write", withContext({ revision: 0, title: "Recover", todos: [] }), context);
     assert.deepEqual(calls, ["read:main-pc:all", "read:main-pc:Recover", "write:main-pc:ctx-instance-test:0"]);
