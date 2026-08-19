@@ -1,5 +1,10 @@
 import type { ToolDefinition } from "@portable-devshell/shared";
 
+import {
+    artifactShareOutputSchema,
+    artifactTransferOutputSchema,
+} from "../McpToolOutputSchemas.js";
+
 export type McpToolCatalogArtifactName = "artifact_viewImage" | "artifact_share" | "artifact_transfer";
 
 export interface McpToolCatalogArtifactAvailability {
@@ -108,16 +113,7 @@ function artifactShareTool(): ToolDefinition {
             type: "object"
         },
         name: "artifact_share",
-        outputSchema: {
-            additionalProperties: true,
-            properties: {
-                expiresAtMs: { minimum: 0, type: "integer" },
-                shareId: { minLength: 1, type: "string" },
-                url: { minLength: 1, type: "string" }
-            },
-            required: ["shareId", "url", "expiresAtMs"],
-            type: "object"
-        },
+        outputSchema: artifactShareOutputSchema,
         requiredCapabilities: ["read", "write"]
     };
 }
@@ -196,15 +192,7 @@ function artifactTransferTool(): ToolDefinition {
             type: "object"
         },
         name: "artifact_transfer",
-        outputSchema: {
-            additionalProperties: false,
-            properties: {
-                operation: { enum: ["start", "status", "cancel"], type: "string" },
-                transfer: { type: "object" }
-            },
-            required: ["operation", "transfer"],
-            type: "object"
-        },
+        outputSchema: artifactTransferOutputSchema,
         requiredCapabilities: ["read", "write"]
     };
 }

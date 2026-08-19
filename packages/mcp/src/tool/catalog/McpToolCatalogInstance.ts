@@ -1,5 +1,13 @@
 import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
 
+import {
+    instanceConnectOutputSchema,
+    instanceCreateOutputSchema,
+    instanceListOutputSchema,
+    instanceSnapshotOutputSchema,
+    instanceStatusOutputSchema,
+} from "../McpToolOutputSchemas.js";
+
 export type McpToolCatalogInstanceName =
     | "instance_list"
     | "instance_status"
@@ -41,10 +49,6 @@ const instanceConnectSchema: JsonValue = {
         }
     },
     required: ["instance"],
-    type: "object"
-};
-
-const genericOutputSchema: JsonValue = {
     type: "object"
 };
 
@@ -129,6 +133,21 @@ function definition(name: McpToolCatalogInstanceName, description: string, input
         group: "instance",
         inputSchema,
         name,
-        outputSchema: genericOutputSchema
+        outputSchema: outputSchema(name)
     };
+}
+
+function outputSchema(name: McpToolCatalogInstanceName): JsonValue {
+    switch (name) {
+        case "instance_list":
+            return instanceListOutputSchema;
+        case "instance_create":
+            return instanceCreateOutputSchema;
+        case "instance_connect":
+            return instanceConnectOutputSchema;
+        case "instance_status":
+            return instanceStatusOutputSchema;
+        case "instance_stop":
+            return instanceSnapshotOutputSchema;
+    }
 }

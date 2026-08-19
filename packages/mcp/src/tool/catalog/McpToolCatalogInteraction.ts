@@ -1,6 +1,16 @@
 import type { ControlMcpContextMode, JsonValue, ToolDefinition } from "@portable-devshell/shared";
 
 import { workspaceAppResourceUri } from "../../workspace/McpWorkspaceApp.js";
+import {
+    approvalRequestOutputSchema,
+    todoReadOutputSchema,
+    workspaceOpenOutputSchema,
+    workspaceQuestionAnswerOutputSchema,
+    workspaceSnapshotOutputSchema,
+    workspaceWaitInterruptOutputSchema,
+    workspaceWaitRecoveryOutputSchema,
+    workspaceWatchOutputSchema,
+} from "../McpToolOutputSchemas.js";
 
 export type McpToolCatalogInteractionName =
     | "ask_question"
@@ -13,7 +23,6 @@ export type McpToolCatalogInteractionName =
     | "workspace_wait_recover"
     | "workspace_approval_decide";
 
-const objectOutput: JsonValue = { type: "object" };
 const appOnlyMeta: JsonValue = {
     ui: { visibility: ["app"] },
     "openai/visibility": "private",
@@ -75,7 +84,7 @@ export class McpToolCatalogInteraction {
             group: "interaction",
             inputSchema: { additionalProperties: false, properties: {}, type: "object" },
             name: "workspace_open",
-            outputSchema: objectOutput,
+            outputSchema: workspaceOpenOutputSchema,
             requiredCapabilities: [],
         },
         {
@@ -88,7 +97,7 @@ export class McpToolCatalogInteraction {
                 type: "object"
             },
             name: "workspace_snapshot",
-            outputSchema: objectOutput,
+            outputSchema: workspaceSnapshotOutputSchema,
             requiredCapabilities: [],
         },
         {
@@ -105,7 +114,7 @@ export class McpToolCatalogInteraction {
                 type: "object",
             },
             name: "workspace_watch",
-            outputSchema: objectOutput,
+            outputSchema: workspaceWatchOutputSchema,
             requiredCapabilities: [],
         },
         {
@@ -123,7 +132,7 @@ export class McpToolCatalogInteraction {
                 type: "object",
             },
             name: "workspace_question_answer",
-            outputSchema: objectOutput,
+            outputSchema: workspaceQuestionAnswerOutputSchema,
             requiredCapabilities: [],
         },
         {
@@ -140,7 +149,7 @@ export class McpToolCatalogInteraction {
                 type: "object",
             },
             name: "workspace_wait_interrupt",
-            outputSchema: objectOutput,
+            outputSchema: workspaceWaitInterruptOutputSchema,
             requiredCapabilities: [],
         },
         {
@@ -158,7 +167,7 @@ export class McpToolCatalogInteraction {
                 type: "object",
             },
             name: "workspace_task_control",
-            outputSchema: objectOutput,
+            outputSchema: todoReadOutputSchema,
             requiredCapabilities: [],
         },
         {
@@ -177,7 +186,7 @@ export class McpToolCatalogInteraction {
                 type: "object",
             },
             name: "workspace_wait_recover",
-            outputSchema: objectOutput,
+            outputSchema: workspaceWaitRecoveryOutputSchema,
             requiredCapabilities: [],
         },
         {
@@ -195,7 +204,7 @@ export class McpToolCatalogInteraction {
                 type: "object",
             },
             name: "workspace_approval_decide",
-            outputSchema: objectOutput,
+            outputSchema: approvalRequestOutputSchema,
             requiredCapabilities: [],
         },
     ];
