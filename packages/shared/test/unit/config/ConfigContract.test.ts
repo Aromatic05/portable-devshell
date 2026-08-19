@@ -196,6 +196,31 @@ test("instance token auth requires a non-trivial configured secret", () => {
     );
 });
 
+test("openai-session context mode rejects custom token authentication", () => {
+    const token = "0123456789abcdef0123456789abcdef";
+    const config = normalizeConfigDraft({
+        instances: [{
+            mcp: { auth: "token", contextMode: "openai-session", token },
+            name: "chatgpt-one",
+            provider: "local"
+        }]
+    });
+    assertConfigIssue(
+        () => validateConfigSemantics(config),
+        "semantic",
+        ["instances", 0, "mcp", "contextMode"],
+        "config.instance.mcpContextAuth"
+    );
+
+    assert.doesNotThrow(() => validateConfigSemantics(normalizeConfigDraft({
+        instances: [{
+            mcp: { auth: "none", contextMode: "openai-session" },
+            name: "chatgpt-none",
+            provider: "local"
+        }]
+    })));
+});
+
 test("config normalization deduplicates MCP access lists", () => {
     const config = normalizeConfigDraft({
         instances: [

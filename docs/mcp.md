@@ -100,6 +100,8 @@ requiredScopes = ["mcp"]
 
 如果 endpoint 配置为 `openai-session`，但 client 没有提供 `openai/session`，调用会 fail closed；不会退回 MCP transport session，也不会自动切换成 explicit 模式。
 
+`openai-session` 只能配合 `auth = "none"` 或 `auth = "oauth2"`。portable-devshell 的静态 `auth = "token"` 仍可供通用 MCP client 使用，但 ChatGPT 不支持把自定义 API key / 静态 bearer secret 作为插件认证方式，因此该组合在配置校验阶段直接拒绝。
+
 ## 工具组与能力
 
 工具是否出现，需要同时满足所属 group 已启用、所需 capability 已授予。
