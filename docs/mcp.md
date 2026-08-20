@@ -138,7 +138,7 @@ Todo task 现在同时承担 model re-entry checkpoint。模型在 `todo_write` 
 
 Todo runtime 仍保留 task-level Pause / Resume / Cancel 语义，用于 durable task 生命周期和兼容已经挂载的旧 Workspace App；当前紧凑 Workspace 不再把 task controls 作为常驻面板展示。它们不会隐式向 tmux 进程发送信号。
 
-`tmux_wait` 首次建立 durable Wait 时使用与 `workspace_ask` 相同的关联规则：优先关联当前 active/blocked Goal，其次关联当前唯一的 `in_progress` Todo，否则只关联 Context。为避开 Host 对单次 MCP tool call 的等待上限，MCP 入口最多在当前模型回合内 hold 约 4 分钟；task 仍未结束时会主动把 Wait 转成 detached，并正常返回 `{ detached: true, task: { id, status: "running" } }`。tmux task/window 本身继续运行；后台 tracker 只通过短暂、未审计的 Worker 状态读取观察 task，不再挂第二个 Worker `tmux_wait` tool call。模型再次调用同一 `ctxId + task id` 的 `tmux_wait` 时会复用并 reattach 该 Wait，而不是新建轮询任务。
+`tmux_wait` 首次建立 durable Wait 时使用与 `workspace_ask` 相同的关联规则：优先关联当前 active/blocked Goal，其次关联当前唯一的 `in_progress` Todo，否则只关联 Context。为避开 Host 对单次 MCP tool call 的等待上限，MCP 入口最多在当前模型回合内 hold 约 3 分钟；task 仍未结束时会主动把 Wait 转成 detached，并正常返回 `{ detached: true, task: { id, status: "running" } }`。tmux task/window 本身继续运行；后台 tracker 只通过短暂、未审计的 Worker 状态读取观察 task，不再挂第二个 Worker `tmux_wait` tool call。模型再次调用同一 `ctxId + task id` 的 `tmux_wait` 时会复用并 reattach 该 Wait，而不是新建轮询任务。
 
 用户在 Workspace 对当前 `tmux_wait` 选择 `Interrupt wait` 时，语义与 Host detach 不同：Wait 直接进入 cancelled，MCP 停止后台状态 observer，但绝不会停止对应 tmux task。原模型 tool call 如果仍处于 held 状态，会正常返回 `{ interrupted: true, task: { id, status: "running" } }`，因此不会把人工中断伪装成系统错误，也不会在 task 后来完成时偷偷触发自动 model re-entry。模型如果仍需等待，可再次显式调用 `tmux_wait` 建立新的 Wait。
 

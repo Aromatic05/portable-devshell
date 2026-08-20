@@ -55,7 +55,7 @@ export interface McpEndpointDispatchOptions {
     worker: McpEndpointWorkerPort;
 }
 
-const MCP_TMUX_WAIT_HOLD_MS = 4 * 60 * 1_000;
+const MCP_TMUX_WAIT_HOLD_MS = 3 * 60 * 1_000;
 const MCP_TMUX_WAIT_POLL_MS = 1_000;
 
 export class McpEndpointDispatch {
