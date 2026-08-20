@@ -15,6 +15,7 @@ import { decodeFrame, encodeFrame } from "@portable-devshell/shared/transport/fr
 import WebSocket from "ws";
 
 import {
+    GoalService,
     InstanceRegistry,
     ReverseConnectionGateway,
     ReverseCredentialService,
@@ -37,6 +38,11 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
         filePath: join(home, "todo.json"),
         instanceName: "reverse-test"
     });
+    const goal = new GoalService({
+        appendEvent: async () => undefined,
+        filePath: join(home, "goals.json"),
+        instanceName: "reverse-test"
+    });
     const registry = new InstanceRegistry([
         {
             enabled: true,
@@ -47,6 +53,7 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
             name: "reverse-test",
             provider: "reverse",
             reverseConnector: connector,
+            goal,
             todo,
             worker
         }
@@ -149,6 +156,11 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
             name: "reverse-test",
             provider: "reverse",
             reverseConnector: connector,
+            goal: new GoalService({
+                appendEvent: async () => undefined,
+                filePath: join(home, "goals.json"),
+                instanceName: "reverse-test"
+            }),
             todo: new TodoService({
                 appendEvent: async () => undefined,
                 filePath: join(home, "todo.json"),

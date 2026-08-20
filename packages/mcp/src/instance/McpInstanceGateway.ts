@@ -9,6 +9,9 @@ import type {
 import type {
     ApprovalRequest,
     ContextMessageReadResult,
+    GoalContinuationInput,
+    GoalManageInput,
+    GoalSnapshot,
     InstanceEvent,
     JsonValue,
     TodoReadInput,
@@ -58,6 +61,10 @@ export interface McpInstanceGateway {
     createSshInstance(sourceInstance: string, input: McpSshInstanceCreateInput): Promise<JsonValue>;
     environment(instance: string): McpEndpointEnvironmentHandshake | undefined;
     listInstances(): Promise<JsonValue>;
+    goalContinuation?(instance: string, input: GoalContinuationInput, ctxId: string): Promise<JsonValue>;
+    manageGoal?(instance: string, input: GoalManageInput, ctxId: string): Promise<GoalSnapshot | undefined>;
+    readGoal?(instance: string, ctxId: string): Promise<GoalSnapshot | undefined>;
+    touchGoal?(instance: string, ctxId: string): Promise<void>;
     createWait?(instance: string, input: WaitCreateInput): Promise<WaitRecord>;
     cancelWait?(instance: string, waitId: string): Promise<WaitRecord>;
     claimWaitRecovery?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
@@ -168,4 +175,16 @@ export function isMcpWorkspaceGateway(
     return isMcpInteractionGateway(gateway) &&
         gateway.readToolCalls !== undefined &&
         gateway.readWorkspaceEvents !== undefined;
+}
+
+export type McpGoalGateway = McpInstanceGateway & Required<Pick<
+    McpInstanceGateway,
+    "goalContinuation" | "manageGoal" | "readGoal"
+>>;
+
+export function isMcpGoalGateway(gateway: McpInstanceGateway | undefined): gateway is McpGoalGateway {
+    return gateway !== undefined &&
+        gateway.goalContinuation !== undefined &&
+        gateway.manageGoal !== undefined &&
+        gateway.readGoal !== undefined;
 }

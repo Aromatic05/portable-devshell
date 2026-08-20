@@ -3,7 +3,6 @@ const titles: Readonly<Record<string, string>> = {
     artifact_share: "Share artifact",
     artifact_transfer: "Transfer artifact",
     artifact_viewImage: "View image",
-    ask_question: "Ask user",
     bash_run: "Run shell command",
     environ_info: "Create environment",
     file_edit: "Edit file",
@@ -26,7 +25,11 @@ const titles: Readonly<Record<string, string>> = {
     tmux_wait: "Wait for tmux task",
     todo_read: "Read task plan",
     todo_write: "Update task plan",
+    workspace_ask: "Ask user",
     workspace_approval_decide: "Decide approval",
+    workspace_goal: "Manage goal",
+    workspace_goal_continue: "Continue goal",
+    workspace_goal_stop: "Stop goal",
     workspace_open: "Open Workspace",
     workspace_question_answer: "Answer question",
     workspace_snapshot: "Read Workspace snapshot",
@@ -41,7 +44,7 @@ export function mcpToolTitle(toolName: string): string {
 }
 
 const invocationStatuses: Readonly<Record<string, { invoked: string; invoking: string }>> = {
-    ask_question: { invoked: "Answer received", invoking: "Waiting for your answer…" },
+    workspace_ask: { invoked: "Answer received", invoking: "Waiting for your answer…" },
     tmux_wait: { invoked: "Task wait finished", invoking: "Waiting for task completion…" },
     workspace_open: { invoked: "Workspace ready", invoking: "Opening Workspace…" },
 };

@@ -48,7 +48,7 @@ test("Control-owned MCP tools describe their structured output instead of generi
         "contextSelector", "ctxId", "instance"
     ]);
     assertProperties(definition(definitions, "workspace_snapshot").outputSchema, [
-        "approvals", "background", "contextSelector", "ctxId", "currentEvent", "cursor", "instance", "questions", "tasks"
+        "approvals", "background", "contextSelector", "ctxId", "currentEvent", "cursor", "goal", "instance", "questions", "tasks"
     ]);
     const questions = record(property(definition(definitions, "workspace_snapshot").outputSchema, "questions"));
     const question = record(questions.items);
@@ -58,14 +58,20 @@ test("Control-owned MCP tools describe their structured output instead of generi
     const questionPayload = property(question, "payload");
     assert.equal(record(questionPayload).additionalProperties, false);
     assert.deepEqual(required(questionPayload), ["allowText", "choices", "question"]);
-    assertAnyOf(definition(definitions, "workspace_watch").outputSchema, 2);
+    assertProperties(definition(definitions, "workspace_watch").outputSchema, ["changed", "cursor", "snapshot"]);
+    assertProperties(definition(definitions, "workspace_goal").outputSchema, ["goal"]);
+    assertProperties(definition(definitions, "workspace_goal_continue").outputSchema, [
+        "claimed", "claimId", "continuationCount", "goal", "valid"
+    ]);
     assert.deepEqual(required(definition(definitions, "workspace_question_answer").outputSchema), [
         "answer", "detached", "questionId", "waitId"
     ]);
     assertProperties(definition(definitions, "workspace_task_control").outputSchema, [
         "items", "revision", "summary", "taskId", "tasks", "title"
     ]);
-    assertAnyOf(definition(definitions, "workspace_wait_recover").outputSchema, 3);
+    assertProperties(definition(definitions, "workspace_wait_recover").outputSchema, [
+        "claimId", "completed", "kind", "released", "result", "taskId", "targetId", "waitId"
+    ]);
     assertProperties(definition(definitions, "workspace_approval_decide").outputSchema, [
         "approvalId", "callId", "createdAt", "decision", "expiresAt", "inputSummary", "instance", "reason", "riskLevel", "source", "status", "toolName"
     ]);
@@ -88,12 +94,10 @@ function definition(definitions: ToolDefinition[], name: string): ToolDefinition
 function assertMeaningfulSchema(definition: ToolDefinition): void {
     const schema = record(definition.outputSchema);
     const properties = record(schema.properties);
-    const union = Array.isArray(schema.anyOf) ? schema.anyOf : [];
-    assert.equal(
-        Object.keys(properties).length > 0 || union.length > 0,
-        true,
-        `${definition.name} must describe its structured output`,
-    );
+    assert.equal(schema.type, "object", `${definition.name} output schema must be an object`);
+    assert.equal(schema.anyOf, undefined, `${definition.name} output schema must not use top-level anyOf`);
+    assert.equal(schema.oneOf, undefined, `${definition.name} output schema must not use top-level oneOf`);
+    assert.equal(Object.keys(properties).length > 0, true, `${definition.name} must describe its structured output`);
 }
 
 function assertProperties(schema: JsonValue, names: string[]): void {
@@ -105,11 +109,6 @@ function property(schema: JsonValue, name: string): JsonValue {
     const value = record(record(schema).properties)[name];
     assert.ok(value, `Missing output property ${name}`);
     return value;
-}
-
-function assertAnyOf(schema: JsonValue, count: number): void {
-    const union = record(schema).anyOf;
-    assert.equal(Array.isArray(union) ? union.length : 0, count);
 }
 
 function required(schema: JsonValue): string[] {

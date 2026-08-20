@@ -15,6 +15,10 @@ interface McpLegacyToolTombstone {
 export type McpLegacyToolCompatibility = McpLegacyToolAlias | McpLegacyToolTombstone;
 
 const legacyTools: Readonly<Record<string, McpLegacyToolCompatibility>> = {
+    ask_question: {
+        kind: "alias",
+        replacement: "workspace_ask",
+    },
     context_message_read: {
         help: "Queued user Comments are delivered automatically with the next successful ordinary tool result. Do not poll for them.",
         kind: "tombstone",

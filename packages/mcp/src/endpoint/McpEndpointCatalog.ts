@@ -182,7 +182,7 @@ export class McpEndpointCatalog {
             }
             if (isMcpInteractionGateway(this.#gateway)) {
                 sources.push({
-                    owner: "interaction",
+                    owner: "workspace",
                     tools: this.#interactionTools.list(this.#contextSelector.requiresExplicitContextId)
                 });
             }

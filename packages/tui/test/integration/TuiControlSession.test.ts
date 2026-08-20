@@ -516,6 +516,12 @@ function createServer(
     const instances = new InstanceRegistry([
         {
             enabled: true,
+            goal: {
+                async continuation() { return {}; },
+                async manage() { return undefined; },
+                async read() { return undefined; },
+                async touch() {},
+            },
             mcpCapabilities: [],
             mcpEnabled: false,
             mcpGroups: [],

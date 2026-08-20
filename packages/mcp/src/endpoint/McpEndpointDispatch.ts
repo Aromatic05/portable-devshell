@@ -148,7 +148,7 @@ export class McpEndpointDispatch {
             this.#instanceName,
         );
         input = resolvedContext.input;
-        const appOnlyInteraction = selected.owner === "interaction" && isAppOnlyInteractionTool(toolName);
+        const appOnlyInteraction = selected.owner === "workspace" && isAppOnlyInteractionTool(toolName);
         const routed = selected.owner === "worker" || selected.owner === "artifact"
             ? readMcpRoutedInput(input, snapshot.instanceRoutingEnabled, this.#instanceName)
             : { input, instance: this.#instanceName };
@@ -161,6 +161,9 @@ export class McpEndpointDispatch {
             !appOnlyInteraction,
             signal
         );
+        if (!appOnlyInteraction && toolName !== "workspace_goal" && context.ctxId !== undefined) {
+            await this.#gateway?.touchGoal?.(this.#instanceName, context.ctxId);
+        }
 
         if (appOnlyInteraction) {
             this.#catalog.assertAdaptable(selected.definition);
@@ -180,7 +183,7 @@ export class McpEndpointDispatch {
 
         if (
             selected.owner === "todo" || selected.owner === "artifact" ||
-            selected.owner === "instance" || selected.owner === "interaction"
+            selected.owner === "instance" || selected.owner === "workspace"
         ) {
             const owner = selected.owner;
             this.#catalog.assertAdaptable(selected.definition);
@@ -484,7 +487,7 @@ export class McpEndpointDispatch {
     }
 
     async #auditControlTool(
-        owner: "artifact" | "instance" | "interaction" | "todo",
+        owner: "artifact" | "instance" | "workspace" | "todo",
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
@@ -520,7 +523,7 @@ export class McpEndpointDispatch {
     }
 
     async #callControlTool(
-        owner: "artifact" | "instance" | "interaction" | "todo",
+        owner: "artifact" | "instance" | "workspace" | "todo",
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
@@ -532,7 +535,7 @@ export class McpEndpointDispatch {
                 return await this.#artifact.call(toolName as McpToolCatalogArtifactName, input, context, signal);
             case "instance":
                 return await this.#instance.call(toolName as McpToolCatalogInstanceName, input, context, signal);
-            case "interaction":
+            case "workspace":
                 return await this.#interaction.call(
                     toolName as McpToolCatalogInteractionName,
                     input,
@@ -550,6 +553,8 @@ export class McpEndpointDispatch {
 function isAppOnlyInteractionTool(toolName: string): boolean {
     return toolName === "workspace_snapshot" ||
         toolName === "workspace_watch" ||
+        toolName === "workspace_goal_continue" ||
+        toolName === "workspace_goal_stop" ||
         toolName === "workspace_question_answer" ||
         toolName === "workspace_wait_interrupt" ||
         toolName === "workspace_task_control" ||

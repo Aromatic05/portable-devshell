@@ -53,7 +53,10 @@ test("Workspace App watches live state and keeps human-action authorization hidd
         await app.locator("html").evaluate((element) => element.style.getPropertyValue("--color-text-primary")),
         "rgb(65, 43, 21)"
     );
-    await app.getByText("ask_question", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("workspace_ask", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("workspace_goal", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("Ship Workspace Goal mode", { exact: true }).waitFor({ state: "visible" });
+    assert.equal(await app.getByRole("button", { name: "Stop Goal", exact: true }).count(), 1);
     const choice = app.locator('[data-question-choice="wait-question"]');
     await choice.first().waitFor({ state: "visible" });
     assert.equal(await choice.count(), 5);
@@ -68,7 +71,7 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     assert.equal(await choice.first().evaluate((element) => element.tagName), "BUTTON");
     assert.equal(await choice.first().evaluate((element) => getComputedStyle(element).borderRadius), "0px");
     assert.equal(await app.getByRole("button", { name: "Continue", exact: true }).count(), 1);
-    assert.equal(await app.locator("body").evaluate((element) => element.scrollHeight <= 350), true);
+    assert.equal(await app.locator("body").evaluate((element) => element.scrollHeight <= 520), true);
     await app.getByRole("button", { name: "Show 7 more", exact: true }).click();
     assert.equal(await choice.count(), 12);
     assert.equal(await app.getByText("Activity", { exact: true }).count(), 0);
@@ -92,6 +95,10 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_wait_interrupt')");
     await app.getByText("No blocking event.", { exact: true }).waitFor({ state: "visible" });
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
+    await app.getByRole("button", { name: "Stop Goal", exact: true }).click();
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_goal_stop')");
+    await app.getByText("stopped", { exact: true }).waitFor({ state: "visible" });
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
     await page.waitForFunction("(window.__workspaceWatchCount || 0) >= 2");
 
     await page.evaluate(() => {
@@ -114,6 +121,7 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     const watchCall = calls.find((call) => call.name === "workspace_watch");
     const answerCall = calls.find((call) => call.name === "workspace_question_answer");
     const approvalCall = calls.find((call) => call.name === "workspace_approval_decide");
+    const goalStopCall = calls.find((call) => call.name === "workspace_goal_stop");
     const interruptCall = calls.find((call) => call.name === "workspace_wait_interrupt");
 
     assert.equal(snapshotCall?.arguments?.token, undefined);
@@ -123,9 +131,90 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     assert.equal(answerCall?.arguments?.waitId, "wait-question");
     assert.equal(approvalCall?.arguments?.token, "browser-secret-token");
     assert.equal(approvalCall?.arguments?.decision, "approve");
+    assert.equal(goalStopCall?.arguments?.token, "browser-secret-token");
+    assert.equal(goalStopCall?.arguments?.ctxId, "ctx-browser");
     assert.equal(interruptCall?.arguments?.token, "browser-secret-token");
     assert.equal(interruptCall?.arguments?.waitId, "wait-background");
     assert.deepEqual(browserFailures, []);
+});
+
+test("Workspace Goal requests one model continuation after inactivity", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    const browserFailures: string[] = [];
+    page.on("console", (message) => {
+        if (message.type() === "error") browserFailures.push(`console: ${message.text()}`);
+    });
+    page.on("pageerror", (error) => browserFailures.push(`pageerror: ${error.message}`));
+    await page.setContent('<iframe id="workspace" style="width:800px;height:500px"></iframe>');
+    await page.evaluate(BRIDGE_SCRIPT);
+    await page.evaluate(() => {
+        const state = window as typeof window & {
+            __workspaceApprovalPending: boolean;
+            __workspaceGoalDueNow: boolean;
+            __workspaceQuestionAnswered: boolean;
+            __workspaceWaitInterrupted: boolean;
+        };
+        state.__workspaceGoalDueNow = true;
+        state.__workspaceQuestionAnswered = true;
+        state.__workspaceApprovalPending = false;
+        state.__workspaceWaitInterrupted = true;
+    });
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    await page.waitForFunction("(window.__modelMessages || []).length === 1");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue').length >= 3");
+    const continuationCalls = await page.evaluate(
+        "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue')",
+    ) as Array<{ arguments?: Record<string, unknown> }>;
+    assert.equal(continuationCalls[0]?.arguments?.action, "claim");
+    assert.equal(continuationCalls[1]?.arguments?.action, "validate");
+    assert.equal(continuationCalls[2]?.arguments?.action, "report");
+    assert.equal(continuationCalls[2]?.arguments?.accepted, true);
+    assert.equal(await page.evaluate("(window.__goalContinuationReports || []).length"), 1);
+    assert.deepEqual(browserFailures, []);
+});
+
+test("Workspace Goal does not continue while a detached wait is still pending", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:500px"></iframe>');
+    await page.evaluate(BRIDGE_SCRIPT);
+    await page.evaluate(() => {
+        const state = window as typeof window & {
+            __workspaceApprovalPending: boolean;
+            __workspaceBackgroundDetached: boolean;
+            __workspaceGoalDueNow: boolean;
+            __workspaceQuestionAnswered: boolean;
+            __workspaceWaitInterrupted: boolean;
+        };
+        state.__workspaceGoalDueNow = true;
+        state.__workspaceQuestionAnswered = true;
+        state.__workspaceApprovalPending = false;
+        state.__workspaceWaitInterrupted = true;
+        state.__workspaceBackgroundDetached = true;
+    });
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    await page.frameLocator("#workspace").getByText("Ship Workspace Goal mode", { exact: true }).waitFor({ state: "visible" });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
+    assert.equal(
+        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue').length"),
+        0,
+    );
 });
 
 test("Workspace App uses OpenAI session context without sending or injecting ctxId", BROWSER_TEST_OPTIONS, async (t) => {
@@ -357,6 +446,10 @@ window.__workspaceCancelledRequests = [];
 window.__workspaceQuestionAnswered = false;
 window.__workspaceApprovalPending = true;
 window.__workspaceWaitInterrupted = false;
+window.__workspaceGoalStopped = false;
+window.__workspaceGoalDueNow = false;
+window.__workspaceBackgroundDetached = false;
+window.__goalContinuationReports = [];
 window.__workspaceWatchCount = 0;
 window.__workspacePendingWatch = null;
 window.__workspaceQuestionText = "Continue the task?";
@@ -372,7 +465,7 @@ function snapshot(withQuestion) {
         createdByCtxId: "ctx-browser",
         eventName: "user.answer",
         kind: "question",
-        name: "ask_question",
+        name: "workspace_ask",
         payload: {
             allowText: false,
             choices: [
@@ -423,7 +516,7 @@ function snapshot(withQuestion) {
             toolName: "bash_run"
         }],
         approvals: window.__workspaceApprovalPending ? [approval] : [],
-        background: [{
+        background: window.__workspaceWaitInterrupted && !window.__workspaceBackgroundDetached ? [] : [{
             detachedAt: "2026-08-19T01:00:01.000Z",
             status: "detached",
             taskId: "task-plan",
@@ -435,6 +528,25 @@ function snapshot(withQuestion) {
         ctxId: "ctx-browser",
         currentEvent: currentEvent,
         cursor: window.__workspaceCursor,
+        goal: {
+            autoContinueExhausted: false,
+            continuationCount: 0,
+            continuationDue: window.__workspaceGoalDueNow,
+            continuationDueAt: window.__workspaceGoalDueNow ? "2000-01-01T00:00:00.000Z" : "2099-08-20T01:00:00.000Z",
+            continuationPending: false,
+            createdAt: "2026-08-19T01:00:00.000Z",
+            goalId: "goal-browser",
+            lastAgentActivityAt: "2026-08-19T01:00:00.000Z",
+            maxContinuations: 10,
+            objective: "Ship Workspace Goal mode",
+            revision: 1,
+            status: window.__workspaceGoalStopped ? "stopped" : "active",
+            steps: [
+                { id: "implement", status: "completed", text: "Implement Goal runtime" },
+                { id: "verify", status: "active", text: "Verify Workspace UI" }
+            ],
+            updatedAt: "2026-08-19T01:00:00.000Z"
+        },
         instance: "browser-instance",
         questions: withQuestion && !window.__workspaceQuestionAnswered ? [question] : [],
         tasks: [{
@@ -505,7 +617,13 @@ window.addEventListener("message", function (event) {
             _meta: { "portable-devshell/workspace": { token: "browser-secret-token" } },
             structuredContent: window.__workspaceWatchCount > 0
                 ? snapshot(!window.__workspaceQuestionAnswered)
-                : Object.assign(snapshot(false), { activity: [], approvals: [], background: [], currentEvent: null, cursor: 1 })
+                : Object.assign(snapshot(false), {
+                    activity: [],
+                    approvals: [],
+                    background: window.__workspaceBackgroundDetached ? snapshot(false).background : [],
+                    currentEvent: null,
+                    cursor: 1
+                })
         });
         return;
     }
@@ -535,6 +653,36 @@ window.addEventListener("message", function (event) {
         window.__workspaceWaitInterrupted = true;
         reply({ structuredContent: { interrupted: true, status: "cancelled", tmuxTaskId: "task-browser", waitId: "wait-background" } });
         return;
+    }
+    if (call.name === "workspace_goal_stop") {
+        window.__workspaceGoalStopped = true;
+        reply({ structuredContent: { goal: snapshot(false).goal } });
+        return;
+    }
+    if (call.name === "workspace_goal_continue") {
+        var action = call.arguments && call.arguments.action;
+        if (action === "claim") {
+            reply({ structuredContent: {
+                claimed: call.arguments.available === true,
+                claimId: call.arguments.claimId,
+                continuationCount: 1,
+                goal: Object.assign({}, snapshot(false).goal, { continuationDue: false, continuationPending: true })
+            } });
+            return;
+        }
+        if (action === "validate") {
+            reply({ structuredContent: {
+                valid: call.arguments.available === true,
+                goal: Object.assign({}, snapshot(false).goal, { continuationDue: false, continuationPending: true })
+            } });
+            return;
+        }
+        if (action === "report") {
+            window.__goalContinuationReports.push(call.arguments);
+            window.__workspaceGoalDueNow = false;
+            reply({ structuredContent: { goal: Object.assign({}, snapshot(false).goal, { continuationCount: 1 }) } });
+            return;
+        }
     }
 });
 
@@ -568,7 +716,7 @@ function sessionModeSnapshot() {
     var question = {
         eventName: "user.answer",
         kind: "question",
-        name: "ask_question",
+        name: "workspace_ask",
         payload: { allowText: false, choices: ["Continue"], question: "Session mode question?" },
         status: "waiting",
         taskId: "task-session",

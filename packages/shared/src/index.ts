@@ -19,6 +19,7 @@ export * from "./dto/instance/DtoInstanceEvent.js";
 export * from "./dto/instance/DtoInstanceLog.js";
 export * from "./dto/instance/DtoInstanceRuntime.js";
 export * from "./dto/instance/DtoInstanceSnapshot.js";
+export * from "./dto/instance/DtoGoal.js";
 export * from "./dto/instance/DtoTodo.js";
 export * from "./dto/instance/DtoWait.js";
 export * from "./dto/oauth/index.js";

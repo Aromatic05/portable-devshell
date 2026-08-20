@@ -150,6 +150,30 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return await this.#requireWait(instance).list();
     }
 
+    async goalContinuation(
+        instance: string,
+        input: import("@portable-devshell/shared").GoalContinuationInput,
+        ctxId: string
+    ): Promise<JsonValue> {
+        return await this.#requireDescriptor(instance).goal.continuation(ctxId, input);
+    }
+
+    async manageGoal(
+        instance: string,
+        input: import("@portable-devshell/shared").GoalManageInput,
+        ctxId: string
+    ) {
+        return await this.#requireDescriptor(instance).goal.manage(ctxId, input);
+    }
+
+    async readGoal(instance: string, ctxId: string) {
+        return await this.#requireDescriptor(instance).goal.read(ctxId);
+    }
+
+    async touchGoal(instance: string, ctxId: string): Promise<void> {
+        await this.#requireDescriptor(instance).goal.touch(ctxId);
+    }
+
     async listApprovals(instance: string) {
         return await this.#requireDescriptor(instance).worker.listApprovals();
     }

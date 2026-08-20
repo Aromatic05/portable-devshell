@@ -49,7 +49,7 @@ export const workspaceAppHtml = String.raw`<!doctype html>
 body { margin: 0; padding: 8px; background: transparent; color: var(--color-text-primary, CanvasText); }
 small, .muted { color: var(--color-text-secondary, color-mix(in srgb, CanvasText 58%, transparent)); font-size: 11px; }
 #status { display: block; margin-bottom: 6px; }
-.grid { display: grid; }
+.grid { display: grid; gap: 6px; }
 .card { border: 1px solid var(--color-border-secondary, color-mix(in srgb, CanvasText 18%, transparent)); border-radius: var(--border-radius-md, 9px); overflow: hidden; background: var(--color-background-primary, color-mix(in srgb, Canvas 94%, CanvasText 6%)); }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 9px 6px; }
 .card-body { padding: 0 9px 8px; }
@@ -70,6 +70,9 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
 .empty { padding: 8px 9px; text-align: left; font-size: 11px; color: var(--color-text-secondary, color-mix(in srgb, CanvasText 55%, transparent)); }
 .choice-row, .action-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 10px; min-height: 34px; padding: 7px 9px; border: 0; border-top: 1px solid var(--color-border-secondary, color-mix(in srgb, CanvasText 14%, transparent)); border-radius: 0; background: transparent; cursor: pointer; font-size: 12px; text-align: left; }
 .choice-row:hover, .action-row:hover { background: var(--color-background-secondary, color-mix(in srgb, CanvasText 6%, transparent)); }
+.goal-step { display: flex; gap: 7px; align-items: baseline; padding: 4px 0; font-size: 11px; }
+.goal-step + .goal-step { border-top: 1px solid var(--color-border-secondary, color-mix(in srgb, CanvasText 10%, transparent)); }
+.goal-step .badge { flex: 0 0 auto; }
 </style>
 </head>
 <body>
@@ -99,6 +102,8 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
   var pendingToolResult = null;
   var initialToolResultResolve = null;
   var liveAbortController = null;
+  var goalTimer = null;
+  var goalContinuationClaimId = "";
 
   function escapeHtml(value) {
     return String(value == null ? "" : value)
@@ -230,6 +235,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     var state = {
       ...(requiresExplicitContextId ? { ctxId: ctxId } : {}),
       instance: snapshot && snapshot.instance,
+      goal: snapshot && snapshot.goal ? snapshot.goal : undefined,
       tasks: tasks.map(function (task) { return {
         taskId: task.taskId,
         title: task.title,
@@ -265,6 +271,90 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
       role: "user",
       content: [{ type: "text", text: text }]
     });
+  }
+
+  function newGoalContinuationClaimId() {
+    if (crypto && typeof crypto.randomUUID === "function") return "goal-continue-" + crypto.randomUUID();
+    return "goal-continue-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+  }
+
+  function goalContinuationAvailable() {
+    if (!snapshot || visibleEvent() || busy.size > 0 || recovering) return false;
+    var background = Array.isArray(snapshot.background) ? snapshot.background : [];
+    return background.length === 0;
+  }
+
+  function scheduleGoalContinuation(minDelayMs) {
+    if (goalTimer) clearTimeout(goalTimer);
+    goalTimer = null;
+    var goal = snapshot && snapshot.goal;
+    if (!goal || goal.status !== "active" || goal.continuationPending || goal.autoContinueExhausted || !goalContinuationAvailable()) return;
+    var dueAt = Date.parse(goal.continuationDueAt || "");
+    if (!Number.isFinite(dueAt)) return;
+    var delayMs = Math.max(minDelayMs || 0, dueAt - Date.now(), 0);
+    goalTimer = setTimeout(function () {
+      goalTimer = null;
+      void continueGoal();
+    }, delayMs);
+  }
+
+  async function continueGoal() {
+    var goal = snapshot && snapshot.goal;
+    if (!goal || goal.status !== "active" || goal.autoContinueExhausted || goal.continuationPending || !goalContinuationAvailable()) return;
+    var claimId = goalContinuationClaimId || newGoalContinuationClaimId();
+    goalContinuationClaimId = claimId;
+    var accepted = false;
+    var errorText = "";
+    var claimed = false;
+    try {
+      var claim = structured(await callTool("workspace_goal_continue", {
+        action: "claim",
+        available: goalContinuationAvailable(),
+        claimId: claimId
+      }, true));
+      if (claim && claim.goal) snapshot.goal = claim.goal;
+      if (!claim || !claim.claimed) {
+        goalContinuationClaimId = "";
+        render();
+        scheduleGoalContinuation(30000);
+        return;
+      }
+      claimed = true;
+      var validation = structured(await callTool("workspace_goal_continue", {
+        action: "validate",
+        available: goalContinuationAvailable(),
+        claimId: claimId
+      }, true));
+      if (validation && validation.goal) snapshot.goal = validation.goal;
+      if (!validation || !validation.valid) {
+        goalContinuationClaimId = "";
+        render();
+        scheduleGoalContinuation(30000);
+        return;
+      }
+      await sendModelMessage(
+        "Continue working on the active portable-devshell Workspace Goal from its current state. Do not repeat completed steps. Keep the Goal synchronized with execution using workspace_goal(action=\"update\"). When every step is completed or skipped, call workspace_goal(action=\"finish\"). If progress genuinely cannot continue, call workspace_goal(action=\"block\", note=...).",
+        { goalContinuation: claim }
+      );
+      accepted = true;
+    } catch (error) {
+      errorText = error instanceof Error ? error.message : String(error);
+      console.error(error);
+    } finally {
+      if (claimed) {
+        try {
+          var reportArgs = { accepted: accepted, action: "report", claimId: claimId };
+          if (errorText) reportArgs.error = errorText;
+          var report = structured(await callTool("workspace_goal_continue", reportArgs, true));
+          if (report && report.goal) snapshot.goal = report.goal;
+        } catch (reportError) {
+          console.error(reportError);
+        }
+      }
+      goalContinuationClaimId = "";
+      render();
+      scheduleGoalContinuation(0);
+    }
   }
 
   function findTask(taskId) {
@@ -332,6 +422,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     persistWorkspaceHint();
     render();
     await syncModelContext();
+    scheduleGoalContinuation(0);
     if (allowRecovery !== false) void recoverDetachedWait();
   }
 
@@ -428,6 +519,8 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     watchGeneration += 1;
     if (liveAbortController) liveAbortController.abort();
     liveAbortController = null;
+    if (goalTimer) clearTimeout(goalTimer);
+    goalTimer = null;
     watchStarted = false;
     initialized = false;
   }
@@ -503,7 +596,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     if (!snapshot) return null;
     if (snapshot.currentEvent && typeof snapshot.currentEvent === "object") return snapshot.currentEvent;
     var questions = Array.isArray(snapshot.questions) ? snapshot.questions : [];
-    if (questions.length) return Object.assign({ kind: "question", name: "ask_question", eventName: "user.answer" }, questions[0]);
+    if (questions.length) return Object.assign({ kind: "question", name: "workspace_ask", eventName: "user.answer" }, questions[0]);
     var approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
     if (approvals.length) return Object.assign({ kind: "approval", name: approvals[0].toolName, eventName: "approval.decision" }, approvals[0]);
     var background = Array.isArray(snapshot.background) ? snapshot.background : [];
@@ -547,20 +640,41 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     return '<div class="card">' + eventHead(item) + '<div class="card-body"><div class="muted">event · ' + escapeHtml(item.eventName || "tmux.task.completed") + '</div><div class="question">Waiting for task completion</div><div class="mono">' + escapeHtml(item.tmuxTaskId || "") + '</div></div>' + action + '</div>';
   }
 
+  function goalCard() {
+    var goal = snapshot && snapshot.goal;
+    if (!goal) return "";
+    var steps = Array.isArray(goal.steps) ? goal.steps : [];
+    var rows = steps.map(function (step) {
+      var note = step.note ? '<div class="muted">' + escapeHtml(step.note) + '</div>' : '';
+      return '<div class="goal-step"><span class="badge">' + escapeHtml(step.status) + '</span><div><div>' + escapeHtml(step.text) + '</div>' + note + '</div></div>';
+    }).join("");
+    var stop = "";
+    if (goal.status === "active" || goal.status === "blocked") {
+      stop = '<button type="button" class="action-row danger-row" aria-label="Stop Goal" data-goal-stop="' + escapeHtml(goal.goalId) + '"' + (busy.has("goal-stop") ? ' disabled' : '') + '><span>Stop Goal</span><span class="muted">keep processes running</span></button>';
+    }
+    var continuation = goal.status === "active"
+      ? '<div class="muted">continuations · ' + escapeHtml(goal.continuationCount) + '/' + escapeHtml(goal.maxContinuations) + '</div>'
+      : '';
+    return '<div class="card"><div class="card-head"><span class="event-name">workspace_goal</span><span class="badge">' + escapeHtml(goal.status) + '</span></div><div class="card-body"><div class="question">' + escapeHtml(goal.objective) + '</div>' + continuation + '<div>' + rows + '</div></div>' + stop + '</div>';
+  }
+
   function render() {
     if (!snapshot) return;
     var item = visibleEvent();
-    if (!item) {
-      root.innerHTML = '<div class="card"><div class="empty">No blocking event.</div></div>';
-      return;
-    }
-    root.innerHTML = item.kind === "question" ? questionCard(item)
+    var eventCard = !item ? '<div class="card"><div class="empty">No blocking event.</div></div>'
+      : item.kind === "question" ? questionCard(item)
       : item.kind === "approval" ? approvalCard(item)
       : item.kind === "tmux" ? tmuxWaitCard(item)
       : '<div class="card"><div class="empty">Unknown event.</div></div>';
+    root.innerHTML = goalCard() + eventCard;
   }
 
   root.addEventListener("click", function (event) {
+    var goalStop = event.target.closest("[data-goal-stop]");
+    if (goalStop && !goalStop.hasAttribute("disabled")) {
+      void act("goal-stop", "workspace_goal_stop", {});
+      return;
+    }
     var expand = event.target.closest("[data-question-expand]");
     if (expand) {
       expandedQuestions.add(expand.getAttribute("data-question-expand"));

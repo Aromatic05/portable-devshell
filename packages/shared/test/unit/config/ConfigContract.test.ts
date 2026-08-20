@@ -251,17 +251,17 @@ test("obsolete context groups are removed from custom MCP allowlists", () => {
     assert.deepEqual(custom.mcp.tools.groups, ["file", "bash", "todo"]);
 });
 
-test("the v0.5 default MCP allowlist gains the v0.6 interaction group", () => {
+test("the v0.5 default MCP allowlist gains the workspace group", () => {
     const upgraded = normalizeConfigInstanceDraft({
         mcp: { tools: { groups: ["file", "bash", "artifact", "tmux", "todo"] } },
         name: "upgraded-policy",
         provider: "local"
     });
 
-    assert.deepEqual(upgraded.mcp.tools.groups, ["file", "bash", "artifact", "tmux", "todo", "interaction"]);
+    assert.deepEqual(upgraded.mcp.tools.groups, ["file", "bash", "artifact", "tmux", "todo", "workspace"]);
 });
 
-test("the v0.5 default MCP allowlist with instance management gains the v0.6 interaction group", () => {
+test("the v0.5 default MCP allowlist with instance management gains the workspace group", () => {
     const upgraded = normalizeConfigInstanceDraft({
         mcp: { tools: { groups: ["file", "bash", "artifact", "tmux", "todo", "instance"] } },
         name: "upgraded-managed-policy",
@@ -270,8 +270,18 @@ test("the v0.5 default MCP allowlist with instance management gains the v0.6 int
 
     assert.deepEqual(
         upgraded.mcp.tools.groups,
-        ["file", "bash", "artifact", "tmux", "todo", "instance", "interaction"]
+        ["file", "bash", "artifact", "tmux", "todo", "instance", "workspace"]
     );
+});
+
+test("the obsolete interaction group normalizes to the workspace namespace", () => {
+    const upgraded = normalizeConfigInstanceDraft({
+        mcp: { tools: { groups: ["file", "interaction"] } },
+        name: "upgraded-interaction-policy",
+        provider: "local"
+    });
+
+    assert.deepEqual(upgraded.mcp.tools.groups, ["file", "workspace"]);
 });
 
 test("provider changes discard stale provider-specific fields before normalization", () => {

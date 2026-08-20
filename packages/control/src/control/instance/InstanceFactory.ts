@@ -3,6 +3,7 @@ import { asInstanceName, type ControlInstanceConfig } from "@portable-devshell/s
 
 import type { InstanceDescriptor } from "./InstanceDescriptor.js";
 import { ContextMessageService } from "../../instance/context/ContextMessageService.js";
+import { GoalService } from "../../instance/goal/GoalService.js";
 import { TodoService } from "../../instance/todo/TodoService.js";
 import { WaitService } from "../../instance/wait/WaitService.js";
 import { WorkerTerminalBackend } from "../terminal/WorkerTerminalBackend.js";
@@ -34,6 +35,13 @@ export class InstanceFactory {
             filePath: paths.contextMessagesFile,
             instanceName: instance.name
         });
+        const goal = new GoalService({
+            appendEvent: async (type, data) => {
+                await workerHolder.value?.appendControlEvent(type, data);
+            },
+            filePath: paths.goalsFile,
+            instanceName: instance.name
+        });
         const wait = new WaitService({
             appendEvent: async (type, data) => {
                 await workerHolder.value?.appendControlEvent(type, data);
@@ -49,6 +57,7 @@ export class InstanceFactory {
 
         return {
             contextMessages,
+            goal,
             mcpCapabilities: instance.mcp.tools.capabilities,
             mcpContextMode: instance.mcp.contextMode,
             mcpGroups: instance.mcp.tools.groups,

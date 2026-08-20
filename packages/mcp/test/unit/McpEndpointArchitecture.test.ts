@@ -328,7 +328,7 @@ test("Workspace authorization metadata never enters audit results or MCP events"
     const catalog = new McpEndpointCatalog({
         gateway,
         instanceName: "demo-local",
-        policy: { capabilities: [], groups: ["interaction"] },
+        policy: { capabilities: [], groups: ["workspace"] },
         worker: harness.worker,
     });
     const dispatch = new McpEndpointDispatch({ catalog, gateway, instanceName: "demo-local", worker: harness.worker });
@@ -484,7 +484,7 @@ test("tmux_wait distinguishes host detach from explicit Workspace interruption",
     const catalog = new McpEndpointCatalog({
         gateway,
         instanceName: "demo-local",
-        policy: { capabilities: ["read"], groups: ["interaction", "tmux"] },
+        policy: { capabilities: ["read"], groups: ["workspace", "tmux"] },
         worker,
     });
     const dispatch = new McpEndpointDispatch({ catalog, gateway, instanceName: "demo-local", worker });

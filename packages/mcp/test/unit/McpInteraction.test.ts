@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { JsonValue, ToolCallContext, WaitCreateInput, WaitRecord } from "@portable-devshell/shared";
+import type { GoalContinuationInput, JsonValue, ToolCallContext, WaitCreateInput, WaitRecord } from "@portable-devshell/shared";
 import {
     McpEndpointHandlerInteraction,
     McpNativeToolResult,
@@ -14,13 +14,13 @@ import {
 
 const context: ToolCallContext = { ctxId: "ctx-question", source: "mcp" };
 
-test("ask_question holds the original call until the Workspace app answers", async () => {
+test("workspace_ask holds the original call until the Workspace app answers", async () => {
     const fake = createInteractionGateway();
     const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
     const token = await openWorkspace(handler);
     let settled = false;
     const held = handler.call(
-        "ask_question",
+        "workspace_ask",
         {
             allowText: false,
             choices: ["A", "B"],
@@ -51,13 +51,13 @@ test("ask_question holds the original call until the Workspace app answers", asy
     assert.equal(fake.waits[0]?.status, "consumed");
 });
 
-test("ask_question detaches durable wait state when the host cancels the held call", async () => {
+test("workspace_ask detaches durable wait state when the host cancels the held call", async () => {
     const fake = createInteractionGateway();
     const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
     const token = await openWorkspace(handler);
     const controller = new AbortController();
     const held = handler.call(
-        "ask_question",
+        "workspace_ask",
         { question: "Still there?", taskId: "task-1" },
         context,
         "call-agent",
@@ -82,7 +82,7 @@ test("ask_question detaches durable wait state when the host cancels the held ca
     });
 });
 
-test("ask_question requires the durable task to be attached to the current Context", async () => {
+test("workspace_ask requires the durable task to be attached to the current Context", async () => {
     const fake = createInteractionGateway();
     const gateway = Object.assign(fake.gateway, {
         async readTodo(_instance: string, input?: { taskId?: string }) {
@@ -104,7 +104,7 @@ test("ask_question requires the durable task to be attached to the current Conte
 
     await assert.rejects(
         handler.call(
-            "ask_question",
+            "workspace_ask",
             { question: "Should not attach implicitly", taskId: "task-1" },
             context,
             "call-foreign-task",
@@ -428,12 +428,12 @@ test("workspace_watch heartbeat advances its cursor without forcing a snapshot",
     assert.deepEqual(result.structuredContent, { changed: false, cursor: 11 });
 });
 
-test("ask_question refuses to hold a call before Workspace is open", async () => {
+test("workspace_ask refuses to hold a call before Workspace is open", async () => {
     const fake = createInteractionGateway();
     const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
     await assert.rejects(
         handler.call(
-            "ask_question",
+            "workspace_ask",
             { question: "Invisible question?", taskId: "task-1" },
             context,
             "call-agent",
@@ -442,7 +442,7 @@ test("ask_question refuses to hold a call before Workspace is open", async () =>
     );
 });
 
-test("ask_question refuses to create a held call after the Workspace App lease expires", async () => {
+test("workspace_ask refuses to create a held call after the Workspace App lease expires", async () => {
     const fake = createInteractionGateway();
     let now = 1_000;
     const handler = new McpEndpointHandlerInteraction({
@@ -456,7 +456,7 @@ test("ask_question refuses to create a held call after the Workspace App lease e
 
     await assert.rejects(
         handler.call(
-            "ask_question",
+            "workspace_ask",
             { question: "Is anyone still there?", taskId: "task-1" },
             context,
             "call-agent-stale",
@@ -466,6 +466,45 @@ test("ask_question refuses to create a held call after the Workspace App lease e
     assert.equal(fake.waits.length, 0);
 });
 
+test("Workspace Goal continuation is unavailable while the current Context still has a detached wait", async () => {
+    const fake = createInteractionGateway();
+    const continuationInputs: GoalContinuationInput[] = [];
+    Object.assign(fake.gateway, {
+        async goalContinuation(_instance: string, input: GoalContinuationInput) {
+            continuationInputs.push({ ...input });
+            return { claimed: false, goal: null };
+        },
+        async manageGoal() {
+            return undefined;
+        },
+        async readGoal() {
+            return undefined;
+        },
+    });
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
+    fake.waits.push({
+        createdAt: "2026-08-20T00:00:00.000Z",
+        createdByCtxId: context.ctxId!,
+        detachedAt: "2026-08-20T00:01:00.000Z",
+        kind: "tmux",
+        status: "detached",
+        targetId: "task-long",
+        updatedAt: "2026-08-20T00:01:00.000Z",
+        waitId: "wait-long",
+    });
+
+    await handler.call(
+        "workspace_goal_continue",
+        { action: "claim", available: true, claimId: "claim-1", token },
+        context,
+        "call-goal-continue",
+    );
+
+    assert.equal(continuationInputs.length, 1);
+    assert.equal(continuationInputs[0]?.available, false);
+});
+
 test("Workspace tool metadata uses one render tool and app-only action tools", () => {
     const definitions = new McpToolCatalogInteraction().list();
     const adapter = new McpToolSchemaAdapter();
@@ -473,13 +512,18 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     const answer = definitions.find((definition) => definition.name === "workspace_question_answer");
     const interrupt = definitions.find((definition) => definition.name === "workspace_wait_interrupt");
     const watch = definitions.find((definition) => definition.name === "workspace_watch");
-    const ask = definitions.find((definition) => definition.name === "ask_question");
+    const ask = definitions.find((definition) => definition.name === "workspace_ask");
+    const goal = definitions.find((definition) => definition.name === "workspace_goal");
+    const goalStop = definitions.find((definition) => definition.name === "workspace_goal_stop");
 
+    assert.deepEqual([...new Set(definitions.map((definition) => definition.group))], ["workspace"]);
     assert.ok(open);
     assert.ok(answer);
     assert.ok(interrupt);
     assert.ok(watch);
     assert.ok(ask);
+    assert.ok(goal);
+    assert.ok(goalStop);
     const adaptedOpen = adapter.toMcpTool(open, open.description);
     const adaptedAnswer = adapter.toMcpTool(answer, answer.description);
     const adaptedInterrupt = adapter.toMcpTool(interrupt, interrupt.description);
@@ -492,6 +536,8 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     assert.deepEqual((adaptedInterrupt._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.deepEqual((adaptedWatch._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.equal(ask._meta, undefined);
+    assert.equal(goal._meta, undefined);
+    assert.deepEqual((goalStop._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
 
     const sessionDefinitions = new McpToolCatalogInteraction().list(false);
     const sessionOpen = sessionDefinitions.find((definition) => definition.name === "workspace_open");

@@ -428,7 +428,7 @@ export const defaultMcpToolGroups = [
     "artifact",
     "tmux",
     "todo",
-    "interaction",
+    "workspace",
 ] as const;
 
 export const defaultConfigNormalizeContext: ConfigNormalizeContext = {

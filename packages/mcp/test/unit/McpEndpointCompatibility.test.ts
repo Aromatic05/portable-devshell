@@ -4,6 +4,10 @@ import test from "node:test";
 import { resolveMcpLegacyTool } from "../../src/endpoint/McpEndpointCompatibility.ts";
 
 test("legacy MCP compatibility aliases only the semantic superset", () => {
+    assert.deepEqual(resolveMcpLegacyTool("ask_question"), {
+        kind: "alias",
+        replacement: "workspace_ask",
+    });
     assert.deepEqual(resolveMcpLegacyTool("instance_start"), {
         kind: "alias",
         replacement: "instance_connect",

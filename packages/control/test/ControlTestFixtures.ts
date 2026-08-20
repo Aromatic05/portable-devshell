@@ -3,8 +3,18 @@ import type { TodoReadResult } from "@portable-devshell/shared";
 
 import type {
     InstanceDescriptor,
+    InstanceGoalPort,
     InstanceTodoPort
 } from "../src/control/instance/InstanceDescriptor.ts";
+
+export function createTestGoalPort(): InstanceGoalPort {
+    return {
+        async continuation() { return {}; },
+        async manage() { return undefined; },
+        async read() { return undefined; },
+        async touch() {},
+    };
+}
 
 export function createTestTodoPort(): InstanceTodoPort {
     const empty: TodoReadResult = {
@@ -40,6 +50,7 @@ export function createTestInstanceDescriptor(
 ): InstanceDescriptor {
     return {
         enabled: true,
+        goal: createTestGoalPort(),
         mcpCapabilities: [],
         mcpEnabled: false,
         mcpGroups: [],

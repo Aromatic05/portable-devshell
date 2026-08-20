@@ -92,7 +92,7 @@ test("MCP tools expose concise human-readable titles with a safe fallback", () =
 });
 
 test("ChatGPT invocation status is limited to long-lived visible tool states", () => {
-    assert.deepEqual(mcpToolInvocationStatus("ask_question"), {
+    assert.deepEqual(mcpToolInvocationStatus("workspace_ask"), {
         invoked: "Answer received",
         invoking: "Waiting for your answer…",
     });

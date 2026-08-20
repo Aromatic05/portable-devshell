@@ -4,6 +4,9 @@ import type { ContextMessageQueueInput, ContextMessageReadResult, ContextMessage
 import type {
     ActiveTodoSummary,
     ControlMcpContextMode,
+    GoalContinuationInput,
+    GoalManageInput,
+    GoalSnapshot,
     JsonValue,
     TodoReadInput,
     TodoReadResult,
@@ -30,6 +33,13 @@ export interface InstanceTodoPort {
     write(input: TodoWriteInput, ctxId: string): Promise<TodoReadResult>;
 }
 
+export interface InstanceGoalPort {
+    continuation(ctxId: string, input: GoalContinuationInput): Promise<JsonValue>;
+    manage(ctxId: string, input: GoalManageInput): Promise<GoalSnapshot | undefined>;
+    read(ctxId: string): Promise<GoalSnapshot | undefined>;
+    touch(ctxId: string): Promise<void>;
+}
+
 export interface InstanceWaitPort {
     cancel(waitId: string): Promise<WaitRecord>;
     claimRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
@@ -48,6 +58,7 @@ export interface InstanceWaitPort {
 export interface InstanceDescriptor {
     contextMessages?: InstanceContextMessagePort;
     enabled: boolean;
+    goal: InstanceGoalPort;
     mcpCapabilities: readonly ToolCapability[];
     mcpContextMode?: ControlMcpContextMode;
     mcpEnabled: boolean;

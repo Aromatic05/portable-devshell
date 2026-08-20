@@ -540,16 +540,18 @@ function cloneNonEmptyRecord(record: Record<string, string> | undefined): Record
 }
 
 function normalizeMcpGroups(configured: readonly string[] | undefined, defaults: readonly string[]): string[] {
-    const groups = deduplicate(configured ?? defaults).filter((group) => group !== "context");
+    const groups = deduplicate(configured ?? defaults)
+        .filter((group) => group !== "context")
+        .map((group) => group === "interaction" ? "workspace" : group);
     const legacyDefaultGroups = ["file", "bash", "artifact", "tmux", "todo"];
     if (
         configured !== undefined &&
-        defaults.includes("interaction") &&
-        !groups.includes("interaction") &&
+        defaults.includes("workspace") &&
+        !groups.includes("workspace") &&
         legacyDefaultGroups.every((group) => groups.includes(group)) &&
         groups.every((group) => legacyDefaultGroups.includes(group) || group === "instance")
     ) {
-        return [...groups, "interaction"];
+        return [...groups, "workspace"];
     }
     return groups;
 }

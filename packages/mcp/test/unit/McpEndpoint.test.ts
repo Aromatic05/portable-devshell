@@ -103,7 +103,7 @@ test("HTTP tools/list keeps Workspace actions app-only while advertising host au
     const binding = new McpEndpointBinding(new McpEndpointWorker({
         gateway,
         instanceName: "demo",
-        policy: { capabilities: [], groups: ["interaction"] },
+        policy: { capabilities: [], groups: ["workspace"] },
         worker: harness.worker,
     }));
     const server = await createBindingServer(binding);

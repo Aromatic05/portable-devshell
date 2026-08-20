@@ -37,6 +37,7 @@ export type InstanceEventType = ArtifactEventType
     | "context.message.queued"
     | "context.message.delivered"
     | "context.message.failed"
+    | "goal.updated"
     | "todo.created"
     | "todo.updated"
     | "todo.completed"

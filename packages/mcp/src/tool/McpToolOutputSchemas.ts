@@ -306,7 +306,7 @@ const workspaceQuestionPayloadSchema = objectSchema({
 const workspaceQuestionEventSchema = objectSchema({
     eventName: { const: "user.answer", type: "string" },
     kind: { const: "question", type: "string" },
-    name: { const: "ask_question", type: "string" },
+    name: { const: "workspace_ask", type: "string" },
     payload: workspaceQuestionPayloadSchema,
     status: { enum: ["waiting", "detached"], type: "string" },
     taskId: nonEmptyString,
@@ -342,6 +342,49 @@ const workspaceTodoTaskSummaryOutputSchema = objectSchema({
     ...activeTodoSummaryProperties,
     updatedAt: stringValue,
 }, ["completed", "revision", "status", "taskId", "title", "total", "updatedAt"]);
+
+const workspaceGoalStepOutputSchema = objectSchema({
+    id: nonEmptyString,
+    note: stringValue,
+    status: { enum: ["pending", "active", "completed", "skipped"], type: "string" },
+    text: nonEmptyString,
+}, ["id", "status", "text"]);
+
+export const workspaceGoalOutputSchema = objectSchema({
+    autoContinueExhausted: booleanValue,
+    continuationCount: nonNegativeInteger,
+    continuationDue: booleanValue,
+    continuationDueAt: nonEmptyString,
+    continuationPending: booleanValue,
+    continuationRetryAfter: stringValue,
+    createdAt: nonEmptyString,
+    goalId: nonEmptyString,
+    lastAgentActivityAt: nonEmptyString,
+    lastContinuationAt: stringValue,
+    maxContinuations: nonNegativeInteger,
+    note: stringValue,
+    objective: nonEmptyString,
+    revision: nonNegativeInteger,
+    status: { enum: ["active", "blocked", "completed", "stopped"], type: "string" },
+    steps: arraySchema(workspaceGoalStepOutputSchema),
+    updatedAt: nonEmptyString,
+}, [
+    "autoContinueExhausted", "continuationCount", "continuationDue", "continuationDueAt",
+    "continuationPending", "createdAt", "goalId", "lastAgentActivityAt", "maxContinuations",
+    "objective", "revision", "status", "steps", "updatedAt"
+]);
+
+export const workspaceGoalResultOutputSchema = objectSchema({
+    goal: { anyOf: [{ type: "null" }, workspaceGoalOutputSchema] },
+}, ["goal"]);
+
+export const workspaceGoalContinuationOutputSchema = objectSchema({
+    claimed: booleanValue,
+    claimId: nonEmptyString,
+    continuationCount: nonNegativeInteger,
+    goal: { anyOf: [{ type: "null" }, workspaceGoalOutputSchema] },
+    valid: booleanValue,
+}, ["goal"]);
 
 const workspaceQuestionWaitOutputSchema = objectSchema({
     createdAt: stringValue,
@@ -380,10 +423,11 @@ export function workspaceSnapshotOutputSchemaForContextMode(requiresExplicitCont
         ...(requiresExplicitContextId ? { ctxId: nonEmptyString } : {}),
         currentEvent: workspaceCurrentEventSchema,
         cursor: nonNegativeInteger,
+        goal: { anyOf: [{ type: "null" }, workspaceGoalOutputSchema] },
         instance: nonEmptyString,
         questions: arraySchema(workspaceQuestionWaitOutputSchema),
         tasks: arraySchema(workspaceTodoTaskSummaryOutputSchema),
-    }, ["approvals", "background", "contextSelector", "currentEvent", "cursor", "instance", "questions", "tasks"]);
+    }, ["approvals", "background", "contextSelector", "currentEvent", "cursor", "goal", "instance", "questions", "tasks"]);
 }
 
 export const workspaceSnapshotOutputSchema = workspaceSnapshotOutputSchemaForContextMode(true);
@@ -399,19 +443,11 @@ export function workspaceOpenOutputSchemaForContextMode(requiresExplicitContextI
 export const workspaceOpenOutputSchema: JsonValue = workspaceOpenOutputSchemaForContextMode(true);
 
 export function workspaceWatchOutputSchemaForContextMode(requiresExplicitContextId: boolean): JsonValue {
-    return {
-        anyOf: [
-            objectSchema({
-                changed: { const: false, type: "boolean" },
-                cursor: nonNegativeInteger,
-            }, ["changed", "cursor"]),
-            objectSchema({
-                changed: { const: true, type: "boolean" },
-                cursor: nonNegativeInteger,
-                snapshot: workspaceSnapshotOutputSchemaForContextMode(requiresExplicitContextId),
-            }, ["changed", "cursor", "snapshot"]),
-        ],
-    };
+    return objectSchema({
+        changed: booleanValue,
+        cursor: nonNegativeInteger,
+        snapshot: workspaceSnapshotOutputSchemaForContextMode(requiresExplicitContextId),
+    }, ["changed", "cursor"]);
 }
 
 export const workspaceWatchOutputSchema = workspaceWatchOutputSchemaForContextMode(true);
@@ -431,25 +467,13 @@ export const workspaceWaitInterruptOutputSchema = objectSchema({
     waitId: nonEmptyString,
 }, ["interrupted", "status", "tmuxTaskId", "waitId"]);
 
-export const workspaceWaitRecoveryOutputSchema: JsonValue = {
-    anyOf: [
-        objectSchema({
-            claimId: nonEmptyString,
-            kind: { enum: ["question", "tmux"], type: "string" },
-            result: anyValue,
-            taskId: nonEmptyString,
-            targetId: stringValue,
-            waitId: nonEmptyString,
-        }, ["claimId", "kind", "targetId", "taskId", "waitId"]),
-        objectSchema({
-            completed: { const: true, type: "boolean" },
-            kind: { enum: ["question", "tmux"], type: "string" },
-            targetId: stringValue,
-            waitId: nonEmptyString,
-        }, ["completed", "kind", "targetId", "waitId"]),
-        objectSchema({
-            released: { const: true, type: "boolean" },
-            waitId: nonEmptyString,
-        }, ["released", "waitId"]),
-    ],
-};
+export const workspaceWaitRecoveryOutputSchema = objectSchema({
+    claimId: nonEmptyString,
+    completed: { const: true, type: "boolean" },
+    kind: { enum: ["question", "tmux"], type: "string" },
+    released: { const: true, type: "boolean" },
+    result: anyValue,
+    taskId: nonEmptyString,
+    targetId: stringValue,
+    waitId: nonEmptyString,
+}, ["waitId"]);

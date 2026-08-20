@@ -3,9 +3,11 @@ import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
 import { workspaceAppResourceUri } from "../../workspace/McpWorkspaceApp.js";
 import {
     todoReadOutputSchema,
+    workspaceApprovalRequestOutputSchema,
+    workspaceGoalContinuationOutputSchema,
+    workspaceGoalResultOutputSchema,
     workspaceOpenOutputSchema,
     workspaceOpenOutputSchemaForContextMode,
-    workspaceApprovalRequestOutputSchema,
     workspaceQuestionAnswerOutputSchema,
     workspaceSnapshotOutputSchema,
     workspaceSnapshotOutputSchemaForContextMode,
@@ -16,7 +18,8 @@ import {
 } from "../McpToolOutputSchemas.js";
 
 export type McpToolCatalogInteractionName =
-    | "ask_question"
+    | "workspace_ask"
+    | "workspace_goal"
     | "workspace_open"
     | "workspace_snapshot"
     | "workspace_watch"
@@ -24,6 +27,8 @@ export type McpToolCatalogInteractionName =
     | "workspace_wait_interrupt"
     | "workspace_task_control"
     | "workspace_wait_recover"
+    | "workspace_goal_continue"
+    | "workspace_goal_stop"
     | "workspace_approval_decide";
 
 const appOnlyMeta: JsonValue = {
@@ -32,11 +37,23 @@ const appOnlyMeta: JsonValue = {
     "openai/widgetAccessible": true,
 };
 
+const goalStepSchema: JsonValue = {
+    additionalProperties: false,
+    properties: {
+        id: { maxLength: 128, minLength: 1, type: "string" },
+        note: { maxLength: 2000, minLength: 1, type: "string" },
+        status: { enum: ["pending", "active", "completed", "skipped"], type: "string" },
+        text: { maxLength: 2000, minLength: 1, type: "string" },
+    },
+    required: ["id", "text"],
+    type: "object",
+};
+
 export class McpToolCatalogInteraction {
     readonly #definitions: readonly ToolDefinition[] = [
         {
-            description: "Ask the user one question and wait for their answer without ending the current model turn. An active Workspace App is required for the current Context; call workspace_open again if the App is no longer active. Use this only when progress genuinely requires human input. The taskId must identify the durable task being worked on.",
-            group: "interaction",
+            description: "Ask the user one question in the active Workspace and wait for their answer without ending the current model turn. An active Workspace App is required for the current Context; call workspace_open again if the App is no longer active. Use this only when progress genuinely requires human input. The taskId must identify the durable task being worked on.",
+            group: "workspace",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
@@ -64,7 +81,7 @@ export class McpToolCatalogInteraction {
                 required: ["taskId", "question"],
                 type: "object",
             },
-            name: "ask_question",
+            name: "workspace_ask",
             outputSchema: {
                 additionalProperties: false,
                 properties: {
@@ -77,6 +94,27 @@ export class McpToolCatalogInteraction {
             requiredCapabilities: [],
         },
         {
+            description: "Manage optional Workspace Goal mode for the current Context. start creates one durable Goal with an objective and ordered steps. update revises the objective, complete step list, or one step. block suspends automatic continuation with a reason; resume reactivates it. finish succeeds only after every step is completed or skipped. stop terminates Goal mode without stopping shell or tmux processes. get reads the current Goal. While an active Goal has an open Workspace, the App may request model continuation after prolonged inactivity.",
+            group: "workspace",
+            inputSchema: {
+                additionalProperties: false,
+                properties: {
+                    action: { enum: ["start", "get", "update", "block", "resume", "finish", "stop"], type: "string" },
+                    note: { maxLength: 2000, minLength: 1, type: "string" },
+                    objective: { maxLength: 4000, minLength: 1, type: "string" },
+                    status: { enum: ["pending", "active", "completed", "skipped"], type: "string" },
+                    stepId: { maxLength: 128, minLength: 1, type: "string" },
+                    steps: { items: goalStepSchema, maxItems: 100, minItems: 1, type: "array" },
+                    text: { maxLength: 2000, minLength: 1, type: "string" },
+                },
+                required: ["action"],
+                type: "object",
+            },
+            name: "workspace_goal",
+            outputSchema: workspaceGoalResultOutputSchema,
+            requiredCapabilities: [],
+        },
+        {
             _meta: {
                 ui: { resourceUri: workspaceAppResourceUri, visibility: ["model", "app"] },
                 "ui/resourceUri": workspaceAppResourceUri,
@@ -84,7 +122,7 @@ export class McpToolCatalogInteraction {
                 "openai/widgetAccessible": true,
             },
             description: "Open the portable-devshell Workspace control surface for the current Context. Call once when the user needs persistent visibility or human interaction; ordinary tools do not need to reopen it.",
-            group: "interaction",
+            group: "workspace",
             inputSchema: { additionalProperties: false, properties: {}, type: "object" },
             name: "workspace_open",
             outputSchema: workspaceOpenOutputSchema,
@@ -93,7 +131,7 @@ export class McpToolCatalogInteraction {
         {
             _meta: appOnlyMeta,
             description: "Read the authoritative Workspace snapshot for the current Context. App-only helper; models should not call it.",
-            group: "interaction",
+            group: "workspace",
             inputSchema: {
                 additionalProperties: false,
                 properties: { token: { minLength: 1, type: "string" } },
@@ -106,7 +144,7 @@ export class McpToolCatalogInteraction {
         {
             _meta: appOnlyMeta,
             description: "Wait for relevant Workspace state changes after a cursor. App-only helper; models should not call it.",
-            group: "interaction",
+            group: "workspace",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
@@ -122,8 +160,8 @@ export class McpToolCatalogInteraction {
         },
         {
             _meta: appOnlyMeta,
-            description: "Answer one pending portable-devshell question. App-only human action; models must not call it.",
-            group: "interaction",
+            description: "Answer one pending portable-devshell Workspace question. App-only human action; models must not call it.",
+            group: "workspace",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
@@ -141,7 +179,7 @@ export class McpToolCatalogInteraction {
         {
             _meta: appOnlyMeta,
             description: "Interrupt one active tmux_wait without stopping the tmux task. The held model tool call returns as interrupted and this wait ends; a later tmux_wait creates a new wait for the still-running task. App-only human action; models must not call it.",
-            group: "interaction",
+            group: "workspace",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
@@ -158,7 +196,7 @@ export class McpToolCatalogInteraction {
         {
             _meta: appOnlyMeta,
             description: "Pause, resume, or cancel one durable task from the Workspace. This controls model re-entry state only; it does not signal terminal processes. App-only human action; models must not call it.",
-            group: "interaction",
+            group: "workspace",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
@@ -176,7 +214,7 @@ export class McpToolCatalogInteraction {
         {
             _meta: appOnlyMeta,
             description: "Claim, complete, or release one detached wait recovery around Workspace model re-entry. App-only recovery helper; models must not call it.",
-            group: "interaction",
+            group: "workspace",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
@@ -194,8 +232,43 @@ export class McpToolCatalogInteraction {
         },
         {
             _meta: appOnlyMeta,
+            description: "Claim, validate, or report one automatic Workspace Goal continuation. App-only helper; models must not call it.",
+            group: "workspace",
+            inputSchema: {
+                additionalProperties: false,
+                properties: {
+                    accepted: { type: "boolean" },
+                    action: { enum: ["claim", "validate", "report"], type: "string" },
+                    available: { type: "boolean" },
+                    claimId: { maxLength: 128, minLength: 1, type: "string" },
+                    error: { maxLength: 2000, minLength: 1, type: "string" },
+                    token: { minLength: 1, type: "string" },
+                },
+                required: ["action", "token"],
+                type: "object",
+            },
+            name: "workspace_goal_continue",
+            outputSchema: workspaceGoalContinuationOutputSchema,
+            requiredCapabilities: [],
+        },
+        {
+            _meta: appOnlyMeta,
+            description: "Stop the current Workspace Goal from the Workspace UI. This ends Goal continuation but does not signal shell or tmux processes. App-only human action; models must not call it.",
+            group: "workspace",
+            inputSchema: {
+                additionalProperties: false,
+                properties: { token: { minLength: 1, type: "string" } },
+                required: ["token"],
+                type: "object",
+            },
+            name: "workspace_goal_stop",
+            outputSchema: workspaceGoalResultOutputSchema,
+            requiredCapabilities: [],
+        },
+        {
+            _meta: appOnlyMeta,
             description: "Approve or deny one pending portable-devshell tool approval. App-only human action; models must not call it.",
-            group: "interaction",
+            group: "workspace",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
@@ -215,10 +288,10 @@ export class McpToolCatalogInteraction {
     list(requiresExplicitContextId = true): ToolDefinition[] {
         return this.#definitions.map((definition) => {
             if (requiresExplicitContextId) return { ...definition };
-            if (definition.name === "ask_question") {
+            if (definition.name === "workspace_ask") {
                 return {
                     ...definition,
-                    description: "Ask the user one question and wait for their answer without ending the current model turn. An active Workspace App is required for the current host session. Use this only when progress genuinely requires human input. The taskId must identify the durable task being worked on."
+                    description: "Ask the user one question in the active Workspace and wait for their answer without ending the current model turn. An active Workspace App is required for the current host session. Use this only when progress genuinely requires human input. The taskId must identify the durable task being worked on."
                 };
             }
             if (definition.name === "workspace_open") {

@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import type {
     ApprovalRequest,
+    GoalContinuationInput,
+    GoalManageInput,
     InstanceEvent,
     JsonValue,
     TodoTaskControlAction,
@@ -11,6 +13,7 @@ import type {
 
 import { createMcpContextSelector, type McpContextSelector } from "../../context/McpContextSelector.js";
 import {
+    isMcpGoalGateway,
     isMcpInteractionGateway,
     isMcpWaitRecoveryGateway,
     isMcpWaitTrackingGateway,
@@ -47,8 +50,10 @@ export class McpEndpointHandlerInteraction {
     ): Promise<McpEndpointResult> {
         const gateway = requireInteractionGateway(this.options.gateway, this.options.instanceName);
         switch (toolName) {
-            case "ask_question":
+            case "workspace_ask":
                 return await this.#askQuestion(gateway, input, context, callId, signal);
+            case "workspace_goal":
+                return await this.#manageGoal(input, context);
             case "workspace_open":
                 return this.#openWorkspace(context);
             case "workspace_snapshot":
@@ -67,6 +72,12 @@ export class McpEndpointHandlerInteraction {
             case "workspace_wait_recover":
                 this.#assertAppToken(input, context);
                 return await this.#recoverWait(gateway, input, context);
+            case "workspace_goal_continue":
+                this.#assertAppToken(input, context);
+                return await this.#continueGoal(gateway, input, context);
+            case "workspace_goal_stop":
+                this.#assertAppToken(input, context);
+                return await this.#stopGoal(context);
             case "workspace_approval_decide":
                 this.#assertAppToken(input, context);
                 return await this.#decideApproval(gateway, input, context);
@@ -88,7 +99,7 @@ export class McpEndpointHandlerInteraction {
             const selector = this.#contextSelector.requiresExplicitContextId
                 ? "this ctxId"
                 : "the current host session";
-            throw new Error(`ask_question requires an active Workspace App for ${selector}; call workspace_open again.`);
+            throw new Error(`workspace_ask requires an active Workspace App for ${selector}; call workspace_open again.`);
         }
         const task = await gateway.readTodo(this.options.instanceName, { taskId: request.taskId });
         const taskRecord = asRecord(task);
@@ -138,6 +149,52 @@ export class McpEndpointHandlerInteraction {
         }, [
             { type: "text", text: "portable-devshell Workspace opened." }
         ]);
+    }
+
+    async #manageGoal(input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
+        const gateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
+        const goal = await gateway.manageGoal(
+            this.options.instanceName,
+            readGoalManageInput(input),
+            requireCtxId(context),
+        );
+        return { goal: goal ?? null } as unknown as JsonValue;
+    }
+
+    async #continueGoal(
+        interactionGateway: McpInteractionGateway,
+        input: JsonValue,
+        context: ToolCallContext,
+    ): Promise<JsonValue> {
+        const goalGateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
+        const ctxId = requireCtxId(context);
+        const request = readGoalContinuationInput(input);
+        if (request.action !== "report") {
+            const [waits, approvals] = await Promise.all([
+                interactionGateway.listWaits(this.options.instanceName),
+                interactionGateway.listApprovals(this.options.instanceName),
+            ]);
+            request.available = request.available !== false &&
+                !waits.some((wait) => (
+                    wait.createdByCtxId === ctxId && wait.status !== "consumed" && wait.status !== "cancelled"
+                )) &&
+                !approvals.some((approval) => approval.ctxId === ctxId && approval.status === "pending");
+        }
+        return await goalGateway.goalContinuation(
+            this.options.instanceName,
+            request,
+            ctxId,
+        );
+    }
+
+    async #stopGoal(context: ToolCallContext): Promise<JsonValue> {
+        const gateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
+        const goal = await gateway.manageGoal(
+            this.options.instanceName,
+            { action: "stop" },
+            requireCtxId(context),
+        );
+        return { goal: goal ?? null } as unknown as JsonValue;
     }
 
     async #readWorkspace(
@@ -336,7 +393,8 @@ export class McpEndpointHandlerInteraction {
     async #snapshot(gateway: McpInteractionGateway, context: ToolCallContext): Promise<JsonValue> {
         const ctxId = requireCtxId(context);
         const workspaceGateway = isMcpWorkspaceGateway(gateway) ? gateway : undefined;
-        const [todo, waits, approvals, eventSlice] = await Promise.all([
+        const goalGateway = isMcpGoalGateway(gateway) ? gateway : undefined;
+        const [todo, waits, approvals, eventSlice, goal] = await Promise.all([
             gateway.readTodo(this.options.instanceName),
             gateway.listWaits(this.options.instanceName),
             gateway.listApprovals(this.options.instanceName),
@@ -345,6 +403,7 @@ export class McpEndpointHandlerInteraction {
                 gap: false,
                 lastSeq: 0,
             },
+            goalGateway?.readGoal(this.options.instanceName, ctxId),
         ]);
         const todoRecord = asRecord(todo);
         const tasks = Array.isArray(todoRecord?.tasks)
@@ -390,6 +449,7 @@ export class McpEndpointHandlerInteraction {
             ...(this.#contextSelector.requiresExplicitContextId ? { ctxId } : {}),
             currentEvent: workspaceCurrentEvent(ownedWaits, ownedApprovals),
             cursor: eventSlice.lastSeq,
+            goal: goal ?? null,
             instance: this.options.instanceName,
             questions: visibleWaits.filter((wait) => wait.kind === "question" && (wait.status === "waiting" || wait.status === "detached")),
             tasks: visibleTasks,
@@ -434,7 +494,7 @@ function workspaceCurrentEvent(waits: WaitRecord[], approvals: ApprovalRequest[]
                 value: {
                     eventName: "user.answer",
                     kind: "question",
-                    name: "ask_question",
+                    name: "workspace_ask",
                     ...(wait.payload === undefined ? {} : { payload: wait.payload }),
                     status: wait.status,
                     ...(wait.taskId === undefined ? {} : { taskId: wait.taskId }),
@@ -472,6 +532,48 @@ function requireInteractionGateway(
     throw new Error(`Workspace interaction backend is unavailable for ${instanceName}.`);
 }
 
+function requireGoalGateway(gateway: McpInstanceGateway | undefined, instanceName: string) {
+    if (isMcpGoalGateway(gateway)) return gateway;
+    throw new Error(`Workspace Goal backend is unavailable for ${instanceName}.`);
+}
+
+function readGoalManageInput(input: JsonValue): GoalManageInput {
+    const record = asRecord(input);
+    if (record === undefined) throw new Error("workspace_goal requires an object input.");
+    const action = record.action;
+    if (
+        action !== "start" && action !== "get" && action !== "update" && action !== "block" &&
+        action !== "resume" && action !== "finish" && action !== "stop"
+    ) {
+        throw new Error("workspace_goal action must be start, get, update, block, resume, finish, or stop.");
+    }
+    return {
+        action,
+        ...(typeof record.note === "string" ? { note: record.note } : {}),
+        ...(typeof record.objective === "string" ? { objective: record.objective } : {}),
+        ...(typeof record.status === "string" ? { status: record.status as GoalManageInput["status"] } : {}),
+        ...(typeof record.stepId === "string" ? { stepId: record.stepId } : {}),
+        ...(Array.isArray(record.steps) ? { steps: record.steps as unknown as GoalManageInput["steps"] } : {}),
+        ...(typeof record.text === "string" ? { text: record.text } : {}),
+    };
+}
+
+function readGoalContinuationInput(input: JsonValue): GoalContinuationInput {
+    const record = asRecord(input);
+    if (record === undefined) throw new Error("workspace_goal_continue requires an object input.");
+    const action = record.action;
+    if (action !== "claim" && action !== "validate" && action !== "report") {
+        throw new Error("workspace_goal_continue action must be claim, validate, or report.");
+    }
+    return {
+        action,
+        ...(typeof record.accepted === "boolean" ? { accepted: record.accepted } : {}),
+        ...(typeof record.available === "boolean" ? { available: record.available } : {}),
+        ...(typeof record.claimId === "string" ? { claimId: record.claimId } : {}),
+        ...(typeof record.error === "string" ? { error: record.error } : {}),
+    };
+}
+
 function readQuestion(input: JsonValue): {
     allowText: boolean;
     choices: string[];
@@ -479,13 +581,13 @@ function readQuestion(input: JsonValue): {
     taskId: string;
 } {
     const record = asRecord(input);
-    if (record === undefined) throw new Error("ask_question requires an object input.");
+    if (record === undefined) throw new Error("workspace_ask requires an object input.");
     const taskId = text(record.taskId, "taskId");
     const question = text(record.question, "question");
     const choices = record.choices === undefined ? [] : stringArray(record.choices, "choices");
     const allowText = record.allowText === undefined ? true : record.allowText;
     if (typeof allowText !== "boolean") throw new Error("allowText must be a boolean.");
-    if (!allowText && choices.length === 0) throw new Error("ask_question requires choices when allowText is false.");
+    if (!allowText && choices.length === 0) throw new Error("workspace_ask requires choices when allowText is false.");
     return { allowText, choices, question, taskId };
 }
 
