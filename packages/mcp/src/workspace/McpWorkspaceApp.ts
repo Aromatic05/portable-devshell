@@ -18,6 +18,21 @@ export const workspaceAppResourceMeta = {
     "openai/widgetPrefersBorder": false,
 } as const;
 
+export function workspaceAppResourceMetaForPublicBaseUrl(publicBaseUrl?: string) {
+    if (publicBaseUrl === undefined) return workspaceAppResourceMeta;
+    const url = new URL(publicBaseUrl);
+    if (url.hostname === "0.0.0.0" || url.hostname === "[::]") return workspaceAppResourceMeta;
+    const domain = url.origin;
+    return {
+        ...workspaceAppResourceMeta,
+        ui: {
+            ...workspaceAppResourceMeta.ui,
+            domain,
+        },
+        "openai/widgetDomain": domain,
+    } as const;
+}
+
 const workspaceSdkScript = loadWorkspaceSdkScript();
 
 export const workspaceAppHtml = String.raw`<!doctype html>

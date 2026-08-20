@@ -134,6 +134,7 @@ export class McpHost {
                 worker: instance.worker
             }),
             this.#config.serverVersion,
+            this.#config.publicBaseUrl,
         );
         const path = instance.path ?? `/${instance.name}/mcp`;
 

@@ -15,7 +15,7 @@ import {
 import { mergeComments, resolveErrorHints, toControlErrorBody, type ControlErrorBody, type JsonValue } from "@portable-devshell/shared";
 
 import { McpToolSchemaUnavailableError } from "../tool/McpToolSchemaAdapter.js";
-import { workspaceAppHtml, workspaceAppResourceMeta, workspaceAppResourceUri, workspaceAppResourceUris } from "../workspace/McpWorkspaceApp.js";
+import { workspaceAppHtml, workspaceAppResourceMetaForPublicBaseUrl, workspaceAppResourceUri, workspaceAppResourceUris } from "../workspace/McpWorkspaceApp.js";
 import { McpEndpointWorker } from "./McpEndpointWorker.js";
 import { McpNativeToolResult, type McpEndpointResult } from "./McpEndpointResult.js";
 
@@ -29,10 +29,12 @@ export class McpEndpointBinding {
     readonly #serverVersion: string;
     readonly #sessions = new Map<string, McpEndpointSession>();
     readonly #worker: McpEndpointWorker;
+    readonly #workspaceResourceMeta: ReturnType<typeof workspaceAppResourceMetaForPublicBaseUrl>;
 
-    constructor(worker: McpEndpointWorker, serverVersion = "0.0.0") {
+    constructor(worker: McpEndpointWorker, serverVersion = "0.0.0", publicBaseUrl?: string) {
         this.#serverVersion = serverVersion;
         this.#worker = worker;
+        this.#workspaceResourceMeta = workspaceAppResourceMetaForPublicBaseUrl(publicBaseUrl);
     }
 
     get instanceName(): string {
@@ -163,7 +165,7 @@ export class McpEndpointBinding {
             }
             return {
                 contents: [{
-                    _meta: workspaceAppResourceMeta,
+                    _meta: this.#workspaceResourceMeta,
                     mimeType: "text/html;profile=mcp-app",
                     text: workspaceAppHtml,
                     uri: request.params.uri

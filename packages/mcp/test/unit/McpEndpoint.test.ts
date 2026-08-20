@@ -152,6 +152,56 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
     }
 });
 
+test("Workspace MCP App uses the configured public origin as its ChatGPT component domain", async () => {
+    const binding = createBinding(createWorkerHarness(), {
+        publicBaseUrl: "https://devshell.example.com/prefix",
+    });
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        const read = await postJson(server.url, {
+            id: "req-resource-domain",
+            jsonrpc: "2.0",
+            method: "resources/read",
+            params: { uri: workspaceAppResourceUri }
+        }, session.headers);
+        assert.equal(read.status, 200);
+        assert.deepEqual(read.body.result?.contents?.[0]?._meta, {
+            ...workspaceAppResourceMeta,
+            ui: {
+                ...workspaceAppResourceMeta.ui,
+                domain: "https://devshell.example.com",
+            },
+            "openai/widgetDomain": "https://devshell.example.com",
+        });
+    } finally {
+        await server.close();
+        await binding.close();
+    }
+});
+
+test("Workspace MCP App does not advertise a wildcard listener as its component domain", async () => {
+    for (const publicBaseUrl of ["http://0.0.0.0:17890", "http://[::]:17890"]) {
+        const binding = createBinding(createWorkerHarness(), { publicBaseUrl });
+        const server = await createBindingServer(binding);
+        try {
+            const session = await initialize(server.url);
+            const read = await postJson(server.url, {
+                id: `req-resource-wildcard-${publicBaseUrl}`,
+                jsonrpc: "2.0",
+                method: "resources/read",
+                params: { uri: workspaceAppResourceUri }
+            }, session.headers);
+            assert.equal(read.status, 200);
+            assert.deepEqual(read.body.result?.contents?.[0]?._meta, workspaceAppResourceMeta);
+        } finally {
+            await server.close();
+            await binding.close();
+        }
+    }
+});
+
 test("session lifecycle emits MCP session events", async () => {
     const harness = createWorkerHarness();
     const binding = createBinding(harness);
@@ -889,7 +939,7 @@ test("tools/call waits for a transiently not-ready instance before executing", a
 
 function createBinding(
     harness = createWorkerHarness(),
-    options?: { contextMode?: "explicit" | "openai-session"; readyWaitMs?: number; serverVersion?: string }
+    options?: { contextMode?: "explicit" | "openai-session"; publicBaseUrl?: string; readyWaitMs?: number; serverVersion?: string }
 ): McpEndpointBinding {
     return new McpEndpointBinding(
         new McpEndpointWorker({
@@ -900,6 +950,7 @@ function createBinding(
             worker: harness.worker
         }),
         options?.serverVersion,
+        options?.publicBaseUrl,
     );
 }
 
