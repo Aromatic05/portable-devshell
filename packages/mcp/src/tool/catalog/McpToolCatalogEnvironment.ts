@@ -34,7 +34,27 @@ export class McpToolCatalogEnvironment {
                         type: "array"
                     },
                     instance: { minLength: 1, type: "string" },
-                    platform: { type: "object" },
+                    platform: {
+                        additionalProperties: false,
+                        properties: {
+                            arch: { minLength: 1, type: "string" },
+                            distribution: {
+                                additionalProperties: false,
+                                properties: {
+                                    id: { minLength: 1, type: "string" },
+                                    name: { minLength: 1, type: "string" },
+                                    version: { minLength: 1, type: "string" },
+                                },
+                                required: ["id", "name"],
+                                type: "object",
+                            },
+                            os: { minLength: 1, type: "string" },
+                            packageManager: { minLength: 1, type: "string" },
+                            shell: { minLength: 1, type: "string" },
+                        },
+                        required: ["arch", "os"],
+                        type: "object",
+                    },
                     projectMemoryAgentFile: { minLength: 1, type: "string" },
                     projectMemoryDirectory: { minLength: 1, type: "string" },
                     skillsDirectory: { minLength: 1, type: "string" },

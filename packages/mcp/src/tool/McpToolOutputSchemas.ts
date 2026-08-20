@@ -297,11 +297,17 @@ const workspaceApprovalEventSchema = objectSchema({
     updatedAt: stringValue,
 }, ["approvalId", "eventName", "inputSummary", "kind", "name", "riskLevel", "status", "toolName", "updatedAt"]);
 
+const workspaceQuestionPayloadSchema = objectSchema({
+    allowText: booleanValue,
+    choices: arraySchema(nonEmptyString),
+    question: nonEmptyString,
+}, ["allowText", "choices", "question"]);
+
 const workspaceQuestionEventSchema = objectSchema({
     eventName: { const: "user.answer", type: "string" },
     kind: { const: "question", type: "string" },
     name: { const: "ask_question", type: "string" },
-    payload: anyValue,
+    payload: workspaceQuestionPayloadSchema,
     status: { enum: ["waiting", "detached"], type: "string" },
     taskId: nonEmptyString,
     updatedAt: stringValue,
@@ -337,16 +343,12 @@ const workspaceTodoTaskSummaryOutputSchema = objectSchema({
     updatedAt: stringValue,
 }, ["completed", "revision", "status", "taskId", "title", "total", "updatedAt"]);
 
-const workspaceWaitRecordOutputSchema = objectSchema({
-    cancelledAt: stringValue,
-    consumedAt: stringValue,
+const workspaceQuestionWaitOutputSchema = objectSchema({
     createdAt: stringValue,
     detachedAt: stringValue,
-    kind: { enum: ["approval", "question", "tmux"], type: "string" },
-    payload: anyValue,
-    resolvedAt: stringValue,
-    result: anyValue,
-    status: { enum: ["cancelled", "consumed", "detached", "resolved", "waiting"], type: "string" },
+    kind: { const: "question", type: "string" },
+    payload: workspaceQuestionPayloadSchema,
+    status: { enum: ["detached", "waiting"], type: "string" },
     targetId: nonEmptyString,
     taskId: nonEmptyString,
     updatedAt: stringValue,
@@ -379,7 +381,7 @@ export function workspaceSnapshotOutputSchemaForContextMode(requiresExplicitCont
         currentEvent: workspaceCurrentEventSchema,
         cursor: nonNegativeInteger,
         instance: nonEmptyString,
-        questions: arraySchema(workspaceWaitRecordOutputSchema),
+        questions: arraySchema(workspaceQuestionWaitOutputSchema),
         tasks: arraySchema(workspaceTodoTaskSummaryOutputSchema),
     }, ["approvals", "background", "contextSelector", "currentEvent", "cursor", "instance", "questions", "tasks"]);
 }

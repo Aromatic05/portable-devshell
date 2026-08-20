@@ -4,6 +4,7 @@ import test from "node:test";
 import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
 import {
     McpToolCatalogArtifact,
+    McpToolCatalogEnvironment,
     McpToolCatalogInstance,
     McpToolCatalogInteraction,
     McpToolSchemaAdapter,
@@ -12,6 +13,7 @@ import {
 test("Control-owned MCP tools describe their structured output instead of generic objects", () => {
     const definitions = [
         ...new McpToolCatalogArtifact().list(),
+        ...new McpToolCatalogEnvironment().list(),
         ...new McpToolCatalogInstance().list(),
         ...new McpToolCatalogInteraction().list(),
     ];
@@ -24,6 +26,15 @@ test("Control-owned MCP tools describe their structured output instead of generi
         "blake3", "bytes", "downloadName", "expiresAtMs", "mediaType", "shareId", "source", "state", "url"
     ]);
     assertProperties(definition(definitions, "artifact_transfer").outputSchema, ["operation", "transfer"]);
+
+    const environment = definition(definitions, "environ_info");
+    const platform = property(environment.outputSchema, "platform");
+    assert.equal(record(platform).additionalProperties, false);
+    assert.deepEqual(required(platform), ["arch", "os"]);
+    assertProperties(platform, ["arch", "distribution", "os", "packageManager", "shell"]);
+    const distribution = property(platform, "distribution");
+    assert.equal(record(distribution).additionalProperties, false);
+    assert.deepEqual(required(distribution), ["id", "name"]);
 
     assertProperties(definition(definitions, "instance_list").outputSchema, ["instances"]);
     assertProperties(definition(definitions, "instance_status").outputSchema, [
@@ -39,6 +50,14 @@ test("Control-owned MCP tools describe their structured output instead of generi
     assertProperties(definition(definitions, "workspace_snapshot").outputSchema, [
         "approvals", "background", "contextSelector", "ctxId", "currentEvent", "cursor", "instance", "questions", "tasks"
     ]);
+    const questions = record(property(definition(definitions, "workspace_snapshot").outputSchema, "questions"));
+    const question = record(questions.items);
+    assert.equal(question.additionalProperties, false);
+    assert.deepEqual(required(question), ["createdAt", "kind", "status", "targetId", "updatedAt", "waitId"]);
+    assert.equal("result" in record(question.properties), false);
+    const questionPayload = property(question, "payload");
+    assert.equal(record(questionPayload).additionalProperties, false);
+    assert.deepEqual(required(questionPayload), ["allowText", "choices", "question"]);
     assertAnyOf(definition(definitions, "workspace_watch").outputSchema, 2);
     assert.deepEqual(required(definition(definitions, "workspace_question_answer").outputSchema), [
         "answer", "detached", "questionId", "waitId"
@@ -80,6 +99,12 @@ function assertMeaningfulSchema(definition: ToolDefinition): void {
 function assertProperties(schema: JsonValue, names: string[]): void {
     const properties = record(record(schema).properties);
     for (const name of names) assert.ok(name in properties, `Missing output property ${name}`);
+}
+
+function property(schema: JsonValue, name: string): JsonValue {
+    const value = record(record(schema).properties)[name];
+    assert.ok(value, `Missing output property ${name}`);
+    return value;
 }
 
 function assertAnyOf(schema: JsonValue, count: number): void {
