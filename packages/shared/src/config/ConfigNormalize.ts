@@ -541,11 +541,13 @@ function cloneNonEmptyRecord(record: Record<string, string> | undefined): Record
 
 function normalizeMcpGroups(configured: readonly string[] | undefined, defaults: readonly string[]): string[] {
     const groups = deduplicate(configured ?? defaults).filter((group) => group !== "context");
+    const legacyDefaultGroups = ["file", "bash", "artifact", "tmux", "todo"];
     if (
         configured !== undefined &&
         defaults.includes("interaction") &&
-        groups.length === 5 &&
-        ["file", "bash", "artifact", "tmux", "todo"].every((group) => groups.includes(group))
+        !groups.includes("interaction") &&
+        legacyDefaultGroups.every((group) => groups.includes(group)) &&
+        groups.every((group) => legacyDefaultGroups.includes(group) || group === "instance")
     ) {
         return [...groups, "interaction"];
     }

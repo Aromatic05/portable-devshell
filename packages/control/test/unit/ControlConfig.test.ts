@@ -125,7 +125,7 @@ test("version 2 instance documents migrate to version 3 without workspace", asyn
                     enabled: true,
                     tools: {
                         capabilities: ["read", "write", "execute"],
-                        groups: ["file", "bash", "artifact", "tmux", "todo"]
+                        groups: ["file", "bash", "artifact", "tmux", "todo", "instance"]
                     }
                 },
                 name: "legacy-default",
@@ -152,7 +152,7 @@ test("version 2 instance documents migrate to version 3 without workspace", asyn
         const config = await new ControlConfigStore().readOrCreate(homeDirectory);
         assert.deepEqual(
             config.instances.find((instance) => instance.name === "legacy-default")?.mcp.tools.groups,
-            ["file", "bash", "artifact", "tmux", "todo", "interaction"]
+            ["file", "bash", "artifact", "tmux", "todo", "instance", "interaction"]
         );
         assert.deepEqual(
             config.instances.find((instance) => instance.name === "custom-policy")?.mcp.tools.groups,
