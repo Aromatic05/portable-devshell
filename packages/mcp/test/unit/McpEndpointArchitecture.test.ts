@@ -70,6 +70,7 @@ function createWorker(options: {
         toolName: string;
     }> = [];
     const audited: Array<{ context: ToolCallContext; toolName: string }> = [];
+    const auditResults: Array<{ result: JsonValue; toolName: string }> = [];
     const releasedAlerts: string[] = [];
     const worker = {
         async auditToolCall<T extends JsonValue>(
@@ -80,6 +81,7 @@ function createWorker(options: {
         ): Promise<T> {
             audited.push({ context, toolName });
             const result = await operation("call-test");
+            auditResults.push({ result, toolName });
             if (options.failAuditAfterOperation === true) throw new Error("audit finalize failed");
             return result;
         },
@@ -131,7 +133,7 @@ function createWorker(options: {
         },
         snapshot: () => ({ ready: options.ready ?? true }),
     };
-    return { audited, calls, events, releasedAlerts, worker };
+    return { audited, auditResults, calls, events, releasedAlerts, worker };
 }
 
 test("McpEndpointCatalog keeps control tools available without a worker schema", () => {
@@ -307,6 +309,47 @@ test("cached MCP tool names stay callable without re-exposing stale recipients",
     await assert.rejects(
         dispatch.callTool("unknown_cached_tool", {}, { principal: "tester", requestId: "request-unknown" }),
     );
+});
+
+test("Workspace authorization metadata never enters audit results or MCP events", async () => {
+    const harness = createWorker({ tools: [] });
+    const unused = async () => { throw new Error("unused"); };
+    const gateway = {
+        consumeWait: unused,
+        createWait: unused,
+        decideApproval: unused,
+        detachWait: unused,
+        listApprovals: async () => [],
+        listTools: () => [],
+        listWaits: async () => [],
+        resolveWait: unused,
+        waitForWait: unused,
+    } as never;
+    const catalog = new McpEndpointCatalog({
+        gateway,
+        instanceName: "demo-local",
+        policy: { capabilities: [], groups: ["interaction"] },
+        worker: harness.worker,
+    });
+    const dispatch = new McpEndpointDispatch({ catalog, gateway, instanceName: "demo-local", worker: harness.worker });
+    const environment = await dispatch.callTool(
+        "environ_info",
+        { workspace: "/workspace" },
+        { principal: "tester", requestId: "workspace-environment" },
+    ) as { ctxId: string };
+    const opened = await dispatch.callTool(
+        "workspace_open",
+        { ctxId: environment.ctxId },
+        { principal: "tester", requestId: "workspace-open" },
+    );
+    assert.ok(opened instanceof McpNativeToolResult);
+    const token = (opened._meta?.["portable-devshell/workspace"] as { token?: string } | undefined)?.token;
+    if (typeof token !== "string") throw new Error("workspace token missing");
+    assert.equal(JSON.stringify(opened.structuredContent).includes(token), false);
+    const workspaceAudit = harness.auditResults.find((entry) => entry.toolName === "workspace_open");
+    assert.notEqual(workspaceAudit, undefined);
+    assert.equal(JSON.stringify(workspaceAudit?.result).includes(token), false);
+    assert.equal(JSON.stringify(harness.events).includes(token), false);
 });
 
 test("legacy aliases still obey the current MCP policy", async () => {

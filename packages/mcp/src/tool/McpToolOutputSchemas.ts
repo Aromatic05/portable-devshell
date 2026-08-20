@@ -247,26 +247,6 @@ export const artifactShareOutputSchema = objectSchema({
     url: nonEmptyString,
 }, ["blake3", "bytes", "downloadName", "expiresAtMs", "mediaType", "shareId", "source", "state", "url"]);
 
-export const waitRecordOutputSchema = objectSchema({
-    cancelledAt: stringValue,
-    consumedAt: stringValue,
-    createdAt: stringValue,
-    createdByCtxId: nonEmptyString,
-    detachedAt: stringValue,
-    kind: { enum: ["approval", "question", "tmux"], type: "string" },
-    ownerCallId: nonEmptyString,
-    payload: anyValue,
-    recoveryClaimedAt: stringValue,
-    recoveryClaimId: nonEmptyString,
-    resolvedAt: stringValue,
-    result: anyValue,
-    status: { enum: ["cancelled", "consumed", "detached", "resolved", "waiting"], type: "string" },
-    targetId: nonEmptyString,
-    taskId: nonEmptyString,
-    updatedAt: stringValue,
-    waitId: nonEmptyString,
-}, ["createdAt", "createdByCtxId", "kind", "status", "targetId", "updatedAt", "waitId"]);
-
 const approvalDecisionSchema = objectSchema({
     approvalId: nonEmptyString,
     decidedAt: stringValue,
