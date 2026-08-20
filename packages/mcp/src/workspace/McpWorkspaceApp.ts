@@ -244,6 +244,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
         checkpoint: task.checkpoint
       }; }),
       background: background.map(function (item) { return {
+        goalId: item.goalId,
         taskId: item.taskId,
         tmuxTaskId: item.tmuxTaskId,
         status: item.status,
@@ -253,7 +254,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     };
     var cleanState = JSON.parse(JSON.stringify(state));
     return {
-      content: [{ type: "text", text: "portable-devshell durable task checkpoint:\n" + JSON.stringify(cleanState, null, 2) }],
+      content: [{ type: "text", text: "portable-devshell durable Workspace state:\n" + JSON.stringify(cleanState, null, 2) }],
       structuredContent: { portableDevshellWorkspace: cleanState }
     };
   }
@@ -265,12 +266,14 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     } catch (_) {}
   }
 
-  async function sendModelMessage(text, extra) {
+  async function sendModelMessage(text, extra, canSend) {
     await syncModelContext(extra);
-    return await app.sendMessage({
+    if (canSend && !canSend()) return false;
+    await app.sendMessage({
       role: "user",
       content: [{ type: "text", text: text }]
     });
+    return true;
   }
 
   function newGoalContinuationClaimId() {
@@ -279,7 +282,8 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
   }
 
   function goalContinuationAvailable() {
-    if (!snapshot || visibleEvent() || busy.size > 0 || recovering) return false;
+    var goal = snapshot && snapshot.goal;
+    if (!goal || goal.status !== "active" || visibleEvent() || busy.size > 0 || recovering) return false;
     var background = Array.isArray(snapshot.background) ? snapshot.background : [];
     return background.length === 0;
   }
@@ -291,7 +295,9 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     if (!goal || goal.status !== "active" || goal.continuationPending || goal.autoContinueExhausted || !goalContinuationAvailable()) return;
     var dueAt = Date.parse(goal.continuationDueAt || "");
     if (!Number.isFinite(dueAt)) return;
-    var delayMs = Math.max(minDelayMs || 0, dueAt - Date.now(), 0);
+    var retryAt = Date.parse(goal.continuationRetryAfter || "");
+    var readyAt = Number.isFinite(retryAt) ? Math.max(dueAt, retryAt) : dueAt;
+    var delayMs = Math.max(minDelayMs || 0, readyAt - Date.now(), 0);
     goalTimer = setTimeout(function () {
       goalTimer = null;
       void continueGoal();
@@ -332,11 +338,11 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
         scheduleGoalContinuation(30000);
         return;
       }
-      await sendModelMessage(
+      accepted = await sendModelMessage(
         "Continue working on the active portable-devshell Workspace Goal from its current state. Do not repeat completed steps. Keep the Goal synchronized with execution using workspace_goal(action=\"update\"). When every step is completed or skipped, call workspace_goal(action=\"finish\"). If progress genuinely cannot continue, call workspace_goal(action=\"block\", note=...).",
-        { goalContinuation: claim }
+        { goalContinuation: claim },
+        goalContinuationAvailable
       );
-      accepted = true;
     } catch (error) {
       errorText = error instanceof Error ? error.message : String(error);
       console.error(error);
@@ -362,12 +368,34 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     return tasks.find(function (task) { return task.taskId === taskId; });
   }
 
+  function hasRecoverableWork(item) {
+    if (!item) return false;
+    if (item.goalId) {
+      var goal = snapshot && snapshot.goal;
+      return !!goal && goal.goalId === item.goalId && (goal.status === "active" || goal.status === "blocked");
+    }
+    if (!item.taskId) return true;
+    var task = findTask(item.taskId);
+    return !!task && task.status !== "paused";
+  }
+
   async function dispatchRecovery(waitId, message, extra) {
     var claimed = structured(await callTool("workspace_wait_recover", { action: "claim", waitId: waitId }, true));
     var dispatched = false;
     try {
-      await sendModelMessage(message, Object.assign({}, extra || {}, { recoveredWait: claimed }));
-      dispatched = true;
+      dispatched = await sendModelMessage(
+        message,
+        Object.assign({}, extra || {}, { recoveredWait: claimed }),
+        function () { return hasRecoverableWork(claimed); }
+      );
+      if (!dispatched) {
+        await callTool("workspace_wait_recover", {
+          action: "release",
+          claimId: claimed.claimId,
+          waitId: waitId
+        }, true);
+        return;
+      }
       await callTool("workspace_wait_recover", {
         action: "complete",
         claimId: claimed.claimId,
@@ -389,16 +417,14 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     if (recovering || !appToken || !snapshot) return;
     var background = Array.isArray(snapshot.background) ? snapshot.background : [];
     var item = background.find(function (entry) {
-      if (entry.status !== "resolved" || !entry.detachedAt || !entry.taskId) return false;
-      var task = findTask(entry.taskId);
-      return task && task.status !== "paused";
+      return entry.status === "resolved" && !!entry.detachedAt && hasRecoverableWork(entry);
     });
     if (!item) return;
     recovering = true;
     try {
       await dispatchRecovery(
         item.waitId,
-        "Resume the portable-devshell task from its durable checkpoint. A detached background wait completed; do not repeat completed work.",
+        "Resume portable-devshell durable work from the current Workspace state. A detached background wait completed; do not repeat completed work. If a blocked Workspace Goal can now proceed, call workspace_goal(action=\"resume\") before continuing.",
         { backgroundWait: item }
       );
       await refresh(false);
@@ -581,11 +607,10 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
 
   async function answerQuestion(waitId, answer) {
     var result = await act(waitId, "workspace_question_answer", { waitId: waitId, answer: answer });
-    var task = result && result.taskId ? findTask(result.taskId) : null;
-    if (result && result.detached && task && task.status !== "paused") {
+    if (result && result.detached && hasRecoverableWork(result)) {
       await dispatchRecovery(
         result.waitId,
-        "Resume the portable-devshell task from its durable checkpoint. The user answered the detached question; use that answer and continue without repeating completed work.",
+        "Resume portable-devshell durable work from the current Workspace state. The user answered the detached question; use that answer and continue without repeating completed work. If a blocked Workspace Goal can now proceed, call workspace_goal(action=\"resume\") before continuing.",
         { answeredQuestion: result }
       );
       await refresh(false);

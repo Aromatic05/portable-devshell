@@ -11,6 +11,7 @@ export type WaitStatus =
 
 export interface WaitCreateInput {
     createdByCtxId: string;
+    goalId?: string;
     kind: WaitKind;
     ownerCallId?: string;
     payload?: JsonValue;

@@ -383,6 +383,7 @@ test("legacy aliases still obey the current MCP policy", async () => {
 test("tmux_wait distinguishes host detach from explicit Workspace interruption", async () => {
     let workerWaitCalls = 0;
     let workerWaitAborts = 0;
+    let goalTouches = 0;
     const workerResolvers: Array<(result: JsonValue) => void> = [];
     const harness = createWorker({ tools: [tmuxWaitTool()] });
     const worker = {
@@ -471,6 +472,7 @@ test("tmux_wait distinguishes host detach from explicit Workspace interruption",
             };
         },
         async resolveWait(_instance: string, waitId: string, result?: JsonValue) { return update(waitId, "resolved", result); },
+        async touchGoal() { goalTouches += 1; },
         async waitForWait(_instance: string, waitId: string): Promise<Wait> {
             const wait = waits.find((entry) => entry.waitId === waitId);
             if (wait === undefined) throw new Error(`missing wait ${waitId}`);
@@ -502,8 +504,10 @@ test("tmux_wait distinguishes host detach from explicit Workspace interruption",
     );
     await waitUntil(() => waits.length === 1 && workerWaitCalls === 1);
     assert.equal(waits[0]?.taskId, "todo-task-1");
+    const touchesBeforeDetach = goalTouches;
     abort.abort("host remount");
     await assert.rejects(first, /cancelled by the client/u);
+    assert.equal(goalTouches, touchesBeforeDetach);
     assert.equal(waits[0]?.status, "detached");
     assert.equal(workerWaitAborts, 0);
 
@@ -552,8 +556,10 @@ test("tmux_wait distinguishes host detach from explicit Workspace interruption",
     await waitUntil(() => workerWaitCalls === 2 && waits.length === 2);
     assert.equal(waits[1]?.status, "waiting");
 
+    const touchesBeforeCompletion = goalTouches;
     workerResolvers[1]!({ task: { id: "task-1", status: "0" } });
     assert.deepEqual(await resumedAgain, { task: { id: "task-1", status: "0" } });
+    assert.equal(goalTouches, touchesBeforeCompletion + 1);
     assert.equal(waits[1]?.status, "consumed");
 });
 
@@ -570,6 +576,17 @@ test("OpenAI session selector replacement happens only after audited environ_inf
         instance: "demo-local",
         principal: "tester"
     });
+    const stoppedGoals: string[] = [];
+    const gateway = {
+        async goalContinuation() { return {}; },
+        async manageGoal(_instance: string, input: { action: string }, ctxId: string) {
+            if (input.action === "stop") stoppedGoals.push(ctxId);
+            return undefined;
+        },
+        async readGoal(_instance: string, ctxId: string) {
+            return ctxId === oldContext.ctxId ? goalSnapshot("goal-old") : undefined;
+        },
+    } as never;
     const harness = createWorker({ failAuditAfterOperation: true });
     const contextSelector = createMcpContextSelector("openai-session");
     const catalog = new McpEndpointCatalog({
@@ -582,6 +599,7 @@ test("OpenAI session selector replacement happens only after audited environ_inf
         catalog,
         contextSelector,
         contextRegistry: registry,
+        gateway,
         instanceName: "demo-local",
         worker: harness.worker,
     });
@@ -605,6 +623,7 @@ test("OpenAI session selector replacement happens only after audited environ_inf
     assert.deepEqual((await registry.list()).map(({ ctxId, status }) => ({ ctxId, status })), [
         { ctxId: oldContext.ctxId, status: "active" }
     ]);
+    assert.deepEqual(stoppedGoals, []);
     assert.deepEqual(harness.releasedAlerts, ["/projects/new"]);
 });
 
@@ -621,6 +640,21 @@ test("successful OpenAI session selector replacement retires the old environment
         instance: "demo-local",
         principal: "tester"
     });
+    const releasedAlerts: string[] = [];
+    const stoppedGoals: string[] = [];
+    const gateway = {
+        async goalContinuation() { return {}; },
+        async manageGoal(_instance: string, input: { action: string }, ctxId: string) {
+            if (input.action === "stop") stoppedGoals.push(ctxId);
+            return undefined;
+        },
+        async readGoal(_instance: string, ctxId: string) {
+            return ctxId === oldContext.ctxId ? goalSnapshot("goal-old") : undefined;
+        },
+        async releaseAlerts(_instance: string, workspace: string) {
+            releasedAlerts.push(workspace);
+        },
+    } as never;
     const harness = createWorker();
     const contextSelector = createMcpContextSelector("openai-session");
     const catalog = new McpEndpointCatalog({
@@ -633,6 +667,7 @@ test("successful OpenAI session selector replacement retires the old environment
         catalog,
         contextSelector,
         contextRegistry: registry,
+        gateway,
         instanceName: "demo-local",
         worker: harness.worker,
     });
@@ -652,7 +687,8 @@ test("successful OpenAI session selector replacement retires the old environment
         { ctxId: oldContext.ctxId, status: "disabled" },
         { ctxId: selected.ctxId, status: "active" }
     ]);
-    assert.deepEqual(harness.releasedAlerts, ["/projects/old"]);
+    assert.deepEqual(stoppedGoals, [oldContext.ctxId]);
+    assert.deepEqual(releasedAlerts, ["/projects/old"]);
 });
 
 test("environ_info rolls back an undisclosed Context when post-create event recording fails", async () => {
@@ -720,6 +756,25 @@ test("environ_info rollback keeps alerts leased by another Context attachment", 
     assert.deepEqual((await registry.list()).map(({ ctxId }) => ctxId), [existing.ctxId]);
     assert.deepEqual(harness.releasedAlerts, []);
 });
+
+function goalSnapshot(goalId: string) {
+    return {
+        autoContinueExhausted: false,
+        continuationCount: 0,
+        continuationDue: false,
+        continuationDueAt: "2099-01-01T00:00:00.000Z",
+        continuationPending: false,
+        createdAt: "2026-08-20T00:00:00.000Z",
+        goalId,
+        lastAgentActivityAt: "2026-08-20T00:00:00.000Z",
+        maxContinuations: 10,
+        objective: "Context Goal",
+        revision: 1,
+        status: "active" as const,
+        steps: [{ id: "work", status: "active" as const, text: "Work" }],
+        updatedAt: "2026-08-20T00:00:00.000Z",
+    };
+}
 
 async function waitUntil(predicate: () => boolean): Promise<void> {
     for (let attempt = 0; attempt < 100; attempt += 1) {

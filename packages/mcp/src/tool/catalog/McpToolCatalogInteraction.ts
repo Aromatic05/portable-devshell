@@ -52,7 +52,7 @@ const goalStepSchema: JsonValue = {
 export class McpToolCatalogInteraction {
     readonly #definitions: readonly ToolDefinition[] = [
         {
-            description: "Ask the user one question in the active Workspace and wait for their answer without ending the current model turn. An active Workspace App is required for the current Context; call workspace_open again if the App is no longer active. Use this only when progress genuinely requires human input. The taskId must identify the durable task being worked on.",
+            description: "Ask the user one question in the active Workspace and wait for their answer without ending the current model turn. An active Workspace App is required for the current Context; call workspace_open again if the App is no longer active. Use this only when progress genuinely requires human input. Durable Goal or Todo association is inferred automatically when available.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
@@ -72,13 +72,8 @@ export class McpToolCatalogInteraction {
                         minLength: 1,
                         type: "string",
                     },
-                    taskId: {
-                        description: "Stable taskId returned by todo_read or todo_write.",
-                        minLength: 1,
-                        type: "string",
-                    },
                 },
-                required: ["taskId", "question"],
+                required: ["question"],
                 type: "object",
             },
             name: "workspace_ask",
@@ -94,7 +89,7 @@ export class McpToolCatalogInteraction {
             requiredCapabilities: [],
         },
         {
-            description: "Manage optional Workspace Goal mode for the current Context. start creates one durable Goal with an objective and ordered steps. update revises the objective, complete step list, or one step. block suspends automatic continuation with a reason; resume reactivates it. finish succeeds only after every step is completed or skipped. stop terminates Goal mode without stopping shell or tmux processes. get reads the current Goal. While an active Goal has an open Workspace, the App may request model continuation after prolonged inactivity.",
+            description: "Manage optional Workspace Goal mode for the current Context. Call workspace_open before start; start requires an active Workspace so Goal controls and continuation remain visible. start creates one durable Goal with an objective and ordered steps. update revises the objective, complete step list, or one step. block suspends automatic continuation with a reason; resume reactivates it. finish succeeds only after every step is completed or skipped. stop terminates Goal mode without stopping shell or tmux processes. get reads the current Goal.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
@@ -291,7 +286,7 @@ export class McpToolCatalogInteraction {
             if (definition.name === "workspace_ask") {
                 return {
                     ...definition,
-                    description: "Ask the user one question in the active Workspace and wait for their answer without ending the current model turn. An active Workspace App is required for the current host session. Use this only when progress genuinely requires human input. The taskId must identify the durable task being worked on."
+                    description: "Ask the user one question in the active Workspace and wait for their answer without ending the current model turn. An active Workspace App is required for the current host session. Use this only when progress genuinely requires human input. Durable Goal or Todo association is inferred automatically when available."
                 };
             }
             if (definition.name === "workspace_open") {

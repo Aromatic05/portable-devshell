@@ -119,6 +119,37 @@ test("GoalState continuation claims are validated against agent activity and cou
     assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
 
     document = state.manage(document, { action: "block", note: "Need user input" }, "ctx-goal").document;
+    document = state.manage(document, { action: "update", objective: "Still waiting for input" }, "ctx-goal").document;
+    assert.equal(state.read(document, "ctx-goal")?.status, "blocked");
     now += GOAL_EXECUTION_LEASE_MS * 2;
     assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
+});
+
+test("GoalState bounds terminal history without removing live Goals", () => {
+    let now = Date.parse("2026-08-20T12:00:00.000Z");
+    let ids = 0;
+    const state = new GoalState({
+        goalId: () => `goal-${++ids}`,
+        now: () => new Date(now).toISOString(),
+    });
+    let document = state.emptyDocument();
+
+    for (const ctxId of ["ctx-old", "ctx-new"]) {
+        document = state.manage(document, {
+            action: "start",
+            objective: ctxId,
+            steps: [{ id: "work", text: "Work" }],
+        }, ctxId).document;
+        now += 1_000;
+        document = state.manage(document, { action: "stop" }, ctxId).document;
+        now += 1_000;
+    }
+    document = state.manage(document, {
+        action: "start",
+        objective: "live",
+        steps: [{ id: "work", text: "Work" }],
+    }, "ctx-live").document;
+
+    const compacted = state.compact(document, 1);
+    assert.deepEqual(compacted.goals.map((goal) => goal.createdByCtxId), ["ctx-new", "ctx-live"]);
 });

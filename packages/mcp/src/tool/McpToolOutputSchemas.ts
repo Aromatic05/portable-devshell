@@ -277,6 +277,7 @@ export const approvalRequestOutputSchema = objectSchema({
 
 const workspaceBackgroundSchema = objectSchema({
     detachedAt: stringValue,
+    goalId: nonEmptyString,
     status: { enum: ["detached", "resolved", "waiting"], type: "string" },
     taskId: nonEmptyString,
     tmuxTaskId: stringValue,
@@ -305,6 +306,7 @@ const workspaceQuestionPayloadSchema = objectSchema({
 
 const workspaceQuestionEventSchema = objectSchema({
     eventName: { const: "user.answer", type: "string" },
+    goalId: nonEmptyString,
     kind: { const: "question", type: "string" },
     name: { const: "workspace_ask", type: "string" },
     payload: workspaceQuestionPayloadSchema,
@@ -316,6 +318,7 @@ const workspaceQuestionEventSchema = objectSchema({
 
 const workspaceTmuxEventSchema = objectSchema({
     eventName: { const: "tmux.task.completed", type: "string" },
+    goalId: nonEmptyString,
     kind: { const: "tmux", type: "string" },
     name: { const: "tmux_wait", type: "string" },
     status: { const: "waiting", type: "string" },
@@ -389,6 +392,7 @@ export const workspaceGoalContinuationOutputSchema = objectSchema({
 const workspaceQuestionWaitOutputSchema = objectSchema({
     createdAt: stringValue,
     detachedAt: stringValue,
+    goalId: nonEmptyString,
     kind: { const: "question", type: "string" },
     payload: workspaceQuestionPayloadSchema,
     status: { enum: ["detached", "waiting"], type: "string" },
@@ -455,6 +459,7 @@ export const workspaceWatchOutputSchema = workspaceWatchOutputSchemaForContextMo
 export const workspaceQuestionAnswerOutputSchema = objectSchema({
     answer: stringValue,
     detached: booleanValue,
+    goalId: nonEmptyString,
     questionId: stringValue,
     taskId: nonEmptyString,
     waitId: nonEmptyString,
@@ -470,6 +475,7 @@ export const workspaceWaitInterruptOutputSchema = objectSchema({
 export const workspaceWaitRecoveryOutputSchema = objectSchema({
     claimId: nonEmptyString,
     completed: { const: true, type: "boolean" },
+    goalId: nonEmptyString,
     kind: { enum: ["question", "tmux"], type: "string" },
     released: { const: true, type: "boolean" },
     result: anyValue,

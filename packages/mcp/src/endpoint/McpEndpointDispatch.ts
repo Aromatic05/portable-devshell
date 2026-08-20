@@ -11,7 +11,7 @@ import {
 
 import { McpContextRegistry } from "../context/McpContextRegistry.js";
 import { createMcpContextSelector, type McpContextSelector } from "../context/McpContextSelector.js";
-import { isMcpWaitTrackingGateway, type McpInstanceGateway } from "../instance/McpInstanceGateway.js";
+import { isMcpGoalGateway, isMcpWaitTrackingGateway, type McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import type { McpToolCatalogArtifactName } from "../tool/catalog/McpToolCatalogArtifact.js";
 import type { McpToolCatalogInstanceName } from "../tool/catalog/McpToolCatalogInstance.js";
 import type { McpToolCatalogInteractionName } from "../tool/catalog/McpToolCatalogInteraction.js";
@@ -248,9 +248,11 @@ export class McpEndpointDispatch {
             wait = await gateway.reattachWait(instance, wait.waitId, context.requestId);
         }
         if (wait === undefined) {
-            const taskId = await this.#currentTaskId(instance, context.ctxId);
+            const goalId = await this.#currentGoalId(instance, context.ctxId);
+            const taskId = goalId === undefined ? await this.#currentTaskId(instance, context.ctxId) : undefined;
             wait = await gateway.createWait(instance, {
                 createdByCtxId: context.ctxId,
+                ...(goalId === undefined ? {} : { goalId }),
                 kind: "tmux",
                 ...(context.requestId === undefined ? {} : { ownerCallId: context.requestId }),
                 ...(taskId === undefined ? {} : { taskId }),
@@ -277,6 +279,7 @@ export class McpEndpointDispatch {
                 throw new Error(`tmux wait ${wait.waitId} resolved without a result.`);
             }
             await gateway.consumeWait(instance, wait.waitId);
+            await gateway.touchGoal?.(instance, context.ctxId);
             return await this.#attachComments(
                 "tmux_wait",
                 result,
@@ -291,6 +294,7 @@ export class McpEndpointDispatch {
             }
             const current = (await gateway.listWaits(instance)).find((record) => record.waitId === wait.waitId);
             if (current?.status === "cancelled") {
+                await gateway.touchGoal?.(instance, context.ctxId);
                 return await this.#attachComments(
                     "tmux_wait",
                     {
@@ -304,6 +308,15 @@ export class McpEndpointDispatch {
             }
             throw error;
         }
+    }
+
+    async #currentGoalId(instance: string, ctxId: string): Promise<string | undefined> {
+        const gateway = this.#gateway;
+        if (!isMcpGoalGateway(gateway)) return undefined;
+        const goal = await gateway.readGoal(instance, ctxId);
+        return goal !== undefined && (goal.status === "active" || goal.status === "blocked")
+            ? goal.goalId
+            : undefined;
     }
 
     async #currentTaskId(instance: string, ctxId: string): Promise<string | undefined> {

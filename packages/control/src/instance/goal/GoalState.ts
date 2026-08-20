@@ -14,6 +14,7 @@ export const GOAL_EXECUTION_LEASE_MS = 15 * 60 * 1_000;
 export const GOAL_MAX_CONTINUATIONS = 10;
 const GOAL_CONTINUATION_CLAIM_TTL_MS = 5 * 60 * 1_000;
 const GOAL_CONTINUATION_RETRY_MS = 5 * 60 * 1_000;
+const MAX_TERMINAL_GOALS = 1_000;
 const GOAL_MAX_STEPS = 100;
 const GOAL_OBJECTIVE_LIMIT = 4_000;
 const GOAL_STEP_ID_LIMIT = 128;
@@ -50,7 +51,7 @@ export class GoalState {
         const goals = value.goals.map((entry) => normalizeStoredGoal(entry));
         const contexts = new Set(goals.map((goal) => goal.createdByCtxId));
         if (contexts.size !== goals.length) throw new Error("goal contexts must be unique");
-        return { goals, version: 1 };
+        return this.compact({ goals, version: 1 });
     }
 
     read(document: GoalDocument, ctxId: string): GoalSnapshot | undefined {
@@ -124,7 +125,7 @@ export class GoalState {
 
         const goals = [...document.goals];
         goals[index] = next;
-        return { document: { goals, version: 1 }, result: snapshot(next, now) };
+        return { document: this.compact({ goals, version: 1 }), result: snapshot(next, now) };
     }
 
     touch(document: GoalDocument, ctxId: string): GoalTransition {
@@ -205,6 +206,18 @@ export class GoalState {
         return { document: { goals, version: 1 }, result };
     }
 
+    compact(document: GoalDocument, maxTerminalGoals = MAX_TERMINAL_GOALS): GoalDocument {
+        const live = document.goals.filter((goal) => !isTerminalGoal(goal));
+        const terminal = document.goals
+            .filter(isTerminalGoal)
+            .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+            .slice(0, Math.max(0, maxTerminalGoals));
+        return {
+            goals: [...live, ...terminal].sort((left, right) => left.createdAt.localeCompare(right.createdAt)),
+            version: 1,
+        };
+    }
+
     #start(document: GoalDocument, input: GoalManageInput, ctxId: string): GoalTransition {
         const existing = document.goals.find((goal) => goal.createdByCtxId === ctxId);
         if (existing !== undefined && (existing.status === "active" || existing.status === "blocked")) {
@@ -226,8 +239,12 @@ export class GoalState {
         };
         const goals = document.goals.filter((goal) => goal.createdByCtxId !== ctxId);
         goals.push(next);
-        return { document: { goals, version: 1 }, result: snapshot(next, now) };
+        return { document: this.compact({ goals, version: 1 }), result: snapshot(next, now) };
     }
+}
+
+function isTerminalGoal(goal: GoalRecord): boolean {
+    return goal.status === "completed" || goal.status === "stopped";
 }
 
 function updateGoal(current: GoalRecord, input: GoalManageInput, now: string): GoalRecord {
@@ -255,7 +272,7 @@ function updateGoal(current: GoalRecord, input: GoalManageInput, now: string): G
         ...(input.note === undefined ? {} : { note: requiredText(input.note, "note", GOAL_NOTE_LIMIT) }),
         ...(input.objective === undefined ? {} : { objective: requiredText(input.objective, "objective", GOAL_OBJECTIVE_LIMIT) }),
         revision: current.revision + 1,
-        status: "active",
+        status: current.status,
         steps,
         updatedAt: now,
     };

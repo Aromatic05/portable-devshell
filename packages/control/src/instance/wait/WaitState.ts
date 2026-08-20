@@ -46,6 +46,7 @@ export class WaitState {
         const record: WaitRecord = {
             createdAt: now,
             createdByCtxId: text(input.createdByCtxId, "createdByCtxId"),
+            ...(input.goalId === undefined ? {} : { goalId: text(input.goalId, "goalId") }),
             kind: kind(input.kind),
             ...(input.ownerCallId === undefined ? {} : { ownerCallId: text(input.ownerCallId, "ownerCallId") }),
             ...(input.payload === undefined ? {} : { payload: structuredClone(input.payload) }),
@@ -200,6 +201,7 @@ function normalizeRecord(value: unknown): WaitRecord {
         createdAt: storedText(value.createdAt, "createdAt"),
         createdByCtxId: storedText(value.createdByCtxId, "createdByCtxId"),
         ...(typeof value.detachedAt === "string" ? { detachedAt: value.detachedAt } : {}),
+        ...(typeof value.goalId === "string" ? { goalId: storedText(value.goalId, "goalId") } : {}),
         kind: kind(value.kind),
         ...(typeof value.ownerCallId === "string" ? { ownerCallId: value.ownerCallId } : {}),
         ...("payload" in value ? { payload: value.payload as JsonValue } : {}),

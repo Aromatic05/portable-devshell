@@ -350,10 +350,34 @@ test("McpContextRegistry bounds terminal history without evicting active context
 test("McpHost context admin releases alerts only after the last workspace context is disabled", async () => {
     const released: string[] = [];
     const releasedReferences: string[] = [];
+    const stoppedGoals: string[] = [];
     const touched: string[] = [];
     const host = new McpHost({
         instances: [{
             gateway: {
+                async goalContinuation() { return {}; },
+                async manageGoal(_instance: string, input: { action: string }, ctxId: string) {
+                    if (input.action === "stop") stoppedGoals.push(ctxId);
+                    return undefined;
+                },
+                async readGoal(_instance: string, ctxId: string) {
+                    return {
+                        autoContinueExhausted: false,
+                        continuationCount: 0,
+                        continuationDue: false,
+                        continuationDueAt: "2099-01-01T00:00:00.000Z",
+                        continuationPending: false,
+                        createdAt: "2026-08-20T00:00:00.000Z",
+                        goalId: `goal-${ctxId}`,
+                        lastAgentActivityAt: "2026-08-20T00:00:00.000Z",
+                        maxContinuations: 10,
+                        objective: "Context Goal",
+                        revision: 1,
+                        status: "active",
+                        steps: [{ id: "work", status: "active", text: "Work" }],
+                        updatedAt: "2026-08-20T00:00:00.000Z",
+                    };
+                },
                 async releaseInstanceReference(instance: string, reference: string) {
                     releasedReferences.push(`${instance}:${reference}`);
                 }
@@ -382,9 +406,11 @@ test("McpHost context admin releases alerts only after the last workspace contex
     });
 
     await host.contextAdmin.disable(first.ctxId);
+    assert.deepEqual(stoppedGoals, [first.ctxId]);
     assert.deepEqual(released, []);
     assert.deepEqual(releasedReferences, [`demo-local:${first.ctxId}`]);
     await host.contextAdmin.disable(second.ctxId);
+    assert.deepEqual(stoppedGoals, [first.ctxId, second.ctxId]);
     assert.deepEqual(released, ["/projects/alpha"]);
     assert.deepEqual(releasedReferences, [
         `demo-local:${first.ctxId}`,

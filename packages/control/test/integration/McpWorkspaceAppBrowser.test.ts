@@ -181,6 +181,82 @@ test("Workspace Goal requests one model continuation after inactivity", BROWSER_
     assert.deepEqual(browserFailures, []);
 });
 
+test("Workspace Goal respects continuation retry backoff", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:500px"></iframe>');
+    await page.evaluate(BRIDGE_SCRIPT);
+    await page.evaluate(() => {
+        const state = window as typeof window & {
+            __workspaceApprovalPending: boolean;
+            __workspaceGoalDueNow: boolean;
+            __workspaceGoalRetryAfter: string;
+            __workspaceQuestionAnswered: boolean;
+            __workspaceWaitInterrupted: boolean;
+        };
+        state.__workspaceGoalDueNow = true;
+        state.__workspaceGoalRetryAfter = new Date(Date.now() + 5 * 60_000).toISOString();
+        state.__workspaceQuestionAnswered = true;
+        state.__workspaceApprovalPending = false;
+        state.__workspaceWaitInterrupted = true;
+    });
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    await page.frameLocator("#workspace").getByText("Ship Workspace Goal mode", { exact: true }).waitFor({ state: "visible" });
+    await page.waitForTimeout(250);
+    assert.equal(
+        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue').length"),
+        0,
+    );
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
+});
+
+test("Workspace Stop fences an in-flight Goal continuation before model re-entry", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:500px"></iframe>');
+    await page.evaluate(BRIDGE_SCRIPT);
+    await page.evaluate(() => {
+        const state = window as typeof window & {
+            __holdGoalContinuationContext: boolean;
+            __workspaceApprovalPending: boolean;
+            __workspaceGoalDueNow: boolean;
+            __workspaceQuestionAnswered: boolean;
+            __workspaceWaitInterrupted: boolean;
+        };
+        state.__holdGoalContinuationContext = true;
+        state.__workspaceGoalDueNow = true;
+        state.__workspaceQuestionAnswered = true;
+        state.__workspaceApprovalPending = false;
+        state.__workspaceWaitInterrupted = true;
+    });
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    await page.waitForFunction("window.__pendingGoalContinuationContext != null");
+    const app = page.frameLocator("#workspace");
+    await app.getByRole("button", { name: "Stop Goal", exact: true }).click();
+    await app.getByText("stopped", { exact: true }).waitFor({ state: "visible" });
+    assert.equal(await page.evaluate("window.__releaseGoalContinuationContext()"), true);
+    await page.waitForFunction("(window.__goalContinuationReports || []).length === 1");
+    await page.waitForTimeout(100);
+
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
+    const reports = await page.evaluate("window.__goalContinuationReports || []") as Array<{ accepted?: boolean }>;
+    assert.equal(reports[0]?.accepted, false);
+});
+
 test("Workspace Goal does not continue while a detached wait is still pending", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
@@ -294,6 +370,48 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     assert.equal(recoverCalls[0]?.arguments?.waitId, "wait-recovery");
     assert.equal(recoverCalls[1]?.arguments?.action, "complete");
     assert.equal(recoverCalls[1]?.arguments?.claimId, "recovery-claim");
+});
+
+test("Workspace Goal recovers a resolved detached wait without Todo", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
+    await page.evaluate(RECOVERY_BRIDGE_SCRIPT);
+    await page.evaluate(() => {
+        (window as typeof window & { __goalRecovery: boolean }).__goalRecovery = true;
+    });
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    await page.waitForFunction("(window.__modelMessages || []).length === 1");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 2");
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
+});
+
+test("Workspace recovers an unassociated resolved wait by Context", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
+    await page.evaluate(RECOVERY_BRIDGE_SCRIPT);
+    await page.evaluate(() => {
+        (window as typeof window & { __unassociatedRecovery: boolean }).__unassociatedRecovery = true;
+    });
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    await page.waitForFunction("(window.__modelMessages || []).length === 1");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 2");
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
 });
 
 test("Workspace does not surface a detached tmux wait as another blocking event", BROWSER_TEST_OPTIONS, async (t) => {
@@ -448,7 +566,10 @@ window.__workspaceApprovalPending = true;
 window.__workspaceWaitInterrupted = false;
 window.__workspaceGoalStopped = false;
 window.__workspaceGoalDueNow = false;
+window.__workspaceGoalRetryAfter = "";
 window.__workspaceBackgroundDetached = false;
+window.__holdGoalContinuationContext = false;
+window.__pendingGoalContinuationContext = null;
 window.__goalContinuationReports = [];
 window.__workspaceWatchCount = 0;
 window.__workspacePendingWatch = null;
@@ -534,6 +655,7 @@ function snapshot(withQuestion) {
             continuationDue: window.__workspaceGoalDueNow,
             continuationDueAt: window.__workspaceGoalDueNow ? "2000-01-01T00:00:00.000Z" : "2099-08-20T01:00:00.000Z",
             continuationPending: false,
+            continuationRetryAfter: window.__workspaceGoalRetryAfter || undefined,
             createdAt: "2026-08-19T01:00:00.000Z",
             goalId: "goal-browser",
             lastAgentActivityAt: "2026-08-19T01:00:00.000Z",
@@ -595,6 +717,10 @@ window.addEventListener("message", function (event) {
     if (message.method === "ui/update-model-context") {
         window.__modelContextUpdates.push(message.params || {});
         window.__bridgeEvents.push("context");
+        if (window.__holdGoalContinuationContext && JSON.stringify(message.params || {}).includes("goalContinuation")) {
+            window.__pendingGoalContinuationContext = { id: message.id, source: source };
+            return;
+        }
         reply({});
         return;
     }
@@ -685,6 +811,14 @@ window.addEventListener("message", function (event) {
         }
     }
 });
+
+window.__releaseGoalContinuationContext = function () {
+    var pending = window.__pendingGoalContinuationContext;
+    if (!pending || pending.id === undefined || !pending.source) return false;
+    window.__pendingGoalContinuationContext = null;
+    pending.source.postMessage({ id: pending.id, jsonrpc: "2.0", result: {} }, "*");
+    return true;
+};
 
 window.__emitWorkspaceQuestionAfterCancellation = function () {
     var pending = window.__workspacePendingWatch;
@@ -797,24 +931,45 @@ window.__workspaceCalls = [];
 window.__modelMessages = [];
 window.__bridgeEvents = [];
 window.__recovered = false;
+window.__goalRecovery = false;
+window.__unassociatedRecovery = false;
 
 function recoverySnapshot() {
+    var goalMode = window.__goalRecovery;
+    var unassociated = window.__unassociatedRecovery;
     return {
         activity: [],
         approvals: [],
         background: window.__recovered ? [] : [{
             detachedAt: "2026-08-19T01:00:01.000Z",
+            goalId: goalMode ? "goal-recovery" : undefined,
             status: "resolved",
-            taskId: "task-recovery",
+            taskId: goalMode || unassociated ? undefined : "task-recovery",
             tmuxTaskId: "tmux-recovery",
             updatedAt: "2026-08-19T01:00:02.000Z",
             waitId: "wait-recovery"
         }],
         ctxId: "ctx-recovery",
         cursor: 1,
+        goal: goalMode ? {
+            autoContinueExhausted: false,
+            continuationCount: 0,
+            continuationDue: false,
+            continuationDueAt: "2099-08-20T01:00:00.000Z",
+            continuationPending: false,
+            createdAt: "2026-08-19T01:00:00.000Z",
+            goalId: "goal-recovery",
+            lastAgentActivityAt: "2026-08-19T01:00:00.000Z",
+            maxContinuations: 10,
+            objective: "Recover Goal work",
+            revision: 1,
+            status: "active",
+            steps: [{ id: "wait", status: "active", text: "Wait for background work" }],
+            updatedAt: "2026-08-19T01:00:00.000Z"
+        } : undefined,
         instance: "browser-instance",
         questions: [],
-        tasks: [{
+        tasks: goalMode || unassociated ? [] : [{
             checkpoint: {
                 next: "Inspect the completed background result",
                 summary: "The long-running command was detached",
@@ -884,9 +1039,10 @@ window.addEventListener("message", function (event) {
         if (call.arguments.action === "claim") {
             reply({ structuredContent: {
                 claimId: "recovery-claim",
+                goalId: window.__goalRecovery ? "goal-recovery" : undefined,
                 kind: "tmux",
                 result: { task: { status: "0" } },
-                taskId: "task-recovery",
+                taskId: window.__goalRecovery || window.__unassociatedRecovery ? undefined : "task-recovery",
                 targetId: "tmux-recovery",
                 waitId: "wait-recovery"
             } });

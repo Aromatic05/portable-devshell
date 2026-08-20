@@ -25,7 +25,6 @@ test("workspace_ask holds the original call until the Workspace app answers", as
             allowText: false,
             choices: ["A", "B"],
             question: "Which implementation?",
-            taskId: "task-1",
         },
         context,
         "call-agent",
@@ -58,7 +57,7 @@ test("workspace_ask detaches durable wait state when the host cancels the held c
     const controller = new AbortController();
     const held = handler.call(
         "workspace_ask",
-        { question: "Still there?", taskId: "task-1" },
+        { question: "Still there?" },
         context,
         "call-agent",
         controller.signal,
@@ -77,41 +76,98 @@ test("workspace_ask detaches durable wait state when the host cancels the held c
         answer: "yes",
         detached: true,
         questionId: wait.targetId,
-        taskId: "task-1",
         waitId: wait.waitId,
     });
 });
 
-test("workspace_ask requires the durable task to be attached to the current Context", async () => {
+test("workspace_ask infers the current Todo association instead of requiring taskId", async () => {
     const fake = createInteractionGateway();
     const gateway = Object.assign(fake.gateway, {
-        async readTodo(_instance: string, input?: { taskId?: string }) {
-            if (input?.taskId !== "task-1") {
-                return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks: [] };
-            }
+        async readTodo() {
             return {
                 items: [],
                 revision: 1,
                 summary: { completed: 0, total: 1 },
-                taskId: "task-1",
-                tasks: [{ ctxId: "ctx-other", status: "in_progress", taskId: "task-1" }],
-                title: "Task"
+                tasks: [{ ctxId: context.ctxId, status: "in_progress", taskId: "task-1" }],
             };
         }
     }) as McpInteractionGateway;
     const handler = new McpEndpointHandlerInteraction({ gateway, instanceName: "demo" });
-    await openWorkspace(handler);
+    const token = await openWorkspace(handler);
 
-    await assert.rejects(
-        handler.call(
-            "workspace_ask",
-            { question: "Should not attach implicitly", taskId: "task-1" },
-            context,
-            "call-foreign-task",
-        ),
-        /not attached to the current Context/u,
+    const held = handler.call(
+        "workspace_ask",
+        { question: "Associate this automatically" },
+        context,
+        "call-task-associated",
     );
-    assert.equal(fake.waits.length, 0);
+    const wait = await fake.created;
+    assert.equal(wait.taskId, "task-1");
+    await handler.call(
+        "workspace_question_answer",
+        { answer: "yes", token, waitId: wait.waitId },
+        context,
+        "call-answer",
+    );
+    await held;
+});
+
+test("workspace_ask prefers the current Goal association over Todo", async () => {
+    const fake = createInteractionGateway();
+    let goalTouches = 0;
+    Object.assign(fake.gateway, {
+        async goalContinuation() {
+            return { goal: null };
+        },
+        async manageGoal() {
+            return undefined;
+        },
+        async readGoal() {
+            return {
+                autoContinueExhausted: false,
+                continuationCount: 0,
+                continuationDue: false,
+                continuationDueAt: "2026-08-20T00:15:00.000Z",
+                continuationPending: false,
+                createdAt: "2026-08-20T00:00:00.000Z",
+                goalId: "goal-1",
+                lastAgentActivityAt: "2026-08-20T00:00:00.000Z",
+                maxContinuations: 10,
+                objective: "Finish Goal mode",
+                revision: 1,
+                status: "active",
+                steps: [{ id: "work", status: "active", text: "Work" }],
+                updatedAt: "2026-08-20T00:00:00.000Z",
+            };
+        },
+        async readTodo() {
+            return {
+                items: [],
+                revision: 1,
+                summary: { completed: 0, total: 1 },
+                tasks: [{ ctxId: context.ctxId, status: "in_progress", taskId: "task-1" }],
+            };
+        },
+        async touchGoal(_instance: string, ctxId: string) {
+            assert.equal(ctxId, context.ctxId);
+            goalTouches += 1;
+        },
+    });
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
+    const held = handler.call("workspace_ask", { question: "Which path?" }, context, "call-goal-associated");
+    const wait = await fake.created;
+
+    assert.equal(wait.goalId, "goal-1");
+    assert.equal(wait.taskId, undefined);
+    await handler.call(
+        "workspace_question_answer",
+        { answer: "continue", token, waitId: wait.waitId },
+        context,
+        "call-answer",
+    );
+    await held;
+    assert.equal(goalTouches, 1);
 });
 
 test("Workspace authorization stays in hidden metadata and gates app-only tools", async () => {
@@ -354,6 +410,101 @@ test("Workspace task control and detached-wait recovery use durable server state
     assert.equal(claimed?.status, "consumed");
 });
 
+test("Workspace detached-wait recovery accepts an active Goal without Todo", async () => {
+    const fake = createInteractionGateway();
+    const now = new Date().toISOString();
+    fake.waits.push({
+        createdAt: now,
+        createdByCtxId: context.ctxId!,
+        detachedAt: now,
+        goalId: "goal-recover",
+        kind: "tmux",
+        resolvedAt: now,
+        result: { task: { status: "0" } },
+        status: "resolved",
+        targetId: "tmux-goal",
+        updatedAt: now,
+        waitId: "wait-goal-recover",
+    });
+    let goalStatus = "stopped";
+    Object.assign(fake.gateway, {
+        async goalContinuation() {
+            return { goal: null };
+        },
+        async manageGoal() {
+            return undefined;
+        },
+        async readGoal() {
+            return {
+                autoContinueExhausted: false,
+                continuationCount: 0,
+                continuationDue: false,
+                continuationDueAt: "2026-08-20T00:15:00.000Z",
+                continuationPending: false,
+                createdAt: now,
+                goalId: "goal-recover",
+                lastAgentActivityAt: now,
+                maxContinuations: 10,
+                objective: "Recover Goal work",
+                revision: 1,
+                status: goalStatus,
+                steps: [{ id: "work", status: "active", text: "Wait for background work" }],
+                updatedAt: now,
+            };
+        },
+    });
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
+
+    await assert.rejects(handler.call(
+        "workspace_wait_recover",
+        { action: "claim", token, waitId: "wait-goal-recover" },
+        context,
+        "call-goal-recover-stopped",
+    ), /not available for automatic recovery/u);
+
+    goalStatus = "active";
+    const recovered = await handler.call(
+        "workspace_wait_recover",
+        { action: "claim", token, waitId: "wait-goal-recover" },
+        context,
+        "call-goal-recover",
+    ) as { claimId: string; goalId: string; waitId: string };
+    assert.equal(recovered.goalId, "goal-recover");
+    assert.equal(recovered.waitId, "wait-goal-recover");
+    assert.match(recovered.claimId, /^recovery-/u);
+});
+
+test("Workspace detached-wait recovery accepts Context-only durable state", async () => {
+    const fake = createInteractionGateway();
+    const now = new Date().toISOString();
+    fake.waits.push({
+        createdAt: now,
+        createdByCtxId: context.ctxId!,
+        detachedAt: now,
+        kind: "question",
+        resolvedAt: now,
+        result: { answer: "continue" },
+        status: "resolved",
+        targetId: "question-context-only",
+        updatedAt: now,
+        waitId: "wait-context-only",
+    });
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
+
+    const recovered = await handler.call(
+        "workspace_wait_recover",
+        { action: "claim", token, waitId: "wait-context-only" },
+        context,
+        "call-context-only-recover",
+    ) as { claimId: string; kind: string; result: JsonValue; waitId: string };
+    assert.equal(recovered.kind, "question");
+    assert.deepEqual(recovered.result, { answer: "continue" });
+    assert.equal(recovered.waitId, "wait-context-only");
+    assert.match(recovered.claimId, /^recovery-/u);
+});
+
 test("workspace_watch skips unrelated events and returns on the current Context event", async () => {
     const fake = createInteractionGateway();
     let watchReads = 0;
@@ -434,12 +585,23 @@ test("workspace_ask refuses to hold a call before Workspace is open", async () =
     await assert.rejects(
         handler.call(
             "workspace_ask",
-            { question: "Invisible question?", taskId: "task-1" },
+            { question: "Invisible question?" },
             context,
             "call-agent",
         ),
         /workspace_open/i,
     );
+    await handler.call("workspace_open", {}, context, "call-open-only");
+    await assert.rejects(
+        handler.call(
+            "workspace_ask",
+            { question: "Panel mounted yet?" },
+            context,
+            "call-agent-open-only",
+        ),
+        /active Workspace App/i,
+    );
+    assert.equal(fake.waits.length, 0);
 });
 
 test("workspace_ask refuses to create a held call after the Workspace App lease expires", async () => {
@@ -457,13 +619,56 @@ test("workspace_ask refuses to create a held call after the Workspace App lease 
     await assert.rejects(
         handler.call(
             "workspace_ask",
-            { question: "Is anyone still there?", taskId: "task-1" },
+            { question: "Is anyone still there?" },
             context,
             "call-agent-stale",
         ),
         /active Workspace App/i,
     );
     assert.equal(fake.waits.length, 0);
+});
+
+test("workspace_goal start requires an active Workspace", async () => {
+    const fake = createInteractionGateway();
+    let starts = 0;
+    Object.assign(fake.gateway, {
+        async goalContinuation() {
+            return { goal: null };
+        },
+        async manageGoal(_instance: string, input: { action: string }) {
+            if (input.action === "start") starts += 1;
+            return undefined;
+        },
+        async readGoal() {
+            return undefined;
+        },
+    });
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    const start = {
+        action: "start",
+        objective: "Visible Goal",
+        steps: [{ id: "work", text: "Do the work" }],
+    };
+
+    await assert.rejects(
+        handler.call("workspace_goal", start, context, "call-goal-headless"),
+        /active Workspace App/u,
+    );
+    assert.equal(starts, 0);
+
+    const opened = await handler.call("workspace_open", {}, context, "call-open");
+    assert.ok(opened instanceof McpNativeToolResult);
+    const meta = opened._meta?.["portable-devshell/workspace"] as { token?: unknown } | undefined;
+    if (typeof meta?.token !== "string") throw new Error("workspace token missing");
+    await assert.rejects(
+        handler.call("workspace_goal", start, context, "call-goal-open-only"),
+        /active Workspace App/u,
+    );
+    assert.equal(starts, 0);
+
+    await handler.call("workspace_snapshot", { token: meta.token }, context, "call-snapshot");
+    await handler.call("workspace_goal", start, context, "call-goal-start");
+    assert.equal(starts, 1);
 });
 
 test("Workspace Goal continuation is unavailable while the current Context still has a detached wait", async () => {
@@ -535,6 +740,12 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     assert.deepEqual((adaptedAnswer._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.deepEqual((adaptedInterrupt._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.deepEqual((adaptedWatch._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
+    const askInputSchema = ask.inputSchema as {
+        properties?: Record<string, unknown>;
+        required?: string[];
+    };
+    assert.equal(askInputSchema.properties?.taskId, undefined);
+    assert.deepEqual(askInputSchema.required, ["question"]);
     assert.equal(ask._meta, undefined);
     assert.equal(goal._meta, undefined);
     assert.deepEqual((goalStop._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
@@ -567,6 +778,7 @@ async function openWorkspace(handler: McpEndpointHandlerInteraction): Promise<st
     assert.ok(opened instanceof McpNativeToolResult);
     const meta = opened._meta?.["portable-devshell/workspace"] as { token?: unknown } | undefined;
     if (typeof meta?.token !== "string") throw new Error("workspace token missing");
+    await handler.call("workspace_snapshot", { token: meta.token }, context, "call-snapshot");
     return meta.token;
 }
 

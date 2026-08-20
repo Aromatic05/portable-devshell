@@ -2,7 +2,7 @@ import { createError, errorCodes, type JsonValue, type McpContextRecord, type To
 
 import { McpContextRegistry } from "../../context/McpContextRegistry.js";
 import type { McpContextSelector } from "../../context/McpContextSelector.js";
-import type { McpInstanceGateway } from "../../instance/McpInstanceGateway.js";
+import { isMcpGoalGateway, type McpInstanceGateway } from "../../instance/McpInstanceGateway.js";
 import { readMcpWorkspace } from "../McpEndpointInput.js";
 import type { McpEndpointCallContext, McpEndpointWorkerPort } from "../McpEndpointPort.js";
 import {
@@ -126,6 +126,12 @@ export class McpEndpointHandlerEnvironment {
 
     async #releaseReplacedContext(context: McpContextRecord): Promise<void> {
         for (const environment of context.environments) {
+            if (isMcpGoalGateway(this.#gateway)) {
+                const goal = await this.#gateway.readGoal(environment.instance, context.ctxId).catch(() => undefined);
+                if (goal?.status === "active" || goal?.status === "blocked") {
+                    await this.#gateway.manageGoal(environment.instance, { action: "stop" }, context.ctxId).catch(() => undefined);
+                }
+            }
             if (environment.workspace !== undefined) {
                 await this.#releaseAlertsIfUnused(environment.instance, environment.workspace).catch(() => undefined);
             }

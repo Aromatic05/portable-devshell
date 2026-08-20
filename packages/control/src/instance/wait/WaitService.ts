@@ -153,6 +153,7 @@ function eventData(record: WaitRecord): JsonValue {
     return {
         createdAt: record.createdAt,
         createdByCtxId: record.createdByCtxId,
+        ...(record.goalId === undefined ? {} : { goalId: record.goalId }),
         kind: record.kind,
         ...(record.ownerCallId === undefined ? {} : { ownerCallId: record.ownerCallId }),
         status: record.status,

@@ -1,7 +1,7 @@
 import type { ControlMcpContextMode, JsonValue, McpContextRecord, ToolCallContext, ToolDefinition, ToolPolicy } from "@portable-devshell/shared";
 import { type McpAuthConfig } from "../auth/McpAuthConfig.js";
 import { McpContextRegistry } from "../context/McpContextRegistry.js";
-import type { McpInstanceGateway } from "../instance/McpInstanceGateway.js";
+import { isMcpGoalGateway, type McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import { McpOAuthProtectedResource } from "../auth/oauth/McpOAuthProtectedResource.js";
 import type { McpOAuthApprovalService } from "../auth/oauth/McpOAuthApprovalService.js";
 import { McpEndpointBinding } from "../endpoint/McpEndpointBinding.js";
@@ -196,6 +196,13 @@ export class McpHost {
                 const contexts = await this.#contextRegistry.list();
                 const now = Date.now();
                 for (const environment of disabled.environments) {
+                    const gateway = this.#gateways.get(environment.instance);
+                    if (isMcpGoalGateway(gateway)) {
+                        const goal = await gateway.readGoal(environment.instance, disabled.ctxId).catch(() => undefined);
+                        if (goal?.status === "active" || goal?.status === "blocked") {
+                            await gateway.manageGoal(environment.instance, { action: "stop" }, disabled.ctxId).catch(() => undefined);
+                        }
+                    }
                     if (environment.workspace !== undefined) {
                         const hasOtherActiveContext = contexts.some((context) =>
                             context.ctxId !== disabled.ctxId &&
@@ -213,7 +220,7 @@ export class McpHost {
                             }
                         }
                     }
-                    await this.#gateways.get(environment.instance)?.releaseInstanceReference?.(
+                    await gateway?.releaseInstanceReference?.(
                         environment.instance,
                         disabled.ctxId
                     );
