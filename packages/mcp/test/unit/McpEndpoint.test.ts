@@ -205,7 +205,8 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
             "ui://portable-devshell/workspace-651c9d0f1042c493.html",
             "ui://portable-devshell/workspace-98410baf51f694b0.html",
             "ui://portable-devshell/workspace-03c4911b6d185e3c.html",
-            "ui://portable-devshell/workspace-c978585dba4e38c7.html"
+            "ui://portable-devshell/workspace-c978585dba4e38c7.html",
+            "ui://portable-devshell/workspace-4305d70d5fdb6a12.html"
         ]);
         for (const [index, uri] of workspaceAppLegacyResourceUris.entries()) {
             const legacy = await postJson(server.url, {

@@ -8,6 +8,7 @@ export const workspaceAppLegacyResourceUris: readonly string[] = [
     "ui://portable-devshell/workspace-98410baf51f694b0.html",
     "ui://portable-devshell/workspace-03c4911b6d185e3c.html",
     "ui://portable-devshell/workspace-c978585dba4e38c7.html",
+    "ui://portable-devshell/workspace-4305d70d5fdb6a12.html",
 ];
 
 export const workspaceAppResourceMeta = {
@@ -437,8 +438,8 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
   };
   app.ontoolresult = acceptInitialOrLiveToolResult;
   app.ontoolcancelled = function () {
-    stopLive();
-    status.textContent = "Cancelled";
+    status.textContent = snapshot && snapshot.instance ? snapshot.instance + " · live" : "Connected";
+    if (initialized) void startLive();
   };
   app.onhostcontextchanged = applyHostContext;
   app.onteardown = async function () {

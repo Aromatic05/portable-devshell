@@ -92,6 +92,7 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_wait_interrupt')");
     await app.getByText("No blocking event.", { exact: true }).waitFor({ state: "visible" });
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
+    await page.waitForFunction("(window.__workspaceWatchCount || 0) >= 2");
 
     await page.evaluate(() => {
         const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
@@ -101,8 +102,9 @@ test("Workspace App watches live state and keeps human-action authorization hidd
             params: { reason: "test cancellation" }
         }, "*");
     });
-    await app.getByText("Cancelled", { exact: true }).waitFor({ state: "visible" });
-    await page.waitForFunction("(window.__workspaceCancelledRequests || []).length > 0");
+    assert.equal(await page.evaluate("window.__emitWorkspaceQuestionAfterCancellation()"), true);
+    await app.getByText("Question after cancellation?", { exact: true }).waitFor({ state: "visible" });
+    assert.equal(await page.evaluate("(window.__workspaceCancelledRequests || []).length"), 0);
 
     const calls = await page.evaluate("window.__workspaceCalls || []") as Array<{
         arguments?: Record<string, unknown>;
@@ -356,6 +358,9 @@ window.__workspaceQuestionAnswered = false;
 window.__workspaceApprovalPending = true;
 window.__workspaceWaitInterrupted = false;
 window.__workspaceWatchCount = 0;
+window.__workspacePendingWatch = null;
+window.__workspaceQuestionText = "Continue the task?";
+window.__workspaceCursor = 2;
 window.__modelContextUpdates = [];
 window.__modelMessages = [];
 window.__bridgeEvents = [];
@@ -374,7 +379,7 @@ function snapshot(withQuestion) {
                 "Continue", "Option 2", "Option 3", "Option 4", "Option 5", "Option 6",
                 "Option 7", "Option 8", "Option 9", "Option 10", "Option 11", "Option 12"
             ],
-            question: "Continue the task?"
+            question: window.__workspaceQuestionText
         },
         status: "waiting",
         targetId: "question-browser",
@@ -429,7 +434,7 @@ function snapshot(withQuestion) {
         contextSelector: { requiresExplicitContextId: true },
         ctxId: "ctx-browser",
         currentEvent: currentEvent,
-        cursor: 2,
+        cursor: window.__workspaceCursor,
         instance: "browser-instance",
         questions: withQuestion && !window.__workspaceQuestionAnswered ? [question] : [],
         tasks: [{
@@ -511,6 +516,8 @@ window.addEventListener("message", function (event) {
                 _meta: { "portable-devshell/workspace": { token: "browser-secret-token" } },
                 structuredContent: { changed: true, cursor: 2, snapshot: snapshot(true) }
             });
+        } else {
+            window.__workspacePendingWatch = { id: message.id, source: source };
         }
         return;
     }
@@ -530,6 +537,26 @@ window.addEventListener("message", function (event) {
         return;
     }
 });
+
+window.__emitWorkspaceQuestionAfterCancellation = function () {
+    var pending = window.__workspacePendingWatch;
+    if (!pending || pending.id === undefined || !pending.source) return false;
+    window.__workspacePendingWatch = null;
+    window.__workspaceQuestionAnswered = false;
+    window.__workspaceApprovalPending = false;
+    window.__workspaceWaitInterrupted = true;
+    window.__workspaceQuestionText = "Question after cancellation?";
+    window.__workspaceCursor = 3;
+    pending.source.postMessage({
+        id: pending.id,
+        jsonrpc: "2.0",
+        result: {
+            _meta: { "portable-devshell/workspace": { token: "browser-secret-token" } },
+            structuredContent: { changed: true, cursor: 3, snapshot: snapshot(true) }
+        }
+    }, "*");
+    return true;
+};
 `;
 
 const SESSION_MODE_BRIDGE_SCRIPT = String.raw`
