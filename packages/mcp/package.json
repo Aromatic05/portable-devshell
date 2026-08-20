@@ -19,8 +19,8 @@
         "dist"
     ],
     "dependencies": {
-        "@modelcontextprotocol/ext-apps": "1.7.2",
-        "@modelcontextprotocol/sdk": "1.29.0",
+        "@modelcontextprotocol/ext-apps": "1.7.5",
+        "@modelcontextprotocol/sdk": "1.30.0",
         "@portable-devshell/shared": "workspace:*",
         "@types/oidc-provider": "9.5.0",
         "express": "^5.2.1",

@@ -43,7 +43,7 @@
         "testspace": "node ./scripts/testspace.mjs"
     },
     "devDependencies": {
-        "@modelcontextprotocol/sdk": "1.29.0",
+        "@modelcontextprotocol/sdk": "1.30.0",
         "@types/react": "^18.3.11",
         "@types/node": "^24.0.0",
         "@eslint/js": "^9.31.0",

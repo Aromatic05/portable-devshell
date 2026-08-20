@@ -17,8 +17,8 @@ importers:
         specifier: ^9.31.0
         version: 9.39.4
       '@modelcontextprotocol/sdk':
-        specifier: 1.29.0
-        version: 1.29.0(zod@3.25.76)
+        specifier: 1.30.0
+        version: 1.30.0(zod@3.25.76)
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.2
@@ -48,7 +48,7 @@ importers:
     dependencies:
       '@portable-devshell/control':
         specifier: workspace:*
-        version: link:../control
+        version: file:packages/control(react@18.3.1)(zod@3.25.76)
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
@@ -63,7 +63,7 @@ importers:
         version: link:../core
       '@portable-devshell/mcp':
         specifier: workspace:*
-        version: link:../mcp
+        version: file:packages/mcp(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(zod@3.25.76)
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
@@ -115,11 +115,11 @@ importers:
   packages/mcp:
     dependencies:
       '@modelcontextprotocol/ext-apps':
-        specifier: 1.7.2
-        version: 1.7.2(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(zod@3.25.76)
+        specifier: 1.7.5
+        version: 1.7.5(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(zod@3.25.76)
       '@modelcontextprotocol/sdk':
-        specifier: 1.29.0
-        version: 1.29.0(zod@3.25.76)
+        specifier: 1.30.0
+        version: 1.30.0(zod@3.25.76)
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
@@ -477,9 +477,9 @@ packages:
       '@noble/hashes':
         optional: true
 
-  '@hono/node-server@1.19.14':
-    resolution: {integrity: sha512-GwtvgtXxnWsucXvbQXkRgqksiH2Qed37H9xHZocE5sA3N8O8O8/8FA3uclQXxXVzc9XBZuEOMK7+r02FmSpHtw==}
-    engines: {node: '>=18.14.1'}
+  '@hono/node-server@2.1.1':
+    resolution: {integrity: sha512-ELuehkj5VCBdgEw9zs+ivkKwyzzUCSQuE96YmiPvn1ECBoZCczbFXJLeEGMTYjphP6gydh4pHMqEYPVMYUVgQg==}
+    engines: {node: '>=20'}
     peerDependencies:
       hono: ^4
 
@@ -516,8 +516,8 @@ packages:
     peerDependencies:
       koa: ^2.0.0 || ^3.0.0
 
-  '@modelcontextprotocol/ext-apps@1.7.2':
-    resolution: {integrity: sha512-OOWKDxdAjYDcgHkmzVzccyyag3FK+jBWPaWu4WvTxFsU4R/cgOX4eep66zPRA5n4v6WfxUNibPyvX4iJ7egYTg==}
+  '@modelcontextprotocol/ext-apps@1.7.5':
+    resolution: {integrity: sha512-TjPH2S2y5UEGKhmI6+XGFuqfqOV4ppe1x6DA3txnUaEWkgtA4G5vo14jGKFZmegdkZ1H4QMLyujLvoU1BEdnAg==}
     engines: {node: '>=20'}
     peerDependencies:
       '@modelcontextprotocol/sdk': ^1.29.0
@@ -530,8 +530,8 @@ packages:
       react-dom:
         optional: true
 
-  '@modelcontextprotocol/sdk@1.29.0':
-    resolution: {integrity: sha512-zo37mZA9hJWpULgkRpowewez1y6ML5GsXJPY8FI0tBBCd77HEvza4jDqRKOXgHNn867PVGCyTdzqpz0izu5ZjQ==}
+  '@modelcontextprotocol/sdk@1.30.0':
+    resolution: {integrity: sha512-xKd8OIzlqNzcqcNumGAa6g+PW2kjD5vrpcKOnfldAUPP3j7lnqMPwlTXQm8gF+UwH72z0lqaRbjr9hqGz0eITA==}
     engines: {node: '>=18'}
     peerDependencies:
       '@cfworker/json-schema': ^4.1.1
@@ -549,6 +549,21 @@ packages:
 
   '@oxc-project/types@0.142.0':
     resolution: {integrity: sha512-7W+2q5AKQVU36fkaryontrHn3YDt1RyUYXatw9i5H8ocYe2sPKSFB6eS8WNPeRKiN1qAWWZUPm7gwFzJGrccqQ==}
+
+  '@portable-devshell/control@file:packages/control':
+    resolution: {directory: packages/control, type: directory}
+
+  '@portable-devshell/core@file:packages/core':
+    resolution: {directory: packages/core, type: directory}
+
+  '@portable-devshell/mcp@file:packages/mcp':
+    resolution: {directory: packages/mcp, type: directory}
+
+  '@portable-devshell/shared@file:packages/shared':
+    resolution: {directory: packages/shared, type: directory}
+
+  '@portable-devshell/web@file:packages/web':
+    resolution: {directory: packages/web, type: directory}
 
   '@rolldown/binding-android-arm64@1.2.1':
     resolution: {integrity: sha512-02hOeOSryYxVrOIphmLAsqnCJWxwlzFk+pEt/N/i6OgT3lShHO7xGCU5cpgchRDHboAEbSjzgGh+O/u1GswQmA==}
@@ -1276,8 +1291,8 @@ packages:
   events-universal@1.0.1:
     resolution: {integrity: sha512-LUd5euvbMLpwOF8m6ivPCbhQeSiYVNb8Vs0fQ8QjXo0JTkEHpz8pxdQf0gStltaPpw0Cca8b39KxvK9cfKRiAw==}
 
-  eventsource-parser@3.1.0:
-    resolution: {integrity: sha512-kJezFj9YFAMLeORyi7aCLxLbD5/qWMQnoMVlVPyHIll7lgRJCc3JVln9Vgl9nwQi0YkMnhdGTMNn7CkRRAptMg==}
+  eventsource-parser@3.1.1:
+    resolution: {integrity: sha512-EKN1vKAMcZ8MlYMpaNuxN6R9yakzH6uajHcHVTqWJzvu5pWw9DyhbP35HH8MVBQ+dZjAfDxk+A8NiR9KWaXiyQ==}
     engines: {node: '>=18.0.0'}
 
   eventsource@3.0.7:
@@ -1288,8 +1303,8 @@ packages:
     resolution: {integrity: sha512-KfYbmpRm0VbLjEvVa9yGwCi9GI34xvi7A/HXYWQO65CSD2u3MczUJSuwXKFIxlGsgBQizV9q5J9NHj4VG0n+pA==}
     engines: {node: '>=12.0.0'}
 
-  express-rate-limit@8.5.2:
-    resolution: {integrity: sha512-5Kb34ipNX694DH48vN9irak1Qx30nb0PLYHXfJgw4YEjiC3ZEmZJhwOp+VfiCYwFzvFTdB9QkArYS5kXa2cx2A==}
+  express-rate-limit@8.6.2:
+    resolution: {integrity: sha512-YH4ru+eOJxQABscKFfRCy9R7x9QFGdezclVMwwgFFndzS2Xnm0uo6B0ABZsLhcpeptGv2qvuJVWlQr9gQZoC3A==}
     engines: {node: '>= 16'}
     peerDependencies:
       express: '>= 4.11'
@@ -1409,8 +1424,8 @@ packages:
     resolution: {integrity: sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A==}
     engines: {node: '>= 0.4'}
 
-  hono@4.12.27:
-    resolution: {integrity: sha512-1yrb/+w6HWQJrUCLkJ2IF5jNIPvvFkblV5RNOYl6bV+OA6p9GLcMpHFFGTosSvHvcAUibuUukRqhlYI4z32C7Q==}
+  hono@4.13.3:
+    resolution: {integrity: sha512-r8AO2mYHoLxSHkgafNeC/BXyb2vWRxD3jem4Ts+ptav8oTG5FIRifAjuJEmZI4bSvvc2ns0GxmIYiZnHqN3mMw==}
     engines: {node: '>=16.9.0'}
 
   html-encoding-sniffer@6.0.0:
@@ -1513,6 +1528,9 @@ packages:
 
   jose@6.2.3:
     resolution: {integrity: sha512-YYVDInQKFJfR/xa3ojUTl8c2KoTwiL1R5Wg9YCydwH0x0B9grbzlg5HC7mMjCtUJjbQ/YnGEZIhI5tCgfTb4Hw==}
+
+  jose@6.2.9:
+    resolution: {integrity: sha512-XrchZOFZUl/T3vTwRe8XK+cJrGtMF4th1ARnDfwbBXFKThGhlsxEE4Zu03AD/bjJSt/9jT/mxrOCkJWOg77aPA==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -2492,9 +2510,9 @@ snapshots:
 
   '@exodus/bytes@1.15.1': {}
 
-  '@hono/node-server@1.19.14(hono@4.12.27)':
+  '@hono/node-server@2.1.1(hono@4.13.3)':
     dependencies:
-      hono: 4.12.27
+      hono: 4.13.3
 
   '@humanfs/core@0.19.2':
     dependencies:
@@ -2528,28 +2546,28 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@modelcontextprotocol/ext-apps@1.7.2(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(zod@3.25.76)':
+  '@modelcontextprotocol/ext-apps@1.7.5(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(zod@3.25.76)':
     dependencies:
-      '@modelcontextprotocol/sdk': 1.29.0(zod@3.25.76)
+      '@modelcontextprotocol/sdk': 1.30.0(zod@3.25.76)
       '@standard-schema/spec': 1.1.0
       zod: 3.25.76
     optionalDependencies:
       react: 18.3.1
       react-dom: 18.3.1(react@18.3.1)
 
-  '@modelcontextprotocol/sdk@1.29.0(zod@3.25.76)':
+  '@modelcontextprotocol/sdk@1.30.0(zod@3.25.76)':
     dependencies:
-      '@hono/node-server': 1.19.14(hono@4.12.27)
+      '@hono/node-server': 2.1.1(hono@4.13.3)
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
       content-type: 1.0.5
       cors: 2.8.6
       cross-spawn: 7.0.6
       eventsource: 3.0.7
-      eventsource-parser: 3.1.0
+      eventsource-parser: 3.1.1
       express: 5.2.1
-      express-rate-limit: 8.5.2(express@5.2.1)
-      hono: 4.12.27
+      express-rate-limit: 8.6.2(express@5.2.1)
+      hono: 4.13.3
       jose: 6.2.3
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
@@ -2567,6 +2585,59 @@ snapshots:
     optional: true
 
   '@oxc-project/types@0.142.0': {}
+
+  '@portable-devshell/control@file:packages/control(react@18.3.1)(zod@3.25.76)':
+    dependencies:
+      '@portable-devshell/core': file:packages/core
+      '@portable-devshell/mcp': file:packages/mcp(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(zod@3.25.76)
+      '@portable-devshell/shared': file:packages/shared
+      '@portable-devshell/web': file:packages/web
+      hash-wasm: 4.12.0
+      smol-toml: 1.7.0
+      tar-stream: 3.2.0
+      ws: 8.21.0
+    transitivePeerDependencies:
+      - '@cfworker/json-schema'
+      - bare-abort-controller
+      - bare-buffer
+      - bufferutil
+      - react
+      - react-dom
+      - react-native-b4a
+      - supports-color
+      - utf-8-validate
+      - zod
+
+  '@portable-devshell/core@file:packages/core':
+    dependencies:
+      '@portable-devshell/shared': file:packages/shared
+      ajv: 8.20.0
+      string-argv: 0.3.2
+      tar-stream: 3.2.0
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - react-native-b4a
+
+  '@portable-devshell/mcp@file:packages/mcp(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(zod@3.25.76)':
+    dependencies:
+      '@modelcontextprotocol/ext-apps': 1.7.5(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(zod@3.25.76)
+      '@modelcontextprotocol/sdk': 1.30.0(zod@3.25.76)
+      '@portable-devshell/shared': file:packages/shared
+      '@types/oidc-provider': 9.5.0
+      express: 5.2.1
+      jose: 6.2.9
+      oidc-provider: 9.9.1
+    transitivePeerDependencies:
+      - '@cfworker/json-schema'
+      - react
+      - react-dom
+      - supports-color
+      - zod
+
+  '@portable-devshell/shared@file:packages/shared': {}
+
+  '@portable-devshell/web@file:packages/web': {}
 
   '@rolldown/binding-android-arm64@1.2.1':
     optional: true
@@ -3296,18 +3367,21 @@ snapshots:
     transitivePeerDependencies:
       - bare-abort-controller
 
-  eventsource-parser@3.1.0: {}
+  eventsource-parser@3.1.1: {}
 
   eventsource@3.0.7:
     dependencies:
-      eventsource-parser: 3.1.0
+      eventsource-parser: 3.1.1
 
   expect-type@1.4.0: {}
 
-  express-rate-limit@8.5.2(express@5.2.1):
+  express-rate-limit@8.6.2(express@5.2.1):
     dependencies:
+      debug: 4.4.3
       express: 5.2.1
       ip-address: 10.3.1
+    transitivePeerDependencies:
+      - supports-color
 
   express@5.2.1:
     dependencies:
@@ -3437,7 +3511,7 @@ snapshots:
     dependencies:
       function-bind: 1.1.2
 
-  hono@4.12.27: {}
+  hono@4.13.3: {}
 
   html-encoding-sniffer@6.0.0:
     dependencies:
@@ -3545,6 +3619,8 @@ snapshots:
   isexe@2.0.0: {}
 
   jose@6.2.3: {}
+
+  jose@6.2.9: {}
 
   js-tokens@4.0.0: {}
 
