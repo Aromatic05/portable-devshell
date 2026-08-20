@@ -86,6 +86,55 @@ test("tool descriptors advertise endpoint authentication schemes", () => {
     assert.equal((token?._meta as { securitySchemes?: JsonValue } | undefined)?.securitySchemes, undefined);
 });
 
+test("HTTP tools/list keeps Workspace actions app-only while advertising host auth metadata", async () => {
+    const harness = createWorkerHarness({ tools: [] });
+    const unused = async () => { throw new Error("unused"); };
+    const gateway = {
+        consumeWait: unused,
+        createWait: unused,
+        decideApproval: unused,
+        detachWait: unused,
+        listApprovals: async () => [],
+        listTools: () => [],
+        listWaits: async () => [],
+        resolveWait: unused,
+        waitForWait: unused,
+    } as unknown as McpInstanceGateway;
+    const binding = new McpEndpointBinding(new McpEndpointWorker({
+        gateway,
+        instanceName: "demo",
+        policy: { capabilities: [], groups: ["interaction"] },
+        worker: harness.worker,
+    }));
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        const response = await postJson(server.url, await readFixture("mcp-tools-list.json"), session.headers);
+        assert.equal(response.status, 200);
+        const tools = response.body.result?.tools as Array<{
+            _meta?: Record<string, JsonValue>;
+            name?: string;
+            securitySchemes?: JsonValue;
+        }> | undefined;
+        const answer = tools?.find((tool) => tool.name === "workspace_question_answer");
+        const open = tools?.find((tool) => tool.name === "workspace_open");
+        assert.notEqual(answer, undefined);
+        assert.deepEqual(answer?._meta?.ui, { visibility: ["app"] });
+        assert.equal(answer?._meta?.["openai/visibility"], "private");
+        assert.equal(answer?._meta?.["openai/widgetAccessible"], true);
+        assert.deepEqual(answer?.securitySchemes, [{ type: "noauth" }]);
+        assert.deepEqual(answer?._meta?.securitySchemes, [{ type: "noauth" }]);
+        assert.notEqual(open, undefined);
+        assert.deepEqual((open?._meta?.ui as { visibility?: JsonValue } | undefined)?.visibility, ["model", "app"]);
+        assert.deepEqual(open?.securitySchemes, [{ type: "noauth" }]);
+        assert.deepEqual(open?._meta?.securitySchemes, [{ type: "noauth" }]);
+    } finally {
+        await server.close();
+        await binding.close();
+    }
+});
+
 test("long-lived visible tools advertise ChatGPT invocation status", () => {
     const harness = createWorkerHarness({
         tools: [{
