@@ -373,19 +373,27 @@ test("a real MCP SDK OAuth consumer completes registration, PKCE authorization, 
 
         const client = new Client(clientInfo);
         await client.connect(new StreamableHTTPClientTransport(new URL(endpoint), { authProvider: provider }));
-        const tools = await client.listTools();
-        assert.equal(tools.tools.some((tool) => tool.name === "bash_run"), true);
-        const ctxId = await readContextId(client, workspacePath);
-        const result = await client.callTool({
-            arguments: { command: readRelativeMarkerCommand(markerName), ctxId, timeoutMs: 30_000 },
-            name: "bash_run"
-        });
-        assert.equal(result.isError, false);
-        assert.match(
-            String((result.structuredContent as { stdout?: string } | undefined)?.stdout ?? ""),
-            new RegExp(markerValue, "u")
-        );
-        await client.close();
+        try {
+            const tools = await client.listTools();
+            const bashTool = tools.tools.find((tool) => tool.name === "bash_run");
+            assert.notEqual(bashTool, undefined);
+            assert.deepEqual(
+                (bashTool?._meta as { securitySchemes?: unknown } | undefined)?.securitySchemes,
+                [{ type: "oauth2", scopes: ["mcp"] }]
+            );
+            const ctxId = await readContextId(client, workspacePath);
+            const result = await client.callTool({
+                arguments: { command: readRelativeMarkerCommand(markerName), ctxId, timeoutMs: 30_000 },
+                name: "bash_run"
+            });
+            assert.equal(result.isError, false);
+            assert.match(
+                String((result.structuredContent as { stdout?: string } | undefined)?.stdout ?? ""),
+                new RegExp(markerValue, "u")
+            );
+        } finally {
+            await client.close();
+        }
 
         const serverInfo = await discoverOAuthServerInfo(endpoint);
         const metadata = serverInfo.authorizationServerMetadata;

@@ -5,6 +5,7 @@ import type {
     ToolPolicy
 } from "@portable-devshell/shared";
 
+import type { McpAuthConfig } from "../auth/McpAuthConfig.js";
 import { McpContextRegistry } from "../context/McpContextRegistry.js";
 import { createMcpContextSelector } from "../context/McpContextSelector.js";
 import type { McpInstanceGateway } from "../instance/McpInstanceGateway.js";
@@ -24,6 +25,7 @@ export type {
 } from "./McpEndpointDispatch.js";
 
 export interface McpEndpointWorkerOptions {
+    auth?: McpAuthConfig;
     contextRegistry?: McpContextRegistry;
     contextMode?: ControlMcpContextMode;
     gateway?: McpInstanceGateway;
@@ -42,6 +44,7 @@ export class McpEndpointWorker {
     constructor(options: McpEndpointWorkerOptions) {
         const contextSelector = createMcpContextSelector(options.contextMode ?? "explicit");
         this.#catalog = new McpEndpointCatalog({
+            auth: options.auth,
             contextSelector,
             gateway: options.gateway,
             instanceName: options.instanceName,

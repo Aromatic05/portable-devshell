@@ -1,5 +1,6 @@
-import type { ToolDefinition, ToolPolicy } from "@portable-devshell/shared";
+import type { JsonValue, ToolDefinition, ToolPolicy } from "@portable-devshell/shared";
 
+import type { McpAuthConfig } from "../auth/McpAuthConfig.js";
 import { createMcpContextSelector, type McpContextSelector } from "../context/McpContextSelector.js";
 import { isMcpInteractionGateway, type McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import { mcpToolAnnotations } from "../tool/McpToolAnnotations.js";
@@ -36,6 +37,7 @@ export interface McpEndpointCatalogWorker {
 }
 
 export interface McpEndpointCatalogOptions {
+    auth?: McpAuthConfig;
     contextSelector?: McpContextSelector;
     gateway?: McpInstanceGateway;
     instanceName: string;
@@ -51,6 +53,7 @@ export interface McpEndpointCatalogSnapshot {
 }
 
 export class McpEndpointCatalog {
+    readonly #auth: McpAuthConfig;
     readonly #artifactTools = new McpToolCatalogArtifact();
     readonly #catalog: McpToolCatalogEndpoint;
     readonly #contextSelector: McpContextSelector;
@@ -65,6 +68,7 @@ export class McpEndpointCatalog {
     readonly #worker: McpEndpointCatalogWorker;
 
     constructor(options: McpEndpointCatalogOptions) {
+        this.#auth = options.auth ?? { enabled: false, provider: "none" };
         this.#catalog = new McpToolCatalogEndpoint(options.policy);
         this.#contextSelector = options.contextSelector ?? createMcpContextSelector("explicit");
         this.#gateway = options.gateway;
@@ -124,11 +128,20 @@ export class McpEndpointCatalog {
             : withMcpCommentOutputSchema(
                   this.#contextSelector.requiresExplicitContextId ? withMcpContextId(tool) : tool
               );
+        const adapted = this.#schemaAdapter.toMcpTool(
+            exposed,
+            this.#descriptionEnhancer.enhance(exposed.description)
+        );
+        const securitySchemes = mcpToolSecuritySchemes(this.#auth);
         return {
-            ...this.#schemaAdapter.toMcpTool(
-                exposed,
-                this.#descriptionEnhancer.enhance(exposed.description)
-            ),
+            ...adapted,
+            ...(securitySchemes === undefined ? {} : {
+                _meta: {
+                    ...asRecord(adapted._meta),
+                    securitySchemes,
+                },
+                securitySchemes,
+            }),
             annotations: mcpToolAnnotations(exposed.name),
             title: mcpToolTitle(exposed.name),
         };
@@ -196,4 +209,18 @@ export class McpEndpointCatalog {
         }
         return entry.definition;
     }
+}
+
+function mcpToolSecuritySchemes(auth: McpAuthConfig): JsonValue[] | undefined {
+    if (auth.provider === "none") return [{ type: "noauth" }];
+    if (auth.provider === "oauth2") {
+        return [{ type: "oauth2", scopes: [...auth.oauth2.requiredScopes] }];
+    }
+    return undefined;
+}
+
+function asRecord(value: JsonValue | undefined): Record<string, JsonValue> {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+        ? value
+        : {};
 }

@@ -54,6 +54,38 @@ test("initialize succeeds over SDK transport", async () => {
     }
 });
 
+test("tool descriptors advertise endpoint authentication schemes", () => {
+    const harness = createWorkerHarness();
+    const base = {
+        instanceName: "demo",
+        policy: { capabilities: ["execute"] as const, groups: ["bash"] },
+        worker: harness.worker,
+    };
+
+    const noauth = new McpEndpointWorker(base).listTools().find((tool) => tool.name === "bash_run");
+    assert.deepEqual(noauth?.securitySchemes, [{ type: "noauth" }]);
+    assert.deepEqual((noauth?._meta as { securitySchemes?: JsonValue })?.securitySchemes, [{ type: "noauth" }]);
+
+    const oauth = new McpEndpointWorker({
+        ...base,
+        auth: {
+            enabled: true,
+            oauth2: { requiredScopes: ["repo:read", "repo:write"], resourceName: "portable-devshell" },
+            provider: "oauth2",
+        },
+    }).listTools().find((tool) => tool.name === "bash_run");
+    const oauthSchemes = [{ type: "oauth2", scopes: ["repo:read", "repo:write"] }];
+    assert.deepEqual(oauth?.securitySchemes, oauthSchemes);
+    assert.deepEqual((oauth?._meta as { securitySchemes?: JsonValue })?.securitySchemes, oauthSchemes);
+
+    const token = new McpEndpointWorker({
+        ...base,
+        auth: { enabled: true, provider: "token", token: "0123456789abcdef0123456789abcdef" },
+    }).listTools().find((tool) => tool.name === "bash_run");
+    assert.equal(token?.securitySchemes, undefined);
+    assert.equal((token?._meta as { securitySchemes?: JsonValue } | undefined)?.securitySchemes, undefined);
+});
+
 test("Workspace MCP App renders from a versioned URI while keeping the stable reader alias", async () => {
     const binding = createBinding();
     const server = await createBindingServer(binding);
@@ -174,9 +206,16 @@ test("tools/list uses group and capability filtering", async () => {
         const response = await postJson(server.url, await readFixture("mcp-tools-list.json"), session.headers);
 
         assert.equal(response.status, 200);
-        const names = response.body.result?.tools.map((tool: { name: string }) => tool.name) ?? [];
+        const listedTools = response.body.result?.tools ?? [];
+        const names = listedTools.map((tool: { name: string }) => tool.name);
         assert.equal(names.includes("bash_run"), true);
         assert.equal(names.includes("read_logs"), false);
+        const bashTool = listedTools.find((tool: { name: string }) => tool.name === "bash_run") as {
+            _meta?: { securitySchemes?: unknown };
+            securitySchemes?: unknown;
+        } | undefined;
+        assert.deepEqual(bashTool?.securitySchemes, [{ type: "noauth" }]);
+        assert.deepEqual(bashTool?._meta?.securitySchemes, [{ type: "noauth" }]);
     } finally {
         await server.close();
         await binding.close();

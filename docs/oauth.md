@@ -65,7 +65,7 @@ capabilities = ["read", "write", "execute"]
 - 目标 instance 的 `[mcp].auth = "oauth2"`；
 - `[mcp.oauth2].resourceName` 非空。
 
-`documentationUrl` 可选。不同 instance 可以配置不同 OAuth scope；也可以让其他 instance 使用 `none` 或独立 token。
+`documentationUrl` 可选。不同 instance 可以配置不同 OAuth scope；也可以让其他 instance 使用 `none` 或独立 token。MCP `tools/list` 会把 instance 的认证策略显式投影到每个 tool：`none` 广告 `securitySchemes = [{ type = "noauth" }]`，`oauth2` 广告配置的 OAuth scopes，并同步写入兼容 `_meta.securitySchemes`。这样 ChatGPT 能把 protected-resource discovery、tool metadata 与运行时认证 challenge 关联起来。
 
 ## 重启与审批
 

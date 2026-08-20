@@ -484,7 +484,7 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
     assert.deepEqual(environmentTool?.annotations, {
         destructiveHint: false,
         idempotentHint: false,
-        openWorldHint: true,
+        openWorldHint: false,
         readOnlyHint: false,
     });
     assert.equal(bashSchema.required?.includes("ctxId"), true);

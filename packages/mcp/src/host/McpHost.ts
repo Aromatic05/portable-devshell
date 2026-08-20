@@ -125,6 +125,7 @@ export class McpHost {
         this.#workers.set(instance.name, instance.worker);
         const binding = new McpEndpointBinding(
             new McpEndpointWorker({
+                auth: instance.auth,
                 contextRegistry: this.#contextRegistry,
                 contextMode: instance.contextMode ?? "explicit",
                 gateway: instance.gateway,
