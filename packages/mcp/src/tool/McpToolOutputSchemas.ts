@@ -295,21 +295,6 @@ export const approvalRequestOutputSchema = objectSchema({
     workspace: stringValue,
 }, ["approvalId", "callId", "createdAt", "expiresAt", "inputSummary", "instance", "reason", "riskLevel", "source", "status", "toolName"]);
 
-const workspaceActivitySchema = objectSchema({
-    callId: nonEmptyString,
-    completedAt: stringValue,
-    error: stringValue,
-    inputSummary: stringValue,
-    startedAt: stringValue,
-    status: {
-        enum: ["queued", "pendingApproval", "running", "completed", "failed", "denied", "expired", "queueTimeout", "cancelled"],
-        type: "string",
-    },
-    taskId: nonEmptyString,
-    todoItemId: nonEmptyString,
-    toolName: nonEmptyString,
-}, ["callId", "inputSummary", "startedAt", "status", "toolName"]);
-
 const workspaceBackgroundSchema = objectSchema({
     detachedAt: stringValue,
     status: { enum: ["detached", "resolved", "waiting"], type: "string" },
@@ -407,7 +392,6 @@ export const workspaceApprovalRequestOutputSchema = objectSchema({
 
 export function workspaceSnapshotOutputSchemaForContextMode(requiresExplicitContextId: boolean): JsonValue {
     return objectSchema({
-        activity: arraySchema(workspaceActivitySchema),
         approvals: arraySchema(workspaceApprovalRequestOutputSchema),
         background: arraySchema(workspaceBackgroundSchema),
         contextSelector: workspaceContextSelectorSchema,
@@ -417,12 +401,20 @@ export function workspaceSnapshotOutputSchemaForContextMode(requiresExplicitCont
         instance: nonEmptyString,
         questions: arraySchema(workspaceWaitRecordOutputSchema),
         tasks: arraySchema(workspaceTodoTaskSummaryOutputSchema),
-    }, ["activity", "approvals", "background", "contextSelector", "currentEvent", "cursor", "instance", "questions", "tasks"]);
+    }, ["approvals", "background", "contextSelector", "currentEvent", "cursor", "instance", "questions", "tasks"]);
 }
 
 export const workspaceSnapshotOutputSchema = workspaceSnapshotOutputSchemaForContextMode(true);
 
-export const workspaceOpenOutputSchema: JsonValue = workspaceSnapshotOutputSchema;
+export function workspaceOpenOutputSchemaForContextMode(requiresExplicitContextId: boolean): JsonValue {
+    return objectSchema({
+        contextSelector: workspaceContextSelectorSchema,
+        ...(requiresExplicitContextId ? { ctxId: nonEmptyString } : {}),
+        instance: nonEmptyString,
+    }, ["contextSelector", "instance"]);
+}
+
+export const workspaceOpenOutputSchema: JsonValue = workspaceOpenOutputSchemaForContextMode(true);
 
 export function workspaceWatchOutputSchemaForContextMode(requiresExplicitContextId: boolean): JsonValue {
     return {

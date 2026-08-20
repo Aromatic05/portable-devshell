@@ -225,11 +225,7 @@ test("Workspace remount follows current ChatGPT tool output and falls back to wi
         toolResponseMetadata: { mcp_tool_result: { structuredContent: { ctxId: "ctx-stale" } } },
         toolOutput: { ctxId: "ctx-current" },
         setWidgetState: function (state) {
-            var self = this;
-            var ctxId = state && state.portableDevshellWorkspace && state.portableDevshellWorkspace.ctxId;
-            return new Promise(function (resolve) {
-                setTimeout(function () { self.widgetState = state; resolve(); }, ctxId ? 0 : 50);
-            });
+            this.widgetState = state;
         }
     }`);
     await page.waitForFunction("(window.__remountCalls || []).some(call => call.name === 'workspace_snapshot' && call.arguments.ctxId === 'ctx-current')");

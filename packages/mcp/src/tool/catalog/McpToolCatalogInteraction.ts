@@ -4,6 +4,7 @@ import { workspaceAppResourceUri } from "../../workspace/McpWorkspaceApp.js";
 import {
     todoReadOutputSchema,
     workspaceOpenOutputSchema,
+    workspaceOpenOutputSchemaForContextMode,
     workspaceApprovalRequestOutputSchema,
     workspaceQuestionAnswerOutputSchema,
     workspaceSnapshotOutputSchema,
@@ -224,7 +225,7 @@ export class McpToolCatalogInteraction {
                 return {
                     ...definition,
                     description: "Open the portable-devshell Workspace control surface for the current host session. Call once when the user needs persistent visibility or human interaction; ordinary tools do not need to reopen it.",
-                    outputSchema: workspaceSnapshotOutputSchemaForContextMode(false),
+                    outputSchema: workspaceOpenOutputSchemaForContextMode(false),
                 };
             }
             if (definition.name === "workspace_snapshot") {

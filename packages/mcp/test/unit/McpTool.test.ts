@@ -7,6 +7,7 @@ import {
     McpToolFilter,
     McpToolSchemaAdapter,
     mcpToolAnnotations,
+    mcpToolInvocationStatus,
     mcpToolTitle
 } from "@portable-devshell/mcp/testing";
 import type { ToolDefinition } from "@portable-devshell/shared";
@@ -88,6 +89,22 @@ test("MCP tools expose concise human-readable titles with a safe fallback", () =
     assert.equal(mcpToolTitle("workspace_open"), "Open Workspace");
     assert.equal(mcpToolTitle("artifact_viewImage"), "View image");
     assert.equal(mcpToolTitle("future_unknown_tool"), "Future unknown tool");
+});
+
+test("ChatGPT invocation status is limited to long-lived visible tool states", () => {
+    assert.deepEqual(mcpToolInvocationStatus("ask_question"), {
+        invoked: "Answer received",
+        invoking: "Waiting for your answer…",
+    });
+    assert.deepEqual(mcpToolInvocationStatus("tmux_wait"), {
+        invoked: "Task wait finished",
+        invoking: "Waiting for task completion…",
+    });
+    assert.deepEqual(mcpToolInvocationStatus("workspace_open"), {
+        invoked: "Workspace ready",
+        invoking: "Opening Workspace…",
+    });
+    assert.equal(mcpToolInvocationStatus("file_read"), undefined);
 });
 
 test("McpToolFilter requires the group and every required capability", () => {

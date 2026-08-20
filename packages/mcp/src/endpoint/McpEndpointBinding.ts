@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
@@ -153,7 +154,7 @@ export class McpEndpointBinding {
     #registerHandlers(server: Server): void {
         server.setRequestHandler(ListResourcesRequestSchema, async () => ({
             resources: [{
-                mimeType: "text/html;profile=mcp-app",
+                mimeType: RESOURCE_MIME_TYPE,
                 name: "portable-devshell Workspace",
                 uri: workspaceAppResourceUri
             }]
@@ -166,7 +167,7 @@ export class McpEndpointBinding {
             return {
                 contents: [{
                     _meta: this.#workspaceResourceMeta,
-                    mimeType: "text/html;profile=mcp-app",
+                    mimeType: RESOURCE_MIME_TYPE,
                     text: workspaceAppHtml,
                     uri: request.params.uri
                 }]

@@ -152,10 +152,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
     state[WIDGET_STATE_KEY] = requiresExplicitContextId
       ? { requiresExplicitContextId: true, ctxId: ctxId }
       : { requiresExplicitContextId: false };
-    try {
-      var result = openai.setWidgetState(state);
-      if (result && typeof result.catch === "function") result.catch(function () {});
-    } catch (_) {}
+    try { openai.setWidgetState(state); } catch (_) {}
   }
 
   function activateCtxId(value) {

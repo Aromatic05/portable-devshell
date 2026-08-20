@@ -5,7 +5,7 @@ import { createMcpContextSelector, type McpContextSelector } from "../context/Mc
 import { isMcpInteractionGateway, type McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import { mcpToolAnnotations } from "../tool/McpToolAnnotations.js";
 import { McpToolDescriptionEnhancer } from "../tool/McpToolDescriptionEnhancer.js";
-import { mcpToolTitle } from "../tool/McpToolTitle.js";
+import { mcpToolInvocationStatus, mcpToolTitle } from "../tool/McpToolTitle.js";
 import {
     McpToolSchemaAdapter,
     McpToolSchemaUnavailableError,
@@ -133,15 +133,19 @@ export class McpEndpointCatalog {
             this.#descriptionEnhancer.enhance(exposed.description)
         );
         const securitySchemes = mcpToolSecuritySchemes(this.#auth);
+        const invocationStatus = mcpToolInvocationStatus(exposed.name);
+        const meta = {
+            ...asRecord(adapted._meta),
+            ...(invocationStatus === undefined ? {} : {
+                "openai/toolInvocation/invoked": invocationStatus.invoked,
+                "openai/toolInvocation/invoking": invocationStatus.invoking,
+            }),
+            ...(securitySchemes === undefined ? {} : { securitySchemes }),
+        };
         return {
             ...adapted,
-            ...(securitySchemes === undefined ? {} : {
-                _meta: {
-                    ...asRecord(adapted._meta),
-                    securitySchemes,
-                },
-                securitySchemes,
-            }),
+            ...(Object.keys(meta).length === 0 ? {} : { _meta: meta }),
+            ...(securitySchemes === undefined ? {} : { securitySchemes }),
             annotations: mcpToolAnnotations(exposed.name),
             title: mcpToolTitle(exposed.name),
         };

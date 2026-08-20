@@ -86,6 +86,28 @@ test("tool descriptors advertise endpoint authentication schemes", () => {
     assert.equal((token?._meta as { securitySchemes?: JsonValue } | undefined)?.securitySchemes, undefined);
 });
 
+test("long-lived visible tools advertise ChatGPT invocation status", () => {
+    const harness = createWorkerHarness({
+        tools: [{
+            description: "Wait for one tmux task",
+            group: "tmux",
+            inputSchema: { type: "object" },
+            name: "tmux_wait",
+            outputSchema: { type: "object" },
+            requiredCapabilities: [],
+        }]
+    });
+    const tool = new McpEndpointWorker({
+        instanceName: "demo",
+        policy: { capabilities: [] as const, groups: ["tmux"] },
+        worker: harness.worker,
+    }).listTools().find((entry) => entry.name === "tmux_wait");
+    const meta = tool?._meta as Record<string, JsonValue> | undefined;
+
+    assert.equal(meta?.["openai/toolInvocation/invoking"], "Waiting for task completion…");
+    assert.equal(meta?.["openai/toolInvocation/invoked"], "Task wait finished");
+});
+
 test("Workspace MCP App renders from a versioned URI while keeping the stable reader alias", async () => {
     const binding = createBinding();
     const server = await createBindingServer(binding);

@@ -6,7 +6,6 @@ import type {
     JsonValue,
     TodoTaskControlAction,
     ToolCallContext,
-    ToolCallRecord,
     WaitRecord
 } from "@portable-devshell/shared";
 
@@ -51,7 +50,7 @@ export class McpEndpointHandlerInteraction {
             case "ask_question":
                 return await this.#askQuestion(gateway, input, context, callId, signal);
             case "workspace_open":
-                return await this.#openWorkspace(gateway, context);
+                return this.#openWorkspace(context);
             case "workspace_snapshot":
                 return await this.#readWorkspace(gateway, context);
             case "workspace_watch":
@@ -128,12 +127,15 @@ export class McpEndpointHandlerInteraction {
         return { answer, questionId };
     }
 
-    async #openWorkspace(
-        gateway: McpInteractionGateway,
-        context: ToolCallContext,
-    ): Promise<McpNativeToolResult> {
+    #openWorkspace(context: ToolCallContext): McpNativeToolResult {
         const ctxId = requireCtxId(context);
-        return this.#workspaceResult(ctxId, await this.#snapshot(gateway, context), [
+        return this.#workspaceResult(ctxId, {
+            contextSelector: {
+                requiresExplicitContextId: this.#contextSelector.requiresExplicitContextId,
+            },
+            ...(this.#contextSelector.requiresExplicitContextId ? { ctxId } : {}),
+            instance: this.options.instanceName,
+        }, [
             { type: "text", text: "portable-devshell Workspace opened." }
         ]);
     }
@@ -334,11 +336,10 @@ export class McpEndpointHandlerInteraction {
     async #snapshot(gateway: McpInteractionGateway, context: ToolCallContext): Promise<JsonValue> {
         const ctxId = requireCtxId(context);
         const workspaceGateway = isMcpWorkspaceGateway(gateway) ? gateway : undefined;
-        const [todo, waits, approvals, activity, eventSlice] = await Promise.all([
+        const [todo, waits, approvals, eventSlice] = await Promise.all([
             gateway.readTodo(this.options.instanceName),
             gateway.listWaits(this.options.instanceName),
             gateway.listApprovals(this.options.instanceName),
-            workspaceGateway?.readToolCalls(this.options.instanceName, ctxId, 30) ?? [],
             workspaceGateway?.readWorkspaceEvents(this.options.instanceName, Number.MAX_SAFE_INTEGER) ?? {
                 events: [],
                 gap: false,
@@ -372,11 +373,6 @@ export class McpEndpointHandlerInteraction {
             return visible;
         });
         return {
-            activity: activity
-                .filter((record) => !record.toolName.startsWith("workspace_"))
-                .slice()
-                .reverse()
-                .map(workspaceActivity),
             approvals: visibleApprovals,
             background: ownedWaits
                 .filter((wait) => wait.kind === "tmux" && wait.status !== "consumed" && wait.status !== "cancelled")
@@ -557,20 +553,6 @@ function taskBelongsToContext(todo: Record<string, JsonValue>, taskId: string, c
         const task = asRecord(entry);
         return task?.taskId === taskId && task.ctxId === ctxId;
     });
-}
-
-function workspaceActivity(record: ToolCallRecord): JsonValue {
-    return {
-        callId: record.callId,
-        ...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
-        ...(record.error === undefined ? {} : { error: record.error }),
-        inputSummary: record.inputSummary,
-        startedAt: record.startedAt,
-        status: record.status,
-        ...(record.taskId === undefined ? {} : { taskId: record.taskId }),
-        ...(record.todoItemId === undefined ? {} : { todoItemId: record.todoItemId }),
-        toolName: record.toolName,
-    };
 }
 
 function validateQuestionAnswer(wait: WaitRecord, answer: string): void {

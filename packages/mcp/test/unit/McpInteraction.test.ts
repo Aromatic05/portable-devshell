@@ -142,7 +142,7 @@ test("Workspace authorization stays in hidden metadata and gates app-only tools"
     );
 });
 
-test("Workspace snapshot projects live activity and background tasks without full tool payloads", async () => {
+test("Workspace snapshot projects only compact task and background state", async () => {
     const fake = createInteractionGateway();
     const now = new Date().toISOString();
     fake.waits.push({
@@ -174,20 +174,7 @@ test("Workspace snapshot projects live activity and background tasks without ful
                 }]
             };
         },
-        async readToolCalls() {
-            return [{
-                callId: "call-1",
-                ctxId: context.ctxId,
-                input: { command: "secret full input" },
-                inputSummary: "bash_run command",
-                instance: "demo",
-                output: { stdout: "secret full output" },
-                source: "mcp" as const,
-                startedAt: now,
-                status: "running" as const,
-                toolName: "bash_run",
-            }];
-        },
+        async readToolCalls() { throw new Error("Workspace snapshot should not read tool history."); },
         async readWorkspaceEvents() {
             return { events: [], gap: false, lastSeq: 7 };
         },
@@ -197,7 +184,6 @@ test("Workspace snapshot projects live activity and background tasks without ful
     const result = await handler.call("workspace_snapshot", {}, context, "call-app");
     assert.ok(result instanceof McpNativeToolResult);
     const snapshot = result.structuredContent as {
-        activity?: Array<Record<string, unknown>>;
         background?: Array<Record<string, unknown>>;
         currentEvent?: Record<string, unknown> | null;
         cursor?: number;
@@ -207,9 +193,7 @@ test("Workspace snapshot projects live activity and background tasks without ful
     assert.equal(snapshot.background?.[0]?.tmuxTaskId, "tmux-task-1");
     assert.equal(snapshot.background?.[0]?.taskId, "task-1");
     assert.equal(snapshot.currentEvent, null);
-    assert.equal(snapshot.activity?.[0]?.toolName, "bash_run");
-    assert.equal("input" in (snapshot.activity?.[0] ?? {}), false);
-    assert.equal("output" in (snapshot.activity?.[0] ?? {}), false);
+    assert.equal(Object.hasOwn(snapshot, "activity"), false);
     assert.equal(Object.hasOwn(snapshot.tasks?.[0] ?? {}, "ctxId"), false);
     assert.equal(Object.hasOwn(snapshot, "waits"), false);
 });
@@ -509,19 +493,26 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     assert.deepEqual((adaptedWatch._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.equal(ask._meta, undefined);
 
-    const sessionOpen = new McpToolCatalogInteraction().list(false).find((definition) => definition.name === "workspace_open");
-    const sessionSchema = sessionOpen?.outputSchema as {
+    const sessionDefinitions = new McpToolCatalogInteraction().list(false);
+    const sessionOpen = sessionDefinitions.find((definition) => definition.name === "workspace_open");
+    const sessionSnapshot = sessionDefinitions.find((definition) => definition.name === "workspace_snapshot");
+    const sessionOpenSchema = sessionOpen?.outputSchema as {
+        properties?: { ctxId?: unknown; tasks?: unknown };
+    };
+    const sessionSnapshotSchema = sessionSnapshot?.outputSchema as {
         properties?: {
             ctxId?: unknown;
             questions?: { items?: { properties?: Record<string, unknown> } };
             tasks?: { items?: { properties?: Record<string, unknown> } };
         };
     };
-    assert.equal(sessionSchema.properties?.ctxId, undefined);
-    assert.equal(sessionSchema.properties?.tasks?.items?.properties?.ctxId, undefined);
-    assert.equal(sessionSchema.properties?.questions?.items?.properties?.createdByCtxId, undefined);
-    assert.equal(sessionSchema.properties?.questions?.items?.properties?.ownerCallId, undefined);
-    assert.equal(sessionSchema.properties?.questions?.items?.properties?.recoveryClaimId, undefined);
+    assert.equal(sessionOpenSchema.properties?.ctxId, undefined);
+    assert.equal(sessionOpenSchema.properties?.tasks, undefined);
+    assert.equal(sessionSnapshotSchema.properties?.ctxId, undefined);
+    assert.equal(sessionSnapshotSchema.properties?.tasks?.items?.properties?.ctxId, undefined);
+    assert.equal(sessionSnapshotSchema.properties?.questions?.items?.properties?.createdByCtxId, undefined);
+    assert.equal(sessionSnapshotSchema.properties?.questions?.items?.properties?.ownerCallId, undefined);
+    assert.equal(sessionSnapshotSchema.properties?.questions?.items?.properties?.recoveryClaimId, undefined);
     assert.doesNotMatch(sessionOpen?.description ?? "", /ctxId/u);
 });
 

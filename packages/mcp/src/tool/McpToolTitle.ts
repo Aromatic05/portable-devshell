@@ -40,6 +40,16 @@ export function mcpToolTitle(toolName: string): string {
     return titles[toolName] ?? humanizeToolName(toolName);
 }
 
+const invocationStatuses: Readonly<Record<string, { invoked: string; invoking: string }>> = {
+    ask_question: { invoked: "Answer received", invoking: "Waiting for your answer…" },
+    tmux_wait: { invoked: "Task wait finished", invoking: "Waiting for task completion…" },
+    workspace_open: { invoked: "Workspace ready", invoking: "Opening Workspace…" },
+};
+
+export function mcpToolInvocationStatus(toolName: string): { invoked: string; invoking: string } | undefined {
+    return invocationStatuses[toolName];
+}
+
 function humanizeToolName(toolName: string): string {
     const words = toolName
         .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
