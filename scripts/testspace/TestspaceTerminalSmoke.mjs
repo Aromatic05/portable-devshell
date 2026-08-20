@@ -1,18 +1,20 @@
 import { withTestspaceControlConnection } from "./TestspaceReverse.mjs";
 
-export async function runTestspaceTerminalSmoke({ instances, runtimeDirectory }) {
+export async function runTestspaceTerminalSmoke({ runtimeDirectory, targets }) {
     const results = [];
-    for (const instance of instances) {
-        results.push(await smokeTerminal(instance, runtimeDirectory));
+    for (const target of targets) {
+        results.push(await smokeTerminal(target, runtimeDirectory));
     }
     return results;
 }
 
-async function smokeTerminal(instance, runtimeDirectory) {
+async function smokeTerminal(target, runtimeDirectory) {
+    const { instance, workspace } = target;
     return await withTestspaceControlConnection(runtimeDirectory, async (_shared, connection) => {
         const opened = await connection.request(instance, "terminal", "open", {
             cols: 80,
             rows: 24,
+            workspace,
         });
         let version = opened.version;
         let lastSeq = 0;

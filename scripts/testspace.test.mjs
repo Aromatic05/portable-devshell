@@ -20,6 +20,7 @@ import {
     resetTestspacePodmanStorage,
     resolveTestspaceRoot,
     resolveTestspaceRuntimeDirectory,
+    resolveTestspaceTmuxSockets,
     stopTestspaceTmux,
 } from "./testspace/TestspaceRuntime.mjs";
 import {
@@ -555,34 +556,51 @@ test("Web smoke resolves an explicit Chromium executable before default candidat
     assert.deepEqual(probes, ["/opt/chromium"]);
 });
 
-test("testspace stop terminates its real tmux server", {
+test("testspace stop terminates legacy and workspace-scoped tmux servers", {
     skip: process.platform === "win32" || spawnSync("tmux", ["-V"]).status !== 0,
 }, async (t) => {
     const root = await mkdtemp(join(tmpdir(), "pds-testspace-root-"));
     const runtime = resolveTestspaceRuntimeDirectory(root);
-    const socket = join(runtime, "devshell-worker", TESTSPACE_INSTANCE, "tmux.sock");
-    await mkdir(dirname(socket), { recursive: true });
+    const devshellHome = join(root, "home", ".devshell");
+    const workspace = join(root, "workspace");
+    await mkdir(workspace, { recursive: true });
+    const options = {
+        devshellHome,
+        instanceName: TESTSPACE_INSTANCE,
+        runtimeDirectory: runtime,
+        workspace,
+    };
+    const sockets = await resolveTestspaceTmuxSockets(options);
+    for (const socket of sockets) await mkdir(dirname(socket), { recursive: true });
     t.after(async () => {
-        spawnSync("tmux", ["-S", socket, "kill-server"], { stdio: "ignore" });
+        for (const socket of sockets) {
+            spawnSync("tmux", ["-S", socket, "kill-server"], { stdio: "ignore" });
+        }
         await rm(runtime, { force: true, recursive: true });
         await rm(root, { force: true, recursive: true });
     });
 
-    const started = spawnSync("tmux", [
-        "-S",
-        socket,
-        "new-session",
-        "-d",
-        "-s",
-        "devshell",
-        "sleep 60",
-    ], { encoding: "utf8" });
-    assert.equal(started.status, 0, started.stderr);
-    assert.equal(stopTestspaceTmux(runtime, TESTSPACE_INSTANCE), true);
-    assert.notEqual(
-        spawnSync("tmux", ["-S", socket, "has-session", "-t", "devshell"]).status,
-        0,
-    );
+    for (const socket of sockets) {
+        const started = spawnSync("tmux", [
+            "-S",
+            socket,
+            "new-session",
+            "-d",
+            "-s",
+            "devshell",
+            "-c",
+            workspace,
+            "sleep 60",
+        ], { encoding: "utf8" });
+        assert.equal(started.status, 0, started.stderr);
+    }
+    assert.equal(await stopTestspaceTmux(options), true);
+    for (const socket of sockets) {
+        assert.notEqual(
+            spawnSync("tmux", ["-S", socket, "has-session", "-t", "devshell"]).status,
+            0,
+        );
+    }
 });
 
 test("testspace reverse lifecycle enrolls with a one-time code and stops by persistent identity", async (t) => {

@@ -196,7 +196,18 @@ async function start(argv) {
     }
     stopTestspaceWorkerProcesses(previousRuntime);
 
-    stopTestspaceTmux(previousRuntime, TESTSPACE_INSTANCE);
+    await stopTestspaceTmux({
+        devshellHome: join(paths.home, ".devshell"),
+        instanceName: TESTSPACE_INSTANCE,
+        runtimeDirectory: previousRuntime,
+        workspace: paths.workspace,
+    });
+    await stopTestspaceTmux({
+        devshellHome: paths.reverseDevshellHome,
+        instanceName: TESTSPACE_REVERSE_INSTANCE,
+        runtimeDirectory: paths.reverseRuntime,
+        workspace: paths.reverseWorkspace,
+    });
     removeTestspaceDockerContainers(paths.instanceConfigDirectory);
     resetTestspacePodmanStorage(paths.home, previousRuntime);
     await removeOwnedTestspaceRoot(repoRoot, root);
@@ -343,6 +354,7 @@ async function commentSmoke() {
         endpoint: testspaceUrls(state).mcp,
         instance: TESTSPACE_INSTANCE,
         runtimeDirectory: stateRuntimeDirectory(state),
+        workspace: paths.workspace,
     });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
@@ -390,13 +402,17 @@ async function smoke() {
         throw new Error(`reverse testspace instance is not connected: ${JSON.stringify(reverse)}`);
     }
     const terminals = await runTestspaceTerminalSmoke({
-        instances: [TESTSPACE_INSTANCE, TESTSPACE_REVERSE_INSTANCE],
         runtimeDirectory,
+        targets: [
+            { instance: TESTSPACE_INSTANCE, workspace: paths.workspace },
+            { instance: TESTSPACE_REVERSE_INSTANCE, workspace: paths.reverseWorkspace },
+        ],
     });
     const comment = await runTestspaceCommentSmoke({
         endpoint: testspaceUrls(state).mcp,
         instance: TESTSPACE_INSTANCE,
         runtimeDirectory,
+        workspace: paths.workspace,
     });
     const web = await runTestspaceWebSmoke({ webPort: state.webPort });
     process.stdout.write(`${JSON.stringify({ comment, reverse, terminals, web }, null, 2)}\n`);
@@ -425,8 +441,18 @@ async function stop() {
     if (isProcessAlive(controlPid)) {
         throw new Error(`testspace control process ${String(controlPid)} is still running`);
     }
-    stopTestspaceTmux(runtimeDirectory, TESTSPACE_INSTANCE);
-    stopTestspaceTmux(paths.reverseRuntime, TESTSPACE_REVERSE_INSTANCE);
+    await stopTestspaceTmux({
+        devshellHome: join(paths.home, ".devshell"),
+        instanceName: TESTSPACE_INSTANCE,
+        runtimeDirectory,
+        workspace: paths.workspace,
+    });
+    await stopTestspaceTmux({
+        devshellHome: paths.reverseDevshellHome,
+        instanceName: TESTSPACE_REVERSE_INSTANCE,
+        runtimeDirectory: paths.reverseRuntime,
+        workspace: paths.reverseWorkspace,
+    });
     removeTestspaceDockerContainers(paths.instanceConfigDirectory);
     resetTestspacePodmanStorage(paths.home, runtimeDirectory);
     await removeOwnedTestspaceRoot(repoRoot, root);

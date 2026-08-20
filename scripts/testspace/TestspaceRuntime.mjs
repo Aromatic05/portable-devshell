@@ -8,6 +8,7 @@ import { extname, isAbsolute, join, parse, posix, relative, resolve, sep, win32 
 
 const require = createRequire(new URL("../../packages/control/package.json", import.meta.url));
 const toml = require("smol-toml");
+const { blake3 } = require("hash-wasm");
 const TESTSPACE_OWNER_FILE = ".portable-devshell-testspace-owner.json";
 const TESTSPACE_OWNER_KIND = "portable-devshell-testspace";
 
@@ -205,30 +206,51 @@ export function removeTestspaceDockerContainers(
     return [...new Set(containerNames)].sort();
 }
 
-export function stopTestspaceTmux(runtimeDirectory, instanceName) {
-    if (process.platform === "win32") return false;
-    const socketPath = join(
-        runtimeDirectory,
-        "devshell-worker",
-        instanceName,
-        "tmux.sock",
-    );
-    if (!existsSync(socketPath)) return false;
-
-    const probe = spawnSync("tmux", ["-S", socketPath, "list-sessions"], {
-        encoding: "utf8",
-    });
-    if (probe.status !== 0) return false;
-
-    const result = spawnSync("tmux", ["-S", socketPath, "kill-server"], {
-        encoding: "utf8",
-    });
-    if (result.status !== 0) {
-        throw new Error(
-            result.stderr ||
-            result.error?.message ||
-            `failed to stop testspace tmux server at ${socketPath}`,
+export async function resolveTestspaceTmuxSockets({
+    devshellHome,
+    instanceName,
+    runtimeDirectory,
+    workspace,
+}) {
+    const defaultRuntimeDirectory = join(runtimeDirectory, "devshell-worker", instanceName);
+    const workerSocket = join(defaultRuntimeDirectory, "worker.sock");
+    const instanceRuntimeDirectory = Buffer.byteLength(workerSocket) <= 100
+        ? defaultRuntimeDirectory
+        : join(
+            tmpdir(),
+            `devshell-worker-${(await blake3(`${devshellHome}:${instanceName}`)).slice(0, 16)}`,
         );
+    const workspaceKey = (await blake3(`${join(devshellHome, instanceName)}\0${workspace}`)).slice(0, 16);
+    const workspaceCandidate = join(instanceRuntimeDirectory, `tmux-${workspaceKey}.sock`);
+    const workspaceSocket = Buffer.byteLength(workspaceCandidate) <= 100
+        ? workspaceCandidate
+        : join(tmpdir(), `devshell-tmux-${workspaceKey}.sock`);
+    return [...new Set([
+        join(instanceRuntimeDirectory, "tmux.sock"),
+        workspaceSocket,
+    ])];
+}
+
+export async function stopTestspaceTmux(options) {
+    if (process.platform === "win32") return false;
+    let stopped = false;
+    for (const socketPath of await resolveTestspaceTmuxSockets(options)) {
+        if (!existsSync(socketPath)) continue;
+        const probe = spawnSync("tmux", ["-S", socketPath, "list-sessions"], {
+            encoding: "utf8",
+        });
+        if (probe.status !== 0) continue;
+        const result = spawnSync("tmux", ["-S", socketPath, "kill-server"], {
+            encoding: "utf8",
+        });
+        if (result.status !== 0) {
+            throw new Error(
+                result.stderr ||
+                result.error?.message ||
+                `failed to stop testspace tmux server at ${socketPath}`,
+            );
+        }
+        stopped = true;
     }
-    return true;
+    return stopped;
 }

@@ -12,6 +12,7 @@ export async function runTestspaceCommentSmoke({
     endpoint,
     instance,
     runtimeDirectory,
+    workspace,
 }) {
     const clients = createTuiClients({ xdgRuntimeDir: runtimeDirectory });
     const session = new TuiControlSession({
@@ -40,7 +41,7 @@ export async function runTestspaceCommentSmoke({
 
         await mcp.connect(new StreamableHTTPClientTransport(new URL(endpoint)));
         const environment = await mcp.callTool({
-            arguments: {},
+            arguments: { workspace },
             name: "environ_info",
         });
         const ctxId = environment.structuredContent?.ctxId;
@@ -52,7 +53,7 @@ export async function runTestspaceCommentSmoke({
         await operations.queueContextMessage(instance, ctxId, marker);
         await waitFor(
             () =>
-                session.store.getState().contextMessagesByInstance[instance]?.some(
+                session.store.getState().readModel.instanceState[instance]?.contextMessages?.some(
                     (message) =>
                         message.ctxId === ctxId &&
                         message.text === marker &&
@@ -60,7 +61,7 @@ export async function runTestspaceCommentSmoke({
                 ) === true,
             "TUI operation did not publish the queued Comment",
         );
-        const queued = session.store.getState().contextMessagesByInstance[instance]?.find(
+        const queued = session.store.getState().readModel.instanceState[instance]?.contextMessages?.find(
             (message) => message.ctxId === ctxId && message.text === marker,
         );
         if (queued === undefined) {
@@ -84,7 +85,7 @@ export async function runTestspaceCommentSmoke({
 
         await waitFor(
             () =>
-                session.store.getState().contextMessagesByInstance[instance]?.some(
+                session.store.getState().readModel.instanceState[instance]?.contextMessages?.some(
                     (message) =>
                         message.id === queued.id &&
                         message.status === "delivered" &&
@@ -94,13 +95,13 @@ export async function runTestspaceCommentSmoke({
                 const state = session.store.getState();
                 return [
                     "TUI Comment state did not automatically become delivered",
-                    `messages=${JSON.stringify(state.contextMessagesByInstance[instance] ?? [])}`,
+                    `messages=${JSON.stringify(state.readModel.instanceState[instance]?.contextMessages ?? [])}`,
                     `events=${JSON.stringify(state.rawEvents.slice(-20).map((event) => ({ event: event.event, payload: event.payload, seq: event.seq })))}`,
                     `panelErrors=${JSON.stringify(state.panelErrors)}`,
                 ].join("\n");
             },
         );
-        const delivered = session.store.getState().contextMessagesByInstance[instance]?.find(
+        const delivered = session.store.getState().readModel.instanceState[instance]?.contextMessages?.find(
             (message) => message.id === queued.id,
         );
         return {
