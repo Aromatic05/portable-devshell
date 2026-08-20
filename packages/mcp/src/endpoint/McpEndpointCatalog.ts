@@ -24,6 +24,7 @@ import {
 import { McpToolCatalogInstance } from "../tool/catalog/McpToolCatalogInstance.js";
 import { McpToolCatalogInteraction } from "../tool/catalog/McpToolCatalogInteraction.js";
 import { McpToolCatalogTodo } from "../tool/catalog/McpToolCatalogTodo.js";
+import { workspaceAppResourceUri } from "../workspace/McpWorkspaceApp.js";
 import { withMcpCommentOutputSchema } from "./McpEndpointFeedback.js";
 import {
     withMcpContextId,
@@ -136,6 +137,12 @@ export class McpEndpointCatalog {
         const invocationStatus = mcpToolInvocationStatus(exposed.name);
         const meta = {
             ...asRecord(adapted._meta),
+            ...(exposed.name === "tmux_wait" ? {
+                ui: { resourceUri: workspaceAppResourceUri, visibility: ["model", "app"] },
+                "ui/resourceUri": workspaceAppResourceUri,
+                "openai/outputTemplate": workspaceAppResourceUri,
+                "openai/widgetAccessible": true,
+            } : {}),
             ...(invocationStatus === undefined ? {} : {
                 "openai/toolInvocation/invoked": invocationStatus.invoked,
                 "openai/toolInvocation/invoking": invocationStatus.invoking,

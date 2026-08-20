@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
+import { parseMcpHttpResponse } from "../TestMcpHttpResponse.ts";
 
 import {
     McpEndpointBinding,
@@ -153,8 +154,8 @@ test("long-lived visible tools advertise ChatGPT invocation status", () => {
     }).listTools().find((entry) => entry.name === "tmux_wait");
     const meta = tool?._meta as Record<string, JsonValue> | undefined;
 
-    assert.equal(meta?.["openai/toolInvocation/invoking"], "Waiting for task completion…");
-    assert.equal(meta?.["openai/toolInvocation/invoked"], "Task wait finished");
+    assert.equal(meta?.["openai/toolInvocation/invoking"], "Handing task wait to Workspace…");
+    assert.equal(meta?.["openai/toolInvocation/invoked"], "Workspace will resume when ready");
 });
 
 test("Workspace MCP App renders from a versioned URI while keeping the stable reader alias", async () => {
@@ -1118,7 +1119,7 @@ async function postJson(url: string, body: JsonValue, extraHeaders?: Record<stri
 
     return {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        body: JSON.parse(response.text) as Record<string, any>,
+        body: parseMcpHttpResponse<Record<string, any>>(response.text),
         headers: response.headers,
         status: response.status
     };

@@ -254,38 +254,35 @@ test("Workspace snapshot projects only compact task and background state", async
     assert.equal(Object.hasOwn(snapshot, "waits"), false);
 });
 
-test("Workspace can interrupt waiting or detached tmux waits without cancelling the tmux task", async () => {
-    for (const status of ["waiting", "detached"] as const) {
-        const fake = createInteractionGateway();
-        const now = new Date().toISOString();
-        fake.waits.push({
-            createdAt: now,
-            createdByCtxId: context.ctxId!,
-            ...(status === "detached" ? { detachedAt: now } : {}),
-            kind: "tmux",
-            ownerCallId: "call-tmux-wait",
-            status,
-            targetId: "tmux-task-1",
-            taskId: "task-1",
-            updatedAt: now,
-            waitId: "wait-tmux",
-        });
-        const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
-        const token = await openWorkspace(handler);
+test("Workspace can interrupt a live tmux wait without cancelling the tmux task", async () => {
+    const fake = createInteractionGateway();
+    const now = new Date().toISOString();
+    fake.waits.push({
+        createdAt: now,
+        createdByCtxId: context.ctxId!,
+        kind: "tmux",
+        ownerCallId: "call-tmux-wait",
+        status: "waiting",
+        targetId: "tmux-task-1",
+        taskId: "task-1",
+        updatedAt: now,
+        waitId: "wait-tmux",
+    });
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
 
-        assert.deepEqual(await handler.call(
-            "workspace_wait_interrupt",
-            { token, waitId: "wait-tmux" },
-            context,
-            "call-app",
-        ), {
-            interrupted: true,
-            status: "cancelled",
-            tmuxTaskId: "tmux-task-1",
-            waitId: "wait-tmux",
-        });
-        assert.equal(fake.waits[0]?.status, "cancelled");
-    }
+    assert.deepEqual(await handler.call(
+        "workspace_wait_interrupt",
+        { token, waitId: "wait-tmux" },
+        context,
+        "call-app",
+    ), {
+        interrupted: true,
+        status: "cancelled",
+        tmuxTaskId: "tmux-task-1",
+        waitId: "wait-tmux",
+    });
+    assert.equal(fake.waits[0]?.status, "cancelled");
 });
 
 test("Workspace task control and detached-wait recovery use durable server state", async () => {
@@ -752,6 +749,8 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     assert.equal(ask._meta, undefined);
     assert.equal(goal._meta, undefined);
     assert.deepEqual((goalStop._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
+    assert.match(open.description, /visible App is attached to this tool result/u);
+    assert.match(open.description, /Workspace state remains durable/u);
 
     const sessionDefinitions = new McpToolCatalogInteraction().list(false);
     const sessionOpen = sessionDefinitions.find((definition) => definition.name === "workspace_open");
@@ -774,6 +773,7 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     assert.equal(sessionSnapshotSchema.properties?.questions?.items?.properties?.ownerCallId, undefined);
     assert.equal(sessionSnapshotSchema.properties?.questions?.items?.properties?.recoveryClaimId, undefined);
     assert.doesNotMatch(sessionOpen?.description ?? "", /ctxId/u);
+    assert.match(sessionOpen?.description ?? "", /visible App is attached to this tool result/u);
 });
 
 async function openWorkspace(handler: McpEndpointHandlerInteraction): Promise<string> {

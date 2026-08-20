@@ -124,7 +124,7 @@ MCP 对已经被 ChatGPT 缓存的旧 recipient 保留一层隐藏兼容。兼�
 
 ## Workspace MCP App 与人工交互
 
-`workspace_open` 是 model-visible 的 Workspace 入口。MCP 边界先用当前 selector 得到内部 Context，再返回该 Context 的 authoritative snapshot；在 `explicit` 模式中 App 需要携带 `ctxId`，在 Host-managed selector 模式中 App 不接触 `ctxId`，后续 app tool call 由 Host metadata 重新解析到同一内部 Context。Workspace 可见区域保持为一个紧凑的 current-event view，同一时刻最多展示一个需要人类关注的事件，而不是任务仪表盘：`workspace_ask` 对应 `user.answer`，Approval 对应 `approval.decision`，正在阻塞的 `tmux_wait` 对应 `tmux.task.completed`。Todo/checkpoint、后台 Wait 与 activity 仍保留在 snapshot/model context 中供恢复逻辑使用，但不同时堆进可见 UI。
+`workspace_open` 是 model-visible 的 Workspace 入口。它返回的 App 视图附着在这一次 tool result / 对话消息上，并不是跨后续消息常驻的独立 ChatGPT 面板；Context、durable Wait、Goal、Todo 等服务端 Workspace 状态则继续存在。用户需要再次看到面板，或 `workspace_ask` / `workspace_goal start` 明确报告 App 已失活时，再调用 `workspace_open` 即可，普通工具调用不需要为了“维持 Workspace 状态”反复打开。MCP 边界先用当前 selector 得到内部 Context，再返回该 Context 的 authoritative snapshot；在 `explicit` 模式中 App 需要携带 `ctxId`，在 Host-managed selector 模式中 App 不接触 `ctxId`，后续 app tool call 由 Host metadata 重新解析到同一内部 Context。Workspace 可见区域保持为一个紧凑的 current-event view，同一时刻最多展示一个需要人类关注的事件，而不是任务仪表盘：`workspace_ask` 对应 `user.answer`，Approval 对应 `approval.decision`，正在阻塞的 `tmux_wait` 对应 `tmux.task.completed`。Todo/checkpoint、后台 Wait 与 activity 仍保留在 snapshot/model context 中供恢复逻辑使用，但不同时堆进可见 UI。
 
 Workspace 的 Host 协议由官方 `@modelcontextprotocol/ext-apps` `App` 实现，portable-devshell 不再自行维护 postMessage JSON-RPC bridge。实际 render URI 根据完整 HTML 内容生成 hash，例如 `ui://portable-devshell/workspace-<hash>.html`，因此 ChatGPT 的 template/render cache 会在内容变化时获得新的 cache key。`ui://portable-devshell/workspace/v1.html` 只作为稳定 reader alias 保留；已经发布过的历史 hash URI也必须继续作为隐藏 alias 可读，不能让旧会话因升级失去模板。
 
@@ -138,11 +138,11 @@ Todo task 现在同时承担 model re-entry checkpoint。模型在 `todo_write` 
 
 Todo runtime 仍保留 task-level Pause / Resume / Cancel 语义，用于 durable task 生命周期和兼容已经挂载的旧 Workspace App；当前紧凑 Workspace 不再把 task controls 作为常驻面板展示。它们不会隐式向 tmux 进程发送信号。
 
-`tmux_wait` 首次建立 durable Wait 时使用与 `workspace_ask` 相同的关联规则：优先关联当前 active/blocked Goal，其次关联当前唯一的 `in_progress` Todo，否则只关联 Context。为避开 Host 对单次 MCP tool call 的等待上限，MCP 入口最多在当前模型回合内 hold 约 3 分钟；task 仍未结束时会主动把 Wait 转成 detached，并正常返回 `{ detached: true, task: { id, status: "running" } }`。tmux task/window 本身继续运行；后台 tracker 只通过短暂、未审计的 Worker 状态读取观察 task，不再挂第二个 Worker `tmux_wait` tool call。模型再次调用同一 `ctxId + task id` 的 `tmux_wait` 时会复用并 reattach 该 Wait，而不是新建轮询任务。
+`tmux_wait` 首次建立 durable Wait 时使用与 `workspace_ask` 相同的关联规则：优先关联当前 active/blocked Goal，其次关联当前唯一的 `in_progress` Todo，否则只关联 Context。MCP 入口不会把模型 tool call 长时间挂住：task 仍在运行时会立即把 Wait 转成 detached，并返回 `{ detached: true, task: { id, status: "running" } }`。tmux task/window 本身负责长期存在；Control 只通过短暂、未审计的 Worker 状态读取观察 task，不再挂第二个 Worker `tmux_wait` tool call。Workspace App 仍在 Host 中活跃时，后台 task 完成会解析 durable Wait 并通过 App 恢复模型。模型再次调用同一 `ctxId + task id` 的 `tmux_wait` 时复用该 durable Wait，不建立新的轮询任务。
 
-用户在 Workspace 对当前 `tmux_wait` 选择 `Interrupt wait` 时，语义与 Host detach 不同：Wait 直接进入 cancelled，MCP 停止后台状态 observer，但绝不会停止对应 tmux task。原模型 tool call 如果仍处于 held 状态，会正常返回 `{ interrupted: true, task: { id, status: "running" } }`，因此不会把人工中断伪装成系统错误，也不会在 task 后来完成时偷偷触发自动 model re-entry。模型如果仍需等待，可再次显式调用 `tmux_wait` 建立新的 Wait。
+用户在 Workspace 对当前 `tmux_wait` 选择 `Interrupt wait` 时，Wait 直接进入 cancelled，MCP 停止后台状态 observer，但绝不会停止对应 tmux task。由于模型侧的 `tmux_wait` 已经在 handoff 时返回 detached，这个操作只取消 Workspace 后续自动恢复，不需要再去结束一个 held model tool call。模型如果仍需等待，可再次显式调用 `tmux_wait` 建立新的 Wait。
 
-只有非人工中断产生的 detached wait 才参与自动恢复。如果这种 wait 在 Workspace 等待窗口内完成，App 会对仍可恢复的 resolved wait 做短租约 claim：关联 Goal 时要求 Goal 仍 active/blocked，关联 Todo 时要求 task 未 paused，没有 Goal/Todo 关联时按当前 Context 直接恢复。App 先用 `ui/update-model-context` 写入当前状态，再用 `ui/message` 恢复模型；消息成功后才 complete/consume 该 Wait，消息发送失败则 release claim 让后续 remount 重试。并发 App 不能同时 claim 同一个 Wait。detached tmux wait 的 Workspace 等待窗口最长 60 分钟；到期仍未完成时，App 会结束这一次 Wait、保留 tmux task 继续运行，并主动恢复模型说明 task 仍在运行。普通 live activity 和仍存活的 Question 回答不会触发额外 `ui/message`。
+只有非人工中断产生的 detached wait 才参与自动恢复。如果这种 wait 后来完成，App 会对仍可恢复的 resolved wait 做短租约 claim：关联 Goal 时要求 Goal 仍 active/blocked，关联 Todo 时要求 task 未 paused，没有 Goal/Todo 关联时按当前 Context 直接恢复。App 先用 `ui/update-model-context` 写入当前状态，再用 `ui/message` 恢复模型；消息成功后才 complete/consume 该 Wait，消息发送失败则 release claim 让后续 remount 重试。并发 App 不能同时 claim 同一个 Wait。普通 live activity 和仍存活的 Question 回答不会触发额外 `ui/message`。
 
 ## Skills 与项目记忆提示
 

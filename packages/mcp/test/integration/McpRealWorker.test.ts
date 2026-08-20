@@ -17,6 +17,7 @@ import {
     resolveTestWorkerBinary,
 } from "../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+import { parseMcpHttpResponse } from "../TestMcpHttpResponse.ts";
 
 const fixturesDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../fixtures");
 const workerBinaryPath = resolveTestWorkerBinary();
@@ -325,7 +326,7 @@ async function postJson(url: string, body: JsonValue, extraHeaders?: Record<stri
     return {
         headers: response.headers,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ...(JSON.parse(response.text) as Record<string, any>)
+        ...(parseMcpHttpResponse<Record<string, any>>(response.text))
     };
 }
 

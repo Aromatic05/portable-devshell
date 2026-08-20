@@ -13,6 +13,7 @@ import { McpHost } from "@portable-devshell/mcp/testing";
 import { asInstanceName } from "@portable-devshell/shared";
 import { resolveTestWorkerBinary, tmuxTestOptions } from "../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+import { parseMcpHttpResponse } from "../TestMcpHttpResponse.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 
@@ -327,7 +328,7 @@ async function postJson(url: string, body: JsonValue, extraHeaders?: Record<stri
     assert.equal(response.status, 200, response.text);
     return {
         headers: response.headers,
-        ...(JSON.parse(response.text) as ToolResponse)
+        ...(parseMcpHttpResponse<ToolResponse>(response.text))
     };
 }
 

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { requireTcpPort, startLoopbackHttpProxy } from "../../../../test/TestHttpSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+import { parseMcpHttpResponse } from "../TestMcpHttpResponse.ts";
 
 import { McpHost } from "@portable-devshell/mcp/testing";
 import type { McpAuthConfig, McpHostInstanceConfig } from "@portable-devshell/mcp";
@@ -50,7 +51,7 @@ test("initialize succeeds over HTTP", async () => {
             },
             body: JSON.stringify(await readFixture("mcp-initialize.json"))
         });
-        const payload = await response.json() as { result?: { protocolVersion?: string } };
+        const payload = parseMcpHttpResponse<{ result?: { protocolVersion?: string } }>(await response.text());
 
         assert.equal(response.status, 200);
         assert.equal(typeof payload.result?.protocolVersion, "string");
@@ -322,7 +323,7 @@ async function initializeAndListTools(endpoint: string): Promise<string[]> {
         body: JSON.stringify(await readFixture("mcp-initialize.json"))
     });
     assert.equal(initialize.status, 200);
-    const initializeBody = await initialize.json() as { result?: { protocolVersion?: string } };
+    const initializeBody = parseMcpHttpResponse<{ result?: { protocolVersion?: string } }>(await initialize.text());
     const sessionId = initialize.headers.get("mcp-session-id");
     assert.equal(typeof sessionId, "string");
     const headers = {

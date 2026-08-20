@@ -116,7 +116,7 @@ export class McpToolCatalogInteraction {
                 "openai/outputTemplate": workspaceAppResourceUri,
                 "openai/widgetAccessible": true,
             },
-            description: "Open the portable-devshell Workspace control surface for the current Context. Call once when the user needs persistent visibility or human interaction; ordinary tools do not need to reopen it.",
+            description: "Open the portable-devshell Workspace control surface for the current Context. The visible App is attached to this tool result, while Workspace state remains durable for the Context. Reopen it only when the user needs the panel again or a human-interaction tool reports that the App is no longer active.",
             group: "workspace",
             inputSchema: { additionalProperties: false, properties: {}, type: "object" },
             name: "workspace_open",
@@ -292,7 +292,7 @@ export class McpToolCatalogInteraction {
             if (definition.name === "workspace_open") {
                 return {
                     ...definition,
-                    description: "Open the portable-devshell Workspace control surface for the current host session. Call once when the user needs persistent visibility or human interaction; ordinary tools do not need to reopen it.",
+                    description: "Open the portable-devshell Workspace control surface for the current host session. The visible App is attached to this tool result, while Workspace state remains durable for the session Context. Reopen it only when the user needs the panel again or a human-interaction tool reports that the App is no longer active.",
                     outputSchema: workspaceOpenOutputSchemaForContextMode(false),
                 };
             }

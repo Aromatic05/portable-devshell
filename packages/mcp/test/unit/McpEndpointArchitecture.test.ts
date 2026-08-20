@@ -380,7 +380,7 @@ test("legacy aliases still obey the current MCP policy", async () => {
     );
 });
 
-test("tmux_wait distinguishes host detach from explicit Workspace interruption", async () => {
+test("tmux_wait hands waits to Workspace and keeps explicit interruption distinct", async () => {
     let workerWaitCalls = 0;
     let observeCalls = 0;
     let goalTouches = 0;
@@ -501,31 +501,27 @@ test("tmux_wait distinguishes host detach from explicit Workspace interruption",
         { workspace: "/workspace" },
         { principal: "tester", requestId: "request-environment" },
     ) as { ctxId: string };
-    const abort = new AbortController();
-    const first = dispatch.callTool(
+    const first = await dispatch.callTool(
         "tmux_wait",
         { ctxId: environment.ctxId, task: "task-1" },
         { principal: "tester", requestId: "wait-1" },
-        abort.signal,
-    );
+    ) as { detached?: boolean; task?: { id?: string; status?: string } };
     await waitUntil(() => waits.length === 1 && observeCalls > 0);
     assert.equal(waits[0]?.taskId, "todo-task-1");
-    const touchesBeforeDetach = goalTouches;
-    abort.abort("host remount");
-    await assert.rejects(first, /cancelled by the client/u);
-    assert.equal(goalTouches, touchesBeforeDetach);
+    assert.equal(first.detached, true);
+    assert.deepEqual(first.task, { id: "task-1", status: "running" });
     assert.equal(waits[0]?.status, "detached");
     assert.equal(workerWaitCalls, 0);
 
-    const resumed = dispatch.callTool(
+    const resumed = await dispatch.callTool(
         "tmux_wait",
         { ctxId: environment.ctxId, task: "task-1" },
         { principal: "tester", requestId: "wait-2" },
-    );
+    ) as { detached?: boolean; task?: { id?: string; status?: string } };
     assert.equal(waits.length, 1);
     assert.equal(workerWaitCalls, 0);
-
-    await waitUntil(() => pending.has(waits[0]!.waitId));
+    assert.equal(resumed.detached, true);
+    assert.deepEqual(resumed.task, { id: "task-1", status: "running" });
     const opened = await dispatch.callTool(
         "workspace_open",
         { ctxId: environment.ctxId },
@@ -546,33 +542,30 @@ test("tmux_wait distinguishes host detach from explicit Workspace interruption",
         tmuxTaskId: "task-1",
         waitId,
     });
-    assert.deepEqual(await resumed, {
-        interrupted: true,
-        task: { id: "task-1", status: "running" },
-    });
     await waitUntil(() => waits[0]?.status === "cancelled");
     assert.equal(waits[0]?.status, "cancelled");
 
-    const resumedAgain = dispatch.callTool(
+    const resumedAgain = await dispatch.callTool(
         "tmux_wait",
         { ctxId: environment.ctxId, task: "task-1" },
         { principal: "tester", requestId: "wait-3" },
-    );
+    ) as { detached?: boolean; task?: { id?: string; status?: string } };
     await waitUntil(() => waits.length === 2 && observeCalls > 1);
-    assert.equal(waits[1]?.status, "waiting");
+    assert.equal(waits[1]?.status, "detached");
+    assert.equal(resumedAgain.detached, true);
+    assert.deepEqual(resumedAgain.task, { id: "task-1", status: "running" });
 
     const touchesBeforeCompletion = goalTouches;
     terminalResults.set("task-1", { task: { id: "task-1", status: "0" } });
-    assert.deepEqual(await resumedAgain, { task: { id: "task-1", status: "0" } });
-    assert.equal(goalTouches, touchesBeforeCompletion + 1);
-    assert.equal(waits[1]?.status, "consumed");
+    await waitUntil(() => waits[1]?.status === "resolved");
+    assert.equal(goalTouches, touchesBeforeCompletion);
+    assert.equal(waits[1]?.status, "resolved");
 
     const handoffDispatch = new McpEndpointDispatch({
         catalog,
         contextRegistry,
         gateway,
         instanceName: "demo-local",
-        tmuxWaitHoldMs: 5,
         tmuxWaitPollMs: 1,
         worker,
     });
@@ -589,7 +582,7 @@ test("tmux_wait distinguishes host detach from explicit Workspace interruption",
     terminalResults.set("task-2", { task: { id: "task-2", status: "0" } });
     await waitUntil(() => waits[2]?.status === "resolved");
     assert.equal(harness.audited.filter((entry) => entry.toolName === "tmux_wait").length, 4);
-    assert.equal(harness.auditResults.filter((entry) => entry.toolName === "tmux_wait").length, 3);
+    assert.equal(harness.auditResults.filter((entry) => entry.toolName === "tmux_wait").length, 4);
 });
 
 test("OpenAI session selector replacement happens only after audited environ_info succeeds", async () => {

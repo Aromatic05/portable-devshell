@@ -45,7 +45,7 @@ export function mcpToolTitle(toolName: string): string {
 
 const invocationStatuses: Readonly<Record<string, { invoked: string; invoking: string }>> = {
     workspace_ask: { invoked: "Answer received", invoking: "Waiting for your answer…" },
-    tmux_wait: { invoked: "Task wait finished", invoking: "Waiting for task completion…" },
+    tmux_wait: { invoked: "Workspace will resume when ready", invoking: "Handing task wait to Workspace…" },
     workspace_open: { invoked: "Workspace ready", invoking: "Opening Workspace…" },
 };
 
