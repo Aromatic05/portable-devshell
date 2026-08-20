@@ -433,6 +433,30 @@ test("Workspace does not surface a detached tmux wait as another blocking event"
     assert.equal(await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"), 0);
 });
 
+test("Workspace ends a detached tmux wait after the 60-minute window", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
+    await page.evaluate(RESUME_BRIDGE_SCRIPT);
+    await page.evaluate("window.__expiredWaitWindow = true");
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_wait_interrupt')");
+    await page.waitForFunction("(window.__modelMessages || []).length === 1");
+    const calls = await page.evaluate("window.__workspaceCalls || []") as Array<{ arguments?: Record<string, unknown>; name?: string }>;
+    const interrupt = calls.find((call) => call.name === "workspace_wait_interrupt");
+    assert.equal(interrupt?.arguments?.waitId, "wait-resume");
+    assert.equal(await page.evaluate("JSON.stringify((window.__modelMessages || [])[0] || {}).includes('60 minutes')"), true);
+    await page.waitForTimeout(100);
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
+});
+
 test("Workspace re-enters after a detached answer without surfacing detached tmux state", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
@@ -638,7 +662,7 @@ function snapshot(withQuestion) {
         }],
         approvals: window.__workspaceApprovalPending ? [approval] : [],
         background: window.__workspaceWaitInterrupted && !window.__workspaceBackgroundDetached ? [] : [{
-            detachedAt: "2026-08-19T01:00:01.000Z",
+            detachedAt: new Date().toISOString(),
             status: "detached",
             taskId: "task-plan",
             tmuxTaskId: "task-browser",
@@ -1064,12 +1088,13 @@ const RESUME_BRIDGE_SCRIPT = String.raw`
 window.__workspaceCalls = [];
 window.__modelMessages = [];
 window.__taskStatus = "in_progress";
+window.__waitWindowInterrupted = false;
 
 function resumeSnapshot() {
     return {
         activity: [], approvals: [], questions: [], waits: [],
-        background: [{
-            detachedAt: "2026-08-19T01:00:01.000Z",
+        background: window.__waitWindowInterrupted ? [] : [{
+            detachedAt: new Date(Date.now() - (window.__expiredWaitWindow ? 61 * 60 * 1000 : 0)).toISOString(),
             status: "detached",
             taskId: "task-resume",
             tmuxTaskId: "tmux-resume",
@@ -1136,6 +1161,16 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (call.name === "workspace_watch") return;
+    if (call.name === "workspace_wait_interrupt") {
+        window.__waitWindowInterrupted = true;
+        reply({ structuredContent: {
+            interrupted: true,
+            status: "cancelled",
+            tmuxTaskId: "tmux-resume",
+            waitId: "wait-resume"
+        } });
+        return;
+    }
     if (call.name === "workspace_wait_recover") {
         reply({ structuredContent: { taskId: "task-resume", waitId: "wait-resume" } });
     }
@@ -1149,7 +1184,7 @@ function detachedInteractionSnapshot() {
     return {
         activity: [], approvals: [], waits: [],
         background: [{
-            detachedAt: "2026-08-19T01:00:01.000Z",
+            detachedAt: new Date().toISOString(),
             status: "detached",
             taskId: "task-detached",
             tmuxTaskId: "tmux-detached",

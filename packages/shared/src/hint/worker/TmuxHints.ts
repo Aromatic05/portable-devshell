@@ -76,6 +76,13 @@ export function tmuxTaskResultHints(toolName: string, result: JsonValue): ToolDi
         ));
     }
 
+    if (toolName === "tmux_wait" && asBoolean(record.detached) === true) {
+        hints.push(diagnosticHint(
+            "tmux.waitDetached",
+            "The task is still running in its tmux window; do not poll immediately. An active Workspace will resume the model when the task completes or its wait window ends; otherwise call tmux_wait again later."
+        ));
+    }
+
     hints.push(...taskStatusHints(asRecord(record.task)));
 
     if (asBoolean(record.observationReset) === true) {

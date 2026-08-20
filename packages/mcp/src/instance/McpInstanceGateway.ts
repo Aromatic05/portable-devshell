@@ -84,6 +84,12 @@ export interface McpInstanceGateway {
     consumeContextMessages?(instance: string, ctxId: string, callId: string): Promise<ContextMessageReadResult>;
     readTodo(instance: string, input?: TodoReadInput): Promise<JsonValue>;
     listTools(instance: string): ToolDefinition[];
+    observeTmuxTask?(
+        instance: string,
+        taskId: string,
+        context: ToolCallContext,
+        signal?: AbortSignal
+    ): Promise<JsonValue>;
     prepareWorkspace(instance: string, workspace: string): Promise<{
         projectMemoryAgentFile: string;
         projectMemoryDirectory: string;
@@ -162,6 +168,17 @@ export function isMcpWaitTrackingGateway(
 ): gateway is McpWaitTrackingGateway {
     return isMcpInteractionGateway(gateway) &&
         gateway.cancelWait !== undefined && gateway.reattachWait !== undefined;
+}
+
+export type McpTmuxWaitGateway = McpWaitTrackingGateway & Required<Pick<
+    McpInstanceGateway,
+    "observeTmuxTask"
+>>;
+
+export function isMcpTmuxWaitGateway(
+    gateway: McpInstanceGateway | undefined
+): gateway is McpTmuxWaitGateway {
+    return isMcpWaitTrackingGateway(gateway) && gateway.observeTmuxTask !== undefined;
 }
 
 export type McpWorkspaceGateway = McpInteractionGateway & Required<Pick<

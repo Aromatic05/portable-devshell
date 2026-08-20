@@ -150,6 +150,15 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return await this.#requireWait(instance).list();
     }
 
+    async observeTmuxTask(
+        instance: string,
+        taskId: string,
+        context: ToolCallContext,
+        signal?: AbortSignal
+    ): Promise<JsonValue> {
+        return await this.#requireDescriptor(instance).worker.observeTmuxTask(taskId, context, signal);
+    }
+
     async goalContinuation(
         instance: string,
         input: import("@portable-devshell/shared").GoalContinuationInput,

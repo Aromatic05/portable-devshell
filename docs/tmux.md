@@ -258,9 +258,9 @@ Transcript 展示层会处理常见 terminal 控制：ANSI control sequence 不�
 }
 ```
 
-它等待 task 到达终态并返回最终 task metadata，不消费 transcript，也没有 `timeMs` 上限。需要输出时，在完成后再调用一次 `tmux_read`。
+Worker 原生 `tmux_wait` 等待 task 到达终态并返回最终 task metadata，不消费 transcript，也没有 `timeMs` 参数。需要输出时，在完成后再调用一次 `tmux_read`。
 
-在 MCP 入口中，这个等待会绑定 durable Wait record。Host 如果取消或断开当前 tool call，Wait 会变成 detached，而 terminal task 和 Worker-side completion tracker 都继续运行；之后再次对同一个 `ctxId + task id` 调用 `tmux_wait` 会复用该 Wait，而不是创建轮询循环。Control 重启后也可以重新调用同一个 `tmux_wait` 来恢复等待，因为 Worker 操作只观察 task state，不消费 transcript。
+在 MCP 入口中，这个等待会绑定 durable Wait record，但不会让单个 Host tool call 无限挂住。当前模型回合最多 hold 约 4 分钟；task 仍在运行时 MCP 会返回 `detached: true`，而 managed task/window 与 transcript 完全不受影响。Control 侧随后只用短 Worker 状态读取观察 task，不再启动第二个长期 `tmux_wait` tool call。Workspace 活跃时会在最长 60 分钟的等待窗口内接收 task completion 并恢复模型；窗口到期只结束 Wait，不会停止 task。之后再次对同一个 `ctxId + task id` 调用 `tmux_wait` 会复用该 durable Wait。Host 主动取消、MCP/Control 重建或 Workspace remount 同样不会杀掉 tmux task。
 
 ## `tmux_inspect`: terminal history
 

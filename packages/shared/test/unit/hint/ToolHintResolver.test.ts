@@ -210,6 +210,15 @@ test("tmux_run running task without block timeout yields a task-running diagnost
     assert.match(hints[0]?.text ?? "", /tmux_wait/u);
 });
 
+test("tmux_wait detached handoff tells the model not to poll", () => {
+    const hints = resolveResultHints("tmux_wait", {
+        detached: true,
+        task: { id: "t1", status: "running" },
+    });
+    assert.deepEqual(codes(hints), ["tmux.waitDetached"]);
+    assert.match(hints[0]?.text ?? "", /do not poll/u);
+});
+
 test("tmux task terminal status distinguishes success, failure, and unknown", () => {
     assert.deepEqual(resolveResultHints("tmux_read", { task: { status: "0" }, warnings: [] }), []);
     assert.deepEqual(resolveResultHints("tmux_wait", { task: { status: "0" } }), []);

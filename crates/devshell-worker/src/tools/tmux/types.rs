@@ -266,6 +266,8 @@ pub struct TmuxTaskOperationOutput {
 pub struct TmuxWaitOutput {
     pub task: TmuxTaskView,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub detached: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub interrupted: Option<bool>,
 }
 

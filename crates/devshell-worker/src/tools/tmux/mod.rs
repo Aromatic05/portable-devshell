@@ -172,7 +172,7 @@ pub fn register_tools(
     ))?;
     registry.register(tool::<TmuxWaitParams, TmuxWaitOutput>(
         ToolName::parse("tmux_wait").unwrap(),
-        "Wait until a managed task reaches a terminal state without consuming its durable transcript. This call has no timeout; cancelling the tool call stops only the wait and leaves the task running.",
+        "Wait until a managed task reaches a terminal state without consuming its durable transcript. Cancelling the call stops only the wait and leaves the task running. MCP hosts may hand long waits to Workspace and return detached=true while the same task continues running.",
         ToolCapability::Read,
         Arc::clone(&states),
         TmuxState::wait,

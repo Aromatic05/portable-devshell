@@ -103,7 +103,9 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
   var initialToolResultResolve = null;
   var liveAbortController = null;
   var goalTimer = null;
+  var waitWindowTimer = null;
   var goalContinuationClaimId = "";
+  var WAIT_WINDOW_MS = 60 * 60 * 1000;
 
   function escapeHtml(value) {
     return String(value == null ? "" : value)
@@ -436,6 +438,58 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     }
   }
 
+  function waitWindowDeadline(item) {
+    var detachedAt = Date.parse(item && item.detachedAt || "");
+    return Number.isFinite(detachedAt) ? detachedAt + WAIT_WINDOW_MS : NaN;
+  }
+
+  function scheduleWaitWindow() {
+    if (waitWindowTimer) clearTimeout(waitWindowTimer);
+    waitWindowTimer = null;
+    var background = snapshot && Array.isArray(snapshot.background) ? snapshot.background : [];
+    var item = background.find(function (entry) {
+      return entry.status === "detached" && !!entry.detachedAt && hasRecoverableWork(entry);
+    });
+    if (!item) return;
+    var deadline = waitWindowDeadline(item);
+    if (!Number.isFinite(deadline)) return;
+    waitWindowTimer = setTimeout(function () {
+      waitWindowTimer = null;
+      void expireDetachedWait(item.waitId);
+    }, Math.max(deadline - Date.now(), 0));
+  }
+
+  async function expireDetachedWait(waitId) {
+    if (recovering || !appToken || !snapshot) return;
+    var background = Array.isArray(snapshot.background) ? snapshot.background : [];
+    var item = background.find(function (entry) { return entry.waitId === waitId; });
+    if (!item) return;
+    if (item.status === "resolved") {
+      await recoverDetachedWait();
+      return;
+    }
+    if (item.status !== "detached") return;
+    var deadline = waitWindowDeadline(item);
+    if (!Number.isFinite(deadline) || Date.now() < deadline) {
+      scheduleWaitWindow();
+      return;
+    }
+    recovering = true;
+    try {
+      var interrupted = structured(await callTool("workspace_wait_interrupt", { waitId: waitId }, true));
+      await sendModelMessage(
+        "The portable-devshell Workspace wait window reached 60 minutes. The tmux task is still running; the wait ended without stopping the task. Decide whether to call tmux_wait again or inspect the task.",
+        { expiredBackgroundWait: interrupted }
+      );
+      await refresh(false);
+    } catch (error) {
+      status.textContent = "Wait window expired";
+      console.error(error);
+    } finally {
+      recovering = false;
+    }
+  }
+
   async function applySnapshot(nextSnapshot, allowRecovery) {
     snapshot = nextSnapshot;
     var selector = asRecord(snapshot && snapshot.contextSelector);
@@ -449,6 +503,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     render();
     await syncModelContext();
     scheduleGoalContinuation(0);
+    scheduleWaitWindow();
     if (allowRecovery !== false) void recoverDetachedWait();
   }
 

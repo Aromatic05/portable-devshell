@@ -254,35 +254,38 @@ test("Workspace snapshot projects only compact task and background state", async
     assert.equal(Object.hasOwn(snapshot, "waits"), false);
 });
 
-test("Workspace can interrupt a held tmux wait without cancelling the tmux task", async () => {
-    const fake = createInteractionGateway();
-    const now = new Date().toISOString();
-    fake.waits.push({
-        createdAt: now,
-        createdByCtxId: context.ctxId!,
-        kind: "tmux",
-        ownerCallId: "call-tmux-wait",
-        status: "waiting",
-        targetId: "tmux-task-1",
-        taskId: "task-1",
-        updatedAt: now,
-        waitId: "wait-tmux",
-    });
-    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
-    const token = await openWorkspace(handler);
+test("Workspace can interrupt waiting or detached tmux waits without cancelling the tmux task", async () => {
+    for (const status of ["waiting", "detached"] as const) {
+        const fake = createInteractionGateway();
+        const now = new Date().toISOString();
+        fake.waits.push({
+            createdAt: now,
+            createdByCtxId: context.ctxId!,
+            ...(status === "detached" ? { detachedAt: now } : {}),
+            kind: "tmux",
+            ownerCallId: "call-tmux-wait",
+            status,
+            targetId: "tmux-task-1",
+            taskId: "task-1",
+            updatedAt: now,
+            waitId: "wait-tmux",
+        });
+        const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+        const token = await openWorkspace(handler);
 
-    assert.deepEqual(await handler.call(
-        "workspace_wait_interrupt",
-        { token, waitId: "wait-tmux" },
-        context,
-        "call-app",
-    ), {
-        interrupted: true,
-        status: "cancelled",
-        tmuxTaskId: "tmux-task-1",
-        waitId: "wait-tmux",
-    });
-    assert.equal(fake.waits[0]?.status, "cancelled");
+        assert.deepEqual(await handler.call(
+            "workspace_wait_interrupt",
+            { token, waitId: "wait-tmux" },
+            context,
+            "call-app",
+        ), {
+            interrupted: true,
+            status: "cancelled",
+            tmuxTaskId: "tmux-task-1",
+            waitId: "wait-tmux",
+        });
+        assert.equal(fake.waits[0]?.status, "cancelled");
+    }
 });
 
 test("Workspace task control and detached-wait recovery use durable server state", async () => {

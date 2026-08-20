@@ -93,6 +93,7 @@ export class WorkerInstance {
     readonly #state: WorkerInstanceState;
     readonly #terminalClient: WorkerTerminalClient;
     readonly #tool: WorkerInstanceTool;
+    readonly #toolInvoker: WorkerToolInvoker;
 
     constructor(dependencies: WorkerInstanceDependencies) {
         this.#approvalManager = dependencies.approvalManager;
@@ -142,6 +143,7 @@ export class WorkerInstance {
             toolCallScheduler: dependencies.toolCallScheduler,
             toolInvoker: dependencies.toolInvoker
         });
+        this.#toolInvoker = dependencies.toolInvoker;
     }
 
     snapshot(): InstanceSnapshot {
@@ -317,6 +319,14 @@ export class WorkerInstance {
         return await this.#tool.call(toolName, input, context, signal, transformResult);
     }
 
+    async observeTmuxTask(taskId: string, context: ToolCallContext, signal?: AbortSignal): Promise<JsonValue> {
+        this.#assertReady();
+        const listed = await this.#toolInvoker.invoke("tmux_list", {}, context, signal);
+        const active = findTmuxTask(listed, taskId);
+        if (active !== undefined) return { task: active };
+        return await this.#toolInvoker.invoke("tmux_wait", { task: taskId }, context, signal);
+    }
+
     async auditToolCall<T extends JsonValue>(
         toolName: string,
         input: JsonValue,
@@ -413,4 +423,17 @@ export class WorkerInstance {
             details: { instanceName: this.#config.name }
         });
     }
+}
+
+function findTmuxTask(result: JsonValue, taskId: string): Record<string, JsonValue> | undefined {
+    if (typeof result !== "object" || result === null || Array.isArray(result) || !Array.isArray(result.panes)) {
+        return undefined;
+    }
+    for (const pane of result.panes) {
+        if (typeof pane !== "object" || pane === null || Array.isArray(pane)) continue;
+        const task = pane.task;
+        if (typeof task !== "object" || task === null || Array.isArray(task)) continue;
+        if (task.id === taskId) return task;
+    }
+    return undefined;
 }

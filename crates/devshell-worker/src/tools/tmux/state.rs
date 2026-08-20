@@ -412,6 +412,7 @@ impl TmuxState {
         let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
         Ok(TmuxWaitOutput {
             task: task_view(require_task(&tasks, &params.task)?),
+            detached: None,
             interrupted: None,
         })
     }

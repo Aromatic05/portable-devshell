@@ -314,7 +314,7 @@ export class McpEndpointHandlerInteraction {
         const wait = (await gateway.listWaits(this.options.instanceName)).find((entry) => entry.waitId === waitId);
         if (
             wait === undefined || wait.createdByCtxId !== requireCtxId(context) ||
-            wait.kind !== "tmux" || wait.status !== "waiting"
+            wait.kind !== "tmux" || (wait.status !== "waiting" && wait.status !== "detached")
         ) {
             throw new Error(`Interruptible tmux wait ${waitId} was not found for the current Context.`);
         }
