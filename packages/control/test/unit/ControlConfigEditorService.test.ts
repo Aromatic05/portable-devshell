@@ -23,6 +23,7 @@ test("config editor returns each patch apply summary to the initiating request",
         },
         getConfig: () => config,
         instanceRegistry: registry,
+        runtimePreflight: { async assertAvailable() {} },
         setConfig: (nextConfig) => {
             config = nextConfig;
         }
@@ -96,6 +97,7 @@ test("config batch update persists instance, MCP, and Web changes as one transac
         },
         getConfig: () => config,
         instanceRegistry: registry,
+        runtimePreflight: { async assertAvailable() {} },
         runtimeApply: {
             async apply() {
                 runtimeApplyCalls += 1;
@@ -308,6 +310,7 @@ test("endpoint runtime failure restores the prior persisted configuration", asyn
         },
         getConfig: () => config,
         instanceRegistry: new InstanceRegistryFactory().build(config),
+        runtimePreflight: { async assertAvailable() {} },
         runtimeApply: {
             async apply() {
                 throw new Error("new listener did not become healthy");
