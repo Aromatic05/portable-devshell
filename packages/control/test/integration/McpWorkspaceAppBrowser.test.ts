@@ -56,14 +56,21 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     await app.getByText("ask_question", { exact: true }).waitFor({ state: "visible" });
     const choice = app.locator('[data-question-choice="wait-question"]');
     await choice.first().waitFor({ state: "visible" });
-    assert.equal(await choice.count(), 12);
+    assert.equal(await choice.count(), 5);
     const choiceListSize = await app.locator(".choice-list").evaluate((element) => ({
         clientHeight: element.clientHeight,
+        overflowY: getComputedStyle(element).overflowY,
         scrollHeight: element.scrollHeight,
     }));
-    assert.equal(choiceListSize.clientHeight <= 170, true);
-    assert.equal(choiceListSize.scrollHeight > choiceListSize.clientHeight, true);
-    assert.equal(await app.getByRole("button", { name: "Continue", exact: true }).count(), 0);
+    assert.equal(choiceListSize.scrollHeight, choiceListSize.clientHeight);
+    assert.notEqual(choiceListSize.overflowY, "auto");
+    assert.notEqual(choiceListSize.overflowY, "scroll");
+    assert.equal(await choice.first().evaluate((element) => element.tagName), "BUTTON");
+    assert.equal(await choice.first().evaluate((element) => getComputedStyle(element).borderRadius), "0px");
+    assert.equal(await app.getByRole("button", { name: "Continue", exact: true }).count(), 1);
+    assert.equal(await app.locator("body").evaluate((element) => element.scrollHeight <= 350), true);
+    await app.getByRole("button", { name: "Show 7 more", exact: true }).click();
+    assert.equal(await choice.count(), 12);
     assert.equal(await app.getByText("Activity", { exact: true }).count(), 0);
     assert.equal(await app.getByText("Background", { exact: true }).count(), 0);
     await page.waitForFunction("(window.__modelContextUpdates || []).length >= 2");

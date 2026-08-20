@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 export const workspaceAppStableResourceUri = "ui://portable-devshell/workspace/v1.html";
 export const workspaceAppLegacyResourceUris: readonly string[] = [
+    "ui://portable-devshell/workspace-651c9d0f1042c493.html",
     "ui://portable-devshell/workspace-98410baf51f694b0.html",
     "ui://portable-devshell/workspace-03c4911b6d185e3c.html",
     "ui://portable-devshell/workspace-c978585dba4e38c7.html",
@@ -42,39 +43,36 @@ export const workspaceAppHtml = String.raw`<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-:root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+:root { color-scheme: light dark; font-family: var(--font-sans, ui-sans-serif, system-ui, -apple-system, sans-serif); }
 * { box-sizing: border-box; }
-body { margin: 0; padding: 8px; background: transparent; color: CanvasText; }
-header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
-h1 { font-size: 13px; margin: 0; font-weight: 650; }
-small, .muted { color: color-mix(in srgb, CanvasText 58%, transparent); font-size: 11px; }
+body { margin: 0; padding: 8px; background: transparent; color: var(--color-text-primary, CanvasText); }
+small, .muted { color: var(--color-text-secondary, color-mix(in srgb, CanvasText 58%, transparent)); font-size: 11px; }
+#status { display: block; margin-bottom: 6px; }
 .grid { display: grid; }
-.card { border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 9px; overflow: hidden; background: color-mix(in srgb, Canvas 94%, CanvasText 6%); }
+.card { border: 1px solid var(--color-border-secondary, color-mix(in srgb, CanvasText 18%, transparent)); border-radius: var(--border-radius-md, 9px); overflow: hidden; background: var(--color-background-primary, color-mix(in srgb, Canvas 94%, CanvasText 6%)); }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 9px 6px; }
 .card-body { padding: 0 9px 8px; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .row.between { justify-content: space-between; }
 .title { font-size: 13px; font-weight: 650; }
-.event-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 650; }
+.event-name { font-size: 11px; font-weight: 650; }
 .question { margin: 3px 0 7px; font-size: 13px; line-height: 1.35; }
 button, input { font: inherit; }
-button { border: 1px solid color-mix(in srgb, CanvasText 24%, transparent); border-radius: 7px; padding: 4px 8px; background: Canvas; color: CanvasText; cursor: pointer; }
+button { border: 1px solid var(--color-border-primary, color-mix(in srgb, CanvasText 24%, transparent)); border-radius: var(--border-radius-sm, 7px); padding: 4px 8px; background: var(--color-background-primary, Canvas); color: var(--color-text-primary, CanvasText); cursor: pointer; }
 button.primary { font-weight: 650; }
-button.danger { color: #c43b3b; }
+button.danger, .danger-row { color: var(--color-text-danger, CanvasText); }
 button:disabled { opacity: .55; cursor: default; }
-input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in srgb, CanvasText 14%, transparent); padding: 8px 9px; background: transparent; color: CanvasText; outline: none; }
-.badge { border-radius: 999px; padding: 2px 7px; font-size: 10px; background: color-mix(in srgb, CanvasText 10%, transparent); }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
-.empty { padding: 8px 9px; text-align: left; font-size: 11px; color: color-mix(in srgb, CanvasText 55%, transparent); }
-.choice-list { max-height: 170px; overflow: auto; }
-.choice-row, .action-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 34px; padding: 7px 9px; border-top: 1px solid color-mix(in srgb, CanvasText 14%, transparent); cursor: pointer; font-size: 12px; }
-.choice-row:hover, .action-row:hover { background: color-mix(in srgb, CanvasText 6%, transparent); }
-.choice-row[aria-disabled="true"], .action-row[aria-disabled="true"] { opacity: .55; cursor: default; }
-.danger-row { color: #c43b3b; }
+button:focus-visible, input:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-border-secondary, color-mix(in srgb, CanvasText 14%, transparent)); padding: 8px 9px; background: transparent; color: var(--color-text-primary, CanvasText); }
+.badge { border-radius: var(--border-radius-full, 999px); padding: 2px 7px; font-size: 10px; background: var(--color-background-secondary, color-mix(in srgb, CanvasText 10%, transparent)); }
+.mono { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11px; }
+.empty { padding: 8px 9px; text-align: left; font-size: 11px; color: var(--color-text-secondary, color-mix(in srgb, CanvasText 55%, transparent)); }
+.choice-row, .action-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 10px; min-height: 34px; padding: 7px 9px; border: 0; border-top: 1px solid var(--color-border-secondary, color-mix(in srgb, CanvasText 14%, transparent)); border-radius: 0; background: transparent; cursor: pointer; font-size: 12px; text-align: left; }
+.choice-row:hover, .action-row:hover { background: var(--color-background-secondary, color-mix(in srgb, CanvasText 6%, transparent)); }
 </style>
 </head>
 <body>
-<header><h1>portable-devshell</h1><small id="status">Connecting…</small></header>
+<small id="status" role="status" aria-live="polite">Connecting…</small>
 <div id="root" class="grid"><div class="empty">Waiting for Workspace state…</div></div>
 <script>${workspaceSdkScript}</script>
 <script>
@@ -94,6 +92,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
   var watchStarted = false;
   var recovering = false;
   var busy = new Set();
+  var expandedQuestions = new Set();
   var WIDGET_STATE_KEY = "portableDevshellWorkspace";
   var bridgeReady = false;
   var pendingToolResult = null;
@@ -520,10 +519,15 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
     var payload = item && item.payload && typeof item.payload === "object" ? item.payload : {};
     var choices = Array.isArray(payload.choices) ? payload.choices : [];
     var disabled = busy.has(item.waitId);
-    var rows = choices.map(function (choice) {
-      return '<div class="choice-row" role="button" tabindex="0" aria-disabled="' + disabled + '" data-question-choice="' + escapeHtml(item.waitId) + '" data-answer="' + escapeHtml(choice) + '"><span>' + escapeHtml(choice) + '</span><span class="muted">›</span></div>';
+    var expanded = expandedQuestions.has(item.waitId);
+    var shownChoices = expanded ? choices : choices.slice(0, 5);
+    var rows = shownChoices.map(function (choice) {
+      return '<button type="button" class="choice-row"' + (disabled ? ' disabled' : '') + ' data-question-choice="' + escapeHtml(item.waitId) + '" data-answer="' + escapeHtml(choice) + '"><span>' + escapeHtml(choice) + '</span><span class="muted" aria-hidden="true">›</span></button>';
     }).join("");
-    var text = payload.allowText === false ? "" : '<input data-question-input="' + escapeHtml(item.waitId) + '" placeholder="Type an answer · Enter"' + (disabled ? ' disabled' : '') + '>';
+    if (!expanded && choices.length > shownChoices.length) {
+      rows += '<button type="button" class="choice-row" data-question-expand="' + escapeHtml(item.waitId) + '" aria-expanded="false"><span>Show ' + (choices.length - shownChoices.length) + ' more</span><span class="muted" aria-hidden="true">+</span></button>';
+    }
+    var text = payload.allowText === false ? "" : '<input aria-label="Answer" data-question-input="' + escapeHtml(item.waitId) + '" placeholder="Type an answer · Enter"' + (disabled ? ' disabled' : '') + '>';
     return '<div class="card">' + eventHead(item) + '<div class="card-body"><div class="muted">event · ' + escapeHtml(item.eventName || "user.answer") + '</div><div class="question">' + escapeHtml(payload.question || "Question") + '</div></div><div class="choice-list">' + rows + '</div>' + text + '</div>';
   }
 
@@ -537,7 +541,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
     var disabled = busy.has(key);
     var action = "";
     if (item.status === "waiting") {
-      action = '<div class="action-row danger-row" role="button" tabindex="0" aria-disabled="' + disabled + '" data-wait-interrupt="' + escapeHtml(item.waitId) + '"><span>Interrupt wait</span><span class="muted">task keeps running</span></div>';
+      action = '<button type="button" class="action-row danger-row"' + (disabled ? ' disabled' : '') + ' data-wait-interrupt="' + escapeHtml(item.waitId) + '"><span>Interrupt wait</span><span class="muted">task keeps running</span></button>';
     }
     return '<div class="card">' + eventHead(item) + '<div class="card-body"><div class="muted">event · ' + escapeHtml(item.eventName || "tmux.task.completed") + '</div><div class="question">Waiting for task completion</div><div class="mono">' + escapeHtml(item.tmuxTaskId || "") + '</div></div>' + action + '</div>';
   }
@@ -556,8 +560,14 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
   }
 
   root.addEventListener("click", function (event) {
+    var expand = event.target.closest("[data-question-expand]");
+    if (expand) {
+      expandedQuestions.add(expand.getAttribute("data-question-expand"));
+      render();
+      return;
+    }
     var choice = event.target.closest("[data-question-choice]");
-    if (choice && choice.getAttribute("aria-disabled") !== "true") {
+    if (choice && !choice.hasAttribute("disabled")) {
       void answerQuestion(choice.getAttribute("data-question-choice"), choice.getAttribute("data-answer"));
       return;
     }
@@ -570,7 +580,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
       }
     }
     var interrupt = event.target.closest("[data-wait-interrupt]");
-    if (interrupt && interrupt.getAttribute("aria-disabled") !== "true") {
+    if (interrupt && !interrupt.hasAttribute("disabled")) {
       var waitId = interrupt.getAttribute("data-wait-interrupt");
       void act(waitId, "workspace_wait_interrupt", { waitId: waitId });
       return;
@@ -578,18 +588,6 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
   });
 
   root.addEventListener("keydown", function (event) {
-    var choice = event.target.closest && event.target.closest("[data-question-choice]");
-    if (choice && (event.key === "Enter" || event.key === " ")) {
-      event.preventDefault();
-      choice.click();
-      return;
-    }
-    var action = event.target.closest && event.target.closest("[data-wait-interrupt]");
-    if (action && (event.key === "Enter" || event.key === " ")) {
-      event.preventDefault();
-      action.click();
-      return;
-    }
     var input = event.target.closest && event.target.closest("[data-question-input]");
     if (input && event.key === "Enter") {
       var answer = input.value.trim();
