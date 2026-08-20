@@ -89,7 +89,10 @@ export class McpEndpointDispatch {
             ...controlOptions,
             contextSelector: this.#contextSelector
         });
-        this.#todo = new McpEndpointHandlerTodo(controlOptions);
+        this.#todo = new McpEndpointHandlerTodo({
+            ...controlOptions,
+            contextSelector: this.#contextSelector
+        });
         this.#workerHandler = new McpEndpointHandlerWorker({
             catalog: options.catalog,
             gateway: options.gateway,
@@ -582,7 +585,7 @@ function contextWorkspaceRequired(ctxId: string, instance: string) {
     return createError({
         code: errorCodes.mcpContextWorkspaceRequired,
         details: { ctxId, instance },
-        message: `No workspace is attached to ${instance} for this ctxId. Call instance_connect with an absolute workspace.`,
+        message: `No workspace is attached to ${instance} for the current Context. Call instance_connect with an absolute workspace.`,
         retryable: false
     });
 }

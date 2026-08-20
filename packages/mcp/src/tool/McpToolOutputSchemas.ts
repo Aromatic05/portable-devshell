@@ -367,35 +367,80 @@ const workspaceContextSelectorSchema = objectSchema({
     requiresExplicitContextId: { type: "boolean" },
 }, ["requiresExplicitContextId"]);
 
-export const workspaceSnapshotOutputSchema = objectSchema({
-    activity: arraySchema(workspaceActivitySchema),
-    approvals: arraySchema(approvalRequestOutputSchema),
-    background: arraySchema(workspaceBackgroundSchema),
-    contextSelector: workspaceContextSelectorSchema,
-    ctxId: nonEmptyString,
-    currentEvent: workspaceCurrentEventSchema,
-    cursor: nonNegativeInteger,
+const workspaceTodoTaskSummaryOutputSchema = objectSchema({
+    ...activeTodoSummaryProperties,
+    updatedAt: stringValue,
+}, ["completed", "revision", "status", "taskId", "title", "total", "updatedAt"]);
+
+const workspaceWaitRecordOutputSchema = objectSchema({
+    cancelledAt: stringValue,
+    consumedAt: stringValue,
+    createdAt: stringValue,
+    detachedAt: stringValue,
+    kind: { enum: ["approval", "question", "tmux"], type: "string" },
+    payload: anyValue,
+    resolvedAt: stringValue,
+    result: anyValue,
+    status: { enum: ["cancelled", "consumed", "detached", "resolved", "waiting"], type: "string" },
+    targetId: nonEmptyString,
+    taskId: nonEmptyString,
+    updatedAt: stringValue,
+    waitId: nonEmptyString,
+}, ["createdAt", "kind", "status", "targetId", "updatedAt", "waitId"]);
+
+export const workspaceApprovalRequestOutputSchema = objectSchema({
+    approvalId: nonEmptyString,
+    callId: nonEmptyString,
+    createdAt: stringValue,
+    decision: approvalDecisionSchema,
+    expiresAt: stringValue,
+    inputSummary: stringValue,
     instance: nonEmptyString,
-    questions: arraySchema(waitRecordOutputSchema),
-    tasks: arraySchema(todoTaskSummaryOutputSchema),
-    waits: arraySchema(waitRecordOutputSchema),
-}, ["activity", "approvals", "background", "contextSelector", "currentEvent", "cursor", "instance", "questions", "tasks", "waits"]);
+    reason: stringValue,
+    requestId: stringValue,
+    riskLevel: { enum: ["low", "medium", "high"], type: "string" },
+    source: { enum: ["cli", "tui", "web", "mcp"], type: "string" },
+    status: { enum: ["pending", "approved", "denied", "expired", "cancelled"], type: "string" },
+    toolName: nonEmptyString,
+    workspace: stringValue,
+}, ["approvalId", "callId", "createdAt", "expiresAt", "inputSummary", "instance", "reason", "riskLevel", "source", "status", "toolName"]);
+
+export function workspaceSnapshotOutputSchemaForContextMode(requiresExplicitContextId: boolean): JsonValue {
+    return objectSchema({
+        activity: arraySchema(workspaceActivitySchema),
+        approvals: arraySchema(workspaceApprovalRequestOutputSchema),
+        background: arraySchema(workspaceBackgroundSchema),
+        contextSelector: workspaceContextSelectorSchema,
+        ...(requiresExplicitContextId ? { ctxId: nonEmptyString } : {}),
+        currentEvent: workspaceCurrentEventSchema,
+        cursor: nonNegativeInteger,
+        instance: nonEmptyString,
+        questions: arraySchema(workspaceWaitRecordOutputSchema),
+        tasks: arraySchema(workspaceTodoTaskSummaryOutputSchema),
+    }, ["activity", "approvals", "background", "contextSelector", "currentEvent", "cursor", "instance", "questions", "tasks"]);
+}
+
+export const workspaceSnapshotOutputSchema = workspaceSnapshotOutputSchemaForContextMode(true);
 
 export const workspaceOpenOutputSchema: JsonValue = workspaceSnapshotOutputSchema;
 
-export const workspaceWatchOutputSchema: JsonValue = {
-    anyOf: [
-        objectSchema({
-            changed: { const: false, type: "boolean" },
-            cursor: nonNegativeInteger,
-        }, ["changed", "cursor"]),
-        objectSchema({
-            changed: { const: true, type: "boolean" },
-            cursor: nonNegativeInteger,
-            snapshot: workspaceSnapshotOutputSchema,
-        }, ["changed", "cursor", "snapshot"]),
-    ],
-};
+export function workspaceWatchOutputSchemaForContextMode(requiresExplicitContextId: boolean): JsonValue {
+    return {
+        anyOf: [
+            objectSchema({
+                changed: { const: false, type: "boolean" },
+                cursor: nonNegativeInteger,
+            }, ["changed", "cursor"]),
+            objectSchema({
+                changed: { const: true, type: "boolean" },
+                cursor: nonNegativeInteger,
+                snapshot: workspaceSnapshotOutputSchemaForContextMode(requiresExplicitContextId),
+            }, ["changed", "cursor", "snapshot"]),
+        ],
+    };
+}
+
+export const workspaceWatchOutputSchema = workspaceWatchOutputSchemaForContextMode(true);
 
 export const workspaceQuestionAnswerOutputSchema = objectSchema({
     answer: stringValue,

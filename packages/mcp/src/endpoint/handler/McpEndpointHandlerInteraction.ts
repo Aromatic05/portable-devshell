@@ -93,8 +93,8 @@ export class McpEndpointHandlerInteraction {
         }
         const task = await gateway.readTodo(this.options.instanceName, { taskId: request.taskId });
         const taskRecord = asRecord(task);
-        if (taskRecord?.taskId !== request.taskId) {
-            throw new Error(`Todo task ${request.taskId} was not found.`);
+        if (taskRecord?.taskId !== request.taskId || !taskBelongsToContext(taskRecord, request.taskId, ctxId)) {
+            throw new Error(`Todo task ${request.taskId} is not attached to the current Context.`);
         }
         const questionId = `question-${randomUUID()}`;
         const wait = await gateway.createWait(this.options.instanceName, {
@@ -205,7 +205,7 @@ export class McpEndpointHandlerInteraction {
         const { answer, waitId } = readQuestionAnswer(input);
         const wait = (await gateway.listWaits(this.options.instanceName)).find((record) => record.waitId === waitId);
         if (wait === undefined || wait.kind !== "question" || wait.createdByCtxId !== requireCtxId(context)) {
-            throw new Error(`Question wait ${waitId} was not found for this ctxId.`);
+            throw new Error(`Question wait ${waitId} was not found for the current Context.`);
         }
         validateQuestionAnswer(wait, answer);
         const resolved = await gateway.resolveWait(this.options.instanceName, waitId, { answer });
@@ -232,7 +232,7 @@ export class McpEndpointHandlerInteraction {
             wait === undefined || wait.createdByCtxId !== requireCtxId(context) ||
             wait.kind !== "tmux" || wait.status !== "waiting"
         ) {
-            throw new Error(`Interruptible tmux wait ${waitId} was not found for this ctxId.`);
+            throw new Error(`Interruptible tmux wait ${waitId} was not found for the current Context.`);
         }
         const cancelled = await gateway.cancelWait(this.options.instanceName, waitId);
         return {
@@ -252,7 +252,12 @@ export class McpEndpointHandlerInteraction {
             throw new Error(`Workspace task control is unavailable for ${this.options.instanceName}.`);
         }
         const { action, taskId } = readTaskControl(input);
-        return await gateway.controlTodo(this.options.instanceName, taskId, action, requireCtxId(context));
+        const ctxId = requireCtxId(context);
+        const task = asRecord(await gateway.readTodo(this.options.instanceName, { taskId }));
+        if (task?.taskId !== taskId || !taskBelongsToContext(task, taskId, ctxId)) {
+            throw new Error(`Todo task ${taskId} is not attached to the current Context.`);
+        }
+        return await gateway.controlTodo(this.options.instanceName, taskId, action, ctxId);
     }
 
     async #recoverWait(
@@ -271,7 +276,7 @@ export class McpEndpointHandlerInteraction {
             (wait.kind !== "tmux" && wait.kind !== "question") ||
             wait.detachedAt === undefined || wait.status !== "resolved"
         ) {
-            throw new Error(`Recoverable detached wait ${waitId} was not found for this ctxId.`);
+            throw new Error(`Recoverable detached wait ${waitId} was not found for the current Context.`);
         }
         if (recovery.action === "release") {
             await gateway.releaseWaitRecovery(this.options.instanceName, waitId, recovery.claimId);
@@ -319,9 +324,11 @@ export class McpEndpointHandlerInteraction {
         const ctxId = requireCtxId(context);
         const approval = (await gateway.listApprovals(this.options.instanceName)).find((entry) => entry.approvalId === approvalId);
         if (approval === undefined || approval.ctxId !== ctxId || approval.status !== "pending") {
-            throw new Error(`Pending approval ${approvalId} was not found for this ctxId.`);
+            throw new Error(`Pending approval ${approvalId} was not found for the current Context.`);
         }
-        return await gateway.decideApproval(this.options.instanceName, approvalId, decision) as unknown as JsonValue;
+        const decided = await gateway.decideApproval(this.options.instanceName, approvalId, decision);
+        const { ctxId: _ctxId, ...visible } = decided;
+        return visible as unknown as JsonValue;
     }
 
     async #snapshot(gateway: McpInteractionGateway, context: ToolCallContext): Promise<JsonValue> {
@@ -344,13 +351,33 @@ export class McpEndpointHandlerInteraction {
             : [];
         const ownedWaits = waits.filter((wait) => wait.createdByCtxId === ctxId);
         const ownedApprovals = approvals.filter((approval) => approval.ctxId === ctxId && approval.status === "pending");
+        const visibleTasks = tasks.flatMap((task) => {
+            const record = asRecord(task);
+            if (record === undefined) return [];
+            const { ctxId: _ctxId, ...visible } = record;
+            return [visible];
+        });
+        const visibleWaits = ownedWaits.map((wait) => {
+            const {
+                createdByCtxId: _createdByCtxId,
+                ownerCallId: _ownerCallId,
+                recoveryClaimedAt: _recoveryClaimedAt,
+                recoveryClaimId: _recoveryClaimId,
+                ...visible
+            } = wait;
+            return visible;
+        });
+        const visibleApprovals = ownedApprovals.map((approval) => {
+            const { ctxId: _ctxId, ...visible } = approval;
+            return visible;
+        });
         return {
             activity: activity
                 .filter((record) => !record.toolName.startsWith("workspace_"))
                 .slice()
                 .reverse()
                 .map(workspaceActivity),
-            approvals: ownedApprovals,
+            approvals: visibleApprovals,
             background: ownedWaits
                 .filter((wait) => wait.kind === "tmux" && wait.status !== "consumed" && wait.status !== "cancelled")
                 .map((wait) => ({
@@ -368,9 +395,8 @@ export class McpEndpointHandlerInteraction {
             currentEvent: workspaceCurrentEvent(ownedWaits, ownedApprovals),
             cursor: eventSlice.lastSeq,
             instance: this.options.instanceName,
-            questions: ownedWaits.filter((wait) => wait.kind === "question" && (wait.status === "waiting" || wait.status === "detached")),
-            tasks,
-            waits: ownedWaits.filter((wait) => wait.status !== "consumed" && wait.status !== "cancelled"),
+            questions: visibleWaits.filter((wait) => wait.kind === "question" && (wait.status === "waiting" || wait.status === "detached")),
+            tasks: visibleTasks,
         } as unknown as JsonValue;
     }
 
@@ -379,7 +405,7 @@ export class McpEndpointHandlerInteraction {
         const record = asRecord(input);
         const token = record === undefined ? undefined : record.token;
         if (typeof token !== "string" || token !== this.#appStates.get(ctxId)?.token) {
-            throw new Error("Workspace App authorization is invalid for this ctxId.");
+            throw new Error("Workspace App authorization is invalid for the current Context.");
         }
     }
 }
@@ -525,6 +551,14 @@ function workspaceEventBelongsTo(event: InstanceEvent, ctxId: string): boolean {
     return data?.ctxId === ctxId || data?.createdByCtxId === ctxId;
 }
 
+function taskBelongsToContext(todo: Record<string, JsonValue>, taskId: string, ctxId: string): boolean {
+    if (!Array.isArray(todo.tasks)) return false;
+    return todo.tasks.some((entry) => {
+        const task = asRecord(entry);
+        return task?.taskId === taskId && task.ctxId === ctxId;
+    });
+}
+
 function workspaceActivity(record: ToolCallRecord): JsonValue {
     return {
         callId: record.callId,
@@ -557,7 +591,7 @@ function readAnswer(result: JsonValue | undefined): string {
 
 function requireCtxId(context: ToolCallContext): string {
     if (typeof context.ctxId !== "string" || context.ctxId.length === 0) {
-        throw new Error("Interaction tool requires a validated ctxId.");
+        throw new Error("Interaction tool requires a validated Context.");
     }
     return context.ctxId;
 }

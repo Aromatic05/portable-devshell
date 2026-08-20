@@ -2,14 +2,16 @@ import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
 
 import { workspaceAppResourceUri } from "../../workspace/McpWorkspaceApp.js";
 import {
-    approvalRequestOutputSchema,
     todoReadOutputSchema,
     workspaceOpenOutputSchema,
+    workspaceApprovalRequestOutputSchema,
     workspaceQuestionAnswerOutputSchema,
     workspaceSnapshotOutputSchema,
+    workspaceSnapshotOutputSchemaForContextMode,
     workspaceWaitInterruptOutputSchema,
     workspaceWaitRecoveryOutputSchema,
     workspaceWatchOutputSchema,
+    workspaceWatchOutputSchemaForContextMode,
 } from "../McpToolOutputSchemas.js";
 
 export type McpToolCatalogInteractionName =
@@ -32,7 +34,7 @@ const appOnlyMeta: JsonValue = {
 export class McpToolCatalogInteraction {
     readonly #definitions: readonly ToolDefinition[] = [
         {
-            description: "Ask the user one question and wait for their answer without ending the current model turn. An active Workspace App is required for this ctxId; call workspace_open again if the App is no longer active. Use this only when progress genuinely requires human input. The taskId must identify the durable task being worked on.",
+            description: "Ask the user one question and wait for their answer without ending the current model turn. An active Workspace App is required for the current Context; call workspace_open again if the App is no longer active. Use this only when progress genuinely requires human input. The taskId must identify the durable task being worked on.",
             group: "interaction",
             inputSchema: {
                 additionalProperties: false,
@@ -80,7 +82,7 @@ export class McpToolCatalogInteraction {
                 "openai/outputTemplate": workspaceAppResourceUri,
                 "openai/widgetAccessible": true,
             },
-            description: "Open the portable-devshell Workspace control surface for the current ctxId. Call once when the user needs persistent visibility or human interaction; ordinary tools do not need to reopen it.",
+            description: "Open the portable-devshell Workspace control surface for the current Context. Call once when the user needs persistent visibility or human interaction; ordinary tools do not need to reopen it.",
             group: "interaction",
             inputSchema: { additionalProperties: false, properties: {}, type: "object" },
             name: "workspace_open",
@@ -89,7 +91,7 @@ export class McpToolCatalogInteraction {
         },
         {
             _meta: appOnlyMeta,
-            description: "Read the authoritative Workspace snapshot for the current ctxId. App-only helper; models should not call it.",
+            description: "Read the authoritative Workspace snapshot for the current Context. App-only helper; models should not call it.",
             group: "interaction",
             inputSchema: {
                 additionalProperties: false,
@@ -204,7 +206,7 @@ export class McpToolCatalogInteraction {
                 type: "object",
             },
             name: "workspace_approval_decide",
-            outputSchema: approvalRequestOutputSchema,
+            outputSchema: workspaceApprovalRequestOutputSchema,
             requiredCapabilities: [],
         },
     ];
@@ -221,8 +223,15 @@ export class McpToolCatalogInteraction {
             if (definition.name === "workspace_open") {
                 return {
                     ...definition,
-                    description: "Open the portable-devshell Workspace control surface for the current host session. Call once when the user needs persistent visibility or human interaction; ordinary tools do not need to reopen it."
+                    description: "Open the portable-devshell Workspace control surface for the current host session. Call once when the user needs persistent visibility or human interaction; ordinary tools do not need to reopen it.",
+                    outputSchema: workspaceSnapshotOutputSchemaForContextMode(false),
                 };
+            }
+            if (definition.name === "workspace_snapshot") {
+                return { ...definition, outputSchema: workspaceSnapshotOutputSchemaForContextMode(false) };
+            }
+            if (definition.name === "workspace_watch") {
+                return { ...definition, outputSchema: workspaceWatchOutputSchemaForContextMode(false) };
             }
             return { ...definition };
         });

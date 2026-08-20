@@ -82,6 +82,38 @@ test("ask_question detaches durable wait state when the host cancels the held ca
     });
 });
 
+test("ask_question requires the durable task to be attached to the current Context", async () => {
+    const fake = createInteractionGateway();
+    const gateway = Object.assign(fake.gateway, {
+        async readTodo(_instance: string, input?: { taskId?: string }) {
+            if (input?.taskId !== "task-1") {
+                return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks: [] };
+            }
+            return {
+                items: [],
+                revision: 1,
+                summary: { completed: 0, total: 1 },
+                taskId: "task-1",
+                tasks: [{ ctxId: "ctx-other", status: "in_progress", taskId: "task-1" }],
+                title: "Task"
+            };
+        }
+    }) as McpInteractionGateway;
+    const handler = new McpEndpointHandlerInteraction({ gateway, instanceName: "demo" });
+    await openWorkspace(handler);
+
+    await assert.rejects(
+        handler.call(
+            "ask_question",
+            { question: "Should not attach implicitly", taskId: "task-1" },
+            context,
+            "call-foreign-task",
+        ),
+        /not attached to the current Context/u,
+    );
+    assert.equal(fake.waits.length, 0);
+});
+
 test("Workspace authorization stays in hidden metadata and gates app-only tools", async () => {
     const fake = createInteractionGateway();
     const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
@@ -125,6 +157,23 @@ test("Workspace snapshot projects live activity and background tasks without ful
     });
     const gateway = Object.assign(fake.gateway, {
         async controlTodo() { return {}; },
+        async readTodo() {
+            return {
+                items: [],
+                revision: 0,
+                summary: { completed: 0, total: 0 },
+                tasks: [{
+                    completed: 0,
+                    ctxId: context.ctxId,
+                    revision: 1,
+                    status: "in_progress",
+                    taskId: "task-1",
+                    title: "Task",
+                    total: 1,
+                    updatedAt: now,
+                }]
+            };
+        },
         async readToolCalls() {
             return [{
                 callId: "call-1",
@@ -152,6 +201,7 @@ test("Workspace snapshot projects live activity and background tasks without ful
         background?: Array<Record<string, unknown>>;
         currentEvent?: Record<string, unknown> | null;
         cursor?: number;
+        tasks?: Array<Record<string, unknown>>;
     };
     assert.equal(snapshot.cursor, 7);
     assert.equal(snapshot.background?.[0]?.tmuxTaskId, "tmux-task-1");
@@ -160,6 +210,8 @@ test("Workspace snapshot projects live activity and background tasks without ful
     assert.equal(snapshot.activity?.[0]?.toolName, "bash_run");
     assert.equal("input" in (snapshot.activity?.[0] ?? {}), false);
     assert.equal("output" in (snapshot.activity?.[0] ?? {}), false);
+    assert.equal(Object.hasOwn(snapshot.tasks?.[0] ?? {}, "ctxId"), false);
+    assert.equal(Object.hasOwn(snapshot, "waits"), false);
 });
 
 test("Workspace can interrupt a held tmux wait without cancelling the tmux task", async () => {
@@ -220,7 +272,14 @@ test("Workspace task control and detached-wait recovery use durable server state
         },
         async readTodo(_instance: string, input?: { taskId?: string }) {
             if (input?.taskId === "task-1") {
-                return { items: [], revision: 1, summary: { completed: 0, total: 1 }, taskId: "task-1", title: "Task" };
+                return {
+                    items: [],
+                    revision: 1,
+                    summary: { completed: 0, total: 1 },
+                    taskId: "task-1",
+                    tasks: [{ ctxId: context.ctxId, status: taskStatus, taskId: "task-1" }],
+                    title: "Task"
+                };
             }
             return {
                 items: [],
@@ -449,6 +508,21 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     assert.deepEqual((adaptedInterrupt._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.deepEqual((adaptedWatch._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.equal(ask._meta, undefined);
+
+    const sessionOpen = new McpToolCatalogInteraction().list(false).find((definition) => definition.name === "workspace_open");
+    const sessionSchema = sessionOpen?.outputSchema as {
+        properties?: {
+            ctxId?: unknown;
+            questions?: { items?: { properties?: Record<string, unknown> } };
+            tasks?: { items?: { properties?: Record<string, unknown> } };
+        };
+    };
+    assert.equal(sessionSchema.properties?.ctxId, undefined);
+    assert.equal(sessionSchema.properties?.tasks?.items?.properties?.ctxId, undefined);
+    assert.equal(sessionSchema.properties?.questions?.items?.properties?.createdByCtxId, undefined);
+    assert.equal(sessionSchema.properties?.questions?.items?.properties?.ownerCallId, undefined);
+    assert.equal(sessionSchema.properties?.questions?.items?.properties?.recoveryClaimId, undefined);
+    assert.doesNotMatch(sessionOpen?.description ?? "", /ctxId/u);
 });
 
 async function openWorkspace(handler: McpEndpointHandlerInteraction): Promise<string> {
@@ -477,7 +551,23 @@ function createInteractionGateway(): {
     const gateway = {
         async readTodo(_instance: string, input?: { taskId?: string }) {
             return input?.taskId === "task-1"
-                ? { items: [], revision: 1, summary: { completed: 0, total: 1 }, taskId: "task-1", title: "Task" }
+                ? {
+                    items: [],
+                    revision: 1,
+                    summary: { completed: 0, total: 1 },
+                    taskId: "task-1",
+                    tasks: [{
+                        completed: 0,
+                        ctxId: context.ctxId,
+                        revision: 1,
+                        status: "in_progress",
+                        taskId: "task-1",
+                        title: "Task",
+                        total: 1,
+                        updatedAt: "2026-08-20T00:00:00.000Z",
+                    }],
+                    title: "Task"
+                }
                 : { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks: [] };
         },
         async createWait(_instance: string, input: WaitCreateInput) {

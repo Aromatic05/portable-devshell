@@ -185,7 +185,7 @@ export class McpEndpointCatalog {
             sources.push(
                 {
                     owner: "todo",
-                    tools: this.#todoTools.list()
+                    tools: this.#todoTools.list(this.#contextSelector.requiresExplicitContextId)
                 },
                 {
                     owner: "instance",

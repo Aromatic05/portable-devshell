@@ -34,10 +34,10 @@ test("Control-owned MCP tools describe their structured output instead of generi
     ]);
 
     assertProperties(definition(definitions, "workspace_open").outputSchema, [
-        "activity", "approvals", "background", "contextSelector", "ctxId", "currentEvent", "cursor", "instance", "questions", "tasks", "waits"
+        "activity", "approvals", "background", "contextSelector", "ctxId", "currentEvent", "cursor", "instance", "questions", "tasks"
     ]);
     assertProperties(definition(definitions, "workspace_snapshot").outputSchema, [
-        "activity", "approvals", "background", "contextSelector", "ctxId", "currentEvent", "cursor", "instance", "questions", "tasks", "waits"
+        "activity", "approvals", "background", "contextSelector", "ctxId", "currentEvent", "cursor", "instance", "questions", "tasks"
     ]);
     assertAnyOf(definition(definitions, "workspace_watch").outputSchema, 2);
     assert.deepEqual(required(definition(definitions, "workspace_question_answer").outputSchema), [

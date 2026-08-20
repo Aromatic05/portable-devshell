@@ -150,7 +150,7 @@ function requireCtxId(context: ToolCallContext): string {
     if (context.ctxId !== undefined && context.ctxId.length > 0) return context.ctxId;
     throw createError({
         code: errorCodes.mcpContextInvalid,
-        message: "instance_connect requires a validated ctxId.",
+        message: "instance_connect requires a validated Context.",
         retryable: false
     });
 }

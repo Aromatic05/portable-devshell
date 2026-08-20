@@ -404,7 +404,8 @@ function sanitizeDetails(details: JsonValue): JsonValue {
 
     const candidate = details as Record<string, JsonValue>;
     const filtered = Object.entries(candidate).filter(([key]) => {
-        return key !== "command" && key !== "commandDisplay" && key !== "cwd" && key !== "stderrTail" && key !== "stdoutTail";
+        return key !== "activeCtxId" && key !== "command" && key !== "commandDisplay" && key !== "createdByCtxId" &&
+            key !== "ctxId" && key !== "cwd" && key !== "stderrTail" && key !== "stdoutTail";
     });
 
     return Object.fromEntries(filtered.map(([key, value]) => [key, sanitizeDetails(value)])) as JsonValue;

@@ -122,7 +122,7 @@ function artifactTransferTool(): ToolDefinition {
     const nonStartFields = ["handle", "sourcePath", "targetInstance", "targetPath", "targetWorkspace", "overwrite"]
         .map((field) => ({ required: [field] }));
     return {
-        description: "Manage an asynchronous transfer between managed instances. For operation=start, provide exactly one of sourcePath or handle, plus targetInstance, targetPath, and an absolute targetWorkspace. The source workspace comes from ctxId. overwrite defaults to false. The returned transferId is used with operation=status or operation=cancel.",
+        description: "Manage an asynchronous transfer between managed instances. For operation=start, provide exactly one of sourcePath or handle, plus targetInstance, targetPath, and an absolute targetWorkspace. The source workspace comes from the current Context. overwrite defaults to false. The returned transferId is used with operation=status or operation=cancel.",
         group: "artifact",
         inputSchema: {
             additionalProperties: false,
