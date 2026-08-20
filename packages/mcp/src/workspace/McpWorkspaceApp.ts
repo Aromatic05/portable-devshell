@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 export const workspaceAppStableResourceUri = "ui://portable-devshell/workspace/v1.html";
 export const workspaceAppLegacyResourceUris: readonly string[] = [
+    "ui://portable-devshell/workspace-98410baf51f694b0.html",
     "ui://portable-devshell/workspace-03c4911b6d185e3c.html",
     "ui://portable-devshell/workspace-c978585dba4e38c7.html",
 ];
@@ -80,7 +81,8 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
 (function () {
   var root = document.getElementById("root");
   var status = document.getElementById("status");
-  var App = globalThis.__portableDevshellMcpApp;
+  var McpApps = globalThis.__portableDevshellMcpApps;
+  var App = McpApps.App;
   var app = new App({ name: "portable-devshell-workspace", version: "0.6.8" }, {});
   var requiresExplicitContextId = true;
   var ctxId = "";
@@ -96,6 +98,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
   var bridgeReady = false;
   var pendingToolResult = null;
   var initialToolResultResolve = null;
+  var liveAbortController = null;
 
   function escapeHtml(value) {
     return String(value == null ? "" : value)
@@ -103,14 +106,17 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
       .replaceAll(">", "&gt;").replaceAll('"', "&quot;");
   }
 
-  function callTool(name, args, requiresToken) {
+  function callTool(name, args, requiresToken, signal) {
     if (!initialized) return Promise.reject(new Error("Workspace App is not initialized"));
     if (requiresToken && !appToken) return Promise.reject(new Error("Workspace App authorization is unavailable"));
     if (requiresExplicitContextId && !ctxId) return Promise.reject(new Error("Workspace context is unavailable"));
     var input = Object.assign({}, args || {});
     if (requiresExplicitContextId) input.ctxId = ctxId;
     if (requiresToken) input.token = appToken;
-    return app.callServerTool({ name: name, arguments: input }).then(function (result) {
+    return app.callServerTool(
+      { name: name, arguments: input },
+      signal ? { signal: signal } : undefined
+    ).then(function (result) {
       acceptMeta(result && result._meta);
       return result;
     });
@@ -127,6 +133,19 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
 
   function asRecord(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  }
+
+  function applyHostContext(context) {
+    var record = asRecord(context);
+    if (!record) return;
+    if (record.theme === "light" || record.theme === "dark") {
+      McpApps.applyDocumentTheme(record.theme);
+    }
+    var styles = asRecord(record.styles);
+    var variables = asRecord(styles && styles.variables);
+    if (variables) McpApps.applyHostStyleVariables(variables);
+    var css = asRecord(styles && styles.css);
+    if (css && typeof css.fonts === "string") McpApps.applyHostFonts(css.fonts);
   }
 
   function toolResultFromOpenAiGlobals(globals) {
@@ -335,8 +354,10 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
   async function watch() {
     var generation = ++watchGeneration;
     while (generation === watchGeneration) {
+      var controller = new AbortController();
+      liveAbortController = controller;
       try {
-        var result = await callTool("workspace_watch", { cursor: cursor }, false);
+        var result = await callTool("workspace_watch", { cursor: cursor }, false, controller.signal);
         if (generation !== watchGeneration) return;
         var update = structured(result) || {};
         if (Number.isSafeInteger(update.cursor)) cursor = update.cursor;
@@ -345,12 +366,14 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
         }
         status.textContent = snapshot && snapshot.instance ? snapshot.instance + " · live" : "Connected";
       } catch (error) {
-        if (generation !== watchGeneration) return;
+        if (generation !== watchGeneration || controller.signal.aborted) return;
         status.textContent = "Reconnecting";
         console.error(error);
         await sleep(1000);
         if (generation !== watchGeneration) return;
         try { await refresh(); } catch (_) {}
+      } finally {
+        if (liveAbortController === controller) liveAbortController = null;
       }
     }
   }
@@ -403,6 +426,8 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
 
   function stopLive() {
     watchGeneration += 1;
+    if (liveAbortController) liveAbortController.abort();
+    liveAbortController = null;
     watchStarted = false;
     initialized = false;
   }
@@ -413,8 +438,10 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
   };
   app.ontoolresult = acceptInitialOrLiveToolResult;
   app.ontoolcancelled = function () {
+    stopLive();
     status.textContent = "Cancelled";
   };
+  app.onhostcontextchanged = applyHostContext;
   app.onteardown = async function () {
     stopLive();
     return {};
@@ -423,6 +450,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid color-mix(in
   async function connect() {
     try {
       await app.connect();
+      applyHostContext(app.getHostContext());
       bridgeReady = true;
       initialized = true;
       status.textContent = "Connected";
@@ -596,12 +624,31 @@ function loadWorkspaceSdkScript(): string {
     const path = fileURLToPath(import.meta.resolve("@modelcontextprotocol/ext-apps/app-with-deps"));
     const source = readFileSync(path, "utf8").trimEnd();
     const exportBlock = source.match(/export\{([\s\S]+)\};$/);
-    const appExport = exportBlock?.[1].match(/(?:^|,)([$A-Za-z_][$\w]*) as App(?:,|$)/);
-    if (exportBlock?.index === undefined || appExport == null) {
-        throw new Error("Unable to locate App export in @modelcontextprotocol/ext-apps/app-with-deps.");
+    const exports = exportBlock?.[1];
+    const exportedSymbol = (name: string): string | undefined => {
+        const match = exports?.match(new RegExp(`(?:^|,)\\s*([$A-Za-z_][$\\w]*)\\s+as\\s+${name}\\s*(?:,|$)`));
+        return match?.[1];
+    };
+    const appExport = exportedSymbol("App");
+    const applyDocumentThemeExport = exportedSymbol("applyDocumentTheme");
+    const applyHostStyleVariablesExport = exportedSymbol("applyHostStyleVariables");
+    const applyHostFontsExport = exportedSymbol("applyHostFonts");
+    if (
+        exportBlock?.index === undefined ||
+        appExport === undefined ||
+        applyDocumentThemeExport === undefined ||
+        applyHostStyleVariablesExport === undefined ||
+        applyHostFontsExport === undefined
+    ) {
+        throw new Error("Unable to locate required exports in @modelcontextprotocol/ext-apps/app-with-deps.");
     }
     if (source.toLowerCase().includes("</script")) {
         throw new Error("MCP Apps browser bundle cannot be embedded safely in Workspace HTML.");
     }
-    return `${source.slice(0, exportBlock.index)}globalThis.__portableDevshellMcpApp=${appExport[1]};`;
+    return `${source.slice(0, exportBlock.index)}globalThis.__portableDevshellMcpApps={` +
+        `App:${appExport},` +
+        `applyDocumentTheme:${applyDocumentThemeExport},` +
+        `applyHostFonts:${applyHostFontsExport},` +
+        `applyHostStyleVariables:${applyHostStyleVariablesExport}` +
+        `};`;
 }

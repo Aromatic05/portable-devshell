@@ -153,6 +153,7 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
         assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /section-head/);
         assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /setInterval\(refresh/);
         assert.deepEqual(workspaceAppLegacyResourceUris, [
+            "ui://portable-devshell/workspace-98410baf51f694b0.html",
             "ui://portable-devshell/workspace-03c4911b6d185e3c.html",
             "ui://portable-devshell/workspace-c978585dba4e38c7.html"
         ]);

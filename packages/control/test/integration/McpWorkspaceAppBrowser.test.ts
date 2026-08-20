@@ -32,6 +32,27 @@ test("Workspace App watches live state and keeps human-action authorization hidd
 
     const app = page.frameLocator("#workspace");
     await app.getByText("Continue the task?", { exact: true }).waitFor({ state: "visible" });
+    assert.equal(await app.locator("html").getAttribute("data-theme"), "dark");
+    assert.equal(
+        await app.locator("html").evaluate((element) => element.style.getPropertyValue("--color-text-primary")),
+        "rgb(12, 34, 56)"
+    );
+    await page.evaluate(() => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        iframe?.contentWindow?.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/host-context-changed",
+            params: { theme: "light", styles: { variables: { "--color-text-primary": "rgb(65, 43, 21)" } } }
+        }, "*");
+    });
+    await page.waitForFunction(() => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        return iframe?.contentDocument?.documentElement.getAttribute("data-theme") === "light";
+    });
+    assert.equal(
+        await app.locator("html").evaluate((element) => element.style.getPropertyValue("--color-text-primary")),
+        "rgb(65, 43, 21)"
+    );
     await app.getByText("ask_question", { exact: true }).waitFor({ state: "visible" });
     const choice = app.locator('[data-question-choice="wait-question"]');
     await choice.first().waitFor({ state: "visible" });
@@ -64,6 +85,17 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_wait_interrupt')");
     await app.getByText("No blocking event.", { exact: true }).waitFor({ state: "visible" });
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
+
+    await page.evaluate(() => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        iframe?.contentWindow?.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-cancelled",
+            params: { reason: "test cancellation" }
+        }, "*");
+    });
+    await app.getByText("Cancelled", { exact: true }).waitFor({ state: "visible" });
+    await page.waitForFunction("(window.__workspaceCancelledRequests || []).length > 0");
 
     const calls = await page.evaluate("window.__workspaceCalls || []") as Array<{
         arguments?: Record<string, unknown>;
@@ -312,6 +344,7 @@ window.addEventListener("message", function (event) {
 
 const BRIDGE_SCRIPT = String.raw`
 window.__workspaceCalls = [];
+window.__workspaceCancelledRequests = [];
 window.__workspaceQuestionAnswered = false;
 window.__workspaceApprovalPending = true;
 window.__workspaceWaitInterrupted = false;
@@ -426,7 +459,10 @@ window.addEventListener("message", function (event) {
         }, "*");
         reply({
             hostCapabilities: {},
-            hostContext: {},
+            hostContext: {
+                theme: "dark",
+                styles: { variables: { "--color-text-primary": "rgb(12, 34, 56)" } }
+            },
             hostInfo: { name: "test-host", version: "1.0.0" },
             protocolVersion: "2026-01-26"
         });
@@ -442,6 +478,10 @@ window.addEventListener("message", function (event) {
         window.__modelMessages.push(message.params || {});
         window.__bridgeEvents.push("message");
         reply({});
+        return;
+    }
+    if (message.method === "notifications/cancelled") {
+        window.__workspaceCancelledRequests.push(message.params || {});
         return;
     }
     if (message.method !== "tools/call") return;
