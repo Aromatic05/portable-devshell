@@ -138,7 +138,7 @@ Todo task 现在同时承担 model re-entry checkpoint。模型在 `todo_write` 
 
 Todo runtime 仍保留 task-level Pause / Resume / Cancel 语义，用于 durable task 生命周期和兼容已经挂载的旧 Workspace App；当前紧凑 Workspace 不再把 task controls 作为常驻面板展示。它们不会隐式向 tmux 进程发送信号。
 
-`tmux_run` 使用与 `workspace_ask` 相同的关联规则建立 durable Wait。`resume: true` 时，MCP 先挂住模型最多固定 60 分钟；任务在此期间结束则直接返回结果。任务仍在运行时才转成 detached。`timeout` 从任务启动开始计算；detached 后，任务结束或该绝对截止时间先到达，都会解析 durable Wait 并通过 Workspace 恢复模型。失败退出码同样会解析 Wait。
+`tmux_run` 使用与 `workspace_ask` 相同的关联规则建立 durable Wait。`resume: true` 时，MCP 只在当前 Host tool call 的安全窗口内挂住模型，固定最多 3 分钟；任务在此期间结束则直接返回结果。任务仍在运行时转成 detached，由 Workspace 接管后续恢复。`timeout` 从任务启动开始计算；detached 后，任务结束或该绝对截止时间先到达，都会解析 durable Wait 并通过 Workspace 恢复模型。失败退出码同样会解析 Wait。允许更大的 `timeout` 不代表单次 Host tool call 会同步阻塞同样长的时间。
 
 用户在 Workspace 对当前 waiting `tmux_run` 选择 `Interrupt wait` 时，Wait 直接进入 cancelled，MCP 停止当前等待 observer，但绝不会停止对应 tmux task；这只取消本次等待。
 
@@ -243,7 +243,7 @@ artifact_viewImage 在 payload 分块读取边界停止，并关闭临时 lease
 control 侧工具     立即停止 MCP 等待；已经开始的生命周期或原子操作继续完成
 tmux_run           停止等待，已经启动的 task 继续运行
 tmux_read          停止等待且不消费尚未返回的输出
-tmux_run           resume 等待超出固定 60 分钟后分离；task 继续运行，Workspace 在任务结束或绝对 timeout 到达时恢复模型
+tmux_run           resume 等待超出固定 3 分钟后分离；task 继续运行，Workspace 在任务结束或绝对 timeout 到达时恢复模型
 ```
 
 worker handshake 返回 `cancel = true`。本地 RPC、WSS 和 SSE + HTTPS POST 反向连接都允许取消请求在长工具运行期间到达 worker。工具调用历史使用 `cancelled`，等待审批时还会产生 `approval.cancelled`。

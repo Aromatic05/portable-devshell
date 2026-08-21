@@ -26,7 +26,7 @@ test("MCP tmux supports a complete interactive lifecycle when JSON-RPC request i
             const tool = tools.find((entry) => entry.name === toolName);
             assert.notEqual(tool, undefined);
             assert.equal(tool?.inputSchema.properties?.timeMs?.minimum, 0);
-            assert.equal(tool?.inputSchema.properties?.timeMs?.maximum, 300_000);
+            assert.equal(tool?.inputSchema.properties?.timeMs?.maximum, 3_600_000);
         }
         const inputTool = tools.find((entry) => entry.name === "tmux_input");
         assert.equal(inputTool?.inputSchema.type, "object");

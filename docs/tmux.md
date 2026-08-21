@@ -143,7 +143,7 @@ nonblock  task 成功启动后立即返回（默认）
 
 `timeMs` 只限制这次 RPC 等待，不停止 task。block wait 超时会返回 `tmux.blockTimeout` warning，task 继续运行。
 
-需要等待已启动 task 的输出或终态时使用 `tmux_read`；`tmux_run` 的 `resume: true` 会由 MCP 负责固定 60 分钟挂起与 Workspace 恢复。
+需要等待已启动 task 的输出或终态时使用 `tmux_read`；`tmux_run` 的 `resume: true` 会由 MCP 在当前 Host tool call 的安全窗口内固定最多挂起 3 分钟，之后由 Workspace 接管恢复。
 
 running task 的返回值包含 task 和它当前独占的 pane：
 
@@ -249,7 +249,7 @@ Transcript 展示层会处理常见 terminal 控制：ANSI control sequence 不�
 
 ## `tmux_run` 的 Workspace resume
 
-MCP 调用 `tmux_run` 时传入 `resume: true`，会先固定挂起模型最多 60 分钟。任务在 60 分钟内结束则直接返回；仍运行时返回 `detached: true` 并建立 durable Wait。`timeout` 从任务启动开始计算，任务结束或绝对截止时间先到达时都会触发 Workspace resume；失败退出码也会触发恢复。
+MCP 调用 `tmux_run` 时传入 `resume: true`，会先在当前 Host tool call 的安全窗口内固定挂起模型最多 3 分钟。任务在 3 分钟内结束则直接返回；仍运行时返回 `detached: true` 并建立 durable Wait，由 Workspace 接管后续恢复。`timeout` 从任务启动开始计算，任务结束或绝对截止时间先到达时都会触发 Workspace resume；失败退出码也会触发恢复。`timeout` 可以长于 3 分钟，但不会延长单次 Host tool call 的同步阻塞时间。
 
 ## `tmux_inspect`: terminal history
 
