@@ -55,7 +55,7 @@ export interface McpEndpointDispatchOptions {
 }
 
 const MCP_TMUX_WAIT_POLL_MS = 1_000;
-const MCP_TMUX_RESUME_BLOCK_MS = 3 * 60_000;
+const MCP_TMUX_RESUME_BLOCK_MS = 20 * 60_000;
 
 export class McpEndpointDispatch {
     readonly #artifact: McpEndpointHandlerArtifact;
@@ -68,6 +68,7 @@ export class McpEndpointDispatch {
     readonly #instanceName: string;
     readonly #interaction: McpEndpointHandlerInteraction;
     readonly #tmuxWaitPollMs: number;
+    readonly #tmuxWaitRestores = new Map<string, Promise<void>>();
     readonly #tmuxWaitTrackers = new Map<string, { controller: AbortController; promise: Promise<JsonValue> }>();
     readonly #todo: McpEndpointHandlerTodo;
     readonly #worker: McpEndpointWorkerPort;
@@ -140,6 +141,7 @@ export class McpEndpointDispatch {
         const selected = snapshot.exposed.find((entry) => entry.definition.name === toolName);
 
         if (known?.owner === "environment") {
+            await this.#restoreTmuxWaits(this.#instanceName);
             return await this.#environment.call(
                 toolName,
                 input,
@@ -164,6 +166,7 @@ export class McpEndpointDispatch {
         const routed = selected.owner === "worker" || selected.owner === "artifact"
             ? readMcpRoutedInput(input, snapshot.instanceRoutingEnabled, this.#instanceName)
             : { input, instance: this.#instanceName };
+        await this.#restoreTmuxWaits(routed.instance);
         const context = await this.#createToolContext(
             toolName,
             resolvedContext.record,
@@ -275,6 +278,7 @@ export class McpEndpointDispatch {
         const taskId = goalId === undefined ? await this.#currentTaskId(instance, context.ctxId) : undefined;
         let wait = await gateway.createWait(instance, {
             createdByCtxId: context.ctxId,
+            ...(timeout === undefined ? {} : { deadlineAt: new Date(startedAt + timeout).toISOString() }),
             ...(goalId === undefined ? {} : { goalId }),
             kind: "tmux",
             ownerCallId: callId,
@@ -354,6 +358,30 @@ export class McpEndpointDispatch {
         this.#tmuxWaitTrackers.set(key, { controller, promise: tracker });
         void tracker.catch(() => undefined);
         return tracker;
+    }
+
+    async #restoreTmuxWaits(instance: string): Promise<void> {
+        if (!isMcpTmuxWaitGateway(this.#gateway)) return;
+        const existing = this.#tmuxWaitRestores.get(instance);
+        if (existing !== undefined) {
+            await existing;
+            return;
+        }
+        const restore = (async () => {
+            const waits = await this.#gateway!.listWaits!(instance);
+            for (const wait of waits) {
+                if (wait.kind !== "tmux" || wait.status !== "detached") continue;
+                this.#ensureTmuxWaitTracker(
+                    wait.waitId,
+                    wait.targetId,
+                    { ctxId: wait.createdByCtxId, source: "mcp" },
+                    instance,
+                    wait.deadlineAt === undefined ? undefined : Date.parse(wait.deadlineAt),
+                );
+            }
+        })().catch(() => undefined);
+        this.#tmuxWaitRestores.set(instance, restore);
+        await restore;
     }
 
     async #trackTmuxTask(

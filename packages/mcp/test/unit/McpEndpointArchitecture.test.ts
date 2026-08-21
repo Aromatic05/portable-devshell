@@ -407,6 +407,7 @@ test("tmux_run hands long waits to Workspace and resumes failed terminal tasks",
         status: "waiting" | "detached" | "resolved" | "consumed" | "cancelled";
         taskId?: string;
         targetId: string;
+        deadlineAt?: string;
         updatedAt: string;
         waitId: string;
     };
@@ -506,7 +507,7 @@ test("tmux_run hands long waits to Workspace and resumes failed terminal tasks",
     ) as { ctxId: string };
     const first = await dispatch.callTool(
         "tmux_run",
-        { command: "sleep 10", ctxId: environment.ctxId, resume: true, timeout: 300_001 },
+        { command: "sleep 10", ctxId: environment.ctxId, resume: true, timeout: 1_200_001 },
         { principal: "tester", requestId: "wait-1" },
     ) as { detached?: boolean; task?: { id?: string; status?: string } };
     await waitUntil(() => waits.length === 1 && observeCalls > 0);
@@ -520,6 +521,35 @@ test("tmux_run hands long waits to Workspace and resumes failed terminal tasks",
     assert.equal(waits[0]?.result, terminalResults.get("task-1"));
     assert.equal(harness.audited.filter((entry) => entry.toolName === "tmux_run").length, 1);
     assert.equal(harness.auditResults.filter((entry) => entry.toolName === "tmux_run").length, 1);
+
+    const restoredNow = new Date().toISOString();
+    waits.push({
+        createdAt: restoredNow,
+        createdByCtxId: environment.ctxId,
+        deadlineAt: new Date(Date.now() + 30_000).toISOString(),
+        detachedAt: restoredNow,
+        kind: "tmux",
+        status: "detached",
+        targetId: "task-2",
+        updatedAt: restoredNow,
+        waitId: "wait-restored",
+    });
+    terminalResults.set("task-2", { task: { id: "task-2", status: "1" } });
+    const restartedDispatch = new McpEndpointDispatch({
+        catalog,
+        contextRegistry: new McpContextRegistry(),
+        gateway,
+        instanceName: "demo-local",
+        tmuxWaitPollMs: 1,
+        worker,
+    });
+    await restartedDispatch.callTool(
+        "environ_info",
+        { workspace: "/workspace/restarted" },
+        { principal: "tester", requestId: "restore-observer" },
+    );
+    await waitUntil(() => waits.find((entry) => entry.waitId === "wait-restored")?.status === "resolved");
+    assert.equal(waits.find((entry) => entry.waitId === "wait-restored")?.result, terminalResults.get("task-2"));
 });
 
 test("OpenAI session selector replacement happens only after audited environ_info succeeds", async () => {
