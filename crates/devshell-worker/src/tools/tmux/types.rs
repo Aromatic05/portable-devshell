@@ -19,10 +19,10 @@ pub struct TmuxRunParams {
     #[schemars(length(min = 1))]
     pub command: String,
     #[serde(default)]
-    /// Resume the model through Workspace when this task reaches a terminal state.
+    /// Request model resume handling for this task.
     pub resume: bool,
     #[serde(default)]
-    /// Maximum time to wait for a resume task before handing it to Workspace. Does not stop the task.
+    /// Maximum total resume wait from task start. Does not stop the task; MCP may hand longer waits to Workspace after its fixed host-safe synchronous window.
     #[schemars(range(min = 1, max = 3600000))]
     pub timeout: Option<u64>,
     #[serde(default)]
@@ -252,9 +252,9 @@ pub struct TmuxWarning {
 #[serde(rename_all = "camelCase")]
 pub struct TmuxRunOutput {
     pub task: TmuxTaskView,
-    /// Whether this task will resume the model through Workspace after completion.
+    /// Whether model resume handling was requested for this task.
     pub resume: bool,
-    /// Maximum resume handoff wait time. Does not stop the task.
+    /// Configured maximum total resume wait from task start. Does not stop the task.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
