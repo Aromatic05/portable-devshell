@@ -207,8 +207,10 @@ test("Workspace App can re-establish its lifecycle after remount", async () => {
 
     assert.ok(reconnected instanceof McpNativeToolResult);
     assert.equal((reconnected.structuredContent as { ctxId?: string }).ctxId, context.ctxId);
-    const meta = reconnected._meta?.["portable-devshell/workspace"] as { token?: unknown } | undefined;
-    assert.equal(typeof meta?.token, "string");
+    const meta = reconnected._meta?.["portable-devshell/workspace"] as { token?: string } | undefined;
+    const token = meta?.token;
+    assert.equal(typeof token, "string");
+    if (token === undefined) throw new Error("Workspace reconnect token is missing.");
     const held = handler.call(
         "workspace_ask",
         { question: "Can the reconnected App receive a question?" },
@@ -218,7 +220,7 @@ test("Workspace App can re-establish its lifecycle after remount", async () => {
     const wait = await fake.created;
     await handler.call(
         "workspace_question_answer",
-        { answer: "yes", token: meta?.token, waitId: wait.waitId },
+        { answer: "yes", token, waitId: wait.waitId },
         context,
         "call-answer",
     );
