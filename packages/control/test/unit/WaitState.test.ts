@@ -72,6 +72,10 @@ test("WaitState keeps resolved waits recoverable until model re-entry completes"
 
     assert.equal(claimed.record.status, "resolved");
     assert.equal(claimed.record.recoveryClaimId, "claim-1");
+    assert.match(claimed.record.recoveryMessageId ?? "", /^recovery-message-/u);
+    const sent = state.markRecoverySent(claimed.document, created.record.waitId, "claim-1");
+    const sentAgain = state.markRecoverySent(sent.document, created.record.waitId, "claim-1");
+    assert.equal(sentAgain.record.recoveryMessageSentAt, sent.record.recoveryMessageSentAt);
     assert.throws(
         () => state.claimRecovery(claimed.document, created.record.waitId, "claim-2"),
         /already claimed/u,

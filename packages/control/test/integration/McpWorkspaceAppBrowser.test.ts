@@ -124,8 +124,8 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     const goalStopCall = calls.find((call) => call.name === "workspace_goal_stop");
     const interruptCall = calls.find((call) => call.name === "workspace_wait_interrupt");
 
-    assert.equal(snapshotCall?.arguments?.token, undefined);
-    assert.equal(watchCall?.arguments?.token, undefined);
+    assert.equal(snapshotCall?.arguments?.token, "browser-secret-token");
+    assert.equal(watchCall?.arguments?.token, "browser-secret-token");
     assert.equal(answerCall?.arguments?.token, "browser-secret-token");
     assert.equal(answerCall?.arguments?.ctxId, "ctx-browser");
     assert.equal(answerCall?.arguments?.waitId, "wait-question");
@@ -351,7 +351,7 @@ test("Workspace App claims a resolved detached wait before one automatic model r
 
     await mount();
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 2");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 3");
 
     const firstEvents = await page.evaluate("window.__bridgeEvents || []") as string[];
     const firstMessage = firstEvents.indexOf("message");
@@ -360,7 +360,7 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     await mount();
     await page.waitForTimeout(100);
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
-    assert.equal(await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"), 2);
+    assert.equal(await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"), 3);
 
     const recoverCalls = await page.evaluate(
         "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover')",
@@ -368,8 +368,10 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     assert.equal(recoverCalls[0]?.arguments?.action, "claim");
     assert.equal(recoverCalls[0]?.arguments?.token, "recovery-secret-token");
     assert.equal(recoverCalls[0]?.arguments?.waitId, "wait-recovery");
-    assert.equal(recoverCalls[1]?.arguments?.action, "complete");
+    assert.equal(recoverCalls[1]?.arguments?.action, "sent");
     assert.equal(recoverCalls[1]?.arguments?.claimId, "recovery-claim");
+    assert.equal(recoverCalls[2]?.arguments?.action, "complete");
+    assert.equal(recoverCalls[2]?.arguments?.claimId, "recovery-claim");
 });
 
 test("Workspace Goal recovers a resolved detached wait without Todo", BROWSER_TEST_OPTIONS, async (t) => {
@@ -389,7 +391,7 @@ test("Workspace Goal recovers a resolved detached wait without Todo", BROWSER_TE
     }, workspaceAppHtml);
 
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 2");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 3");
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
 });
 
@@ -410,7 +412,7 @@ test("Workspace recovers an unassociated resolved wait by Context", BROWSER_TEST
     }, workspaceAppHtml);
 
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 2");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 3");
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
 });
 
@@ -1051,6 +1053,15 @@ window.addEventListener("message", function (event) {
         if (call.arguments.action === "complete") {
             window.__recovered = true;
             reply({ structuredContent: { completed: true, kind: "tmux", targetId: "tmux-recovery", waitId: "wait-recovery" } });
+            return;
+        }
+        if (call.arguments.action === "sent") {
+            reply({ structuredContent: {
+                recoveryMessageId: "recovery-message-id",
+                recoveryMessageSentAt: "2026-08-19T01:00:03.000Z",
+                sent: true,
+                waitId: "wait-recovery"
+            } });
             return;
         }
         if (call.arguments.action === "release") {

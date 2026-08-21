@@ -122,6 +122,10 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return await this.#requireWait(instance).completeRecovery(waitId, claimId);
     }
 
+    async markWaitRecoverySent(instance: string, waitId: string, claimId: string) {
+        return await this.#requireWait(instance).markRecoverySent(waitId, claimId);
+    }
+
     async detachWait(instance: string, waitId: string) {
         return await this.#requireWait(instance).detach(waitId);
     }

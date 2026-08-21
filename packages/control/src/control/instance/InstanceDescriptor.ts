@@ -49,6 +49,7 @@ export interface InstanceWaitPort {
     detach(waitId: string): Promise<WaitRecord>;
     get(waitId: string): Promise<WaitRecord | undefined>;
     list(taskId?: string): Promise<WaitRecord[]>;
+    markRecoverySent(waitId: string, claimId: string): Promise<WaitRecord>;
     reattach(waitId: string, ownerCallId?: string): Promise<WaitRecord>;
     releaseRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
     resolve(waitId: string, result?: JsonValue): Promise<WaitRecord>;

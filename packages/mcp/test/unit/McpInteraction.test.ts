@@ -180,7 +180,7 @@ test("Workspace authorization stays in hidden metadata and gates app-only tools"
     assert.equal(JSON.stringify(opened.structuredContent).includes(meta.token), false);
     const snapshot = await handler.call(
         "workspace_snapshot",
-        {},
+        { token: meta.token },
         context,
         "call-app",
     );
@@ -225,6 +225,26 @@ test("Workspace App can re-establish its lifecycle after remount", async () => {
     await assert.doesNotReject(held);
 });
 
+test("Workspace reconnect rotates the App token and fences the old token", async () => {
+    const fake = createInteractionGateway();
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    const firstToken = await openWorkspace(handler);
+    const reconnected = await handler.call("workspace_reconnect", {}, context, "call-reconnect");
+    assert.ok(reconnected instanceof McpNativeToolResult);
+    const secondToken = (reconnected._meta?.["portable-devshell/workspace"] as { token: string }).token;
+    assert.notEqual(secondToken, firstToken);
+    await assert.rejects(
+        handler.call("workspace_snapshot", { token: firstToken }, context, "call-stale-snapshot"),
+        /authorization is invalid/i,
+    );
+    await assert.doesNotReject(handler.call(
+        "workspace_snapshot",
+        { token: secondToken },
+        context,
+        "call-current-snapshot",
+    ));
+});
+
 test("Workspace snapshot projects only compact task and background state", async () => {
     const fake = createInteractionGateway();
     const now = new Date().toISOString();
@@ -263,8 +283,9 @@ test("Workspace snapshot projects only compact task and background state", async
         },
     }) as McpWorkspaceGateway;
     const handler = new McpEndpointHandlerInteraction({ gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
 
-    const result = await handler.call("workspace_snapshot", {}, context, "call-app");
+    const result = await handler.call("workspace_snapshot", { token }, context, "call-app");
     assert.ok(result instanceof McpNativeToolResult);
     const snapshot = result.structuredContent as {
         background?: Array<Record<string, unknown>>;
@@ -388,11 +409,13 @@ test("Workspace task control and detached-wait recovery use durable server state
         { action: "claim", token, waitId: "wait-recover" },
         context,
         "call-recover",
-    ) as { claimId: string; kind: string; result: JsonValue; targetId: string; taskId: string; waitId: string };
+    ) as { claimId: string; kind: string; recoveryMessageId: string; result: JsonValue; targetId: string; taskId: string; waitId: string };
     assert.match(recovered.claimId, /^recovery-/u);
+    assert.match(recovered.recoveryMessageId, /^recovery-message-/u);
     assert.deepEqual({ ...recovered, claimId: "<claim>" }, {
         claimId: "<claim>",
         kind: "tmux",
+        recoveryMessageId: recovered.recoveryMessageId,
         result: { task: { status: "0" } },
         taskId: "task-1",
         targetId: "tmux-task-1",
@@ -401,6 +424,22 @@ test("Workspace task control and detached-wait recovery use durable server state
     const claimed = fake.waits.find((entry) => entry.waitId === "wait-recover");
     assert.equal(claimed?.status, "resolved");
     assert.equal(claimed?.recoveryClaimId, recovered.claimId);
+
+    const sent = await handler.call(
+        "workspace_wait_recover",
+        { action: "sent", claimId: recovered.claimId, token, waitId: "wait-recover" },
+        context,
+        "call-recover-sent",
+    ) as { recoveryMessageId: string; recoveryMessageSentAt: string; sent: true; waitId: string };
+    assert.equal(sent.sent, true);
+    assert.equal(sent.waitId, "wait-recover");
+    assert.equal(claimed?.recoveryMessageSentAt, sent.recoveryMessageSentAt);
+    assert.deepEqual(await handler.call(
+        "workspace_wait_recover",
+        { action: "sent", claimId: recovered.claimId, token, waitId: "wait-recover" },
+        context,
+        "call-recover-sent-again",
+    ), sent);
 
     await assert.rejects(handler.call(
         "workspace_wait_recover",
@@ -575,8 +614,9 @@ test("workspace_watch skips unrelated events and returns on the current Context 
         watchHeartbeatMs: 100,
         watchPollMs: 1,
     });
+    const token = await openWorkspace(handler);
 
-    const result = await handler.call("workspace_watch", { cursor: 0 }, context, "call-watch");
+    const result = await handler.call("workspace_watch", { cursor: 0, token }, context, "call-watch");
     assert.ok(result instanceof McpNativeToolResult);
     const update = result.structuredContent as { changed?: boolean; cursor?: number; snapshot?: { cursor?: number } };
     assert.equal(update.changed, true);
@@ -600,8 +640,9 @@ test("workspace_watch heartbeat advances its cursor without forcing a snapshot",
         watchHeartbeatMs: 0,
         watchPollMs: 1,
     });
+    const token = await openWorkspace(handler);
 
-    const result = await handler.call("workspace_watch", { cursor: 7 }, context, "call-watch");
+    const result = await handler.call("workspace_watch", { cursor: 7, token }, context, "call-watch");
     assert.ok(result instanceof McpNativeToolResult);
     assert.deepEqual(result.structuredContent, { changed: false, cursor: 11 });
 });
@@ -913,8 +954,16 @@ function createInteractionGateway(): {
                 throw new Error(`Wait ${waitId} recovery is already claimed.`);
             }
             record.recoveryClaimId = claimId;
+            record.recoveryMessageId ??= `recovery-message-${claimId}`;
             record.recoveryClaimedAt = new Date().toISOString();
             record.updatedAt = record.recoveryClaimedAt;
+            return structuredClone(record);
+        },
+        async markWaitRecoverySent(_instance: string, waitId: string, claimId: string) {
+            const record = requireWait(waits, waitId);
+            if (record.recoveryClaimId !== claimId) throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            record.recoveryMessageSentAt ??= new Date().toISOString();
+            record.updatedAt = record.recoveryMessageSentAt;
             return structuredClone(record);
         },
         async releaseWaitRecovery(_instance: string, waitId: string, claimId: string) {

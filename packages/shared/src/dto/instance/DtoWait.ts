@@ -11,6 +11,7 @@ export type WaitStatus =
 
 export interface WaitCreateInput {
     createdByCtxId: string;
+    deadlineAt?: string;
     goalId?: string;
     kind: WaitKind;
     ownerCallId?: string;
@@ -26,6 +27,8 @@ export interface WaitRecord extends WaitCreateInput {
     detachedAt?: string;
     recoveryClaimedAt?: string;
     recoveryClaimId?: string;
+    recoveryMessageId?: string;
+    recoveryMessageSentAt?: string;
     resolvedAt?: string;
     result?: JsonValue;
     status: WaitStatus;

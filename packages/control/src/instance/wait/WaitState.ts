@@ -46,6 +46,7 @@ export class WaitState {
         const record: WaitRecord = {
             createdAt: now,
             createdByCtxId: text(input.createdByCtxId, "createdByCtxId"),
+            ...(input.deadlineAt === undefined ? {} : { deadlineAt: storedText(input.deadlineAt, "deadlineAt") }),
             ...(input.goalId === undefined ? {} : { goalId: text(input.goalId, "goalId") }),
             kind: kind(input.kind),
             ...(input.ownerCallId === undefined ? {} : { ownerCallId: text(input.ownerCallId, "ownerCallId") }),
@@ -120,8 +121,22 @@ export class WaitState {
                 ...record,
                 recoveryClaimedAt: now,
                 recoveryClaimId: normalizedClaimId,
+                ...(record.recoveryMessageId === undefined
+                    ? { recoveryMessageId: `recovery-message-${randomUUID()}` }
+                    : {}),
                 updatedAt: now,
             };
+        });
+    }
+
+    markRecoverySent(document: WaitDocument, waitId: string, claimId: string): WaitTransition {
+        return this.#update(document, waitId, (record) => {
+            if (record.status !== "resolved" || record.recoveryClaimId !== claimId) {
+                throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            }
+            if (record.recoveryMessageSentAt !== undefined) return record;
+            const now = this.#now();
+            return { ...record, recoveryMessageSentAt: now, updatedAt: now };
         });
     }
 
@@ -200,6 +215,7 @@ function normalizeRecord(value: unknown): WaitRecord {
         ...(typeof value.consumedAt === "string" ? { consumedAt: value.consumedAt } : {}),
         createdAt: storedText(value.createdAt, "createdAt"),
         createdByCtxId: storedText(value.createdByCtxId, "createdByCtxId"),
+        ...(typeof value.deadlineAt === "string" ? { deadlineAt: storedText(value.deadlineAt, "deadlineAt") } : {}),
         ...(typeof value.detachedAt === "string" ? { detachedAt: value.detachedAt } : {}),
         ...(typeof value.goalId === "string" ? { goalId: storedText(value.goalId, "goalId") } : {}),
         kind: kind(value.kind),
@@ -207,6 +223,8 @@ function normalizeRecord(value: unknown): WaitRecord {
         ...("payload" in value ? { payload: value.payload as JsonValue } : {}),
         ...(typeof value.recoveryClaimedAt === "string" ? { recoveryClaimedAt: value.recoveryClaimedAt } : {}),
         ...(typeof value.recoveryClaimId === "string" ? { recoveryClaimId: value.recoveryClaimId } : {}),
+        ...(typeof value.recoveryMessageId === "string" ? { recoveryMessageId: value.recoveryMessageId } : {}),
+        ...(typeof value.recoveryMessageSentAt === "string" ? { recoveryMessageSentAt: value.recoveryMessageSentAt } : {}),
         ...(typeof value.resolvedAt === "string" ? { resolvedAt: value.resolvedAt } : {}),
         ...("result" in value ? { result: value.result as JsonValue } : {}),
         status,

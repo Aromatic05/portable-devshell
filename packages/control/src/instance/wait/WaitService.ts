@@ -68,6 +68,13 @@ export class WaitService {
         );
     }
 
+    async markRecoverySent(waitId: string, claimId: string): Promise<WaitRecord> {
+        return await this.#commit(
+            "wait.recoveryMessageSent",
+            (document) => this.#state.markRecoverySent(document, waitId, claimId),
+        );
+    }
+
     async completeRecovery(waitId: string, claimId: string): Promise<WaitRecord> {
         return await this.#commit(
             "wait.consumed",
@@ -153,10 +160,13 @@ function eventData(record: WaitRecord): JsonValue {
     return {
         createdAt: record.createdAt,
         createdByCtxId: record.createdByCtxId,
+        ...(record.deadlineAt === undefined ? {} : { deadlineAt: record.deadlineAt }),
         ...(record.goalId === undefined ? {} : { goalId: record.goalId }),
         kind: record.kind,
         ...(record.ownerCallId === undefined ? {} : { ownerCallId: record.ownerCallId }),
         status: record.status,
+        ...(record.recoveryMessageId === undefined ? {} : { recoveryMessageId: record.recoveryMessageId }),
+        ...(record.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: record.recoveryMessageSentAt }),
         targetId: record.targetId,
         ...(record.taskId === undefined ? {} : { taskId: record.taskId }),
         updatedAt: record.updatedAt,
