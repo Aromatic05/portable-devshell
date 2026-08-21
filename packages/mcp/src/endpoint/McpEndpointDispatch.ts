@@ -55,7 +55,7 @@ export interface McpEndpointDispatchOptions {
 }
 
 const MCP_TMUX_WAIT_POLL_MS = 1_000;
-const MCP_TMUX_RESUME_BLOCK_MS = 20 * 60_000;
+const MCP_TMUX_RESUME_BLOCK_MS = 60 * 60_000;
 
 export class McpEndpointDispatch {
     readonly #artifact: McpEndpointHandlerArtifact;

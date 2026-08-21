@@ -269,7 +269,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             .unwrap();
         assert_eq!(
             tmux_run["inputSchema"]["properties"]["timeMs"]["maximum"],
-            1_200_000
+            3_600_000
         );
         assert!(tmux_run["description"]
             .as_str()

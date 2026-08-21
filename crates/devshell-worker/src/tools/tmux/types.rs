@@ -30,7 +30,7 @@ pub struct TmuxRunParams {
     pub wait: Option<TmuxWaitMode>,
     #[serde(default)]
     /// Maximum time an explicit wait=block call waits for output or completion. Defaults to 30000 and never stops the task.
-    #[schemars(range(min = 0, max = 1200000))]
+    #[schemars(range(min = 0, max = 3600000))]
     pub time_ms: Option<u64>,
     #[serde(default)]
     /// Output lines to consume. Defaults to 80. Range: -400..=400.
@@ -56,7 +56,7 @@ pub struct TmuxTaskInputParams {
     pub input: String,
     #[serde(default)]
     /// Maximum time this call waits for new task transcript output. Defaults to 0.
-    #[schemars(range(min = 0, max = 1200000))]
+    #[schemars(range(min = 0, max = 3600000))]
     pub time_ms: Option<u64>,
     #[serde(default)]
     /// Task transcript lines to consume after sending input. Defaults to 80, range -400..=400.
@@ -83,7 +83,7 @@ pub struct TmuxReadParams {
     pub task: String,
     #[serde(default)]
     /// Maximum time this call waits for new output. Defaults to 0.
-    #[schemars(range(min = 0, max = 1200000))]
+    #[schemars(range(min = 0, max = 3600000))]
     pub time_ms: Option<u64>,
     #[serde(default)]
     /// Output lines to consume. Defaults to 80. Range: -400..=400.

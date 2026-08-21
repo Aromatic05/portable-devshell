@@ -507,7 +507,7 @@ test("tmux_run hands long waits to Workspace and resumes failed terminal tasks",
     ) as { ctxId: string };
     const first = await dispatch.callTool(
         "tmux_run",
-        { command: "sleep 10", ctxId: environment.ctxId, resume: true, timeout: 1_200_001 },
+        { command: "sleep 10", ctxId: environment.ctxId, resume: true, timeout: 3_600_001 },
         { principal: "tester", requestId: "wait-1" },
     ) as { detached?: boolean; task?: { id?: string; status?: string } };
     await waitUntil(() => waits.length === 1 && observeCalls > 0);
