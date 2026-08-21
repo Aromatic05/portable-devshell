@@ -222,12 +222,12 @@ export class McpToolCatalogInteraction {
         },
         {
             _meta: appOnlyMeta,
-            description: "Claim, complete, or release one detached wait recovery around Workspace model re-entry. App-only recovery helper; models must not call it.",
+            description: "Claim, mark sent, complete, or release one detached wait recovery around Workspace model re-entry. App-only recovery helper; models must not call it.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
-                    action: { enum: ["claim", "complete", "release"], type: "string" },
+                    action: { enum: ["claim", "sent", "complete", "release"], type: "string" },
                     claimId: { minLength: 1, type: "string" },
                     token: { minLength: 1, type: "string" },
                     waitId: { minLength: 1, type: "string" },

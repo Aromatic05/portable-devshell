@@ -786,6 +786,7 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     const open = definitions.find((definition) => definition.name === "workspace_open");
     const answer = definitions.find((definition) => definition.name === "workspace_question_answer");
     const interrupt = definitions.find((definition) => definition.name === "workspace_wait_interrupt");
+    const recover = definitions.find((definition) => definition.name === "workspace_wait_recover");
     const watch = definitions.find((definition) => definition.name === "workspace_watch");
     const reconnect = definitions.find((definition) => definition.name === "workspace_reconnect");
     const ask = definitions.find((definition) => definition.name === "workspace_ask");
@@ -796,6 +797,7 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     assert.ok(open);
     assert.ok(answer);
     assert.ok(interrupt);
+    assert.ok(recover);
     assert.ok(watch);
     assert.ok(reconnect);
     assert.ok(ask);
@@ -813,6 +815,10 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     assert.deepEqual((adaptedInterrupt._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.deepEqual((adaptedWatch._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.deepEqual((reconnect?._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
+    const recoveryInputSchema = recover.inputSchema as {
+        properties?: { action?: { enum?: string[] } };
+    };
+    assert.deepEqual(recoveryInputSchema.properties?.action?.enum, ["claim", "sent", "complete", "release"]);
     const askInputSchema = ask.inputSchema as {
         properties?: Record<string, unknown>;
         required?: string[];
