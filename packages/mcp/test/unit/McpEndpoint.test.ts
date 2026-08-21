@@ -136,7 +136,7 @@ test("HTTP tools/list keeps Workspace actions app-only while advertising host au
     }
 });
 
-test("tmux_run advertises Workspace UI metadata", () => {
+test("tmux_run does not render a Workspace App", () => {
     const harness = createWorkerHarness({
         tools: [{
             description: "Run one tmux task",
@@ -154,6 +154,10 @@ test("tmux_run advertises Workspace UI metadata", () => {
     }).listTools().find((entry) => entry.name === "tmux_run");
     const meta = tool?._meta as Record<string, JsonValue> | undefined;
 
+    assert.equal(meta?.["openai/outputTemplate"], undefined);
+    assert.equal(meta?.["openai/widgetAccessible"], undefined);
+    assert.equal(meta?.["ui/resourceUri"], undefined);
+    assert.equal((meta?.ui as { resourceUri?: string } | undefined)?.resourceUri, undefined);
     assert.equal(meta?.["openai/toolInvocation/invoking"], undefined);
 });
 
