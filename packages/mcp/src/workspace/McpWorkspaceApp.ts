@@ -688,10 +688,18 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     var key = item.waitId || item.taskId || item.tmuxTaskId;
     var disabled = busy.has(key);
     var action = "";
-    if (item.status === "waiting") {
+    if (item.status === "waiting" || item.status === "detached") {
       action = '<button type="button" class="action-row danger-row"' + (disabled ? ' disabled' : '') + ' data-wait-interrupt="' + escapeHtml(item.waitId) + '"><span>Interrupt wait</span><span class="muted">task keeps running</span></button>';
     }
     return '<div class="card">' + eventHead(item) + '<div class="card-body"><div class="muted">event · ' + escapeHtml(item.eventName || "tmux.task.completed") + '</div><div class="question">Waiting for task completion</div><div class="mono">' + escapeHtml(item.tmuxTaskId || "") + '</div></div>' + action + '</div>';
+  }
+
+  function detachedWaitCards() {
+    if (visibleEvent()) return "";
+    var background = Array.isArray(snapshot && snapshot.background) ? snapshot.background : [];
+    var detached = background.filter(function (item) { return (item.kind === "tmux" || item.tmuxTaskId) && item.status === "detached"; });
+    if (!detached.length) return "";
+    return '<div class="muted">Background waits</div>' + detached.map(tmuxWaitCard).join("");
   }
 
   function goalCard() {
@@ -720,7 +728,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
       : item.kind === "approval" ? approvalCard(item)
       : item.kind === "tmux" ? tmuxWaitCard(item)
       : '<div class="card"><div class="empty">Unknown event.</div></div>';
-    root.innerHTML = goalCard() + eventCard;
+    root.innerHTML = goalCard() + eventCard + detachedWaitCards();
   }
 
   root.addEventListener("click", function (event) {
