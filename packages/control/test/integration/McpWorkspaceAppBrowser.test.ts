@@ -476,7 +476,7 @@ test("Workspace remount follows current ChatGPT tool output and falls back to wi
             this.widgetState = state;
         }
     }`);
-    await page.waitForFunction("(window.__remountCalls || []).some(call => call.name === 'workspace_snapshot' && call.arguments.ctxId === 'ctx-current')");
+    await page.waitForFunction("(window.__remountCalls || []).some(call => (call.name === 'workspace_snapshot' || call.name === 'workspace_reconnect') && call.arguments.ctxId === 'ctx-current')");
     await page.waitForTimeout(100);
     const currentFrame = page.frames().find((frame) => frame !== page.mainFrame());
     assert.equal(
@@ -489,7 +489,7 @@ test("Workspace remount follows current ChatGPT tool output and falls back to wi
         widgetState: { portableDevshellWorkspace: { ctxId: "ctx-widget-only" } },
         setWidgetState: function (state) { this.widgetState = state; }
     }`);
-    await page.waitForFunction("(window.__remountCalls || []).some(call => call.name === 'workspace_snapshot' && call.arguments.ctxId === 'ctx-widget-only')");
+    await page.waitForFunction("(window.__remountCalls || []).some(call => (call.name === 'workspace_snapshot' || call.name === 'workspace_reconnect') && call.arguments.ctxId === 'ctx-widget-only')");
     assert.equal(await page.evaluate("(window.__remountCalls || []).some(call => call.arguments.ctxId === 'ctx-stale')"), false);
 });
 
@@ -543,7 +543,7 @@ window.addEventListener("message", function (event) {
     if (message.method !== "tools/call") return;
     var call = message.params || {};
     window.__remountCalls.push(call);
-    if (call.name === "workspace_snapshot") {
+    if (call.name === "workspace_snapshot" || call.name === "workspace_reconnect") {
         reply({
             _meta: { "portable-devshell/workspace": { token: "remount-token" } },
             structuredContent: {
@@ -738,7 +738,7 @@ window.addEventListener("message", function (event) {
 
     var call = message.params || {};
     window.__workspaceCalls.push(call);
-    if (call.name === "workspace_snapshot") {
+    if (call.name === "workspace_snapshot" || call.name === "workspace_reconnect") {
         reply({
             _meta: { "portable-devshell/workspace": { token: "browser-secret-token" } },
             structuredContent: window.__workspaceWatchCount > 0
@@ -910,7 +910,7 @@ window.addEventListener("message", function (event) {
     if (message.method !== "tools/call") return;
     var call = message.params || {};
     window.__sessionModeCalls.push(call);
-    if (call.name === "workspace_snapshot") {
+    if (call.name === "workspace_snapshot" || call.name === "workspace_reconnect") {
         reply({
             _meta: { "portable-devshell/workspace": { token: "session-mode-token" } },
             structuredContent: sessionModeSnapshot()
@@ -1024,7 +1024,7 @@ window.addEventListener("message", function (event) {
 
     var call = message.params || {};
     window.__workspaceCalls.push(call);
-    if (call.name === "workspace_snapshot") {
+    if (call.name === "workspace_snapshot" || call.name === "workspace_reconnect") {
         reply({
             _meta: { "portable-devshell/workspace": { token: "recovery-secret-token" } },
             structuredContent: recoverySnapshot()
@@ -1129,7 +1129,7 @@ window.addEventListener("message", function (event) {
     if (message.method !== "tools/call") return;
     var call = message.params || {};
     window.__workspaceCalls.push(call);
-    if (call.name === "workspace_snapshot") {
+    if (call.name === "workspace_snapshot" || call.name === "workspace_reconnect") {
         reply({
             _meta: { "portable-devshell/workspace": { token: "resume-secret-token" } },
             structuredContent: resumeSnapshot()
@@ -1226,7 +1226,7 @@ window.addEventListener("message", function (event) {
     }
     if (message.method !== "tools/call") return;
     var call = message.params || {};
-    if (call.name === "workspace_snapshot") {
+    if (call.name === "workspace_snapshot" || call.name === "workspace_reconnect") {
         reply({
             _meta: { "portable-devshell/workspace": { token: "detached-secret-token" } },
             structuredContent: detachedInteractionSnapshot()

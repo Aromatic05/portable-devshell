@@ -198,6 +198,33 @@ test("Workspace authorization stays in hidden metadata and gates app-only tools"
     );
 });
 
+test("Workspace App can re-establish its lifecycle after remount", async () => {
+    const fake = createInteractionGateway();
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    await handler.call("workspace_open", {}, context, "call-open");
+
+    const reconnected = await handler.call("workspace_reconnect", {}, context, "call-reconnect");
+
+    assert.ok(reconnected instanceof McpNativeToolResult);
+    assert.equal((reconnected.structuredContent as { ctxId?: string }).ctxId, context.ctxId);
+    const meta = reconnected._meta?.["portable-devshell/workspace"] as { token?: unknown } | undefined;
+    assert.equal(typeof meta?.token, "string");
+    const held = handler.call(
+        "workspace_ask",
+        { question: "Can the reconnected App receive a question?" },
+        context,
+        "call-after-reconnect",
+    );
+    const wait = await fake.created;
+    await handler.call(
+        "workspace_question_answer",
+        { answer: "yes", token: meta?.token, waitId: wait.waitId },
+        context,
+        "call-answer",
+    );
+    await assert.doesNotReject(held);
+});
+
 test("Workspace snapshot projects only compact task and background state", async () => {
     const fake = createInteractionGateway();
     const now = new Date().toISOString();
@@ -717,6 +744,7 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     const answer = definitions.find((definition) => definition.name === "workspace_question_answer");
     const interrupt = definitions.find((definition) => definition.name === "workspace_wait_interrupt");
     const watch = definitions.find((definition) => definition.name === "workspace_watch");
+    const reconnect = definitions.find((definition) => definition.name === "workspace_reconnect");
     const ask = definitions.find((definition) => definition.name === "workspace_ask");
     const goal = definitions.find((definition) => definition.name === "workspace_goal");
     const goalStop = definitions.find((definition) => definition.name === "workspace_goal_stop");
@@ -726,6 +754,7 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     assert.ok(answer);
     assert.ok(interrupt);
     assert.ok(watch);
+    assert.ok(reconnect);
     assert.ok(ask);
     assert.ok(goal);
     assert.ok(goalStop);
@@ -740,6 +769,7 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     assert.deepEqual((adaptedAnswer._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.deepEqual((adaptedInterrupt._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.deepEqual((adaptedWatch._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
+    assert.deepEqual((reconnect?._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     const askInputSchema = ask.inputSchema as {
         properties?: Record<string, unknown>;
         required?: string[];
