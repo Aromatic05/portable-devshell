@@ -384,11 +384,17 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     var claimed = structured(await callTool("workspace_wait_recover", { action: "claim", waitId: waitId }, true));
     var dispatched = false;
     try {
-      dispatched = await sendModelMessage(
-        message,
-        Object.assign({}, extra || {}, { recoveredWait: claimed }),
-        function () { return hasRecoverableWork(claimed); }
-      );
+      dispatched = !!claimed.recoveryMessageSentAt;
+      if (!dispatched) {
+        dispatched = await sendModelMessage(
+          message,
+          Object.assign({}, extra || {}, {
+            recoveredWait: claimed,
+            recoveryMessageId: claimed.recoveryMessageId
+          }),
+          function () { return hasRecoverableWork(claimed); }
+        );
+      }
       if (!dispatched) {
         await callTool("workspace_wait_recover", {
           action: "release",
@@ -396,6 +402,13 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
           waitId: waitId
         }, true);
         return;
+      }
+      if (!claimed.recoveryMessageSentAt) {
+        await callTool("workspace_wait_recover", {
+          action: "sent",
+          claimId: claimed.claimId,
+          waitId: waitId
+        }, true);
       }
       await callTool("workspace_wait_recover", {
         action: "complete",
@@ -456,7 +469,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
   async function refresh(allowRecovery) {
     if (!initialized || (requiresExplicitContextId && !ctxId)) return;
     try {
-      var result = await callTool("workspace_snapshot", {}, false);
+      var result = await callTool("workspace_snapshot", {}, true);
       await applySnapshot(structured(result), allowRecovery);
       status.textContent = snapshot && snapshot.instance ? snapshot.instance + " · live" : "Connected";
     } catch (error) {
@@ -482,7 +495,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
       var controller = new AbortController();
       liveAbortController = controller;
       try {
-        var result = await callTool("workspace_watch", { cursor: cursor }, false, controller.signal);
+        var result = await callTool("workspace_watch", { cursor: cursor }, true, controller.signal);
         if (generation !== watchGeneration) return;
         var update = structured(result) || {};
         if (Number.isSafeInteger(update.cursor)) cursor = update.cursor;
@@ -589,7 +602,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
       var initialResult = await waitForInitialToolResult(300);
       if (initialResult) acceptToolResult(initialResult);
       else {
-        reconnectOnStart = !!window.openai;
+        reconnectOnStart = true;
         configureFromOpenAiGlobals();
       }
       if (requiresExplicitContextId && !ctxId) {

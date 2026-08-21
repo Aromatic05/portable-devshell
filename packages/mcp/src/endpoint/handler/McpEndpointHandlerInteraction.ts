@@ -59,7 +59,7 @@ export class McpEndpointHandlerInteraction {
             case "workspace_reconnect":
                 return await this.#reconnectWorkspace(gateway, context);
             case "workspace_snapshot":
-                return await this.#readWorkspace(gateway, context);
+                return await this.#readWorkspace(gateway, input, context);
             case "workspace_watch":
                 return await this.#watchWorkspace(gateway, input, context, signal);
             case "workspace_question_answer":
@@ -224,9 +224,11 @@ export class McpEndpointHandlerInteraction {
 
     async #readWorkspace(
         gateway: McpInteractionGateway,
+        input: JsonValue,
         context: ToolCallContext,
     ): Promise<McpNativeToolResult> {
         const ctxId = requireCtxId(context);
+        this.#assertAppToken(input, context);
         return this.#workspaceResult(ctxId, await this.#snapshot(gateway, context));
     }
 
@@ -235,7 +237,7 @@ export class McpEndpointHandlerInteraction {
         context: ToolCallContext,
     ): Promise<McpNativeToolResult> {
         const ctxId = requireCtxId(context);
-        return this.#workspaceResult(ctxId, await this.#snapshot(gateway, context));
+        return this.#workspaceResult(ctxId, await this.#snapshot(gateway, context), [], true, true);
     }
 
     async #watchWorkspace(
@@ -248,6 +250,7 @@ export class McpEndpointHandlerInteraction {
             throw new Error(`Workspace live events are unavailable for ${this.options.instanceName}.`);
         }
         const ctxId = requireCtxId(context);
+        this.#assertAppToken(input, context);
         const startedAt = Date.now();
         const heartbeatMs = this.options.watchHeartbeatMs ?? 20_000;
         const pollMs = this.options.watchPollMs ?? 250;
@@ -276,9 +279,10 @@ export class McpEndpointHandlerInteraction {
         structuredContent: JsonValue,
         content: McpNativeToolResult["content"] = [],
         markAppSeen = true,
+        rotateToken = false,
     ): McpNativeToolResult {
         const existing = this.#appStates.get(ctxId);
-        const token = existing?.token ?? randomUUID();
+        const token = rotateToken || existing === undefined ? randomUUID() : existing.token;
         this.#appStates.set(ctxId, {
             ...(markAppSeen ? { lastSeenAt: (this.options.now ?? Date.now)() } : {}),
             token,
@@ -372,6 +376,15 @@ export class McpEndpointHandlerInteraction {
         ) {
             throw new Error(`Recoverable detached wait ${waitId} was not found for the current Context.`);
         }
+        if (recovery.action === "sent") {
+            const sent = await gateway.markWaitRecoverySent(this.options.instanceName, waitId, recovery.claimId);
+            return {
+                ...(sent.recoveryMessageId === undefined ? {} : { recoveryMessageId: sent.recoveryMessageId }),
+                ...(sent.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: sent.recoveryMessageSentAt }),
+                sent: true,
+                waitId: sent.waitId,
+            };
+        }
         if (recovery.action === "release") {
             await gateway.releaseWaitRecovery(this.options.instanceName, waitId, recovery.claimId);
             return { released: true, waitId };
@@ -413,6 +426,8 @@ export class McpEndpointHandlerInteraction {
             ...(claimed.goalId === undefined ? {} : { goalId: claimed.goalId }),
             kind: claimed.kind,
             ...(claimed.result === undefined ? {} : { result: claimed.result }),
+            ...(claimed.recoveryMessageId === undefined ? {} : { recoveryMessageId: claimed.recoveryMessageId }),
+            ...(claimed.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: claimed.recoveryMessageSentAt }),
             ...(claimed.taskId === undefined ? {} : { taskId: claimed.taskId }),
             targetId: claimed.targetId,
             waitId: claimed.waitId,
@@ -669,16 +684,16 @@ function readWaitId(input: JsonValue, toolName: string): string {
 
 function readWaitRecovery(input: JsonValue):
     | { action: "claim"; waitId: string }
-    | { action: "complete" | "release"; claimId: string; waitId: string } {
+    | { action: "complete" | "release" | "sent"; claimId: string; waitId: string } {
     const record = asRecord(input);
     if (record === undefined) throw new Error("workspace_wait_recover requires an object input.");
     const action = record.action;
     const waitId = text(record.waitId, "waitId");
     if (action === "claim") return { action, waitId };
-    if (action === "complete" || action === "release") {
+    if (action === "complete" || action === "release" || action === "sent") {
         return { action, claimId: text(record.claimId, "claimId"), waitId };
     }
-    throw new Error("action must be claim, complete, or release.");
+    throw new Error("action must be claim, sent, complete, or release.");
 }
 
 function readWorkspaceCursor(input: JsonValue): number {
