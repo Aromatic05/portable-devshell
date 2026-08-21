@@ -235,7 +235,7 @@ impl TmuxState {
             self.refresh_task(&task_id)?;
         }
 
-        self.task_output(&task_id, line, true)
+        self.task_output(&task_id, line, true, params.resume, params.timeout)
     }
 
     pub fn input(
@@ -317,7 +317,7 @@ impl TmuxState {
                     }
                     thread::sleep(Duration::from_millis(50));
                 }
-                let task_output = self.task_output(&task_id, line, false)?;
+                let task_output = self.task_output(&task_id, line, false, false, None)?;
                 let pane = {
                     let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
                     let task = require_task(&tasks, &task_id)?;
@@ -390,31 +390,7 @@ impl TmuxState {
             thread::sleep(Duration::from_millis(50));
         }
         call.check_cancelled()?;
-        self.task_output(&params.task, line, false)
-    }
-
-    pub fn wait(
-        &self,
-        call: &ToolCall,
-        params: TmuxWaitParams,
-    ) -> Result<TmuxWaitOutput, ToolError> {
-        call.check_cancelled()?;
-        require_read(call)?;
-        loop {
-            call.check_cancelled()?;
-            self.refresh_task(&params.task)?;
-            if self.task_is_terminal(&params.task)? {
-                break;
-            }
-            thread::sleep(Duration::from_millis(50));
-        }
-        call.check_cancelled()?;
-        let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
-        Ok(TmuxWaitOutput {
-            task: task_view(require_task(&tasks, &params.task)?),
-            detached: None,
-            interrupted: None,
-        })
+        self.task_output(&params.task, line, false, false, None)
     }
 
     pub fn inspect(
@@ -994,6 +970,8 @@ impl TmuxState {
         task_id: &str,
         line: i64,
         include_pane: bool,
+        resume: bool,
+        timeout: Option<u64>,
     ) -> Result<TmuxTaskOperationOutput, ToolError> {
         let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
         tasks.prune();
@@ -1024,6 +1002,8 @@ impl TmuxState {
         Ok(TmuxTaskOperationOutput {
             task: view,
             pane,
+            resume,
+            timeout,
             output: non_empty(output),
             warnings: non_empty(warnings),
         })

@@ -23,7 +23,7 @@ use crate::tools::tmux::state::TmuxState;
 use crate::tools::tmux::types::{
     TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams, TmuxInputOutput,
     TmuxInputParams, TmuxInspectParams, TmuxListOutput, TmuxListParams, TmuxPaneOperationOutput,
-    TmuxReadParams, TmuxRunParams, TmuxTaskOperationOutput, TmuxWaitOutput, TmuxWaitParams,
+    TmuxReadParams, TmuxRunParams, TmuxTaskOperationOutput,
     TmuxWarning,
 };
 use crate::tools::{
@@ -169,13 +169,6 @@ pub fn register_tools(
         ToolCapability::Read,
         Arc::clone(&states),
         TmuxState::read,
-    ))?;
-    registry.register(tool::<TmuxWaitParams, TmuxWaitOutput>(
-        ToolName::parse("tmux_wait").unwrap(),
-        "Wait until a managed task reaches a terminal state without consuming its durable transcript. Cancelling the call stops only the wait and leaves the task running. MCP hosts may hand long waits to Workspace and return detached=true while the same task continues running.",
-        ToolCapability::Read,
-        Arc::clone(&states),
-        TmuxState::wait,
     ))?;
     registry.register(tool::<TmuxInspectParams, TmuxPaneOperationOutput>(
         ToolName::parse("tmux_inspect").unwrap(),

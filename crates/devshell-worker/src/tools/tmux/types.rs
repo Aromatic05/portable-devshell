@@ -19,6 +19,13 @@ pub struct TmuxRunParams {
     #[schemars(length(min = 1))]
     pub command: String,
     #[serde(default)]
+    /// Resume the model through Workspace when this task reaches a terminal state.
+    pub resume: bool,
+    #[serde(default)]
+    /// Maximum time to wait for a resume task before handing it to Workspace. Does not stop the task.
+    #[schemars(range(min = 1, max = 3600000))]
+    pub timeout: Option<u64>,
+    #[serde(default)]
     /// Wait mode. Defaults to nonblock.
     pub wait: Option<TmuxWaitMode>,
     #[serde(default)]
@@ -82,14 +89,6 @@ pub struct TmuxReadParams {
     /// Output lines to consume. Defaults to 80. Range: -400..=400.
     #[schemars(range(min = -400, max = 400))]
     pub line: Option<i64>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(rename_all = "camelCase")]
-pub struct TmuxWaitParams {
-    /// Managed task id returned by tmux_run.
-    pub task: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -253,22 +252,17 @@ pub struct TmuxWarning {
 #[serde(rename_all = "camelCase")]
 pub struct TmuxTaskOperationOutput {
     pub task: TmuxTaskView,
+    /// Whether this task will resume the model through Workspace after completion.
+    pub resume: bool,
+    /// Maximum resume handoff wait time. Does not stop the task.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pane: Option<TmuxPaneRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warnings: Option<Vec<TmuxWarning>>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct TmuxWaitOutput {
-    pub task: TmuxTaskView,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub detached: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub interrupted: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
