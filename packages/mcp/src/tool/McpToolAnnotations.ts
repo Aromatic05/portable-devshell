@@ -20,6 +20,7 @@ const readOnlyTools = new Set([
     "tmux_list",
     "todo_read",
     "workspace_open",
+    "workspace_reconnect",
     "workspace_snapshot",
     "workspace_watch",
 ]);
@@ -68,6 +69,7 @@ const closedWorldTools = new Set([
     "workspace_goal_continue",
     "workspace_goal_stop",
     "workspace_open",
+    "workspace_reconnect",
     "workspace_approval_decide",
     "workspace_question_answer",
     "workspace_snapshot",

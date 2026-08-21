@@ -56,6 +56,8 @@ export class McpEndpointHandlerInteraction {
                 return await this.#manageGoal(input, context);
             case "workspace_open":
                 return this.#openWorkspace(context);
+            case "workspace_reconnect":
+                return await this.#reconnectWorkspace(gateway, context);
             case "workspace_snapshot":
                 return await this.#readWorkspace(gateway, context);
             case "workspace_watch":
@@ -221,6 +223,14 @@ export class McpEndpointHandlerInteraction {
     }
 
     async #readWorkspace(
+        gateway: McpInteractionGateway,
+        context: ToolCallContext,
+    ): Promise<McpNativeToolResult> {
+        const ctxId = requireCtxId(context);
+        return this.#workspaceResult(ctxId, await this.#snapshot(gateway, context));
+    }
+
+    async #reconnectWorkspace(
         gateway: McpInteractionGateway,
         context: ToolCallContext,
     ): Promise<McpNativeToolResult> {

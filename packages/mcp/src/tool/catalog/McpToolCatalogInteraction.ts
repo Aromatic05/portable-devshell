@@ -21,6 +21,7 @@ export type McpToolCatalogInteractionName =
     | "workspace_ask"
     | "workspace_goal"
     | "workspace_open"
+    | "workspace_reconnect"
     | "workspace_snapshot"
     | "workspace_watch"
     | "workspace_question_answer"
@@ -121,6 +122,19 @@ export class McpToolCatalogInteraction {
             inputSchema: { additionalProperties: false, properties: {}, type: "object" },
             name: "workspace_open",
             outputSchema: workspaceOpenOutputSchema,
+            requiredCapabilities: [],
+        },
+        {
+            _meta: appOnlyMeta,
+            description: "Re-establish the Workspace App lifecycle after a remount or transport reconnect. App-only helper; models should not call it.",
+            group: "workspace",
+            inputSchema: {
+                additionalProperties: false,
+                properties: {},
+                type: "object"
+            },
+            name: "workspace_reconnect",
+            outputSchema: workspaceSnapshotOutputSchema,
             requiredCapabilities: [],
         },
         {

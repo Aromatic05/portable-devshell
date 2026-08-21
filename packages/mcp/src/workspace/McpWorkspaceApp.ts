@@ -94,6 +94,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
   var cursor = 0;
   var watchGeneration = 0;
   var watchStarted = false;
+  var reconnectOnStart = false;
   var recovering = false;
   var busy = new Set();
   var expandedQuestions = new Set();
@@ -464,6 +465,13 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     }
   }
 
+  async function reconnectWorkspace() {
+    if (!initialized || (requiresExplicitContextId && !ctxId)) return;
+    var result = await callTool("workspace_reconnect", {}, false);
+    await applySnapshot(structured(result), true);
+    status.textContent = snapshot && snapshot.instance ? snapshot.instance + " · live" : "Connected";
+  }
+
   function sleep(milliseconds) {
     return new Promise(function (resolve) { setTimeout(resolve, milliseconds); });
   }
@@ -499,7 +507,12 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     if (!initialized || (requiresExplicitContextId && !ctxId) || watchStarted) return;
     watchStarted = true;
     try {
-      await refresh();
+      if (reconnectOnStart) {
+        reconnectOnStart = false;
+        await reconnectWorkspace();
+      } else {
+        await refresh();
+      }
       void watch();
     } catch (error) {
       watchStarted = false;
@@ -575,7 +588,10 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
       status.textContent = "Connected";
       var initialResult = await waitForInitialToolResult(300);
       if (initialResult) acceptToolResult(initialResult);
-      else configureFromOpenAiGlobals();
+      else {
+        reconnectOnStart = !!window.openai;
+        configureFromOpenAiGlobals();
+      }
       if (requiresExplicitContextId && !ctxId) {
         status.textContent = "Waiting for Workspace identity";
         return;
@@ -625,7 +641,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     var approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
     if (approvals.length) return Object.assign({ kind: "approval", name: approvals[0].toolName, eventName: "approval.decision" }, approvals[0]);
     var background = Array.isArray(snapshot.background) ? snapshot.background : [];
-    var tmux = background.find(function (item) { return item.status === "waiting" || item.status === "detached"; });
+    var tmux = background.find(function (item) { return item.status === "waiting"; });
     if (tmux) return Object.assign({ kind: "tmux", name: "tmux_run", eventName: "tmux.task.completed" }, tmux);
     return null;
   }
@@ -738,6 +754,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
 
   window.addEventListener("openai:set_globals", function (event) {
     var detail = event && event.detail;
+    reconnectOnStart = true;
     if (configureFromOpenAiGlobals(detail && detail.globals) && initialized) void startLive();
   });
   window.addEventListener("beforeunload", function () {
