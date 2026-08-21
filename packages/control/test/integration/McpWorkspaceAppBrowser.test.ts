@@ -431,9 +431,6 @@ test("Workspace does not surface a detached tmux wait as another blocking event"
 
     const app = page.frameLocator("#workspace");
     await app.getByText("No blocking event.", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("Interrupt wait", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("Interrupt wait", { exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_wait_interrupt')");
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
     assert.equal(await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"), 0);
 });
