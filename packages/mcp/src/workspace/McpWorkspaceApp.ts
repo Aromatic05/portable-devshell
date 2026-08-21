@@ -626,7 +626,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     if (approvals.length) return Object.assign({ kind: "approval", name: approvals[0].toolName, eventName: "approval.decision" }, approvals[0]);
     var background = Array.isArray(snapshot.background) ? snapshot.background : [];
     var tmux = background.find(function (item) { return item.status === "waiting" || item.status === "detached"; });
-    if (tmux) return Object.assign({ kind: "tmux", name: "tmux_wait", eventName: "tmux.task.completed" }, tmux);
+    if (tmux) return Object.assign({ kind: "tmux", name: "tmux_run", eventName: "tmux.task.completed" }, tmux);
     return null;
   }
 

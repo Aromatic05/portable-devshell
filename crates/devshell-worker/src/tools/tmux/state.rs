@@ -24,8 +24,7 @@ use crate::tools::tmux::task::{
 use crate::tools::tmux::types::{
     TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams, TmuxInputOutput,
     TmuxInputParams, TmuxInspectParams, TmuxListOutput, TmuxPaneDetail, TmuxPaneOperationOutput,
-    TmuxReadParams, TmuxRunParams, TmuxTaskOperationOutput, TmuxWaitMode, TmuxWaitOutput,
-    TmuxWaitParams, TmuxWarning,
+    TmuxReadParams, TmuxRunParams, TmuxTaskOperationOutput, TmuxWaitMode, TmuxWarning,
 };
 use crate::tools::{ToolCall, ToolError};
 
@@ -1004,6 +1003,8 @@ impl TmuxState {
             pane,
             resume,
             timeout,
+            detached: None,
+            timed_out: None,
             output: non_empty(output),
             warnings: non_empty(warnings),
         })

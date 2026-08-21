@@ -136,13 +136,13 @@ test("HTTP tools/list keeps Workspace actions app-only while advertising host au
     }
 });
 
-test("long-lived visible tools advertise ChatGPT invocation status", () => {
+test("tmux_run advertises Workspace UI metadata", () => {
     const harness = createWorkerHarness({
         tools: [{
-            description: "Wait for one tmux task",
+            description: "Run one tmux task",
             group: "tmux",
             inputSchema: { type: "object" },
-            name: "tmux_wait",
+            name: "tmux_run",
             outputSchema: { type: "object" },
             requiredCapabilities: [],
         }]
@@ -151,11 +151,10 @@ test("long-lived visible tools advertise ChatGPT invocation status", () => {
         instanceName: "demo",
         policy: { capabilities: [] as const, groups: ["tmux"] },
         worker: harness.worker,
-    }).listTools().find((entry) => entry.name === "tmux_wait");
+    }).listTools().find((entry) => entry.name === "tmux_run");
     const meta = tool?._meta as Record<string, JsonValue> | undefined;
 
-    assert.equal(meta?.["openai/toolInvocation/invoking"], "Handing task wait to Workspace…");
-    assert.equal(meta?.["openai/toolInvocation/invoked"], "Workspace will resume when ready");
+    assert.equal(meta?.["openai/toolInvocation/invoking"], undefined);
 });
 
 test("Workspace MCP App renders from a versioned URI while keeping the stable reader alias", async () => {

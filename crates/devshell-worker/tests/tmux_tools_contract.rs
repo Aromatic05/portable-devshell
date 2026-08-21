@@ -409,62 +409,6 @@ fn tmux_run_defaults_to_nonblock_for_long_tasks() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
-fn tmux_wait_blocks_until_terminal_without_consuming_transcript() {
-    assert!(
-        tmux_available(),
-        "tmux is required to run this ignored contract test"
-    );
-    let env = TestEnv::new();
-    let instance = "aromatic-tmux-wait";
-    start(&env, instance);
-    let run = call(
-        &env,
-        instance,
-        "1",
-        "tmux_run",
-        json!({ "command": "sleep 0.2; printf 'WAITED\\n'", "wait": "nonblock" }),
-        "ctx-a",
-        "run-waited",
-    );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap();
-
-    let waited = call(
-        &env,
-        instance,
-        "2",
-        "tmux_wait",
-        json!({ "task": task }),
-        "ctx-a",
-        "wait-terminal",
-    );
-    assert_eq!(waited["ok"], true, "{waited}");
-    assert_ne!(waited["result"]["task"]["status"], "running", "{waited}");
-    assert!(waited["result"].get("output").is_none(), "{waited}");
-
-    let read = call(
-        &env,
-        instance,
-        "3",
-        "tmux_read",
-        json!({ "task": task, "line": 20 }),
-        "ctx-a",
-        "read-after-wait",
-    );
-    assert_eq!(read["ok"], true, "{read}");
-    assert!(
-        read["result"]["output"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|line| line == "WAITED"),
-        "{read}"
-    );
-    stop(&env, instance);
-}
-
-#[test]
-#[ignore = "requires tmux on PATH"]
 fn tmux_task_and_persistent_pane_controls_remain_separate_across_contexts() {
     assert!(
         tmux_available(),

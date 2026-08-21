@@ -6,7 +6,6 @@
 tmux_run
 tmux_input
 tmux_read
-tmux_wait
 tmux_inspect
 tmux_list
 tmux_create
@@ -144,7 +143,7 @@ nonblock  task 成功启动后立即返回（默认）
 
 `timeMs` 只限制这次 RPC 等待，不停止 task。block wait 超时会返回 `tmux.blockTimeout` warning，task 继续运行。
 
-需要等待一个已经启动的 task 直到终态时使用 `tmux_wait`，不要循环调用 `tmux_read` 或 `tmux_list`。
+需要等待已启动 task 的输出或终态时使用 `tmux_read`；`tmux_run` 的 `resume: true` 会由 MCP 负责固定 3 分钟挂起与 Workspace 恢复。
 
 running task 的返回值包含 task 和它当前独占的 pane：
 
@@ -248,19 +247,9 @@ Transcript 展示层会处理常见 terminal 控制：ANSI control sequence 不�
 
 `tmux_read` 的已读 offset 也会持久化。worker restart / running-task adoption 后继续读取时，不会把 restart 前已经消费或丢弃的 transcript 当成新输出重复返回。
 
-## `tmux_wait`: task completion
+## `tmux_run` 的 Workspace resume
 
-`tmux_wait` 只接受 managed task id：
-
-```json
-{
-    "task": "task-..."
-}
-```
-
-Worker 原生 `tmux_wait` 等待 task 到达终态并返回最终 task metadata，不消费 transcript，也没有 `timeMs` 参数。需要输出时，在完成后再调用一次 `tmux_read`。
-
-在 MCP 入口中，这个等待会绑定 durable Wait record，但不会长期占住模型的 Host tool call。task 仍在运行时会立即返回 `detached: true`，managed task/window 与 transcript 继续存在；Control 只做短 Worker 状态读取，不再启动第二个长期 `tmux_wait` tool call。Workspace App 活跃时，task 完成会解析 durable Wait 并恢复模型。之后再次对同一个 `ctxId + task id` 调用 `tmux_wait` 会复用该 durable Wait。Host/App remount、MCP/Control 重建或模型侧 handoff 都不会杀掉 tmux task。
+MCP 调用 `tmux_run` 时传入 `resume: true`，会先固定挂起模型最多 3 分钟。任务在 3 分钟内结束则直接返回；仍运行时返回 `detached: true` 并建立 durable Wait。`timeout` 从任务启动开始计算，任务结束或绝对截止时间先到达时都会触发 Workspace resume；失败退出码也会触发恢复。
 
 ## `tmux_inspect`: terminal history
 
@@ -352,7 +341,7 @@ managed task pane 不能通过 `pane=` close；必须使用 task id。
 
 取消 `tmux_read` 停止等待，并且不会消费这次尚未返回的 transcript。
 
-取消 `tmux_wait` 只分离当前等待，不停止 managed task，也不消费 transcript；之后可以继续等待同一个 task id。
+取消 detached `tmux_run` 的 Workspace wait 只停止恢复观察，不停止 managed task。
 
 需要正常终止 terminal-side program 时通常发送：
 

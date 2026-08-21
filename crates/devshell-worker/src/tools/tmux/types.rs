@@ -258,6 +258,10 @@ pub struct TmuxTaskOperationOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub detached: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timed_out: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pane: Option<TmuxPaneRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<Vec<String>>,

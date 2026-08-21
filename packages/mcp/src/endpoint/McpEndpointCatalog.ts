@@ -137,7 +137,7 @@ export class McpEndpointCatalog {
         const invocationStatus = mcpToolInvocationStatus(exposed.name);
         const meta = {
             ...asRecord(adapted._meta),
-            ...(exposed.name === "tmux_wait" ? {
+            ...(exposed.name === "tmux_run" ? {
                 ui: { resourceUri: workspaceAppResourceUri, visibility: ["model", "app"] },
                 "ui/resourceUri": workspaceAppResourceUri,
                 "openai/outputTemplate": workspaceAppResourceUri,

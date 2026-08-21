@@ -320,7 +320,7 @@ const workspaceTmuxEventSchema = objectSchema({
     eventName: { const: "tmux.task.completed", type: "string" },
     goalId: nonEmptyString,
     kind: { const: "tmux", type: "string" },
-    name: { const: "tmux_wait", type: "string" },
+    name: { const: "tmux_run", type: "string" },
     status: { const: "waiting", type: "string" },
     taskId: nonEmptyString,
     tmuxTaskId: stringValue,

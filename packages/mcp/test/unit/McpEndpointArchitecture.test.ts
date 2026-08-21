@@ -40,17 +40,23 @@ function workerTool(name: string = "bash_run"): ToolDefinition {
     };
 }
 
-function tmuxWaitTool(): ToolDefinition {
+function tmuxRunResumeTool(): ToolDefinition {
     return {
-        description: "Wait for a managed tmux task.",
+        description: "Run a managed tmux task.",
         group: "tmux",
         inputSchema: {
             additionalProperties: false,
-            properties: { task: { type: "string" } },
-            required: ["task"],
+            properties: {
+                command: { type: "string" },
+                resume: { type: "boolean" },
+                timeout: { type: "integer" },
+                timeMs: { type: "integer" },
+                wait: { type: "string" },
+            },
+            required: ["command"],
             type: "object",
         },
-        name: "tmux_wait",
+        name: "tmux_run",
         outputSchema: { type: "object" },
         requiredCapabilities: ["read"],
     };
@@ -380,18 +386,15 @@ test("legacy aliases still obey the current MCP policy", async () => {
     );
 });
 
-test("tmux_wait hands waits to Workspace and keeps explicit interruption distinct", async () => {
-    let workerWaitCalls = 0;
+test("tmux_run hands long waits to Workspace and resumes failed terminal tasks", async () => {
     let observeCalls = 0;
-    let goalTouches = 0;
     const terminalResults = new Map<string, JsonValue>();
-    const harness = createWorker({ tools: [tmuxWaitTool()] });
+    const harness = createWorker({ tools: [tmuxRunResumeTool()] });
     const worker = {
         ...harness.worker,
         async callTool(toolName: string): Promise<JsonValue> {
-            assert.equal(toolName, "tmux_wait");
-            workerWaitCalls += 1;
-            throw new Error("durable tracker must not hold a Worker tmux_wait tool call");
+            assert.equal(toolName, "tmux_run");
+            return { task: { id: "task-1", status: "running" } };
         },
     };
     type Wait = {
@@ -470,7 +473,7 @@ test("tmux_wait hands waits to Workspace and keeps explicit interruption distinc
             };
         },
         async resolveWait(_instance: string, waitId: string, result?: JsonValue) { return update(waitId, "resolved", result); },
-        async touchGoal() { goalTouches += 1; },
+        async touchGoal() {},
         async waitForWait(_instance: string, waitId: string): Promise<Wait> {
             const wait = waits.find((entry) => entry.waitId === waitId);
             if (wait === undefined) throw new Error(`missing wait ${waitId}`);
@@ -502,8 +505,8 @@ test("tmux_wait hands waits to Workspace and keeps explicit interruption distinc
         { principal: "tester", requestId: "request-environment" },
     ) as { ctxId: string };
     const first = await dispatch.callTool(
-        "tmux_wait",
-        { ctxId: environment.ctxId, task: "task-1" },
+        "tmux_run",
+        { command: "sleep 10", ctxId: environment.ctxId, resume: true, timeout: 300_001 },
         { principal: "tester", requestId: "wait-1" },
     ) as { detached?: boolean; task?: { id?: string; status?: string } };
     await waitUntil(() => waits.length === 1 && observeCalls > 0);
@@ -511,78 +514,12 @@ test("tmux_wait hands waits to Workspace and keeps explicit interruption distinc
     assert.equal(first.detached, true);
     assert.deepEqual(first.task, { id: "task-1", status: "running" });
     assert.equal(waits[0]?.status, "detached");
-    assert.equal(workerWaitCalls, 0);
-
-    const resumed = await dispatch.callTool(
-        "tmux_wait",
-        { ctxId: environment.ctxId, task: "task-1" },
-        { principal: "tester", requestId: "wait-2" },
-    ) as { detached?: boolean; task?: { id?: string; status?: string } };
-    assert.equal(waits.length, 1);
-    assert.equal(workerWaitCalls, 0);
-    assert.equal(resumed.detached, true);
-    assert.deepEqual(resumed.task, { id: "task-1", status: "running" });
-    const opened = await dispatch.callTool(
-        "workspace_open",
-        { ctxId: environment.ctxId },
-        { principal: "tester", requestId: "workspace-open" },
-    );
-    assert.ok(opened instanceof McpNativeToolResult);
-    const token = (opened._meta?.["portable-devshell/workspace"] as { token?: string } | undefined)?.token;
-    if (typeof token !== "string") throw new Error("workspace token missing");
-    const waitId = waits[0]!.waitId;
-    const interruptedByUser = await dispatch.callTool(
-        "workspace_wait_interrupt",
-        { ctxId: environment.ctxId, token, waitId },
-        { principal: "tester", requestId: "workspace-interrupt" },
-    );
-    assert.deepEqual(interruptedByUser, {
-        interrupted: true,
-        status: "cancelled",
-        tmuxTaskId: "task-1",
-        waitId,
-    });
-    await waitUntil(() => waits[0]?.status === "cancelled");
-    assert.equal(waits[0]?.status, "cancelled");
-
-    const resumedAgain = await dispatch.callTool(
-        "tmux_wait",
-        { ctxId: environment.ctxId, task: "task-1" },
-        { principal: "tester", requestId: "wait-3" },
-    ) as { detached?: boolean; task?: { id?: string; status?: string } };
-    await waitUntil(() => waits.length === 2 && observeCalls > 1);
-    assert.equal(waits[1]?.status, "detached");
-    assert.equal(resumedAgain.detached, true);
-    assert.deepEqual(resumedAgain.task, { id: "task-1", status: "running" });
-
-    const touchesBeforeCompletion = goalTouches;
-    terminalResults.set("task-1", { task: { id: "task-1", status: "0" } });
-    await waitUntil(() => waits[1]?.status === "resolved");
-    assert.equal(goalTouches, touchesBeforeCompletion);
-    assert.equal(waits[1]?.status, "resolved");
-
-    const handoffDispatch = new McpEndpointDispatch({
-        catalog,
-        contextRegistry,
-        gateway,
-        instanceName: "demo-local",
-        tmuxWaitPollMs: 1,
-        worker,
-    });
-    const handoff = await handoffDispatch.callTool(
-        "tmux_wait",
-        { ctxId: environment.ctxId, task: "task-2" },
-        { principal: "tester", requestId: "wait-4" },
-    ) as { detached?: boolean; task?: { id?: string; status?: string } };
-    assert.equal(handoff.detached, true);
-    assert.deepEqual(handoff.task, { id: "task-2", status: "running" });
-    assert.equal(waits[2]?.status, "detached");
-    assert.equal(workerWaitCalls, 0);
-
-    terminalResults.set("task-2", { task: { id: "task-2", status: "0" } });
-    await waitUntil(() => waits[2]?.status === "resolved");
-    assert.equal(harness.audited.filter((entry) => entry.toolName === "tmux_wait").length, 4);
-    assert.equal(harness.auditResults.filter((entry) => entry.toolName === "tmux_wait").length, 4);
+    terminalResults.set("task-1", { task: { id: "task-1", status: "1" } });
+    await waitUntil(() => waits[0]?.status === "resolved");
+    assert.equal(waits[0]?.status, "resolved");
+    assert.equal(waits[0]?.result, terminalResults.get("task-1"));
+    assert.equal(harness.audited.filter((entry) => entry.toolName === "tmux_run").length, 1);
+    assert.equal(harness.auditResults.filter((entry) => entry.toolName === "tmux_run").length, 1);
 });
 
 test("OpenAI session selector replacement happens only after audited environ_info succeeds", async () => {

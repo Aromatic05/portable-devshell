@@ -182,7 +182,6 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             "tmux_list",
             "tmux_read",
             "tmux_run",
-            "tmux_wait",
         ]);
     }
     assert_eq!(

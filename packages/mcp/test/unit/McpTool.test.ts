@@ -96,10 +96,7 @@ test("ChatGPT invocation status is limited to long-lived visible tool states", (
         invoked: "Answer received",
         invoking: "Waiting for your answer…",
     });
-    assert.deepEqual(mcpToolInvocationStatus("tmux_wait"), {
-        invoked: "Workspace will resume when ready",
-        invoking: "Handing task wait to Workspace…",
-    });
+    assert.equal(mcpToolInvocationStatus("tmux_run"), undefined);
     assert.deepEqual(mcpToolInvocationStatus("workspace_open"), {
         invoked: "Workspace ready",
         invoking: "Opening Workspace…",

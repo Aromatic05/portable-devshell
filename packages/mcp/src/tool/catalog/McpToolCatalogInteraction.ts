@@ -173,7 +173,7 @@ export class McpToolCatalogInteraction {
         },
         {
             _meta: appOnlyMeta,
-            description: "Interrupt one active tmux_wait without stopping the tmux task. The held model tool call returns as interrupted and this wait ends; a later tmux_wait creates a new wait for the still-running task. App-only human action; models must not call it.",
+            description: "Interrupt one detached tmux_run wait without stopping the tmux task. The Workspace resume is cancelled; the task continues running. App-only human action; models must not call it.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,

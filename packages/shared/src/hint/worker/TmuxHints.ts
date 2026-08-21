@@ -6,7 +6,7 @@ import { workerCommonErrorHints } from "./WorkerCommonHints.js";
 
 const warningTexts: Record<string, string> = {
     "tmux.blockTimeout":
-        "Task still running; continue with tmux_wait.",
+        "Task still running; use the returned task id with tmux_read.",
     "tmux.taskAdopted":
         "Continue using the existing task id.",
     "tmux.outputSkipped":
@@ -68,18 +68,20 @@ export function tmuxTaskResultHints(toolName: string, result: JsonValue): ToolDi
     const hints: ToolDiagnosticHint[] = [...warningHints(warnings)];
 
     if (toolName === "tmux_run" &&
-        asString(asRecord(record.task)?.status) === "running" &&
-        !hasWarningCode(warnings, "tmux.blockTimeout")) {
+        asBoolean(record.detached) === true) {
         hints.push(diagnosticHint(
-            "tmux.taskRunning",
-            "Continue with tmux_wait."
+            "tmux.runDetached",
+            "The task is still running in its tmux window. Do not poll; Workspace owns the detached resume."
         ));
     }
 
-    if (toolName === "tmux_wait" && asBoolean(record.detached) === true) {
+    if (toolName === "tmux_run" &&
+        asString(asRecord(record.task)?.status) === "running" &&
+        asBoolean(record.detached) !== true &&
+        !hasWarningCode(warnings, "tmux.blockTimeout")) {
         hints.push(diagnosticHint(
-            "tmux.waitDetached",
-            "The task is still running in its tmux window; do not poll. Workspace owns this wait and will resume the model when the task completes."
+            "tmux.taskRunning",
+            "Continue with tmux_read."
         ));
     }
 
@@ -245,7 +247,7 @@ export function tmuxErrorHints(toolName: string, body: ControlErrorBody): ToolDi
         case "tool.cancelled":
             return [errorHint(
                 "tool.cancelled",
-                toolName === "tmux_run" || toolName === "tmux_input" || toolName === "tmux_read" || toolName === "tmux_wait"
+                toolName === "tmux_run" || toolName === "tmux_input" || toolName === "tmux_read"
                     ? "Wait cancelled; continue using the same task id."
                     : "Retry if the result is still needed."
             )];

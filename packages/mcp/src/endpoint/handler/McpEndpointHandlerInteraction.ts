@@ -547,7 +547,7 @@ function workspaceCurrentEvent(waits: WaitRecord[], approvals: ApprovalRequest[]
                 value: {
                     eventName: "tmux.task.completed",
                     kind: "tmux",
-                    name: "tmux_wait",
+                    name: "tmux_run",
                     ...(wait.goalId === undefined ? {} : { goalId: wait.goalId }),
                     status: wait.status,
                     ...(wait.taskId === undefined ? {} : { taskId: wait.taskId }),

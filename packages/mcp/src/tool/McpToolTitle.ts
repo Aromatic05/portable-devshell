@@ -22,7 +22,6 @@ const titles: Readonly<Record<string, string>> = {
     tmux_list: "List tmux panes",
     tmux_read: "Read tmux task",
     tmux_run: "Run tmux task",
-    tmux_wait: "Wait for tmux task",
     todo_read: "Read task plan",
     todo_write: "Update task plan",
     workspace_ask: "Ask user",
@@ -45,7 +44,6 @@ export function mcpToolTitle(toolName: string): string {
 
 const invocationStatuses: Readonly<Record<string, { invoked: string; invoking: string }>> = {
     workspace_ask: { invoked: "Answer received", invoking: "Waiting for your answer…" },
-    tmux_wait: { invoked: "Workspace will resume when ready", invoking: "Handing task wait to Workspace…" },
     workspace_open: { invoked: "Workspace ready", invoking: "Opening Workspace…" },
 };
 

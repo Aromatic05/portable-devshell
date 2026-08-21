@@ -37,9 +37,7 @@ test("MCP tmux supports a complete interactive lifecycle when JSON-RPC request i
         }
         assert.equal(inputTool?.inputSchema.required?.includes("ctxId"), true);
         assert.equal(inputTool?.inputSchema.required?.includes("input"), true);
-        const waitTool = tools.find((entry) => entry.name === "tmux_wait");
-        assert.notEqual(waitTool, undefined);
-        assert.equal(waitTool?.inputSchema.properties?.timeMs, undefined);
+        assert.equal(tools.some((entry) => entry.name === "tmux_run"), true);
         const ctxId = await createContext();
         const requestId = "reused-tools-call-id";
         const created = await callTool(requestId, "tmux_create", { ctxId, name: "interactive" });
@@ -303,9 +301,9 @@ async function waitForTask(
     ctxId: string,
     task: string
 ): Promise<{ output: string[]; task: { status: string } }> {
-    const waited = await callTool(requestId, "tmux_wait", { ctxId, task });
+    const waited = await callTool(requestId, "tmux_read", { ctxId, line: 200, task, timeMs: 30_000 });
     assert.equal(waited.error, undefined, JSON.stringify(waited));
-    const status = readString(waited.result?.structuredContent?.task?.status, "tmux_wait task status");
+    const status = readString(waited.result?.structuredContent?.task?.status, "tmux_read task status");
     assert.notEqual(status, "running");
 
     const read = await callTool(requestId, "tmux_read", { ctxId, line: 200, task });

@@ -88,7 +88,7 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_approval_decide')");
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
 
-    await app.getByText("tmux_wait", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("tmux_run", { exact: true }).waitFor({ state: "visible" });
     await app.getByText("event · tmux.task.completed", { exact: true }).waitFor({ state: "visible" });
     await app.getByText("task-browser", { exact: true }).waitFor({ state: "visible" });
     await app.getByText("Interrupt wait", { exact: true }).click();
@@ -616,7 +616,7 @@ function snapshot(withQuestion) {
     var tmux = {
         eventName: "tmux.task.completed",
         kind: "tmux",
-        name: "tmux_wait",
+        name: "tmux_run",
         status: "waiting",
         taskId: "task-plan",
         tmuxTaskId: "task-browser",
