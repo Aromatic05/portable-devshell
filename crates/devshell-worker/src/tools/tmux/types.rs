@@ -250,7 +250,7 @@ pub struct TmuxWarning {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct TmuxTaskOperationOutput {
+pub struct TmuxRunOutput {
     pub task: TmuxTaskView,
     /// Whether this task will resume the model through Workspace after completion.
     pub resume: bool,
@@ -261,6 +261,18 @@ pub struct TmuxTaskOperationOutput {
     pub detached: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timed_out: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pane: Option<TmuxPaneRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warnings: Option<Vec<TmuxWarning>>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TmuxReadOutput {
+    pub task: TmuxTaskView,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pane: Option<TmuxPaneRef>,
     #[serde(skip_serializing_if = "Option::is_none")]

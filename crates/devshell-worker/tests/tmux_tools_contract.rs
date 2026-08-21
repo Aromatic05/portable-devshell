@@ -313,6 +313,8 @@ fn tmux_zero_time_ms_returns_immediate_observations() {
     );
     assert_eq!(read["ok"], true, "{read}");
     assert!(read["result"].get("pane").is_none());
+    assert!(read["result"].get("resume").is_none(), "{read}");
+    assert!(read["result"].get("timeout").is_none(), "{read}");
     assert!(read["result"].get("kind").is_none());
     assert!(read["result"].get("observationEpoch").is_none());
     assert!(read["result"].get("observationReset").is_none());

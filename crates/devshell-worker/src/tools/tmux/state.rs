@@ -24,7 +24,7 @@ use crate::tools::tmux::task::{
 use crate::tools::tmux::types::{
     TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams, TmuxInputOutput,
     TmuxInputParams, TmuxInspectParams, TmuxListOutput, TmuxPaneDetail, TmuxPaneOperationOutput,
-    TmuxReadParams, TmuxRunParams, TmuxTaskOperationOutput, TmuxWaitMode, TmuxWarning,
+    TmuxReadOutput, TmuxReadParams, TmuxRunOutput, TmuxRunParams, TmuxWaitMode, TmuxWarning,
 };
 use crate::tools::{ToolCall, ToolError};
 
@@ -135,7 +135,7 @@ impl TmuxState {
         &self,
         call: &ToolCall,
         params: TmuxRunParams,
-    ) -> Result<TmuxTaskOperationOutput, ToolError> {
+    ) -> Result<TmuxRunOutput, ToolError> {
         self.replays
             .execute(call, "tmux_run", || self.run_once(call, params))
     }
@@ -144,7 +144,7 @@ impl TmuxState {
         &self,
         call: &ToolCall,
         params: TmuxRunParams,
-    ) -> Result<TmuxTaskOperationOutput, ToolError> {
+    ) -> Result<TmuxRunOutput, ToolError> {
         call.check_cancelled()?;
         require_execute(call)?;
         if params.command.is_empty() || params.command.contains('\0') {
@@ -234,7 +234,17 @@ impl TmuxState {
             self.refresh_task(&task_id)?;
         }
 
-        self.task_output(&task_id, line, true, params.resume, params.timeout)
+        let output = self.task_output(&task_id, line, true)?;
+        Ok(TmuxRunOutput {
+            task: output.task,
+            resume: params.resume,
+            timeout: params.timeout,
+            detached: None,
+            timed_out: None,
+            pane: output.pane,
+            output: output.output,
+            warnings: output.warnings,
+        })
     }
 
     pub fn input(
@@ -316,7 +326,7 @@ impl TmuxState {
                     }
                     thread::sleep(Duration::from_millis(50));
                 }
-                let task_output = self.task_output(&task_id, line, false, false, None)?;
+                let task_output = self.task_output(&task_id, line, false)?;
                 let pane = {
                     let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
                     let task = require_task(&tasks, &task_id)?;
@@ -371,7 +381,7 @@ impl TmuxState {
         &self,
         call: &ToolCall,
         params: TmuxReadParams,
-    ) -> Result<TmuxTaskOperationOutput, ToolError> {
+    ) -> Result<TmuxReadOutput, ToolError> {
         call.check_cancelled()?;
         require_read(call)?;
         let time_ms = validate_time(params.time_ms.unwrap_or(DEFAULT_READ_TIME_MS))?;
@@ -389,7 +399,7 @@ impl TmuxState {
             thread::sleep(Duration::from_millis(50));
         }
         call.check_cancelled()?;
-        self.task_output(&params.task, line, false, false, None)
+        self.task_output(&params.task, line, false)
     }
 
     pub fn inspect(
@@ -969,9 +979,7 @@ impl TmuxState {
         task_id: &str,
         line: i64,
         include_pane: bool,
-        resume: bool,
-        timeout: Option<u64>,
-    ) -> Result<TmuxTaskOperationOutput, ToolError> {
+    ) -> Result<TmuxReadOutput, ToolError> {
         let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
         tasks.prune();
         let task = tasks
@@ -998,13 +1006,9 @@ impl TmuxState {
             .flatten();
         drop(tasks);
         warnings.append(&mut self.take_pending_warnings()?);
-        Ok(TmuxTaskOperationOutput {
+        Ok(TmuxReadOutput {
             task: view,
             pane,
-            resume,
-            timeout,
-            detached: None,
-            timed_out: None,
             output: non_empty(output),
             warnings: non_empty(warnings),
         })

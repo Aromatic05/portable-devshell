@@ -23,7 +23,7 @@ use crate::tools::tmux::state::TmuxState;
 use crate::tools::tmux::types::{
     TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams, TmuxInputOutput,
     TmuxInputParams, TmuxInspectParams, TmuxListOutput, TmuxListParams, TmuxPaneOperationOutput,
-    TmuxReadParams, TmuxRunParams, TmuxTaskOperationOutput,
+    TmuxReadOutput, TmuxReadParams, TmuxRunOutput, TmuxRunParams,
     TmuxWarning,
 };
 use crate::tools::{
@@ -149,7 +149,7 @@ pub fn register_tools(
         socket_paths,
         runtime,
     ));
-    registry.register(tool::<TmuxRunParams, TmuxTaskOperationOutput>(
+    registry.register(tool::<TmuxRunParams, TmuxRunOutput>(
         ToolName::parse("tmux_run").unwrap(),
         "Run a long-running or PTY-oriented Bash program as a managed task in a fresh ephemeral pane. Uses clean Bash without user rc files; command may contain multiple lines and cwd defaults to the workspace. Use bash_run for short non-interactive work. wait defaults to nonblock; timeMs applies only to explicit wait=block and never stops the task. The pane is destroyed after exit while the bounded task transcript remains readable during retention.",
         ToolCapability::Execute,
@@ -163,7 +163,7 @@ pub fn register_tools(
         Arc::clone(&states),
         TmuxState::input,
     ))?;
-    registry.register(tool::<TmuxReadParams, TmuxTaskOperationOutput>(
+    registry.register(tool::<TmuxReadParams, TmuxReadOutput>(
         ToolName::parse("tmux_read").unwrap(),
         "Consume a managed task's durable terminal transcript. Positive line values return the oldest unread lines, zero discards unread transcript data, and negative values return only the requested tail. Transcript capture is bounded and reports truncation explicitly. Use tmux_inspect for current terminal screen state while the task is running.",
         ToolCapability::Read,

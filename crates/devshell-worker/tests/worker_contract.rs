@@ -230,6 +230,20 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         bash_schema["inputSchema"]["properties"]["command"]["minLength"],
         1
     );
+    if let Some(tmux_read_schema) = catalog.iter().find(|tool| tool["name"] == "tmux_read") {
+        assert!(tmux_read_schema["outputSchema"]["properties"]
+            .get("resume")
+            .is_none());
+        assert!(tmux_read_schema["outputSchema"]["properties"]
+            .get("timeout")
+            .is_none());
+        let tmux_run_schema = catalog
+            .iter()
+            .find(|tool| tool["name"] == "tmux_run")
+            .unwrap();
+        assert!(tmux_run_schema["outputSchema"]["properties"]["resume"].is_object());
+        assert!(tmux_run_schema["outputSchema"]["properties"]["timeout"].is_object());
+    }
     let file_edit_schema = catalog
         .iter()
         .find(|tool| tool["name"] == "file_edit")
