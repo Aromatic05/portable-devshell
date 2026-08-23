@@ -239,6 +239,7 @@ impl TmuxState {
             task: output.task,
             timeout: params.timeout,
             detached: None,
+            interrupted: None,
             timed_out: None,
             pane: output.pane,
             output: output.output,

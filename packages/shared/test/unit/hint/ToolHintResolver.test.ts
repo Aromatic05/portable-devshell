@@ -221,6 +221,16 @@ test("tmux_run detached handoff tells the model not to poll", () => {
     assert.match(hints[0]?.text ?? "", /wait deadline/iu);
 });
 
+test("tmux_run interrupted wait tells the model the task is still running", () => {
+    const hints = resolveResultHints("tmux_run", {
+        interrupted: true,
+        task: { id: "t1", status: "running" },
+    });
+    assert.deepEqual(codes(hints), ["tmux.runInterrupted"]);
+    assert.match(hints[0]?.text ?? "", /user stopped waiting/iu);
+    assert.match(hints[0]?.text ?? "", /still running/iu);
+});
+
 test("tmux task terminal status distinguishes success, failure, and unknown", () => {
     assert.deepEqual(resolveResultHints("tmux_read", { task: { status: "0" }, warnings: [] }), []);
     assert.deepEqual(resolveResultHints("tmux_run", { task: { status: "0" } }), []);

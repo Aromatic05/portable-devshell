@@ -141,7 +141,7 @@ block     等待 task 退出；长等待可由 Workspace 接管
 nonblock  task 成功启动后立即返回（默认）
 ```
 
-`timeout` 是 `block` 从 task 启动开始计算的总等待截止时间，不停止 task。MCP 单次 Host tool call 的同步窗口固定最多 3 分钟；超过同步窗口但尚未到 `timeout` 时转为 detached，由 Workspace 接管。
+`timeout` 是 `block` 从 task 启动开始计算的总等待截止时间，不停止 task。MCP 在 task 启动后立即建立 Workspace Wait，因此用户可以随时 `Stop waiting`；单次 Host tool call 的同步窗口固定最多 3 分钟，超过同步窗口但尚未到 `timeout` 时转为 detached，由 Workspace 接管。
 
 需要等待已启动 task 的输出或终态时使用 `tmux_read`；`tmux_run` 的 `wait: block` 会由 MCP 在当前 Host tool call 的安全窗口内固定最多挂起 3 分钟，之后由 Workspace 接管恢复。
 
@@ -249,7 +249,7 @@ Transcript 展示层会处理常见 terminal 控制：ANSI control sequence 不�
 
 ## `tmux_run` 的 Workspace block handoff
 
-MCP 调用 `tmux_run` 时传入 `wait: block`，会先在当前 Host tool call 的安全窗口内固定挂起模型最多 3 分钟。任务在 3 分钟内结束则直接返回；仍运行时返回 `detached: true` 并建立 durable Wait，由 Workspace 接管后续恢复。`timeout` 从任务启动开始计算，任务结束或绝对截止时间先到达时都会触发 Workspace resume；失败退出码也会触发恢复。`timeout` 可以长于 3 分钟，但不会延长单次 Host tool call 的同步阻塞时间。
+MCP 调用 `tmux_run` 时传入 `wait: block`，会立即启动 managed task 并建立 durable Wait，再在当前 Host tool call 的安全窗口内固定挂起模型最多 3 分钟。任务在 3 分钟内结束则直接返回；仍运行时返回 `detached: true`，由 Workspace 接管后续恢复。用户在同步阶段选择 `Stop waiting` 会让原调用立即返回 `interrupted: true`；已经 detached 时选择同一动作则由 Workspace 立即恢复模型。两种情况都不停止 task。`timeout` 从任务启动开始计算，任务结束或绝对截止时间先到达时都会触发 Workspace resume；失败退出码也会触发恢复。`timeout` 可以长于 3 分钟，但不会延长单次 Host tool call 的同步阻塞时间。
 
 ## `tmux_inspect`: terminal history
 
@@ -341,7 +341,7 @@ managed task pane 不能通过 `pane=` close；必须使用 task id。
 
 取消 `tmux_read` 停止等待，并且不会消费这次尚未返回的 transcript。
 
-取消 detached `tmux_run` 的 Workspace wait 只停止恢复观察，不停止 managed task。
+Workspace 的 `Stop waiting` 会停止 `tmux_run` 的 block wait 并让模型继续，但不停止 managed task；同步阶段直接返回原 tool call，detached 阶段通过 Workspace re-entry 恢复模型。
 
 需要正常终止 terminal-side program 时通常发送：
 

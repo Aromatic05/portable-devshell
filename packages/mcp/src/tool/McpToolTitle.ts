@@ -34,7 +34,7 @@ const titles: Readonly<Record<string, string>> = {
     workspace_question_answer: "Answer question",
     workspace_snapshot: "Read Workspace snapshot",
     workspace_task_control: "Control task",
-    workspace_wait_interrupt: "Interrupt wait",
+    workspace_wait_interrupt: "Stop waiting",
     workspace_wait_recover: "Recover wait",
     workspace_watch: "Watch Workspace",
 };

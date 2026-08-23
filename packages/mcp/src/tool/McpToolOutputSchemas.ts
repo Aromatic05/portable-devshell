@@ -466,11 +466,14 @@ export const workspaceQuestionAnswerOutputSchema = objectSchema({
 }, ["answer", "detached", "questionId", "waitId"]);
 
 export const workspaceWaitInterruptOutputSchema = objectSchema({
+    detached: booleanValue,
+    goalId: nonEmptyString,
     interrupted: { const: true, type: "boolean" },
-    status: { const: "cancelled", type: "string" },
+    status: { const: "resolved", type: "string" },
+    taskId: nonEmptyString,
     tmuxTaskId: stringValue,
     waitId: nonEmptyString,
-}, ["interrupted", "status", "tmuxTaskId", "waitId"]);
+}, ["detached", "interrupted", "status", "tmuxTaskId", "waitId"]);
 
 export const workspaceWaitRecoveryOutputSchema = objectSchema({
     claimId: nonEmptyString,

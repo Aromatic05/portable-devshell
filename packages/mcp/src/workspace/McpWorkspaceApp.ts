@@ -99,7 +99,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
   var busy = new Set();
   var expandedQuestions = new Set();
   var WIDGET_STATE_KEY = "portableDevshellWorkspace";
-  var RECOVERY_MESSAGE = "Resume the existing portable-devshell work from the current Workspace state. Do not repeat completed work or restart the original command. Read the recovered result before acting. Reuse any existing tmux task instead of starting it again. For tmux waits, a timeout only ends the wait and does not stop the task. If a blocked Workspace Goal can now proceed, call workspace_goal with action=resume before continuing.";
+  var RESUME_MESSAGE = "Resume the existing portable-devshell work from the current Workspace state. Do not repeat completed work or restart the original command. Read the Workspace state and triggering result before acting. Reuse any existing tmux task instead of starting it again. For tmux waits, a timeout or user interruption ends only the wait and does not stop the task. If a blocked Workspace Goal can now proceed, call workspace_goal with action=resume before continuing.";
   var bridgeReady = false;
   var pendingToolResult = null;
   var initialToolResultResolve = null;
@@ -439,7 +439,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     try {
       await dispatchRecovery(
         item.waitId,
-        RECOVERY_MESSAGE,
+        RESUME_MESSAGE,
         { backgroundWait: item }
       );
       await refresh(false);
@@ -640,11 +640,23 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     if (result && result.detached && hasRecoverableWork(result)) {
       await dispatchRecovery(
         result.waitId,
-        RECOVERY_MESSAGE,
+        RESUME_MESSAGE,
         { answeredQuestion: result }
       );
       await refresh(false);
     }
+  }
+
+  async function interruptWait(waitId) {
+    var previousRecovering = recovering;
+    recovering = true;
+    var result;
+    try {
+      result = await act(waitId, "workspace_wait_interrupt", { waitId: waitId });
+    } finally {
+      recovering = previousRecovering;
+    }
+    if (result && result.interrupted && result.detached) await recoverDetachedWait();
   }
 
   function visibleEvent() {
@@ -690,7 +702,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     var disabled = busy.has(key);
     var action = "";
     if (item.status === "waiting" || item.status === "detached") {
-      action = '<button type="button" class="action-row danger-row"' + (disabled ? ' disabled' : '') + ' data-wait-interrupt="' + escapeHtml(item.waitId) + '"><span>Interrupt wait</span><span class="muted">task keeps running</span></button>';
+      action = '<button type="button" class="action-row danger-row"' + (disabled ? ' disabled' : '') + ' data-wait-interrupt="' + escapeHtml(item.waitId) + '"><span>Stop waiting</span><span class="muted">task keeps running</span></button>';
     }
     return '<div class="card">' + eventHead(item) + '<div class="card-body"><div class="muted">event · ' + escapeHtml(item.eventName || "tmux.task.completed") + '</div><div class="question">Waiting for task completion</div><div class="mono">' + escapeHtml(item.tmuxTaskId || "") + '</div></div>' + action + '</div>';
   }
@@ -760,7 +772,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     var interrupt = event.target.closest("[data-wait-interrupt]");
     if (interrupt && !interrupt.hasAttribute("disabled")) {
       var waitId = interrupt.getAttribute("data-wait-interrupt");
-      void act(waitId, "workspace_wait_interrupt", { waitId: waitId });
+      void interruptWait(waitId);
       return;
     }
   });

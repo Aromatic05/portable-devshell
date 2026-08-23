@@ -384,8 +384,9 @@ test("legacy aliases still obey the current MCP policy", async () => {
     );
 });
 
-test("tmux_run hands long waits to Workspace and resumes failed terminal tasks", async () => {
+test("tmux_run block waits are interruptible before handoff and detach after the sync window", async () => {
     let observeCalls = 0;
+    let runCalls = 0;
     const terminalResults = new Map<string, JsonValue>();
     const harness = createWorker({ tools: [tmuxRunBlockTool()] });
     const worker = {
@@ -394,11 +395,11 @@ test("tmux_run hands long waits to Workspace and resumes failed terminal tasks",
             assert.equal(toolName, "tmux_run");
             assert.deepEqual(input, {
                 command: "sleep 10",
-                timeMs: 180_000,
                 timeout: 660_000,
-                wait: "block",
+                wait: "nonblock",
             });
-            return { task: { id: "task-1", status: "running" } };
+            runCalls += 1;
+            return { task: { id: `task-${runCalls}`, status: "running" } };
         },
     };
     type Wait = {
@@ -501,6 +502,7 @@ test("tmux_run hands long waits to Workspace and resumes failed terminal tasks",
         contextRegistry,
         gateway,
         instanceName: "demo-local",
+        tmuxBlockSyncMs: 250,
         tmuxWaitPollMs: 1,
         worker,
     });
@@ -509,22 +511,53 @@ test("tmux_run hands long waits to Workspace and resumes failed terminal tasks",
         { workspace: "/workspace" },
         { principal: "tester", requestId: "request-environment" },
     ) as { ctxId: string };
+
+    const opened = await dispatch.callTool(
+        "workspace_open",
+        { ctxId: environment.ctxId },
+        { principal: "tester", requestId: "workspace-open" },
+    );
+    assert.ok(opened instanceof McpNativeToolResult);
+    const token = (opened._meta?.["portable-devshell/workspace"] as { token?: string } | undefined)?.token;
+    if (typeof token !== "string") throw new Error("workspace token missing");
+
+    const interruptible = dispatch.callTool(
+        "tmux_run",
+        { command: "sleep 10", ctxId: environment.ctxId, timeout: 660_000, wait: "block" },
+        { principal: "tester", requestId: "wait-interruptible" },
+    ) as Promise<{ interrupted?: boolean; task?: { id?: string; status?: string } }>;
+    await waitUntil(() => waits.length === 1 && observeCalls > 0);
+    assert.equal(waits[0]?.taskId, "todo-task-1");
+    assert.equal(waits[0]?.status, "waiting");
+    const interrupt = await dispatch.callTool(
+        "workspace_wait_interrupt",
+        { ctxId: environment.ctxId, token, waitId: waits[0]!.waitId },
+        { principal: "tester", requestId: "interrupt-wait" },
+    ) as { detached?: boolean; interrupted?: boolean; tmuxTaskId?: string };
+    assert.equal(interrupt.interrupted, true);
+    assert.equal(interrupt.detached, false);
+    assert.equal(interrupt.tmuxTaskId, "task-1");
+    const interrupted = await interruptible;
+    assert.equal(interrupted.interrupted, true);
+    assert.deepEqual(interrupted.task, { id: "task-1", status: "running" });
+    assert.equal(waits[0]?.status, "consumed");
+
     const first = await dispatch.callTool(
         "tmux_run",
         { command: "sleep 10", ctxId: environment.ctxId, timeout: 660_000, wait: "block" },
-        { principal: "tester", requestId: "wait-1" },
+        { principal: "tester", requestId: "wait-detached" },
     ) as { detached?: boolean; task?: { id?: string; status?: string } };
-    await waitUntil(() => waits.length === 1 && observeCalls > 0);
-    assert.equal(waits[0]?.taskId, "todo-task-1");
+    await waitUntil(() => waits.length === 2 && observeCalls > 1);
+    assert.equal(waits[1]?.taskId, "todo-task-1");
     assert.equal(first.detached, true);
-    assert.deepEqual(first.task, { id: "task-1", status: "running" });
-    assert.equal(waits[0]?.status, "detached");
-    terminalResults.set("task-1", { task: { id: "task-1", status: "1" } });
-    await waitUntil(() => waits[0]?.status === "resolved");
-    assert.equal(waits[0]?.status, "resolved");
-    assert.equal(waits[0]?.result, terminalResults.get("task-1"));
-    assert.equal(harness.audited.filter((entry) => entry.toolName === "tmux_run").length, 1);
-    assert.equal(harness.auditResults.filter((entry) => entry.toolName === "tmux_run").length, 1);
+    assert.deepEqual(first.task, { id: "task-2", status: "running" });
+    assert.equal(waits[1]?.status, "detached");
+    terminalResults.set("task-2", { task: { id: "task-2", status: "1" } });
+    await waitUntil(() => waits[1]?.status === "resolved");
+    assert.equal(waits[1]?.status, "resolved");
+    assert.equal(waits[1]?.result, terminalResults.get("task-2"));
+    assert.equal(harness.audited.filter((entry) => entry.toolName === "tmux_run").length, 2);
+    assert.equal(harness.auditResults.filter((entry) => entry.toolName === "tmux_run").length, 2);
 
     const restoredNow = new Date().toISOString();
     waits.push({
@@ -544,6 +577,7 @@ test("tmux_run hands long waits to Workspace and resumes failed terminal tasks",
         contextRegistry: new McpContextRegistry(),
         gateway,
         instanceName: "demo-local",
+        tmuxBlockSyncMs: 250,
         tmuxWaitPollMs: 1,
         worker,
     });

@@ -257,6 +257,9 @@ pub struct TmuxRunOutput {
     pub timeout: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detached: Option<bool>,
+    /// Whether the user stopped waiting while the task was left running.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interrupted: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timed_out: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -75,9 +75,17 @@ export function tmuxTaskResultHints(toolName: string, result: JsonValue): ToolDi
         ));
     }
 
+    if (toolName === "tmux_run" && asBoolean(record.interrupted) === true) {
+        hints.push(diagnosticHint(
+            "tmux.runInterrupted",
+            "The user stopped waiting. The tmux task is still running; continue other useful work and reuse the existing task id if needed."
+        ));
+    }
+
     if (toolName === "tmux_run" &&
         asString(asRecord(record.task)?.status) === "running" &&
         asBoolean(record.detached) !== true &&
+        asBoolean(record.interrupted) !== true &&
         !hasWarningCode(warnings, "tmux.blockTimeout")) {
         hints.push(diagnosticHint(
             "tmux.taskRunning",

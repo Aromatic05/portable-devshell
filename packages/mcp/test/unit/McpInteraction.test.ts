@@ -327,12 +327,18 @@ test("Workspace can interrupt a live tmux wait without cancelling the tmux task"
         context,
         "call-app",
     ), {
+        detached: false,
         interrupted: true,
-        status: "cancelled",
+        status: "resolved",
+        taskId: "task-1",
         tmuxTaskId: "tmux-task-1",
         waitId: "wait-tmux",
     });
-    assert.equal(fake.waits[0]?.status, "cancelled");
+    assert.equal(fake.waits[0]?.status, "resolved");
+    assert.deepEqual(fake.waits[0]?.result, {
+        interrupted: true,
+        task: { id: "tmux-task-1", status: "running" },
+    });
 });
 
 test("Workspace task control and detached-wait recovery use durable server state", async () => {

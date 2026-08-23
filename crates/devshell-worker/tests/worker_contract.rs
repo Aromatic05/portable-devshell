@@ -248,6 +248,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             .get("resume")
             .is_none());
         assert!(tmux_run_schema["outputSchema"]["properties"]["timeout"].is_object());
+        assert!(tmux_run_schema["outputSchema"]["properties"]["interrupted"].is_object());
     }
     let file_edit_schema = catalog
         .iter()

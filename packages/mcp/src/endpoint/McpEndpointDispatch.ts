@@ -50,6 +50,7 @@ export interface McpEndpointDispatchOptions {
     gateway?: McpInstanceGateway;
     instanceName: string;
     readyWaitMs?: number;
+    tmuxBlockSyncMs?: number;
     tmuxWaitPollMs?: number;
     worker: McpEndpointWorkerPort;
 }
@@ -67,6 +68,7 @@ export class McpEndpointDispatch {
     readonly #instance: McpEndpointHandlerInstance;
     readonly #instanceName: string;
     readonly #interaction: McpEndpointHandlerInteraction;
+    readonly #tmuxBlockSyncMs: number;
     readonly #tmuxWaitPollMs: number;
     readonly #tmuxWaitRestores = new Map<string, Promise<void>>();
     readonly #tmuxWaitTrackers = new Map<string, { controller: AbortController; promise: Promise<JsonValue> }>();
@@ -80,6 +82,7 @@ export class McpEndpointDispatch {
         this.#contextSelector = options.contextSelector ?? createMcpContextSelector("explicit");
         this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
+        this.#tmuxBlockSyncMs = options.tmuxBlockSyncMs ?? MCP_TMUX_BLOCK_SYNC_MS;
         this.#tmuxWaitPollMs = options.tmuxWaitPollMs ?? MCP_TMUX_WAIT_POLL_MS;
         this.#worker = options.worker;
         const controlOptions = {
@@ -259,24 +262,22 @@ export class McpEndpointDispatch {
         const startedAt = Date.now();
         const initialInput = {
             ...(isRecord(input) ? input : {}),
-            wait: "block",
-            timeMs: timeout !== undefined && timeout <= MCP_TMUX_BLOCK_SYNC_MS
-                ? timeout
-                : MCP_TMUX_BLOCK_SYNC_MS,
+            wait: "nonblock",
         } as JsonValue;
-        const result = instance === this.#instanceName
+        const started = instance === this.#instanceName
             ? await this.#worker.callTool("tmux_run", initialInput, context, signal)
             : await gateway.callTool(instance, "tmux_run", initialInput, context, signal);
-        if (!isRecord(result) || !isRecord(result.task) || typeof result.task.id !== "string") {
+        if (!isRecord(started) || !isRecord(started.task) || typeof started.task.id !== "string") {
             throw new Error("tmux_run returned an invalid task result.");
         }
-        if (result.task.status !== "running") return result;
-        if (timeout !== undefined && timeout <= MCP_TMUX_BLOCK_SYNC_MS) return result;
+        if (started.task.status !== "running") {
+            return await this.#attachComments("tmux_run", started, context, callId, instance);
+        }
 
-        const task = result.task.id;
+        const task = started.task.id;
         const goalId = await this.#currentGoalId(instance, context.ctxId);
         const taskId = goalId === undefined ? await this.#currentTaskId(instance, context.ctxId) : undefined;
-        let wait = await gateway.createWait(instance, {
+        const wait = await gateway.createWait(instance, {
             createdByCtxId: context.ctxId,
             ...(timeout === undefined ? {} : { deadlineAt: new Date(startedAt + timeout).toISOString() }),
             ...(goalId === undefined ? {} : { goalId }),
@@ -285,7 +286,6 @@ export class McpEndpointDispatch {
             ...(taskId === undefined ? {} : { taskId }),
             targetId: task,
         });
-        wait = await gateway.detachWait(instance, wait.waitId);
         this.#ensureTmuxWaitTracker(
             wait.waitId,
             task,
@@ -293,13 +293,66 @@ export class McpEndpointDispatch {
             instance,
             timeout === undefined ? undefined : startedAt + timeout,
         );
-        return await this.#attachComments(
-            "tmux_run",
-            { ...result, detached: true },
-            context,
-            callId,
-            instance,
+
+        let boundaryTimer: ReturnType<typeof setTimeout> | undefined;
+        const boundary = new Promise<{ kind: "boundary" }>((resolve) => {
+            boundaryTimer = setTimeout(() => resolve({ kind: "boundary" }), this.#tmuxBlockSyncMs);
+        });
+        const resolution = gateway.waitForWait(instance, wait.waitId).then(
+            (record) => ({ kind: "wait" as const, record }),
+            (error: unknown) => ({ kind: "waitError" as const, error }),
         );
+
+        let outcome: Awaited<typeof resolution> | { kind: "boundary" };
+        try {
+            outcome = await waitForMcpEndpointAbortable(Promise.race([resolution, boundary]), signal);
+        } catch (error) {
+            if (signal?.aborted === true) {
+                const current = (await gateway.listWaits(instance)).find((entry) => entry.waitId === wait.waitId);
+                if (current?.status === "waiting") {
+                    await gateway.detachWait(instance, wait.waitId).catch(() => undefined);
+                }
+            }
+            throw error;
+        } finally {
+            if (boundaryTimer !== undefined) clearTimeout(boundaryTimer);
+        }
+
+        let current = outcome.kind === "wait"
+            ? outcome.record
+            : (await gateway.listWaits(instance)).find((entry) => entry.waitId === wait.waitId);
+        if (outcome.kind === "boundary" && current?.status === "waiting") {
+            try {
+                current = await gateway.detachWait(instance, wait.waitId);
+            } catch {
+                current = (await gateway.listWaits(instance)).find((entry) => entry.waitId === wait.waitId);
+            }
+        }
+        if (current?.status === "resolved") {
+            await gateway.consumeWait(instance, wait.waitId);
+            if (current.result === undefined || !isRecord(current.result)) {
+                throw new Error("tmux_run wait resolved without a task result.");
+            }
+            return await this.#attachComments(
+                "tmux_run",
+                { ...started, ...current.result },
+                context,
+                callId,
+                instance,
+            );
+        }
+        if (current?.status === "detached") {
+            return await this.#attachComments(
+                "tmux_run",
+                { ...started, detached: true },
+                context,
+                callId,
+                instance,
+            );
+        }
+        if (current?.status === "cancelled" && outcome.kind === "waitError") throw outcome.error;
+        if (outcome.kind === "waitError") throw outcome.error;
+        throw new Error(`tmux_run wait ${wait.waitId} entered an unexpected state.`);
     }
 
     async #currentGoalId(instance: string, ctxId: string): Promise<string | undefined> {

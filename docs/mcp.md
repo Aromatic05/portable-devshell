@@ -138,11 +138,11 @@ Todo task 现在同时承担 model re-entry checkpoint。模型在 `todo_write` 
 
 Todo runtime 仍保留 task-level Pause / Resume / Cancel 语义，用于 durable task 生命周期和兼容已经挂载的旧 Workspace App；当前紧凑 Workspace 不再把 task controls 作为常驻面板展示。它们不会隐式向 tmux 进程发送信号。
 
-`tmux_run` 使用与 `workspace_ask` 相同的关联规则建立 durable Wait。`wait: block` 时，MCP 只在当前 Host tool call 的安全窗口内挂住模型，固定最多 3 分钟；任务在此期间结束则直接返回结果。任务仍在运行时转成 detached，由 Workspace 接管后续恢复。`timeout` 从任务启动开始计算；detached 后，任务结束或该绝对截止时间先到达，都会解析 durable Wait 并通过 Workspace 恢复模型。失败退出码同样会解析 Wait。允许更大的 `timeout` 不代表单次 Host tool call 会同步阻塞同样长的时间。
+`tmux_run` 使用与 `workspace_ask` 相同的关联规则建立 durable Wait。`wait: block` 会先以 managed task 启动命令并立即建立 Wait，因此 Workspace 从等待开始就可以让用户选择 `Stop waiting`。MCP 只在当前 Host tool call 的安全窗口内挂住模型，固定最多 3 分钟；任务在此期间结束则直接返回结果。任务仍在运行时转成 detached，由 Workspace 接管后续恢复。`timeout` 从任务启动开始计算；detached 后，任务结束或该绝对截止时间先到达，都会解析 durable Wait 并通过 Workspace 恢复模型。失败退出码同样会解析 Wait。允许更大的 `timeout` 不代表单次 Host tool call 会同步阻塞同样长的时间。
 
-用户在 Workspace 对 detached `tmux_run` 选择 `Interrupt wait` 时，Wait 直接进入 cancelled，MCP 停止后台状态 observer，但绝不会停止对应 tmux task；这只取消 Workspace 后续自动恢复。
+用户在 Workspace 选择 `Stop waiting` 时，Wait 会解析为 `interrupted` 结果，但绝不会停止对应 tmux task。若原始 `tmux_run` tool call 仍处于同步 block 阶段，该调用立即返回 `interrupted: true`，模型在当前 turn 继续；若已经进入 detached 阶段，Workspace 停止后台 observer，并通过与正常完成相同的 durable recovery claim/send/complete 流程立即重新进入模型。两种情况都只结束等待，不结束 task。
 
-只有非人工中断产生的 detached wait 才参与自动恢复。如果这种 wait 后来完成，App 会对仍可恢复的 resolved wait 做短租约 claim：关联 Goal 时要求 Goal 仍 active/blocked，关联 Todo 时要求 task 未 paused，没有 Goal/Todo 关联时按当前 Context 直接恢复。App 先用 `ui/update-model-context` 写入当前状态，再用带持久化 `recoveryMessageId` 的 `ui/message` 恢复模型；消息成功后先记录 sent marker，再 complete/consume 该 Wait，消息发送失败则 release claim 让后续 remount 重试。并发 App 不能同时 claim 同一个 Wait。普通 live activity 和仍存活的 Question 回答不会触发额外 `ui/message`。
+detached wait 在任务完成、timeout 或用户 `Stop waiting` 后都会进入 resolved，再由 App 对仍可恢复的 wait 做短租约 claim：关联 Goal 时要求 Goal 仍 active/blocked，关联 Todo 时要求 task 未 paused，没有 Goal/Todo 关联时按当前 Context 直接恢复。App 先用 `ui/update-model-context` 写入当前状态，再用带持久化 `recoveryMessageId` 的 `ui/message` 恢复模型；消息成功后先记录 sent marker，再 complete/consume 该 Wait，消息发送失败则 release claim 让后续 remount 重试。并发 App 不能同时 claim 同一个 Wait。普通 live activity 和仍存活的 Question 回答不会触发额外 `ui/message`。
 
 ## Skills 与项目记忆提示
 

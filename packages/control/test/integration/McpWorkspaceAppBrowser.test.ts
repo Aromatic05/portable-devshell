@@ -91,7 +91,7 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     await app.getByText("tmux_run", { exact: true }).waitFor({ state: "visible" });
     await app.getByText("event · tmux.task.completed", { exact: true }).waitFor({ state: "visible" });
     await app.getByText("task-browser", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("Interrupt wait", { exact: true }).click();
+    await app.getByText("Stop waiting", { exact: true }).click();
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_wait_interrupt')");
     await app.getByText("No blocking event.", { exact: true }).waitFor({ state: "visible" });
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
@@ -416,7 +416,7 @@ test("Workspace recovers an unassociated resolved wait by Context", BROWSER_TEST
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
 });
 
-test("Workspace does not surface a detached tmux wait as another blocking event", BROWSER_TEST_OPTIONS, async (t) => {
+test("Workspace Stop waiting resumes the agent after a detached tmux wait", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
 
@@ -431,11 +431,19 @@ test("Workspace does not surface a detached tmux wait as another blocking event"
 
     const app = page.frameLocator("#workspace");
     await app.getByText("No blocking event.", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("Interrupt wait", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("Interrupt wait", { exact: true }).click();
+    await app.getByText("Stop waiting", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("Stop waiting", { exact: true }).click();
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_wait_interrupt')");
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
-    assert.equal(await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"), 0);
+    await page.waitForFunction("(window.__modelMessages || []).length === 1");
+    assert.match(
+        String(await page.evaluate("(window.__modelMessages || [])[0]?.content?.[0]?.text || ''")),
+        /Do not repeat completed work or restart the original command/u,
+    );
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 3");
+    const recoveryActions = await page.evaluate(
+        "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)",
+    );
+    assert.deepEqual(recoveryActions, ["claim", "sent", "complete"]);
 });
 
 test("Workspace re-enters after a detached answer without surfacing detached tmux state", BROWSER_TEST_OPTIONS, async (t) => {
@@ -782,7 +790,7 @@ window.addEventListener("message", function (event) {
     }
     if (call.name === "workspace_wait_interrupt") {
         window.__workspaceWaitInterrupted = true;
-        reply({ structuredContent: { interrupted: true, status: "cancelled", tmuxTaskId: "task-browser", waitId: "wait-background" } });
+        reply({ structuredContent: { detached: false, interrupted: true, status: "resolved", taskId: "task-plan", tmuxTaskId: "task-browser", waitId: "wait-background" } });
         return;
     }
     if (call.name === "workspace_goal_stop") {
@@ -1079,13 +1087,14 @@ window.__workspaceCalls = [];
 window.__modelMessages = [];
 window.__taskStatus = "in_progress";
 window.__waitWindowInterrupted = false;
+window.__waitWindowRecovered = false;
 
 function resumeSnapshot() {
     return {
         activity: [], approvals: [], questions: [], waits: [],
-        background: window.__waitWindowInterrupted ? [] : [{
+        background: window.__waitWindowRecovered ? [] : [{
             detachedAt: new Date().toISOString(),
-            status: "detached",
+            status: window.__waitWindowInterrupted ? "resolved" : "detached",
             taskId: "task-resume",
             tmuxTaskId: "tmux-resume",
             updatedAt: "2026-08-19T01:00:02.000Z",
@@ -1154,15 +1163,44 @@ window.addEventListener("message", function (event) {
     if (call.name === "workspace_wait_interrupt") {
         window.__waitWindowInterrupted = true;
         reply({ structuredContent: {
+            detached: true,
             interrupted: true,
-            status: "cancelled",
+            status: "resolved",
+            taskId: "task-resume",
             tmuxTaskId: "tmux-resume",
             waitId: "wait-resume"
         } });
         return;
     }
     if (call.name === "workspace_wait_recover") {
-        reply({ structuredContent: { taskId: "task-resume", waitId: "wait-resume" } });
+        if (call.arguments.action === "claim") {
+            reply({ structuredContent: {
+                claimId: "resume-claim",
+                kind: "tmux",
+                result: { interrupted: true, task: { id: "tmux-resume", status: "running" } },
+                taskId: "task-resume",
+                targetId: "tmux-resume",
+                waitId: "wait-resume"
+            } });
+            return;
+        }
+        if (call.arguments.action === "sent") {
+            reply({ structuredContent: {
+                recoveryMessageId: "resume-message",
+                recoveryMessageSentAt: "2026-08-19T01:00:03.000Z",
+                sent: true,
+                waitId: "wait-resume"
+            } });
+            return;
+        }
+        if (call.arguments.action === "complete") {
+            window.__waitWindowRecovered = true;
+            reply({ structuredContent: { completed: true, kind: "tmux", targetId: "tmux-resume", waitId: "wait-resume" } });
+            return;
+        }
+        if (call.arguments.action === "release") {
+            reply({ structuredContent: { released: true, waitId: "wait-resume" } });
+        }
     }
 });
 `;

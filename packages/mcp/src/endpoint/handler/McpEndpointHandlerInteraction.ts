@@ -332,12 +332,19 @@ export class McpEndpointHandlerInteraction {
         ) {
             throw new Error(`Interruptible tmux wait ${waitId} was not found for the current Context.`);
         }
-        const cancelled = await gateway.cancelWait(this.options.instanceName, waitId);
-        return {
+        const interrupted = {
             interrupted: true,
-            status: cancelled.status,
-            tmuxTaskId: cancelled.targetId,
-            waitId: cancelled.waitId,
+            task: { id: wait.targetId, status: "running" },
+        } as const;
+        const resolved = await gateway.resolveWait(this.options.instanceName, waitId, interrupted);
+        return {
+            detached: wait.status === "detached",
+            ...(resolved.goalId === undefined ? {} : { goalId: resolved.goalId }),
+            interrupted: true,
+            status: resolved.status,
+            ...(resolved.taskId === undefined ? {} : { taskId: resolved.taskId }),
+            tmuxTaskId: resolved.targetId,
+            waitId: resolved.waitId,
         };
     }
 
