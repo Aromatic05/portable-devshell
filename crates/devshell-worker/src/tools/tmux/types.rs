@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TmuxWaitMode {
+    /// Wait for the task result. Prefer this for unattended work on the current critical path when completion is required before continuing and there is no useful parallel work.
     Block,
+    /// Return after the task starts. Use this only when you intentionally want to continue other work or interact with or observe the task later.
     Nonblock,
 }
 
@@ -19,11 +21,11 @@ pub struct TmuxRunParams {
     #[schemars(length(min = 1))]
     pub command: String,
     #[serde(default)]
-    /// Maximum total wait from task start for wait=block. Does not stop the task; MCP may hand longer waits to Workspace after its fixed host-safe synchronous window.
+    /// Total deadline from task start for wait=block. It does not stop the task. Set it long enough for the expected runtime; MCP may hand longer waits to Workspace after its fixed host-safe synchronous window.
     #[schemars(range(min = 1, max = 3600000))]
     pub timeout: Option<u64>,
     #[serde(default)]
-    /// Wait mode. Defaults to nonblock.
+    /// Wait strategy. Use block when completion is required before continuing and there is no useful parallel work; long unattended builds, tests, downloads, and benchmarks on the current critical path should normally use block. Long MCP block waits are detached automatically and Workspace resumes the model when the task finishes or the timeout is reached, so do not poll. Use nonblock only when you intentionally want to continue other work or interact with or observe the task later. Defaults to nonblock.
     pub wait: Option<TmuxWaitMode>,
     #[serde(default)]
     /// Internal direct-worker block interval. MCP controls this while handing long block waits to Workspace.

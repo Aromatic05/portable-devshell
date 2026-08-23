@@ -27,6 +27,10 @@ test("MCP tmux supports a complete interactive lifecycle when JSON-RPC request i
         assert.equal(runTool?.inputSchema.properties?.timeMs, undefined);
         assert.equal(runTool?.inputSchema.properties?.resume, undefined);
         assert.notEqual(runTool?.inputSchema.properties?.timeout, undefined);
+        assert.match(String(runTool?.description), /Prefer wait=block for unattended tasks on the current critical path/u);
+        assert.match(String(runTool?.inputSchema.properties?.wait?.description), /completion is required before continuing and there is no useful parallel work/u);
+        assert.match(String(runTool?.inputSchema.properties?.wait?.description), /Use nonblock only when you intentionally want to continue other work or interact with or observe the task later/u);
+        assert.match(String(runTool?.inputSchema.properties?.timeout?.description), /Set it long enough for the expected runtime/u);
         const readTool = tools.find((entry) => entry.name === "tmux_read");
         assert.notEqual(readTool, undefined);
         assert.equal(readTool?.inputSchema.properties?.timeMs?.minimum, 0);
@@ -166,10 +170,11 @@ interface ToolStructuredContent {
 }
 
 interface ToolSummary {
+    description?: string;
     inputSchema: {
         anyOf?: JsonValue[];
         oneOf?: JsonValue[];
-        properties?: Record<string, { maximum?: number; minimum?: number }>;
+        properties?: Record<string, { description?: string; maximum?: number; minimum?: number }>;
         required?: string[];
         type?: string;
     };

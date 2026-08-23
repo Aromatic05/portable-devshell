@@ -151,7 +151,7 @@ pub fn register_tools(
     ));
     registry.register(tool::<TmuxRunParams, TmuxRunOutput>(
         ToolName::parse("tmux_run").unwrap(),
-        "Run a long-running or PTY-oriented Bash program as a managed task in a fresh ephemeral pane. Uses clean Bash without user rc files; command may contain multiple lines and cwd defaults to the workspace. Use bash_run for short non-interactive work. wait defaults to nonblock; wait=block requests completion and timeout limits the total wait without stopping the task. MCP may hand long block waits to Workspace after its host-safe synchronous window. The pane is destroyed after exit while the bounded task transcript remains readable during retention.",
+        "Run a long-running or PTY-oriented Bash program as a managed task in a fresh ephemeral pane. Uses clean Bash without user rc files; command may contain multiple lines and cwd defaults to the workspace. Use bash_run for short non-interactive work. Prefer wait=block for unattended tasks on the current critical path when their result is required before continuing and there is no useful parallel work; Workspace handles long waits without polling. Use wait=nonblock only when you intentionally want to continue other work or interact with or observe the task later. timeout limits the total block wait without stopping the task. The pane is destroyed after exit while the bounded task transcript remains readable during retention.",
         ToolCapability::Execute,
         Arc::clone(&states),
         TmuxState::run,

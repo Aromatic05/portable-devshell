@@ -292,6 +292,18 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         assert!(tmux_run["description"]
             .as_str()
             .is_some_and(|value| value.contains("Use bash_run for short non-interactive work")));
+        assert!(tmux_run["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("Prefer wait=block for unattended tasks on the current critical path")));
+        assert!(tmux_run["inputSchema"]["properties"]["wait"]["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("Use block when completion is required before continuing and there is no useful parallel work")));
+        assert!(tmux_run["inputSchema"]["properties"]["wait"]["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("Use nonblock only when you intentionally want to continue other work or interact with or observe the task later")));
+        assert!(tmux_run["inputSchema"]["properties"]["timeout"]["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("Set it long enough for the expected runtime")));
         let tmux_create = catalog
             .iter()
             .find(|tool| tool["name"] == "tmux_create")
