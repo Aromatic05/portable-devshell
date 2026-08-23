@@ -77,6 +77,9 @@ export class McpEndpointHandlerInteraction {
             case "workspace_goal_continue":
                 this.#assertAppToken(input, context);
                 return await this.#continueGoal(gateway, input, context);
+            case "workspace_goal_resume":
+                this.#assertAppToken(input, context);
+                return await this.#resumeGoal(context);
             case "workspace_goal_stop":
                 this.#assertAppToken(input, context);
                 return await this.#stopGoal(context);
@@ -217,6 +220,16 @@ export class McpEndpointHandlerInteraction {
         const goal = await gateway.manageGoal(
             this.options.instanceName,
             { action: "stop" },
+            requireCtxId(context),
+        );
+        return { goal: goal ?? null } as unknown as JsonValue;
+    }
+
+    async #resumeGoal(context: ToolCallContext): Promise<JsonValue> {
+        const gateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
+        const goal = await gateway.manageGoal(
+            this.options.instanceName,
+            { action: "resume" },
             requireCtxId(context),
         );
         return { goal: goal ?? null } as unknown as JsonValue;
@@ -572,25 +585,8 @@ function workspaceCurrentEvent(waits: WaitRecord[], approvals: ApprovalRequest[]
                 },
             });
         }
-        if (wait.kind === "tmux" && wait.status === "waiting") {
-            candidates.push({
-                rank: 0,
-                updatedAt: wait.updatedAt,
-                value: {
-                    eventName: "tmux.task.completed",
-                    kind: "tmux",
-                    name: "tmux_run",
-                    ...(wait.goalId === undefined ? {} : { goalId: wait.goalId }),
-                    status: wait.status,
-                    ...(wait.taskId === undefined ? {} : { taskId: wait.taskId }),
-                    tmuxTaskId: wait.targetId,
-                    updatedAt: wait.updatedAt,
-                    waitId: wait.waitId,
-                },
-            });
-        }
     }
-    candidates.sort((left, right) => left.rank - right.rank || right.updatedAt.localeCompare(left.updatedAt));
+    candidates.sort((left, right) => left.rank - right.rank || left.updatedAt.localeCompare(right.updatedAt));
     return candidates[0]?.value ?? null;
 }
 

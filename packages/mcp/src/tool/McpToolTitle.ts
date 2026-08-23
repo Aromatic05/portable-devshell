@@ -28,6 +28,7 @@ const titles: Readonly<Record<string, string>> = {
     workspace_approval_decide: "Decide approval",
     workspace_goal: "Manage goal",
     workspace_goal_continue: "Continue goal",
+    workspace_goal_resume: "Resume goal",
     workspace_goal_stop: "Stop goal",
     workspace_open: "Open Workspace",
     workspace_reconnect: "Reconnect Workspace",

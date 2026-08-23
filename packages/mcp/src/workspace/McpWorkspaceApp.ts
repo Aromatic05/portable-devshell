@@ -49,13 +49,12 @@ export const workspaceAppHtml = String.raw`<!doctype html>
 body { margin: 0; padding: 8px; background: transparent; color: var(--color-text-primary, CanvasText); }
 small, .muted { color: var(--color-text-secondary, color-mix(in srgb, CanvasText 58%, transparent)); font-size: 11px; }
 #status { display: block; margin-bottom: 6px; }
+#status:empty { display: none; }
 .grid { display: grid; gap: 6px; }
 .card { border: 1px solid var(--color-border-secondary, color-mix(in srgb, CanvasText 18%, transparent)); border-radius: var(--border-radius-md, 9px); overflow: hidden; background: var(--color-background-primary, color-mix(in srgb, Canvas 94%, CanvasText 6%)); }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 9px 6px; }
 .card-body { padding: 0 9px 8px; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.row.between { justify-content: space-between; }
-.title { font-size: 13px; font-weight: 650; }
 .event-name { font-size: 11px; font-weight: 650; }
 .question { margin: 3px 0 7px; font-size: 13px; line-height: 1.35; }
 button, input { font: inherit; }
@@ -64,20 +63,26 @@ button.primary { font-weight: 650; }
 button.danger, .danger-row { color: var(--color-text-danger, CanvasText); }
 button:disabled { opacity: .55; cursor: default; }
 button:focus-visible, input:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
-input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-border-secondary, color-mix(in srgb, CanvasText 14%, transparent)); padding: 8px 9px; background: transparent; color: var(--color-text-primary, CanvasText); }
+input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: transparent; color: var(--color-text-primary, CanvasText); }
 .badge { border-radius: var(--border-radius-full, 999px); padding: 2px 7px; font-size: 10px; background: var(--color-background-secondary, color-mix(in srgb, CanvasText 10%, transparent)); }
 .mono { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11px; }
-.empty { padding: 8px 9px; text-align: left; font-size: 11px; color: var(--color-text-secondary, color-mix(in srgb, CanvasText 55%, transparent)); }
 .choice-row, .action-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 10px; min-height: 34px; padding: 7px 9px; border: 0; border-top: 1px solid var(--color-border-secondary, color-mix(in srgb, CanvasText 14%, transparent)); border-radius: 0; background: transparent; cursor: pointer; font-size: 12px; text-align: left; }
 .choice-row:hover, .action-row:hover { background: var(--color-background-secondary, color-mix(in srgb, CanvasText 6%, transparent)); }
-.goal-step { display: flex; gap: 7px; align-items: baseline; padding: 4px 0; font-size: 11px; }
-.goal-step + .goal-step { border-top: 1px solid var(--color-border-secondary, color-mix(in srgb, CanvasText 10%, transparent)); }
-.goal-step .badge { flex: 0 0 auto; }
+.answer-row { display: flex; align-items: center; border-top: 1px solid var(--color-border-secondary, color-mix(in srgb, CanvasText 14%, transparent)); }
+.answer-row input { flex: 1 1 auto; }
+.answer-row button { flex: 0 0 auto; margin-right: 7px; }
+.background-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 9px; }
+.background-copy { min-width: 0; }
+.background-copy .row { gap: 6px; }
+.background-row > button { flex: 0 0 auto; }
+.detail { margin-top: 6px; line-height: 1.35; }
+.goal-current { margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--color-border-secondary, color-mix(in srgb, CanvasText 10%, transparent)); font-size: 12px; line-height: 1.35; }
+.goal-note { margin-top: 7px; font-size: 11px; line-height: 1.35; }
 </style>
 </head>
 <body>
 <small id="status" role="status" aria-live="polite">Connecting…</small>
-<div id="root" class="grid"><div class="empty">Waiting for Workspace state…</div></div>
+<div id="root" class="grid"></div>
 <script>${workspaceSdkScript}</script>
 <script>
 (function () {
@@ -472,7 +477,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     try {
       var result = await callTool("workspace_snapshot", {}, true);
       await applySnapshot(structured(result), allowRecovery);
-      status.textContent = snapshot && snapshot.instance ? snapshot.instance + " · live" : "Connected";
+      status.textContent = "";
     } catch (error) {
       status.textContent = "Reconnecting";
       throw error;
@@ -483,7 +488,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     if (!initialized || (requiresExplicitContextId && !ctxId)) return;
     var result = await callTool("workspace_reconnect", {}, false);
     await applySnapshot(structured(result), true);
-    status.textContent = snapshot && snapshot.instance ? snapshot.instance + " · live" : "Connected";
+    status.textContent = "";
   }
 
   function sleep(milliseconds) {
@@ -503,7 +508,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
         if (update.changed && update.snapshot) {
           await applySnapshot(update.snapshot, true);
         }
-        status.textContent = snapshot && snapshot.instance ? snapshot.instance + " · live" : "Connected";
+        status.textContent = "";
       } catch (error) {
         if (generation !== watchGeneration || controller.signal.aborted) return;
         status.textContent = "Reconnecting";
@@ -584,7 +589,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
   };
   app.ontoolresult = acceptInitialOrLiveToolResult;
   app.ontoolcancelled = function () {
-    status.textContent = snapshot && snapshot.instance ? snapshot.instance + " · live" : "Connected";
+    status.textContent = "";
     if (initialized) void startLive();
   };
   app.onhostcontextchanged = applyHostContext;
@@ -599,7 +604,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
       applyHostContext(app.getHostContext());
       bridgeReady = true;
       initialized = true;
-      status.textContent = "Connected";
+      status.textContent = "";
       var initialResult = await waitForInitialToolResult(300);
       if (initialResult) acceptToolResult(initialResult);
       else {
@@ -661,19 +666,28 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
 
   function visibleEvent() {
     if (!snapshot) return null;
-    if (snapshot.currentEvent && typeof snapshot.currentEvent === "object") return snapshot.currentEvent;
+    var current = snapshot.currentEvent;
+    if (current && typeof current === "object" && (current.kind === "question" || current.kind === "approval")) return current;
+    var candidates = [];
     var questions = Array.isArray(snapshot.questions) ? snapshot.questions : [];
-    if (questions.length) return Object.assign({ kind: "question", name: "workspace_ask", eventName: "user.answer" }, questions[0]);
+    questions.forEach(function (item) {
+      candidates.push(Object.assign({ kind: "question" }, item));
+    });
     var approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
-    if (approvals.length) return Object.assign({ kind: "approval", name: approvals[0].toolName, eventName: "approval.decision" }, approvals[0]);
-    var background = Array.isArray(snapshot.background) ? snapshot.background : [];
-    var tmux = background.find(function (item) { return item.status === "waiting"; });
-    if (tmux) return Object.assign({ kind: "tmux", name: "tmux_run", eventName: "tmux.task.completed" }, tmux);
-    return null;
+    approvals.forEach(function (item) {
+      candidates.push(Object.assign({ kind: "approval" }, item));
+    });
+    candidates.sort(function (left, right) {
+      var leftRank = left.kind === "question" && left.status === "detached" ? 1 : 0;
+      var rightRank = right.kind === "question" && right.status === "detached" ? 1 : 0;
+      if (leftRank !== rightRank) return leftRank - rightRank;
+      return String(left.updatedAt || left.createdAt || "").localeCompare(String(right.updatedAt || right.createdAt || ""));
+    });
+    return candidates[0] || null;
   }
 
-  function eventHead(item) {
-    return '<div class="card-head"><span class="event-name">' + escapeHtml(item.name || item.kind || "event") + '</span><span class="badge">' + escapeHtml(item.status || "waiting") + '</span></div>';
+  function eventHead(label, badge) {
+    return '<div class="card-head"><span class="event-name">' + escapeHtml(label) + '</span><span class="badge">' + escapeHtml(badge) + '</span></div>';
   }
 
   function questionCard(item) {
@@ -681,70 +695,72 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     var choices = Array.isArray(payload.choices) ? payload.choices : [];
     var disabled = busy.has(item.waitId);
     var expanded = expandedQuestions.has(item.waitId);
-    var shownChoices = expanded ? choices : choices.slice(0, 5);
+    var shownChoices = expanded ? choices : choices.slice(0, 3);
     var rows = shownChoices.map(function (choice) {
       return '<button type="button" class="choice-row"' + (disabled ? ' disabled' : '') + ' data-question-choice="' + escapeHtml(item.waitId) + '" data-answer="' + escapeHtml(choice) + '"><span>' + escapeHtml(choice) + '</span><span class="muted" aria-hidden="true">›</span></button>';
     }).join("");
     if (!expanded && choices.length > shownChoices.length) {
       rows += '<button type="button" class="choice-row" data-question-expand="' + escapeHtml(item.waitId) + '" aria-expanded="false"><span>Show ' + (choices.length - shownChoices.length) + ' more</span><span class="muted" aria-hidden="true">+</span></button>';
     }
-    var text = payload.allowText === false ? "" : '<input aria-label="Answer" data-question-input="' + escapeHtml(item.waitId) + '" placeholder="Type an answer · Enter"' + (disabled ? ' disabled' : '') + '>';
-    return '<div class="card">' + eventHead(item) + '<div class="card-body"><div class="muted">event · ' + escapeHtml(item.eventName || "user.answer") + '</div><div class="question">' + escapeHtml(payload.question || "Question") + '</div></div><div class="choice-list">' + rows + '</div>' + text + '</div>';
+    var text = payload.allowText === false ? "" : '<div class="answer-row"><input aria-label="Answer" data-question-input="' + escapeHtml(item.waitId) + '" placeholder="Type an answer"' + (disabled ? ' disabled' : '') + '><button type="button" class="primary" data-question-submit="' + escapeHtml(item.waitId) + '"' + (disabled ? ' disabled' : '') + '>Send</button></div>';
+    return '<div class="card">' + eventHead("Question", "Needs input") + '<div class="card-body"><div class="question">' + escapeHtml(payload.question || "Question") + '</div></div><div class="choice-list">' + rows + '</div>' + text + '</div>';
   }
 
   function approvalCard(item) {
     var disabled = busy.has(item.approvalId) ? " disabled" : "";
-    return '<div class="card">' + eventHead(item) + '<div class="card-body"><div class="muted">event · ' + escapeHtml(item.eventName || "approval.decision") + '</div><div class="question"><strong>' + escapeHtml(item.toolName || item.name) + '</strong><br><span class="muted">' + escapeHtml(item.inputSummary || item.reason || "") + '</span></div><div class="row"><button class="danger" data-approval="' + escapeHtml(item.approvalId) + '" data-decision="deny"' + disabled + '>Deny</button><button class="primary" data-approval="' + escapeHtml(item.approvalId) + '" data-decision="approve"' + disabled + '>Approve</button></div></div></div>';
+    var risk = item.riskLevel ? item.riskLevel.charAt(0).toUpperCase() + item.riskLevel.slice(1) + " risk" : "Review";
+    var summary = item.inputSummary ? '<div class="mono detail">' + escapeHtml(item.inputSummary) + '</div>' : '';
+    var reason = item.reason ? '<div class="detail"><div class="muted">Why</div><div>' + escapeHtml(item.reason) + '</div></div>' : '';
+    return '<div class="card">' + eventHead("Approval", risk) + '<div class="card-body"><div class="question">Approval required</div>' + summary + reason + '<div class="row"><button class="danger" data-approval="' + escapeHtml(item.approvalId) + '" data-decision="deny"' + disabled + '>Deny</button><button class="primary" data-approval="' + escapeHtml(item.approvalId) + '" data-decision="approve"' + disabled + '>Approve</button></div></div></div>';
   }
 
   function tmuxWaitCard(item) {
     var key = item.waitId || item.taskId || item.tmuxTaskId;
     var disabled = busy.has(key);
-    var action = "";
-    if (item.status === "waiting" || item.status === "detached") {
-      action = '<button type="button" class="action-row danger-row"' + (disabled ? ' disabled' : '') + ' data-wait-interrupt="' + escapeHtml(item.waitId) + '"><span>Stop waiting</span><span class="muted">task keeps running</span></button>';
-    }
-    return '<div class="card">' + eventHead(item) + '<div class="card-body"><div class="muted">event · ' + escapeHtml(item.eventName || "tmux.task.completed") + '</div><div class="question">Waiting for task completion</div><div class="mono">' + escapeHtml(item.tmuxTaskId || "") + '</div></div>' + action + '</div>';
+    var action = '<button type="button" class="danger"' + (disabled ? ' disabled' : '') + ' data-wait-interrupt="' + escapeHtml(item.waitId) + '">Stop waiting</button>';
+    return '<div class="card"><div class="background-row"><div class="background-copy"><div class="row"><span class="event-name">Background task</span><span class="badge">Running</span></div><div class="muted"><span>Waiting for task to finish</span><span> · task keeps running</span></div></div>' + action + '</div></div>';
   }
 
-  function detachedWaitCards() {
-    if (visibleEvent()) return "";
+  function backgroundWaitCards() {
     var background = Array.isArray(snapshot && snapshot.background) ? snapshot.background : [];
-    var detached = background.filter(function (item) { return (item.kind === "tmux" || item.tmuxTaskId) && item.status === "detached"; });
-    if (!detached.length) return "";
-    return '<div class="muted">Background waits</div>' + detached.map(tmuxWaitCard).join("");
+    var waiting = background.filter(function (item) { return (item.kind === "tmux" || item.tmuxTaskId) && (item.status === "waiting" || item.status === "detached"); });
+    return waiting.map(tmuxWaitCard).join("");
   }
 
   function goalCard() {
     var goal = snapshot && snapshot.goal;
-    if (!goal) return "";
+    if (!goal || goal.status === "completed" || goal.status === "stopped") return "";
     var steps = Array.isArray(goal.steps) ? goal.steps : [];
-    var rows = steps.map(function (step) {
-      var note = step.note ? '<div class="muted">' + escapeHtml(step.note) + '</div>' : '';
-      return '<div class="goal-step"><span class="badge">' + escapeHtml(step.status) + '</span><div><div>' + escapeHtml(step.text) + '</div>' + note + '</div></div>';
-    }).join("");
-    var stop = "";
-    if (goal.status === "active" || goal.status === "blocked") {
-      stop = '<button type="button" class="action-row danger-row" aria-label="Stop Goal" data-goal-stop="' + escapeHtml(goal.goalId) + '"' + (busy.has("goal-stop") ? ' disabled' : '') + '><span>Stop Goal</span><span class="muted">keep processes running</span></button>';
+    var completed = steps.filter(function (step) { return step.status === "completed" || step.status === "skipped"; }).length;
+    var current = steps.find(function (step) { return step.status === "active"; }) || steps.find(function (step) { return step.status === "pending"; });
+    var progress = '<div class="muted">' + completed + '/' + steps.length + ' steps</div>';
+    var currentStep = current ? '<div class="goal-current"><div class="muted">' + (current.status === "active" ? 'Current' : 'Next') + '</div><div>' + escapeHtml(current.text) + '</div>' + (current.note ? '<div class="muted detail">' + escapeHtml(current.note) + '</div>' : '') + '</div>' : '';
+    var note = goal.status === "blocked" && goal.note ? '<div class="goal-note"><div class="muted">Reason</div><div>' + escapeHtml(goal.note) + '</div></div>' : '';
+    var actions = "";
+    if (goal.status === "blocked") {
+      actions += '<button type="button" class="action-row" aria-label="Resume Goal" data-goal-resume="' + escapeHtml(goal.goalId) + '"' + (busy.has("goal-resume") ? ' disabled' : '') + '><span>Resume Goal</span><span class="muted">continue agent work</span></button>';
     }
-    var continuation = goal.status === "active"
-      ? '<div class="muted">continuations · ' + escapeHtml(goal.continuationCount) + '/' + escapeHtml(goal.maxContinuations) + '</div>'
-      : '';
-    return '<div class="card"><div class="card-head"><span class="event-name">workspace_goal</span><span class="badge">' + escapeHtml(goal.status) + '</span></div><div class="card-body"><div class="question">' + escapeHtml(goal.objective) + '</div>' + continuation + '<div>' + rows + '</div></div>' + stop + '</div>';
+    actions += '<button type="button" class="action-row danger-row" aria-label="Stop Goal" data-goal-stop="' + escapeHtml(goal.goalId) + '"' + (busy.has("goal-stop") ? ' disabled' : '') + '><span>Stop Goal</span><span class="muted">keep processes running</span></button>';
+    var statusLabel = goal.status === "blocked" ? "Blocked" : "Active";
+    return '<div class="card">' + eventHead("Goal", statusLabel) + '<div class="card-body"><div class="question">' + escapeHtml(goal.objective) + '</div>' + progress + currentStep + note + '</div>' + actions + '</div>';
   }
 
   function render() {
     if (!snapshot) return;
     var item = visibleEvent();
-    var eventCard = !item ? '<div class="card"><div class="empty">No blocking event.</div></div>'
+    var eventCard = !item ? ""
       : item.kind === "question" ? questionCard(item)
       : item.kind === "approval" ? approvalCard(item)
-      : item.kind === "tmux" ? tmuxWaitCard(item)
-      : '<div class="card"><div class="empty">Unknown event.</div></div>';
-    root.innerHTML = goalCard() + eventCard + detachedWaitCards();
+      : "";
+    root.innerHTML = eventCard + goalCard() + backgroundWaitCards();
   }
 
   root.addEventListener("click", function (event) {
+    var goalResume = event.target.closest("[data-goal-resume]");
+    if (goalResume && !goalResume.hasAttribute("disabled")) {
+      void act("goal-resume", "workspace_goal_resume", {});
+      return;
+    }
     var goalStop = event.target.closest("[data-goal-stop]");
     if (goalStop && !goalStop.hasAttribute("disabled")) {
       void act("goal-stop", "workspace_goal_stop", {});
@@ -759,6 +775,14 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     var choice = event.target.closest("[data-question-choice]");
     if (choice && !choice.hasAttribute("disabled")) {
       void answerQuestion(choice.getAttribute("data-question-choice"), choice.getAttribute("data-answer"));
+      return;
+    }
+    var submit = event.target.closest("[data-question-submit]");
+    if (submit && !submit.hasAttribute("disabled")) {
+      var answerInput = submit.parentElement && submit.parentElement.querySelector("[data-question-input]");
+      var answer = answerInput ? answerInput.value.trim() : "";
+      var questionWaitId = submit.getAttribute("data-question-submit");
+      if (answer && questionWaitId) void answerQuestion(questionWaitId, answer);
       return;
     }
     var target = event.target.closest("button");
@@ -779,7 +803,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
 
   root.addEventListener("keydown", function (event) {
     var input = event.target.closest && event.target.closest("[data-question-input]");
-    if (input && event.key === "Enter") {
+    if (input && event.key === "Enter" && !event.isComposing) {
       var answer = input.value.trim();
       var waitId = input.getAttribute("data-question-input");
       if (answer && waitId) void answerQuestion(waitId, answer);

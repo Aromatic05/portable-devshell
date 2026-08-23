@@ -658,6 +658,7 @@ function isAppOnlyInteractionTool(toolName: string): boolean {
         toolName === "workspace_snapshot" ||
         toolName === "workspace_watch" ||
         toolName === "workspace_goal_continue" ||
+        toolName === "workspace_goal_resume" ||
         toolName === "workspace_goal_stop" ||
         toolName === "workspace_question_answer" ||
         toolName === "workspace_wait_interrupt" ||

@@ -53,13 +53,21 @@ test("Workspace App watches live state and keeps human-action authorization hidd
         await app.locator("html").evaluate((element) => element.style.getPropertyValue("--color-text-primary")),
         "rgb(65, 43, 21)"
     );
-    await app.getByText("workspace_ask", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("workspace_goal", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("Question", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("Goal", { exact: true }).waitFor({ state: "visible" });
     await app.getByText("Ship Workspace Goal mode", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("1/2 steps", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("Verify Workspace UI", { exact: true }).waitFor({ state: "visible" });
+    assert.equal(await app.getByText("Implement Goal runtime", { exact: true }).count(), 0);
+    assert.equal(await app.getByText("workspace_ask", { exact: true }).count(), 0);
+    assert.equal(await app.getByText("workspace_goal", { exact: true }).count(), 0);
+    assert.equal(await app.getByText(/event ·/u).count(), 0);
+    assert.match(await app.locator(".card").first().innerText(), /Continue the task\?/u);
     assert.equal(await app.getByRole("button", { name: "Stop Goal", exact: true }).count(), 1);
+    assert.equal(await app.getByRole("button", { name: "Send", exact: true }).count(), 1);
     const choice = app.locator('[data-question-choice="wait-question"]');
     await choice.first().waitFor({ state: "visible" });
-    assert.equal(await choice.count(), 5);
+    assert.equal(await choice.count(), 3);
     const choiceListSize = await app.locator(".choice-list").evaluate((element) => ({
         clientHeight: element.clientHeight,
         overflowY: getComputedStyle(element).overflowY,
@@ -71,8 +79,9 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     assert.equal(await choice.first().evaluate((element) => element.tagName), "BUTTON");
     assert.equal(await choice.first().evaluate((element) => getComputedStyle(element).borderRadius), "0px");
     assert.equal(await app.getByRole("button", { name: "Continue", exact: true }).count(), 1);
-    assert.equal(await app.locator("body").evaluate((element) => element.scrollHeight <= 520), true);
-    await app.getByRole("button", { name: "Show 7 more", exact: true }).click();
+    const bodyHeight = await app.locator("body").evaluate((element) => element.scrollHeight);
+    assert.equal(bodyHeight <= 520, true, `Workspace height ${bodyHeight}px exceeds compact limit`);
+    await app.getByRole("button", { name: "Show 9 more", exact: true }).click();
     assert.equal(await choice.count(), 12);
     assert.equal(await app.getByText("Activity", { exact: true }).count(), 0);
     assert.equal(await app.getByText("Background", { exact: true }).count(), 0);
@@ -83,21 +92,30 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_question_answer')");
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
 
-    await app.getByText("approval.decision", { exact: false }).waitFor({ state: "visible" });
+    await app.getByText("Approval", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("Approval required", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("High risk", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("git push origin v0.6.7", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("Publishing a release changes the remote repository.", { exact: true }).waitFor({ state: "visible" });
+    assert.equal(await app.getByText("approval.decision", { exact: false }).count(), 0);
     await app.getByRole("button", { name: "Approve", exact: true }).click();
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_approval_decide')");
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
 
-    await app.getByText("tmux_run", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("event · tmux.task.completed", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("task-browser", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("Background task", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("Waiting for task to finish", { exact: true }).waitFor({ state: "visible" });
+    assert.equal(await app.getByText("tmux_run", { exact: true }).count(), 0);
+    assert.equal(await app.getByText("task-browser", { exact: true }).count(), 0);
     await app.getByText("Stop waiting", { exact: true }).click();
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_wait_interrupt')");
-    await app.getByText("No blocking event.", { exact: true }).waitFor({ state: "visible" });
+    assert.equal(await app.getByText("No blocking event.", { exact: true }).count(), 0);
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
     await app.getByRole("button", { name: "Stop Goal", exact: true }).click();
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_goal_stop')");
-    await app.getByText("stopped", { exact: true }).waitFor({ state: "visible" });
+    await page.waitForFunction(() => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        return !iframe?.contentDocument?.body.textContent?.includes("Ship Workspace Goal mode");
+    });
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
     await page.waitForFunction("(window.__workspaceWatchCount || 0) >= 2");
 
@@ -136,6 +154,39 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     assert.equal(interruptCall?.arguments?.token, "browser-secret-token");
     assert.equal(interruptCall?.arguments?.waitId, "wait-background");
     assert.deepEqual(browserFailures, []);
+});
+
+test("Workspace blocked Goal shows its reason and can be resumed by the user", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:420px"></iframe>');
+    await page.evaluate(BRIDGE_SCRIPT);
+    await page.evaluate(() => {
+        const state = window as typeof window & {
+            __workspaceApprovalPending: boolean;
+            __workspaceGoalBlocked: boolean;
+            __workspaceQuestionAnswered: boolean;
+            __workspaceWaitInterrupted: boolean;
+        };
+        state.__workspaceApprovalPending = false;
+        state.__workspaceGoalBlocked = true;
+        state.__workspaceQuestionAnswered = true;
+        state.__workspaceWaitInterrupted = true;
+    });
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    const app = page.frameLocator("#workspace");
+    await app.getByText("Blocked", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("Waiting for user decision", { exact: true }).waitFor({ state: "visible" });
+    await app.getByRole("button", { name: "Resume Goal", exact: true }).click();
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_goal_resume')");
+    await app.getByText("Active", { exact: true }).waitFor({ state: "visible" });
+    assert.equal(await app.getByRole("button", { name: "Resume Goal", exact: true }).count(), 0);
 });
 
 test("Workspace Goal requests one model continuation after inactivity", BROWSER_TEST_OPTIONS, async (t) => {
@@ -247,7 +298,10 @@ test("Workspace Stop fences an in-flight Goal continuation before model re-entry
     await page.waitForFunction("window.__pendingGoalContinuationContext != null");
     const app = page.frameLocator("#workspace");
     await app.getByRole("button", { name: "Stop Goal", exact: true }).click();
-    await app.getByText("stopped", { exact: true }).waitFor({ state: "visible" });
+    await page.waitForFunction(() => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        return !iframe?.contentDocument?.body.textContent?.includes("Ship Workspace Goal mode");
+    });
     assert.equal(await page.evaluate("window.__releaseGoalContinuationContext()"), true);
     await page.waitForFunction("(window.__goalContinuationReports || []).length === 1");
     await page.waitForTimeout(100);
@@ -430,7 +484,8 @@ test("Workspace Stop waiting resumes the agent after a detached tmux wait", BROW
     }, workspaceAppHtml);
 
     const app = page.frameLocator("#workspace");
-    await app.getByText("No blocking event.", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("Background task", { exact: true }).waitFor({ state: "visible" });
+    assert.equal(await app.getByText("No blocking event.", { exact: true }).count(), 0);
     await app.getByText("Stop waiting", { exact: true }).waitFor({ state: "visible" });
     await app.getByText("Stop waiting", { exact: true }).click();
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_wait_interrupt')");
@@ -462,7 +517,8 @@ test("Workspace re-enters after a detached answer without surfacing detached tmu
     const app = page.frameLocator("#workspace");
     await app.locator('[data-question-choice="wait-question-detached"]').click();
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await app.getByText("No blocking event.", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("Background task", { exact: true }).waitFor({ state: "visible" });
+    assert.equal(await app.getByText("No blocking event.", { exact: true }).count(), 0);
     assert.equal(await app.getByRole("button", { name: "Resume agent", exact: true }).count(), 0);
     await page.waitForTimeout(100);
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
@@ -578,6 +634,7 @@ window.__workspaceQuestionAnswered = false;
 window.__workspaceApprovalPending = true;
 window.__workspaceWaitInterrupted = false;
 window.__workspaceGoalStopped = false;
+window.__workspaceGoalBlocked = false;
 window.__workspaceGoalDueNow = false;
 window.__workspaceGoalRetryAfter = "";
 window.__workspaceBackgroundDetached = false;
@@ -601,7 +658,7 @@ function snapshot(withQuestion) {
         kind: "question",
         name: "workspace_ask",
         payload: {
-            allowText: false,
+            allowText: true,
             choices: [
                 "Continue", "Option 2", "Option 3", "Option 4", "Option 5", "Option 6",
                 "Option 7", "Option 8", "Option 9", "Option 10", "Option 11", "Option 12"
@@ -621,26 +678,17 @@ function snapshot(withQuestion) {
         inputSummary: "git push origin v0.6.7",
         kind: "approval",
         name: "bash_run",
+        reason: "Publishing a release changes the remote repository.",
         riskLevel: "high",
         status: "waiting",
         toolName: "bash_run",
         updatedAt: "2026-08-19T01:00:01.000Z"
     };
-    var tmux = {
-        eventName: "tmux.task.completed",
-        kind: "tmux",
-        name: "tmux_run",
-        status: "waiting",
-        taskId: "task-plan",
-        tmuxTaskId: "task-browser",
-        updatedAt: "2026-08-19T01:00:02.000Z",
-        waitId: "wait-background"
-    };
     var currentEvent = withQuestion && !window.__workspaceQuestionAnswered
         ? question
         : window.__workspaceApprovalPending
             ? approval
-            : window.__workspaceWaitInterrupted ? null : tmux;
+            : null;
     return {
         activity: [{
             callId: "call-1",
@@ -673,9 +721,10 @@ function snapshot(withQuestion) {
             goalId: "goal-browser",
             lastAgentActivityAt: "2026-08-19T01:00:00.000Z",
             maxContinuations: 10,
+            note: window.__workspaceGoalBlocked ? "Waiting for user decision" : undefined,
             objective: "Ship Workspace Goal mode",
             revision: 1,
-            status: window.__workspaceGoalStopped ? "stopped" : "active",
+            status: window.__workspaceGoalStopped ? "stopped" : window.__workspaceGoalBlocked ? "blocked" : "active",
             steps: [
                 { id: "implement", status: "completed", text: "Implement Goal runtime" },
                 { id: "verify", status: "active", text: "Verify Workspace UI" }
@@ -795,6 +844,11 @@ window.addEventListener("message", function (event) {
     }
     if (call.name === "workspace_goal_stop") {
         window.__workspaceGoalStopped = true;
+        reply({ structuredContent: { goal: snapshot(false).goal } });
+        return;
+    }
+    if (call.name === "workspace_goal_resume") {
+        window.__workspaceGoalBlocked = false;
         reply({ structuredContent: { goal: snapshot(false).goal } });
         return;
     }

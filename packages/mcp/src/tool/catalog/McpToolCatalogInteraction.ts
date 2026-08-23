@@ -29,6 +29,7 @@ export type McpToolCatalogInteractionName =
     | "workspace_task_control"
     | "workspace_wait_recover"
     | "workspace_goal_continue"
+    | "workspace_goal_resume"
     | "workspace_goal_stop"
     | "workspace_approval_decide";
 
@@ -258,6 +259,20 @@ export class McpToolCatalogInteraction {
             },
             name: "workspace_goal_continue",
             outputSchema: workspaceGoalContinuationOutputSchema,
+            requiredCapabilities: [],
+        },
+        {
+            _meta: appOnlyMeta,
+            description: "Resume the current blocked Workspace Goal from the Workspace UI. App-only human action; models must not call it.",
+            group: "workspace",
+            inputSchema: {
+                additionalProperties: false,
+                properties: { token: { minLength: 1, type: "string" } },
+                required: ["token"],
+                type: "object",
+            },
+            name: "workspace_goal_resume",
+            outputSchema: workspaceGoalResultOutputSchema,
             requiredCapabilities: [],
         },
         {

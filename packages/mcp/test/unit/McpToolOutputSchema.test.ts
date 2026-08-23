@@ -61,6 +61,10 @@ test("Control-owned MCP tools describe their structured output instead of generi
     const questionPayload = property(question, "payload");
     assert.equal(record(questionPayload).additionalProperties, false);
     assert.deepEqual(required(questionPayload), ["allowText", "choices", "question"]);
+    const currentEvent = record(property(definition(definitions, "workspace_snapshot").outputSchema, "currentEvent"));
+    const currentEventVariants = currentEvent.anyOf as Array<Record<string, unknown>>;
+    assert.equal(currentEventVariants.length, 3);
+    assert.equal(JSON.stringify(currentEventVariants).includes("tmux_run"), false);
     assertProperties(definition(definitions, "workspace_watch").outputSchema, ["changed", "cursor", "snapshot"]);
     assertProperties(definition(definitions, "workspace_goal").outputSchema, ["goal"]);
     assertProperties(definition(definitions, "workspace_goal_continue").outputSchema, [

@@ -316,24 +316,11 @@ const workspaceQuestionEventSchema = objectSchema({
     waitId: nonEmptyString,
 }, ["eventName", "kind", "name", "status", "updatedAt", "waitId"]);
 
-const workspaceTmuxEventSchema = objectSchema({
-    eventName: { const: "tmux.task.completed", type: "string" },
-    goalId: nonEmptyString,
-    kind: { const: "tmux", type: "string" },
-    name: { const: "tmux_run", type: "string" },
-    status: { const: "waiting", type: "string" },
-    taskId: nonEmptyString,
-    tmuxTaskId: stringValue,
-    updatedAt: stringValue,
-    waitId: nonEmptyString,
-}, ["eventName", "kind", "name", "status", "updatedAt", "waitId"]);
-
 const workspaceCurrentEventSchema: JsonValue = {
     anyOf: [
         { type: "null" },
         workspaceApprovalEventSchema,
         workspaceQuestionEventSchema,
-        workspaceTmuxEventSchema,
     ],
 };
 

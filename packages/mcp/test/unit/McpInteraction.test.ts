@@ -254,7 +254,7 @@ test("Workspace snapshot projects only compact task and background state", async
         createdAt: now,
         createdByCtxId: context.ctxId!,
         kind: "tmux",
-        status: "detached",
+        status: "waiting",
         targetId: "tmux-task-1",
         taskId: "task-1",
         updatedAt: now,
@@ -302,6 +302,48 @@ test("Workspace snapshot projects only compact task and background state", async
     assert.equal(Object.hasOwn(snapshot, "activity"), false);
     assert.equal(Object.hasOwn(snapshot.tasks?.[0] ?? {}, "ctxId"), false);
     assert.equal(Object.hasOwn(snapshot, "waits"), false);
+});
+
+test("Workspace currentEvent keeps human actions FIFO and ignores tmux waits", async () => {
+    const fake = createInteractionGateway();
+    fake.waits.push(
+        {
+            createdAt: "2026-08-20T00:00:00.000Z",
+            createdByCtxId: context.ctxId!,
+            kind: "question",
+            payload: { allowText: true, choices: [], question: "Oldest question" },
+            status: "waiting",
+            targetId: "question-old",
+            updatedAt: "2026-08-20T00:00:00.000Z",
+            waitId: "wait-old",
+        },
+        {
+            createdAt: "2026-08-20T00:00:02.000Z",
+            createdByCtxId: context.ctxId!,
+            kind: "tmux",
+            status: "waiting",
+            targetId: "tmux-new",
+            updatedAt: "2026-08-20T00:00:02.000Z",
+            waitId: "wait-tmux-new",
+        },
+        {
+            createdAt: "2026-08-20T00:00:03.000Z",
+            createdByCtxId: context.ctxId!,
+            kind: "question",
+            payload: { allowText: true, choices: [], question: "Newer question" },
+            status: "waiting",
+            targetId: "question-new",
+            updatedAt: "2026-08-20T00:00:03.000Z",
+            waitId: "wait-new",
+        },
+    );
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
+    const result = await handler.call("workspace_snapshot", { token }, context, "call-app");
+    assert.ok(result instanceof McpNativeToolResult);
+    const currentEvent = (result.structuredContent as { currentEvent?: Record<string, unknown> }).currentEvent;
+    assert.equal(currentEvent?.kind, "question");
+    assert.equal(currentEvent?.waitId, "wait-old");
 });
 
 test("Workspace can interrupt a live tmux wait without cancelling the tmux task", async () => {
@@ -747,6 +789,36 @@ test("workspace_goal start requires an active Workspace", async () => {
     assert.equal(starts, 1);
 });
 
+test("Workspace can resume a blocked Goal through the app-only control", async () => {
+    const fake = createInteractionGateway();
+    const actions: string[] = [];
+    Object.assign(fake.gateway, {
+        async goalContinuation() {
+            return { goal: null };
+        },
+        async manageGoal(_instance: string, input: { action: string }) {
+            actions.push(input.action);
+            return input.action === "resume"
+                ? { goalId: "goal-1", objective: "Resume work", status: "active", steps: [] }
+                : undefined;
+        },
+        async readGoal() {
+            return { goalId: "goal-1", objective: "Resume work", status: "blocked", steps: [] };
+        },
+    });
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
+
+    const result = await handler.call(
+        "workspace_goal_resume",
+        { token },
+        context,
+        "call-goal-resume",
+    ) as { goal?: { status?: string } };
+    assert.deepEqual(actions, ["resume"]);
+    assert.equal(result.goal?.status, "active");
+});
+
 test("Workspace Goal continuation is unavailable while the current Context still has a detached wait", async () => {
     const fake = createInteractionGateway();
     const continuationInputs: GoalContinuationInput[] = [];
@@ -797,6 +869,7 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     const reconnect = definitions.find((definition) => definition.name === "workspace_reconnect");
     const ask = definitions.find((definition) => definition.name === "workspace_ask");
     const goal = definitions.find((definition) => definition.name === "workspace_goal");
+    const goalResume = definitions.find((definition) => definition.name === "workspace_goal_resume");
     const goalStop = definitions.find((definition) => definition.name === "workspace_goal_stop");
 
     assert.deepEqual([...new Set(definitions.map((definition) => definition.group))], ["workspace"]);
@@ -808,6 +881,7 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     assert.ok(reconnect);
     assert.ok(ask);
     assert.ok(goal);
+    assert.ok(goalResume);
     assert.ok(goalStop);
     const adaptedOpen = adapter.toMcpTool(open, open.description);
     const adaptedAnswer = adapter.toMcpTool(answer, answer.description);
@@ -833,6 +907,7 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     assert.deepEqual(askInputSchema.required, ["question"]);
     assert.equal(ask._meta, undefined);
     assert.equal(goal._meta, undefined);
+    assert.deepEqual((goalResume._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.deepEqual((goalStop._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.match(open.description, /visible App is attached to this tool result/u);
     assert.match(open.description, /Workspace state remains durable/u);
