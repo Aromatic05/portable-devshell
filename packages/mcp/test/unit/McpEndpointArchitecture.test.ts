@@ -40,7 +40,7 @@ function workerTool(name: string = "bash_run"): ToolDefinition {
     };
 }
 
-function tmuxRunResumeTool(): ToolDefinition {
+function tmuxRunBlockTool(): ToolDefinition {
     return {
         description: "Run a managed tmux task.",
         group: "tmux",
@@ -48,9 +48,7 @@ function tmuxRunResumeTool(): ToolDefinition {
             additionalProperties: false,
             properties: {
                 command: { type: "string" },
-                resume: { type: "boolean" },
                 timeout: { type: "integer" },
-                timeMs: { type: "integer" },
                 wait: { type: "string" },
             },
             required: ["command"],
@@ -389,11 +387,17 @@ test("legacy aliases still obey the current MCP policy", async () => {
 test("tmux_run hands long waits to Workspace and resumes failed terminal tasks", async () => {
     let observeCalls = 0;
     const terminalResults = new Map<string, JsonValue>();
-    const harness = createWorker({ tools: [tmuxRunResumeTool()] });
+    const harness = createWorker({ tools: [tmuxRunBlockTool()] });
     const worker = {
         ...harness.worker,
-        async callTool(toolName: string): Promise<JsonValue> {
+        async callTool(toolName: string, input: JsonValue): Promise<JsonValue> {
             assert.equal(toolName, "tmux_run");
+            assert.deepEqual(input, {
+                command: "sleep 10",
+                timeMs: 180_000,
+                timeout: 660_000,
+                wait: "block",
+            });
             return { task: { id: "task-1", status: "running" } };
         },
     };
@@ -507,7 +511,7 @@ test("tmux_run hands long waits to Workspace and resumes failed terminal tasks",
     ) as { ctxId: string };
     const first = await dispatch.callTool(
         "tmux_run",
-        { command: "sleep 10", ctxId: environment.ctxId, resume: true, timeout: 660_000 },
+        { command: "sleep 10", ctxId: environment.ctxId, timeout: 660_000, wait: "block" },
         { principal: "tester", requestId: "wait-1" },
     ) as { detached?: boolean; task?: { id?: string; status?: string } };
     await waitUntil(() => waits.length === 1 && observeCalls > 0);

@@ -55,7 +55,7 @@ export interface McpEndpointDispatchOptions {
 }
 
 const MCP_TMUX_WAIT_POLL_MS = 1_000;
-const MCP_TMUX_RESUME_BLOCK_MS = 3 * 60_000;
+const MCP_TMUX_BLOCK_SYNC_MS = 3 * 60_000;
 
 export class McpEndpointDispatch {
     readonly #artifact: McpEndpointHandlerArtifact;
@@ -212,7 +212,7 @@ export class McpEndpointDispatch {
             );
         }
 
-        if (toolName === "tmux_run" && isMcpTmuxWaitGateway(this.#gateway) && readTmuxResume(routed.input)) {
+        if (toolName === "tmux_run" && isMcpTmuxWaitGateway(this.#gateway) && readTmuxBlock(routed.input)) {
             this.#catalog.assertAdaptable(selected.definition);
             return await auditMcpEndpointTool({
                 context,
@@ -253,16 +253,16 @@ export class McpEndpointDispatch {
     ): Promise<JsonValue> {
         const gateway = this.#gateway;
         if (!isMcpTmuxWaitGateway(gateway) || context.ctxId === undefined) {
-            throw new Error("tmux_run resume state is unavailable.");
+            throw new Error("tmux_run block wait state is unavailable.");
         }
         const timeout = readTmuxTimeout(input);
         const startedAt = Date.now();
         const initialInput = {
             ...(isRecord(input) ? input : {}),
             wait: "block",
-            timeMs: timeout !== undefined && timeout <= MCP_TMUX_RESUME_BLOCK_MS
+            timeMs: timeout !== undefined && timeout <= MCP_TMUX_BLOCK_SYNC_MS
                 ? timeout
-                : MCP_TMUX_RESUME_BLOCK_MS,
+                : MCP_TMUX_BLOCK_SYNC_MS,
         } as JsonValue;
         const result = instance === this.#instanceName
             ? await this.#worker.callTool("tmux_run", initialInput, context, signal)
@@ -271,7 +271,7 @@ export class McpEndpointDispatch {
             throw new Error("tmux_run returned an invalid task result.");
         }
         if (result.task.status !== "running") return result;
-        if (timeout !== undefined && timeout <= MCP_TMUX_RESUME_BLOCK_MS) return result;
+        if (timeout !== undefined && timeout <= MCP_TMUX_BLOCK_SYNC_MS) return result;
 
         const task = result.task.id;
         const goalId = await this.#currentGoalId(instance, context.ctxId);
@@ -338,7 +338,7 @@ export class McpEndpointDispatch {
     ): Promise<JsonValue> {
         const gateway = this.#gateway;
         if (!isMcpTmuxWaitGateway(gateway)) {
-            throw new Error("tmux_run resume state is unavailable.");
+            throw new Error("tmux_run block wait state is unavailable.");
         }
         const key = `${instance}:${waitId}`;
         const existing = this.#tmuxWaitTrackers.get(key);
@@ -613,8 +613,8 @@ function isAppOnlyInteractionTool(toolName: string): boolean {
         toolName === "workspace_approval_decide";
 }
 
-function readTmuxResume(input: JsonValue): boolean {
-    return isRecord(input) && input.resume === true;
+function readTmuxBlock(input: JsonValue): boolean {
+    return isRecord(input) && input.wait === "block";
 }
 
 function readTmuxTimeout(input: JsonValue): number | undefined {

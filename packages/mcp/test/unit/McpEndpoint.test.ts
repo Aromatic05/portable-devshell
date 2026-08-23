@@ -202,6 +202,10 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
         assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_wait_interrupt/);
         assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_watch/);
         assert.match(String(read.body.result?.contents?.[0]?.text), /tmux\.task\.completed/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /Do not repeat completed work or restart the original command/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /timeout only ends the wait and does not stop the task/);
+        assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /A detached background wait completed/);
+        assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /The user answered the detached question/);
         assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /Current tasks/);
         assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /section-head/);
         assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /setInterval\(refresh/);

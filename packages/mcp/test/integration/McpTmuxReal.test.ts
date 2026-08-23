@@ -22,12 +22,15 @@ type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string
 test("MCP tmux supports a complete interactive lifecycle when JSON-RPC request ids are reused", tmuxTestOptions(workerBinaryPath), async () => {
     await withTmuxHarness("aromatic-mcp-tmux-lifecycle", async ({ callTool, createContext, listTools }) => {
         const tools = await listTools();
-        for (const toolName of ["tmux_run", "tmux_read"]) {
-            const tool = tools.find((entry) => entry.name === toolName);
-            assert.notEqual(tool, undefined);
-            assert.equal(tool?.inputSchema.properties?.timeMs?.minimum, 0);
-            assert.equal(tool?.inputSchema.properties?.timeMs?.maximum, 3_600_000);
-        }
+        const runTool = tools.find((entry) => entry.name === "tmux_run");
+        assert.notEqual(runTool, undefined);
+        assert.equal(runTool?.inputSchema.properties?.timeMs, undefined);
+        assert.equal(runTool?.inputSchema.properties?.resume, undefined);
+        assert.notEqual(runTool?.inputSchema.properties?.timeout, undefined);
+        const readTool = tools.find((entry) => entry.name === "tmux_read");
+        assert.notEqual(readTool, undefined);
+        assert.equal(readTool?.inputSchema.properties?.timeMs?.minimum, 0);
+        assert.equal(readTool?.inputSchema.properties?.timeMs?.maximum, 3_600_000);
         const inputTool = tools.find((entry) => entry.name === "tmux_input");
         assert.equal(inputTool?.inputSchema.type, "object");
         assert.equal(inputTool?.inputSchema.anyOf, undefined);

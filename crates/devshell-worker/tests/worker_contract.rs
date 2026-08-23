@@ -241,7 +241,12 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             .iter()
             .find(|tool| tool["name"] == "tmux_run")
             .unwrap();
-        assert!(tmux_run_schema["outputSchema"]["properties"]["resume"].is_object());
+        assert!(tmux_run_schema["inputSchema"]["properties"]
+            .get("resume")
+            .is_none());
+        assert!(tmux_run_schema["outputSchema"]["properties"]
+            .get("resume")
+            .is_none());
         assert!(tmux_run_schema["outputSchema"]["properties"]["timeout"].is_object());
     }
     let file_edit_schema = catalog
@@ -281,10 +286,9 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             .iter()
             .find(|tool| tool["name"] == "tmux_run")
             .unwrap();
-        assert_eq!(
-            tmux_run["inputSchema"]["properties"]["timeMs"]["maximum"],
-            3_600_000
-        );
+        assert!(tmux_run["inputSchema"]["properties"]
+            .get("timeMs")
+            .is_none());
         assert!(tmux_run["description"]
             .as_str()
             .is_some_and(|value| value.contains("Use bash_run for short non-interactive work")));

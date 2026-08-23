@@ -19,17 +19,15 @@ pub struct TmuxRunParams {
     #[schemars(length(min = 1))]
     pub command: String,
     #[serde(default)]
-    /// Request model resume handling for this task.
-    pub resume: bool,
-    #[serde(default)]
-    /// Maximum total resume wait from task start. Does not stop the task; MCP may hand longer waits to Workspace after its fixed host-safe synchronous window.
+    /// Maximum total wait from task start for wait=block. Does not stop the task; MCP may hand longer waits to Workspace after its fixed host-safe synchronous window.
     #[schemars(range(min = 1, max = 3600000))]
     pub timeout: Option<u64>,
     #[serde(default)]
     /// Wait mode. Defaults to nonblock.
     pub wait: Option<TmuxWaitMode>,
     #[serde(default)]
-    /// Maximum time an explicit wait=block call waits for output or completion. Defaults to 30000 and never stops the task.
+    /// Internal direct-worker block interval. MCP controls this while handing long block waits to Workspace.
+    #[schemars(skip)]
     #[schemars(range(min = 0, max = 3600000))]
     pub time_ms: Option<u64>,
     #[serde(default)]
@@ -252,9 +250,7 @@ pub struct TmuxWarning {
 #[serde(rename_all = "camelCase")]
 pub struct TmuxRunOutput {
     pub task: TmuxTaskView,
-    /// Whether model resume handling was requested for this task.
-    pub resume: bool,
-    /// Configured maximum total resume wait from task start. Does not stop the task.
+    /// Configured maximum total block wait from task start. Does not stop the task.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]

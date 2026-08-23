@@ -237,7 +237,6 @@ impl TmuxState {
         let output = self.task_output(&task_id, line, true)?;
         Ok(TmuxRunOutput {
             task: output.task,
-            resume: params.resume,
             timeout: params.timeout,
             detached: None,
             timed_out: None,

@@ -217,6 +217,8 @@ test("tmux_run detached handoff tells the model not to poll", () => {
     });
     assert.deepEqual(codes(hints), ["tmux.runDetached"]);
     assert.match(hints[0]?.text ?? "", /do not poll/iu);
+    assert.match(hints[0]?.text ?? "", /end this turn/iu);
+    assert.match(hints[0]?.text ?? "", /wait deadline/iu);
 });
 
 test("tmux task terminal status distinguishes success, failure, and unknown", () => {

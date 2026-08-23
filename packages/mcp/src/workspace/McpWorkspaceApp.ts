@@ -99,6 +99,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
   var busy = new Set();
   var expandedQuestions = new Set();
   var WIDGET_STATE_KEY = "portableDevshellWorkspace";
+  var RECOVERY_MESSAGE = "Resume the existing portable-devshell work from the current Workspace state. Do not repeat completed work or restart the original command. Read the recovered result before acting. Reuse any existing tmux task instead of starting it again. For tmux waits, a timeout only ends the wait and does not stop the task. If a blocked Workspace Goal can now proceed, call workspace_goal with action=resume before continuing.";
   var bridgeReady = false;
   var pendingToolResult = null;
   var initialToolResultResolve = null;
@@ -438,7 +439,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     try {
       await dispatchRecovery(
         item.waitId,
-        "Resume portable-devshell durable work from the current Workspace state. A detached background wait completed; do not repeat completed work. If a blocked Workspace Goal can now proceed, call workspace_goal(action=\"resume\") before continuing.",
+        RECOVERY_MESSAGE,
         { backgroundWait: item }
       );
       await refresh(false);
@@ -639,7 +640,7 @@ input { width: 100%; min-width: 0; border: 0; border-top: 1px solid var(--color-
     if (result && result.detached && hasRecoverableWork(result)) {
       await dispatchRecovery(
         result.waitId,
-        "Resume portable-devshell durable work from the current Workspace state. The user answered the detached question; use that answer and continue without repeating completed work. If a blocked Workspace Goal can now proceed, call workspace_goal(action=\"resume\") before continuing.",
+        RECOVERY_MESSAGE,
         { answeredQuestion: result }
       );
       await refresh(false);
