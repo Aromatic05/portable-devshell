@@ -22,14 +22,12 @@ try {
             clientInfo: { name: "acceptance", version: "0.0.0" }
         }
     });
-    const sessionId = initialize.headers.get("mcp-session-id");
     const protocolVersion = String(initialize.body.result?.protocolVersion ?? "");
-    assert.ok(sessionId);
+    assert.equal(initialize.headers.get("mcp-session-id"), null);
     assert.notEqual(protocolVersion, "");
     assert.equal(initialize.body.result?.serverInfo?.version, applicationVersion);
     const headers = {
-        "mcp-protocol-version": protocolVersion,
-        "mcp-session-id": sessionId
+        "mcp-protocol-version": protocolVersion
     };
 
     const initialized = await post(endpoint, {
