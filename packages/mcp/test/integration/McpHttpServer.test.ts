@@ -55,7 +55,7 @@ test("initialize succeeds over HTTP", async () => {
 
         assert.equal(response.status, 200);
         assert.equal(typeof payload.result?.protocolVersion, "string");
-        assert.equal(typeof response.headers.get("mcp-session-id"), "string");
+        assert.equal(response.headers.get("mcp-session-id"), null);
     } finally {
         await host.stop();
     }
@@ -324,13 +324,11 @@ async function initializeAndListTools(endpoint: string): Promise<string[]> {
     });
     assert.equal(initialize.status, 200);
     const initializeBody = parseMcpHttpResponse<{ result?: { protocolVersion?: string } }>(await initialize.text());
-    const sessionId = initialize.headers.get("mcp-session-id");
-    assert.equal(typeof sessionId, "string");
+    assert.equal(initialize.headers.get("mcp-session-id"), null);
     const headers = {
         accept: "application/json, text/event-stream",
         "content-type": "application/json",
-        "mcp-protocol-version": String(initializeBody.result?.protocolVersion ?? ""),
-        "mcp-session-id": String(sessionId)
+        "mcp-protocol-version": String(initializeBody.result?.protocolVersion ?? "")
     };
 
     const initialized = await fetch(endpoint, {

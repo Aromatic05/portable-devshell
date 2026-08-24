@@ -248,10 +248,9 @@ async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness
         });
         assert.equal(initialize.error, undefined, JSON.stringify(initialize));
         const headers = {
-            "mcp-protocol-version": String(initialize.result?.protocolVersion ?? ""),
-            "mcp-session-id": String(initialize.headers.get("mcp-session-id") ?? "")
+            "mcp-protocol-version": String(initialize.result?.protocolVersion ?? "")
         };
-        assert.notEqual(headers["mcp-session-id"], "");
+        assert.equal(initialize.headers.get("mcp-session-id"), null);
         const initialized = await postRawJson(endpoint, {
             jsonrpc: "2.0",
             method: "notifications/initialized"

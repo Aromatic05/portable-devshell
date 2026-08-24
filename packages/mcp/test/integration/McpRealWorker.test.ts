@@ -65,10 +65,9 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         assert.equal(initialize.error, undefined);
         assert.equal(typeof initialize.result?.protocolVersion, "string");
         const sessionHeaders = {
-            "mcp-protocol-version": String(initialize.result?.protocolVersion ?? ""),
-            "mcp-session-id": String(initialize.headers.get("mcp-session-id") ?? "")
+            "mcp-protocol-version": String(initialize.result?.protocolVersion ?? "")
         };
-        assert.notEqual(sessionHeaders["mcp-session-id"], "");
+        assert.equal(initialize.headers.get("mcp-session-id"), null);
 
         const initialized = await postRawJson(endpoint, {
             jsonrpc: "2.0",
@@ -153,7 +152,6 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
 
         const replay = instance.subscribe(1);
         assert.equal(replay.kind, "events");
-        assert.equal(replay.events.some((event) => event.type === "mcp.sessionOpened"), true);
         assert.equal(replay.events.some((event) => event.type === "mcp.toolCalled"), true);
     } finally {
         await host.stop();
@@ -205,8 +203,7 @@ test("MCP tools/call waits for approval before invoking the worker tool", realWo
 
         const initialize = await postJson(endpoint, await readFixture("mcp-initialize.json"));
         const sessionHeaders = {
-            "mcp-protocol-version": String(initialize.result?.protocolVersion ?? ""),
-            "mcp-session-id": String(initialize.headers.get("mcp-session-id") ?? "")
+            "mcp-protocol-version": String(initialize.result?.protocolVersion ?? "")
         };
 
         await postRawJson(

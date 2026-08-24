@@ -48,10 +48,9 @@ test("initialize succeeds over SDK transport", async () => {
         assert.equal(typeof response.body.result?.protocolVersion, "string");
         assert.equal(response.body.result?.serverInfo?.name, "portable-devshell-mcp");
         assert.equal(response.body.result?.serverInfo?.version, "9.8.7");
-        assert.equal(typeof response.headers.get("mcp-session-id"), "string");
+        assert.equal(response.headers.get("mcp-session-id"), null);
     } finally {
         await server.close();
-        await binding.close();
     }
 });
 
@@ -132,7 +131,6 @@ test("HTTP tools/list keeps Workspace actions app-only while advertising host au
         assert.deepEqual(open?._meta?.securitySchemes, [{ type: "noauth" }]);
     } finally {
         await server.close();
-        await binding.close();
     }
 });
 
@@ -232,7 +230,6 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
         }
     } finally {
         await server.close();
-        await binding.close();
     }
 });
 
@@ -261,7 +258,6 @@ test("Workspace MCP App uses the configured public origin as its ChatGPT compone
         });
     } finally {
         await server.close();
-        await binding.close();
     }
 });
 
@@ -281,54 +277,34 @@ test("Workspace MCP App does not advertise a wildcard listener as its component 
             assert.deepEqual(read.body.result?.contents?.[0]?._meta, workspaceAppResourceMeta);
         } finally {
             await server.close();
-            await binding.close();
         }
     }
 });
 
-test("session lifecycle emits MCP session events", async () => {
+test("stateless endpoint serves every request without sessions", async () => {
     const harness = createWorkerHarness();
     const binding = createBinding(harness);
     const server = await createBindingServer(binding);
 
     try {
-        await initialize(server.url);
-        assert.deepEqual(
-            harness.events.map((event) => event.type),
-            ["mcp.sessionOpened"]
-        );
+        const staleHeaders = { "mcp-session-id": "stale-session" };
+        const initializeResponse = await postJson(server.url, await readFixture("mcp-initialize.json"), staleHeaders);
+        assert.equal(initializeResponse.status, 200);
+        assert.equal(initializeResponse.headers.get("mcp-session-id"), null);
 
-        await binding.close();
-        assert.deepEqual(
-            harness.events.map((event) => event.type),
-            ["mcp.sessionOpened", "mcp.sessionClosed"]
-        );
+        const listResponse = await postJson(server.url, {
+            id: "req-stateless-tools-list",
+            jsonrpc: "2.0",
+            method: "tools/list",
+            params: {}
+        }, staleHeaders);
+        assert.equal(listResponse.status, 200);
+        assert.ok(Array.isArray(listResponse.body.result?.tools));
+
+        assert.deepEqual(harness.events.map((event) => event.type), []);
     } finally {
         await server.close();
-        await binding.close();
     }
-});
-
-test("session close does not release context-owned worker tool state", async () => {
-    const harness = createWorkerHarness();
-    const released: string[] = [];
-    const endpoint = new McpEndpointWorker({
-        gateway: {
-            async closeToolSession(sessionId: string) {
-                released.push(sessionId);
-            }
-        } as never,
-        instanceName: "demo-local",
-        policy: { capabilities: ["read"], groups: ["file"] },
-        worker: harness.worker
-    });
-
-    await endpoint.appendSessionClosed("session-routed");
-
-    assert.deepEqual(released, []);
-    assert.deepEqual(harness.events, [
-        { data: { sessionId: "session-routed" }, type: "mcp.sessionClosed" }
-    ]);
 });
 
 test("tools/list uses group and capability filtering", async () => {
@@ -352,7 +328,6 @@ test("tools/list uses group and capability filtering", async () => {
         assert.deepEqual(bashTool?._meta?.securitySchemes, [{ type: "noauth" }]);
     } finally {
         await server.close();
-        await binding.close();
     }
 });
 
@@ -384,7 +359,6 @@ test("cached removed tool recipients return a structured tombstone over MCP", as
         assert.equal(response.body.result?.structuredContent?.staleToolSnapshot?.replacement, undefined);
     } finally {
         await server.close();
-        await binding.close();
     }
 });
 
@@ -405,8 +379,8 @@ test("tools/call delegates to WorkerInstance.callTool", async () => {
         assert.equal(harness.calls[0]?.ctxId, ctxId);
         assert.equal(harness.calls[0]?.source, "mcp");
         assert.equal(harness.calls[0]?.toolName, "bash_run");
-        assert.deepEqual(harness.events.map((event) => event.type), ["mcp.sessionOpened", "mcp.toolCalled", "mcp.toolCalled"]);
-        assert.deepEqual(harness.events[2]?.data, {
+        assert.deepEqual(harness.events.map((event) => event.type), ["mcp.toolCalled", "mcp.toolCalled"]);
+        assert.deepEqual(harness.events[1]?.data, {
             ctxId,
             requestId: "req-tools-call",
             source: "mcp",
@@ -421,7 +395,6 @@ test("tools/call delegates to WorkerInstance.callTool", async () => {
         });
     } finally {
         await server.close();
-        await binding.close();
     }
 });
 
@@ -448,7 +421,6 @@ test("tools/call returns a structured hint when the tool fails", async () => {
         assert.match(comments[0] ?? "", /^\[error\.unknown\] /);
     } finally {
         await server.close();
-        await binding.close();
     }
 });
 
@@ -479,7 +451,6 @@ test("tools/call appends a worker result hint and keeps the flat shape", async (
         }
     } finally {
         await server.close();
-        await binding.close();
     }
 });
 
@@ -651,64 +622,16 @@ test("HTTP tools/call forwards openai/session metadata into session context sele
         assert.match(String(missingMeta.body.error?.message), /openai\/session/u);
     } finally {
         await server.close();
-        await binding.close();
     }
 });
 
-test("notifications/cancelled aborts an in-flight tools/call handler", async () => {
-    let observedSignal: AbortSignal | undefined;
-    let markStarted!: () => void;
-    const started = new Promise<void>((resolve) => {
-        markStarted = resolve;
-    });
-    const harness = createWorkerHarness({
-        async callHandler(_toolName, _input, _context, signal) {
-            observedSignal = signal;
-            markStarted();
-            return await new Promise<CommandResult>((_resolve, reject) => {
-                const onAbort = () => {
-                    const error = new Error("client timeout");
-                    Object.assign(error, {
-                        code: "core.toolCallCancelled",
-                        retryable: true
-                    });
-                    reject(error);
-                };
-                if (signal?.aborted === true) {
-                    onAbort();
-                    return;
-                }
-                signal?.addEventListener("abort", onAbort, { once: true });
-            });
-        }
-    });
+test("notifications/cancelled is acknowledged without a matching in-flight call", async () => {
+    const harness = createWorkerHarness();
     const binding = createBinding(harness);
     const server = await createBindingServer(binding);
 
     try {
         const session = await initialize(server.url);
-        const ctxId = await createContext(server.url, session.headers);
-        const requestController = new AbortController();
-        const pendingCall = fetch(server.url, {
-            body: JSON.stringify({
-                id: "req-cancel-tool",
-                jsonrpc: "2.0",
-                method: "tools/call",
-                params: {
-                    arguments: { command: "sleep 30", ctxId },
-                    name: "bash_run"
-                }
-            }),
-            headers: {
-                accept: "application/json, text/event-stream",
-                "content-type": "application/json",
-                ...session.headers
-            },
-            method: "POST",
-            signal: requestController.signal
-        }).catch(() => undefined);
-
-        await started;
         const cancelled = await postRawJson(
             server.url,
             {
@@ -716,20 +639,15 @@ test("notifications/cancelled aborts an in-flight tools/call handler", async () 
                 method: "notifications/cancelled",
                 params: {
                     reason: "client timeout",
-                    requestId: "req-cancel-tool"
+                    requestId: "req-unknown-tool"
                 }
             },
             session.headers
         );
         assert.equal(cancelled.status, 202);
-        await waitFor(() => observedSignal?.aborted === true);
-        assert.equal(observedSignal?.reason, "client timeout");
-
-        requestController.abort();
-        await pendingCall;
+        assert.deepEqual(harness.calls, []);
     } finally {
         await server.close();
-        await binding.close();
     }
 });
 
@@ -783,10 +701,9 @@ test("closing the HTTP request aborts an in-flight tools/call handler", async ()
         requestController.abort("gateway timeout");
         await pendingCall;
         await waitFor(() => observedSignal?.aborted === true);
-        assert.equal(observedSignal?.reason, "MCP HTTP response closed before completion");
+        assert.equal(observedSignal?.reason, "MCP HTTP connection closed before completion");
     } finally {
         await server.close();
-        await binding.close();
     }
 });
 
@@ -856,7 +773,6 @@ test("instance_list returns object structured content through SDK transport", as
         });
     } finally {
         await server.close();
-        await binding.close();
     }
 });
 
@@ -927,7 +843,6 @@ test("artifact_viewImage returns native image content over SDK transport", async
         });
     } finally {
         await server.close();
-        await binding.close();
     }
 });
 
@@ -946,7 +861,6 @@ test("tools/list returns cached schema while the instance is not ready", async (
         );
     } finally {
         await server.close();
-        await binding.close();
     }
 });
 
@@ -961,7 +875,6 @@ test("environ_info remains callable without a worker schema", async () => {
         assert.equal(typeof ctxId, "string");
     } finally {
         await server.close();
-        await binding.close();
     }
 });
 
@@ -978,7 +891,6 @@ test("tools/call still maps not ready to mcp.instanceNotReady", async () => {
         assert.equal(response.body.error?.data?.code, "mcp.instanceNotReady");
     } finally {
         await server.close();
-        await binding.close();
     }
 });
 
@@ -1017,7 +929,6 @@ test("tools/call waits for a transiently not-ready instance before executing", a
         assert.equal(invoked, true);
     } finally {
         await server.close();
-        await binding.close();
     }
 });
 
@@ -1080,14 +991,10 @@ async function handleRequest(binding: McpEndpointBinding, request: IncomingMessa
 async function initialize(url: string): Promise<{ headers: Record<string, string> }> {
     const response = await postJson(url, await readFixture("mcp-initialize.json"));
     assert.equal(response.status, 200);
-    const sessionId = response.headers.get("mcp-session-id");
-    if (sessionId === null) {
-        throw new Error("MCP initialize response omitted mcp-session-id");
-    }
+    assert.equal(response.headers.get("mcp-session-id"), null);
 
     const headers: Record<string, string> = {
-        "mcp-protocol-version": String(response.body.result?.protocolVersion ?? ""),
-        "mcp-session-id": sessionId
+        "mcp-protocol-version": String(response.body.result?.protocolVersion ?? "")
     };
     const initialized = await postRawJson(
         url,
