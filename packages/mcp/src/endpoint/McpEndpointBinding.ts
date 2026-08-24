@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
@@ -7,7 +6,6 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import {
     CallToolRequestSchema,
     ErrorCode,
-    isInitializeRequest,
     ListResourcesRequestSchema,
     ListToolsRequestSchema,
     McpError,
@@ -20,15 +18,8 @@ import { workspaceAppHtml, workspaceAppResourceMetaForPublicBaseUrl, workspaceAp
 import { McpEndpointWorker } from "./McpEndpointWorker.js";
 import { McpNativeToolResult, type McpEndpointResult } from "./McpEndpointResult.js";
 
-interface McpEndpointSession {
-    server: Server;
-    transport: StreamableHTTPServerTransport;
-}
-
 export class McpEndpointBinding {
-    readonly #requestSignals = new Map<string, AbortController>();
     readonly #serverVersion: string;
-    readonly #sessions = new Map<string, McpEndpointSession>();
     readonly #worker: McpEndpointWorker;
     readonly #workspaceResourceMeta: ReturnType<typeof workspaceAppResourceMetaForPublicBaseUrl>;
 
@@ -42,77 +33,29 @@ export class McpEndpointBinding {
         return this.#worker.instanceName;
     }
 
-    async close(): Promise<void> {
-        const sessions = [...this.#sessions.entries()];
-        await Promise.all(
-            sessions.map(async ([sessionId, session]) => {
-                await session.server.close();
-                await this.#closeSession(sessionId);
-            })
-        );
-    }
-
     async handleRequest(request: IncomingMessage, response: ServerResponse, body: JsonValue): Promise<void> {
-        const sessionId = asHeaderValue(request.headers["mcp-session-id"]);
-
-        if (sessionId !== undefined) {
-            const session = this.#sessions.get(sessionId);
-
-            if (session === undefined) {
-                writeJsonRpcError(response, 404, -32001, "Session not found");
-                return;
-            }
-
-            await this.#handleSessionRequest(sessionId, session, request, response, body);
-            return;
-        }
-
-        if (!isInitializeRequest(body)) {
-            writeJsonRpcError(response, 400, -32000, "Bad Request: Mcp-Session-Id header is required", getRequestId(body));
-            return;
-        }
-
-        const session = await this.#createSession();
-        await session.transport.handleRequest(request, response, body);
-    }
-
-    async #handleSessionRequest(
-        sessionId: string,
-        session: McpEndpointSession,
-        request: IncomingMessage,
-        response: ServerResponse,
-        body: JsonValue
-    ): Promise<void> {
-        const requestId = getRequestId(body);
-        if (requestId === null) {
-            await session.transport.handleRequest(request, response, body);
-            return;
-        }
-
-        const key = requestSignalKey(sessionId, String(requestId));
-        const controller = new AbortController();
-        const abortRequest = () => controller.abort("MCP HTTP request was aborted");
-        const closeResponse = () => {
+        const disconnect = new AbortController();
+        const abortOnDisconnect = () => {
             if (!response.writableEnded) {
-                controller.abort("MCP HTTP response closed before completion");
+                disconnect.abort("MCP HTTP connection closed before completion");
             }
         };
-        request.once("aborted", abortRequest);
-        response.once("close", closeResponse);
-        this.#requestSignals.set(key, controller);
+        request.once("aborted", abortOnDisconnect);
+        response.once("close", abortOnDisconnect);
 
+        const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
+        const server = this.#createServer(disconnect.signal);
         try {
-            await session.transport.handleRequest(request, response, body);
+            await server.connect(transport);
+            await transport.handleRequest(request, response, body);
         } finally {
-            if (this.#requestSignals.get(key) === controller) {
-                this.#requestSignals.delete(key);
-            }
-            request.off("aborted", abortRequest);
-            response.off("close", closeResponse);
+            request.off("aborted", abortOnDisconnect);
+            response.off("close", abortOnDisconnect);
+            await Promise.allSettled([server.close(), transport.close()]);
         }
     }
 
-    async #createSession(): Promise<McpEndpointSession> {
+    #createServer(disconnectSignal: AbortSignal): Server {
         const server = new Server(
             {
                 name: "portable-devshell-mcp",
@@ -125,33 +68,7 @@ export class McpEndpointBinding {
                 }
             }
         );
-        const transport = new StreamableHTTPServerTransport({
-            enableJsonResponse: true,
-            onsessionclosed: async (sessionId) => {
-                await this.#closeSession(sessionId);
-            },
-            onsessioninitialized: async (sessionId) => {
-                this.#sessions.set(sessionId, session);
-                await this.#worker.appendSessionOpened(sessionId);
-            },
-            sessionIdGenerator: () => randomUUID()
-        });
-        const session: McpEndpointSession = { server, transport };
 
-        this.#registerHandlers(server);
-        await server.connect(transport);
-        return session;
-    }
-
-    async #closeSession(sessionId: string): Promise<void> {
-        if (!this.#sessions.delete(sessionId)) {
-            return;
-        }
-
-        await this.#worker.appendSessionClosed(sessionId);
-    }
-
-    #registerHandlers(server: Server): void {
         server.setRequestHandler(ListResourcesRequestSchema, async () => ({
             resources: [{
                 mimeType: RESOURCE_MIME_TYPE,
@@ -192,11 +109,7 @@ export class McpEndpointBinding {
                     ...(requestMeta === undefined ? {} : { requestMeta }),
                     requestId: toRequestId(extra.requestId)
                 };
-                const requestSignal =
-                    extra.sessionId === undefined
-                        ? undefined
-                        : this.#requestSignals.get(requestSignalKey(extra.sessionId, String(extra.requestId)))?.signal;
-                const combined = combineAbortSignals(extra.signal, requestSignal);
+                const combined = combineAbortSignals(extra.signal, disconnectSignal);
                 try {
                     const result = await this.#worker.callTool(
                         request.params.name,
@@ -212,6 +125,8 @@ export class McpEndpointBinding {
                 throw toMcpError(error, request.params.name);
             }
         });
+
+        return server;
     }
 }
 
@@ -226,10 +141,6 @@ function readPrincipal(authInfo: { clientId: string; extra?: Record<string, unkn
 function readRequestMeta(meta: unknown): Record<string, unknown> | undefined {
     if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return undefined;
     return meta as Record<string, unknown>;
-}
-
-function requestSignalKey(sessionId: string, requestId: string): string {
-    return `${sessionId}:${requestId}`;
 }
 
 function combineAbortSignals(primary: AbortSignal, secondary: AbortSignal | undefined): {
@@ -261,18 +172,6 @@ function combineAbortSignals(primary: AbortSignal, secondary: AbortSignal | unde
     };
 }
 
-function asHeaderValue(value: string | string[] | undefined): string | undefined {
-    if (typeof value === "string") {
-        return value;
-    }
-
-    if (Array.isArray(value) && value.length > 0) {
-        return value[0];
-    }
-
-    return undefined;
-}
-
 function toRequestId(value: unknown): string | undefined {
     if (typeof value === "string") {
         return value;
@@ -283,33 +182,6 @@ function toRequestId(value: unknown): string | undefined {
     }
 
     return undefined;
-}
-
-
-function getRequestId(body: JsonValue): string | number | null {
-    if (typeof body === "object" && body !== null && !Array.isArray(body) && "id" in body) {
-        const id = body.id;
-
-        if (typeof id === "string" || typeof id === "number") {
-            return id;
-        }
-    }
-
-    return null;
-}
-
-function writeJsonRpcError(response: ServerResponse, statusCode: number, code: number, message: string, id: string | number | null = null): void {
-    response.writeHead(statusCode, { "content-type": "application/json" });
-    response.end(
-        JSON.stringify({
-            error: {
-                code,
-                message
-            },
-            id,
-            jsonrpc: "2.0"
-        })
-    );
 }
 
 function toCallToolResult(result: McpEndpointResult) {

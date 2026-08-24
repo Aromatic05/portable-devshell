@@ -87,14 +87,6 @@ export class McpEndpointWorker {
         return this.#catalog.snapshot().hasWorkerSchema;
     }
 
-    async appendSessionOpened(sessionId: string): Promise<void> {
-        await this.#worker.appendMcpSessionOpened(sessionId);
-    }
-
-    async appendSessionClosed(sessionId: string): Promise<void> {
-        await this.#worker.appendMcpSessionClosed(sessionId);
-    }
-
     async callTool(
         toolName: string,
         input: JsonValue,
