@@ -149,11 +149,11 @@ function composerBox(
         expandedKey: `audit-conversation:${instance}:${ctxId}:composer`,
         editable: true,
         id: "conversation-composer",
-        status: current ? (draft.length === 0 ? "normal" : "running") : "failed",
+        status: current ? (draft.length === 0 ? "normal" : "running") : "disabled",
         summaryLines: [
             draft.length === 0 ? "draft=<empty>" : `draft=${draft}`,
             current
-                ? "Enter edit · Space expand · Esc back"
+                ? "Space expand · ↑/↓ Draft · Enter edit · Esc back"
                 : `sending blocked · latest=${latest ?? "unknown"}`,
         ],
         title: "Write Comment",

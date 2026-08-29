@@ -214,6 +214,7 @@ export function selectFooterText(state: TuiAppState): string {
 }
 
 export function selectFooterShortcuts(state: TuiAppState): string[] {
+    const route = currentTuiRoute(state);
     switch (state.interaction.focusScope) {
         case "sidebarPages":
         case "sidebarInstances":
@@ -228,10 +229,17 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
                     "esc back",
                 ];
             }
+            if (
+                route.page === "audit" &&
+                route.view === "conversation"
+            ) {
+                return ["space expand", "↑↓ draft", "enter edit", "esc back"];
+            }
             return [
                 "← sidebar",
                 "enter detail",
                 "space expand",
+                ...(isAuditContextRoute(route) ? ["m comment"] : []),
                 ...(isTuiSearchablePage(state.ui.selectedPage) ? ["/"] : []),
                 "esc back",
             ];
@@ -241,6 +249,7 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
                 "space",
                 "r",
                 "↑↓",
+                ...(isAuditContextRoute(route) ? ["m comment"] : []),
                 ...(isTuiSearchablePage(state.ui.selectedPage) ? ["/"] : []),
                 "esc back",
             ];
@@ -270,6 +279,16 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
                 "ctrl+] sidebar",
             ];
     }
+}
+
+function isAuditContextRoute(
+    route: ReturnType<typeof currentTuiRoute>,
+): boolean {
+    return (
+        route.page === "audit" &&
+        route.view === "context" &&
+        route.scope === "context"
+    );
 }
 
 export function selectErrorMessage(state: TuiAppState): string[] | undefined {

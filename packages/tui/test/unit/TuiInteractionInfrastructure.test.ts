@@ -527,6 +527,12 @@ test("Comment conversation blocks a stale ctxId instead of reporting a false que
         /not queued.*ctx-current/iu,
     );
     assert.match(conversationScreenText(harness), /sending blocked/iu);
+    assert.equal(
+        selectMainScreenModel(harness.store.getState()).boxes.find(
+            (box) => box.id === "conversation-composer",
+        )?.status,
+        "disabled",
+    );
 });
 
 test("Todo uses a dedicated instance-scoped page and does not appear in Instances boxes", async () => {

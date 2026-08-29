@@ -4,6 +4,7 @@ import test from "node:test";
 import {
     currentTuiRoute,
     selectBreadcrumbSegments,
+    selectFooterShortcuts,
     selectMainScreenModel,
     selectMainScrollKey,
     TuiAppStore,
@@ -185,6 +186,52 @@ test("footer breadcrumb follows the route stack and excludes overlay state", () 
         "audit",
         "unscoped",
         "bash_run",
+    ]);
+});
+
+test("Audit footer exposes Comment only on concrete Context routes", () => {
+    const store = createStore();
+    store.setSelectedPage("audit");
+    store.setFocusScope("mainBoxes");
+
+    assert.equal(selectFooterShortcuts(store.getState()).includes("m comment"), false);
+
+    store.pushRoute({
+        ctxId: "ctx-a",
+        page: "audit",
+        scope: "context",
+        view: "context",
+    });
+    assert.equal(selectFooterShortcuts(store.getState()).includes("m comment"), true);
+
+    store.setFocusScope("boxDetail");
+    assert.equal(selectFooterShortcuts(store.getState()).includes("m comment"), true);
+});
+
+test("Audit Comment footer reflects browse and edit modes", () => {
+    const store = createStore();
+    store.setSelectedPage("audit");
+    store.pushRoute({
+        ctxId: "ctx-a",
+        page: "audit",
+        scope: "context",
+        view: "conversation",
+    });
+    store.setFocusScope("mainBoxes");
+
+    assert.deepEqual(selectFooterShortcuts(store.getState()), [
+        "space expand",
+        "↑↓ draft",
+        "enter edit",
+        "esc back",
+    ]);
+
+    store.setFocusScope("contextConversation");
+    assert.deepEqual(selectFooterShortcuts(store.getState()), [
+        "type",
+        "enter send",
+        "pgup/pgdn",
+        "esc",
     ]);
 });
 
