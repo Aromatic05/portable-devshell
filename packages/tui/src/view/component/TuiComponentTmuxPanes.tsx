@@ -31,7 +31,7 @@ export function TuiComponentTmuxPanes(props: TuiComponentTmuxPanesProps) {
           : "←/→ pane · ↑/↓ scroll · Enter attach · Esc close";
     const paneLabel = pane === undefined
         ? "no pane"
-        : `${snapshot.selectedIndex + 1}/${snapshot.panes.length} · ${pane.name} · ${pane.status}`;
+        : `${snapshot.selectedIndex + 1}/${snapshot.panes.length} · ${pane.name} · ${pane.status} · ${workspaceLabel(pane.workspace)}`;
     const header = `tmux · ${props.instance ?? "no instance"} · ${snapshot.status} · ${paneLabel} · ${help}`;
     const bodyRows = Math.max(0, props.rows - 2);
 
@@ -50,10 +50,10 @@ export function TuiComponentTmuxPanes(props: TuiComponentTmuxPanesProps) {
                             <Text
                                 backgroundColor={index === snapshot.selectedIndex ? "cyan" : undefined}
                                 color={index === snapshot.selectedIndex ? "black" : undefined}
-                                key={candidate.id}
+                                key={`${candidate.workspace}:${candidate.id}`}
                                 wrap="truncate-end"
                             >
-                                {`${index === snapshot.selectedIndex ? "▶" : " "} ${candidate.name} · ${candidate.status}${candidate.taskId === undefined ? "" : ` · ${candidate.taskId}`}`}
+                                {`${index === snapshot.selectedIndex ? "▶" : " "} ${candidate.name} · ${candidate.status}${candidate.taskId === undefined ? "" : ` · ${candidate.taskId}`} · ${workspaceLabel(candidate.workspace)}`}
                             </Text>
                         ))
                     )
@@ -89,4 +89,9 @@ export function TuiComponentTmuxPanes(props: TuiComponentTmuxPanesProps) {
             </Box>
         </Box>
     );
+}
+
+function workspaceLabel(workspace: string): string {
+    const normalized = workspace.replace(/\\/gu, "/").replace(/\/+$/gu, "");
+    return normalized.split("/").at(-1) || workspace;
 }

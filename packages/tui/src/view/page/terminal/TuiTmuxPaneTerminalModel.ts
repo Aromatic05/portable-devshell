@@ -17,6 +17,7 @@ export interface TuiTmuxListPane {
     name: string;
     status: string;
     task?: { id: string; status: string };
+    workspace: string;
 }
 
 export type TuiTmuxPaneMode = "view" | "attach";
@@ -27,6 +28,7 @@ export interface TuiTmuxPaneViewModel {
     name: string;
     status: string;
     taskId?: string;
+    workspace: string;
 }
 
 export function projectTmuxPanes(panes: readonly TuiTmuxListPane[]): TuiTmuxPaneViewModel[] {
@@ -38,6 +40,7 @@ export function projectTmuxPanes(panes: readonly TuiTmuxListPane[]): TuiTmuxPane
             name: pane.name,
             status: pane.status,
             taskId: task?.id,
+            workspace: pane.workspace,
         };
     });
 }

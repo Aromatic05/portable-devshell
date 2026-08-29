@@ -22,17 +22,17 @@ function visibleText(view: { visibleLines: TuiTerminalLine[] }): string[] {
 
 test("only panes whose task.status is exactly running support Attach; other tasks stay View-only", () => {
     const panes: TuiTmuxListPane[] = [
-        { id: "pane-1", name: "main", status: "idle" },
-        { id: "pane-2", name: "server", status: "running", task: { id: "task-9", status: "running" } },
-        { id: "pane-3", name: "auto-1", status: "0" },
-        { id: "pane-4", name: "done", status: "0", task: { id: "task-5", status: "0" } },
+        { id: "pane-1", name: "main", status: "idle", workspace: "/work/a" },
+        { id: "pane-2", name: "server", status: "running", task: { id: "task-9", status: "running" }, workspace: "/work/b" },
+        { id: "pane-3", name: "auto-1", status: "0", workspace: "/work/a" },
+        { id: "pane-4", name: "done", status: "0", task: { id: "task-5", status: "0" }, workspace: "/work/b" },
     ];
     const models = projectTmuxPanes(panes);
     assert.deepEqual(models, [
-        { id: "pane-1", mode: "view", name: "main", status: "idle", taskId: undefined },
-        { id: "pane-2", mode: "attach", name: "server", status: "running", taskId: "task-9" },
-        { id: "pane-3", mode: "view", name: "auto-1", status: "0", taskId: undefined },
-        { id: "pane-4", mode: "view", name: "done", status: "0", taskId: "task-5" },
+        { id: "pane-1", mode: "view", name: "main", status: "idle", taskId: undefined, workspace: "/work/a" },
+        { id: "pane-2", mode: "attach", name: "server", status: "running", taskId: "task-9", workspace: "/work/b" },
+        { id: "pane-3", mode: "view", name: "auto-1", status: "0", taskId: undefined, workspace: "/work/a" },
+        { id: "pane-4", mode: "view", name: "done", status: "0", taskId: "task-5", workspace: "/work/b" },
     ]);
 });
 

@@ -14,6 +14,7 @@ export interface TuiTmuxInspectPane {
     status: string;
     taskId?: string;
     taskStatus?: string;
+    workspace: string;
 }
 
 export interface TuiTmuxInputResult {
@@ -30,13 +31,28 @@ export class TuiRuntimeTmuxOperations {
     }) {}
 
     async listPanes(instance: string): Promise<TuiTmuxListPane[]> {
-        const result = await this.call(instance, "tmux_list", {});
-        return readPanes(result);
+        const workspaces = this.#candidateWorkspaces(instance);
+        const panes: TuiTmuxListPane[] = [];
+        let firstError: unknown;
+        let successfulCalls = 0;
+        for (const workspace of workspaces) {
+            try {
+                const result = await this.call(instance, workspace, "tmux_list", {});
+                successfulCalls += 1;
+                panes.push(...readPanes(result, workspace));
+            } catch (error) {
+                firstError ??= error;
+            }
+        }
+        if (successfulCalls === 0 && firstError !== undefined) {
+            throw firstError;
+        }
+        return panes.sort(comparePanes);
     }
 
-    async inspectPane(instance: string, pane: string, lines = 200): Promise<TuiTmuxInspectPane | undefined> {
+    async inspectPane(instance: string, workspace: string, pane: string, lines = 200): Promise<TuiTmuxInspectPane | undefined> {
         const half = Math.max(1, Math.min(TUI_TMUX_INSPECT_MAX_LINES, Math.floor(lines)));
-        const result = await this.call(instance, "tmux_inspect", { end: 0, pane, start: -half });
+        const result = await this.call(instance, workspace, "tmux_inspect", { end: 0, pane, start: -half });
         const candidates = readRecordArray(result, "panes");
         const detail = candidates.find((candidate) => candidate.id === pane)
             ?? candidates.find((candidate) => candidate.name === pane);
@@ -53,11 +69,12 @@ export class TuiRuntimeTmuxOperations {
             status: readRequiredString(detail, "status"),
             taskId: readNestedString(detail, "task", "id"),
             taskStatus: readNestedString(detail, "task", "status"),
+            workspace,
         };
     }
 
-    async sendInput(instance: string, task: string, input: string): Promise<TuiTmuxInputResult> {
-        const result = await this.call(instance, "tmux_input", { input, task, timeMs: 0 });
+    async sendInput(instance: string, workspace: string, task: string, input: string): Promise<TuiTmuxInputResult> {
+        const result = await this.call(instance, workspace, "tmux_input", { input, task, timeMs: 0 });
         return {
             output: readStringArray(result, "output"),
             status: readNestedString(result, "task", "status") ?? "unknown",
@@ -65,9 +82,9 @@ export class TuiRuntimeTmuxOperations {
         };
     }
 
-    private async call(instance: string, toolName: string, input: JsonValue): Promise<Record<string, JsonValue>> {
+    private async call(instance: string, workspace: string, toolName: string, input: JsonValue): Promise<Record<string, JsonValue>> {
         const feedback = (await withRequestTimeout(
-            this.options.clients.tool.call(instance, toolName, input, this.#requireHomeDirectory(instance)),
+            this.options.clients.tool.call(instance, toolName, input, workspace),
             this.options.operationTimeoutMs,
             `tool.call:${toolName}`,
             "uncertain",
@@ -79,6 +96,30 @@ export class TuiRuntimeTmuxOperations {
         return feedback;
     }
 
+    #candidateWorkspaces(instance: string): string[] {
+        const state = this.options.store.getState();
+        const workspaces: string[] = [];
+        const seen = new Set<string>();
+        const add = (workspace: string | undefined) => {
+            if (workspace === undefined || workspace.length === 0 || seen.has(workspace)) return;
+            seen.add(workspace);
+            workspaces.push(workspace);
+        };
+
+        const toolCalls = state.readModel.instanceState[instance]?.toolCalls ?? [];
+        for (const call of [...toolCalls].sort((left, right) => right.startedAt.localeCompare(left.startedAt))) {
+            if (call.toolName.startsWith("tmux_")) add(call.workspace);
+        }
+        for (const context of [...state.readModel.contexts].sort((left, right) => right.lastAccessedAt.localeCompare(left.lastAccessedAt))) {
+            if (context.status !== "active") continue;
+            for (const environment of context.environments ?? [{ instance: context.instance, workspace: context.workspace }]) {
+                if (environment.instance === instance) add(environment.workspace);
+            }
+        }
+        add(this.#requireHomeDirectory(instance));
+        return workspaces.slice(0, 32);
+    }
+
     #requireHomeDirectory(instance: string): string {
         const home = this.options.store.getState().instances.find((candidate) => candidate.name === instance)?.homeDirectory;
         if (home !== undefined && home.length > 0) return home;
@@ -86,12 +127,13 @@ export class TuiRuntimeTmuxOperations {
     }
 }
 
-function readPanes(result: Record<string, JsonValue>): TuiTmuxListPane[] {
+function readPanes(result: Record<string, JsonValue>, workspace: string): TuiTmuxListPane[] {
     return readRecordArray(result, "panes").map((pane) => {
         const base = {
             id: readRequiredString(pane, "id"),
             name: readRequiredString(pane, "name"),
             status: readRequiredString(pane, "status"),
+            workspace,
         };
         const taskId = readNestedString(pane, "task", "id");
         if (taskId === undefined) {
@@ -102,6 +144,12 @@ function readPanes(result: Record<string, JsonValue>): TuiTmuxListPane[] {
             task: { id: taskId, status: readNestedString(pane, "task", "status") ?? "unknown" },
         };
     });
+}
+
+function comparePanes(left: TuiTmuxListPane, right: TuiTmuxListPane): number {
+    const leftRank = left.task?.status === "running" ? 0 : left.task === undefined ? 2 : 1;
+    const rightRank = right.task?.status === "running" ? 0 : right.task === undefined ? 2 : 1;
+    return leftRank - rightRank || left.workspace.localeCompare(right.workspace) || left.name.localeCompare(right.name);
 }
 
 function readRecordArray(result: Record<string, JsonValue>, key: string): Record<string, JsonValue>[] {

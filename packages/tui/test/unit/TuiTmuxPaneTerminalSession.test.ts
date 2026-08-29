@@ -14,22 +14,29 @@ interface RecordedOperation {
     method: "inspectPane" | "listPanes" | "sendInput";
 }
 
+type PaneFixture = Omit<TuiTmuxListPane, "workspace"> & { workspace?: string };
+type InspectFixture = Omit<TuiTmuxInspectPane, "workspace"> & { workspace?: string };
+const testWorkspace = "/work/test";
+
 function createOperationsHarness() {
     const calls: RecordedOperation[] = [];
-    const inspectByPane = new Map<string, TuiTmuxInspectPane>();
+    const inspectByPane = new Map<string, InspectFixture>();
     const inputResponses: TuiTmuxInputResult[] = [];
-    let panes: TuiTmuxListPane[] = [];
+    let panes: PaneFixture[] = [];
     const operations: TuiTmuxPaneTerminalOperations = {
-        async inspectPane(instance, pane) {
-            calls.push({ args: [instance, pane], method: "inspectPane" });
-            return inspectByPane.get(pane);
+        async inspectPane(instance, workspace, pane) {
+            calls.push({ args: [instance, workspace, pane], method: "inspectPane" });
+            const detail = inspectByPane.get(pane);
+            return detail === undefined
+                ? undefined
+                : { ...detail, workspace: detail.workspace ?? workspace };
         },
         async listPanes(instance) {
             calls.push({ args: [instance], method: "listPanes" });
-            return panes;
+            return panes.map((pane) => ({ ...pane, workspace: pane.workspace ?? testWorkspace }));
         },
-        async sendInput(instance, task, input) {
-            calls.push({ args: [instance, task, input], method: "sendInput" });
+        async sendInput(instance, workspace, task, input) {
+            calls.push({ args: [instance, workspace, task, input], method: "sendInput" });
             return inputResponses.shift() ?? { output: [], status: "running", task };
         },
     };
@@ -38,7 +45,7 @@ function createOperationsHarness() {
         inspectByPane,
         inputResponses,
         operations,
-        setPanes(next: TuiTmuxListPane[]) {
+        setPanes(next: PaneFixture[]) {
             panes = next;
         },
     };
@@ -84,8 +91,8 @@ function activeLines(session: TuiTmuxPaneTerminalSession): string[] {
     );
 }
 
-const runningPane: TuiTmuxListPane = { id: "%1", name: "server", status: "running", task: { id: "task-9", status: "running" } };
-const idlePane: TuiTmuxListPane = { id: "%0", name: "main", status: "idle" };
+const runningPane: PaneFixture = { id: "%1", name: "server", status: "running", task: { id: "task-9", status: "running" } };
+const idlePane: PaneFixture = { id: "%0", name: "main", status: "idle" };
 
 test("bind lists panes, projects them, and defaults the selection to the first pane", async () => {
     const harness = createOperationsHarness();
@@ -102,8 +109,8 @@ test("bind lists panes, projects them, and defaults the selection to the first p
     assert.equal(snapshot.instance, "alpha");
     assert.equal(snapshot.selectedIndex, 0);
     assert.deepEqual(snapshot.panes, [
-        { id: "%0", mode: "view", name: "main", status: "idle", taskId: undefined },
-        { id: "%1", mode: "attach", name: "server", status: "running", taskId: "task-9" },
+        { id: "%0", mode: "view", name: "main", status: "idle", taskId: undefined, workspace: testWorkspace },
+        { id: "%1", mode: "attach", name: "server", status: "running", taskId: "task-9", workspace: testWorkspace },
     ]);
 });
 
@@ -139,7 +146,7 @@ test("activating a view-only pane opens an unattached panel without a warning", 
     assert.equal(active?.warning, undefined);
     assert.equal(active?.name, "main");
     assert.deepEqual(activeLines(session), ["one", "two"]);
-    assert.equal(harness.calls.some((call) => call.method === "inspectPane" && call.args[1] === "%0"), true);
+    assert.equal(harness.calls.some((call) => call.method === "inspectPane" && call.args[2] === "%0"), true);
 });
 
 test("activating a running pane attaches and surfaces the multi-writer warning", async () => {
@@ -171,7 +178,7 @@ test("attached input is encoded and forwarded to the selected running task id", 
 
     assert.deepEqual(
         harness.calls.find((call) => call.method === "sendInput"),
-        { args: ["alpha", "task-9", "hello^M"], method: "sendInput" },
+        { args: ["alpha", testWorkspace, "task-9", "hello^M"], method: "sendInput" },
     );
     const active = session.getSnapshot().active;
     assert.deepEqual(activeLines(session), ["hello"]);
@@ -421,7 +428,7 @@ test("handleRawInput in attach mode forwards input and exits on Esc without forw
     await session.handleRawInput("hi\r");
     assert.deepEqual(
         harness.calls.find((call) => call.method === "sendInput"),
-        { args: ["alpha", "task-9", "hi^M"], method: "sendInput" },
+        { args: ["alpha", testWorkspace, "task-9", "hi^M"], method: "sendInput" },
     );
 
     await session.handleRawInput("\u001b");
@@ -463,12 +470,13 @@ test("refresh converts an inspect failure into session error state without rejec
                 status: "running",
                 taskId: "task-9",
                 taskStatus: "running",
+                workspace: testWorkspace,
             };
         },
         async listPanes() {
-            return [runningPane];
+            return [{ ...runningPane, workspace: testWorkspace }];
         },
-        async sendInput(_instance, task) {
+        async sendInput(_instance, _workspace, task) {
             return { output: [], status: "running", task };
         },
     };
@@ -495,12 +503,13 @@ test("Attach serializes input batches submitted by the same TUI client", async (
                 status: "running",
                 taskId: "task-9",
                 taskStatus: "running",
+                workspace: testWorkspace,
             };
         },
         async listPanes() {
-            return [runningPane];
+            return [{ ...runningPane, workspace: testWorkspace }];
         },
-        async sendInput(_instance, task, input) {
+        async sendInput(_instance, _workspace, _task, input) {
             calls.push(input);
             return await new Promise<TuiTmuxInputResult>((resolve) => {
                 resolvers.push(resolve);
@@ -558,9 +567,9 @@ test("rebinding during an in-flight refresh immediately loads the new instance",
                     resolveAlpha = resolve;
                 });
             }
-            return [{ id: "%2", name: "beta-pane", status: "idle" }];
+            return [{ id: "%2", name: "beta-pane", status: "idle", workspace: "/work/beta" }];
         },
-        async sendInput(_instance, task) {
+        async sendInput(_instance, _workspace, task) {
             return { output: [], status: "running", task };
         },
     };
@@ -604,7 +613,7 @@ test("session inspects the selected pane by stable id when pane names are duplic
 
     assert.deepEqual(
         harness.calls.filter((call) => call.method === "inspectPane").at(-1),
-        { args: ["alpha", "%2"], method: "inspectPane" },
+        { args: ["alpha", testWorkspace, "%2"], method: "inspectPane" },
     );
     assert.equal(session.getSnapshot().active?.paneId, "%2");
     assert.equal(session.getSnapshot().active?.attached, true);
@@ -644,6 +653,7 @@ test("a stale polling inspect cannot overwrite output returned by tmux_input", a
                     status: "running",
                     taskId: "task-9",
                     taskStatus: "running",
+                    workspace: testWorkspace,
                 };
             }
             return await new Promise<TuiTmuxInspectPane | undefined>((resolve) => {
@@ -651,9 +661,9 @@ test("a stale polling inspect cannot overwrite output returned by tmux_input", a
             });
         },
         async listPanes() {
-            return [runningPane];
+            return [{ ...runningPane, workspace: testWorkspace }];
         },
-        async sendInput(_instance, task) {
+        async sendInput(_instance, _workspace, task) {
             return { output: ["fresh output"], status: "running", task };
         },
     };
@@ -673,6 +683,7 @@ test("a stale polling inspect cannot overwrite output returned by tmux_input", a
         status: "running",
         taskId: "task-9",
         taskStatus: "running",
+        workspace: testWorkspace,
     });
     await refresh;
 

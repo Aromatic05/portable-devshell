@@ -15,9 +15,9 @@ import {
 } from "../../view/page/terminal/TuiTmuxPaneTerminalModel.js";
 
 export interface TuiTmuxPaneTerminalOperations {
-    inspectPane(instance: string, pane: string, lines?: number): Promise<TuiTmuxInspectPane | undefined>;
+    inspectPane(instance: string, workspace: string, pane: string, lines?: number): Promise<TuiTmuxInspectPane | undefined>;
     listPanes(instance: string): Promise<TuiTmuxListPane[]>;
-    sendInput(instance: string, task: string, input: string): Promise<TuiTmuxInputResult>;
+    sendInput(instance: string, workspace: string, task: string, input: string): Promise<TuiTmuxInputResult>;
 }
 
 export type TuiTmuxPaneTerminalStatus = "error" | "idle" | "loading" | "ready";
@@ -34,6 +34,7 @@ export interface TuiTmuxPaneTerminalActive {
     status: string;
     taskId?: string;
     warning?: string;
+    workspace: string;
 }
 
 export interface TuiTmuxPaneTerminalSnapshot {
@@ -167,7 +168,7 @@ export class TuiTmuxPaneTerminalSession {
         const selectedIndex = clampIndex(this.#snapshot.selectedIndex, panes.length);
         let active = this.#snapshot.active;
         if (active !== undefined) {
-            const current = panes.find((pane) => pane.id === active?.paneId);
+            const current = panes.find((pane) => pane.id === active?.paneId && pane.workspace === active?.workspace);
             if (current === undefined) {
                 active = undefined;
             } else {
@@ -188,7 +189,7 @@ export class TuiTmuxPaneTerminalSession {
         if (active !== undefined) {
             let detail: TuiTmuxInspectPane | undefined;
             try {
-                detail = await this.#operations.inspectPane(instance, active.paneId);
+                detail = await this.#operations.inspectPane(instance, active.workspace, active.paneId);
             } catch (error) {
                 if (generation !== this.#refreshGeneration) {
                     return;
@@ -235,7 +236,7 @@ export class TuiTmuxPaneTerminalSession {
         const generation = ++this.#refreshGeneration;
         let detail: TuiTmuxInspectPane | undefined;
         try {
-            detail = await this.#operations.inspectPane(instance, pane.id);
+            detail = await this.#operations.inspectPane(instance, pane.workspace, pane.id);
         } catch (error) {
             if (generation !== this.#refreshGeneration) {
                 return;
@@ -267,6 +268,7 @@ export class TuiTmuxPaneTerminalSession {
                 status: detail?.status ?? pane.status,
                 taskId,
                 warning: attach && taskId !== undefined ? TUI_TMUX_MULTI_WRITER_WARNING : undefined,
+                workspace: pane.workspace,
             },
             error: undefined,
         });
@@ -312,6 +314,7 @@ export class TuiTmuxPaneTerminalSession {
         if (taskId === undefined) {
             return;
         }
+        const workspace = active.workspace;
         const pending = this.#inputTail.then(async () => {
             if (this.#disposed) {
                 return;
@@ -320,13 +323,14 @@ export class TuiTmuxPaneTerminalSession {
             if (
                 this.#snapshot.instance !== instance ||
                 before?.attached !== true ||
-                before.taskId !== taskId
+                before.taskId !== taskId ||
+                before.workspace !== workspace
             ) {
                 return;
             }
             let result: TuiTmuxInputResult;
             try {
-                result = await this.#operations.sendInput(instance, taskId, action.input);
+                result = await this.#operations.sendInput(instance, workspace, taskId, action.input);
             } catch (error) {
                 if (!this.#disposed) {
                     this.#replace({ ...this.#snapshot, error: readErrorMessage(error) });
@@ -338,7 +342,7 @@ export class TuiTmuxPaneTerminalSession {
             }
             this.#refreshGeneration += 1;
             const current = this.#snapshot.active;
-            if (current === undefined || current.taskId !== taskId) {
+            if (current === undefined || current.taskId !== taskId || current.workspace !== workspace) {
                 return;
             }
             const lines = [...current.lines, ...(await parseTmuxInspectLines(result.output))];
