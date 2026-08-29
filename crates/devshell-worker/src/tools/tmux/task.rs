@@ -105,6 +105,7 @@ impl TaskRegistry {
     pub fn remove(&mut self, id: &str) {
         if let Some(task) = self.tasks.remove(id) {
             let _ = std::fs::remove_file(&task.transcript.path);
+            let _ = super::transcript_ring::remove(&task.transcript.ring_name);
             let _ = std::fs::remove_file(task.transcript.path.with_extension("json"));
             let _ = std::fs::remove_file(task.transcript.path.with_extension("done"));
             let _ = std::fs::remove_file(task.transcript.path.with_extension("offset"));
@@ -246,7 +247,10 @@ mod tests {
             pane_id: "pane-main".to_string(),
             pane_incarnation_id: "incarnation".to_string(),
             state,
-            transcript: TranscriptCursor::new(std::env::temp_dir().join(format!("{id}.log"))),
+            transcript: TranscriptCursor::new(
+                std::env::temp_dir().join(format!("{id}.log")),
+                format!("/devshell-test-task-{id}"),
+            ),
             finished_at_ms,
             last_pane: Some(pane()),
             warnings: Vec::new(),

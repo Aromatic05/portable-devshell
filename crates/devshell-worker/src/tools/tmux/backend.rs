@@ -21,8 +21,9 @@ use crate::storage::InstancePaths;
 use crate::storage::permissions::ensure_dir;
 use crate::tools::ToolError;
 use crate::tools::tmux::codec::{TmuxInputChunk, parse_tmux_input, sanitize_terminal_snapshot};
-use crate::tools::tmux::output::{MAX_TRANSCRIPT_BYTES, TRANSCRIPT_LOGGER_MODE};
+use crate::tools::tmux::output::TRANSCRIPT_LOGGER_MODE;
 use crate::tools::tmux::shell::prepare_shell_launch;
+use crate::tools::tmux::transcript_ring;
 
 pub const TMUX_SESSION: &str = "devshell";
 pub const MAX_PANES: usize = 16;
@@ -266,7 +267,9 @@ impl TmuxBackend {
             let shell_status = self.read_status(id);
             let task_status = managed_task_id.as_ref().map(|task_id| {
                 if fields.get(9).copied() == Some("1") {
-                    if let Some(status) = self.wait_task_exit_status(task_id, Duration::from_millis(250)) {
+                    if let Some(status) =
+                        self.wait_task_exit_status(task_id, Duration::from_millis(250))
+                    {
                         status.to_string()
                     } else if let Some(status) =
                         fields.get(10).copied().filter(|value| !value.is_empty())
@@ -338,12 +341,12 @@ impl TmuxBackend {
         ])?;
         let sanitized = sanitize_terminal_snapshot(&raw);
         let mut selected = sanitized.lines().map(ToOwned::to_owned).collect::<Vec<_>>();
-        let logical_start = selected.len().saturating_sub(start.unsigned_abs() as usize);
-        let logical_end = selected.len().saturating_sub(end.unsigned_abs() as usize);
-        selected = selected[logical_start.min(logical_end)..logical_end].to_vec();
         while selected.last().is_some_and(String::is_empty) {
             selected.pop();
         }
+        let logical_start = selected.len().saturating_sub(start.unsigned_abs() as usize);
+        let logical_end = selected.len().saturating_sub(end.unsigned_abs() as usize);
+        selected = selected[logical_start.min(logical_end)..logical_end].to_vec();
         Ok(selected)
     }
 
@@ -434,9 +437,11 @@ impl TmuxBackend {
         let gate_path = self.tasks_dir.join(format!("{task_id}.start"));
         let exit_path = self.task_exit_path(task_id);
         let transcript_path = self.transcript_path(task_id);
+        let transcript_buffer_name = self.transcript_buffer_name(task_id);
         let transcript_done_path = self.transcript_done_path(task_id);
         let _ = fs::remove_file(&gate_path);
         let _ = fs::remove_file(&exit_path);
+        let _ = transcript_ring::remove(&transcript_buffer_name);
         let _ = fs::remove_file(&transcript_done_path);
         atomic_write_bytes(&transcript_path, b"")?;
         atomic_write_bytes(&script_path, command.as_bytes())?;
@@ -498,8 +503,8 @@ impl TmuxBackend {
                     ),
                     TRANSCRIPT_LOGGER_MODE,
                     shell_quote(&transcript_path.to_string_lossy()),
+                    shell_quote(&transcript_buffer_name),
                     shell_quote(&transcript_done_path.to_string_lossy()),
-                    MAX_TRANSCRIPT_BYTES,
                 ),
             ])?;
             Ok::<(), ToolError>(())
@@ -508,6 +513,7 @@ impl TmuxBackend {
             let _ = self.run(&["kill-pane".into(), "-t".into(), tmux_pane_id.clone()]);
             self.remove_task_runtime(task_id);
             let _ = fs::remove_file(&transcript_path);
+            let _ = transcript_ring::remove(&transcript_buffer_name);
             return Err(error);
         }
         self.capture_workspace()?
@@ -540,6 +546,12 @@ impl TmuxBackend {
 
     pub fn transcript_path(&self, task_id: &str) -> PathBuf {
         self.transcripts_dir.join(format!("{task_id}.log"))
+    }
+
+    pub fn transcript_buffer_name(&self, task_id: &str) -> String {
+        let identity = format!("{}:{}:{task_id}", self.instance, self.workspace.display());
+        let digest = blake3::hash(identity.as_bytes()).to_hex();
+        format!("/devshell-tmux-{}", &digest[..32])
     }
 
     pub fn persist_task_record<T: Serialize>(

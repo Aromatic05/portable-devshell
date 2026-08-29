@@ -1,15 +1,17 @@
 use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
+use super::transcript_ring::{self, RingWriter};
 use super::warning;
 
 use crate::tools::ToolError;
 use crate::tools::tmux::types::TmuxWarning;
 
 pub const MAX_TRANSCRIPT_BYTES: u64 = 4 * 1024 * 1024;
+pub const MAX_TRANSCRIPT_RING_BYTES: u64 = 4 * 1024 * 1024;
 pub const TRANSCRIPT_LOGGER_MODE: &str = "__tmux-transcript-logger";
 const MAX_RENDERED_RECORD_BYTES: usize = 4096;
 
@@ -24,16 +26,14 @@ pub fn try_run_transcript_logger() -> Option<Result<(), String>> {
             args.next()
                 .ok_or_else(|| "tmux transcript logger path is missing".to_string())?,
         );
+        let ring = args
+            .next()
+            .and_then(|value| value.into_string().ok())
+            .ok_or_else(|| "tmux transcript logger shared-memory name is missing".to_string())?;
         let done = PathBuf::from(
             args.next()
                 .ok_or_else(|| "tmux transcript logger completion path is missing".to_string())?,
         );
-        let limit = args
-            .next()
-            .and_then(|value| value.into_string().ok())
-            .ok_or_else(|| "tmux transcript logger byte limit is missing".to_string())?
-            .parse::<u64>()
-            .map_err(|error| format!("tmux transcript logger byte limit is invalid: {error}"))?;
         if args.next().is_some() {
             return Err("tmux transcript logger received unexpected arguments".to_string());
         }
@@ -43,7 +43,9 @@ pub fn try_run_transcript_logger() -> Option<Result<(), String>> {
             .append(true)
             .open(&transcript)
             .map_err(|error| format!("failed to open {}: {error}", transcript.display()))?;
-        drain_transcript(&mut input, &mut output, limit)
+        let mut ring = RingWriter::open(&ring, MAX_TRANSCRIPT_RING_BYTES, MAX_TRANSCRIPT_BYTES)
+            .map_err(|error| format!("failed to open shared transcript buffer {ring}: {error}"))?;
+        drain_transcript(&mut input, &mut output, &mut ring, MAX_TRANSCRIPT_BYTES)
             .map_err(|error| format!("failed to write {}: {error}", transcript.display()))?;
         drop(output);
         std::fs::write(&done, b"done\n")
@@ -55,20 +57,25 @@ pub fn try_run_transcript_logger() -> Option<Result<(), String>> {
 fn drain_transcript(
     input: &mut impl Read,
     output: &mut impl Write,
-    limit: u64,
+    ring: &mut RingWriter,
+    durable_limit: u64,
 ) -> std::io::Result<()> {
-    let mut remaining = limit;
+    let mut logical_offset = 0_u64;
     let mut buffer = [0_u8; 64 * 1024];
     loop {
         let count = input.read(&mut buffer)?;
         if count == 0 {
             break;
         }
-        if remaining > 0 {
-            let persisted = count.min(remaining as usize);
+        let durable_remaining = durable_limit.saturating_sub(logical_offset);
+        let persisted = count.min(durable_remaining as usize);
+        if persisted > 0 {
             output.write_all(&buffer[..persisted])?;
-            remaining -= persisted as u64;
         }
+        if persisted < count {
+            ring.append(logical_offset + persisted as u64, &buffer[persisted..count])?;
+        }
+        logical_offset += count as u64;
     }
     output.flush()
 }
@@ -76,24 +83,27 @@ fn drain_transcript(
 #[derive(Debug, Clone)]
 pub struct TranscriptCursor {
     pub path: PathBuf,
+    pub ring_name: String,
     offset: u64,
-    truncation_reported: bool,
+    rotation_reported_until: u64,
 }
 
 impl TranscriptCursor {
-    pub fn new(path: PathBuf) -> Self {
+    pub fn new(path: PathBuf, ring_name: String) -> Self {
         Self {
             path,
+            ring_name,
             offset: 0,
-            truncation_reported: false,
+            rotation_reported_until: 0,
         }
     }
 
-    pub fn restore(path: PathBuf, offset: u64) -> Self {
+    pub fn restore(path: PathBuf, ring_name: String, offset: u64) -> Self {
         Self {
             path,
+            ring_name,
             offset,
-            truncation_reported: false,
+            rotation_reported_until: 0,
         }
     }
 
@@ -102,14 +112,10 @@ impl TranscriptCursor {
     }
 
     pub fn has_output(&self, terminal: bool) -> Result<bool, ToolError> {
-        let Some(mut reader) = self.reader()? else {
-            return Ok(false);
-        };
-        let mut bytes = Vec::new();
-        let count = reader
-            .read_until(b'\n', &mut bytes)
-            .map_err(transcript_error)?;
-        Ok(count > 0 && (terminal || bytes.ends_with(b"\n")))
+        let mut cursor = self.clone();
+        Ok(!cursor
+            .take_oldest(1, "probe", &mut Vec::new(), terminal)?
+            .is_empty())
     }
 
     pub fn take_output(
@@ -119,7 +125,6 @@ impl TranscriptCursor {
         line: i64,
         terminal: bool,
     ) -> Result<Vec<String>, ToolError> {
-        self.warn_if_truncated(pane_id, warnings)?;
         if line == 0 {
             self.discard()?;
             return Ok(Vec::new());
@@ -130,30 +135,6 @@ impl TranscriptCursor {
         self.take_tail(line.unsigned_abs() as usize, pane_id, warnings, terminal)
     }
 
-    fn warn_if_truncated(
-        &mut self,
-        pane_id: &str,
-        warnings: &mut Vec<TmuxWarning>,
-    ) -> Result<(), ToolError> {
-        if self.truncation_reported {
-            return Ok(());
-        }
-        let size = match std::fs::metadata(&self.path) {
-            Ok(metadata) => metadata.len(),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(transcript_error(error)),
-        };
-        if size >= MAX_TRANSCRIPT_BYTES {
-            warnings.push(warning(
-                Some(pane_id),
-                "tmux.outputTruncated",
-                "task transcript reached the 4 MiB capture limit; terminal output beyond the limit was not persisted",
-            ));
-            self.truncation_reported = true;
-        }
-        Ok(())
-    }
-
     fn take_oldest(
         &mut self,
         limit: usize,
@@ -161,31 +142,10 @@ impl TranscriptCursor {
         warnings: &mut Vec<TmuxWarning>,
         terminal: bool,
     ) -> Result<Vec<String>, ToolError> {
-        let Some(mut reader) = self.reader()? else {
-            return Ok(Vec::new());
-        };
         let mut output = Vec::new();
-        let mut committed = self.offset;
-        while output.len() < limit {
-            let mut bytes = Vec::new();
-            let count = reader
-                .read_until(b'\n', &mut bytes)
-                .map_err(transcript_error)?;
-            if count == 0 {
-                break;
-            }
-            let complete = bytes.ends_with(b"\n");
-            if !complete && !terminal {
-                break;
-            }
-            committed += count as u64;
-            let (record, truncated) = render_terminal_record(&bytes);
-            if truncated {
-                warn_record_truncated(pane_id, warnings);
-            }
+        self.consume_records(pane_id, warnings, terminal, Some(limit), |record| {
             output.push(record);
-        }
-        self.offset = committed;
+        })?;
         Ok(output)
     }
 
@@ -196,40 +156,19 @@ impl TranscriptCursor {
         warnings: &mut Vec<TmuxWarning>,
         terminal: bool,
     ) -> Result<Vec<String>, ToolError> {
-        let Some(mut reader) = self.reader()? else {
-            return Ok(Vec::new());
-        };
         let mut tail = VecDeque::with_capacity(limit);
-        let mut committed = self.offset;
         let mut skipped = false;
-        loop {
-            let mut bytes = Vec::new();
-            let count = reader
-                .read_until(b'\n', &mut bytes)
-                .map_err(transcript_error)?;
-            if count == 0 {
-                break;
-            }
-            let complete = bytes.ends_with(b"\n");
-            if !complete && !terminal {
-                break;
-            }
-            committed += count as u64;
+        self.consume_records(pane_id, warnings, terminal, None, |record| {
             if limit == 0 {
                 skipped = true;
-                continue;
-            }
-            if tail.len() == limit {
+            } else if tail.len() == limit {
                 tail.pop_front();
                 skipped = true;
+                tail.push_back(record);
+            } else {
+                tail.push_back(record);
             }
-            let (record, truncated) = render_terminal_record(&bytes);
-            if truncated {
-                warn_record_truncated(pane_id, warnings);
-            }
-            tail.push_back(record);
-        }
-        self.offset = committed;
+        })?;
         if skipped {
             warnings.push(warning(
                 Some(pane_id),
@@ -241,28 +180,160 @@ impl TranscriptCursor {
     }
 
     fn discard(&mut self) -> Result<(), ToolError> {
-        match std::fs::metadata(&self.path) {
-            Ok(metadata) => {
-                self.offset = metadata.len();
-                Ok(())
+        self.offset = self.offset.max(self.logical_end()?);
+        Ok(())
+    }
+
+    fn consume_records(
+        &mut self,
+        pane_id: &str,
+        warnings: &mut Vec<TmuxWarning>,
+        terminal: bool,
+        max_records: Option<usize>,
+        mut consume: impl FnMut(String),
+    ) -> Result<(), ToolError> {
+        let mut records = 0_usize;
+        loop {
+            if max_records.is_some_and(|limit| records >= limit) {
+                return Ok(());
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(transcript_error(error)),
+            let segment = self.read_segment(self.offset)?;
+            if segment.start > self.offset {
+                self.warn_rotated(pane_id, warnings, segment.start);
+                self.offset = segment.start;
+            }
+            if segment.bytes.is_empty() {
+                if let Some(next_start) = segment.next_start {
+                    if next_start > self.offset {
+                        self.warn_rotated(pane_id, warnings, next_start);
+                        self.offset = next_start;
+                        continue;
+                    }
+                }
+                return Ok(());
+            }
+
+            let mut position = 0_usize;
+            while position < segment.bytes.len() {
+                if max_records.is_some_and(|limit| records >= limit) {
+                    return Ok(());
+                }
+                let remaining = &segment.bytes[position..];
+                let newline = remaining.iter().position(|byte| *byte == b'\n');
+                let count = match newline {
+                    Some(index) => index + 1,
+                    None if terminal || segment.next_start.is_some() => remaining.len(),
+                    None => return Ok(()),
+                };
+                let bytes = &remaining[..count];
+                self.offset = segment.start + (position + count) as u64;
+                position += count;
+                let (record, truncated) = render_terminal_record(bytes);
+                if truncated {
+                    warn_record_truncated(pane_id, warnings);
+                }
+                consume(record);
+                records += 1;
+            }
+
+            if let Some(next_start) = segment.next_start {
+                if next_start > self.offset {
+                    self.warn_rotated(pane_id, warnings, next_start);
+                    self.offset = next_start;
+                    continue;
+                }
+            }
+            return Ok(());
         }
     }
 
-    fn reader(&self) -> Result<Option<BufReader<File>>, ToolError> {
-        let file = match File::open(&self.path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+    fn read_segment(&self, offset: u64) -> Result<TranscriptSegment, ToolError> {
+        let durable_end = match std::fs::metadata(&self.path) {
+            Ok(metadata) => metadata.len().min(MAX_TRANSCRIPT_BYTES),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
             Err(error) => return Err(transcript_error(error)),
         };
-        let mut reader = BufReader::new(file);
-        reader
-            .seek(SeekFrom::Start(self.offset))
-            .map_err(transcript_error)?;
-        Ok(Some(reader))
+        let ring = transcript_ring::snapshot(&self.ring_name).map_err(transcript_error)?;
+
+        if offset < durable_end {
+            let mut bytes = read_file_range(&self.path, offset, durable_end)?;
+            let mut next_start = None;
+            if let Some(ring) = ring.as_ref().filter(|ring| !ring.is_empty()) {
+                if ring.base <= durable_end {
+                    bytes.extend_from_slice(ring.bytes_from(durable_end));
+                } else {
+                    next_start = Some(ring.base);
+                }
+            }
+            return Ok(TranscriptSegment {
+                bytes,
+                next_start,
+                start: offset,
+            });
+        }
+
+        let Some(ring) = ring.filter(|ring| !ring.is_empty()) else {
+            return Ok(TranscriptSegment::empty(offset));
+        };
+        if offset >= ring.end {
+            return Ok(TranscriptSegment::empty(offset));
+        }
+        let start = offset.max(ring.base);
+        Ok(TranscriptSegment {
+            bytes: ring.bytes_from(start).to_vec(),
+            next_start: None,
+            start,
+        })
     }
+
+    fn logical_end(&self) -> Result<u64, ToolError> {
+        let durable_end = match std::fs::metadata(&self.path) {
+            Ok(metadata) => metadata.len().min(MAX_TRANSCRIPT_BYTES),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(error) => return Err(transcript_error(error)),
+        };
+        let ring_end = transcript_ring::snapshot(&self.ring_name)
+            .map_err(transcript_error)?
+            .map_or(0, |ring| if ring.is_empty() { 0 } else { ring.end });
+        Ok(durable_end.max(ring_end))
+    }
+
+    fn warn_rotated(&mut self, pane_id: &str, warnings: &mut Vec<TmuxWarning>, retained_from: u64) {
+        if retained_from <= self.rotation_reported_until {
+            return;
+        }
+        warnings.push(warning(
+            Some(pane_id),
+            "tmux.outputRotated",
+            "earlier unread task output was evicted from the volatile 4 MiB rotating buffer; reading continues from the oldest retained output",
+        ));
+        self.rotation_reported_until = retained_from;
+    }
+}
+
+struct TranscriptSegment {
+    bytes: Vec<u8>,
+    next_start: Option<u64>,
+    start: u64,
+}
+
+impl TranscriptSegment {
+    fn empty(offset: u64) -> Self {
+        Self {
+            bytes: Vec::new(),
+            next_start: None,
+            start: offset,
+        }
+    }
+}
+
+fn read_file_range(path: &PathBuf, start: u64, end: u64) -> Result<Vec<u8>, ToolError> {
+    let mut file = File::open(path).map_err(transcript_error)?;
+    file.seek(SeekFrom::Start(start))
+        .map_err(transcript_error)?;
+    let mut bytes = vec![0_u8; end.saturating_sub(start) as usize];
+    file.read_exact(&mut bytes).map_err(transcript_error)?;
+    Ok(bytes)
 }
 
 fn render_terminal_record(bytes: &[u8]) -> (String, bool) {
@@ -364,8 +435,14 @@ fn transcript_error(error: std::io::Error) -> ToolError {
 mod tests {
     use std::io::{Cursor, Write};
 
-    use super::{MAX_TRANSCRIPT_BYTES, TranscriptCursor, drain_transcript, render_terminal_record};
+    use super::transcript_ring::{RingWriter, remove, snapshot};
+    use super::{TranscriptCursor, drain_transcript, render_terminal_record};
     use crate::testing::temp_dir;
+    use uuid::Uuid;
+
+    fn test_ring_name() -> String {
+        format!("/devshell-test-output-{}", Uuid::new_v4().simple())
+    }
 
     #[test]
     fn terminal_record_keeps_latest_carriage_return_render() {
@@ -390,7 +467,8 @@ mod tests {
         write!(file, "one\ntwo").unwrap();
         drop(file);
 
-        let mut cursor = TranscriptCursor::new(path.clone());
+        let ring_name = test_ring_name();
+        let mut cursor = TranscriptCursor::new(path.clone(), ring_name);
         let mut warnings = Vec::new();
         assert_eq!(
             cursor
@@ -411,29 +489,42 @@ mod tests {
     }
 
     #[test]
-    fn transcript_cursor_reports_capture_limit_once() {
+    fn transcript_cursor_continues_from_the_oldest_retained_rotating_output() {
         let root = temp_dir();
         let path = root.path().join("task.log");
-        let file = std::fs::File::create(&path).unwrap();
-        file.set_len(MAX_TRANSCRIPT_BYTES).unwrap();
-        drop(file);
+        std::fs::write(&path, b"disk\n").unwrap();
+        let ring_name = test_ring_name();
+        let mut ring = RingWriter::open(&ring_name, 8, 5).unwrap();
+        ring.append(5, b"gone\nold\nnew\n").unwrap();
 
-        let mut cursor = TranscriptCursor::new(path);
+        let mut cursor = TranscriptCursor::new(path, ring_name.clone());
         let mut warnings = Vec::new();
-        cursor.take_output("pane", &mut warnings, 0, true).unwrap();
+        assert_eq!(
+            cursor.take_output("pane", &mut warnings, 80, true).unwrap(),
+            vec!["disk", "old", "new"]
+        );
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].code, "tmux.outputTruncated");
-        cursor.take_output("pane", &mut warnings, 0, true).unwrap();
-        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].code, "tmux.outputRotated");
+        remove(&ring_name).unwrap();
     }
 
     #[test]
-    fn transcript_logger_drains_input_after_reaching_its_byte_limit() {
+    fn transcript_logger_keeps_accepting_output_in_the_rotating_buffer() {
         let source = vec![b'x'; 16 * 1024];
         let mut input = Cursor::new(source.clone());
         let mut output = Vec::new();
-        drain_transcript(&mut input, &mut output, 4096).unwrap();
+        let ring_name = test_ring_name();
+        let mut ring = RingWriter::open(&ring_name, 4096, 4096).unwrap();
+        drain_transcript(&mut input, &mut output, &mut ring, 4096).unwrap();
         assert_eq!(input.position(), source.len() as u64);
         assert_eq!(output, source[..4096]);
+        let snapshot = snapshot(&ring_name).unwrap().unwrap();
+        assert_eq!(snapshot.end, source.len() as u64);
+        assert_eq!(snapshot.end - snapshot.base, 4096);
+        assert_eq!(
+            snapshot.bytes_from(snapshot.base),
+            &source[source.len() - 4096..]
+        );
+        remove(&ring_name).unwrap();
     }
 }

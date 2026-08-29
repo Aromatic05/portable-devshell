@@ -325,6 +325,57 @@ fn tmux_zero_time_ms_returns_immediate_observations() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
+fn tmux_read_preserves_output_after_a_task_exits_nonzero() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-read-failed-task";
+    start(&env, instance);
+
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({
+            "command": "sleep 1; printf 'FAILED-TASK-OUTPUT\\n'; exit 7",
+            "wait": "nonblock",
+            "timeMs": 0,
+            "line": 0
+        }),
+        "ctx-a",
+        "run-failed-task",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    assert_eq!(run["result"]["task"]["status"], "running", "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap();
+
+    thread::sleep(Duration::from_millis(1300));
+    let read = call(
+        &env,
+        instance,
+        "2",
+        "tmux_read",
+        json!({ "task": task, "line": 20, "timeMs": 1000 }),
+        "ctx-a",
+        "read-failed-task",
+    );
+    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["result"]["task"]["status"], "7", "{read}");
+    assert!(
+        read["result"]["output"]
+            .as_array()
+            .is_some_and(|lines| lines.iter().any(|line| line == "FAILED-TASK-OUTPUT")),
+        "completed non-zero tasks must keep unread transcript output: {read}"
+    );
+
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
 fn tmux_run_returns_a_task_and_preserves_clean_first_output() {
     assert!(
         tmux_available(),
@@ -764,7 +815,10 @@ fn failed_main_shell_startup_remains_observable_and_recovers() {
         {
             break;
         }
-        assert!(Instant::now() < deadline, "main shell did not recover: {recovered}");
+        assert!(
+            Instant::now() < deadline,
+            "main shell did not recover: {recovered}"
+        );
         thread::sleep(Duration::from_millis(25));
     }
     stop(&env, instance);
@@ -948,6 +1002,38 @@ fn tmux_inspect_honors_nonzero_end_offsets() {
     let env = TestEnv::new();
     let instance = "aromatic-tmux-inspect-range";
     start(&env, instance);
+
+    let short = call(
+        &env,
+        instance,
+        "0",
+        "tmux_input",
+        json!({ "pane": "main", "input": "printf 'SHORT-PANE-LINE\\n'^M" }),
+        "ctx-a",
+        "write-short-pane-output",
+    );
+    assert_eq!(short["ok"], true, "{short}");
+    let short_deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let inspect = call(
+            &env,
+            instance,
+            "0-inspect",
+            "tmux_inspect",
+            json!({ "pane": "main", "start": -20, "end": 0 }),
+            "ctx-a",
+            "inspect-short-pane-output",
+        );
+        assert_eq!(inspect["ok"], true, "{inspect}");
+        if inspect["result"]["panes"][0]["lines"]
+            .as_array()
+            .is_some_and(|lines| lines.iter().any(|line| line == "SHORT-PANE-LINE"))
+        {
+            break;
+        }
+        assert!(Instant::now() < short_deadline, "{inspect}");
+        thread::sleep(Duration::from_millis(25));
+    }
 
     let input = call(
         &env,
@@ -1655,7 +1741,7 @@ fn tmux_run_does_not_expose_internal_tmux_environment() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
-fn tmux_transcript_capture_is_bounded_without_stopping_the_task() {
+fn tmux_transcript_overflow_rotates_without_stopping_capture() {
     assert!(
         tmux_available(),
         "tmux is required to run this ignored contract test"
@@ -1670,10 +1756,10 @@ fn tmux_transcript_capture_is_bounded_without_stopping_the_task() {
         "1",
         "tmux_run",
         json!({
-            "command": "/usr/bin/head -c 5242880 /dev/zero",
+            "command": "/usr/bin/head -c 9437184 /dev/zero; printf '\\nROTATING-END\\n'",
             "wait": "block",
             "timeMs": 5000,
-            "line": 0
+            "line": -10
         }),
         "ctx-transcript-limit",
         "run-large-transcript",
@@ -1685,7 +1771,15 @@ fn tmux_transcript_capture_is_bounded_without_stopping_the_task() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|warning| warning["code"] == "tmux.outputTruncated"),
+            .any(|warning| warning["code"] == "tmux.outputRotated"),
+        "{run}"
+    );
+    assert!(
+        run["result"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line == "ROTATING-END"),
         "{run}"
     );
     let task = run["result"]["task"]["id"].as_str().unwrap();
@@ -1911,7 +2005,10 @@ fn tmux_run_stays_clean_bash_while_main_uses_user_zsh_rc() {
         } else {
             assert_eq!(listed["error"]["code"], "tmux.paneNotReady", "{listed}");
         }
-        assert!(Instant::now() < deadline, "main zsh did not become ready: {listed}");
+        assert!(
+            Instant::now() < deadline,
+            "main zsh did not become ready: {listed}"
+        );
         thread::sleep(Duration::from_millis(25));
     }
 

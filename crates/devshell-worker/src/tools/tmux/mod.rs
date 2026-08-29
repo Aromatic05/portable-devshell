@@ -5,6 +5,7 @@ pub mod replay;
 pub mod shell;
 pub mod state;
 pub mod task;
+mod transcript_ring;
 pub mod types;
 
 use std::collections::HashMap;
@@ -23,8 +24,7 @@ use crate::tools::tmux::state::TmuxState;
 use crate::tools::tmux::types::{
     TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams, TmuxInputOutput,
     TmuxInputParams, TmuxInspectParams, TmuxListOutput, TmuxListParams, TmuxPaneOperationOutput,
-    TmuxReadOutput, TmuxReadParams, TmuxRunOutput, TmuxRunParams,
-    TmuxWarning,
+    TmuxReadOutput, TmuxReadParams, TmuxRunOutput, TmuxRunParams, TmuxWarning,
 };
 use crate::tools::{
     ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName, ToolRegistry,

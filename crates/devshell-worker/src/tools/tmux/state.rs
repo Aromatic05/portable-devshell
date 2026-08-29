@@ -81,6 +81,7 @@ impl TmuxState {
                 state,
                 transcript: TranscriptCursor::restore(
                     backend.transcript_path(&record.task_id),
+                    backend.transcript_buffer_name(&record.task_id),
                     backend.load_task_offset(&record.task_id)?,
                 ),
                 finished_at_ms: Some(record.finished_at_ms),
@@ -131,20 +132,12 @@ impl TmuxState {
         });
     }
 
-    pub fn run(
-        &self,
-        call: &ToolCall,
-        params: TmuxRunParams,
-    ) -> Result<TmuxRunOutput, ToolError> {
+    pub fn run(&self, call: &ToolCall, params: TmuxRunParams) -> Result<TmuxRunOutput, ToolError> {
         self.replays
             .execute(call, "tmux_run", || self.run_once(call, params))
     }
 
-    fn run_once(
-        &self,
-        call: &ToolCall,
-        params: TmuxRunParams,
-    ) -> Result<TmuxRunOutput, ToolError> {
+    fn run_once(&self, call: &ToolCall, params: TmuxRunParams) -> Result<TmuxRunOutput, ToolError> {
         call.check_cancelled()?;
         require_execute(call)?;
         if params.command.is_empty() || params.command.contains('\0') {
@@ -182,12 +175,16 @@ impl TmuxState {
                 let _ = self.backend.close_pane(&pane);
                 self.backend.remove_task_runtime(&task_id);
                 let _ = fs::remove_file(self.backend.transcript_path(&task_id));
+                let _ =
+                    super::transcript_ring::remove(&self.backend.transcript_buffer_name(&task_id));
                 return Err(error);
             }
             if let Err(error) = self.backend.start_task_pane(&task_id) {
                 let _ = self.backend.close_pane(&pane);
                 self.backend.remove_task_runtime(&task_id);
                 let _ = fs::remove_file(self.backend.transcript_path(&task_id));
+                let _ =
+                    super::transcript_ring::remove(&self.backend.transcript_buffer_name(&task_id));
                 return Err(error);
             }
             let mut task = TaskRecord {
@@ -195,7 +192,10 @@ impl TmuxState {
                 pane_id: pane.id.clone(),
                 pane_incarnation_id: pane.pane_incarnation_id.clone(),
                 state: TaskState::Running,
-                transcript: TranscriptCursor::new(self.backend.transcript_path(&task_id)),
+                transcript: TranscriptCursor::new(
+                    self.backend.transcript_path(&task_id),
+                    self.backend.transcript_buffer_name(&task_id),
+                ),
                 finished_at_ms: None,
                 last_pane: Some(pane.clone()),
                 warnings: self.output_warnings(&workspace)?,
@@ -445,9 +445,7 @@ impl TmuxState {
         let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
         let mut panes = Vec::with_capacity(selected.len());
         for pane in selected {
-            let lines = self
-                .backend
-                .capture_lines(&pane.tmux_pane_id, start, end)?;
+            let lines = self.backend.capture_lines(&pane.tmux_pane_id, start, end)?;
             panes.push(pane_detail(&pane, current_task(&tasks, &pane.id), lines));
         }
         Ok(self.pane_output(panes, self.output_warnings(&workspace)?))
@@ -880,6 +878,7 @@ impl TmuxState {
                     state: TaskState::Running,
                     transcript: TranscriptCursor::restore(
                         self.backend.transcript_path(task_id),
+                        self.backend.transcript_buffer_name(task_id),
                         self.backend.load_task_offset(task_id)?,
                     ),
                     finished_at_ms: None,

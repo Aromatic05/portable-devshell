@@ -54,7 +54,9 @@ impl TestEnv {
     }
 
     pub fn context_temp_target(&self) -> PathBuf {
-        self.runtime_root.join("devshell-worker").join("context-tmp")
+        self.runtime_root
+            .join("devshell-worker")
+            .join("context-tmp")
     }
 
     pub fn socket_file(&self, instance: &str) -> PathBuf {
