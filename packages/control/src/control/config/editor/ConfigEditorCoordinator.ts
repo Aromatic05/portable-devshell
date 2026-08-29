@@ -162,6 +162,7 @@ export class ConfigEditorCoordinator {
             await this.#runtimePreflight.assertAvailable(currentConfig, nextConfig);
         }
         const stoppedForDisable = await this.#stopForDisable(existing, instance, descriptor);
+        await this.#retireInteractionsForDisable(existing, instance, descriptor);
         let hotApplied = false;
         try {
             await this.#persistConfig(nextConfig);
@@ -223,6 +224,7 @@ export class ConfigEditorCoordinator {
         if (rebuildRequired) this.#assertInstanceStopped(request.instanceName, "update");
 
         const stoppedForDisable = await this.#stopForDisable(existing, instance, descriptor);
+        await this.#retireInteractionsForDisable(existing, instance, descriptor);
         let hotApplied = false;
         try {
             await this.#persistConfig(nextConfig);
@@ -364,6 +366,7 @@ export class ConfigEditorCoordinator {
         const descriptor = this.#instanceRegistry.get(instanceName);
         const preparedDescriptor = this.#prepareInstanceDescriptor(instance, descriptor, false);
         const stoppedForDisable = await this.#stopForDisable(existing, instance, descriptor);
+        await this.#retireInteractionsForDisable(existing, instance, descriptor);
         try {
             await this.#persistConfig(nextConfig);
             await this.#applyPersistedChanges({
@@ -384,6 +387,41 @@ export class ConfigEditorCoordinator {
             nextConfig,
             [{ kind: enabled ? "instance.enabled" : "instance.disabled", target: instanceName }]
         );
+    }
+
+    async #retireInteractionsForDisable(
+        existing: ControlConfig["instances"][number] | undefined,
+        next: ControlConfig["instances"][number] | undefined,
+        descriptor: ReturnType<InstanceRegistry["get"]>,
+    ): Promise<void> {
+        if (
+            existing === undefined || next === undefined || descriptor === undefined ||
+            !existing.enabled || next.enabled
+        ) return;
+
+        for (const approval of await descriptor.worker.listApprovals()) {
+            if (approval.status === "pending") {
+                await descriptor.worker.cancelApproval(
+                    approval.approvalId,
+                    `Instance ${descriptor.name} was disabled before approval.`,
+                );
+            }
+        }
+
+        if (descriptor.wait === undefined) return;
+        for (const wait of await descriptor.wait.list()) {
+            if (wait.status !== "waiting" && wait.status !== "detached") continue;
+            try {
+                await descriptor.wait.cancel(wait.waitId);
+            } catch (error) {
+                const current = await descriptor.wait.get(wait.waitId);
+                if (
+                    current === undefined || current.status === "cancelled" ||
+                    current.status === "consumed" || current.status === "resolved"
+                ) continue;
+                throw error;
+            }
+        }
     }
 
     async #stopForDisable(

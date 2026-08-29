@@ -414,9 +414,15 @@ test("config editor reconfigures and disables a running instance without replaci
     assert.equal(registry.get("demo-local")?.enabled, false);
 });
 
-test("generic enabled=false config patch stops a running managed instance in Control", async () => {
+test("generic enabled=false config patch stops the worker and cancels unresolved Workspace waits", async () => {
     let config = createConfig();
     let stopCalls = 0;
+    const cancelledWaits: string[] = [];
+    const waits = [
+        { status: "waiting", waitId: "wait-question" },
+        { status: "detached", waitId: "wait-tmux" },
+        { status: "resolved", waitId: "wait-result" },
+    ];
     const worker = {
         reconfigure() {},
         snapshot: runningSnapshot,
@@ -425,7 +431,20 @@ test("generic enabled=false config patch stops a running managed instance in Con
             return { ...runningSnapshot(), daemonState: "stopped", ready: false, status: "stopped" };
         }
     };
-    const registry = new InstanceRegistry([descriptor(worker)]);
+    const registry = new InstanceRegistry([descriptor(worker, {
+        wait: {
+            async cancel(waitId: string) {
+                cancelledWaits.push(waitId);
+                const wait = waits.find((entry) => entry.waitId === waitId)!;
+                wait.status = "cancelled";
+                return wait;
+            },
+            async get(waitId: string) {
+                return waits.find((entry) => entry.waitId === waitId);
+            },
+            async list() { return waits; },
+        },
+    })]);
     const service = createService(() => config, (next) => { config = next; }, registry);
 
     await service.updateInstanceConfig({
@@ -434,6 +453,8 @@ test("generic enabled=false config patch stops a running managed instance in Con
     });
 
     assert.equal(stopCalls, 1);
+    assert.deepEqual(cancelledWaits, ["wait-question", "wait-tmux"]);
+    assert.equal(waits.find((entry) => entry.waitId === "wait-result")?.status, "resolved");
     assert.equal(config.instances[0]?.enabled, false);
     assert.equal(registry.get("demo-local")?.enabled, false);
 });
@@ -500,19 +521,39 @@ test("disable restarts a managed worker when persistence fails after stop", asyn
     assert.equal(registry.get("demo-local")?.enabled, true);
 });
 
-test("Control disable never stops a self-managed reverse worker", async () => {
+test("Control disable does not stop self-managed reverse workers but retires local pending interactions", async () => {
     let config = createConfig();
     let stopCalls = 0;
+    const cancelledApprovals: string[] = [];
+    const cancelledWaits: string[] = [];
     const registry = new InstanceRegistry([descriptor({
         managementMode: "selfManaged",
         snapshot: runningSnapshot,
+        async listApprovals() {
+            return [{ approvalId: "approval-self-managed", status: "pending" }];
+        },
+        async cancelApproval(approvalId: string) {
+            cancelledApprovals.push(approvalId);
+            return { approvalId, status: "cancelled" };
+        },
         async stop() { stopCalls += 1; throw new Error("must not stop self-managed worker"); }
+    }, {
+        wait: {
+            async cancel(waitId: string) {
+                cancelledWaits.push(waitId);
+                return { status: "cancelled", waitId };
+            },
+            async get() { return undefined; },
+            async list() { return [{ status: "waiting", waitId: "wait-self-managed" }]; },
+        },
     })]);
     const service = createService(() => config, (next) => { config = next; }, registry);
 
     await service.disableInstance({ instanceName: "demo-local" });
 
     assert.equal(stopCalls, 0);
+    assert.deepEqual(cancelledApprovals, ["approval-self-managed"]);
+    assert.deepEqual(cancelledWaits, ["wait-self-managed"]);
     assert.equal(config.instances[0]?.enabled, false);
     assert.equal(registry.get("demo-local")?.enabled, false);
 });
@@ -718,14 +759,20 @@ function createService(
     });
 }
 
-function descriptor(worker: Record<string, unknown>) {
+function descriptor(worker: Record<string, unknown>, extra: Record<string, unknown> = {}) {
     return {
         tools: { capabilities: ["read", "write", "execute"] as const, groups: ["file", "bash", "artifact"] },
         enabled: true,
         mcpEnabled: true,
         mcpPath: "/demo-local/mcp",
         name: "demo-local",
-        worker
+        worker: {
+            managementMode: "controllerManaged",
+            async listApprovals() { return []; },
+            async cancelApproval() { throw new Error("no pending approval"); },
+            ...worker,
+        },
+        ...extra,
     } as never;
 }
 
