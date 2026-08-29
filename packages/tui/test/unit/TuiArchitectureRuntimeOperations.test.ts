@@ -318,7 +318,7 @@ test("reverse instance creation reports committed creation when device code gene
     assert.deepEqual(harness.refreshed, ["all"]);
 });
 
-test("failed disable restores a worker that was running before the config update", async () => {
+test("failed disable delegates worker rollback to Control instead of duplicating lifecycle logic", async () => {
     const harness = createHarness({ failConfigUpdate: true });
     harness.store.patchControlSnapshot({
         connectionState: "connected",
@@ -334,11 +334,7 @@ test("failed disable restores a worker that was running before the config update
         /config update failed/u
     );
 
-    assert.deepEqual(harness.calls, [
-        "runtime.stop:alpha",
-        "config.instance:alpha",
-        "runtime.start:alpha"
-    ]);
+    assert.deepEqual(harness.calls, ["config.instance:alpha"]);
 });
 
 test("disabling an online self-managed reverse instance never stops the remote worker", async () => {

@@ -178,35 +178,13 @@ export class TuiRuntimeControlOperations {
     }
 
     async setInstanceEnabled(instance: string, enabled: boolean): Promise<void> {
-        const snapshot = this.options.store.getState().readModel.instanceState[instance]?.snapshot;
-        const selfManaged = snapshot?.reverse?.managementMode === "selfManaged";
-        const wasRunning = !enabled && !selfManaged && snapshot?.daemonState !== undefined && snapshot.daemonState !== "stopped";
-        let stoppedForDisable = false;
-        try {
-            if (wasRunning) {
-                await this.options.session.commands.stopInstance(instance);
-                stoppedForDisable = true;
-            }
-            await this.#request(
-                this.options.clients.config.updateInstance({
-                    instanceName: instance,
-                    patch: { enabled }
-                }),
-                `config.instance.enabled:${instance}`
-            );
-        } catch (error) {
-            if (stoppedForDisable) {
-                try {
-                    await this.options.session.commands.startInstance(instance);
-                } catch (restoreError) {
-                    throw new AggregateError(
-                        [error, restoreError],
-                        `Disabling ${instance} failed and the previous running state could not be restored.`
-                    );
-                }
-            }
-            throw error;
-        }
+        await this.#request(
+            this.options.clients.config.updateInstance({
+                instanceName: instance,
+                patch: { enabled }
+            }),
+            `config.instance.enabled:${instance}`
+        );
         await this.#refreshBestEffort(`instances:${instance}`, async () => {
             await this.options.session.refresh();
         });

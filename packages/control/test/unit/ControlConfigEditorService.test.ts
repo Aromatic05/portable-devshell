@@ -368,12 +368,17 @@ test("namespace auth updates apply runtime protection before exposing OAuth", as
 test("config editor reconfigures and disables a running instance without replacing it", async () => {
     let config = createConfig();
     const reconfigureCalls: Array<Record<string, unknown>> = [];
+    let stopCalls = 0;
     const registry = new InstanceRegistry([
         descriptor({
             reconfigure(input: Record<string, unknown>) {
                 reconfigureCalls.push(input);
             },
-            snapshot: runningSnapshot
+            snapshot: runningSnapshot,
+            async stop() {
+                stopCalls += 1;
+                return { ...runningSnapshot(), daemonState: "stopped", ready: false, status: "stopped" };
+            }
         })
     ]);
     const service = createService(() => config, (next) => {
@@ -391,6 +396,7 @@ test("config editor reconfigures and disables a running instance without replaci
     await service.disableInstance({ instanceName: "demo-local" });
 
     assert.equal(config.instances[0]?.enabled, false);
+    assert.equal(stopCalls, 1);
     assert.equal(config.instances[0]?.security.mode, "workspace");
     assert.equal(reconfigureCalls.length, 1);
     const reconfigure = reconfigureCalls[0] as {
@@ -405,6 +411,109 @@ test("config editor reconfigures and disables a running instance without replaci
     assert.equal(reconfigure.effectiveSecurityMode, "workspace");
     assert.equal(reconfigure.env?.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE, "workspace");
     assert.equal(reconfigure.env?.DEVSHELL_WORKER_SECURITY_MODE, "workspace");
+    assert.equal(registry.get("demo-local")?.enabled, false);
+});
+
+test("generic enabled=false config patch stops a running managed instance in Control", async () => {
+    let config = createConfig();
+    let stopCalls = 0;
+    const worker = {
+        reconfigure() {},
+        snapshot: runningSnapshot,
+        async stop() {
+            stopCalls += 1;
+            return { ...runningSnapshot(), daemonState: "stopped", ready: false, status: "stopped" };
+        }
+    };
+    const registry = new InstanceRegistry([descriptor(worker)]);
+    const service = createService(() => config, (next) => { config = next; }, registry);
+
+    await service.updateInstanceConfig({
+        instanceName: "demo-local",
+        patch: { enabled: false }
+    });
+
+    assert.equal(stopCalls, 1);
+    assert.equal(config.instances[0]?.enabled, false);
+    assert.equal(registry.get("demo-local")?.enabled, false);
+});
+
+test("failed managed-instance stop leaves enabled configuration unchanged", async () => {
+    let config = createConfig();
+    const writes: ControlConfig[] = [];
+    const registry = new InstanceRegistry([descriptor({
+        snapshot: runningSnapshot,
+        async stop() { throw new Error("worker stop failed"); }
+    })]);
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                writes.push(nextConfig);
+                config = nextConfig;
+            }
+        },
+        getConfig: () => config,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => { config = nextConfig; }
+    });
+
+    await assert.rejects(
+        service.disableInstance({ instanceName: "demo-local" }),
+        /worker stop failed/u,
+    );
+    assert.equal(writes.length, 0);
+    assert.equal(config.instances[0]?.enabled, true);
+    assert.equal(registry.get("demo-local")?.enabled, true);
+});
+
+test("disable restarts a managed worker when persistence fails after stop", async () => {
+    let config = createConfig();
+    let stopCalls = 0;
+    let startCalls = 0;
+    const registry = new InstanceRegistry([descriptor({
+        snapshot: runningSnapshot,
+        async stop() {
+            stopCalls += 1;
+            return { ...runningSnapshot(), daemonState: "stopped", ready: false, status: "stopped" };
+        },
+        async start() {
+            startCalls += 1;
+            return runningSnapshot();
+        }
+    })]);
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write() { throw new Error("config persistence failed"); }
+        },
+        getConfig: () => config,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => { config = nextConfig; }
+    });
+
+    await assert.rejects(
+        service.disableInstance({ instanceName: "demo-local" }),
+        /config persistence failed/u,
+    );
+    assert.equal(stopCalls, 1);
+    assert.equal(startCalls, 1);
+    assert.equal(config.instances[0]?.enabled, true);
+    assert.equal(registry.get("demo-local")?.enabled, true);
+});
+
+test("Control disable never stops a self-managed reverse worker", async () => {
+    let config = createConfig();
+    let stopCalls = 0;
+    const registry = new InstanceRegistry([descriptor({
+        managementMode: "selfManaged",
+        snapshot: runningSnapshot,
+        async stop() { stopCalls += 1; throw new Error("must not stop self-managed worker"); }
+    })]);
+    const service = createService(() => config, (next) => { config = next; }, registry);
+
+    await service.disableInstance({ instanceName: "demo-local" });
+
+    assert.equal(stopCalls, 0);
+    assert.equal(config.instances[0]?.enabled, false);
     assert.equal(registry.get("demo-local")?.enabled, false);
 });
 

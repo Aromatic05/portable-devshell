@@ -302,6 +302,16 @@ export class WorkerInstance {
     }
 
     async stop(): Promise<InstanceSnapshot> {
+        if (this.managementMode !== "selfManaged") {
+            for (const approval of await this.#tool.listApprovals()) {
+                if (approval.status === "pending") {
+                    await this.#tool.cancelApproval(
+                        approval.approvalId,
+                        `Instance ${this.snapshot().name} was stopped before approval.`,
+                    );
+                }
+            }
+        }
         return await this.#lifecycle.stop();
     }
 

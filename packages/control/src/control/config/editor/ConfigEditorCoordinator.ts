@@ -161,23 +161,29 @@ export class ConfigEditorCoordinator {
         if (request.mcp !== undefined || request.web !== undefined) {
             await this.#runtimePreflight.assertAvailable(currentConfig, nextConfig);
         }
-        await this.#persistConfig(nextConfig);
+        const stoppedForDisable = await this.#stopForDisable(existing, instance, descriptor);
+        let hotApplied = false;
+        try {
+            await this.#persistConfig(nextConfig);
 
-        const runtimeChanges: ConfigRuntimeChangeSet = {
-            instanceAuth: authChanged,
-            mcp: request.mcp !== undefined,
-            web: request.web !== undefined
-        };
-        const hotApplied = await this.#applyPersistedChanges({
-            currentConfig,
-            descriptor,
-            existing,
-            instance,
-            nextConfig,
-            preparedDescriptor,
-            rebuildRequired,
-            runtimeChanges
-        });
+            const runtimeChanges: ConfigRuntimeChangeSet = {
+                instanceAuth: authChanged,
+                mcp: request.mcp !== undefined,
+                web: request.web !== undefined
+            };
+            hotApplied = await this.#applyPersistedChanges({
+                currentConfig,
+                descriptor,
+                existing,
+                instance,
+                nextConfig,
+                preparedDescriptor,
+                rebuildRequired,
+                runtimeChanges
+            });
+        } catch (error) {
+            await this.#restoreAfterFailedDisable(descriptor, stoppedForDisable, error);
+        }
 
         const changes = [
             ...(instanceRequest === undefined
@@ -216,22 +222,27 @@ export class ConfigEditorCoordinator {
         const authChanged = JSON.stringify(existing.mcp.auth) !== JSON.stringify(instance.mcp.auth);
         if (rebuildRequired) this.#assertInstanceStopped(request.instanceName, "update");
 
-        await this.#persistConfig(nextConfig);
-
-        const hotApplied = await this.#applyPersistedChanges({
-            currentConfig,
-            descriptor,
-            existing,
-            instance,
-            nextConfig,
-            preparedDescriptor,
-            rebuildRequired,
-            runtimeChanges: {
-                instanceAuth: authChanged,
-                mcp: false,
-                web: false
-            }
-        });
+        const stoppedForDisable = await this.#stopForDisable(existing, instance, descriptor);
+        let hotApplied = false;
+        try {
+            await this.#persistConfig(nextConfig);
+            hotApplied = await this.#applyPersistedChanges({
+                currentConfig,
+                descriptor,
+                existing,
+                instance,
+                nextConfig,
+                preparedDescriptor,
+                rebuildRequired,
+                runtimeChanges: {
+                    instanceAuth: authChanged,
+                    mcp: false,
+                    web: false
+                }
+            });
+        } catch (error) {
+            await this.#restoreAfterFailedDisable(descriptor, stoppedForDisable, error);
+        }
         return this.#finalizeApplyResult(
             currentConfig,
             nextConfig,
@@ -350,22 +361,60 @@ export class ConfigEditorCoordinator {
             ...currentConfig,
             instances: currentConfig.instances.map((entry) => (entry.name === instanceName ? instance : entry))
         });
-        await this.#persistConfig(nextConfig);
-
         const descriptor = this.#instanceRegistry.get(instanceName);
-        if (enabled) {
-            if (descriptor === undefined) this.#instanceRegistry.add(this.#instanceConfigMapper.map(instance));
-            else descriptor.enabled = true;
-        } else if (descriptor !== undefined) {
-            descriptor.enabled = false;
+        const preparedDescriptor = this.#prepareInstanceDescriptor(instance, descriptor, false);
+        const stoppedForDisable = await this.#stopForDisable(existing, instance, descriptor);
+        try {
+            await this.#persistConfig(nextConfig);
+            await this.#applyPersistedChanges({
+                currentConfig,
+                descriptor,
+                existing,
+                instance,
+                nextConfig,
+                preparedDescriptor,
+                rebuildRequired: false,
+                runtimeChanges: { instanceAuth: false, mcp: false, web: false }
+            });
+        } catch (error) {
+            await this.#restoreAfterFailedDisable(descriptor, stoppedForDisable, error);
         }
-
-        this.#syncMcpEndpoint(instanceName);
         return this.#finalizeApplyResult(
             currentConfig,
             nextConfig,
             [{ kind: enabled ? "instance.enabled" : "instance.disabled", target: instanceName }]
         );
+    }
+
+    async #stopForDisable(
+        existing: ControlConfig["instances"][number] | undefined,
+        next: ControlConfig["instances"][number] | undefined,
+        descriptor: ReturnType<InstanceRegistry["get"]>,
+    ): Promise<boolean> {
+        if (
+            existing === undefined || next === undefined || descriptor === undefined ||
+            !existing.enabled || next.enabled || descriptor.worker.managementMode === "selfManaged"
+        ) return false;
+        if (descriptor.worker.snapshot().daemonState === "stopped") return false;
+        await descriptor.worker.stop();
+        return true;
+    }
+
+    async #restoreAfterFailedDisable(
+        descriptor: ReturnType<InstanceRegistry["get"]>,
+        stoppedForDisable: boolean,
+        error: unknown,
+    ): Promise<never> {
+        if (!stoppedForDisable || descriptor === undefined) throw error;
+        try {
+            await descriptor.worker.start();
+        } catch (restoreError) {
+            throw new AggregateError(
+                [error, restoreError],
+                `Disabling ${descriptor.name} failed and the previous running state could not be restored.`,
+            );
+        }
+        throw error;
     }
 
     async #applyPersistedChanges(input: {
@@ -475,7 +524,9 @@ export class ConfigEditorCoordinator {
             this.#instanceRegistry.add(preparedDescriptor);
             return;
         }
-        await descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
+        if (instance.enabled) {
+            await descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
+        }
         descriptor.mcpCapabilities = [...instance.mcp.tools.capabilities];
         descriptor.mcpContextMode = instance.mcp.contextMode;
         descriptor.mcpGroups = [...instance.mcp.tools.groups];

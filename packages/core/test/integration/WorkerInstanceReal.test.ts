@@ -577,6 +577,42 @@ test("WorkerInstance cancels a pending approval when the caller aborts", async (
     }
 });
 
+test("WorkerInstance stop cancels pending approvals before stopping the worker", async () => {
+    const homeDirectory = await createTestTempDirectory("instance-stop-pending-approval");
+    const harness = createWorkerInstanceHarness();
+    const instance = new WorkerInstanceFactory().create({
+        approvalPolicy: { mode: "ask" },
+        homeDirectory,
+        name: asInstanceName("task-6-stop-pending-approval"),
+        transport: harness.transport
+    });
+
+    try {
+        await instance.start();
+        const callPromise = instance.callTool(
+            "bash_run",
+            { command: "pwd" },
+            { requestId: "req-stop-pending", ctxId: "ctx-stop-pending", source: "mcp" },
+        );
+        const approvalId = (await waitForPendingApproval(instance)).approvalId;
+
+        const stopped = await instance.stop();
+        assert.equal(stopped.daemonState, "stopped");
+        await assert.rejects(callPromise, (error: unknown) => {
+            assert.equal((error as { code?: string }).code, errorCodes.coreToolCallCancelled);
+            return true;
+        });
+        assert.equal((await instance.getApproval(approvalId)).status, "cancelled");
+        assert.deepEqual(
+            (await instance.readToolCalls()).map((record) => record.status),
+            ["cancelled"],
+        );
+    } finally {
+        await instance.close();
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
 test("WorkerInstance cancellation API terminates a pending approval before tool execution", async () => {
     const homeDirectory = await createTestTempDirectory("instance-approval-admin-cancel");
     const harness = createWorkerInstanceHarness();
