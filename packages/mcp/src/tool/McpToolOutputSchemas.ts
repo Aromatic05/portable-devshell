@@ -278,6 +278,9 @@ export const approvalRequestOutputSchema = objectSchema({
 const workspaceBackgroundSchema = objectSchema({
     detachedAt: stringValue,
     goalId: nonEmptyString,
+    recoveryMessageAttemptedAt: stringValue,
+    recoveryMessageId: nonEmptyString,
+    recoveryMessageSentAt: stringValue,
     status: { enum: ["detached", "resolved", "waiting"], type: "string" },
     taskId: nonEmptyString,
     tmuxTaskId: stringValue,
@@ -338,11 +341,14 @@ const workspaceGoalStepOutputSchema = objectSchema({
 
 export const workspaceGoalOutputSchema = objectSchema({
     autoContinueExhausted: booleanValue,
+    continuationAttemptedAt: stringValue,
     continuationCount: nonNegativeInteger,
+    continuationMessageId: nonEmptyString,
     continuationDue: booleanValue,
     continuationDueAt: nonEmptyString,
     continuationPending: booleanValue,
     continuationRetryAfter: stringValue,
+    continuationUncertain: booleanValue,
     createdAt: nonEmptyString,
     goalId: nonEmptyString,
     lastAgentActivityAt: nonEmptyString,
@@ -356,7 +362,7 @@ export const workspaceGoalOutputSchema = objectSchema({
     updatedAt: nonEmptyString,
 }, [
     "autoContinueExhausted", "continuationCount", "continuationDue", "continuationDueAt",
-    "continuationPending", "createdAt", "goalId", "lastAgentActivityAt", "maxContinuations",
+    "continuationPending", "continuationUncertain", "createdAt", "goalId", "lastAgentActivityAt", "maxContinuations",
     "objective", "revision", "status", "steps", "updatedAt"
 ]);
 
@@ -365,9 +371,11 @@ export const workspaceGoalResultOutputSchema = objectSchema({
 }, ["goal"]);
 
 export const workspaceGoalContinuationOutputSchema = objectSchema({
+    attempted: booleanValue,
     claimed: booleanValue,
     claimId: nonEmptyString,
     continuationCount: nonNegativeInteger,
+    messageId: nonEmptyString,
     goal: { anyOf: [{ type: "null" }, workspaceGoalOutputSchema] },
     valid: booleanValue,
 }, ["goal"]);
@@ -445,10 +453,13 @@ export const workspaceWaitInterruptOutputSchema = objectSchema({
 }, ["detached", "interrupted", "status", "tmuxTaskId", "waitId"]);
 
 export const workspaceWaitRecoveryOutputSchema = objectSchema({
+    attempted: { const: true, type: "boolean" },
     claimId: nonEmptyString,
     completed: { const: true, type: "boolean" },
+    dismissed: { const: true, type: "boolean" },
     goalId: nonEmptyString,
     kind: { enum: ["question", "tmux"], type: "string" },
+    recoveryMessageAttemptedAt: stringValue,
     recoveryMessageId: nonEmptyString,
     recoveryMessageSentAt: stringValue,
     released: { const: true, type: "boolean" },

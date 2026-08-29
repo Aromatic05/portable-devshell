@@ -122,6 +122,14 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return await this.#requireWait(instance).completeRecovery(waitId, claimId);
     }
 
+    async dismissWaitRecovery(instance: string, waitId: string, recoveryMessageId: string) {
+        return await this.#requireWait(instance).dismissRecovery(waitId, recoveryMessageId);
+    }
+
+    async markWaitRecoveryAttempted(instance: string, waitId: string, claimId: string) {
+        return await this.#requireWait(instance).markRecoveryAttempted(waitId, claimId);
+    }
+
     async markWaitRecoverySent(instance: string, waitId: string, claimId: string) {
         return await this.#requireWait(instance).markRecoverySent(waitId, claimId);
     }
@@ -206,9 +214,10 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         instance: string,
         taskId: string,
         action: import("@portable-devshell/shared").TodoTaskControlAction,
-        ctxId: string
+        ctxId: string,
+        expectedRevision?: number
     ): Promise<JsonValue> {
-        return (await this.#requireDescriptor(instance).todo.control(taskId, action, ctxId)) as unknown as JsonValue;
+        return (await this.#requireDescriptor(instance).todo.control(taskId, action, ctxId, expectedRevision)) as unknown as JsonValue;
     }
 
     async decideApproval(instance: string, approvalId: string, decision: "approve" | "deny") {

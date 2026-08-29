@@ -27,6 +27,8 @@ export interface WaitRecord extends WaitCreateInput {
     detachedAt?: string;
     recoveryClaimedAt?: string;
     recoveryClaimId?: string;
+    recoveryDismissedAt?: string;
+    recoveryMessageAttemptedAt?: string;
     recoveryMessageId?: string;
     recoveryMessageSentAt?: string;
     resolvedAt?: string;

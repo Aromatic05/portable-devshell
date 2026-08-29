@@ -41,6 +41,7 @@ export class ApprovalManager {
     readonly #store: ApprovalStore;
     readonly #timeoutMs: number;
     readonly #pending = new Map<string, PendingApproval>();
+    #ready?: Promise<void>;
 
     constructor(options: ApprovalManagerOptions) {
         this.#instanceName = options.instanceName;
@@ -50,6 +51,7 @@ export class ApprovalManager {
     }
 
     async evaluate(input: ApprovalEvaluationInput): Promise<ApprovalEvaluation> {
+        await this.#ensureReady();
         const policyDecision = resolvePolicyDecision(this.#policy, input.context.source, input.toolName);
 
         if (policyDecision === "allow") {
@@ -101,10 +103,12 @@ export class ApprovalManager {
     }
 
     async listApprovals(): Promise<ApprovalRequest[]> {
+        await this.#ensureReady();
         return await this.#store.list();
     }
 
     async getApproval(approvalId: string): Promise<ApprovalRequest> {
+        await this.#ensureReady();
         const request = await this.#store.get(approvalId);
         if (request !== undefined) {
             return request;
@@ -128,6 +132,7 @@ export class ApprovalManager {
             remember?: boolean;
         }
     ): Promise<ApprovalRequest> {
+        await this.#ensureReady();
         const pending = this.#pending.get(approvalId);
         const request = pending?.request ?? (await this.#store.get(approvalId));
 
@@ -190,6 +195,7 @@ export class ApprovalManager {
     }
 
     async cancel(approvalId: string, reason?: string): Promise<ApprovalRequest> {
+        await this.#ensureReady();
         const pending = this.#pending.get(approvalId);
         const request = pending?.request ?? (await this.#store.get(approvalId));
 
@@ -240,6 +246,29 @@ export class ApprovalManager {
         }
 
         return cancelledRequest;
+    }
+
+    async #ensureReady(): Promise<void> {
+        if (this.#ready === undefined) {
+            const ready = this.#reconcilePersistedPending();
+            this.#ready = ready;
+            void ready.catch(() => {
+                if (this.#ready === ready) this.#ready = undefined;
+            });
+        }
+        await this.#ready;
+    }
+
+    async #reconcilePersistedPending(): Promise<void> {
+        const now = Date.now();
+        for (const request of await this.#store.list()) {
+            if (request.status !== "pending") continue;
+            const expired = Date.parse(request.expiresAt) <= now;
+            await this.#store.append({
+                ...request,
+                status: expired ? "expired" : "cancelled",
+            });
+        }
     }
 
     setPolicy(policy: ApprovalPolicy | undefined): void {

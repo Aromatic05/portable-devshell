@@ -346,6 +346,42 @@ test("Workspace currentEvent keeps human actions FIFO and ignores tmux waits", a
     assert.equal(currentEvent?.waitId, "wait-old");
 });
 
+test("Workspace question answer reports owner loss that races with resolution", async () => {
+    const fake = createInteractionGateway();
+    const now = new Date().toISOString();
+    fake.waits.push({
+        createdAt: now,
+        createdByCtxId: context.ctxId!,
+        kind: "question",
+        payload: { allowText: true, choices: [], question: "Race?" },
+        status: "waiting",
+        targetId: "question-race",
+        updatedAt: now,
+        waitId: "wait-question-race",
+    });
+    const gateway = Object.assign(fake.gateway, {
+        async resolveWait(_instance: string, waitId: string, result?: JsonValue) {
+            const record = fake.waits.find((entry) => entry.waitId === waitId)!;
+            record.detachedAt = new Date().toISOString();
+            record.resolvedAt = new Date().toISOString();
+            record.result = result;
+            record.status = "resolved";
+            record.updatedAt = record.resolvedAt;
+            return structuredClone(record);
+        },
+    });
+    const handler = new McpEndpointHandlerInteraction({ gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
+
+    const result = await handler.call(
+        "workspace_question_answer",
+        { answer: "yes", token, waitId: "wait-question-race" },
+        context,
+        "call-answer-race",
+    ) as { detached?: boolean };
+    assert.equal(result.detached, true);
+});
+
 test("Workspace can interrupt a live tmux wait without cancelling the tmux task", async () => {
     const fake = createInteractionGateway();
     const now = new Date().toISOString();
@@ -381,6 +417,41 @@ test("Workspace can interrupt a live tmux wait without cancelling the tmux task"
         interrupted: true,
         task: { id: "tmux-task-1", status: "running" },
     });
+});
+
+test("Workspace wait interruption reports owner loss that races with resolution", async () => {
+    const fake = createInteractionGateway();
+    const now = new Date().toISOString();
+    fake.waits.push({
+        createdAt: now,
+        createdByCtxId: context.ctxId!,
+        kind: "tmux",
+        ownerCallId: "call-race",
+        status: "waiting",
+        targetId: "tmux-race",
+        updatedAt: now,
+        waitId: "wait-tmux-race",
+    });
+    const gateway = Object.assign(fake.gateway, {
+        async resolveWait(_instance: string, waitId: string, result?: JsonValue) {
+            const record = fake.waits.find((entry) => entry.waitId === waitId)!;
+            record.detachedAt = new Date().toISOString();
+            record.resolvedAt = new Date().toISOString();
+            record.result = result;
+            record.status = "resolved";
+            record.updatedAt = record.resolvedAt;
+            return structuredClone(record);
+        },
+    });
+    const handler = new McpEndpointHandlerInteraction({ gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
+    const result = await handler.call(
+        "workspace_wait_interrupt",
+        { token, waitId: "wait-tmux-race" },
+        context,
+        "call-interrupt-race",
+    ) as { detached?: boolean };
+    assert.equal(result.detached, true);
 });
 
 test("Workspace task control and detached-wait recovery use durable server state", async () => {
@@ -434,7 +505,7 @@ test("Workspace task control and detached-wait recovery use durable server state
 
     await handler.call(
         "workspace_task_control",
-        { action: "pause", taskId: "task-1", token },
+        { action: "pause", revision: 1, taskId: "task-1", token },
         context,
         "call-control",
     );
@@ -449,7 +520,7 @@ test("Workspace task control and detached-wait recovery use durable server state
 
     await handler.call(
         "workspace_task_control",
-        { action: "resume", taskId: "task-1", token },
+        { action: "resume", revision: 1, taskId: "task-1", token },
         context,
         "call-resume",
     );
@@ -474,6 +545,16 @@ test("Workspace task control and detached-wait recovery use durable server state
     const claimed = fake.waits.find((entry) => entry.waitId === "wait-recover");
     assert.equal(claimed?.status, "resolved");
     assert.equal(claimed?.recoveryClaimId, recovered.claimId);
+
+    const attempted = await handler.call(
+        "workspace_wait_recover",
+        { action: "attempt", claimId: recovered.claimId, token, waitId: "wait-recover" },
+        context,
+        "call-recover-attempt",
+    ) as { attempted: true; recoveryMessageAttemptedAt: string; recoveryMessageId: string; waitId: string };
+    assert.equal(attempted.attempted, true);
+    assert.equal(attempted.waitId, "wait-recover");
+    assert.equal(claimed?.recoveryMessageAttemptedAt, attempted.recoveryMessageAttemptedAt);
 
     const sent = await handler.call(
         "workspace_wait_recover",
@@ -675,7 +756,7 @@ test("workspace_watch skips unrelated events and returns on the current Context 
     assert.equal(watchReads, 2);
 });
 
-test("workspace_watch heartbeat advances its cursor without forcing a snapshot", async () => {
+test("workspace_watch heartbeat reconciles from an authoritative snapshot", async () => {
     const fake = createInteractionGateway();
     const gateway = Object.assign(fake.gateway, {
         async controlTodo() { return {}; },
@@ -694,12 +775,30 @@ test("workspace_watch heartbeat advances its cursor without forcing a snapshot",
 
     const result = await handler.call("workspace_watch", { cursor: 7, token }, context, "call-watch");
     assert.ok(result instanceof McpNativeToolResult);
-    assert.deepEqual(result.structuredContent, { changed: false, cursor: 11 });
+    assert.deepEqual(result.structuredContent, {
+        changed: false,
+        cursor: 11,
+        snapshot: {
+            approvals: [],
+            background: [],
+            ctxId: context.ctxId,
+            currentEvent: null,
+            cursor: 11,
+            goal: null,
+            instance: "demo",
+            questions: [],
+            tasks: [],
+        },
+    });
 });
 
 test("workspace_ask refuses to hold a call before Workspace is open", async () => {
     const fake = createInteractionGateway();
-    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    const handler = new McpEndpointHandlerInteraction({
+        gateway: fake.gateway,
+        instanceName: "demo",
+        workspaceActivationGraceMs: 5,
+    });
     await assert.rejects(
         handler.call(
             "workspace_ask",
@@ -722,6 +821,36 @@ test("workspace_ask refuses to hold a call before Workspace is open", async () =
     assert.equal(fake.waits.length, 0);
 });
 
+test("workspace_ask waits briefly for the Workspace App to finish mounting", async () => {
+    const fake = createInteractionGateway();
+    const handler = new McpEndpointHandlerInteraction({
+        gateway: fake.gateway,
+        instanceName: "demo",
+        workspaceActivationGraceMs: 100,
+    });
+    const opened = await handler.call("workspace_open", {}, context, "call-open");
+    assert.ok(opened instanceof McpNativeToolResult);
+    const token = (opened._meta?.["portable-devshell/workspace"] as { token?: string } | undefined)?.token;
+    if (token === undefined) throw new Error("workspace token missing");
+
+    const held = handler.call(
+        "workspace_ask",
+        { question: "Mounted during grace?" },
+        context,
+        "call-agent-grace",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await handler.call("workspace_snapshot", { token }, context, "call-app-ready");
+    const wait = await fake.created;
+    await handler.call(
+        "workspace_question_answer",
+        { answer: "yes", token, waitId: wait.waitId },
+        context,
+        "call-answer",
+    );
+    assert.deepEqual(await held, { answer: "yes", questionId: wait.targetId });
+});
+
 test("workspace_ask refuses to create a held call after the Workspace App lease expires", async () => {
     const fake = createInteractionGateway();
     let now = 1_000;
@@ -729,6 +858,7 @@ test("workspace_ask refuses to create a held call after the Workspace App lease 
         gateway: fake.gateway,
         instanceName: "demo",
         now: () => now,
+        workspaceActivationGraceMs: 5,
         workspaceLivenessMs: 60_000,
     });
     await openWorkspace(handler);
@@ -761,7 +891,11 @@ test("workspace_goal start requires an active Workspace", async () => {
             return undefined;
         },
     });
-    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    const handler = new McpEndpointHandlerInteraction({
+        gateway: fake.gateway,
+        instanceName: "demo",
+        workspaceActivationGraceMs: 5,
+    });
     const start = {
         action: "start",
         objective: "Visible Goal",
@@ -811,7 +945,7 @@ test("Workspace can resume a blocked Goal through the app-only control", async (
 
     const result = await handler.call(
         "workspace_goal_resume",
-        { token },
+        { goalId: "goal-1", revision: 1, token },
         context,
         "call-goal-resume",
     ) as { goal?: { status?: string } };
@@ -898,7 +1032,7 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     const recoveryInputSchema = recover.inputSchema as {
         properties?: { action?: { enum?: string[] } };
     };
-    assert.deepEqual(recoveryInputSchema.properties?.action?.enum, ["claim", "sent", "complete", "release"]);
+    assert.deepEqual(recoveryInputSchema.properties?.action?.enum, ["claim", "attempt", "sent", "complete", "release", "dismiss"]);
     const askInputSchema = ask.inputSchema as {
         properties?: Record<string, unknown>;
         required?: string[];
@@ -1047,9 +1181,31 @@ function createInteractionGateway(): {
             record.updatedAt = record.recoveryClaimedAt;
             return structuredClone(record);
         },
+        async dismissWaitRecovery(_instance: string, waitId: string, recoveryMessageId: string) {
+            const record = requireWait(waits, waitId);
+            if (
+                record.status !== "resolved" || record.recoveryMessageAttemptedAt === undefined ||
+                record.recoveryMessageSentAt !== undefined || record.recoveryMessageId !== recoveryMessageId
+            ) throw new Error(`Wait ${waitId} cannot dismiss recovery.`);
+            delete record.recoveryClaimId;
+            delete record.recoveryClaimedAt;
+            record.recoveryDismissedAt = new Date().toISOString();
+            record.consumedAt = record.recoveryDismissedAt;
+            record.status = "consumed";
+            record.updatedAt = record.recoveryDismissedAt;
+            return structuredClone(record);
+        },
+        async markWaitRecoveryAttempted(_instance: string, waitId: string, claimId: string) {
+            const record = requireWait(waits, waitId);
+            if (record.recoveryClaimId !== claimId) throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            record.recoveryMessageAttemptedAt ??= new Date().toISOString();
+            record.updatedAt = record.recoveryMessageAttemptedAt;
+            return structuredClone(record);
+        },
         async markWaitRecoverySent(_instance: string, waitId: string, claimId: string) {
             const record = requireWait(waits, waitId);
             if (record.recoveryClaimId !== claimId) throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            if (record.recoveryMessageAttemptedAt === undefined) throw new Error(`Wait ${waitId} recovery was not marked attempted.`);
             record.recoveryMessageSentAt ??= new Date().toISOString();
             record.updatedAt = record.recoveryMessageSentAt;
             return structuredClone(record);
@@ -1065,6 +1221,7 @@ function createInteractionGateway(): {
         async completeWaitRecovery(_instance: string, waitId: string, claimId: string) {
             const record = requireWait(waits, waitId);
             if (record.recoveryClaimId !== claimId) throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            if (record.recoveryMessageSentAt === undefined) throw new Error(`Wait ${waitId} recovery has not been durably marked sent.`);
             delete record.recoveryClaimId;
             delete record.recoveryClaimedAt;
             record.consumedAt = new Date().toISOString();

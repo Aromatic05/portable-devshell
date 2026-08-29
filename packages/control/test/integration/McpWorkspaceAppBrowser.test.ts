@@ -117,6 +117,22 @@ test("Workspace App watches live state and keeps human-action authorization hidd
         return !iframe?.contentDocument?.body.textContent?.includes("Ship Workspace Goal mode");
     });
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
+    await app.getByText("Task · v0.6 feature train", { exact: true }).waitFor({ state: "visible" });
+    await app.getByRole("button", { name: "Pause task", exact: true }).click();
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task_control' && call.arguments.action === 'pause')");
+    await app.getByText("Paused", { exact: true }).waitFor({ state: "visible" });
+    await app.getByRole("button", { name: "Resume task", exact: true }).click();
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task_control' && call.arguments.action === 'resume')");
+    await app.getByText("Running", { exact: true }).waitFor({ state: "visible" });
+    await app.getByRole("button", { name: "Cancel task", exact: true }).click();
+    await app.getByRole("button", { name: "Confirm cancel", exact: true }).waitFor({ state: "visible" });
+    assert.equal(
+        await page.evaluate("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task_control' && call.arguments.action === 'cancel')"),
+        false,
+    );
+    await app.getByRole("button", { name: "Confirm cancel", exact: true }).click();
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task_control' && call.arguments.action === 'cancel')");
+    await app.getByText("Task · v0.6 feature train", { exact: true }).waitFor({ state: "detached" });
     await page.waitForFunction("(window.__workspaceWatchCount || 0) >= 2");
 
     await page.evaluate(() => {
@@ -141,6 +157,9 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     const approvalCall = calls.find((call) => call.name === "workspace_approval_decide");
     const goalStopCall = calls.find((call) => call.name === "workspace_goal_stop");
     const interruptCall = calls.find((call) => call.name === "workspace_wait_interrupt");
+    const taskPauseCall = calls.find((call) => call.name === "workspace_task_control" && call.arguments?.action === "pause");
+    const taskResumeCall = calls.find((call) => call.name === "workspace_task_control" && call.arguments?.action === "resume");
+    const taskCancelCall = calls.find((call) => call.name === "workspace_task_control" && call.arguments?.action === "cancel");
 
     assert.equal(snapshotCall?.arguments?.token, "browser-secret-token");
     assert.equal(watchCall?.arguments?.token, "browser-secret-token");
@@ -151,8 +170,19 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     assert.equal(approvalCall?.arguments?.decision, "approve");
     assert.equal(goalStopCall?.arguments?.token, "browser-secret-token");
     assert.equal(goalStopCall?.arguments?.ctxId, "ctx-browser");
+    assert.equal(goalStopCall?.arguments?.goalId, "goal-browser");
+    assert.equal(goalStopCall?.arguments?.revision, 1);
     assert.equal(interruptCall?.arguments?.token, "browser-secret-token");
     assert.equal(interruptCall?.arguments?.waitId, "wait-background");
+    assert.equal(taskPauseCall?.arguments?.taskId, "task-plan");
+    assert.equal(taskPauseCall?.arguments?.revision, 1);
+    assert.equal(taskPauseCall?.arguments?.token, "browser-secret-token");
+    assert.equal(taskResumeCall?.arguments?.taskId, "task-plan");
+    assert.equal(taskResumeCall?.arguments?.revision, 2);
+    assert.equal(taskResumeCall?.arguments?.token, "browser-secret-token");
+    assert.equal(taskCancelCall?.arguments?.taskId, "task-plan");
+    assert.equal(taskCancelCall?.arguments?.revision, 3);
+    assert.equal(taskCancelCall?.arguments?.token, "browser-secret-token");
     assert.deepEqual(browserFailures, []);
 });
 
@@ -185,6 +215,12 @@ test("Workspace blocked Goal shows its reason and can be resumed by the user", B
     await app.getByText("Waiting for user decision", { exact: true }).waitFor({ state: "visible" });
     await app.getByRole("button", { name: "Resume Goal", exact: true }).click();
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_goal_resume')");
+    const resumeCall = await page.evaluate(
+        "(window.__workspaceCalls || []).find(call => call.name === 'workspace_goal_resume')",
+    ) as { arguments?: Record<string, unknown> } | undefined;
+    assert.equal(resumeCall?.arguments?.goalId, "goal-browser");
+    assert.equal(resumeCall?.arguments?.revision, 1);
+    assert.equal(resumeCall?.arguments?.token, "browser-secret-token");
     await app.getByText("Active", { exact: true }).waitFor({ state: "visible" });
     assert.equal(await app.getByRole("button", { name: "Resume Goal", exact: true }).count(), 0);
 });
@@ -220,14 +256,15 @@ test("Workspace Goal requests one model continuation after inactivity", BROWSER_
     }, workspaceAppHtml);
 
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue').length >= 3");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue').length >= 4");
     const continuationCalls = await page.evaluate(
         "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue')",
     ) as Array<{ arguments?: Record<string, unknown> }>;
     assert.equal(continuationCalls[0]?.arguments?.action, "claim");
     assert.equal(continuationCalls[1]?.arguments?.action, "validate");
-    assert.equal(continuationCalls[2]?.arguments?.action, "report");
-    assert.equal(continuationCalls[2]?.arguments?.accepted, true);
+    assert.equal(continuationCalls[2]?.arguments?.action, "attempt");
+    assert.equal(continuationCalls[3]?.arguments?.action, "report");
+    assert.equal(continuationCalls[3]?.arguments?.accepted, true);
     assert.equal(await page.evaluate("(window.__goalContinuationReports || []).length"), 1);
     assert.deepEqual(browserFailures, []);
 });
@@ -458,7 +495,7 @@ test("Workspace App claims a resolved detached wait before one automatic model r
 
     await mount();
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 3");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
 
     const firstEvents = await page.evaluate("window.__bridgeEvents || []") as string[];
     const firstMessage = firstEvents.indexOf("message");
@@ -467,7 +504,7 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     await mount();
     await page.waitForTimeout(100);
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
-    assert.equal(await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"), 3);
+    assert.equal(await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"), 4);
 
     const recoverCalls = await page.evaluate(
         "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover')",
@@ -475,10 +512,12 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     assert.equal(recoverCalls[0]?.arguments?.action, "claim");
     assert.equal(recoverCalls[0]?.arguments?.token, "recovery-secret-token");
     assert.equal(recoverCalls[0]?.arguments?.waitId, "wait-recovery");
-    assert.equal(recoverCalls[1]?.arguments?.action, "sent");
+    assert.equal(recoverCalls[1]?.arguments?.action, "attempt");
     assert.equal(recoverCalls[1]?.arguments?.claimId, "recovery-claim");
-    assert.equal(recoverCalls[2]?.arguments?.action, "complete");
+    assert.equal(recoverCalls[2]?.arguments?.action, "sent");
     assert.equal(recoverCalls[2]?.arguments?.claimId, "recovery-claim");
+    assert.equal(recoverCalls[3]?.arguments?.action, "complete");
+    assert.equal(recoverCalls[3]?.arguments?.claimId, "recovery-claim");
 });
 
 test("Workspace Goal recovers a resolved detached wait without Todo", BROWSER_TEST_OPTIONS, async (t) => {
@@ -498,7 +537,7 @@ test("Workspace Goal recovers a resolved detached wait without Todo", BROWSER_TE
     }, workspaceAppHtml);
 
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 3");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
 });
 
@@ -519,7 +558,7 @@ test("Workspace recovers an unassociated resolved wait by Context", BROWSER_TEST
     }, workspaceAppHtml);
 
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 3");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
 });
 
@@ -547,11 +586,11 @@ test("Workspace Stop waiting resumes the agent after a detached tmux wait", BROW
         String(await page.evaluate("(window.__modelMessages || [])[0]?.content?.[0]?.text || ''")),
         /Do not repeat completed work or restart the original command/u,
     );
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 3");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
     const recoveryActions = await page.evaluate(
         "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)",
     );
-    assert.deepEqual(recoveryActions, ["claim", "sent", "complete"]);
+    assert.deepEqual(recoveryActions, ["claim", "attempt", "sent", "complete"]);
 });
 
 test("Workspace re-enters after a detached answer without surfacing detached tmux state", BROWSER_TEST_OPTIONS, async (t) => {
@@ -702,6 +741,7 @@ window.__modelContextUpdates = [];
 window.__modelMessages = [];
 window.__bridgeEvents = [];
 window.__taskStatus = "in_progress";
+window.__taskRevision = 1;
 
 function snapshot(withQuestion) {
     var question = {
@@ -794,6 +834,7 @@ function snapshot(withQuestion) {
             },
             completed: 1,
             currentItem: "Implement live Workspace",
+            revision: window.__taskRevision,
             status: window.__taskStatus,
             taskId: "task-plan",
             title: "v0.6 feature train",
@@ -895,6 +936,20 @@ window.addEventListener("message", function (event) {
         reply({ structuredContent: { detached: false, interrupted: true, status: "resolved", taskId: "task-plan", tmuxTaskId: "task-browser", waitId: "wait-background" } });
         return;
     }
+    if (call.name === "workspace_task_control") {
+        if (call.arguments.action === "pause") window.__taskStatus = "paused";
+        if (call.arguments.action === "resume") window.__taskStatus = "in_progress";
+        if (call.arguments.action === "cancel") window.__taskStatus = "cancelled";
+        window.__taskRevision += 1;
+        reply({ structuredContent: {
+            items: [],
+            revision: window.__taskRevision,
+            summary: { completed: 1, total: 7 },
+            taskId: "task-plan",
+            title: "v0.6 feature train"
+        } });
+        return;
+    }
     if (call.name === "workspace_goal_stop") {
         window.__workspaceGoalStopped = true;
         reply({ structuredContent: { goal: snapshot(false).goal } });
@@ -920,6 +975,20 @@ window.addEventListener("message", function (event) {
             reply({ structuredContent: {
                 valid: call.arguments.available === true,
                 goal: Object.assign({}, snapshot(false).goal, { continuationDue: false, continuationPending: true })
+            } });
+            return;
+        }
+        if (action === "attempt") {
+            reply({ structuredContent: {
+                attempted: true,
+                messageId: "goal-message-browser",
+                goal: Object.assign({}, snapshot(false).goal, {
+                    continuationAttemptedAt: new Date().toISOString(),
+                    continuationDue: false,
+                    continuationMessageId: "goal-message-browser",
+                    continuationPending: true,
+                    continuationUncertain: true
+                })
             } });
             return;
         }
@@ -1245,6 +1314,15 @@ window.addEventListener("message", function (event) {
             } });
             return;
         }
+        if (call.arguments.action === "attempt") {
+            reply({ structuredContent: {
+                attempted: true,
+                recoveryMessageAttemptedAt: "2026-08-19T01:00:02.500Z",
+                recoveryMessageId: "recovery-message-id",
+                waitId: "wait-recovery"
+            } });
+            return;
+        }
         if (call.arguments.action === "complete") {
             window.__recovered = true;
             reply({ structuredContent: { completed: true, kind: "tmux", targetId: "tmux-recovery", waitId: "wait-recovery" } });
@@ -1364,6 +1442,15 @@ window.addEventListener("message", function (event) {
                 result: { interrupted: true, task: { id: "tmux-resume", status: "running" } },
                 taskId: "task-resume",
                 targetId: "tmux-resume",
+                waitId: "wait-resume"
+            } });
+            return;
+        }
+        if (call.arguments.action === "attempt") {
+            reply({ structuredContent: {
+                attempted: true,
+                recoveryMessageAttemptedAt: "2026-08-19T01:00:02.500Z",
+                recoveryMessageId: "resume-message",
                 waitId: "wait-resume"
             } });
             return;
@@ -1491,6 +1578,25 @@ window.addEventListener("message", function (event) {
                 result: { answer: "Continue" },
                 taskId: "task-detached",
                 targetId: "question-detached",
+                waitId: "wait-question-detached"
+            } });
+            return;
+        }
+        if (call.arguments.action === "attempt") {
+            reply({ structuredContent: {
+                attempted: true,
+                recoveryMessageAttemptedAt: "2026-08-19T01:00:02.500Z",
+                recoveryMessageId: "detached-message",
+                waitId: "wait-question-detached"
+            } });
+            return;
+        }
+        if (call.arguments.action === "sent") {
+            reply({ structuredContent: {
+                recoveryMessageAttemptedAt: "2026-08-19T01:00:02.500Z",
+                recoveryMessageId: "detached-message",
+                recoveryMessageSentAt: "2026-08-19T01:00:03.000Z",
+                sent: true,
                 waitId: "wait-question-detached"
             } });
             return;

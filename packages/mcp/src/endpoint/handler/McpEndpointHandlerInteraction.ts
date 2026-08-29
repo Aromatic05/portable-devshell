@@ -21,11 +21,12 @@ import {
     type McpInteractionGateway
 } from "../../instance/McpInstanceGateway.js";
 import type { McpToolCatalogInteractionName } from "../../tool/catalog/McpToolCatalogInteraction.js";
-import { waitForMcpEndpointAbortable } from "../McpEndpointCancellation.js";
+import { throwIfMcpEndpointAborted, waitForMcpEndpointAbortable } from "../McpEndpointCancellation.js";
 import { McpNativeToolResult, type McpEndpointResult } from "../McpEndpointResult.js";
 
 export class McpEndpointHandlerInteraction {
     readonly #appStates = new Map<string, { lastSeenAt?: number; token: string }>();
+    readonly #appReadyWaiters = new Map<string, Set<() => void>>();
 
     constructor(private readonly options: {
         gateway?: McpInstanceGateway;
@@ -33,6 +34,7 @@ export class McpEndpointHandlerInteraction {
         now?: () => number;
         watchHeartbeatMs?: number;
         watchPollMs?: number;
+        workspaceActivationGraceMs?: number;
         workspaceLivenessMs?: number;
     }) {}
 
@@ -74,10 +76,10 @@ export class McpEndpointHandlerInteraction {
                 return await this.#continueGoal(gateway, input, context);
             case "workspace_goal_resume":
                 this.#assertAppToken(input, context);
-                return await this.#resumeGoal(context);
+                return await this.#resumeGoal(input, context);
             case "workspace_goal_stop":
                 this.#assertAppToken(input, context);
-                return await this.#stopGoal(context);
+                return await this.#stopGoal(input, context);
             case "workspace_approval_decide":
                 this.#assertAppToken(input, context);
                 return await this.#decideApproval(gateway, input, context);
@@ -93,14 +95,10 @@ export class McpEndpointHandlerInteraction {
     ): Promise<JsonValue> {
         const request = readQuestion(input);
         const ctxId = requireCtxId(context);
-        const app = this.#appStates.get(ctxId);
-        const now = (this.options.now ?? Date.now)();
-        if (
-            app?.lastSeenAt === undefined ||
-            now - app.lastSeenAt > (this.options.workspaceLivenessMs ?? 60_000)
-        ) {
-            throw new Error("workspace_ask requires an active Workspace App for this ctxId; call workspace_open and keep the panel open.");
-        }
+        await this.#requireActiveWorkspace(
+            ctxId,
+            "workspace_ask requires an active Workspace App for this ctxId; call workspace_open and keep the panel open.",
+        );
         const goalGateway = isMcpGoalGateway(this.options.gateway) ? this.options.gateway : undefined;
         const goal = await goalGateway?.readGoal(this.options.instanceName, ctxId);
         const goalId = goal !== undefined && (goal.status === "active" || goal.status === "blocked")
@@ -137,6 +135,10 @@ export class McpEndpointHandlerInteraction {
             throw error;
         }
 
+        if (signal?.aborted === true) {
+            await gateway.detachWait(this.options.instanceName, wait.waitId).catch(() => undefined);
+            throwIfMcpEndpointAborted(signal);
+        }
         const answer = readAnswer(resolved.result);
         await gateway.consumeWait(this.options.instanceName, wait.waitId);
         await gateway.touchGoal?.(this.options.instanceName, ctxId);
@@ -158,14 +160,10 @@ export class McpEndpointHandlerInteraction {
         const request = readGoalManageInput(input);
         const ctxId = requireCtxId(context);
         if (request.action === "start") {
-            const app = this.#appStates.get(ctxId);
-            const now = (this.options.now ?? Date.now)();
-            if (
-                app?.lastSeenAt === undefined ||
-                now - app.lastSeenAt > (this.options.workspaceLivenessMs ?? 60_000)
-            ) {
-                throw new Error("workspace_goal start requires an active Workspace App for this ctxId; call workspace_open and wait for the panel to connect.");
-            }
+            await this.#requireActiveWorkspace(
+                ctxId,
+                "workspace_goal start requires an active Workspace App for this ctxId; call workspace_open and wait for the panel to connect.",
+            );
         }
         const goal = await gateway.manageGoal(
             this.options.instanceName,
@@ -201,21 +199,23 @@ export class McpEndpointHandlerInteraction {
         );
     }
 
-    async #stopGoal(context: ToolCallContext): Promise<JsonValue> {
+    async #stopGoal(input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
         const gateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
+        const fence = readGoalFence(input, "workspace_goal_stop");
         const goal = await gateway.manageGoal(
             this.options.instanceName,
-            { action: "stop" },
+            { action: "stop", expectedGoalId: fence.goalId, expectedRevision: fence.revision },
             requireCtxId(context),
         );
         return { goal: goal ?? null } as unknown as JsonValue;
     }
 
-    async #resumeGoal(context: ToolCallContext): Promise<JsonValue> {
+    async #resumeGoal(input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
         const gateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
+        const fence = readGoalFence(input, "workspace_goal_resume");
         const goal = await gateway.manageGoal(
             this.options.instanceName,
-            { action: "resume" },
+            { action: "resume", expectedGoalId: fence.goalId, expectedRevision: fence.revision },
             requireCtxId(context),
         );
         return { goal: goal ?? null } as unknown as JsonValue;
@@ -267,7 +267,11 @@ export class McpEndpointHandlerInteraction {
                 });
             }
             if (Date.now() - startedAt >= heartbeatMs) {
-                return this.#workspaceResult(ctxId, { changed: false, cursor });
+                return this.#workspaceResult(ctxId, {
+                    changed: false,
+                    cursor,
+                    snapshot: await this.#snapshot(gateway, context),
+                });
             }
             await waitForMcpEndpointAbortable(delay(pollMs), signal);
         }
@@ -286,11 +290,49 @@ export class McpEndpointHandlerInteraction {
             ...(markAppSeen ? { lastSeenAt: (this.options.now ?? Date.now)() } : {}),
             token,
         });
+        if (markAppSeen) this.#notifyWorkspaceReady(ctxId);
         return new McpNativeToolResult({
             _meta: { "portable-devshell/workspace": { token } },
             content,
             structuredContent,
         });
+    }
+
+    #workspaceIsActive(ctxId: string): boolean {
+        const app = this.#appStates.get(ctxId);
+        const now = (this.options.now ?? Date.now)();
+        return app?.lastSeenAt !== undefined &&
+            now - app.lastSeenAt <= (this.options.workspaceLivenessMs ?? 60_000);
+    }
+
+    async #requireActiveWorkspace(ctxId: string, message: string): Promise<void> {
+        if (this.#workspaceIsActive(ctxId)) return;
+        if (!this.#appStates.has(ctxId)) throw new Error(message);
+        const graceMs = this.options.workspaceActivationGraceMs ?? 5_000;
+        if (graceMs > 0) {
+            await new Promise<void>((resolve) => {
+                const waiter = () => {
+                    clearTimeout(timer);
+                    this.#appReadyWaiters.get(ctxId)?.delete(waiter);
+                    resolve();
+                };
+                const timer = setTimeout(() => {
+                    this.#appReadyWaiters.get(ctxId)?.delete(waiter);
+                    resolve();
+                }, graceMs);
+                const waiters = this.#appReadyWaiters.get(ctxId) ?? new Set<() => void>();
+                waiters.add(waiter);
+                this.#appReadyWaiters.set(ctxId, waiters);
+            });
+        }
+        if (!this.#workspaceIsActive(ctxId)) throw new Error(message);
+    }
+
+    #notifyWorkspaceReady(ctxId: string): void {
+        const waiters = this.#appReadyWaiters.get(ctxId);
+        if (waiters === undefined) return;
+        this.#appReadyWaiters.delete(ctxId);
+        for (const ready of waiters) ready();
     }
 
     async #answerQuestion(
@@ -307,7 +349,7 @@ export class McpEndpointHandlerInteraction {
         const resolved = await gateway.resolveWait(this.options.instanceName, waitId, { answer });
         return {
             answer,
-            detached: wait.status === "detached",
+            detached: resolved.detachedAt !== undefined,
             ...(resolved.goalId === undefined ? {} : { goalId: resolved.goalId }),
             questionId: resolved.targetId,
             ...(resolved.taskId === undefined ? {} : { taskId: resolved.taskId }),
@@ -337,7 +379,7 @@ export class McpEndpointHandlerInteraction {
         } as const;
         const resolved = await gateway.resolveWait(this.options.instanceName, waitId, interrupted);
         return {
-            detached: wait.status === "detached",
+            detached: resolved.detachedAt !== undefined,
             ...(resolved.goalId === undefined ? {} : { goalId: resolved.goalId }),
             interrupted: true,
             status: resolved.status,
@@ -355,13 +397,13 @@ export class McpEndpointHandlerInteraction {
         if (gateway.controlTodo === undefined) {
             throw new Error(`Workspace task control is unavailable for ${this.options.instanceName}.`);
         }
-        const { action, taskId } = readTaskControl(input);
+        const { action, revision, taskId } = readTaskControl(input);
         const ctxId = requireCtxId(context);
         const task = asRecord(await gateway.readTodo(this.options.instanceName, { taskId }));
         if (task?.taskId !== taskId || !taskBelongsToContext(task, taskId, ctxId)) {
             throw new Error(`Todo task ${taskId} is not attached to the current Context.`);
         }
-        return await gateway.controlTodo(this.options.instanceName, taskId, action, ctxId);
+        return await gateway.controlTodo(this.options.instanceName, taskId, action, ctxId, revision);
     }
 
     async #recoverWait(
@@ -382,9 +424,32 @@ export class McpEndpointHandlerInteraction {
         ) {
             throw new Error(`Recoverable detached wait ${waitId} was not found for the current Context.`);
         }
+        if (recovery.action === "dismiss") {
+            const dismissed = await gateway.dismissWaitRecovery(
+                this.options.instanceName,
+                waitId,
+                recovery.recoveryMessageId,
+            );
+            return {
+                dismissed: true,
+                kind: dismissed.kind,
+                targetId: dismissed.targetId,
+                waitId: dismissed.waitId,
+            };
+        }
+        if (recovery.action === "attempt") {
+            const attempted = await gateway.markWaitRecoveryAttempted(this.options.instanceName, waitId, recovery.claimId);
+            return {
+                attempted: true,
+                ...(attempted.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: attempted.recoveryMessageAttemptedAt }),
+                ...(attempted.recoveryMessageId === undefined ? {} : { recoveryMessageId: attempted.recoveryMessageId }),
+                waitId: attempted.waitId,
+            };
+        }
         if (recovery.action === "sent") {
             const sent = await gateway.markWaitRecoverySent(this.options.instanceName, waitId, recovery.claimId);
             return {
+                ...(sent.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: sent.recoveryMessageAttemptedAt }),
                 ...(sent.recoveryMessageId === undefined ? {} : { recoveryMessageId: sent.recoveryMessageId }),
                 ...(sent.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: sent.recoveryMessageSentAt }),
                 sent: true,
@@ -432,6 +497,7 @@ export class McpEndpointHandlerInteraction {
             ...(claimed.goalId === undefined ? {} : { goalId: claimed.goalId }),
             kind: claimed.kind,
             ...(claimed.result === undefined ? {} : { result: claimed.result }),
+            ...(claimed.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: claimed.recoveryMessageAttemptedAt }),
             ...(claimed.recoveryMessageId === undefined ? {} : { recoveryMessageId: claimed.recoveryMessageId }),
             ...(claimed.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: claimed.recoveryMessageSentAt }),
             ...(claimed.taskId === undefined ? {} : { taskId: claimed.taskId }),
@@ -500,10 +566,16 @@ export class McpEndpointHandlerInteraction {
         return {
             approvals: visibleApprovals,
             background: ownedWaits
-                .filter((wait) => wait.kind === "tmux" && wait.status !== "consumed" && wait.status !== "cancelled")
+                .filter((wait) => wait.kind === "tmux" && (
+                    wait.status === "waiting" || wait.status === "detached" ||
+                    (wait.status === "resolved" && wait.detachedAt !== undefined)
+                ))
                 .map((wait) => ({
                     ...(wait.detachedAt === undefined ? {} : { detachedAt: wait.detachedAt }),
                     ...(wait.goalId === undefined ? {} : { goalId: wait.goalId }),
+                    ...(wait.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: wait.recoveryMessageAttemptedAt }),
+                    ...(wait.recoveryMessageId === undefined ? {} : { recoveryMessageId: wait.recoveryMessageId }),
+                    ...(wait.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: wait.recoveryMessageSentAt }),
                     status: wait.status,
                     ...(wait.taskId === undefined ? {} : { taskId: wait.taskId }),
                     tmuxTaskId: wait.targetId,
@@ -611,8 +683,8 @@ function readGoalContinuationInput(input: JsonValue): GoalContinuationInput {
     const record = asRecord(input);
     if (record === undefined) throw new Error("workspace_goal_continue requires an object input.");
     const action = record.action;
-    if (action !== "claim" && action !== "validate" && action !== "report") {
-        throw new Error("workspace_goal_continue action must be claim, validate, or report.");
+    if (action !== "claim" && action !== "validate" && action !== "attempt" && action !== "report") {
+        throw new Error("workspace_goal_continue action must be claim, validate, attempt, or report.");
     }
     return {
         action,
@@ -652,14 +724,28 @@ function readApprovalDecision(input: JsonValue): { approvalId: string; decision:
     return { approvalId: text(record.approvalId, "approvalId"), decision };
 }
 
-function readTaskControl(input: JsonValue): { action: TodoTaskControlAction; taskId: string } {
+function readGoalFence(input: JsonValue, toolName: string): { goalId: string; revision: number } {
+    const record = asRecord(input);
+    if (record === undefined) throw new Error(`${toolName} requires an object input.`);
+    const revision = record.revision;
+    if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1) {
+        throw new Error(`${toolName} revision must be a positive integer.`);
+    }
+    return { goalId: text(record.goalId, "goalId"), revision };
+}
+
+function readTaskControl(input: JsonValue): { action: TodoTaskControlAction; revision: number; taskId: string } {
     const record = asRecord(input);
     if (record === undefined) throw new Error("workspace_task_control requires an object input.");
     const action = record.action;
     if (action !== "pause" && action !== "resume" && action !== "cancel") {
         throw new Error("action must be pause, resume, or cancel.");
     }
-    return { action, taskId: text(record.taskId, "taskId") };
+    const revision = record.revision;
+    if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1) {
+        throw new Error("workspace_task_control revision must be a positive integer.");
+    }
+    return { action, revision, taskId: text(record.taskId, "taskId") };
 }
 
 function readWaitId(input: JsonValue, toolName: string): string {
@@ -670,16 +756,20 @@ function readWaitId(input: JsonValue, toolName: string): string {
 
 function readWaitRecovery(input: JsonValue):
     | { action: "claim"; waitId: string }
-    | { action: "complete" | "release" | "sent"; claimId: string; waitId: string } {
+    | { action: "dismiss"; recoveryMessageId: string; waitId: string }
+    | { action: "attempt" | "complete" | "release" | "sent"; claimId: string; waitId: string } {
     const record = asRecord(input);
     if (record === undefined) throw new Error("workspace_wait_recover requires an object input.");
     const action = record.action;
     const waitId = text(record.waitId, "waitId");
     if (action === "claim") return { action, waitId };
-    if (action === "complete" || action === "release" || action === "sent") {
+    if (action === "dismiss") {
+        return { action, recoveryMessageId: text(record.recoveryMessageId, "recoveryMessageId"), waitId };
+    }
+    if (action === "attempt" || action === "complete" || action === "release" || action === "sent") {
         return { action, claimId: text(record.claimId, "claimId"), waitId };
     }
-    throw new Error("action must be claim, sent, complete, or release.");
+    throw new Error("action must be claim, attempt, sent, complete, release, or dismiss.");
 }
 
 function readWorkspaceCursor(input: JsonValue): number {

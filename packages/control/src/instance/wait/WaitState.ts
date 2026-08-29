@@ -65,10 +65,17 @@ export class WaitState {
 
     detach(document: WaitDocument, waitId: string): WaitTransition {
         return this.#update(document, waitId, (record) => {
-            if (record.status === "detached") return record;
-            if (record.status !== "waiting") throw invalidTransition(record, "detach");
+            if (record.status === "detached" || (record.status === "resolved" && record.detachedAt !== undefined)) {
+                return record;
+            }
             const now = this.#now();
-            return { ...record, detachedAt: now, status: "detached", updatedAt: now };
+            if (record.status === "waiting") {
+                return { ...record, detachedAt: now, status: "detached", updatedAt: now };
+            }
+            if (record.status === "resolved") {
+                return { ...record, detachedAt: now, updatedAt: now };
+            }
+            throw invalidTransition(record, "detach");
         });
     }
 
@@ -107,11 +114,15 @@ export class WaitState {
             if (record.status !== "resolved" || record.detachedAt === undefined) {
                 throw invalidTransition(record, "claim recovery for");
             }
+            if (record.recoveryMessageAttemptedAt !== undefined && record.recoveryMessageSentAt === undefined) {
+                throw new Error(`Wait ${waitId} recovery delivery is uncertain; automatic replay is disabled.`);
+            }
             const normalizedClaimId = text(claimId, "recoveryClaimId");
             if (record.recoveryClaimId === normalizedClaimId) return record;
             const now = this.#now();
             const claimedAt = record.recoveryClaimedAt === undefined ? Number.NaN : Date.parse(record.recoveryClaimedAt);
             if (
+                record.recoveryMessageSentAt === undefined &&
                 record.recoveryClaimId !== undefined && Number.isFinite(claimedAt) &&
                 Date.parse(now) - claimedAt < RECOVERY_CLAIM_TTL_MS
             ) {
@@ -129,10 +140,24 @@ export class WaitState {
         });
     }
 
+    markRecoveryAttempted(document: WaitDocument, waitId: string, claimId: string): WaitTransition {
+        return this.#update(document, waitId, (record) => {
+            if (record.status !== "resolved" || record.recoveryClaimId !== claimId) {
+                throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            }
+            if (record.recoveryMessageAttemptedAt !== undefined) return record;
+            const now = this.#now();
+            return { ...record, recoveryMessageAttemptedAt: now, updatedAt: now };
+        });
+    }
+
     markRecoverySent(document: WaitDocument, waitId: string, claimId: string): WaitTransition {
         return this.#update(document, waitId, (record) => {
             if (record.status !== "resolved" || record.recoveryClaimId !== claimId) {
                 throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            }
+            if (record.recoveryMessageAttemptedAt === undefined) {
+                throw new Error(`Wait ${waitId} recovery was not marked attempted.`);
             }
             if (record.recoveryMessageSentAt !== undefined) return record;
             const now = this.#now();
@@ -145,9 +170,33 @@ export class WaitState {
             if (record.status !== "resolved" || record.recoveryClaimId !== claimId) {
                 throw new Error(`Wait ${waitId} recovery claim does not match.`);
             }
+            if (record.recoveryMessageAttemptedAt !== undefined && record.recoveryMessageSentAt === undefined) {
+                throw new Error(`Wait ${waitId} recovery delivery is uncertain and cannot be released automatically.`);
+            }
             const { recoveryClaimedAt: _claimedAt, recoveryClaimId: _claimId, ...rest } = record;
             const now = this.#now();
             return { ...rest, updatedAt: now };
+        });
+    }
+
+    dismissRecovery(document: WaitDocument, waitId: string, recoveryMessageId: string): WaitTransition {
+        return this.#update(document, waitId, (record) => {
+            if (
+                record.status !== "resolved" || record.detachedAt === undefined ||
+                record.recoveryMessageAttemptedAt === undefined || record.recoveryMessageSentAt !== undefined ||
+                record.recoveryMessageId !== recoveryMessageId
+            ) {
+                throw invalidTransition(record, "dismiss uncertain recovery for");
+            }
+            const { recoveryClaimedAt: _claimedAt, recoveryClaimId: _claimId, ...rest } = record;
+            const now = this.#now();
+            return {
+                ...rest,
+                consumedAt: now,
+                recoveryDismissedAt: now,
+                status: "consumed",
+                updatedAt: now,
+            };
         });
     }
 
@@ -155,6 +204,9 @@ export class WaitState {
         return this.#update(document, waitId, (record) => {
             if (record.status !== "resolved" || record.recoveryClaimId !== claimId) {
                 throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            }
+            if (record.recoveryMessageSentAt === undefined) {
+                throw new Error(`Wait ${waitId} recovery has not been durably marked sent.`);
             }
             const { recoveryClaimedAt: _claimedAt, recoveryClaimId: _claimId, ...rest } = record;
             const now = this.#now();
@@ -223,6 +275,8 @@ function normalizeRecord(value: unknown): WaitRecord {
         ...("payload" in value ? { payload: value.payload as JsonValue } : {}),
         ...(typeof value.recoveryClaimedAt === "string" ? { recoveryClaimedAt: value.recoveryClaimedAt } : {}),
         ...(typeof value.recoveryClaimId === "string" ? { recoveryClaimId: value.recoveryClaimId } : {}),
+        ...(typeof value.recoveryDismissedAt === "string" ? { recoveryDismissedAt: value.recoveryDismissedAt } : {}),
+        ...(typeof value.recoveryMessageAttemptedAt === "string" ? { recoveryMessageAttemptedAt: value.recoveryMessageAttemptedAt } : {}),
         ...(typeof value.recoveryMessageId === "string" ? { recoveryMessageId: value.recoveryMessageId } : {}),
         ...(typeof value.recoveryMessageSentAt === "string" ? { recoveryMessageSentAt: value.recoveryMessageSentAt } : {}),
         ...(typeof value.resolvedAt === "string" ? { resolvedAt: value.resolvedAt } : {}),

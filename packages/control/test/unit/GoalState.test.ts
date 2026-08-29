@@ -110,6 +110,14 @@ test("GoalState continuation claims are validated against agent activity and cou
     assert.equal(continuation.result.valid, true);
 
     continuation = state.continuation(document, {
+        action: "attempt",
+        claimId: "claim-2",
+    }, "ctx-goal");
+    document = continuation.document;
+    assert.equal(continuation.result.attempted, true);
+    assert.equal(state.read(document, "ctx-goal")?.continuationUncertain, true);
+
+    continuation = state.continuation(document, {
         accepted: true,
         action: "report",
         claimId: "claim-2",
@@ -123,6 +131,64 @@ test("GoalState continuation claims are validated against agent activity and cou
     assert.equal(state.read(document, "ctx-goal")?.status, "blocked");
     now += GOAL_EXECUTION_LEASE_MS * 2;
     assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
+});
+
+test("GoalState fences stale Workspace UI actions by goal id and revision", () => {
+    const state = new GoalState({ goalId: () => "goal-current" });
+    const started = state.manage(state.emptyDocument(), {
+        action: "start",
+        objective: "Protected goal",
+        steps: [{ id: "work", text: "Work" }],
+    }, "ctx-goal");
+    const revision = started.result?.revision ?? 0;
+
+    assert.throws(
+        () => state.manage(started.document, {
+            action: "stop",
+            expectedGoalId: "goal-stale",
+            expectedRevision: revision,
+        }, "ctx-goal"),
+        /changed from goal-stale/u,
+    );
+    assert.throws(
+        () => state.manage(started.document, {
+            action: "stop",
+            expectedGoalId: "goal-current",
+            expectedRevision: revision + 1,
+        }, "ctx-goal"),
+        /changed from revision/u,
+    );
+    assert.equal(state.read(started.document, "ctx-goal")?.status, "active");
+});
+
+test("GoalState never automatically retries an ambiguous continuation dispatch", () => {
+    let now = Date.parse("2026-08-20T12:00:00.000Z");
+    const state = new GoalState({
+        goalId: () => "goal-fixed",
+        now: () => new Date(now).toISOString(),
+    });
+    let document = state.manage(state.emptyDocument(), {
+        action: "start",
+        objective: "Continue safely",
+        steps: [{ id: "work", status: "active", text: "Work" }],
+    }, "ctx-goal").document;
+    now += GOAL_EXECUTION_LEASE_MS + 1;
+    let transition = state.continuation(document, { action: "claim", available: true, claimId: "claim-1" }, "ctx-goal");
+    document = transition.document;
+    transition = state.continuation(document, { action: "validate", available: true, claimId: "claim-1" }, "ctx-goal");
+    document = transition.document;
+    transition = state.continuation(document, { action: "attempt", claimId: "claim-1" }, "ctx-goal");
+    document = transition.document;
+
+    now += 60 * 60 * 1_000;
+    const snapshot = state.read(document, "ctx-goal");
+    assert.equal(snapshot?.continuationUncertain, true);
+    assert.equal(snapshot?.continuationPending, true);
+    assert.equal(snapshot?.continuationDue, false);
+    assert.throws(
+        () => state.continuation(document, { accepted: false, action: "report", claimId: "claim-1" }, "ctx-goal"),
+        /delivery is uncertain/u,
+    );
 });
 
 test("GoalState bounds terminal history without removing live Goals", () => {

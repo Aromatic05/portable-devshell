@@ -126,12 +126,16 @@ test("TodoState persists checkpoints and task controls model re-entry without re
         updatedAt: "2026-08-19T01:00:00.000Z",
     });
 
-    const paused = state.control(created.document, "task-fixed", "pause", "ctx-1");
+    assert.throws(
+        () => state.control(created.document, "task-fixed", "pause", "ctx-1", 2),
+        /changed from revision 2 to 1/u,
+    );
+    const paused = state.control(created.document, "task-fixed", "pause", "ctx-1", 1);
     assert.equal(state.readResult(paused.document).tasks?.[0]?.status, "paused");
     assert.equal(state.currentAssociation(paused.document, "ctx-1"), undefined);
     assert.deepEqual(paused.document.active[0]?.items, items);
 
-    const resumed = state.control(paused.document, "task-fixed", "resume", "ctx-2");
+    const resumed = state.control(paused.document, "task-fixed", "resume", "ctx-2", 2);
     assert.equal(state.readResult(resumed.document).tasks?.[0]?.status, "in_progress");
     assert.deepEqual(state.currentAssociation(resumed.document, "ctx-2"), {
         taskId: "task-fixed",
@@ -149,7 +153,7 @@ test("TodoState persists checkpoints and task controls model re-entry without re
         "Core path is ready",
     );
 
-    const cancelled = state.control(updated.document, "task-fixed", "cancel", "ctx-2");
+    const cancelled = state.control(updated.document, "task-fixed", "cancel", "ctx-2", 4);
     const archived = state.readResult(cancelled.document, { taskId: "task-fixed" });
     assert.equal(cancelled.document.active.length, 0);
     assert.equal(cancelled.document.archived.length, 1);

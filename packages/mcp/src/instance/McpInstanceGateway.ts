@@ -69,8 +69,10 @@ export interface McpInstanceGateway {
     cancelWait?(instance: string, waitId: string): Promise<WaitRecord>;
     claimWaitRecovery?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
     completeWaitRecovery?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
+    markWaitRecoveryAttempted?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
     markWaitRecoverySent?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
     detachWait?(instance: string, waitId: string): Promise<WaitRecord>;
+    dismissWaitRecovery?(instance: string, waitId: string, recoveryMessageId: string): Promise<WaitRecord>;
     reattachWait?(instance: string, waitId: string, ownerCallId?: string): Promise<WaitRecord>;
     releaseWaitRecovery?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
     consumeWait?(instance: string, waitId: string): Promise<WaitRecord>;
@@ -81,7 +83,7 @@ export interface McpInstanceGateway {
     decideApproval?(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<ApprovalRequest>;
     readToolCalls?(instance: string, ctxId: string, limit: number): Promise<ToolCallRecord[]>;
     readWorkspaceEvents?(instance: string, fromSeq: number): Promise<McpWorkspaceEventSlice>;
-    controlTodo?(instance: string, taskId: string, action: TodoTaskControlAction, ctxId: string): Promise<JsonValue>;
+    controlTodo?(instance: string, taskId: string, action: TodoTaskControlAction, ctxId: string, expectedRevision?: number): Promise<JsonValue>;
     consumeContextMessages?(instance: string, ctxId: string, callId: string): Promise<ContextMessageReadResult>;
     readTodo(instance: string, input?: TodoReadInput): Promise<JsonValue>;
     listTools(instance: string): ToolDefinition[];
@@ -147,7 +149,7 @@ export function isMcpInteractionGateway(
 
 export type McpWaitRecoveryGateway = McpInteractionGateway & Required<Pick<
     McpInstanceGateway,
-    "claimWaitRecovery" | "completeWaitRecovery" | "markWaitRecoverySent" | "releaseWaitRecovery"
+    "claimWaitRecovery" | "completeWaitRecovery" | "dismissWaitRecovery" | "markWaitRecoveryAttempted" | "markWaitRecoverySent" | "releaseWaitRecovery"
 >>;
 
 export function isMcpWaitRecoveryGateway(
@@ -156,6 +158,8 @@ export function isMcpWaitRecoveryGateway(
     return isMcpInteractionGateway(gateway) &&
         gateway.claimWaitRecovery !== undefined &&
         gateway.completeWaitRecovery !== undefined &&
+        gateway.dismissWaitRecovery !== undefined &&
+        gateway.markWaitRecoveryAttempted !== undefined &&
         gateway.markWaitRecoverySent !== undefined &&
         gateway.releaseWaitRecovery !== undefined;
 }

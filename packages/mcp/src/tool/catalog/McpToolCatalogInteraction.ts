@@ -208,10 +208,11 @@ export class McpToolCatalogInteraction {
                 additionalProperties: false,
                 properties: {
                     action: { enum: ["pause", "resume", "cancel"], type: "string" },
+                    revision: { minimum: 1, type: "integer" },
                     taskId: { minLength: 1, type: "string" },
                     token: { minLength: 1, type: "string" },
                 },
-                required: ["taskId", "action", "token"],
+                required: ["taskId", "revision", "action", "token"],
                 type: "object",
             },
             name: "workspace_task_control",
@@ -220,13 +221,14 @@ export class McpToolCatalogInteraction {
         },
         {
             _meta: appOnlyMeta,
-            description: "Claim, mark sent, complete, or release one detached wait recovery around Workspace model re-entry. App-only recovery helper; models must not call it.",
+            description: "Manage one detached-wait model re-entry with durable delivery fencing: claim, mark the outbound attempt before host dispatch, mark a confirmed send, complete, safely release before dispatch, or explicitly dismiss an uncertain delivery after human reconciliation. App-only recovery helper; models must not call it.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
-                    action: { enum: ["claim", "sent", "complete", "release"], type: "string" },
+                    action: { enum: ["claim", "attempt", "sent", "complete", "release", "dismiss"], type: "string" },
                     claimId: { minLength: 1, type: "string" },
+                    recoveryMessageId: { minLength: 1, type: "string" },
                     token: { minLength: 1, type: "string" },
                     waitId: { minLength: 1, type: "string" },
                 },
@@ -239,13 +241,13 @@ export class McpToolCatalogInteraction {
         },
         {
             _meta: appOnlyMeta,
-            description: "Claim, validate, or report one automatic Workspace Goal continuation. App-only helper; models must not call it.",
+            description: "Manage one automatic Workspace Goal continuation with durable delivery fencing: claim, validate, mark the outbound attempt before host dispatch, then report only a known accepted or pre-dispatch rejected outcome. App-only helper; models must not call it.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
                     accepted: { type: "boolean" },
-                    action: { enum: ["claim", "validate", "report"], type: "string" },
+                    action: { enum: ["claim", "validate", "attempt", "report"], type: "string" },
                     available: { type: "boolean" },
                     claimId: { maxLength: 128, minLength: 1, type: "string" },
                     error: { maxLength: 2000, minLength: 1, type: "string" },
@@ -264,8 +266,12 @@ export class McpToolCatalogInteraction {
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
-                properties: { token: { minLength: 1, type: "string" } },
-                required: ["token"],
+                properties: {
+                    goalId: { minLength: 1, type: "string" },
+                    revision: { minimum: 1, type: "integer" },
+                    token: { minLength: 1, type: "string" },
+                },
+                required: ["goalId", "revision", "token"],
                 type: "object",
             },
             name: "workspace_goal_resume",
@@ -278,8 +284,12 @@ export class McpToolCatalogInteraction {
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
-                properties: { token: { minLength: 1, type: "string" } },
-                required: ["token"],
+                properties: {
+                    goalId: { minLength: 1, type: "string" },
+                    revision: { minimum: 1, type: "integer" },
+                    token: { minLength: 1, type: "string" },
+                },
+                required: ["goalId", "revision", "token"],
                 type: "object",
             },
             name: "workspace_goal_stop",

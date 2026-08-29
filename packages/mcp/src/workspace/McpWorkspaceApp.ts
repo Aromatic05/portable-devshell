@@ -106,6 +106,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var reconnectOnStart = false;
   var recovering = false;
   var busy = new Set();
+  var confirmingTaskCancel = new Set();
   var expandedQuestions = new Set();
   var WIDGET_STATE_KEY = "portableDevshellWorkspace";
   var RESUME_MESSAGE = "Resume the existing portable-devshell work from the current Workspace state. Do not repeat completed work or restart the original command. Read the Workspace state and triggering result before acting. Reuse any existing tmux task instead of starting it again. For tmux waits, a timeout or user interruption ends only the wait and does not stop the task. If a blocked Workspace Goal can now proceed, call workspace_goal with action=resume before continuing.";
@@ -257,9 +258,10 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     } catch (_) {}
   }
 
-  async function sendModelMessage(text, extra, canSend) {
+  async function sendModelMessage(text, extra, canSend, beforeSend) {
     await syncModelContext(extra);
     if (canSend && !canSend()) return false;
+    if (beforeSend) await beforeSend();
     await app.sendMessage({
       role: "user",
       content: [{ type: "text", text: text }]
@@ -301,6 +303,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     var claimId = goalContinuationClaimId || newGoalContinuationClaimId();
     goalContinuationClaimId = claimId;
     var accepted = false;
+    var attempted = false;
     var errorText = "";
     var claimed = false;
     try {
@@ -331,14 +334,22 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       }
       accepted = await sendModelMessage(
         "Continue working on the active portable-devshell Workspace Goal from its current state. Do not repeat completed steps. Keep the Goal synchronized with execution using workspace_goal(action=\"update\"). When every step is completed or skipped, call workspace_goal(action=\"finish\"). If progress genuinely cannot continue, call workspace_goal(action=\"block\", note=...).",
-        { goalContinuation: claim },
-        goalContinuationAvailable
+        { goalContinuation: claim, continuationMessageId: claim && claim.goal && claim.goal.continuationMessageId },
+        goalContinuationAvailable,
+        async function () {
+          var marked = structured(await callTool("workspace_goal_continue", {
+            action: "attempt",
+            claimId: claimId
+          }, true));
+          attempted = true;
+          if (marked && marked.goal) snapshot.goal = marked.goal;
+        }
       );
     } catch (error) {
       errorText = error instanceof Error ? error.message : String(error);
       console.error(error);
     } finally {
-      if (claimed) {
+      if (claimed && !(attempted && !accepted && errorText)) {
         try {
           var reportArgs = { accepted: accepted, action: "report", claimId: claimId };
           if (errorText) reportArgs.error = errorText;
@@ -372,6 +383,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
 
   async function dispatchRecovery(waitId, message, extra) {
     var claimed = structured(await callTool("workspace_wait_recover", { action: "claim", waitId: waitId }, true));
+    var attempted = !!claimed.recoveryMessageAttemptedAt;
     var dispatched = false;
     try {
       dispatched = !!claimed.recoveryMessageSentAt;
@@ -382,7 +394,15 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
             recoveredWait: claimed,
             recoveryMessageId: claimed.recoveryMessageId
           }),
-          function () { return hasRecoverableWork(claimed); }
+          function () { return hasRecoverableWork(claimed); },
+          async function () {
+            await callTool("workspace_wait_recover", {
+              action: "attempt",
+              claimId: claimed.claimId,
+              waitId: waitId
+            }, true);
+            attempted = true;
+          }
         );
       }
       if (!dispatched) {
@@ -406,7 +426,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         waitId: waitId
       }, true);
     } catch (error) {
-      if (!dispatched && claimed && claimed.claimId) {
+      if (!dispatched && !attempted && claimed && claimed.claimId) {
         await callTool("workspace_wait_recover", {
           action: "release",
           claimId: claimed.claimId,
@@ -421,7 +441,9 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     if (recovering || !appToken || !snapshot) return;
     var background = Array.isArray(snapshot.background) ? snapshot.background : [];
     var item = background.find(function (entry) {
-      return entry.status === "resolved" && !!entry.detachedAt && hasRecoverableWork(entry);
+      return entry.status === "resolved" && !!entry.detachedAt &&
+        !(entry.recoveryMessageAttemptedAt && !entry.recoveryMessageSentAt) &&
+        hasRecoverableWork(entry);
     });
     if (!item) return;
     recovering = true;
@@ -470,6 +492,11 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     status.textContent = "";
   }
 
+  function workspaceAuthorizationFailed(error) {
+    var message = error && error.message ? String(error.message) : String(error || "");
+    return message.indexOf("Workspace App authorization is invalid") >= 0;
+  }
+
   function sleep(milliseconds) {
     return new Promise(function (resolve) { setTimeout(resolve, milliseconds); });
   }
@@ -484,7 +511,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         if (generation !== watchGeneration) return;
         var update = structured(result) || {};
         if (Number.isSafeInteger(update.cursor)) cursor = update.cursor;
-        if (update.changed && update.snapshot) {
+        if (update.snapshot) {
           await applySnapshot(update.snapshot, true);
         }
         status.textContent = "";
@@ -492,9 +519,18 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         if (generation !== watchGeneration || controller.signal.aborted) return;
         status.textContent = "Reconnecting";
         console.error(error);
-        await sleep(1000);
         if (generation !== watchGeneration) return;
-        try { await refresh(); } catch (_) {}
+        if (workspaceAuthorizationFailed(error)) {
+          try {
+            await reconnectWorkspace();
+          } catch (_) {
+            await sleep(1000);
+          }
+        } else {
+          await sleep(1000);
+          if (generation !== watchGeneration) return;
+          try { await refresh(); } catch (_) {}
+        }
       } finally {
         if (liveAbortController === controller) liveAbortController = null;
       }
@@ -610,8 +646,13 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       await refresh(false);
       return result;
     } catch (error) {
-      status.textContent = "Action failed";
       console.error(error);
+      try {
+        await refresh(false);
+        status.textContent = "State changed; review and retry";
+      } catch (_) {
+        status.textContent = "Action failed";
+      }
       return null;
     } finally {
       busy.delete(key);
@@ -700,10 +741,46 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return '<div class="card"><div class="background-row"><div class="background-copy"><div class="row"><span class="event-name">Background task</span><span class="badge">Running</span></div><div class="muted"><span>Waiting for task to finish</span><span> · task keeps running</span></div></div>' + action + '</div></div>';
   }
 
+  function uncertainWaitCard(item) {
+    var key = item.waitId || item.tmuxTaskId;
+    var disabled = busy.has(key);
+    var action = item.recoveryMessageId
+      ? '<button type="button" class="action-row danger-row" aria-label="Dismiss automatic resume" data-wait-dismiss="' + escapeHtml(item.waitId) + '" data-recovery-message-id="' + escapeHtml(item.recoveryMessageId) + '"' + (disabled ? ' disabled' : '') + '><span>Dismiss automatic resume</span><span class="muted">continue manually in chat</span></button>'
+      : '';
+    return '<div class="card">' + eventHead("Resume", "Delivery uncertain") + '<div class="card-body"><div class="question">Automatic retry stopped to avoid duplicate agent execution.</div><div class="muted">The previous resume message may have been accepted by the host. Continue manually in chat, then dismiss this automatic resume.</div></div>' + action + '</div>';
+  }
+
   function backgroundWaitCards() {
     var background = Array.isArray(snapshot && snapshot.background) ? snapshot.background : [];
     var waiting = background.filter(function (item) { return (item.kind === "tmux" || item.tmuxTaskId) && (item.status === "waiting" || item.status === "detached"); });
-    return waiting.map(tmuxWaitCard).join("");
+    var uncertain = background.filter(function (item) {
+      return item.status === "resolved" && item.recoveryMessageAttemptedAt && !item.recoveryMessageSentAt;
+    });
+    return waiting.map(tmuxWaitCard).join("") + uncertain.map(uncertainWaitCard).join("");
+  }
+
+  function taskCard(task) {
+    var key = "task:" + task.taskId;
+    var disabled = busy.has(key) ? " disabled" : "";
+    var progress = '<div class="muted">' + escapeHtml(task.completed) + '/' + escapeHtml(task.total) + ' items</div>';
+    var current = task.currentItem ? '<div class="goal-current"><div class="muted">Current</div><div>' + escapeHtml(task.currentItem) + '</div></div>' : '';
+    var checkpoint = task.checkpoint && task.checkpoint.summary ? '<div class="detail"><div class="muted">Checkpoint</div><div>' + escapeHtml(task.checkpoint.summary) + '</div></div>' : '';
+    var action = task.status === "paused" ? "resume" : "pause";
+    var actionLabel = task.status === "paused" ? "Resume task" : "Pause task";
+    var cancelPending = confirmingTaskCancel.has(task.taskId);
+    var cancelLabel = cancelPending ? "Confirm cancel" : "Cancel task";
+    var cancelDetail = cancelPending ? "click again · processes keep running" : "keep processes running";
+    var controls = '<button type="button" class="action-row" aria-label="' + actionLabel + '" data-task-control="' + action + '" data-task-id="' + escapeHtml(task.taskId) + '" data-task-revision="' + escapeHtml(task.revision) + '"' + disabled + '><span>' + actionLabel + '</span><span class="muted">model re-entry only</span></button>' +
+      '<button type="button" class="action-row danger-row" aria-label="' + cancelLabel + '" data-task-control="cancel" data-task-id="' + escapeHtml(task.taskId) + '" data-task-revision="' + escapeHtml(task.revision) + '"' + disabled + '><span>' + cancelLabel + '</span><span class="muted">' + cancelDetail + '</span></button>';
+    var label = task.status === "paused" ? "Paused" : "Running";
+    return '<div class="card">' + eventHead("Task · " + task.title, label) + '<div class="card-body">' + progress + current + checkpoint + '</div>' + controls + '</div>';
+  }
+
+  function taskCards() {
+    var tasks = snapshot && Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
+    return tasks.filter(function (task) {
+      return task.status !== "completed" && task.status !== "cancelled" && task.status !== "none";
+    }).map(taskCard).join("");
   }
 
   function goalCard() {
@@ -715,13 +792,14 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     var progress = '<div class="muted">' + completed + '/' + steps.length + ' steps</div>';
     var currentStep = current ? '<div class="goal-current"><div class="muted">' + (current.status === "active" ? 'Current' : 'Next') + '</div><div>' + escapeHtml(current.text) + '</div>' + (current.note ? '<div class="muted detail">' + escapeHtml(current.note) + '</div>' : '') + '</div>' : '';
     var note = goal.status === "blocked" && goal.note ? '<div class="goal-note"><div class="muted">Reason</div><div>' + escapeHtml(goal.note) + '</div></div>' : '';
+    var uncertain = goal.continuationUncertain ? '<div class="goal-note"><div class="muted">Continuation delivery uncertain</div><div>Automatic retry stopped to avoid duplicate agent execution. Continue manually in chat or stop this Goal.</div></div>' : '';
     var actions = "";
     if (goal.status === "blocked") {
-      actions += '<button type="button" class="action-row" aria-label="Resume Goal" data-goal-resume="' + escapeHtml(goal.goalId) + '"' + (busy.has("goal-resume") ? ' disabled' : '') + '><span>Resume Goal</span><span class="muted">continue agent work</span></button>';
+      actions += '<button type="button" class="action-row" aria-label="Resume Goal" data-goal-resume="' + escapeHtml(goal.goalId) + '" data-goal-revision="' + escapeHtml(goal.revision) + '"' + (busy.has("goal-resume") ? ' disabled' : '') + '><span>Resume Goal</span><span class="muted">continue agent work</span></button>';
     }
-    actions += '<button type="button" class="action-row danger-row" aria-label="Stop Goal" data-goal-stop="' + escapeHtml(goal.goalId) + '"' + (busy.has("goal-stop") ? ' disabled' : '') + '><span>Stop Goal</span><span class="muted">keep processes running</span></button>';
-    var statusLabel = goal.status === "blocked" ? "Blocked" : "Active";
-    return '<div class="card">' + eventHead("Goal", statusLabel) + '<div class="card-body"><div class="question">' + escapeHtml(goal.objective) + '</div>' + progress + currentStep + note + '</div>' + actions + '</div>';
+    actions += '<button type="button" class="action-row danger-row" aria-label="Stop Goal" data-goal-stop="' + escapeHtml(goal.goalId) + '" data-goal-revision="' + escapeHtml(goal.revision) + '"' + (busy.has("goal-stop") ? ' disabled' : '') + '><span>Stop Goal</span><span class="muted">keep processes running</span></button>';
+    var statusLabel = goal.continuationUncertain ? "Delivery uncertain" : goal.status === "blocked" ? "Blocked" : "Active";
+    return '<div class="card">' + eventHead("Goal", statusLabel) + '<div class="card-body"><div class="question">' + escapeHtml(goal.objective) + '</div>' + progress + currentStep + note + uncertain + '</div>' + actions + '</div>';
   }
 
   function render() {
@@ -731,18 +809,54 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       : item.kind === "question" ? questionCard(item)
       : item.kind === "approval" ? approvalCard(item)
       : "";
-    root.innerHTML = eventCard + goalCard() + backgroundWaitCards();
+    root.innerHTML = eventCard + goalCard() + (item ? "" : taskCards()) + backgroundWaitCards();
   }
 
   root.addEventListener("click", function (event) {
     var goalResume = event.target.closest("[data-goal-resume]");
     if (goalResume && !goalResume.hasAttribute("disabled")) {
-      void act("goal-resume", "workspace_goal_resume", {});
+      void act("goal-resume", "workspace_goal_resume", {
+        goalId: goalResume.getAttribute("data-goal-resume"),
+        revision: Number(goalResume.getAttribute("data-goal-revision"))
+      });
       return;
     }
     var goalStop = event.target.closest("[data-goal-stop]");
     if (goalStop && !goalStop.hasAttribute("disabled")) {
-      void act("goal-stop", "workspace_goal_stop", {});
+      void act("goal-stop", "workspace_goal_stop", {
+        goalId: goalStop.getAttribute("data-goal-stop"),
+        revision: Number(goalStop.getAttribute("data-goal-revision"))
+      });
+      return;
+    }
+    var waitDismiss = event.target.closest("[data-wait-dismiss]");
+    if (waitDismiss && !waitDismiss.hasAttribute("disabled")) {
+      var dismissWaitId = waitDismiss.getAttribute("data-wait-dismiss");
+      var recoveryMessageId = waitDismiss.getAttribute("data-recovery-message-id");
+      if (dismissWaitId && recoveryMessageId) void act(dismissWaitId, "workspace_wait_recover", {
+        action: "dismiss",
+        recoveryMessageId: recoveryMessageId,
+        waitId: dismissWaitId
+      });
+      return;
+    }
+    var taskControl = event.target.closest("[data-task-control]");
+    if (taskControl && !taskControl.hasAttribute("disabled")) {
+      var taskId = taskControl.getAttribute("data-task-id");
+      var taskAction = taskControl.getAttribute("data-task-control");
+      if (taskId && taskAction === "cancel" && !confirmingTaskCancel.has(taskId)) {
+        confirmingTaskCancel.add(taskId);
+        render();
+        return;
+      }
+      if (taskId && taskAction) {
+        confirmingTaskCancel.delete(taskId);
+        void act("task:" + taskId, "workspace_task_control", {
+          action: taskAction,
+          revision: Number(taskControl.getAttribute("data-task-revision")),
+          taskId: taskId
+        });
+      }
       return;
     }
     var expand = event.target.closest("[data-question-expand]");

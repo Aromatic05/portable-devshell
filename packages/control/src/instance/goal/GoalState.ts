@@ -67,6 +67,12 @@ export class GoalState {
         const index = document.goals.findIndex((goal) => goal.createdByCtxId === ctxId);
         if (index === -1) throw new Error("No Workspace Goal is attached to the current Context.");
         const current = document.goals[index]!;
+        if (input.expectedGoalId !== undefined && input.expectedGoalId !== current.goalId) {
+            throw new Error(`Workspace Goal changed from ${input.expectedGoalId} to ${current.goalId}; refresh before retrying.`);
+        }
+        if (input.expectedRevision !== undefined && input.expectedRevision !== current.revision) {
+            throw new Error(`Workspace Goal ${current.goalId} changed from revision ${input.expectedRevision} to ${current.revision}; refresh before retrying.`);
+        }
         if (current.status === "completed" || current.status === "stopped") {
             throw new Error(`Workspace Goal ${current.goalId} is already ${current.status}.`);
         }
@@ -167,6 +173,7 @@ export class GoalState {
                     continuationClaimActivityAt: current.lastAgentActivityAt,
                     continuationClaimedAt: now,
                     continuationClaimId: claimId,
+                    continuationMessageId: `goal-message-${randomUUID()}`,
                     continuationPending: true,
                 };
                 result = {
@@ -182,10 +189,27 @@ export class GoalState {
                 current.status === "active" && current.continuationClaimActivityAt === current.lastAgentActivityAt;
             if (!valid && claimMatches(current, claimId)) next = clearContinuation(current);
             result = { goal: snapshot(next, now), valid };
+        } else if (input.action === "attempt") {
+            const claimId = requiredText(input.claimId, "claimId", 128);
+            if (!claimMatches(current, claimId)) throw new Error("Workspace Goal continuation claim is no longer active.");
+            if (current.continuationAttemptedAt === undefined) {
+                next = { ...current, continuationAttemptedAt: now };
+            }
+            result = {
+                attempted: true,
+                goal: snapshot(next, now),
+                ...(next.continuationMessageId === undefined ? {} : { messageId: next.continuationMessageId }),
+            };
         } else if (input.action === "report") {
             const claimId = requiredText(input.claimId, "claimId", 128);
             if (!claimMatches(current, claimId)) throw new Error("Workspace Goal continuation claim is no longer active.");
             if (typeof input.accepted !== "boolean") throw new Error("accepted must be a boolean for continuation report.");
+            if (input.accepted && current.continuationAttemptedAt === undefined) {
+                throw new Error("Workspace Goal continuation was not marked attempted.");
+            }
+            if (!input.accepted && current.continuationAttemptedAt !== undefined) {
+                throw new Error("Workspace Goal continuation delivery is uncertain and cannot be reported as rejected automatically.");
+            }
             next = {
                 ...clearContinuation(current),
                 continuationCount: current.continuationCount + 1,
@@ -325,7 +349,7 @@ function normalizeStoredGoal(value: unknown): GoalRecord {
         steps: normalizeSteps(value.steps as GoalStepInput[], true),
         updatedAt: requiredStoredString(value.updatedAt, "updatedAt"),
     };
-    for (const key of ["continuationClaimActivityAt", "continuationClaimedAt", "continuationClaimId", "continuationRetryAfter", "lastContinuationAt", "note"] as const) {
+    for (const key of ["continuationAttemptedAt", "continuationClaimActivityAt", "continuationClaimedAt", "continuationClaimId", "continuationMessageId", "continuationRetryAfter", "lastContinuationAt", "note"] as const) {
         const field = value[key];
         if (typeof field === "string" && field.length > 0) record[key] = field;
     }
@@ -340,17 +364,21 @@ function normalizeGoalStatus(value: unknown): GoalRecord["status"] {
 function snapshot(record: GoalRecord, now: string): GoalSnapshot {
     const nowMs = Date.parse(now);
     const dueAtMs = Date.parse(record.lastAgentActivityAt) + GOAL_EXECUTION_LEASE_MS;
-    const claimFresh = record.continuationPending && record.continuationClaimedAt !== undefined &&
-        nowMs - Date.parse(record.continuationClaimedAt) < GOAL_CONTINUATION_CLAIM_TTL_MS;
+    const uncertain = record.continuationPending && record.continuationAttemptedAt !== undefined;
+    const claimFresh = uncertain || (record.continuationPending && record.continuationClaimedAt !== undefined &&
+        nowMs - Date.parse(record.continuationClaimedAt) < GOAL_CONTINUATION_CLAIM_TTL_MS);
     const retryReady = record.continuationRetryAfter === undefined || nowMs >= Date.parse(record.continuationRetryAfter);
     const exhausted = record.continuationCount >= GOAL_MAX_CONTINUATIONS;
     return {
         autoContinueExhausted: exhausted,
+        ...(record.continuationAttemptedAt === undefined ? {} : { continuationAttemptedAt: record.continuationAttemptedAt }),
         continuationCount: record.continuationCount,
+        ...(record.continuationMessageId === undefined ? {} : { continuationMessageId: record.continuationMessageId }),
         continuationDue: record.status === "active" && !claimFresh && !exhausted && retryReady && nowMs >= dueAtMs,
         continuationDueAt: new Date(dueAtMs).toISOString(),
         continuationPending: claimFresh,
         ...(record.continuationRetryAfter === undefined ? {} : { continuationRetryAfter: record.continuationRetryAfter }),
+        continuationUncertain: uncertain,
         createdAt: record.createdAt,
         goalId: record.goalId,
         lastAgentActivityAt: record.lastAgentActivityAt,
@@ -367,15 +395,18 @@ function snapshot(record: GoalRecord, now: string): GoalSnapshot {
 
 function expireStaleClaim(record: GoalRecord, now: string): GoalRecord {
     if (!record.continuationPending || record.continuationClaimedAt === undefined) return record;
+    if (record.continuationAttemptedAt !== undefined) return record;
     if (Date.parse(now) - Date.parse(record.continuationClaimedAt) < GOAL_CONTINUATION_CLAIM_TTL_MS) return record;
     return clearContinuation(record);
 }
 
 function clearContinuation(record: GoalRecord): GoalRecord {
     const {
+        continuationAttemptedAt: _attemptedAt,
         continuationClaimActivityAt: _activity,
         continuationClaimedAt: _claimedAt,
         continuationClaimId: _claimId,
+        continuationMessageId: _messageId,
         ...rest
     } = record;
     return { ...rest, continuationPending: false };

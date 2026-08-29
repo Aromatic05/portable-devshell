@@ -25,7 +25,7 @@ export interface InstanceContextMessagePort {
 }
 
 export interface InstanceTodoPort {
-    control(taskId: string, action: TodoTaskControlAction, ctxId: string): Promise<TodoReadResult>;
+    control(taskId: string, action: TodoTaskControlAction, ctxId: string, expectedRevision?: number): Promise<TodoReadResult>;
     currentAssociation(): ToolCallAssociation | undefined;
     delete(taskId: string): Promise<void>;
     read(input?: TodoReadInput): Promise<TodoReadResult>;
@@ -47,8 +47,10 @@ export interface InstanceWaitPort {
     consume(waitId: string): Promise<WaitRecord>;
     create(input: WaitCreateInput): Promise<WaitRecord>;
     detach(waitId: string): Promise<WaitRecord>;
+    dismissRecovery(waitId: string, recoveryMessageId: string): Promise<WaitRecord>;
     get(waitId: string): Promise<WaitRecord | undefined>;
     list(taskId?: string): Promise<WaitRecord[]>;
+    markRecoveryAttempted(waitId: string, claimId: string): Promise<WaitRecord>;
     markRecoverySent(waitId: string, claimId: string): Promise<WaitRecord>;
     reattach(waitId: string, ownerCallId?: string): Promise<WaitRecord>;
     releaseRecovery(waitId: string, claimId: string): Promise<WaitRecord>;

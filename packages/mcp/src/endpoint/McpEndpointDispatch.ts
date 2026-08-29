@@ -303,7 +303,10 @@ export class McpEndpointDispatch {
         } catch (error) {
             if (signal?.aborted === true) {
                 const current = (await gateway.listWaits(instance)).find((entry) => entry.waitId === wait.waitId);
-                if (current?.status === "waiting") {
+                if (
+                    current?.status === "waiting" ||
+                    (current?.status === "resolved" && current.detachedAt === undefined)
+                ) {
                     await gateway.detachWait(instance, wait.waitId).catch(() => undefined);
                 }
             }

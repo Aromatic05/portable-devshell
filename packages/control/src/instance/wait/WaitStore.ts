@@ -38,9 +38,15 @@ export class WaitStore {
             const detachedAt = new Date().toISOString();
             return {
                 ...document,
-                waits: document.waits.map((record) => record.status === "waiting"
-                    ? { ...record, detachedAt, status: "detached", updatedAt: detachedAt }
-                    : record),
+                waits: document.waits.map((record) => {
+                    if (record.status === "waiting") {
+                        return { ...record, detachedAt, status: "detached", updatedAt: detachedAt };
+                    }
+                    if (record.status === "resolved" && record.detachedAt === undefined) {
+                        return { ...record, detachedAt, updatedAt: detachedAt };
+                    }
+                    return record;
+                }),
             };
         } catch (error) {
             throw createError({

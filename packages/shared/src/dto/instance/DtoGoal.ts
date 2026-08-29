@@ -1,7 +1,7 @@
 export type GoalStepStatus = "pending" | "active" | "completed" | "skipped";
 export type GoalStatus = "active" | "blocked" | "completed" | "stopped";
 export type GoalAction = "start" | "get" | "update" | "block" | "resume" | "finish" | "stop";
-export type GoalContinuationAction = "claim" | "validate" | "report";
+export type GoalContinuationAction = "claim" | "validate" | "attempt" | "report";
 
 export interface GoalStep {
     id: string;
@@ -19,6 +19,8 @@ export interface GoalStepInput {
 
 export interface GoalManageInput {
     action: GoalAction;
+    expectedGoalId?: string;
+    expectedRevision?: number;
     note?: string;
     objective?: string;
     status?: GoalStepStatus;
@@ -36,10 +38,12 @@ export interface GoalContinuationInput {
 }
 
 export interface GoalRecord {
+    continuationAttemptedAt?: string;
     continuationClaimActivityAt?: string;
     continuationClaimedAt?: string;
     continuationClaimId?: string;
     continuationCount: number;
+    continuationMessageId?: string;
     continuationPending: boolean;
     continuationRetryAfter?: string;
     createdAt: string;
@@ -57,11 +61,14 @@ export interface GoalRecord {
 
 export interface GoalSnapshot {
     autoContinueExhausted: boolean;
+    continuationAttemptedAt?: string;
     continuationCount: number;
+    continuationMessageId?: string;
     continuationDue: boolean;
     continuationDueAt: string;
     continuationPending: boolean;
     continuationRetryAfter?: string;
+    continuationUncertain: boolean;
     createdAt: string;
     goalId: string;
     lastAgentActivityAt: string;

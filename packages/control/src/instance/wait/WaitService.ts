@@ -68,10 +68,24 @@ export class WaitService {
         );
     }
 
+    async markRecoveryAttempted(waitId: string, claimId: string): Promise<WaitRecord> {
+        return await this.#commit(
+            "wait.recoveryMessageAttempted",
+            (document) => this.#state.markRecoveryAttempted(document, waitId, claimId),
+        );
+    }
+
     async markRecoverySent(waitId: string, claimId: string): Promise<WaitRecord> {
         return await this.#commit(
             "wait.recoveryMessageSent",
             (document) => this.#state.markRecoverySent(document, waitId, claimId),
+        );
+    }
+
+    async dismissRecovery(waitId: string, recoveryMessageId: string): Promise<WaitRecord> {
+        return await this.#commit(
+            "wait.recoveryDismissed",
+            (document) => this.#state.dismissRecovery(document, waitId, recoveryMessageId),
         );
     }
 
@@ -109,6 +123,9 @@ export class WaitService {
         if (record.status === "resolved") return record;
         if (record.status !== "waiting" && record.status !== "detached") {
             throw new Error(`Wait ${waitId} cannot be awaited while it is ${record.status}.`);
+        }
+        if (this.#pending.has(waitId)) {
+            throw new Error(`Wait ${waitId} already has an active in-process owner.`);
         }
         return await new Promise<WaitRecord>((resolve, reject) => {
             this.#pending.set(waitId, { reject, resolve });
@@ -165,6 +182,8 @@ function eventData(record: WaitRecord): JsonValue {
         kind: record.kind,
         ...(record.ownerCallId === undefined ? {} : { ownerCallId: record.ownerCallId }),
         status: record.status,
+        ...(record.recoveryDismissedAt === undefined ? {} : { recoveryDismissedAt: record.recoveryDismissedAt }),
+        ...(record.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: record.recoveryMessageAttemptedAt }),
         ...(record.recoveryMessageId === undefined ? {} : { recoveryMessageId: record.recoveryMessageId }),
         ...(record.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: record.recoveryMessageSentAt }),
         targetId: record.targetId,

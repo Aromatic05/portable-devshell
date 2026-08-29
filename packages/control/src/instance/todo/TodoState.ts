@@ -141,7 +141,8 @@ export class TodoState {
         document: TodoDocument,
         taskId: string,
         action: TodoTaskControlAction,
-        ctxId: string
+        ctxId: string,
+        expectedRevision?: number
     ): TodoTransition {
         const previousIndex = document.active.findIndex((entry) => entry.taskId === taskId);
         if (previousIndex === -1) {
@@ -153,6 +154,9 @@ export class TodoState {
         }
 
         const previous = document.active[previousIndex]!;
+        if (expectedRevision !== undefined && previous.revision !== expectedRevision) {
+            throw invalidTodo(`todo task ${taskId} changed from revision ${expectedRevision} to ${previous.revision}; refresh before retrying`);
+        }
         if (action === "pause" && previous.pausedAt !== undefined) return { document, events: [] };
         if (action === "resume" && previous.pausedAt === undefined) return { document, events: [] };
 

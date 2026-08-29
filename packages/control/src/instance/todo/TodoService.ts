@@ -66,9 +66,14 @@ export class TodoService {
         });
     }
 
-    async control(taskId: string, action: TodoTaskControlAction, ctxId: string): Promise<TodoReadResult> {
+    async control(
+        taskId: string,
+        action: TodoTaskControlAction,
+        ctxId: string,
+        expectedRevision?: number,
+    ): Promise<TodoReadResult> {
         return await this.#runExclusive(async () => {
-            const transition = this.#state.control(this.#store.read(), taskId, action, ctxId);
+            const transition = this.#state.control(this.#store.read(), taskId, action, ctxId, expectedRevision);
             if (transition.events.length > 0) {
                 await this.#persistTransition(transition);
                 await this.#emitTransition(transition);
