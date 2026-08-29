@@ -178,12 +178,42 @@ export class McpHost {
                 const disabled = await this.#contextRegistry.disable(ctxId);
                 const contexts = await this.#contextRegistry.list();
                 const now = Date.now();
+                const reconciledInstances = new Set<string>();
                 for (const environment of disabled.environments) {
                     const gateway = this.#gateways.get(environment.instance);
-                    if (isMcpGoalGateway(gateway)) {
-                        const goal = await gateway.readGoal(environment.instance, disabled.ctxId).catch(() => undefined);
-                        if (goal?.status === "active" || goal?.status === "blocked") {
-                            await gateway.manageGoal(environment.instance, { action: "stop" }, disabled.ctxId).catch(() => undefined);
+                    if (gateway !== undefined && !reconciledInstances.has(environment.instance)) {
+                        reconciledInstances.add(environment.instance);
+                        if (isMcpGoalGateway(gateway)) {
+                            const goal = await gateway.readGoal(environment.instance, disabled.ctxId).catch(() => undefined);
+                            if (goal?.status === "active" || goal?.status === "blocked") {
+                                await gateway.manageGoal(environment.instance, { action: "stop" }, disabled.ctxId).catch(() => undefined);
+                            }
+                        }
+                        if (gateway.listWaits !== undefined) {
+                            const waits = await gateway.listWaits(environment.instance);
+                            for (const wait of waits) {
+                                if (wait.createdByCtxId !== disabled.ctxId) continue;
+                                if ((wait.status === "waiting" || wait.status === "detached") && gateway.cancelWait !== undefined) {
+                                    await gateway.cancelWait(environment.instance, wait.waitId);
+                                } else if (wait.status === "resolved" && gateway.consumeWait !== undefined) {
+                                    await gateway.consumeWait(environment.instance, wait.waitId);
+                                }
+                            }
+                        }
+                        if (gateway.listApprovals !== undefined) {
+                            const approvals = await gateway.listApprovals(environment.instance);
+                            for (const approval of approvals) {
+                                if (approval.ctxId !== disabled.ctxId || approval.status !== "pending") continue;
+                                if (gateway.cancelApproval !== undefined) {
+                                    await gateway.cancelApproval(
+                                        environment.instance,
+                                        approval.approvalId,
+                                        `Context ${disabled.ctxId} was disabled.`,
+                                    );
+                                } else if (gateway.decideApproval !== undefined) {
+                                    await gateway.decideApproval(environment.instance, approval.approvalId, "deny");
+                                }
+                            }
                         }
                     }
                     if (environment.workspace !== undefined) {

@@ -363,6 +363,11 @@ test("McpHost context admin releases alerts only after the last workspace contex
     const released: string[] = [];
     const releasedReferences: string[] = [];
     const stoppedGoals: string[] = [];
+    const cancelledWaits: string[] = [];
+    const consumedWaits: string[] = [];
+    const cancelledApprovals: string[] = [];
+    const waits: Array<Record<string, unknown>> = [];
+    const approvals: Array<Record<string, unknown>> = [];
     const touched: string[] = [];
     const host = new McpHost({
         instances: [{
@@ -392,6 +397,27 @@ test("McpHost context admin releases alerts only after the last workspace contex
                 },
                 async releaseInstanceReference(instance: string, reference: string) {
                     releasedReferences.push(`${instance}:${reference}`);
+                },
+                async listWaits() { return waits; },
+                async cancelWait(_instance: string, waitId: string) {
+                    cancelledWaits.push(waitId);
+                    const wait = waits.find((entry) => entry.waitId === waitId)!;
+                    wait.status = "cancelled";
+                    return wait;
+                },
+                async consumeWait(_instance: string, waitId: string) {
+                    consumedWaits.push(waitId);
+                    const wait = waits.find((entry) => entry.waitId === waitId)!;
+                    wait.status = "consumed";
+                    return wait;
+                },
+                async listApprovals() { return approvals; },
+                async cancelApproval(_instance: string, approvalId: string, reason?: string) {
+                    assert.match(reason ?? "", /Context .* was disabled/u);
+                    cancelledApprovals.push(approvalId);
+                    const approval = approvals.find((entry) => entry.approvalId === approvalId)!;
+                    approval.status = "cancelled";
+                    return approval;
                 }
             } as never,
             name: "demo-local",
@@ -416,13 +442,29 @@ test("McpHost context admin releases alerts only after the last workspace contex
         principal: "local",
         workspace: "/projects/alpha",
     });
+    waits.push(
+        { createdByCtxId: first.ctxId, status: "waiting", waitId: "wait-first-live" },
+        { createdByCtxId: first.ctxId, status: "resolved", waitId: "wait-first-resolved" },
+        { createdByCtxId: second.ctxId, status: "waiting", waitId: "wait-second-live" },
+    );
+    approvals.push(
+        { approvalId: "approval-first-pending", ctxId: first.ctxId, status: "pending" },
+        { approvalId: "approval-first-done", ctxId: first.ctxId, status: "approved" },
+        { approvalId: "approval-second-pending", ctxId: second.ctxId, status: "pending" },
+    );
 
     await host.contextAdmin.disable(first.ctxId);
     assert.deepEqual(stoppedGoals, [first.ctxId]);
+    assert.deepEqual(cancelledWaits, ["wait-first-live"]);
+    assert.deepEqual(consumedWaits, ["wait-first-resolved"]);
+    assert.deepEqual(cancelledApprovals, ["approval-first-pending"]);
     assert.deepEqual(released, []);
     assert.deepEqual(releasedReferences, [`demo-local:${first.ctxId}`]);
     await host.contextAdmin.disable(second.ctxId);
     assert.deepEqual(stoppedGoals, [first.ctxId, second.ctxId]);
+    assert.deepEqual(cancelledWaits, ["wait-first-live", "wait-second-live"]);
+    assert.deepEqual(consumedWaits, ["wait-first-resolved"]);
+    assert.deepEqual(cancelledApprovals, ["approval-first-pending", "approval-second-pending"]);
     assert.deepEqual(released, ["/projects/alpha"]);
     assert.deepEqual(releasedReferences, [
         `demo-local:${first.ctxId}`,

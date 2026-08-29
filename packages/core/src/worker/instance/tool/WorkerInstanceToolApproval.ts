@@ -46,6 +46,10 @@ export class WorkerInstanceToolApproval {
         return await this.#approvalManager.decideApproval(approvalId, input);
     }
 
+    async cancelApproval(approvalId: string, reason?: string): Promise<ApprovalRequest> {
+        return await this.#approvalManager.cancel(approvalId, reason);
+    }
+
     async prepare(
         callId: string,
         toolName: string,

@@ -100,6 +100,10 @@ export class WorkerInstanceTool {
         return await this.#approval.decideApproval(approvalId, input);
     }
 
+    async cancelApproval(approvalId: string, reason?: string): Promise<ApprovalRequest> {
+        return await this.#approval.cancelApproval(approvalId, reason);
+    }
+
     async readLogs(query: LogQuery = {}): Promise<InstanceLogEntry[]> {
         return await this.#log.read(query);
     }

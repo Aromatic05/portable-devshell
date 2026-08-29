@@ -227,6 +227,10 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         });
     }
 
+    async cancelApproval(instance: string, approvalId: string, reason?: string) {
+        return await this.#requireDescriptor(instance).worker.cancelApproval(approvalId, reason);
+    }
+
     async consumeContextMessages(instance: string, ctxId: string, callId: string) {
         const service = this.#requireDescriptor(instance).contextMessages;
         if (service === undefined) {

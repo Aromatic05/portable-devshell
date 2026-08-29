@@ -352,6 +352,10 @@ export class WorkerInstance {
         return await this.#tool.decideApproval(approvalId, input);
     }
 
+    async cancelApproval(approvalId: string, reason?: string): Promise<ApprovalRequest> {
+        return await this.#tool.cancelApproval(approvalId, reason);
+    }
+
     async readLogs(query: LogQuery = {}): Promise<InstanceLogEntry[]> {
         return await this.#tool.readLogs(query);
     }

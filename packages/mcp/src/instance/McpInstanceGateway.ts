@@ -81,6 +81,7 @@ export interface McpInstanceGateway {
     listWaits?(instance: string): Promise<WaitRecord[]>;
     listApprovals?(instance: string): Promise<ApprovalRequest[]>;
     decideApproval?(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<ApprovalRequest>;
+    cancelApproval?(instance: string, approvalId: string, reason?: string): Promise<ApprovalRequest>;
     readToolCalls?(instance: string, ctxId: string, limit: number): Promise<ToolCallRecord[]>;
     readWorkspaceEvents?(instance: string, fromSeq: number): Promise<McpWorkspaceEventSlice>;
     controlTodo?(instance: string, taskId: string, action: TodoTaskControlAction, ctxId: string, expectedRevision?: number): Promise<JsonValue>;
