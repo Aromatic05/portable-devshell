@@ -9,6 +9,7 @@ import type {
 import type {
     ApprovalRequest,
     ContextMessageReadResult,
+    ContextMessageRecord,
     GoalContinuationInput,
     GoalManageInput,
     GoalSnapshot,
@@ -86,6 +87,7 @@ export interface McpInstanceGateway {
     readWorkspaceEvents?(instance: string, fromSeq: number): Promise<McpWorkspaceEventSlice>;
     controlTodo?(instance: string, taskId: string, action: TodoTaskControlAction, ctxId: string, expectedRevision?: number): Promise<JsonValue>;
     consumeContextMessages?(instance: string, ctxId: string, callId: string): Promise<ContextMessageReadResult>;
+    failContextMessages?(instance: string, ctxId: string, reason: string): Promise<ContextMessageRecord[]>;
     readTodo(instance: string, input?: TodoReadInput): Promise<JsonValue>;
     listTools(instance: string): ToolDefinition[];
     observeTmuxTask?(

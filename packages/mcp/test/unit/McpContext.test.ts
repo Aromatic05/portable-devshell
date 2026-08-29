@@ -366,6 +366,7 @@ test("McpHost context admin releases alerts only after the last workspace contex
     const cancelledWaits: string[] = [];
     const consumedWaits: string[] = [];
     const cancelledApprovals: string[] = [];
+    const failedContextMessages: string[] = [];
     const waits: Array<Record<string, unknown>> = [];
     const approvals: Array<Record<string, unknown>> = [];
     const touched: string[] = [];
@@ -410,6 +411,11 @@ test("McpHost context admin releases alerts only after the last workspace contex
                     const wait = waits.find((entry) => entry.waitId === waitId)!;
                     wait.status = "consumed";
                     return wait;
+                },
+                async failContextMessages(_instance: string, ctxId: string, reason: string) {
+                    assert.match(reason, /disabled before Comment delivery/u);
+                    failedContextMessages.push(ctxId);
+                    return [];
                 },
                 async listApprovals() { return approvals; },
                 async cancelApproval(_instance: string, approvalId: string, reason?: string) {
@@ -458,6 +464,7 @@ test("McpHost context admin releases alerts only after the last workspace contex
     assert.deepEqual(cancelledWaits, ["wait-first-live"]);
     assert.deepEqual(consumedWaits, ["wait-first-resolved"]);
     assert.deepEqual(cancelledApprovals, ["approval-first-pending"]);
+    assert.deepEqual(failedContextMessages, [first.ctxId]);
     assert.deepEqual(released, []);
     assert.deepEqual(releasedReferences, [`demo-local:${first.ctxId}`]);
     await host.contextAdmin.disable(second.ctxId);
@@ -465,6 +472,7 @@ test("McpHost context admin releases alerts only after the last workspace contex
     assert.deepEqual(cancelledWaits, ["wait-first-live", "wait-second-live"]);
     assert.deepEqual(consumedWaits, ["wait-first-resolved"]);
     assert.deepEqual(cancelledApprovals, ["approval-first-pending", "approval-second-pending"]);
+    assert.deepEqual(failedContextMessages, [first.ctxId, second.ctxId]);
     assert.deepEqual(released, ["/projects/alpha"]);
     assert.deepEqual(releasedReferences, [
         `demo-local:${first.ctxId}`,

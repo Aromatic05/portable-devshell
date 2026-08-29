@@ -367,6 +367,7 @@ test("Comment conversation shows exact history and keeps the route open after se
         },
     });
     enableContextMessageMcp(harness);
+    harness.store.patchControlReadModel({ contexts: [tuiContextRecord("ctx-alpha", "active")] });
     const commentCall: ToolCallRecord = {
         callId: "call-comment",
         completedAt: "2026-08-02T00:01:30.000Z",
@@ -479,6 +480,10 @@ test("Comment conversation blocks a stale ctxId instead of reporting a false que
         },
     });
     enableContextMessageMcp(harness);
+    harness.store.patchControlReadModel({ contexts: [
+        tuiContextRecord("ctx-old", "active"),
+        tuiContextRecord("ctx-current", "active"),
+    ] });
     harness.store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [
         {
             callId: "call-old",
@@ -533,6 +538,38 @@ test("Comment conversation blocks a stale ctxId instead of reporting a false que
         )?.status,
         "disabled",
     );
+});
+
+test("Comment conversation disables editing for the latest observed disabled Context", async () => {
+    const sent: Array<{ ctxId: string; text: string }> = [];
+    const harness = createHarness({
+        onContextMessage: async (_instance, ctxId, text) => { sent.push({ ctxId, text }); },
+    });
+    enableContextMessageMcp(harness);
+    harness.store.patchControlReadModel({
+        contexts: [tuiContextRecord("ctx-disabled", "disabled")],
+        instanceState: { alpha: { toolCalls: [{
+            callId: "call-disabled",
+            ctxId: "ctx-disabled",
+            inputSummary: "{}",
+            instance: asInstanceName("alpha"),
+            source: "mcp",
+            startedAt: "2026-08-06T12:00:00.000Z",
+            status: "completed",
+            toolName: "file_read",
+        }] } },
+    });
+    enterAuditContext(harness, "ctx-disabled");
+    await harness.press("m");
+
+    const composer = selectMainScreenModel(harness.store.getState()).boxes.find(
+        (box) => box.id === "conversation-composer",
+    );
+    assert.equal(composer?.status, "disabled");
+    assert.match(conversationScreenText(harness), /context is not active/iu);
+    assert.equal(await harness.dispatch({ type: "contextConversation.edit" }), undefined);
+    assert.notEqual(harness.store.getState().interaction.focusScope, "contextConversation");
+    assert.deepEqual(sent, []);
 });
 
 test("Todo uses a dedicated instance-scoped page and does not appear in Instances boxes", async () => {
@@ -2734,6 +2771,23 @@ async function openPrimaryRoute(
     harness.store.setFocusScope("mainBoxes");
     harness.store.setMainFocusId(boxId);
     await harness.dispatch({ type: "focus.activate" });
+}
+
+function tuiContextRecord(
+    ctxId: string,
+    status: "active" | "disabled" | "expired",
+) {
+    return {
+        createdAt: "2026-08-02T00:00:00.000Z",
+        ctxId,
+        environments: [{ instance: "alpha", workspace: "/workspace/alpha" }],
+        expiresAt: "2099-08-02T01:00:00.000Z",
+        instance: "alpha",
+        lastAccessedAt: "2026-08-02T00:05:00.000Z",
+        principal: "client-alpha",
+        status,
+        workspace: "/workspace/alpha",
+    };
 }
 
 function enableContextMessageMcp(harness: ReturnType<typeof createHarness>): void {

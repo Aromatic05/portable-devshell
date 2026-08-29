@@ -10,6 +10,7 @@ import { selectTuiOverviewInstanceName } from "../../../view/page/TuiOverviewPre
 import { topTuiOverlay } from "../../../state/overlay/TuiOverlay.js";
 import { currentTuiRoute } from "../../../state/route/TuiRouteState.js";
 import {
+    isActiveContextForInstance,
     isLatestObservedContext,
     latestObservedContextId,
 } from "../../../state/audit/TuiAuditContextActivity.js";
@@ -212,7 +213,12 @@ export class TuiCommandDispatcherNavigation {
     #startContextConversationEditing(): boolean {
         const target = this.#contextConversationTarget();
         if (target === undefined) return false;
-        const draft = readContextConversationDraft(this.#store.getState(), target.instance, target.ctxId);
+        const state = this.#store.getState();
+        if (!isActiveContextForInstance(state, target.instance, target.ctxId)) {
+            this.#store.setScreenStatus("audit", "Comment editing is blocked because this context is not active on this instance.");
+            return false;
+        }
+        const draft = readContextConversationDraft(state, target.instance, target.ctxId);
         this.#store.setEditor({
             cursor: draft.length,
             editing: true,
@@ -262,6 +268,13 @@ export class TuiCommandDispatcherNavigation {
         const target = this.#contextConversationTarget();
         if (target === undefined) return false;
         const state = this.#store.getState();
+        if (!isActiveContextForInstance(state, target.instance, target.ctxId)) {
+            this.#store.setScreenStatus(
+                "audit",
+                "Comment not queued: this context is not active on this instance.",
+            );
+            return false;
+        }
         if (!isLatestObservedContext(state, target.instance, target.ctxId)) {
             const latest = latestObservedContextId(state, target.instance);
             this.#store.setScreenStatus(

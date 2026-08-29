@@ -67,6 +67,21 @@ export class ContextMessageService {
             );
     }
 
+    async failPending(ctxId: string, reason: string): Promise<ContextMessageRecord[]> {
+        return await this.#runExclusive(async () => {
+            const records = this.#store
+                .read()
+                .messages.filter((message) =>
+                    message.ctxId === ctxId &&
+                    (message.status === "pending" || message.status === "sent")
+                );
+            if (records.length === 0) return [];
+            await this.#markFailed(records, reason);
+            const ids = new Set(records.map((record) => record.id));
+            return this.#store.read().messages.filter((message) => ids.has(message.id));
+        });
+    }
+
     async consumePending(ctxId: string, callId: string): Promise<ContextMessageReadResult> {
         const delivered = await this.#runExclusive(async () => {
             const transition = this.#state.deliver(this.#store.read(), ctxId, callId);

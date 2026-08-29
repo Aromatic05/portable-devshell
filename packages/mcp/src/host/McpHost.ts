@@ -200,6 +200,13 @@ export class McpHost {
                                 }
                             }
                         }
+                        if (gateway.failContextMessages !== undefined) {
+                            await gateway.failContextMessages(
+                                environment.instance,
+                                disabled.ctxId,
+                                `Context ${disabled.ctxId} was disabled before Comment delivery.`,
+                            );
+                        }
                         if (gateway.listApprovals !== undefined) {
                             const approvals = await gateway.listApprovals(environment.instance);
                             for (const approval of approvals) {

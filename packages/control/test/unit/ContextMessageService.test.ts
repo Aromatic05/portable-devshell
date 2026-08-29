@@ -109,6 +109,40 @@ test("ContextMessageService marks a queued message failed when its audit event c
     assert.equal(record?.error, "audit unavailable");
 });
 
+test("ContextMessageService fails undelivered Comments when their Context is retired", async () => {
+    const root = await createTestTempDirectory("context-message-retired");
+    const events: Array<{ data: JsonValue; type: InstanceEventType }> = [];
+    const service = new ContextMessageService({
+        appendEvent: async (type, data) => { events.push({ data, type }); },
+        filePath: join(root, "context-messages.json"),
+        instanceName: "alpha",
+    });
+    const first = await service.queue({ ctxId: "ctx-retired", text: "Do not deliver later" });
+    await service.queue({ ctxId: "ctx-live", text: "Keep live" });
+
+    const failed = await service.failPending(
+        "ctx-retired",
+        "Context ctx-retired was disabled before Comment delivery.",
+    );
+
+    assert.deepEqual(failed.map((message) => [message.id, message.status]), [[first.id, "failed"]]);
+    assert.match(failed[0]?.error ?? "", /disabled before Comment delivery/u);
+    assert.deepEqual(
+        (await service.list())
+            .map((message) => [message.ctxId, message.status])
+            .sort((left, right) => String(left[0]).localeCompare(String(right[0]))),
+        [["ctx-live", "sent"], ["ctx-retired", "failed"]],
+    );
+    assert.equal(
+        events.filter((event) => event.type === "context.message.failed").length,
+        1,
+    );
+    assert.deepEqual(await service.consumePending("ctx-retired", "call-late"), {
+        callId: "call-late",
+        messages: [],
+    });
+});
+
 test("ContextMessageService delivery event failure never blocks or requeues a completed call", async () => {
     const root = await createTestTempDirectory("context-message-retry");
     const service = new ContextMessageService({

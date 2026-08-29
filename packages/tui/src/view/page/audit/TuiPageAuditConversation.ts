@@ -4,6 +4,7 @@ import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
 import { readContextConversationDraft } from "../../../interaction/command/dispatcher/TuiCommandDispatcherNavigation.js";
 import {
+    isActiveContextForInstance,
     isLatestObservedContext,
     latestObservedContextId,
 } from "../../../state/audit/TuiAuditContextActivity.js";
@@ -117,7 +118,8 @@ function composerBox(
     ctxId: string,
 ): BoxModel {
     const draft = readContextConversationDraft(state, instance, ctxId);
-    const current = isLatestObservedContext(state, instance, ctxId);
+    const active = isActiveContextForInstance(state, instance, ctxId);
+    const current = active && isLatestObservedContext(state, instance, ctxId);
     const latest = latestObservedContextId(state, instance);
     const prefix = "Draft              ";
     const display = draft.length === 0 ? "<empty>" : draft;
@@ -128,7 +130,9 @@ function composerBox(
                 "Delivery",
                 current
                     ? "next tool call in this context"
-                    : `blocked; latest observed context is ${latest ?? "unknown"}`,
+                    : !active
+                      ? "blocked; context is not active on this instance"
+                      : `blocked; latest observed context is ${latest ?? "unknown"}`,
             ),
             {
                 editable: true,
@@ -143,7 +147,9 @@ function composerBox(
             },
             current
                 ? "Enter queues this Comment for the next tool call."
-                : "Sending is blocked because this context is no longer current.",
+                : !active
+                  ? "Sending is blocked because this context is not active on this instance."
+                  : "Sending is blocked because this context is no longer current.",
             "Esc or Ctrl+[ returns to the Audit Context.",
         ],
         expandedKey: `audit-conversation:${instance}:${ctxId}:composer`,
@@ -154,7 +160,9 @@ function composerBox(
             draft.length === 0 ? "draft=<empty>" : `draft=${draft}`,
             current
                 ? "Space expand · ↑/↓ Draft · Enter edit · Esc back"
-                : `sending blocked · latest=${latest ?? "unknown"}`,
+                : !active
+                  ? "sending blocked · context is not active"
+                  : `sending blocked · latest=${latest ?? "unknown"}`,
         ],
         title: "Write Comment",
     });

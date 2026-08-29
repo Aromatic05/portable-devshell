@@ -19,6 +19,7 @@ import type {
 } from "@portable-devshell/shared";
 
 export interface InstanceContextMessagePort {
+    failPending(ctxId: string, reason: string): Promise<ContextMessageRecord[]>;
     list(ctxId?: string): Promise<ContextMessageRecord[]>;
     queue(input: ContextMessageQueueInput): Promise<ContextMessageRecord>;
     consumePending(ctxId: string, callId: string): Promise<ContextMessageReadResult>;
