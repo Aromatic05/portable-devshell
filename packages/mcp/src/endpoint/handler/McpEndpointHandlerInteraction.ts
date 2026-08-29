@@ -27,6 +27,7 @@ import { McpNativeToolResult, type McpEndpointResult } from "../McpEndpointResul
 export class McpEndpointHandlerInteraction {
     readonly #appStates = new Map<string, { lastSeenAt?: number; token: string }>();
     readonly #appReadyWaiters = new Map<string, Set<() => void>>();
+    readonly #activeAppWatches = new Map<string, number>();
 
     constructor(private readonly options: {
         gateway?: McpInstanceGateway;
@@ -236,7 +237,7 @@ export class McpEndpointHandlerInteraction {
         context: ToolCallContext,
     ): Promise<McpNativeToolResult> {
         const ctxId = requireCtxId(context);
-        return this.#workspaceResult(ctxId, await this.#snapshot(gateway, context), [], true, true);
+        return this.#workspaceResult(ctxId, await this.#snapshot(gateway, context));
     }
 
     async #watchWorkspace(
@@ -254,26 +255,30 @@ export class McpEndpointHandlerInteraction {
         const heartbeatMs = this.options.watchHeartbeatMs ?? 20_000;
         const pollMs = this.options.watchPollMs ?? 250;
         let cursor = readWorkspaceCursor(input);
-
-        while (true) {
-            const batch = await gateway.readWorkspaceEvents(this.options.instanceName, cursor + 1);
-            const changed = batch.gap || batch.lastSeq < cursor || batch.events.some((event) => workspaceEventBelongsTo(event, ctxId));
-            cursor = batch.lastSeq;
-            if (changed) {
-                return this.#workspaceResult(ctxId, {
-                    changed: true,
-                    cursor,
-                    snapshot: await this.#snapshot(gateway, context),
-                });
+        this.#beginWorkspaceWatch(ctxId);
+        try {
+            while (true) {
+                const batch = await gateway.readWorkspaceEvents(this.options.instanceName, cursor + 1);
+                const changed = batch.gap || batch.lastSeq < cursor || batch.events.some((event) => workspaceEventBelongsTo(event, ctxId));
+                cursor = batch.lastSeq;
+                if (changed) {
+                    return this.#workspaceResult(ctxId, {
+                        changed: true,
+                        cursor,
+                        snapshot: await this.#snapshot(gateway, context),
+                    });
+                }
+                if (Date.now() - startedAt >= heartbeatMs) {
+                    return this.#workspaceResult(ctxId, {
+                        changed: false,
+                        cursor,
+                        snapshot: await this.#snapshot(gateway, context),
+                    });
+                }
+                await waitForMcpEndpointAbortable(delay(pollMs), signal);
             }
-            if (Date.now() - startedAt >= heartbeatMs) {
-                return this.#workspaceResult(ctxId, {
-                    changed: false,
-                    cursor,
-                    snapshot: await this.#snapshot(gateway, context),
-                });
-            }
-            await waitForMcpEndpointAbortable(delay(pollMs), signal);
+        } finally {
+            this.#endWorkspaceWatch(ctxId);
         }
     }
 
@@ -290,7 +295,6 @@ export class McpEndpointHandlerInteraction {
             ...(markAppSeen ? { lastSeenAt: (this.options.now ?? Date.now)() } : {}),
             token,
         });
-        if (markAppSeen) this.#notifyWorkspaceReady(ctxId);
         return new McpNativeToolResult({
             _meta: { "portable-devshell/workspace": { token } },
             content,
@@ -303,6 +307,24 @@ export class McpEndpointHandlerInteraction {
         const now = (this.options.now ?? Date.now)();
         return app?.lastSeenAt !== undefined &&
             now - app.lastSeenAt <= (this.options.workspaceLivenessMs ?? 60_000);
+    }
+
+    #beginWorkspaceWatch(ctxId: string): void {
+        this.#activeAppWatches.set(ctxId, (this.#activeAppWatches.get(ctxId) ?? 0) + 1);
+        const app = this.#appStates.get(ctxId);
+        if (app !== undefined) app.lastSeenAt = (this.options.now ?? Date.now)();
+        this.#notifyWorkspaceReady(ctxId);
+    }
+
+    #endWorkspaceWatch(ctxId: string): void {
+        const next = (this.#activeAppWatches.get(ctxId) ?? 0) - 1;
+        if (next > 0) {
+            this.#activeAppWatches.set(ctxId, next);
+            return;
+        }
+        this.#activeAppWatches.delete(ctxId);
+        const app = this.#appStates.get(ctxId);
+        if (app !== undefined) delete app.lastSeenAt;
     }
 
     async #requireActiveWorkspace(ctxId: string, message: string): Promise<void> {
@@ -526,7 +548,7 @@ export class McpEndpointHandlerInteraction {
         const ctxId = requireCtxId(context);
         const workspaceGateway = isMcpWorkspaceGateway(gateway) ? gateway : undefined;
         const goalGateway = isMcpGoalGateway(gateway) ? gateway : undefined;
-        const [todo, waits, approvals, eventSlice, goal] = await Promise.all([
+        const [todo, waits, approvals, eventSlice, goal, toolCalls] = await Promise.all([
             gateway.readTodo(this.options.instanceName),
             gateway.listWaits(this.options.instanceName),
             gateway.listApprovals(this.options.instanceName),
@@ -536,6 +558,7 @@ export class McpEndpointHandlerInteraction {
                 lastSeq: 0,
             },
             goalGateway?.readGoal(this.options.instanceName, ctxId),
+            workspaceGateway?.readToolCalls(this.options.instanceName, ctxId, 64) ?? [],
         ]);
         const todoRecord = asRecord(todo);
         const tasks = Array.isArray(todoRecord?.tasks)
@@ -563,7 +586,11 @@ export class McpEndpointHandlerInteraction {
             const { ctxId: _ctxId, ...visible } = approval;
             return visible;
         });
+        const agentBusy = toolCalls.some((call) =>
+            call.status === "queued" || call.status === "pendingApproval" || call.status === "running"
+        );
         return {
+            agentBusy,
             approvals: visibleApprovals,
             background: ownedWaits
                 .filter((wait) => wait.kind === "tmux" && (

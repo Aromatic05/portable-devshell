@@ -227,23 +227,19 @@ test("Workspace App can re-establish its lifecycle after remount", async () => {
     await assert.doesNotReject(held);
 });
 
-test("Workspace reconnect rotates the App token and fences the old token", async () => {
+test("Workspace reconnect reuses a live App token instead of invalidating sibling mounts", async () => {
     const fake = createInteractionGateway();
     const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
     const firstToken = await openWorkspace(handler);
     const reconnected = await handler.call("workspace_reconnect", {}, context, "call-reconnect");
     assert.ok(reconnected instanceof McpNativeToolResult);
     const secondToken = (reconnected._meta?.["portable-devshell/workspace"] as { token: string }).token;
-    assert.notEqual(secondToken, firstToken);
-    await assert.rejects(
-        handler.call("workspace_snapshot", { token: firstToken }, context, "call-stale-snapshot"),
-        /authorization is invalid/i,
-    );
+    assert.equal(secondToken, firstToken);
     await assert.doesNotReject(handler.call(
         "workspace_snapshot",
-        { token: secondToken },
+        { token: firstToken },
         context,
-        "call-current-snapshot",
+        "call-sibling-snapshot",
     ));
 });
 
@@ -279,7 +275,9 @@ test("Workspace snapshot projects only compact task and background state", async
                 }]
             };
         },
-        async readToolCalls() { throw new Error("Workspace snapshot should not read tool history."); },
+        async readToolCalls() {
+            return [{ callId: "call-running", inputSummary: "long command", instance: "demo", source: "mcp", startedAt: now, status: "running", toolName: "bash_run" }];
+        },
         async readWorkspaceEvents() {
             return { events: [], gap: false, lastSeq: 7 };
         },
@@ -290,12 +288,14 @@ test("Workspace snapshot projects only compact task and background state", async
     const result = await handler.call("workspace_snapshot", { token }, context, "call-app");
     assert.ok(result instanceof McpNativeToolResult);
     const snapshot = result.structuredContent as {
+        agentBusy?: boolean;
         background?: Array<Record<string, unknown>>;
         currentEvent?: Record<string, unknown> | null;
         cursor?: number;
         tasks?: Array<Record<string, unknown>>;
     };
     assert.equal(snapshot.cursor, 7);
+    assert.equal(snapshot.agentBusy, true);
     assert.equal(snapshot.background?.[0]?.tmuxTaskId, "tmux-task-1");
     assert.equal(snapshot.background?.[0]?.taskId, "task-1");
     assert.equal(snapshot.currentEvent, null);
@@ -779,6 +779,7 @@ test("workspace_watch heartbeat reconciles from an authoritative snapshot", asyn
         changed: false,
         cursor: 11,
         snapshot: {
+            agentBusy: false,
             approvals: [],
             background: [],
             ctxId: context.ctxId,
@@ -821,11 +822,17 @@ test("workspace_ask refuses to hold a call before Workspace is open", async () =
     assert.equal(fake.waits.length, 0);
 });
 
-test("workspace_ask waits briefly for the Workspace App to finish mounting", async () => {
+test("workspace_ask waits briefly for the Workspace App to establish a live watch", async () => {
     const fake = createInteractionGateway();
+    const gateway = Object.assign(fake.gateway, {
+        async readToolCalls() { return []; },
+        async readWorkspaceEvents() { return { events: [], gap: false, lastSeq: 0 }; },
+    }) as McpWorkspaceGateway;
     const handler = new McpEndpointHandlerInteraction({
-        gateway: fake.gateway,
+        gateway,
         instanceName: "demo",
+        watchHeartbeatMs: 60_000,
+        watchPollMs: 1,
         workspaceActivationGraceMs: 100,
     });
     const opened = await handler.call("workspace_open", {}, context, "call-open");
@@ -840,7 +847,14 @@ test("workspace_ask waits briefly for the Workspace App to finish mounting", asy
         "call-agent-grace",
     );
     await new Promise((resolve) => setTimeout(resolve, 5));
-    await handler.call("workspace_snapshot", { token }, context, "call-app-ready");
+    const watchAbort = new AbortController();
+    const watch = handler.call(
+        "workspace_watch",
+        { cursor: 0, token },
+        context,
+        "call-app-watch",
+        watchAbort.signal,
+    );
     const wait = await fake.created;
     await handler.call(
         "workspace_question_answer",
@@ -849,30 +863,46 @@ test("workspace_ask waits briefly for the Workspace App to finish mounting", asy
         "call-answer",
     );
     assert.deepEqual(await held, { answer: "yes", questionId: wait.targetId });
+    watchAbort.abort();
+    await assert.rejects(watch);
 });
 
-test("workspace_ask refuses to create a held call after the Workspace App lease expires", async () => {
+test("workspace_ask refuses to create a held call after the live Workspace watch is torn down", async () => {
     const fake = createInteractionGateway();
-    let now = 1_000;
+    const gateway = Object.assign(fake.gateway, {
+        async readToolCalls() { return []; },
+        async readWorkspaceEvents() { return { events: [], gap: false, lastSeq: 0 }; },
+    }) as McpWorkspaceGateway;
     const handler = new McpEndpointHandlerInteraction({
-        gateway: fake.gateway,
+        gateway,
         instanceName: "demo",
-        now: () => now,
+        watchHeartbeatMs: 60_000,
+        watchPollMs: 1,
         workspaceActivationGraceMs: 5,
-        workspaceLivenessMs: 60_000,
     });
-    await openWorkspace(handler);
-    now += 60_001;
-
-    await assert.rejects(
-        handler.call(
-            "workspace_ask",
-            { question: "Is anyone still there?" },
-            context,
-            "call-agent-stale",
-        ),
-        /active Workspace App/i,
+    const token = await openWorkspace(handler);
+    const watchAbort = new AbortController();
+    const watch = handler.call(
+        "workspace_watch",
+        { cursor: 0, token },
+        context,
+        "call-app-watch",
+        watchAbort.signal,
     );
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    watchAbort.abort();
+    await assert.rejects(watch);
+
+    const askAbort = new AbortController();
+    const held = handler.call(
+        "workspace_ask",
+        { question: "Is anyone still there?" },
+        context,
+        "call-agent-stale",
+        askAbort.signal,
+    );
+    setTimeout(() => askAbort.abort(), 50);
+    await assert.rejects(held, /active Workspace App/i);
     assert.equal(fake.waits.length, 0);
 });
 

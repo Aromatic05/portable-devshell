@@ -189,6 +189,10 @@ test("GoalState never automatically retries an ambiguous continuation dispatch",
         () => state.continuation(document, { accepted: false, action: "report", claimId: "claim-1" }, "ctx-goal"),
         /delivery is uncertain/u,
     );
+
+    const observed = state.touch(document, "ctx-goal");
+    assert.equal(observed.result?.continuationUncertain, false);
+    assert.equal(observed.result?.continuationPending, false);
 });
 
 test("GoalState bounds terminal history without removing live Goals", () => {

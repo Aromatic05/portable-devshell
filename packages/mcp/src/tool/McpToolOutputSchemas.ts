@@ -411,6 +411,7 @@ export const workspaceApprovalRequestOutputSchema = objectSchema({
 }, ["approvalId", "callId", "createdAt", "expiresAt", "inputSummary", "instance", "reason", "riskLevel", "source", "status", "toolName"]);
 
 export const workspaceSnapshotOutputSchema: JsonValue = objectSchema({
+        agentBusy: booleanValue,
         approvals: arraySchema(workspaceApprovalRequestOutputSchema),
         background: arraySchema(workspaceBackgroundSchema),
         ctxId: nonEmptyString,
@@ -420,7 +421,7 @@ export const workspaceSnapshotOutputSchema: JsonValue = objectSchema({
         instance: nonEmptyString,
         questions: arraySchema(workspaceQuestionWaitOutputSchema),
         tasks: arraySchema(workspaceTodoTaskSummaryOutputSchema),
-}, ["approvals", "background", "ctxId", "currentEvent", "cursor", "goal", "instance", "questions", "tasks"]);
+}, ["agentBusy", "approvals", "background", "ctxId", "currentEvent", "cursor", "goal", "instance", "questions", "tasks"]);
 
 export const workspaceOpenOutputSchema: JsonValue = objectSchema({
     ctxId: nonEmptyString,

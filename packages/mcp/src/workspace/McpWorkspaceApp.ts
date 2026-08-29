@@ -98,6 +98,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var app = new App({ name: "portable-devshell-workspace", version: "0.6.8" }, {});
   var ctxId = "";
   var appToken = "";
+  var liveAuthorizationEstablished = false;
   var initialized = false;
   var snapshot = null;
   var cursor = 0;
@@ -134,7 +135,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       { name: name, arguments: input },
       signal ? { signal: signal } : undefined
     ).then(function (result) {
-      acceptMeta(result && result._meta);
+      acceptMeta(result && result._meta, true);
       return result;
     });
   }
@@ -143,9 +144,12 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return result && result.structuredContent ? result.structuredContent : result;
   }
 
-  function acceptMeta(meta) {
+  function acceptMeta(meta, authoritative) {
     var hidden = meta && meta["portable-devshell/workspace"];
-    if (hidden && hidden.token) appToken = String(hidden.token);
+    if (!hidden || !hidden.token) return;
+    if (liveAuthorizationEstablished && authoritative !== true) return;
+    appToken = String(hidden.token);
+    if (authoritative === true) liveAuthorizationEstablished = true;
   }
 
   function asRecord(value) {
@@ -189,7 +193,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     try { openai.setWidgetState(state); } catch (_) {}
   }
 
-  function activateCtxId(value) {
+  function assignCtxId(value) {
     if (!value) return false;
     var nextCtxId = String(value);
     if (ctxId && ctxId !== nextCtxId) {
@@ -197,19 +201,28 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       watchStarted = false;
       snapshot = null;
       cursor = 0;
+      appToken = "";
+      liveAuthorizationEstablished = false;
     }
     ctxId = nextCtxId;
     persistWorkspaceHint();
-    if (initialized) void startLive();
     return true;
+  }
+
+  function activateCtxId(value) {
+    var assigned = assignCtxId(value);
+    if (assigned && initialized) void startLive();
+    return assigned;
   }
 
   function acceptToolResult(result) {
     if (!result) return false;
-    acceptMeta(result._meta);
     var initial = asRecord(result.structuredContent);
-    if (!initial) return false;
-    return activateCtxId(initial.ctxId);
+    if (!initial || !initial.ctxId) return false;
+    var assigned = assignCtxId(initial.ctxId);
+    acceptMeta(result._meta, false);
+    if (assigned && initialized) void startLive();
+    return assigned;
   }
 
   function configureFromOpenAiGlobals(globals) {
@@ -276,7 +289,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
 
   function goalContinuationAvailable() {
     var goal = snapshot && snapshot.goal;
-    if (!goal || goal.status !== "active" || visibleEvent() || busy.size > 0 || recovering) return false;
+    if (!goal || goal.status !== "active" || snapshot.agentBusy || visibleEvent() || busy.size > 0 || recovering) return false;
     var background = Array.isArray(snapshot.background) ? snapshot.background : [];
     return background.length === 0;
   }

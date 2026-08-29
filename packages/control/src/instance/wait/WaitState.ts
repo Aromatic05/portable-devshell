@@ -183,7 +183,7 @@ export class WaitState {
         return this.#update(document, waitId, (record) => {
             if (
                 record.status !== "resolved" || record.detachedAt === undefined ||
-                record.recoveryMessageAttemptedAt === undefined || record.recoveryMessageSentAt !== undefined ||
+                record.recoveryMessageAttemptedAt === undefined ||
                 record.recoveryMessageId !== recoveryMessageId
             ) {
                 throw invalidTransition(record, "dismiss uncertain recovery for");

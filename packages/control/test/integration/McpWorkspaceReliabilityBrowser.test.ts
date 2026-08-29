@@ -564,6 +564,110 @@ window.addEventListener("message", function (event) {
 });
 `;
 
+
+test("Workspace ignores a stale initial tool-result token after live reconnect succeeds", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
+    await page.evaluate(LATE_INITIAL_RESULT_BRIDGE_SCRIPT);
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    const app = page.frameLocator("#workspace");
+    await app.getByText("Continue after reconnect?", { exact: true }).waitFor({ state: "visible" });
+    await page.waitForFunction("(window.__lateInitialCalls || []).some(call => call.name === 'workspace_reconnect')");
+    assert.equal(await page.evaluate("window.__deliverLateInitialResult()"), true);
+    await app.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.waitForFunction("(window.__lateInitialCalls || []).some(call => call.name === 'workspace_question_answer')");
+
+    const answerToken = await page.evaluate(
+        "(window.__lateInitialCalls || []).find(call => call.name === 'workspace_question_answer')?.arguments?.token",
+    );
+    assert.equal(answerToken, "token-new");
+    await app.getByText("Continue after reconnect?", { exact: true }).waitFor({ state: "hidden" });
+});
+
+const LATE_INITIAL_RESULT_BRIDGE_SCRIPT = String.raw`
+window.__lateInitialCalls = [];
+window.__lateInitialSource = null;
+window.__lateInitialAnswered = false;
+function lateInitialSnapshot() {
+    var question = {
+        eventName: "user.answer",
+        kind: "question",
+        name: "workspace_ask",
+        payload: { allowText: false, choices: ["Continue"], question: "Continue after reconnect?" },
+        status: "waiting",
+        updatedAt: "2026-08-30T00:00:00.000Z",
+        waitId: "wait-late-initial"
+    };
+    return {
+        approvals: [], background: [], ctxId: "ctx-late-initial",
+        currentEvent: window.__lateInitialAnswered ? null : question,
+        cursor: 1, goal: null, instance: "browser-instance",
+        questions: window.__lateInitialAnswered ? [] : [question], tasks: []
+    };
+}
+window.__deliverLateInitialResult = function () {
+    if (!window.__lateInitialSource) return false;
+    window.__lateInitialSource.postMessage({
+        jsonrpc: "2.0",
+        method: "ui/notifications/tool-result",
+        params: {
+            _meta: { "portable-devshell/workspace": { token: "token-old" } },
+            content: [{ type: "text", text: "portable-devshell Workspace opened." }],
+            structuredContent: { ctxId: "ctx-late-initial", instance: "browser-instance" }
+        }
+    }, "*");
+    return true;
+};
+window.addEventListener("message", function (event) {
+    if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
+    var source = event.source;
+    var message = event.data;
+    function reply(result) {
+        if (message.id === undefined) return;
+        source.postMessage({ id: message.id, jsonrpc: "2.0", result: result }, "*");
+    }
+    function reject(text) {
+        if (message.id === undefined) return;
+        source.postMessage({ error: { code: -32000, message: text }, id: message.id, jsonrpc: "2.0" }, "*");
+    }
+    if (message.method === "ui/initialize") {
+        window.__lateInitialSource = source;
+        source.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-input",
+            params: { arguments: { ctxId: "ctx-late-initial" } }
+        }, "*");
+        reply({ hostCapabilities: {}, hostContext: {}, hostInfo: { name: "test-host", version: "1.0.0" }, protocolVersion: "2026-01-26" });
+        return;
+    }
+    if (message.method === "ui/update-model-context") { reply({}); return; }
+    if (message.method !== "tools/call") return;
+    var call = message.params || {};
+    window.__lateInitialCalls.push(call);
+    if (call.name === "workspace_reconnect" || call.name === "workspace_snapshot") {
+        reply({ _meta: { "portable-devshell/workspace": { token: "token-new" } }, structuredContent: lateInitialSnapshot() });
+        return;
+    }
+    if (call.name === "workspace_watch") return;
+    if (call.name === "workspace_question_answer") {
+        if (call.arguments.token !== "token-new") {
+            reject("Workspace App authorization is invalid for the current Context.");
+            return;
+        }
+        window.__lateInitialAnswered = true;
+        reply({ structuredContent: { answer: "Continue", detached: false, questionId: "question-late", waitId: "wait-late-initial" } });
+    }
+});
+`;
+
 async function launchBrowser(): Promise<Browser> {
     if (CHROMIUM_EXECUTABLE === undefined) {
         throw new Error("A Chromium executable is required for this browser test.");

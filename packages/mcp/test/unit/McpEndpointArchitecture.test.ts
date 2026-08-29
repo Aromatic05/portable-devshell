@@ -4,7 +4,8 @@ import test from "node:test";
 import type {
     JsonValue,
     ToolCallContext,
-    ToolDefinition
+    ToolDefinition,
+    WaitRecord
 } from "@portable-devshell/shared";
 
 import { McpEndpointCatalog } from "../../src/endpoint/McpEndpointCatalog.ts";
@@ -162,6 +163,8 @@ test("McpEndpointCatalog keeps control tools available without a worker schema",
 
 test("McpEndpointDispatch executes environment, control, and worker domains without HTTP binding", async () => {
     const harness = createWorker();
+    const recoverableWaits: WaitRecord[] = [];
+    const dismissedRecoveries: string[] = [];
     const gateway = {
         assertReady() {},
         async callTool(): Promise<JsonValue> {
@@ -169,6 +172,27 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
         },
         async createSshInstance(): Promise<JsonValue> {
             return { created: true };
+        },
+        async createWait(): Promise<WaitRecord> { throw new Error("unused"); },
+        async detachWait(): Promise<WaitRecord> { throw new Error("unused"); },
+        async consumeWait(): Promise<WaitRecord> { throw new Error("unused"); },
+        async resolveWait(): Promise<WaitRecord> { throw new Error("unused"); },
+        async waitForWait(): Promise<WaitRecord> { throw new Error("unused"); },
+        async listWaits(): Promise<WaitRecord[]> { return recoverableWaits.map((wait) => ({ ...wait })); },
+        async listApprovals() { return []; },
+        async decideApproval() { throw new Error("unused"); },
+        async claimWaitRecovery(): Promise<WaitRecord> { throw new Error("unused"); },
+        async completeWaitRecovery(): Promise<WaitRecord> { throw new Error("unused"); },
+        async markWaitRecoveryAttempted(): Promise<WaitRecord> { throw new Error("unused"); },
+        async markWaitRecoverySent(): Promise<WaitRecord> { throw new Error("unused"); },
+        async releaseWaitRecovery(): Promise<WaitRecord> { throw new Error("unused"); },
+        async dismissWaitRecovery(_instance: string, waitId: string): Promise<WaitRecord> {
+            dismissedRecoveries.push(waitId);
+            const wait = recoverableWaits.find((entry) => entry.waitId === waitId);
+            if (wait === undefined) throw new Error("wait missing");
+            if (waitId === "wait-recovery-raced") throw new Error("already consumed by sibling Workspace App");
+            wait.status = "consumed";
+            return { ...wait };
         },
         async listInstances(): Promise<JsonValue[]> {
             return [{ name: "demo-local" }];
@@ -221,12 +245,38 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
     );
     assert.deepEqual(listed, { instances: [{ name: "demo-local" }] });
 
+    recoverableWaits.push({
+        createdAt: "2026-08-30T00:00:00.000Z",
+        createdByCtxId: environment.ctxId,
+        detachedAt: "2026-08-30T00:00:01.000Z",
+        kind: "tmux",
+        recoveryMessageAttemptedAt: "2026-08-30T00:00:02.000Z",
+        recoveryMessageId: "resume-message-1",
+        status: "resolved",
+        targetId: "tmux-task-1",
+        updatedAt: "2026-08-30T00:00:02.000Z",
+        waitId: "wait-recovery-1",
+    });
+    recoverableWaits.push({
+        createdAt: "2026-08-30T00:00:00.000Z",
+        createdByCtxId: environment.ctxId,
+        detachedAt: "2026-08-30T00:00:01.000Z",
+        kind: "tmux",
+        recoveryMessageAttemptedAt: "2026-08-30T00:00:02.000Z",
+        recoveryMessageId: "resume-message-raced",
+        status: "resolved",
+        targetId: "tmux-task-raced",
+        updatedAt: "2026-08-30T00:00:02.000Z",
+        waitId: "wait-recovery-raced",
+    });
+
     const workerResult = await dispatch.callTool(
         "bash_run",
         { command: "pwd", ctxId: environment.ctxId },
         { principal: "tester", requestId: "request-worker" }
     );
     assert.deepEqual(workerResult, { ok: true, toolName: "bash_run" });
+    assert.deepEqual(dismissedRecoveries, ["wait-recovery-1", "wait-recovery-raced"]);
     assert.deepEqual(harness.calls[0]?.input, { command: "pwd" });
     assert.deepEqual(harness.audited, [
         {

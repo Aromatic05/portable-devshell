@@ -160,6 +160,16 @@ test("WaitState fences an ambiguous recovery delivery from automatic replay", ()
         () => state.dismissRecovery(attempted.document, created.record.waitId, "wrong-message"),
         /dismiss uncertain recovery/u,
     );
+
+    const claimedAgain = state.claimRecovery(resolved.document, created.record.waitId, "claim-sent");
+    const attemptedAgain = state.markRecoveryAttempted(claimedAgain.document, created.record.waitId, "claim-sent");
+    const sent = state.markRecoverySent(attemptedAgain.document, created.record.waitId, "claim-sent");
+    const settledAfterActivity = state.dismissRecovery(
+        sent.document,
+        created.record.waitId,
+        sent.record.recoveryMessageId!,
+    );
+    assert.equal(settledAfterActivity.record.status, "consumed");
 });
 
 test("WaitStore persists wait state atomically and detaches orphaned calls after restart", async () => {

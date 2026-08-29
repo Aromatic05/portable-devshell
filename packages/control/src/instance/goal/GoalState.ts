@@ -140,7 +140,7 @@ export class GoalState {
         const current = document.goals[index]!;
         if (current.status !== "active") return { document, result: snapshot(current, this.#now()) };
         const now = this.#now();
-        const next = { ...current, lastAgentActivityAt: now };
+        const next = { ...clearContinuation(current), lastAgentActivityAt: now };
         const goals = [...document.goals];
         goals[index] = next;
         return { document: { goals, version: 1 }, result: snapshot(next, now) };

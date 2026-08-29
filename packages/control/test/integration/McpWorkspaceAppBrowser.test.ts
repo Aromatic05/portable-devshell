@@ -269,6 +269,42 @@ test("Workspace Goal requests one model continuation after inactivity", BROWSER_
     assert.deepEqual(browserFailures, []);
 });
 
+test("Workspace Goal does not auto-continue while an Agent tool call is still running", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:500px"></iframe>');
+    await page.evaluate(BRIDGE_SCRIPT);
+    await page.evaluate(() => {
+        const state = window as typeof window & {
+            __workspaceAgentBusy: boolean;
+            __workspaceApprovalPending: boolean;
+            __workspaceGoalDueNow: boolean;
+            __workspaceQuestionAnswered: boolean;
+            __workspaceWaitInterrupted: boolean;
+        };
+        state.__workspaceAgentBusy = true;
+        state.__workspaceGoalDueNow = true;
+        state.__workspaceQuestionAnswered = true;
+        state.__workspaceApprovalPending = false;
+        state.__workspaceWaitInterrupted = true;
+    });
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    await page.frameLocator("#workspace").getByText("Ship Workspace Goal mode", { exact: true }).waitFor({ state: "visible" });
+    await page.waitForTimeout(250);
+    assert.equal(
+        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue').length"),
+        0,
+    );
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
+});
+
 test("Workspace Goal respects continuation retry backoff", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
@@ -724,6 +760,7 @@ window.__workspaceCalls = [];
 window.__workspaceCancelledRequests = [];
 window.__workspaceQuestionAnswered = false;
 window.__workspaceApprovalPending = true;
+window.__workspaceAgentBusy = false;
 window.__workspaceWaitInterrupted = false;
 window.__workspaceGoalStopped = false;
 window.__workspaceGoalBlocked = false;
@@ -783,6 +820,7 @@ function snapshot(withQuestion) {
             ? approval
             : null;
     return {
+        agentBusy: window.__workspaceAgentBusy,
         activity: [{
             callId: "call-1",
             inputSummary: "bash_run command",

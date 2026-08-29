@@ -831,6 +831,52 @@ test("expired OpenAI session binding keeps its ctxId and context_renew reactivat
     assert.equal(harness.calls.at(-1)?.ctxId, acquired.ctxId);
 });
 
+test("disabled OpenAI session binding reacquires a new Context and moves the binding", async () => {
+    const ids = ["ctx-openai-disabled", "ctx-openai-replacement"];
+    const harness = createWorkerHarness();
+    const registry = new McpContextRegistry({ idFactory: () => ids.shift() ?? "ctx-unexpected" });
+    await registry.initialize();
+    const endpoint = new McpEndpointWorker({
+        contextMode: "openai-session",
+        contextRegistry: registry,
+        instanceName: "demo",
+        policy: { capabilities: ["execute"], groups: ["bash"] },
+        worker: harness.worker,
+    });
+    const requestContext = {
+        principal: "subject-1",
+        requestMeta: { "openai/session": "chat-session-disabled" },
+        requestId: "request-openai-disabled",
+    };
+
+    const first = (await endpoint.callTool(
+        "context_acquire",
+        { workspace: "/workspace/old" },
+        requestContext,
+    )) as { ctxId: string; status: string };
+    assert.equal(first.ctxId, "ctx-openai-disabled");
+    await registry.disable(first.ctxId);
+
+    const replacement = (await endpoint.callTool(
+        "context_acquire",
+        { workspace: "/workspace/new" },
+        requestContext,
+    )) as { ctxId: string; status: string; workspace: string };
+    assert.equal(replacement.ctxId, "ctx-openai-replacement");
+    assert.equal(replacement.status, "active");
+    assert.equal(replacement.workspace, "/workspace/new");
+
+    const bound = await registry.lookupExternal(
+        { kind: "openai/session", value: "chat-session-disabled" },
+        { principal: "subject-1" },
+    );
+    assert.equal(bound?.ctxId, replacement.ctxId);
+    assert.equal((await registry.lookup(first.ctxId, { principal: "subject-1" })).status, "disabled");
+
+    await endpoint.callTool("bash_run", { command: "pwd" }, requestContext);
+    assert.equal(harness.calls.at(-1)?.ctxId, replacement.ctxId);
+});
+
 test("HTTP forwards OpenAI session metadata into the generic Context binding", async () => {
     const harness = createWorkerHarness();
     const binding = createBinding(harness, { contextMode: "openai-session" });
