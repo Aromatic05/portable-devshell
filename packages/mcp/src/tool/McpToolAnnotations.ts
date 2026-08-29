@@ -27,6 +27,8 @@ const readOnlyTools = new Set([
 
 const nonDestructiveMutationTools = new Set([
     "artifact_share",
+    "context_acquire",
+    "context_renew",
     "environ_info",
     "instance_connect",
     "instance_create",
@@ -50,6 +52,8 @@ const closedWorldTools = new Set([
     "artifact_read",
     "artifact_transfer",
     "artifact_viewImage",
+    "context_acquire",
+    "context_renew",
     "environ_info",
     "file_edit",
     "file_find",

@@ -18,8 +18,8 @@ import {
     type McpToolCatalogEndpointSource
 } from "../tool/catalog/McpToolCatalogEndpoint.js";
 import {
-    McpToolCatalogEnvironment,
-    mcpEnvironmentToolName
+    isMcpEnvironmentToolName,
+    McpToolCatalogEnvironment
 } from "../tool/catalog/McpToolCatalogEnvironment.js";
 import { McpToolCatalogInstance } from "../tool/catalog/McpToolCatalogInstance.js";
 import { McpToolCatalogInteraction } from "../tool/catalog/McpToolCatalogInteraction.js";
@@ -123,10 +123,10 @@ export class McpEndpointCatalog {
     }
 
     adapt(tool: ToolDefinition): McpTool {
-        const exposed = tool.name === mcpEnvironmentToolName
+        const exposed = isMcpEnvironmentToolName(tool.name)
             ? tool
             : withMcpCommentOutputSchema(
-                  this.#contextSelector.requiresExplicitContextId ? withMcpContextId(tool) : tool
+                  withMcpContextId(tool, this.#contextSelector.requiresExplicitContextId)
               );
         const adapted = this.#schemaAdapter.toMcpTool(
             exposed,
@@ -158,7 +158,9 @@ export class McpEndpointCatalog {
     #sources(hasWorkerSchema: boolean): McpToolCatalogEndpointSource[] {
         const sources: McpToolCatalogEndpointSource[] = [{
             owner: "environment",
-            tools: this.#environmentTools.list(this.#contextSelector.requiresExplicitContextId)
+            tools: this.#environmentTools.list({
+                requireExplicitContextId: this.#contextSelector.requiresExplicitContextId
+            })
         }];
 
         if (hasWorkerSchema) {
@@ -183,13 +185,13 @@ export class McpEndpointCatalog {
             if (isMcpInteractionGateway(this.#gateway)) {
                 sources.push({
                     owner: "workspace",
-                    tools: this.#interactionTools.list(this.#contextSelector.requiresExplicitContextId)
+                    tools: this.#interactionTools.list()
                 });
             }
             sources.push(
                 {
                     owner: "todo",
-                    tools: this.#todoTools.list(this.#contextSelector.requiresExplicitContextId)
+                    tools: this.#todoTools.list()
                 },
                 {
                     owner: "instance",

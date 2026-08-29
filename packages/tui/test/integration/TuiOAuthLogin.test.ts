@@ -221,7 +221,7 @@ test("real TUI keyboard approval completes registration, authorization, token ex
             method: "POST",
         });
         assert.equal(login.status, 200);
-        assert.equal(typeof login.headers.get("mcp-session-id"), "string");
+        assert.equal(login.headers.get("mcp-session-id"), null);
 
         terminal.write("\u0004");
         await running;

@@ -67,13 +67,13 @@ const checkpointOutputSchema: JsonValue = {
     type: "object",
 };
 
-function todoTaskSummarySchema(includeCtxId: boolean): JsonValue {
+function todoTaskSummarySchema(): JsonValue {
     return {
         additionalProperties: false,
         properties: {
             checkpoint: checkpointOutputSchema,
             completed: { minimum: 0, type: "integer" },
-            ...(includeCtxId ? { ctxId: { minLength: 1, type: "string" } } : {}),
+            ctxId: { minLength: 1, type: "string" },
             currentItem: { minLength: 1, type: "string" },
             pausedAt: { minLength: 1, type: "string" },
             revision: { minimum: 0, type: "integer" },
@@ -91,7 +91,7 @@ function todoTaskSummarySchema(includeCtxId: boolean): JsonValue {
     };
 }
 
-function outputSchema(includeCtxId: boolean): JsonValue {
+function outputSchema(): JsonValue {
     return {
         additionalProperties: false,
         properties: {
@@ -102,7 +102,7 @@ function outputSchema(includeCtxId: boolean): JsonValue {
             revision: { minimum: 0, type: "integer" },
             summary: todoSummarySchema,
             taskId: { minLength: 1, type: "string" },
-            tasks: { items: todoTaskSummarySchema(includeCtxId), type: "array" },
+            tasks: { items: todoTaskSummarySchema(), type: "array" },
             title: { minLength: 1, type: "string" }
         },
         required: ["items", "revision", "summary"],
@@ -133,7 +133,7 @@ export class McpToolCatalogTodo {
                 type: "object",
             },
             name: "todo_read",
-            outputSchema: outputSchema(true),
+            outputSchema: outputSchema(),
         },
         {
             requiredCapabilities: [],
@@ -185,7 +185,7 @@ export class McpToolCatalogTodo {
                 type: "object",
             },
             name: "todo_write",
-            outputSchema: outputSchema(true),
+            outputSchema: outputSchema(),
         },
     ];
 
@@ -197,27 +197,7 @@ export class McpToolCatalogTodo {
         return this.get(name) !== undefined;
     }
 
-    list(requiresExplicitContextId = true): ToolDefinition[] {
-        return this.#definitions.map((definition) => ({
-            ...definition,
-            ...(definition.name === "todo_read" && !requiresExplicitContextId ? {
-                description: "Read todo plans for the current host session. With no selector, list only tasks currently attached to this session. A known taskId may explicitly read a durable task from another Context for handoff. Use todo tools only for multi-step tasks.",
-                inputSchema: {
-                    additionalProperties: false,
-                    properties: {
-                        taskId: {
-                            description: "Stable durable task identifier. Pass a known taskId to explicitly hand off a task from another Context.",
-                            minLength: 1,
-                            type: "string"
-                        }
-                    },
-                    type: "object"
-                }
-            } : {}),
-            ...(definition.name === "todo_write" && !requiresExplicitContextId ? {
-                description: "Replace one task's complete plan; this is not a patch. Create a new task with revision 0 and no taskId. Every update to an existing durable task must pass its stable taskId; doing so explicitly attaches that task to the current host session. Preserve the immutable title. Each item requires a unique id, content, and status, with at most one in_progress item. checkpoint is optional durable handoff context and should be updated at meaningful progress boundaries."
-            } : {}),
-            outputSchema: outputSchema(requiresExplicitContextId),
-        }));
+    list(): ToolDefinition[] {
+        return this.#definitions.map((definition) => ({ ...definition }));
     }
 }

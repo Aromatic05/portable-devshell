@@ -11,7 +11,6 @@ import type {
     WaitRecord
 } from "@portable-devshell/shared";
 
-import { createMcpContextSelector, type McpContextSelector } from "../../context/McpContextSelector.js";
 import {
     isMcpGoalGateway,
     isMcpInteractionGateway,
@@ -27,19 +26,15 @@ import { McpNativeToolResult, type McpEndpointResult } from "../McpEndpointResul
 
 export class McpEndpointHandlerInteraction {
     readonly #appStates = new Map<string, { lastSeenAt?: number; token: string }>();
-    readonly #contextSelector: McpContextSelector;
 
     constructor(private readonly options: {
-        contextSelector?: McpContextSelector;
         gateway?: McpInstanceGateway;
         instanceName: string;
         now?: () => number;
         watchHeartbeatMs?: number;
         watchPollMs?: number;
         workspaceLivenessMs?: number;
-    }) {
-        this.#contextSelector = options.contextSelector ?? createMcpContextSelector("explicit");
-    }
+    }) {}
 
     async call(
         toolName: McpToolCatalogInteractionName,
@@ -104,10 +99,7 @@ export class McpEndpointHandlerInteraction {
             app?.lastSeenAt === undefined ||
             now - app.lastSeenAt > (this.options.workspaceLivenessMs ?? 60_000)
         ) {
-            const selector = this.#contextSelector.requiresExplicitContextId
-                ? "this ctxId"
-                : "the current host session";
-            throw new Error(`workspace_ask requires an active Workspace App for ${selector}; call workspace_open and keep the panel open.`);
+            throw new Error("workspace_ask requires an active Workspace App for this ctxId; call workspace_open and keep the panel open.");
         }
         const goalGateway = isMcpGoalGateway(this.options.gateway) ? this.options.gateway : undefined;
         const goal = await goalGateway?.readGoal(this.options.instanceName, ctxId);
@@ -154,10 +146,7 @@ export class McpEndpointHandlerInteraction {
     #openWorkspace(context: ToolCallContext): McpNativeToolResult {
         const ctxId = requireCtxId(context);
         return this.#workspaceResult(ctxId, {
-            contextSelector: {
-                requiresExplicitContextId: this.#contextSelector.requiresExplicitContextId,
-            },
-            ...(this.#contextSelector.requiresExplicitContextId ? { ctxId } : {}),
+            ctxId,
             instance: this.options.instanceName,
         }, [
             { type: "text", text: "portable-devshell Workspace opened." }
@@ -175,10 +164,7 @@ export class McpEndpointHandlerInteraction {
                 app?.lastSeenAt === undefined ||
                 now - app.lastSeenAt > (this.options.workspaceLivenessMs ?? 60_000)
             ) {
-                const selector = this.#contextSelector.requiresExplicitContextId
-                    ? "this ctxId"
-                    : "the current host session";
-                throw new Error(`workspace_goal start requires an active Workspace App for ${selector}; call workspace_open and wait for the panel to connect.`);
+                throw new Error("workspace_goal start requires an active Workspace App for this ctxId; call workspace_open and wait for the panel to connect.");
             }
         }
         const goal = await gateway.manageGoal(
@@ -524,10 +510,7 @@ export class McpEndpointHandlerInteraction {
                     updatedAt: wait.updatedAt,
                     waitId: wait.waitId,
                 })),
-            contextSelector: {
-                requiresExplicitContextId: this.#contextSelector.requiresExplicitContextId,
-            },
-            ...(this.#contextSelector.requiresExplicitContextId ? { ctxId } : {}),
+            ctxId,
             currentEvent: workspaceCurrentEvent(ownedWaits, ownedApprovals),
             cursor: eventSlice.lastSeq,
             goal: goal ?? null,

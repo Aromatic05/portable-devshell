@@ -7,14 +7,11 @@ import {
     workspaceGoalContinuationOutputSchema,
     workspaceGoalResultOutputSchema,
     workspaceOpenOutputSchema,
-    workspaceOpenOutputSchemaForContextMode,
     workspaceQuestionAnswerOutputSchema,
     workspaceSnapshotOutputSchema,
-    workspaceSnapshotOutputSchemaForContextMode,
     workspaceWaitInterruptOutputSchema,
     workspaceWaitRecoveryOutputSchema,
     workspaceWatchOutputSchema,
-    workspaceWatchOutputSchemaForContextMode,
 } from "../McpToolOutputSchemas.js";
 
 export type McpToolCatalogInteractionName =
@@ -309,29 +306,7 @@ export class McpToolCatalogInteraction {
         },
     ];
 
-    list(requiresExplicitContextId = true): ToolDefinition[] {
-        return this.#definitions.map((definition) => {
-            if (requiresExplicitContextId) return { ...definition };
-            if (definition.name === "workspace_ask") {
-                return {
-                    ...definition,
-                    description: "Ask the user one question in the active Workspace and wait for their answer without ending the current model turn. An active Workspace App is required for the current host session. Use this only when progress genuinely requires human input. Durable Goal or Todo association is inferred automatically when available."
-                };
-            }
-            if (definition.name === "workspace_open") {
-                return {
-                    ...definition,
-                    description: "Open the portable-devshell Workspace control surface for the current host session. The visible App is attached to this tool result, while Workspace state remains durable for the session Context. Reopen it only when the user needs the panel again or a human-interaction tool reports that the App is no longer active.",
-                    outputSchema: workspaceOpenOutputSchemaForContextMode(false),
-                };
-            }
-            if (definition.name === "workspace_snapshot") {
-                return { ...definition, outputSchema: workspaceSnapshotOutputSchemaForContextMode(false) };
-            }
-            if (definition.name === "workspace_watch") {
-                return { ...definition, outputSchema: workspaceWatchOutputSchemaForContextMode(false) };
-            }
-            return { ...definition };
-        });
+    list(): ToolDefinition[] {
+        return this.#definitions.map((definition) => ({ ...definition }));
     }
 }

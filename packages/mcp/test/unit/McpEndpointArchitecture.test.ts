@@ -356,6 +356,97 @@ test("Workspace authorization metadata never enters audit results or MCP events"
     assert.equal(JSON.stringify(harness.events).includes(token), false);
 });
 
+test("OpenAI session resolves Workspace once and the App continues by ctxId without session metadata", async () => {
+    const harness = createWorker({ tools: [] });
+    const unused = async () => {
+        throw new Error("unused");
+    };
+    const gateway = {
+        consumeWait: unused,
+        createWait: unused,
+        decideApproval: unused,
+        detachWait: unused,
+        listApprovals: async () => [],
+        listTools: () => [],
+        listWaits: async () => [],
+        async readTodo() {
+            return {
+                items: [],
+                revision: 0,
+                summary: { completed: 0, total: 0 },
+                tasks: [],
+            };
+        },
+        async readToolCalls() {
+            return [];
+        },
+        async readWorkspaceEvents() {
+            return { events: [], gap: false, lastSeq: 0 };
+        },
+        resolveWait: unused,
+        waitForWait: unused,
+    } as never;
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-workspace-session",
+    });
+    await registry.initialize();
+    const contextSelector = createMcpContextSelector("openai-session");
+    const catalog = new McpEndpointCatalog({
+        contextSelector,
+        gateway,
+        instanceName: "demo-local",
+        policy: { capabilities: [], groups: ["workspace"] },
+        worker: harness.worker,
+    });
+    const dispatch = new McpEndpointDispatch({
+        catalog,
+        contextRegistry: registry,
+        contextSelector,
+        gateway,
+        instanceName: "demo-local",
+        worker: harness.worker,
+    });
+    const sessionContext = {
+        principal: "tester",
+        requestId: "workspace-session-acquire",
+        requestMeta: { "openai/session": "openai-workspace-session" },
+    };
+
+    const acquired = (await dispatch.callTool(
+        "context_acquire",
+        { workspace: "/workspace" },
+        sessionContext,
+    )) as { ctxId: string };
+    assert.equal(acquired.ctxId, "ctx-workspace-session");
+
+    const opened = await dispatch.callTool(
+        "workspace_open",
+        {},
+        { ...sessionContext, requestId: "workspace-session-open" },
+    );
+    assert.ok(opened instanceof McpNativeToolResult);
+    assert.equal(
+        (opened.structuredContent as { ctxId?: string }).ctxId,
+        acquired.ctxId,
+    );
+    const token = (
+        opened._meta?.["portable-devshell/workspace"] as
+            { token?: string } | undefined
+    )?.token;
+    if (typeof token !== "string") throw new Error("workspace token missing");
+
+    const snapshot = await dispatch.callTool(
+        "workspace_snapshot",
+        { ctxId: acquired.ctxId, token },
+        { principal: "tester", requestId: "workspace-app-snapshot" },
+    );
+    assert.ok(snapshot instanceof McpNativeToolResult);
+    assert.equal(
+        (snapshot.structuredContent as { ctxId?: string }).ctxId,
+        acquired.ctxId,
+    );
+});
+
 test("legacy aliases still obey the current MCP policy", async () => {
     const harness = createWorker();
     const gateway = {
@@ -590,32 +681,35 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     assert.equal(waits.find((entry) => entry.waitId === "wait-restored")?.result, terminalResults.get("task-2"));
 });
 
-test("OpenAI session selector replacement happens only after audited environ_info succeeds", async () => {
+test("failed environ_info rolls back only the undisclosed explicit Context", async () => {
     const ids = ["ctx-session-old", "ctx-session-new"];
     const registry = new McpContextRegistry({ idFactory: () => ids.shift()! });
-    const externalSelector = { kind: "openai/session", value: "chat-session" };
     const oldContext = await registry.create({
         instance: "demo-local",
         principal: "tester",
-        workspace: "/projects/old"
-    });
-    await registry.bindSelector(oldContext.ctxId, externalSelector, {
-        instance: "demo-local",
-        principal: "tester"
+        workspace: "/projects/old",
     });
     const stoppedGoals: string[] = [];
     const gateway = {
-        async goalContinuation() { return {}; },
-        async manageGoal(_instance: string, input: { action: string }, ctxId: string) {
+        async goalContinuation() {
+            return {};
+        },
+        async manageGoal(
+            _instance: string,
+            input: { action: string },
+            ctxId: string,
+        ) {
             if (input.action === "stop") stoppedGoals.push(ctxId);
             return undefined;
         },
         async readGoal(_instance: string, ctxId: string) {
-            return ctxId === oldContext.ctxId ? goalSnapshot("goal-old") : undefined;
+            return ctxId === oldContext.ctxId
+                ? goalSnapshot("goal-old")
+                : undefined;
         },
     } as never;
     const harness = createWorker({ failAuditAfterOperation: true });
-    const contextSelector = createMcpContextSelector("openai-session");
+    const contextSelector = createMcpContextSelector("explicit");
     const catalog = new McpEndpointCatalog({
         contextSelector,
         instanceName: "demo-local",
@@ -635,55 +729,60 @@ test("OpenAI session selector replacement happens only after audited environ_inf
         dispatch.callTool(
             "environ_info",
             { workspace: "/projects/new" },
-            { principal: "tester", requestId: "request-session", requestMeta: { "openai/session": "chat-session" } },
+            { principal: "tester", requestId: "request-explicit" },
         ),
         /audit finalize failed/u,
     );
 
     assert.equal(
-        (await registry.validateAndTouchSelector(externalSelector, {
-            instance: "demo-local",
-            principal: "tester"
-        })).ctxId,
-        oldContext.ctxId
+        (
+            await registry.validateAndTouch(oldContext.ctxId, {
+                principal: "tester",
+            })
+        ).ctxId,
+        oldContext.ctxId,
     );
-    assert.deepEqual((await registry.list()).map(({ ctxId, status }) => ({ ctxId, status })), [
-        { ctxId: oldContext.ctxId, status: "active" }
-    ]);
+    assert.deepEqual(
+        (await registry.list()).map(({ ctxId, status }) => ({ ctxId, status })),
+        [{ ctxId: oldContext.ctxId, status: "active" }],
+    );
     assert.deepEqual(stoppedGoals, []);
     assert.deepEqual(harness.releasedAlerts, ["/projects/new"]);
 });
 
-test("successful OpenAI session selector replacement retires the old environment", async () => {
+test("successful environ_info creates a new explicit Context without retiring older Contexts", async () => {
     const ids = ["ctx-session-old", "ctx-session-new"];
     const registry = new McpContextRegistry({ idFactory: () => ids.shift()! });
-    const externalSelector = { kind: "openai/session", value: "chat-session" };
     const oldContext = await registry.create({
         instance: "demo-local",
         principal: "tester",
-        workspace: "/projects/old"
-    });
-    await registry.bindSelector(oldContext.ctxId, externalSelector, {
-        instance: "demo-local",
-        principal: "tester"
+        workspace: "/projects/old",
     });
     const releasedAlerts: string[] = [];
     const stoppedGoals: string[] = [];
     const gateway = {
-        async goalContinuation() { return {}; },
-        async manageGoal(_instance: string, input: { action: string }, ctxId: string) {
+        async goalContinuation() {
+            return {};
+        },
+        async manageGoal(
+            _instance: string,
+            input: { action: string },
+            ctxId: string,
+        ) {
             if (input.action === "stop") stoppedGoals.push(ctxId);
             return undefined;
         },
         async readGoal(_instance: string, ctxId: string) {
-            return ctxId === oldContext.ctxId ? goalSnapshot("goal-old") : undefined;
+            return ctxId === oldContext.ctxId
+                ? goalSnapshot("goal-old")
+                : undefined;
         },
         async releaseAlerts(_instance: string, workspace: string) {
             releasedAlerts.push(workspace);
         },
     } as never;
     const harness = createWorker();
-    const contextSelector = createMcpContextSelector("openai-session");
+    const contextSelector = createMcpContextSelector("explicit");
     const catalog = new McpEndpointCatalog({
         contextSelector,
         instanceName: "demo-local",
@@ -699,23 +798,60 @@ test("successful OpenAI session selector replacement retires the old environment
         worker: harness.worker,
     });
 
-    await dispatch.callTool(
+    const created = await dispatch.callTool(
         "environ_info",
         { workspace: "/projects/new" },
-        { principal: "tester", requestId: "request-session", requestMeta: { "openai/session": "chat-session" } },
+        { principal: "tester", requestId: "request-explicit" },
     );
 
-    const selected = await registry.validateAndTouchSelector(externalSelector, {
-        instance: "demo-local",
-        principal: "tester"
+    const createdCtxId = (created as { ctxId?: string }).ctxId;
+    assert.equal(createdCtxId, "ctx-session-new");
+    const selected = await registry.validateAndTouch(createdCtxId!, {
+        principal: "tester",
     });
     assert.equal(selected.workspace, "/projects/new");
-    assert.deepEqual((await registry.list()).map(({ ctxId, status }) => ({ ctxId, status })), [
-        { ctxId: oldContext.ctxId, status: "disabled" },
-        { ctxId: selected.ctxId, status: "active" }
-    ]);
-    assert.deepEqual(stoppedGoals, [oldContext.ctxId]);
-    assert.deepEqual(releasedAlerts, ["/projects/old"]);
+    assert.deepEqual(
+        (await registry.list()).map(({ ctxId, status }) => ({ ctxId, status })),
+        [
+            { ctxId: oldContext.ctxId, status: "active" },
+            { ctxId: selected.ctxId, status: "active" },
+        ],
+    );
+    assert.deepEqual(stoppedGoals, []);
+    assert.deepEqual(releasedAlerts, []);
+});
+
+test("environ_info releases the previous workspace alert lease after an explicit Context switches workspace", async () => {
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-switch-workspace",
+    });
+    const context = await registry.create({
+        instance: "demo-local",
+        principal: "tester",
+        workspace: "/projects/old",
+    });
+    const harness = createWorker();
+    const catalog = new McpEndpointCatalog({
+        instanceName: "demo-local",
+        policy: { capabilities: ["read"], groups: ["file"] },
+        worker: harness.worker,
+    });
+    const dispatch = new McpEndpointDispatch({
+        catalog,
+        contextRegistry: registry,
+        instanceName: "demo-local",
+        worker: harness.worker,
+    });
+
+    const result = await dispatch.callTool(
+        "environ_info",
+        { ctxId: context.ctxId, workspace: "/projects/new" },
+        { principal: "tester", requestId: "request-switch-workspace" },
+    );
+
+    assert.equal((result as { ctxId?: string }).ctxId, context.ctxId);
+    assert.equal((await registry.list())[0]?.workspace, "/projects/new");
+    assert.deepEqual(harness.releasedAlerts, ["/projects/old"]);
 });
 
 test("environ_info rolls back an undisclosed Context when post-create event recording fails", async () => {

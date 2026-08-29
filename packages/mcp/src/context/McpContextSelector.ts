@@ -6,11 +6,11 @@ import {
     type McpContextRecord,
 } from "@portable-devshell/shared";
 
-import { readMcpContextInput } from "../endpoint/McpEndpointInput.js";
+import { readOptionalMcpContextInput } from "../endpoint/McpEndpointInput.js";
 import type { McpEndpointCallContext } from "../endpoint/McpEndpointPort.js";
 import {
     McpContextRegistry,
-    type McpContextExternalSelector,
+    type McpContextExternalBinding,
 } from "./McpContextRegistry.js";
 
 export interface McpResolvedContext {
@@ -21,7 +21,9 @@ export interface McpResolvedContext {
 export interface McpContextSelector {
     readonly id: ControlMcpContextMode;
     readonly requiresExplicitContextId: boolean;
-    binding(requestContext: McpEndpointCallContext): McpContextExternalSelector | undefined;
+    bindings(
+        requestContext: McpEndpointCallContext,
+    ): McpContextExternalBinding[];
     expose(record: McpContextRecord): Record<string, JsonValue>;
     resolve(
         registry: McpContextRegistry,
@@ -31,18 +33,29 @@ export interface McpContextSelector {
     ): Promise<McpResolvedContext>;
 }
 
-export function createMcpContextSelector(mode: ControlMcpContextMode): McpContextSelector {
-    return mode === "openai-session"
-        ? new OpenAiSessionContextSelector()
-        : new ExplicitContextSelector();
+export function createMcpContextSelector(
+    mode: ControlMcpContextMode = "explicit",
+): McpContextSelector {
+    return new UnifiedContextSelector(mode);
 }
 
-class ExplicitContextSelector implements McpContextSelector {
-    readonly id = "explicit" as const;
-    readonly requiresExplicitContextId = true;
+class UnifiedContextSelector implements McpContextSelector {
+    readonly id: ControlMcpContextMode;
+    readonly requiresExplicitContextId: boolean;
 
-    binding(): undefined {
-        return undefined;
+    constructor(mode: ControlMcpContextMode) {
+        this.id = mode;
+        this.requiresExplicitContextId = mode === "explicit";
+    }
+
+    bindings(
+        requestContext: McpEndpointCallContext,
+    ): McpContextExternalBinding[] {
+        if (this.id !== "openai-session") return [];
+        const session = requestContext.requestMeta?.["openai/session"];
+        return typeof session === "string" && session.length > 0
+            ? [{ kind: "openai/session", value: session }]
+            : [];
     }
 
     expose(record: McpContextRecord): Record<string, JsonValue> {
@@ -53,54 +66,45 @@ class ExplicitContextSelector implements McpContextSelector {
         registry: McpContextRegistry,
         input: JsonValue,
         requestContext: McpEndpointCallContext,
+        _instanceName: string,
     ): Promise<McpResolvedContext> {
-        const contextInput = readMcpContextInput(input);
-        return {
-            input: contextInput.input,
-            record: await registry.validateAndTouch(contextInput.ctxId, {
+        const contextInput = readOptionalMcpContextInput(input);
+        if (contextInput.ctxId !== undefined) {
+            return {
+                input: contextInput.input,
+                record: await registry.validateAndTouch(contextInput.ctxId, {
+                    principal: requestContext.principal,
+                }),
+            };
+        }
+        let boundCtxId: string | undefined;
+        for (const binding of this.bindings(requestContext)) {
+            const record = await registry.lookupExternal(binding, {
                 principal: requestContext.principal,
-            }),
-        };
+            });
+            if (record === undefined) continue;
+            if (boundCtxId !== undefined && boundCtxId !== record.ctxId) {
+                throw createError({
+                    code: errorCodes.mcpContextInvalid,
+                    message: "External Context bindings disagree on ctxId.",
+                    retryable: false,
+                });
+            }
+            boundCtxId = record.ctxId;
+        }
+        if (boundCtxId !== undefined) {
+            return {
+                input: contextInput.input,
+                record: await registry.validateAndTouch(boundCtxId, {
+                    principal: requestContext.principal,
+                }),
+            };
+        }
+        throw createError({
+            code: errorCodes.mcpContextInvalid,
+            message:
+                "No Context is bound to this request. Call context_acquire or provide ctxId.",
+            retryable: false,
+        });
     }
-}
-
-class OpenAiSessionContextSelector implements McpContextSelector {
-    readonly id = "openai-session" as const;
-    readonly requiresExplicitContextId = false;
-
-    binding(requestContext: McpEndpointCallContext): McpContextExternalSelector {
-        return {
-            kind: "openai/session",
-            value: requireOpenAiSession(requestContext),
-        };
-    }
-
-    expose(): Record<string, JsonValue> {
-        return {};
-    }
-
-    async resolve(
-        registry: McpContextRegistry,
-        input: JsonValue,
-        requestContext: McpEndpointCallContext,
-        instanceName: string,
-    ): Promise<McpResolvedContext> {
-        return {
-            input,
-            record: await registry.validateAndTouchSelector(this.binding(requestContext), {
-                instance: instanceName,
-                principal: requestContext.principal,
-            }),
-        };
-    }
-}
-
-function requireOpenAiSession(context: McpEndpointCallContext): string {
-    const value = context.requestMeta?.["openai/session"];
-    if (typeof value === "string" && value.length > 0) return value;
-    throw createError({
-        code: errorCodes.mcpContextInvalid,
-        message: "This endpoint uses OpenAI session context mode, but the client did not provide _meta['openai/session'].",
-        retryable: false,
-    });
 }

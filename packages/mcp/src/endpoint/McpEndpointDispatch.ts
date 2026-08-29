@@ -101,14 +101,8 @@ export class McpEndpointDispatch {
             ...controlOptions,
             contextRegistry: this.#contextRegistry
         });
-        this.#interaction = new McpEndpointHandlerInteraction({
-            ...controlOptions,
-            contextSelector: this.#contextSelector
-        });
-        this.#todo = new McpEndpointHandlerTodo({
-            ...controlOptions,
-            contextSelector: this.#contextSelector
-        });
+        this.#interaction = new McpEndpointHandlerInteraction(controlOptions);
+        this.#todo = new McpEndpointHandlerTodo(controlOptions);
         this.#workerHandler = new McpEndpointHandlerWorker({
             catalog: options.catalog,
             gateway: options.gateway,

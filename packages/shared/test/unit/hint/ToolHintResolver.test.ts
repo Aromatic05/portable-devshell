@@ -318,11 +318,16 @@ test("cross-tool error hints apply to any tool and walk the cause chain", () => 
     assert.deepEqual(codes(wrapped), ["core.workerStartFailed", "core.providerFailed"]);
 });
 
-test("context expired and invalid remain distinct error classes", () => {
+test("context expired, disabled, and invalid remain distinct error classes", () => {
     const expired = resolveErrorHints("bash_run", body("mcp.contextExpired"));
     assert.deepEqual(codes(expired), ["mcp.contextExpired"]);
+    assert.match(expired[0]?.text ?? "", /context_renew/u);
+    const disabled = resolveErrorHints("bash_run", body("mcp.contextDisabled"));
+    assert.deepEqual(codes(disabled), ["mcp.contextDisabled"]);
+    assert.match(disabled[0]?.text ?? "", /context_acquire/u);
     const invalid = resolveErrorHints("bash_run", body("mcp.contextInvalid"));
     assert.deepEqual(codes(invalid), ["mcp.contextInvalid"]);
+    assert.match(invalid[0]?.text ?? "", /context_acquire/u);
 });
 
 test("unclassified errors fall back to a safe unknown hint", () => {

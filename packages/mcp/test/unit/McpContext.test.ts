@@ -72,7 +72,7 @@ test("McpContextRegistry persists active contexts and renews their sliding expir
     }
 });
 
-test("McpContextRegistry keeps external selectors private and durable", async () => {
+test("McpContextRegistry keeps external bindings private and does not retire the previous Context", async () => {
     const root = await createTestTempDirectory("context-external-selector");
     const filePath = join(root, "contexts.json");
     const ids = ["ctx-session-old", "ctx-session-current"];
@@ -90,15 +90,9 @@ test("McpContextRegistry keeps external selectors private and durable", async ()
             principal: "subject-1",
             workspace: "/old"
         });
-        await registry.bindSelector(oldContext.ctxId, selector, {
-            instance: "demo-local",
-            principal: "subject-1"
-        });
+        await registry.bindExternal(oldContext.ctxId, selector, { principal: "subject-1" });
         assert.equal(
-            (await registry.validateAndTouchSelector(selector, {
-                instance: "demo-local",
-                principal: "subject-1"
-            })).ctxId,
+            (await registry.resolveExternal(selector, { principal: "subject-1" })).ctxId,
             oldContext.ctxId
         );
         assert.equal("externalSelector" in (await registry.list())[0]!, false);
@@ -108,46 +102,34 @@ test("McpContextRegistry keeps external selectors private and durable", async ()
             principal: "subject-1",
             workspace: "/current"
         });
-        await registry.bindSelector(current.ctxId, selector, {
-            instance: "demo-local",
-            principal: "subject-1"
-        });
+        await registry.bindExternal(current.ctxId, selector, { principal: "subject-1" });
         assert.equal(
-            (await registry.validateAndTouchSelector(selector, {
-                instance: "demo-local",
-                principal: "subject-1"
-            })).ctxId,
+            (await registry.resolveExternal(selector, { principal: "subject-1" })).ctxId,
             current.ctxId
         );
         const publicContexts = await registry.list();
-        assert.equal(publicContexts.find(({ ctxId }) => ctxId === oldContext.ctxId)?.status, "disabled");
-        assert.equal(publicContexts.some((record) => "externalSelector" in record), false);
+        assert.equal(publicContexts.find(({ ctxId }) => ctxId === oldContext.ctxId)?.status, "active");
+        assert.equal(publicContexts.some((record) => "externalBindings" in record), false);
         await assert.rejects(
-            registry.validateAndTouchSelector(selector, {
-                instance: "demo-local",
-                principal: "subject-2"
-            }),
+            registry.resolveExternal(selector, { principal: "subject-2" }),
             hasCode("mcp.contextInvalid")
         );
 
         const reloaded = new McpContextRegistry({ filePath });
         await reloaded.initialize();
         assert.equal(
-            (await reloaded.validateAndTouchSelector(selector, {
-                instance: "demo-local",
-                principal: "subject-1"
-            })).ctxId,
+            (await reloaded.resolveExternal(selector, { principal: "subject-1" })).ctxId,
             current.ctxId
         );
         assert.match(await readFile(filePath, "utf8"), /test\/session/u);
         assert.match(await readFile(filePath, "utf8"), /chat-session-1/u);
-        assert.equal("externalSelector" in (await reloaded.list())[1]!, false);
+        assert.equal((await reloaded.list()).some((record) => "externalBindings" in record), false);
     } finally {
         await rm(root, { force: true, recursive: true });
     }
 });
 
-test("McpContextRegistry migrates persisted OpenAI session selectors to generic external selectors", async () => {
+test("McpContextRegistry migrates persisted OpenAI session selectors to generic external bindings", async () => {
     const root = await createTestTempDirectory("context-legacy-openai-selector");
     const filePath = join(root, "contexts.json");
     try {
@@ -171,12 +153,42 @@ test("McpContextRegistry migrates persisted OpenAI session selectors to generic 
             now: () => Date.parse("2026-08-20T00:00:00.000Z")
         });
         await registry.initialize();
-        const selected = await registry.validateAndTouchSelector(
+        const selected = await registry.resolveExternal(
             { kind: "openai/session", value: "chat-session-legacy" },
-            { instance: "demo-local", principal: "subject-1" }
+            { principal: "subject-1" }
         );
         assert.equal(selected.ctxId, "ctx-legacy-session");
         assert.equal("externalSelector" in (await registry.list())[0]!, false);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("McpContextRegistry rejects malformed legacy external bindings instead of silently dropping them", async () => {
+    const root = await createTestTempDirectory("context-malformed-legacy-binding");
+    const filePath = join(root, "contexts.json");
+    try {
+        await writeFile(filePath, JSON.stringify({
+            contexts: [{
+                createdAt: "2026-08-19T00:00:00.000Z",
+                ctxId: "ctx-malformed-session",
+                environments: [{ instance: "demo-local", workspace: "/workspace" }],
+                expiresAt: "2026-08-21T00:00:00.000Z",
+                externalSelector: { kind: "openai/session", value: "" },
+                instance: "demo-local",
+                lastAccessedAt: "2026-08-19T00:00:00.000Z",
+                principal: "subject-1",
+                status: "active",
+                workspace: "/workspace"
+            }],
+            version: 1
+        }));
+        const registry = new McpContextRegistry({
+            filePath,
+            now: () => Date.parse("2026-08-20T00:00:00.000Z")
+        });
+        await registry.initialize();
+        assert.deepEqual(await registry.list(), []);
     } finally {
         await rm(root, { force: true, recursive: true });
     }
@@ -426,7 +438,7 @@ test("McpHost context admin releases alerts only after the last workspace contex
     assert.deepEqual(touched, ["/projects/beta"]);
 });
 
-test("McpEndpointWorker exposes environ_info and requires ctxId on every other tool", async () => {
+test("McpEndpointWorker exposes Context tools while explicit mode still requires a resolvable Context at runtime", async () => {
     let now = 1_000;
     const registry = new McpContextRegistry({ idFactory: () => "ctx-created", now: () => now, ttlMs: 100 });
     await registry.initialize();
@@ -497,10 +509,22 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
     const tools = endpoint.listTools();
     const bashTool = tools.find((tool) => tool.name === "bash_run");
     const environmentTool = tools.find((tool) => tool.name === "environ_info");
+    const acquireTool = tools.find((tool) => tool.name === "context_acquire");
+    const renewTool = tools.find((tool) => tool.name === "context_renew");
+    const renewSchema = renewTool?.inputSchema as { required?: string[] } | undefined;
     const bashSchema = bashTool?.inputSchema as { properties?: Record<string, unknown>; required?: string[] };
     assert.ok(bashSchema.properties?.ctxId);
     assert.equal(bashTool?.title, "Run shell command");
+    assert.equal(acquireTool?.title, "Acquire context");
+    assert.equal(renewTool?.title, "Renew context");
     assert.equal(environmentTool?.title, "Create environment");
+    assert.deepEqual(acquireTool?.annotations, {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+        readOnlyHint: false
+    });
+    assert.deepEqual(renewTool?.annotations, acquireTool?.annotations);
     assert.deepEqual(bashTool?.annotations, {
         destructiveHint: true,
         idempotentHint: false,
@@ -515,6 +539,9 @@ test("McpEndpointWorker exposes environ_info and requires ctxId on every other t
     });
     assert.equal(bashSchema.required?.includes("ctxId"), true);
     assert.equal(bashSchema.required?.includes("command"), true);
+    assert.notEqual(tools.find((tool) => tool.name === "context_acquire"), undefined);
+    assert.notEqual(renewTool, undefined);
+    assert.equal(renewSchema?.required?.includes("ctxId"), true);
 
     const environment = await endpoint.callTool(
         "environ_info",

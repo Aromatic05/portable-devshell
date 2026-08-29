@@ -347,7 +347,7 @@ test("Workspace Goal does not continue while a detached wait is still pending", 
     );
 });
 
-test("Workspace App uses OpenAI session context without sending or injecting ctxId", BROWSER_TEST_OPTIONS, async (t) => {
+test("Workspace App keeps the internal ctxId even when Context selection came from an external session", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
 
@@ -374,7 +374,8 @@ test("Workspace App uses OpenAI session context without sending or injecting ctx
         arguments?: Record<string, unknown>;
         name?: string;
     }>;
-    assert.equal(calls.some((call) => Object.hasOwn(call.arguments ?? {}, "ctxId")), false);
+    assert.equal(calls.length > 0, true);
+    assert.equal(calls.every((call) => call.arguments?.ctxId === "ctx-session-mode"), true);
     const answer = calls.find((call) => call.name === "workspace_question_answer");
     assert.equal(answer?.arguments?.token, "session-mode-token");
     assert.equal(answer?.arguments?.waitId, "wait-session-question");
@@ -384,11 +385,63 @@ test("Workspace App uses OpenAI session context without sending or injecting ctx
     }>;
     assert.equal(contexts.length > 0, true);
     assert.equal(
-        contexts.some((entry) => Object.hasOwn(entry.structuredContent?.portableDevshellWorkspace ?? {}, "ctxId")),
-        false
+        contexts.every((entry) => entry.structuredContent?.portableDevshellWorkspace?.ctxId === "ctx-session-mode"),
+        true
     );
     assert.deepEqual(browserFailures, []);
 });
+
+test(
+    "Workspace App resumes after a delayed initial tool result instead of staying in Waiting",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
+
+        const page = await browser.newPage();
+        const browserFailures: string[] = [];
+        page.on("console", (message) => {
+            if (message.type() === "error")
+                browserFailures.push(`console: ${message.text()}`);
+        });
+        page.on("pageerror", (error) =>
+            browserFailures.push(`pageerror: ${error.message}`),
+        );
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:320px"></iframe>',
+        );
+        await page.evaluate(DELAYED_CONTEXT_BRIDGE_SCRIPT);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
+
+        const app = page.frameLocator("#workspace");
+        await app
+            .getByText("Waiting for Workspace context", { exact: true })
+            .waitFor({ state: "visible" });
+        assert.equal(
+            await page.evaluate("window.__deliverDelayedWorkspaceContext()"),
+            true,
+        );
+        await page.waitForFunction(
+            "(window.__delayedContextCalls || []).some(call => call.name === 'workspace_reconnect' || call.name === 'workspace_snapshot')",
+        );
+        await app
+            .getByText("Delayed context ready", { exact: true })
+            .waitFor({ state: "visible" });
+        assert.equal(
+            await page.evaluate(
+                "(window.__delayedContextCalls || []).every(call => call.arguments.ctxId === 'ctx-delayed')",
+            ),
+            true,
+        );
+        assert.deepEqual(browserFailures, []);
+    },
+);
 
 test("Workspace App claims a resolved detached wait before one automatic model re-entry", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
@@ -928,7 +981,7 @@ function sessionModeSnapshot() {
         activity: [],
         approvals: [],
         background: [],
-        contextSelector: { requiresExplicitContextId: false },
+        ctxId: "ctx-session-mode",
         currentEvent: window.__sessionModeAnswered ? null : question,
         cursor: 1,
         instance: "browser-instance",
@@ -990,6 +1043,83 @@ window.addEventListener("message", function (event) {
         reply({ structuredContent: { answer: "Continue", detached: false, taskId: "task-session", waitId: "wait-session-question" } });
         return;
     }
+});
+`;
+
+const DELAYED_CONTEXT_BRIDGE_SCRIPT = String.raw`
+window.__delayedContextCalls = [];
+window.__delayedContextSource = null;
+
+function delayedContextSnapshot() {
+    var question = {
+        eventName: "user.answer",
+        kind: "question",
+        name: "workspace_ask",
+        payload: { allowText: false, choices: ["Continue"], question: "Delayed context ready" },
+        status: "waiting",
+        updatedAt: "2026-08-29T00:00:00.000Z",
+        waitId: "wait-delayed"
+    };
+    return {
+        approvals: [],
+        background: [],
+        ctxId: "ctx-delayed",
+        currentEvent: question,
+        cursor: 1,
+        goal: null,
+        instance: "browser-instance",
+        questions: [question],
+        tasks: []
+    };
+}
+
+window.__deliverDelayedWorkspaceContext = function () {
+    if (!window.__delayedContextSource) return false;
+    window.__delayedContextSource.postMessage({
+        jsonrpc: "2.0",
+        method: "ui/notifications/tool-result",
+        params: {
+            _meta: { "portable-devshell/workspace": { token: "delayed-context-token" } },
+            content: [{ type: "text", text: "portable-devshell Workspace opened." }],
+            structuredContent: { ctxId: "ctx-delayed", instance: "browser-instance" }
+        }
+    }, "*");
+    return true;
+};
+
+window.addEventListener("message", function (event) {
+    if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
+    var source = event.source;
+    var message = event.data;
+    function reply(result) {
+        if (message.id === undefined) return;
+        source.postMessage({ id: message.id, jsonrpc: "2.0", result: result }, "*");
+    }
+    if (message.method === "ui/initialize") {
+        window.__delayedContextSource = source;
+        reply({
+            hostCapabilities: {},
+            hostContext: {},
+            hostInfo: { name: "test-host", version: "1.0.0" },
+            protocolVersion: "2026-01-26"
+        });
+        return;
+    }
+    if (message.method === "ui/update-model-context") {
+        reply({});
+        return;
+    }
+    if (message.method !== "tools/call") return;
+    var call = message.params || {};
+    window.__delayedContextCalls.push(call);
+    if (call.name === "workspace_reconnect" || call.name === "workspace_snapshot") {
+        reply({
+            _meta: { "portable-devshell/workspace": { token: "delayed-context-token" } },
+            structuredContent: delayedContextSnapshot()
+        });
+        return;
+    }
+    if (call.name === "workspace_watch") return;
 });
 `;
 

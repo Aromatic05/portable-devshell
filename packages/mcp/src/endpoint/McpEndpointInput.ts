@@ -13,19 +13,32 @@ import {
 import type { McpSshInstanceCreateInput } from "../instance/McpInstanceGateway.js";
 import { McpToolSchemaUnavailableError } from "../tool/McpToolSchemaAdapter.js";
 
-export function withMcpContextId(tool: ToolDefinition): ToolDefinition {
+export function withMcpContextId(tool: ToolDefinition, required = true): ToolDefinition {
     return withInputProperty(tool, "ctxId", {
-        description: "Session context ID.",
+        description: "Internal Context ID. Optional when the request has a stable external Context binding.",
         minLength: 1,
         type: "string"
-    }, true);
+    }, required);
 }
 
 export function readMcpContextInput(input: JsonValue): { ctxId: string; input: JsonValue } {
-    if (!isRecord(input) || typeof input.ctxId !== "string" || input.ctxId.trim().length === 0) {
+    const context = readOptionalMcpContextInput(input);
+    if (context.ctxId === undefined) {
         throw createError({
             code: errorCodes.mcpContextInvalid,
-            message: "This tool requires the ctxId returned by environ_info.",
+            message: "No Context is referenced by this request. Call context_acquire or provide ctxId.",
+            retryable: false
+        });
+    }
+    return { ctxId: context.ctxId, input: context.input };
+}
+
+export function readOptionalMcpContextInput(input: JsonValue): { ctxId?: string; input: JsonValue } {
+    if (!isRecord(input) || input.ctxId === undefined) return { input };
+    if (typeof input.ctxId !== "string" || input.ctxId.trim().length === 0) {
+        throw createError({
+            code: errorCodes.mcpContextInvalid,
+            message: "ctxId must be a non-empty Context ID.",
             retryable: false
         });
     }
@@ -182,6 +195,26 @@ export function readMcpWorkspace(input: JsonValue, toolName: string): string {
         throw invalidArguments(`${toolName} accepts only workspace.`);
     }
     return requiredString(input.workspace, "workspace");
+}
+
+export function readMcpContextRenewInput(input: JsonValue): { ctxId?: string } {
+    if (!isRecord(input) || Object.keys(input).some((key) => key !== "ctxId")) {
+        throw invalidArguments("context_renew accepts only optional ctxId.");
+    }
+    const ctxId = optionalString(input.ctxId, "ctxId");
+    return ctxId === undefined ? {} : { ctxId };
+}
+
+export function readMcpEnvironmentInfoInput(input: JsonValue): { ctxId?: string; workspace?: string } {
+    if (!isRecord(input) || Object.keys(input).some((key) => key !== "ctxId" && key !== "workspace")) {
+        throw invalidArguments("environ_info accepts only optional ctxId and workspace.");
+    }
+    const ctxId = optionalString(input.ctxId, "ctxId");
+    const workspace = optionalString(input.workspace, "workspace");
+    return {
+        ...(ctxId === undefined ? {} : { ctxId }),
+        ...(workspace === undefined ? {} : { workspace })
+    };
 }
 
 export function readMcpSshCreateInput(input: JsonValue): McpSshInstanceCreateInput {

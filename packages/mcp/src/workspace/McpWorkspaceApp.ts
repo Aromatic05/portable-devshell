@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-export const workspaceAppStableResourceUri = "ui://portable-devshell/workspace/v1.html";
+export const workspaceAppStableResourceUri =
+    "ui://portable-devshell/workspace/v1.html";
 export const workspaceAppLegacyResourceUris: readonly string[] = [
     "ui://portable-devshell/workspace-651c9d0f1042c493.html",
     "ui://portable-devshell/workspace-98410baf51f694b0.html",
@@ -17,14 +18,18 @@ export const workspaceAppResourceMeta = {
         prefersBorder: false,
     },
     "openai/widgetCSP": { connect_domains: [], resource_domains: [] },
-    "openai/widgetDescription": "Compact portable-devshell human interaction surface for the current blocking event.",
+    "openai/widgetDescription":
+        "Compact portable-devshell human interaction surface for the current blocking event.",
     "openai/widgetPrefersBorder": false,
 } as const;
 
-export function workspaceAppResourceMetaForPublicBaseUrl(publicBaseUrl?: string) {
+export function workspaceAppResourceMetaForPublicBaseUrl(
+    publicBaseUrl?: string,
+) {
     if (publicBaseUrl === undefined) return workspaceAppResourceMeta;
     const url = new URL(publicBaseUrl);
-    if (url.hostname === "0.0.0.0" || url.hostname === "[::]") return workspaceAppResourceMeta;
+    if (url.hostname === "0.0.0.0" || url.hostname === "[::]")
+        return workspaceAppResourceMeta;
     const domain = url.origin;
     return {
         ...workspaceAppResourceMeta,
@@ -91,7 +96,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var McpApps = globalThis.__portableDevshellMcpApps;
   var App = McpApps.App;
   var app = new App({ name: "portable-devshell-workspace", version: "0.6.8" }, {});
-  var requiresExplicitContextId = true;
   var ctxId = "";
   var appToken = "";
   var initialized = false;
@@ -121,9 +125,9 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   function callTool(name, args, requiresToken, signal) {
     if (!initialized) return Promise.reject(new Error("Workspace App is not initialized"));
     if (requiresToken && !appToken) return Promise.reject(new Error("Workspace App authorization is unavailable"));
-    if (requiresExplicitContextId && !ctxId) return Promise.reject(new Error("Workspace context is unavailable"));
+    if (!ctxId) return Promise.reject(new Error("Workspace context is unavailable"));
     var input = Object.assign({}, args || {});
-    if (requiresExplicitContextId) input.ctxId = ctxId;
+    input.ctxId = ctxId;
     if (requiresToken) input.token = appToken;
     return app.callServerTool(
       { name: name, arguments: input },
@@ -180,14 +184,12 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     var openai = asRecord(window.openai);
     if (!openai || typeof openai.setWidgetState !== "function") return;
     var state = Object.assign({}, asRecord(openai.widgetState) || {});
-    state[WIDGET_STATE_KEY] = requiresExplicitContextId
-      ? { requiresExplicitContextId: true, ctxId: ctxId }
-      : { requiresExplicitContextId: false };
+    state[WIDGET_STATE_KEY] = { ctxId: ctxId };
     try { openai.setWidgetState(state); } catch (_) {}
   }
 
   function activateCtxId(value) {
-    if (!requiresExplicitContextId || !value) return false;
+    if (!value) return false;
     var nextCtxId = String(value);
     if (ctxId && ctxId !== nextCtxId) {
       watchGeneration += 1;
@@ -206,15 +208,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     acceptMeta(result._meta);
     var initial = asRecord(result.structuredContent);
     if (!initial) return false;
-    var selector = asRecord(initial.contextSelector);
-    if (selector && typeof selector.requiresExplicitContextId === "boolean") {
-      requiresExplicitContextId = selector.requiresExplicitContextId;
-    }
-    if (!requiresExplicitContextId) {
-      ctxId = "";
-      persistWorkspaceHint();
-      return true;
-    }
     return activateCtxId(initial.ctxId);
   }
 
@@ -223,24 +216,15 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     var result = toolResultFromOpenAiGlobals(source);
     var configured = acceptToolResult(result);
     var hint = workspaceHintFromOpenAiGlobals(source);
-    if (!configured && hint) {
-      if (typeof hint.requiresExplicitContextId === "boolean") {
-        requiresExplicitContextId = hint.requiresExplicitContextId;
-        if (!requiresExplicitContextId) configured = true;
-        else configured = activateCtxId(hint.ctxId);
-      } else if (hint.ctxId) {
-        requiresExplicitContextId = true;
-        configured = activateCtxId(hint.ctxId);
-      }
-    }
-    return configured || !requiresExplicitContextId || !!ctxId;
+    if (!configured && hint && hint.ctxId) configured = activateCtxId(hint.ctxId);
+    return configured || !!ctxId;
   }
 
   function modelContext(extra) {
     var tasks = snapshot && Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
     var background = snapshot && Array.isArray(snapshot.background) ? snapshot.background : [];
     var state = {
-      ...(requiresExplicitContextId ? { ctxId: ctxId } : {}),
+      ctxId: ctxId,
       instance: snapshot && snapshot.instance,
       goal: snapshot && snapshot.goal ? snapshot.goal : undefined,
       tasks: tasks.map(function (task) { return {
@@ -458,12 +442,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
 
   async function applySnapshot(nextSnapshot, allowRecovery) {
     snapshot = nextSnapshot;
-    var selector = asRecord(snapshot && snapshot.contextSelector);
-    if (selector && typeof selector.requiresExplicitContextId === "boolean") {
-      requiresExplicitContextId = selector.requiresExplicitContextId;
-    }
-    if (requiresExplicitContextId && snapshot && snapshot.ctxId) ctxId = String(snapshot.ctxId);
-    if (!requiresExplicitContextId) ctxId = "";
+    if (snapshot && snapshot.ctxId) ctxId = String(snapshot.ctxId);
     if (snapshot && Number.isSafeInteger(snapshot.cursor)) cursor = snapshot.cursor;
     persistWorkspaceHint();
     render();
@@ -473,7 +452,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   }
 
   async function refresh(allowRecovery) {
-    if (!initialized || (requiresExplicitContextId && !ctxId)) return;
+    if (!initialized || !ctxId) return;
     try {
       var result = await callTool("workspace_snapshot", {}, true);
       await applySnapshot(structured(result), allowRecovery);
@@ -485,7 +464,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   }
 
   async function reconnectWorkspace() {
-    if (!initialized || (requiresExplicitContextId && !ctxId)) return;
+    if (!initialized || !ctxId) return;
     var result = await callTool("workspace_reconnect", {}, false);
     await applySnapshot(structured(result), true);
     status.textContent = "";
@@ -523,7 +502,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   }
 
   async function startLive() {
-    if (!initialized || (requiresExplicitContextId && !ctxId) || watchStarted) return;
+    if (!initialized || !ctxId || watchStarted) return;
     watchStarted = true;
     try {
       if (reconnectOnStart) {
@@ -585,7 +564,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
 
   app.ontoolinput = function (params) {
     var input = params && params.arguments;
-    if (requiresExplicitContextId && input && input.ctxId) activateCtxId(input.ctxId);
+    if (input && input.ctxId) activateCtxId(input.ctxId);
   };
   app.ontoolresult = acceptInitialOrLiveToolResult;
   app.ontoolcancelled = function () {
@@ -611,8 +590,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         reconnectOnStart = true;
         configureFromOpenAiGlobals();
       }
-      if (requiresExplicitContextId && !ctxId) {
-        status.textContent = "Waiting for Workspace identity";
+      if (!ctxId) {
+        status.textContent = "Waiting for Workspace context";
         return;
       }
       await startLive();
@@ -825,7 +804,10 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
 </body>
 </html>`;
 
-const workspaceAppDigest = createHash("sha256").update(workspaceAppHtml).digest("hex").slice(0, 16);
+const workspaceAppDigest = createHash("sha256")
+    .update(workspaceAppHtml)
+    .digest("hex")
+    .slice(0, 16);
 export const workspaceAppResourceUri = `ui://portable-devshell/workspace-${workspaceAppDigest}.html`;
 export const workspaceAppResourceUris = [
     workspaceAppResourceUri,
@@ -834,17 +816,25 @@ export const workspaceAppResourceUris = [
 ] as const;
 
 function loadWorkspaceSdkScript(): string {
-    const path = fileURLToPath(import.meta.resolve("@modelcontextprotocol/ext-apps/app-with-deps"));
+    const path = fileURLToPath(
+        import.meta.resolve("@modelcontextprotocol/ext-apps/app-with-deps"),
+    );
     const source = readFileSync(path, "utf8").trimEnd();
     const exportBlock = source.match(/export\{([\s\S]+)\};$/);
     const exports = exportBlock?.[1];
     const exportedSymbol = (name: string): string | undefined => {
-        const match = exports?.match(new RegExp(`(?:^|,)\\s*([$A-Za-z_][$\\w]*)\\s+as\\s+${name}\\s*(?:,|$)`));
+        const match = exports?.match(
+            new RegExp(
+                `(?:^|,)\\s*([$A-Za-z_][$\\w]*)\\s+as\\s+${name}\\s*(?:,|$)`,
+            ),
+        );
         return match?.[1];
     };
     const appExport = exportedSymbol("App");
     const applyDocumentThemeExport = exportedSymbol("applyDocumentTheme");
-    const applyHostStyleVariablesExport = exportedSymbol("applyHostStyleVariables");
+    const applyHostStyleVariablesExport = exportedSymbol(
+        "applyHostStyleVariables",
+    );
     const applyHostFontsExport = exportedSymbol("applyHostFonts");
     if (
         exportBlock?.index === undefined ||
@@ -853,15 +843,21 @@ function loadWorkspaceSdkScript(): string {
         applyHostStyleVariablesExport === undefined ||
         applyHostFontsExport === undefined
     ) {
-        throw new Error("Unable to locate required exports in @modelcontextprotocol/ext-apps/app-with-deps.");
+        throw new Error(
+            "Unable to locate required exports in @modelcontextprotocol/ext-apps/app-with-deps.",
+        );
     }
     if (source.toLowerCase().includes("</script")) {
-        throw new Error("MCP Apps browser bundle cannot be embedded safely in Workspace HTML.");
+        throw new Error(
+            "MCP Apps browser bundle cannot be embedded safely in Workspace HTML.",
+        );
     }
-    return `${source.slice(0, exportBlock.index)}globalThis.__portableDevshellMcpApps={` +
+    return (
+        `${source.slice(0, exportBlock.index)}globalThis.__portableDevshellMcpApps={` +
         `App:${appExport},` +
         `applyDocumentTheme:${applyDocumentThemeExport},` +
         `applyHostFonts:${applyHostFontsExport},` +
         `applyHostStyleVariables:${applyHostStyleVariablesExport}` +
-        `};`;
+        `};`
+    );
 }

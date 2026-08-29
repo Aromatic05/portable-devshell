@@ -4,6 +4,8 @@ const titles: Readonly<Record<string, string>> = {
     artifact_transfer: "Transfer artifact",
     artifact_viewImage: "View image",
     bash_run: "Run shell command",
+    context_acquire: "Acquire context",
+    context_renew: "Renew context",
     environ_info: "Create environment",
     file_edit: "Edit file",
     file_find: "Find files",

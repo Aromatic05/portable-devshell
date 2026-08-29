@@ -94,7 +94,7 @@ test("environ_info never accepts a cross-instance target", async () => {
             { instance: "remote-server", workspace: "/remote-workspace" },
             context
         ),
-        /environ_info accepts only workspace/u
+        /environ_info accepts only optional ctxId and workspace/u
     );
 });
 
@@ -704,15 +704,14 @@ test("todo tools are control-side, group-controlled, capability-free, and availa
     });
 });
 
-test("openai-session todo discovery stays session-scoped while explicit task selectors allow durable handoff", async () => {
+test("openai-session binding uses the same Todo contract as explicit ctxId", async () => {
     const registry = new McpContextRegistry({ idFactory: () => "ctx-session-todo" });
     const current = await registry.create({
         instance: "main-pc",
         principal: "local",
         workspace: "/workspace"
     });
-    await registry.bindSelector(current.ctxId, { kind: "openai/session", value: "chat-session-todo" }, {
-        instance: "main-pc",
+    await registry.bindExternal(current.ctxId, { kind: "openai/session", value: "chat-session-todo" }, {
         principal: "local"
     });
     const tasks = [
@@ -759,35 +758,16 @@ test("openai-session todo discovery stays session-scoped while explicit task sel
     const discovered = await endpoint.callTool("todo_read", {}, requestContext) as {
         tasks?: Array<Record<string, unknown>>;
     };
-    assert.deepEqual(discovered.tasks?.map((task) => task.taskId), ["task-current"]);
-    assert.equal(Object.hasOwn(discovered.tasks?.[0] ?? {}, "ctxId"), false);
+    assert.deepEqual(discovered.tasks?.map((task) => task.taskId), ["task-current", "task-other"]);
+    assert.equal(discovered.tasks?.[0]?.ctxId, current.ctxId);
 
     const todoTool = endpoint.listTools().find((tool) => tool.name === "todo_read");
     const schema = todoTool?.outputSchema as {
         properties?: { tasks?: { items?: { properties?: Record<string, unknown> } } };
     };
-    assert.equal(schema.properties?.tasks?.items?.properties?.ctxId, undefined);
-    assert.equal(
+    assert.notEqual(schema.properties?.tasks?.items?.properties?.ctxId, undefined);
+    assert.notEqual(
         (todoTool?.inputSchema as { properties?: Record<string, unknown> }).properties?.title,
         undefined
     );
-
-    await assert.rejects(
-        endpoint.callTool("todo_read", { title: "Other task" }, requestContext),
-        /use taskId/u
-    );
-    await assert.rejects(
-        endpoint.callTool("todo_write", {
-            revision: 1,
-            title: "Current task",
-            todos: []
-        }, requestContext),
-        /require taskId/u
-    );
-
-    const explicit = await endpoint.callTool("todo_read", { taskId: "task-other" }, requestContext) as {
-        tasks?: Array<Record<string, unknown>>;
-    };
-    assert.deepEqual(explicit.tasks?.map((task) => task.taskId), ["task-current", "task-other"]);
-    assert.equal(explicit.tasks?.some((task) => Object.hasOwn(task, "ctxId")), false);
 });

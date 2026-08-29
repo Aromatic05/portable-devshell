@@ -289,14 +289,14 @@ test("running host replaces and unregisters instance bindings without restart", 
         const port = requireTcpPort(host.server.address);
         const endpoint = `http://127.0.0.1:${port}/demo/mcp`;
 
-        assert.deepEqual(await initializeAndListTools(endpoint), ["environ_info", "bash_run"]);
+        assert.deepEqual(await initializeAndListTools(endpoint), ["context_acquire", "context_renew", "environ_info", "bash_run"]);
 
         host.registerInstance({
             name: "demo",
             policy: { capabilities: ["read"], groups: ["file"] },
             worker: createToolWorker({ requiredCapabilities: ["read"], group: "file", name: "file_read" })
         });
-        assert.deepEqual(await initializeAndListTools(endpoint), ["environ_info", "file_read"]);
+        assert.deepEqual(await initializeAndListTools(endpoint), ["context_acquire", "context_renew", "environ_info", "file_read"]);
 
         host.unregisterInstance("demo");
         const missing = await fetch(endpoint, {

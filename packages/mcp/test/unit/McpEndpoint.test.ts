@@ -10,6 +10,7 @@ import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
 import { parseMcpHttpResponse } from "../TestMcpHttpResponse.ts";
 
 import {
+    McpContextRegistry,
     McpEndpointBinding,
     McpEndpointWorker,
     workspaceAppLegacyResourceUris,
@@ -473,8 +474,14 @@ test("environment and control-owned tools execute through the endpoint audit pat
         listTools() {
             return [];
         },
-        async shareArtifact(_defaultInstance: string, input: { path?: string }) {
-            return { ...(input.path === undefined ? {} : { path: input.path }), shareId: "share-1" };
+        async shareArtifact(
+            _defaultInstance: string,
+            input: { path?: string },
+        ) {
+            return {
+                ...(input.path === undefined ? {} : { path: input.path }),
+                shareId: "share-1",
+            };
         },
         async transferArtifact() {
             return {};
@@ -490,24 +497,35 @@ test("environment and control-owned tools execute through the endpoint audit pat
         },
         async writeTodo() {
             return {};
-        }
+        },
     } as unknown as McpInstanceGateway;
     const endpoint = new McpEndpointWorker({
         gateway,
         instanceName: "demo-local",
         policy: {
             capabilities: ["manage", "read", "write"],
-            groups: ["artifact", "instance", "todo"]
+            groups: ["artifact", "instance", "todo"],
         },
-        worker: harness.worker
+        worker: harness.worker,
     });
-    const requestContext = { principal: "test", requestId: "request-control-tools" };
+    const requestContext = {
+        principal: "test",
+        requestId: "request-control-tools",
+    };
 
-    const environment = await endpoint.callTool("environ_info", { workspace: "/workspace" }, requestContext);
+    const environment = await endpoint.callTool(
+        "environ_info",
+        { workspace: "/workspace" },
+        requestContext,
+    );
     const ctxId = String((environment as { ctxId?: string }).ctxId);
     await endpoint.callTool("todo_read", { ctxId }, requestContext);
     await endpoint.callTool("instance_list", { ctxId }, requestContext);
-    await endpoint.callTool("artifact_share", { ctxId, path: "./result.txt" }, requestContext);
+    await endpoint.callTool(
+        "artifact_share",
+        { ctxId, path: "./result.txt" },
+        requestContext,
+    );
 
     assert.deepEqual(
         harness.auditedCalls.map((call) => ({
@@ -515,7 +533,7 @@ test("environment and control-owned tools execute through the endpoint audit pat
             input: call.input,
             requestId: call.context.requestId,
             source: call.context.source,
-            toolName: call.toolName
+            toolName: call.toolName,
         })),
         [
             {
@@ -523,103 +541,343 @@ test("environment and control-owned tools execute through the endpoint audit pat
                 input: {},
                 requestId: "request-control-tools",
                 source: "mcp",
-                toolName: "environ_info"
+                toolName: "environ_info",
             },
             {
                 ctxId,
                 input: {},
                 requestId: "request-control-tools",
                 source: "mcp",
-                toolName: "todo_read"
+                toolName: "todo_read",
             },
             {
                 ctxId,
                 input: {},
                 requestId: "request-control-tools",
                 source: "mcp",
-                toolName: "instance_list"
+                toolName: "instance_list",
             },
             {
                 ctxId,
                 input: { path: "./result.txt" },
                 requestId: "request-control-tools",
                 source: "mcp",
-                toolName: "artifact_share"
-            }
-        ]
+                toolName: "artifact_share",
+            },
+        ],
     );
 });
 
-test("openai-session context mode removes ctxId and resolves the current ChatGPT session", async () => {
+test("explicit context mode exposes ctxId and does not bind authority to OpenAI session metadata", async () => {
     const harness = createWorkerHarness();
     const endpoint = new McpEndpointWorker({
-        contextMode: "openai-session",
         instanceName: "demo",
         policy: { capabilities: ["execute"], groups: ["bash"] },
-        worker: harness.worker
+        worker: harness.worker,
     });
-    const bashTool = endpoint.listTools().find((tool) => tool.name === "bash_run");
+    const bashTool = endpoint
+        .listTools()
+        .find((tool) => tool.name === "bash_run");
     assert.notEqual(bashTool, undefined);
-    assert.equal((bashTool?.inputSchema as { properties?: Record<string, unknown> }).properties?.ctxId, undefined);
-    const environmentTool = endpoint.listTools().find((tool) => tool.name === "environ_info");
-    assert.equal((environmentTool?.outputSchema as { properties?: Record<string, unknown> }).properties?.ctxId, undefined);
+    assert.notEqual(
+        (bashTool?.inputSchema as { properties?: Record<string, unknown> })
+            .properties?.ctxId,
+        undefined,
+    );
+    const environmentTool = endpoint
+        .listTools()
+        .find((tool) => tool.name === "environ_info");
+    assert.notEqual(
+        (
+            environmentTool?.outputSchema as {
+                properties?: Record<string, unknown>;
+            }
+        ).properties?.ctxId,
+        undefined,
+    );
 
     const requestContext = {
         principal: "subject-1",
         requestMeta: { "openai/session": "chat-session-1" },
-        requestId: "request-session-mode"
+        requestId: "request-session-mode",
     };
-    const environment = await endpoint.callTool("environ_info", { workspace: "/workspace" }, requestContext);
-    assert.equal((environment as { ctxId?: unknown }).ctxId, undefined);
+    const environment = await endpoint.callTool(
+        "environ_info",
+        { workspace: "/workspace" },
+        requestContext,
+    );
+    const ctxIdValue = (environment as { ctxId?: unknown }).ctxId;
+    assert.equal(typeof ctxIdValue, "string");
+    const ctxId = ctxIdValue as string;
 
-    await endpoint.callTool("bash_run", { command: "pwd" }, requestContext);
-    assert.equal(typeof harness.calls[0]?.ctxId, "string");
+    await endpoint.callTool(
+        "bash_run",
+        { command: "pwd", ctxId },
+        {
+            ...requestContext,
+            requestMeta: { "openai/session": "chat-session-2" },
+        },
+    );
+    assert.equal(harness.calls[0]?.ctxId, ctxId);
     assert.deepEqual(harness.calls[0]?.input, { command: "pwd" });
 
     await assert.rejects(
-        endpoint.callTool("bash_run", { command: "pwd" }, {
-            ...requestContext,
-            requestMeta: { "openai/session": "chat-session-2" }
-        }),
-        (error: unknown) => (error as { code?: string }).code === "mcp.contextInvalid"
+        endpoint.callTool("bash_run", { command: "pwd" }, requestContext),
+        (error: unknown) =>
+            (error as { code?: string }).code === "mcp.contextInvalid",
     );
 });
 
-test("HTTP tools/call forwards openai/session metadata into session context selection", async () => {
+test("explicit context mode ignores OpenAI session metadata unless ctxId is supplied", async () => {
+    const harness = createWorkerHarness();
+    const binding = createBinding(harness);
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        const meta = { "openai/session": "chat-http-1" };
+        const environment = await postJson(
+            server.url,
+            {
+                id: "req-session-environ",
+                jsonrpc: "2.0",
+                method: "tools/call",
+                params: {
+                    _meta: meta,
+                    arguments: { workspace: "/workspace" },
+                    name: "environ_info",
+                },
+            },
+            session.headers,
+        );
+        assert.equal(environment.status, 200);
+        const ctxId = environment.body.result?.structuredContent?.ctxId;
+        assert.equal(typeof ctxId, "string");
+
+        const run = await postJson(
+            server.url,
+            {
+                id: "req-session-run",
+                jsonrpc: "2.0",
+                method: "tools/call",
+                params: {
+                    _meta: meta,
+                    arguments: { command: "pwd", ctxId },
+                    name: "bash_run",
+                },
+            },
+            session.headers,
+        );
+        assert.equal(run.status, 200);
+        assert.equal(run.body.error, undefined, JSON.stringify(run.body));
+        assert.equal(harness.calls[0]?.ctxId, ctxId);
+        assert.deepEqual(harness.calls[0]?.input, { command: "pwd" });
+
+        const missingContext = await postJson(
+            server.url,
+            {
+                id: "req-session-missing-context",
+                jsonrpc: "2.0",
+                method: "tools/call",
+                params: {
+                    _meta: meta,
+                    arguments: { command: "pwd" },
+                    name: "bash_run",
+                },
+            },
+            session.headers,
+        );
+        assert.notEqual(missingContext.body.error, undefined);
+    } finally {
+        await server.close();
+    }
+});
+
+test("OpenAI session binding resolves one internal ctxId without making models carry it", async () => {
+    const harness = createWorkerHarness();
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-openai-stable",
+    });
+    await registry.initialize();
+    const endpoint = new McpEndpointWorker({
+        contextMode: "openai-session",
+        contextRegistry: registry,
+        instanceName: "demo",
+        policy: { capabilities: ["execute"], groups: ["bash"] },
+        worker: harness.worker,
+    });
+    const requestContext = {
+        principal: "subject-1",
+        requestMeta: { "openai/session": "chat-session-stable" },
+        requestId: "request-openai-session",
+    };
+
+    const bashTool = endpoint
+        .listTools()
+        .find((tool) => tool.name === "bash_run");
+    const bashSchema = bashTool?.inputSchema as {
+        properties?: Record<string, unknown>;
+        required?: string[];
+    };
+    assert.notEqual(bashSchema.properties?.ctxId, undefined);
+    assert.equal(bashSchema.required?.includes("ctxId") ?? false, false);
+    const renewTool = endpoint
+        .listTools()
+        .find((tool) => tool.name === "context_renew");
+    const renewSchema = renewTool?.inputSchema as
+        { required?: string[] } | undefined;
+    assert.equal(renewSchema?.required?.includes("ctxId") ?? false, false);
+
+    await assert.rejects(
+        endpoint.callTool(
+            "environ_info",
+            { workspace: "/workspace/legacy-bootstrap" },
+            requestContext,
+        ),
+        (error: unknown) =>
+            (error as { code?: string }).code === "mcp.contextInvalid",
+    );
+    assert.deepEqual(await registry.list(), []);
+
+    const first = (await endpoint.callTool(
+        "context_acquire",
+        { workspace: "/workspace/one" },
+        requestContext,
+    )) as { ctxId: string; status: string; workspace: string };
+    const second = (await endpoint.callTool(
+        "context_acquire",
+        { workspace: "/workspace/two" },
+        requestContext,
+    )) as { ctxId: string; status: string; workspace: string };
+
+    assert.equal(first.ctxId, "ctx-openai-stable");
+    assert.equal(first.workspace, "/workspace/one");
+    assert.equal(second.ctxId, first.ctxId);
+    assert.equal(second.status, "active");
+    assert.equal(second.workspace, "/workspace/one");
+    assert.equal((await registry.list())[0]?.workspace, "/workspace/one");
+
+    await endpoint.callTool("bash_run", { command: "pwd" }, requestContext);
+    assert.equal(harness.calls[0]?.ctxId, first.ctxId);
+    assert.deepEqual(harness.calls[0]?.input, { command: "pwd" });
+
+    await endpoint.callTool(
+        "bash_run",
+        { command: "pwd", ctxId: first.ctxId },
+        {
+            ...requestContext,
+            requestMeta: { "openai/session": "another-session" },
+        },
+    );
+    assert.equal(harness.calls[1]?.ctxId, first.ctxId);
+});
+
+test("expired OpenAI session binding keeps its ctxId and context_renew reactivates that same Context", async () => {
+    let now = 1_000;
+    const harness = createWorkerHarness();
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-openai-renew",
+        now: () => now,
+        ttlMs: 100,
+    });
+    await registry.initialize();
+    const endpoint = new McpEndpointWorker({
+        contextMode: "openai-session",
+        contextRegistry: registry,
+        instanceName: "demo",
+        policy: { capabilities: ["execute"], groups: ["bash"] },
+        worker: harness.worker,
+    });
+    const requestContext = {
+        principal: "subject-1",
+        requestMeta: { "openai/session": "chat-session-renew" },
+        requestId: "request-openai-renew",
+    };
+
+    const acquired = (await endpoint.callTool(
+        "context_acquire",
+        { workspace: "/workspace" },
+        requestContext,
+    )) as { ctxId: string; status: string };
+    assert.equal(acquired.ctxId, "ctx-openai-renew");
+
+    now = 1_101;
+    await assert.rejects(
+        endpoint.callTool("bash_run", { command: "pwd" }, requestContext),
+        (error: unknown) =>
+            (error as { code?: string }).code === "mcp.contextExpired",
+    );
+
+    const expired = (await endpoint.callTool(
+        "context_acquire",
+        { workspace: "/workspace/ignored-until-renew" },
+        requestContext,
+    )) as { ctxId: string; status: string };
+    assert.equal(expired.ctxId, acquired.ctxId);
+    assert.equal(expired.status, "expired");
+
+    const renewed = (await endpoint.callTool(
+        "context_renew",
+        {},
+        requestContext,
+    )) as {
+        ctxId: string;
+        status: string;
+    };
+    assert.equal(renewed.ctxId, acquired.ctxId);
+    assert.equal(renewed.status, "active");
+
+    await endpoint.callTool("bash_run", { command: "pwd" }, requestContext);
+    assert.equal(harness.calls.at(-1)?.ctxId, acquired.ctxId);
+});
+
+test("HTTP forwards OpenAI session metadata into the generic Context binding", async () => {
     const harness = createWorkerHarness();
     const binding = createBinding(harness, { contextMode: "openai-session" });
     const server = await createBindingServer(binding);
 
     try {
         const session = await initialize(server.url);
-        const meta = { "openai/session": "chat-http-1" };
-        const environment = await postJson(server.url, {
-            id: "req-session-environ",
-            jsonrpc: "2.0",
-            method: "tools/call",
-            params: { _meta: meta, arguments: { workspace: "/workspace" }, name: "environ_info" }
-        }, session.headers);
-        assert.equal(environment.status, 200);
-        assert.equal(environment.body.result?.structuredContent?.ctxId, undefined);
+        const meta = { "openai/session": "chat-http-bound" };
+        const acquire = async (workspace: string) =>
+            await postJson(
+                server.url,
+                {
+                    id: `req-session-acquire-${workspace}`,
+                    jsonrpc: "2.0",
+                    method: "tools/call",
+                    params: {
+                        _meta: meta,
+                        arguments: { workspace },
+                        name: "context_acquire",
+                    },
+                },
+                session.headers,
+            );
 
-        const run = await postJson(server.url, {
-            id: "req-session-run",
-            jsonrpc: "2.0",
-            method: "tools/call",
-            params: { _meta: meta, arguments: { command: "pwd" }, name: "bash_run" }
-        }, session.headers);
+        const first = await acquire("/workspace/one");
+        const second = await acquire("/workspace/two");
+        const firstCtxId = first.body.result?.structuredContent?.ctxId;
+        assert.equal(typeof firstCtxId, "string");
+        assert.equal(second.body.result?.structuredContent?.ctxId, firstCtxId);
+
+        const run = await postJson(
+            server.url,
+            {
+                id: "req-session-run-with-binding",
+                jsonrpc: "2.0",
+                method: "tools/call",
+                params: {
+                    _meta: meta,
+                    arguments: { command: "pwd" },
+                    name: "bash_run",
+                },
+            },
+            session.headers,
+        );
         assert.equal(run.status, 200);
         assert.equal(run.body.error, undefined, JSON.stringify(run.body));
-        assert.equal(typeof harness.calls[0]?.ctxId, "string");
-        assert.deepEqual(harness.calls[0]?.input, { command: "pwd" });
-
-        const missingMeta = await postJson(server.url, {
-            id: "req-session-missing-meta",
-            jsonrpc: "2.0",
-            method: "tools/call",
-            params: { arguments: { command: "pwd" }, name: "bash_run" }
-        }, session.headers);
-        assert.match(String(missingMeta.body.error?.message), /openai\/session/u);
+        assert.equal(harness.calls[0]?.ctxId, firstCtxId);
     } finally {
         await server.close();
     }

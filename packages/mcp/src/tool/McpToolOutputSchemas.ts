@@ -324,10 +324,6 @@ const workspaceCurrentEventSchema: JsonValue = {
     ],
 };
 
-const workspaceContextSelectorSchema = objectSchema({
-    requiresExplicitContextId: { type: "boolean" },
-}, ["requiresExplicitContextId"]);
-
 const workspaceTodoTaskSummaryOutputSchema = objectSchema({
     ...activeTodoSummaryProperties,
     updatedAt: stringValue,
@@ -406,42 +402,28 @@ export const workspaceApprovalRequestOutputSchema = objectSchema({
     workspace: stringValue,
 }, ["approvalId", "callId", "createdAt", "expiresAt", "inputSummary", "instance", "reason", "riskLevel", "source", "status", "toolName"]);
 
-export function workspaceSnapshotOutputSchemaForContextMode(requiresExplicitContextId: boolean): JsonValue {
-    return objectSchema({
+export const workspaceSnapshotOutputSchema: JsonValue = objectSchema({
         approvals: arraySchema(workspaceApprovalRequestOutputSchema),
         background: arraySchema(workspaceBackgroundSchema),
-        contextSelector: workspaceContextSelectorSchema,
-        ...(requiresExplicitContextId ? { ctxId: nonEmptyString } : {}),
+        ctxId: nonEmptyString,
         currentEvent: workspaceCurrentEventSchema,
         cursor: nonNegativeInteger,
         goal: { anyOf: [{ type: "null" }, workspaceGoalOutputSchema] },
         instance: nonEmptyString,
         questions: arraySchema(workspaceQuestionWaitOutputSchema),
         tasks: arraySchema(workspaceTodoTaskSummaryOutputSchema),
-    }, ["approvals", "background", "contextSelector", "currentEvent", "cursor", "goal", "instance", "questions", "tasks"]);
-}
+}, ["approvals", "background", "ctxId", "currentEvent", "cursor", "goal", "instance", "questions", "tasks"]);
 
-export const workspaceSnapshotOutputSchema = workspaceSnapshotOutputSchemaForContextMode(true);
+export const workspaceOpenOutputSchema: JsonValue = objectSchema({
+    ctxId: nonEmptyString,
+    instance: nonEmptyString,
+}, ["ctxId", "instance"]);
 
-export function workspaceOpenOutputSchemaForContextMode(requiresExplicitContextId: boolean): JsonValue {
-    return objectSchema({
-        contextSelector: workspaceContextSelectorSchema,
-        ...(requiresExplicitContextId ? { ctxId: nonEmptyString } : {}),
-        instance: nonEmptyString,
-    }, ["contextSelector", "instance"]);
-}
-
-export const workspaceOpenOutputSchema: JsonValue = workspaceOpenOutputSchemaForContextMode(true);
-
-export function workspaceWatchOutputSchemaForContextMode(requiresExplicitContextId: boolean): JsonValue {
-    return objectSchema({
-        changed: booleanValue,
-        cursor: nonNegativeInteger,
-        snapshot: workspaceSnapshotOutputSchemaForContextMode(requiresExplicitContextId),
-    }, ["changed", "cursor"]);
-}
-
-export const workspaceWatchOutputSchema = workspaceWatchOutputSchemaForContextMode(true);
+export const workspaceWatchOutputSchema: JsonValue = objectSchema({
+    changed: booleanValue,
+    cursor: nonNegativeInteger,
+    snapshot: workspaceSnapshotOutputSchema,
+}, ["changed", "cursor"]);
 
 export const workspaceQuestionAnswerOutputSchema = objectSchema({
     answer: stringValue,

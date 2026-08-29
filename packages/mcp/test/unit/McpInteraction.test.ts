@@ -912,28 +912,27 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     assert.match(open.description, /visible App is attached to this tool result/u);
     assert.match(open.description, /Workspace state remains durable/u);
 
-    const sessionDefinitions = new McpToolCatalogInteraction().list(false);
-    const sessionOpen = sessionDefinitions.find((definition) => definition.name === "workspace_open");
-    const sessionSnapshot = sessionDefinitions.find((definition) => definition.name === "workspace_snapshot");
-    const sessionOpenSchema = sessionOpen?.outputSchema as {
+    const compatibilityDefinitions = new McpToolCatalogInteraction().list();
+    const compatibilityOpen = compatibilityDefinitions.find((definition) => definition.name === "workspace_open");
+    const compatibilitySnapshot = compatibilityDefinitions.find((definition) => definition.name === "workspace_snapshot");
+    const compatibilityOpenSchema = compatibilityOpen?.outputSchema as {
         properties?: { ctxId?: unknown; tasks?: unknown };
     };
-    const sessionSnapshotSchema = sessionSnapshot?.outputSchema as {
+    const compatibilitySnapshotSchema = compatibilitySnapshot?.outputSchema as {
         properties?: {
             ctxId?: unknown;
             questions?: { items?: { properties?: Record<string, unknown> } };
             tasks?: { items?: { properties?: Record<string, unknown> } };
         };
     };
-    assert.equal(sessionOpenSchema.properties?.ctxId, undefined);
-    assert.equal(sessionOpenSchema.properties?.tasks, undefined);
-    assert.equal(sessionSnapshotSchema.properties?.ctxId, undefined);
-    assert.equal(sessionSnapshotSchema.properties?.tasks?.items?.properties?.ctxId, undefined);
-    assert.equal(sessionSnapshotSchema.properties?.questions?.items?.properties?.createdByCtxId, undefined);
-    assert.equal(sessionSnapshotSchema.properties?.questions?.items?.properties?.ownerCallId, undefined);
-    assert.equal(sessionSnapshotSchema.properties?.questions?.items?.properties?.recoveryClaimId, undefined);
-    assert.doesNotMatch(sessionOpen?.description ?? "", /ctxId/u);
-    assert.match(sessionOpen?.description ?? "", /visible App is attached to this tool result/u);
+    assert.notEqual(compatibilityOpenSchema.properties?.ctxId, undefined);
+    assert.equal(compatibilityOpenSchema.properties?.tasks, undefined);
+    assert.notEqual(compatibilitySnapshotSchema.properties?.ctxId, undefined);
+    assert.equal(compatibilitySnapshotSchema.properties?.tasks?.items?.properties?.ctxId, undefined);
+    assert.equal(compatibilitySnapshotSchema.properties?.questions?.items?.properties?.createdByCtxId, undefined);
+    assert.equal(compatibilitySnapshotSchema.properties?.questions?.items?.properties?.ownerCallId, undefined);
+    assert.equal(compatibilitySnapshotSchema.properties?.questions?.items?.properties?.recoveryClaimId, undefined);
+    assert.equal(compatibilityOpen?.description, open.description);
 });
 
 async function openWorkspace(handler: McpEndpointHandlerInteraction): Promise<string> {

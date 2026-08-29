@@ -11,7 +11,7 @@ export interface McpContextRecord {
     ctxId: string;
     environments: McpContextEnvironment[];
     expiresAt: string;
-    /** Initial environment selected by environ_info. It is not an authorization boundary. */
+    /** Initial environment attached when the Context is acquired. It is not an authorization boundary. */
     instance: string;
     lastAccessedAt: string;
     principal: string;

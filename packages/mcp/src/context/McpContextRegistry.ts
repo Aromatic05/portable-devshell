@@ -31,17 +31,13 @@ export interface McpContextValidationBinding {
     principal: string;
 }
 
-export interface McpContextSelectorValidationBinding extends McpContextValidationBinding {
-    instance: string;
-}
-
-export interface McpContextExternalSelector {
+export interface McpContextExternalBinding {
     kind: string;
     value: string;
 }
 
 interface McpContextStoredRecord extends McpContextRecord {
-    externalSelector?: McpContextExternalSelector;
+    externalBindings?: McpContextExternalBinding[];
 }
 
 interface McpContextDocument {
@@ -71,14 +67,22 @@ export class McpContextRegistry {
         this.#filePath = options.filePath;
         this.#initialized = this.#filePath === undefined;
         this.#idFactory = options.idFactory ?? (() => `ctx-${randomUUID()}`);
-        this.#maxTerminalContexts = options.maxTerminalContexts ?? defaultMcpContextTerminalHistory;
+        this.#maxTerminalContexts =
+            options.maxTerminalContexts ?? defaultMcpContextTerminalHistory;
         this.#now = options.now ?? Date.now;
         this.#ttlMs = options.ttlMs ?? defaultMcpContextTtlMs;
-        if (!Number.isSafeInteger(this.#maxTerminalContexts) || this.#maxTerminalContexts < 0) {
-            throw new Error("MCP context maxTerminalContexts must be a non-negative safe integer.");
+        if (
+            !Number.isSafeInteger(this.#maxTerminalContexts) ||
+            this.#maxTerminalContexts < 0
+        ) {
+            throw new Error(
+                "MCP context maxTerminalContexts must be a non-negative safe integer.",
+            );
         }
         if (!Number.isFinite(this.#ttlMs) || this.#ttlMs <= 0) {
-            throw new Error("MCP context ttlMs must be a positive finite number.");
+            throw new Error(
+                "MCP context ttlMs must be a positive finite number.",
+            );
         }
     }
 
@@ -117,14 +121,16 @@ export class McpContextRegistry {
                 ...binding,
                 createdAt: at,
                 ctxId,
-                environments: [{
-                    instance: binding.instance,
-                    temporaryDirectory: binding.temporaryDirectory,
-                    workspace: binding.workspace
-                }],
+                environments: [
+                    {
+                        instance: binding.instance,
+                        temporaryDirectory: binding.temporaryDirectory,
+                        workspace: binding.workspace,
+                    },
+                ],
                 expiresAt: new Date(now + this.#ttlMs).toISOString(),
                 lastAccessedAt: at,
-                status: "active"
+                status: "active",
             };
             await this.#mutateAndPersist(() => {
                 this.#contexts.set(ctxId, record);
@@ -133,60 +139,31 @@ export class McpContextRegistry {
         });
     }
 
-    async bindSelector(
+    async bindExternal(
         ctxId: string,
-        selector: McpContextExternalSelector,
-        binding: McpContextSelectorValidationBinding
-    ): Promise<{ replaced: McpContextRecord[] }> {
+        external: McpContextExternalBinding,
+        binding: McpContextValidationBinding,
+    ): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
-            if (!isCtxId(ctxId) || !isExternalSelector(selector)) {
-                throw invalidExternalSelectorContext();
+            if (!isCtxId(ctxId) || !isExternalBinding(external)) {
+                throw invalidExternalBinding();
             }
             const record = this.#contexts.get(ctxId);
             if (
                 record === undefined ||
-                record.status !== "active" ||
-                record.principal !== binding.principal ||
-                record.instance !== binding.instance
+                record.principal !== binding.principal
             ) {
-                throw invalidExternalSelectorContext();
-            }
-            const replaced: McpContextStoredRecord[] = [];
-            await this.#mutateAndPersist(() => {
-                for (const existing of this.#contexts.values()) {
-                    if (
-                        existing.ctxId !== ctxId &&
-                        sameExternalSelector(existing.externalSelector, selector) &&
-                        existing.principal === binding.principal &&
-                        existing.instance === binding.instance
-                    ) {
-                        existing.externalSelector = undefined;
-                        if (existing.status === "active") existing.status = "disabled";
-                        replaced.push(existing);
-                    }
-                }
-                record.externalSelector = { ...selector };
-            });
-            return { replaced: replaced.map(cloneRecord) };
-        });
-    }
-
-    async validateAndTouch(ctxId: string, binding: McpContextValidationBinding): Promise<McpContextRecord> {
-        return await this.#run(async () => {
-            this.#assertInitialized();
-            if (!isCtxId(ctxId)) {
-                throw invalidContext(ctxId);
-            }
-            const record = this.#contexts.get(ctxId);
-            if (record === undefined) {
-                throw invalidContext(ctxId);
+                throw invalidExternalBinding();
             }
             const now = this.#now();
             if (record.status === "disabled") {
                 throw disabledContext(ctxId);
             }
-            if (record.status === "expired" || Date.parse(record.expiresAt) <= now) {
+            if (
+                record.status === "expired" ||
+                Date.parse(record.expiresAt) <= now
+            ) {
                 if (record.status !== "expired") {
                     await this.#mutateAndPersist(() => {
                         record.status = "expired";
@@ -194,46 +171,80 @@ export class McpContextRegistry {
                 }
                 throw expiredContext(ctxId, record.expiresAt);
             }
-            if (record.principal !== binding.principal) {
-                throw invalidContext(ctxId);
-            }
             await this.#mutateAndPersist(() => {
-                record.lastAccessedAt = new Date(now).toISOString();
-                record.expiresAt = new Date(now + this.#ttlMs).toISOString();
+                for (const existing of this.#contexts.values()) {
+                    if (existing.principal !== binding.principal) continue;
+                    existing.externalBindings = (
+                        existing.externalBindings ?? []
+                    ).filter(
+                        (candidate) =>
+                            !sameExternalBinding(candidate, external),
+                    );
+                    if (existing.externalBindings.length === 0) {
+                        existing.externalBindings = undefined;
+                    }
+                }
+                record.externalBindings = [
+                    ...(record.externalBindings ?? []),
+                    { ...external },
+                ];
             });
             return cloneRecord(record);
         });
     }
 
-    async validateAndTouchSelector(
-        selector: McpContextExternalSelector,
-        binding: McpContextSelectorValidationBinding
+    async lookupExternal(
+        external: McpContextExternalBinding,
+        binding: McpContextValidationBinding,
+    ): Promise<McpContextRecord | undefined> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            if (!isExternalBinding(external)) {
+                throw invalidExternalBinding();
+            }
+            const matches = this.#externalMatches(external, binding.principal);
+            if (matches.length === 0) return undefined;
+            if (matches.length !== 1) throw invalidExternalBinding();
+            const record = matches[0]!;
+            const now = this.#now();
+            if (
+                record.status === "active" &&
+                Date.parse(record.expiresAt) <= now
+            ) {
+                await this.#mutateAndPersist(() => {
+                    record.status = "expired";
+                });
+            }
+            return cloneRecord(record);
+        });
+    }
+
+    async resolveExternal(
+        external: McpContextExternalBinding,
+        binding: McpContextValidationBinding,
     ): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
-            if (!isExternalSelector(selector)) {
-                throw invalidExternalSelectorContext();
+            if (!isExternalBinding(external)) {
+                throw invalidExternalBinding();
             }
-            const matches = [...this.#contexts.values()].filter((record) =>
-                sameExternalSelector(record.externalSelector, selector) &&
-                record.principal === binding.principal &&
-                record.instance === binding.instance
-            );
-            if (matches.length !== 1) {
-                throw invalidExternalSelectorContext();
-            }
+            const matches = this.#externalMatches(external, binding.principal);
+            if (matches.length !== 1) throw invalidExternalBinding();
             const record = matches[0]!;
             const now = this.#now();
             if (record.status === "disabled") {
-                throw disabledExternalSelectorContext();
+                throw disabledContext(record.ctxId);
             }
-            if (record.status === "expired" || Date.parse(record.expiresAt) <= now) {
+            if (
+                record.status === "expired" ||
+                Date.parse(record.expiresAt) <= now
+            ) {
                 if (record.status !== "expired") {
                     await this.#mutateAndPersist(() => {
                         record.status = "expired";
                     });
                 }
-                throw expiredExternalSelectorContext(record.expiresAt);
+                throw expiredContext(record.ctxId, record.expiresAt);
             }
             await this.#mutateAndPersist(() => {
                 record.lastAccessedAt = new Date(now).toISOString();
@@ -243,7 +254,37 @@ export class McpContextRegistry {
         });
     }
 
-    async validateForInstance(ctxId: string, instance: string): Promise<McpContextRecord> {
+    async lookup(
+        ctxId: string,
+        binding: McpContextValidationBinding,
+    ): Promise<McpContextRecord> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            if (!isCtxId(ctxId)) throw invalidContext(ctxId);
+            const record = this.#contexts.get(ctxId);
+            if (
+                record === undefined ||
+                record.principal !== binding.principal
+            ) {
+                throw invalidContext(ctxId);
+            }
+            const now = this.#now();
+            if (
+                record.status === "active" &&
+                Date.parse(record.expiresAt) <= now
+            ) {
+                await this.#mutateAndPersist(() => {
+                    record.status = "expired";
+                });
+            }
+            return cloneRecord(record);
+        });
+    }
+
+    async validateAndTouch(
+        ctxId: string,
+        binding: McpContextValidationBinding,
+    ): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
             if (!isCtxId(ctxId)) {
@@ -257,7 +298,49 @@ export class McpContextRegistry {
             if (record.status === "disabled") {
                 throw disabledContext(ctxId);
             }
-            if (record.status === "expired" || Date.parse(record.expiresAt) <= now) {
+            if (record.principal !== binding.principal) {
+                throw invalidContext(ctxId);
+            }
+            if (
+                record.status === "expired" ||
+                Date.parse(record.expiresAt) <= now
+            ) {
+                if (record.status !== "expired") {
+                    await this.#mutateAndPersist(() => {
+                        record.status = "expired";
+                    });
+                }
+                throw expiredContext(ctxId, record.expiresAt);
+            }
+            await this.#mutateAndPersist(() => {
+                record.lastAccessedAt = new Date(now).toISOString();
+                record.expiresAt = new Date(now + this.#ttlMs).toISOString();
+            });
+            return cloneRecord(record);
+        });
+    }
+
+    async validateForInstance(
+        ctxId: string,
+        instance: string,
+    ): Promise<McpContextRecord> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            if (!isCtxId(ctxId)) {
+                throw invalidContext(ctxId);
+            }
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined) {
+                throw invalidContext(ctxId);
+            }
+            if (record.status === "disabled") {
+                throw disabledContext(ctxId);
+            }
+            const now = this.#now();
+            if (
+                record.status === "expired" ||
+                Date.parse(record.expiresAt) <= now
+            ) {
                 if (record.status !== "expired") {
                     await this.#mutateAndPersist(() => {
                         record.status = "expired";
@@ -274,7 +357,7 @@ export class McpContextRegistry {
 
     async attachEnvironment(
         ctxId: string,
-        binding: McpContextEnvironmentBinding
+        binding: McpContextEnvironmentBinding,
     ): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
@@ -286,7 +369,10 @@ export class McpContextRegistry {
                 throw disabledContext(ctxId);
             }
             const now = this.#now();
-            if (record.status === "expired" || Date.parse(record.expiresAt) <= now) {
+            if (
+                record.status === "expired" ||
+                Date.parse(record.expiresAt) <= now
+            ) {
                 if (record.status !== "expired") {
                     await this.#mutateAndPersist(() => {
                         record.status = "expired";
@@ -295,21 +381,28 @@ export class McpContextRegistry {
                 throw expiredContext(ctxId, record.expiresAt);
             }
             await this.#mutateAndPersist(() => {
-                const index = record.environments.findIndex((environment) => environment.instance === binding.instance);
-                const current = index < 0 ? undefined : record.environments[index];
-                const next: McpContextEnvironment = binding.workspace === undefined
-                    ? { ...(current ?? {}), instance: binding.instance }
-                    : {
-                        instance: binding.instance,
-                        temporaryDirectory: binding.temporaryDirectory,
-                        workspace: binding.workspace
-                    };
+                const index = record.environments.findIndex(
+                    (environment) => environment.instance === binding.instance,
+                );
+                const current =
+                    index < 0 ? undefined : record.environments[index];
+                const next: McpContextEnvironment =
+                    binding.workspace === undefined
+                        ? { ...(current ?? {}), instance: binding.instance }
+                        : {
+                              instance: binding.instance,
+                              temporaryDirectory: binding.temporaryDirectory,
+                              workspace: binding.workspace,
+                          };
                 if (index < 0) {
                     record.environments.push(next);
                 } else {
                     record.environments[index] = next;
                 }
-                if (record.instance === binding.instance && binding.workspace !== undefined) {
+                if (
+                    record.instance === binding.instance &&
+                    binding.workspace !== undefined
+                ) {
                     record.workspace = binding.workspace;
                     record.temporaryDirectory = binding.temporaryDirectory;
                 }
@@ -334,7 +427,9 @@ export class McpContextRegistry {
             }
             return [...this.#contexts.values()]
                 .map(cloneRecord)
-                .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+                .sort((left, right) =>
+                    left.createdAt.localeCompare(right.createdAt),
+                );
         });
     }
 
@@ -366,6 +461,33 @@ export class McpContextRegistry {
         });
     }
 
+    async renewForPrincipal(
+        ctxId: string,
+        binding: McpContextValidationBinding,
+    ): Promise<McpContextRecord> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            const record = this.#contexts.get(ctxId);
+            if (
+                record === undefined ||
+                !isCtxId(ctxId) ||
+                record.principal !== binding.principal
+            ) {
+                throw invalidContext(ctxId);
+            }
+            if (record.status === "disabled") {
+                throw disabledContext(ctxId);
+            }
+            const now = this.#now();
+            await this.#mutateAndPersist(() => {
+                record.status = "active";
+                record.lastAccessedAt = new Date(now).toISOString();
+                record.expiresAt = new Date(now + this.#ttlMs).toISOString();
+            });
+            return cloneRecord(record);
+        });
+    }
+
     async renew(ctxId: string): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
@@ -389,7 +511,7 @@ export class McpContextRegistry {
     async updateWorkerState(
         ctxId: string,
         instance: string,
-        binding: Pick<McpContextBinding, "temporaryDirectory" | "workspace">
+        binding: Pick<McpContextBinding, "temporaryDirectory" | "workspace">,
     ): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
@@ -400,7 +522,16 @@ export class McpContextRegistry {
             if (record.status === "disabled") {
                 throw disabledContext(ctxId);
             }
-            if (record.status === "expired") {
+            const now = this.#now();
+            if (
+                record.status === "expired" ||
+                Date.parse(record.expiresAt) <= now
+            ) {
+                if (record.status !== "expired") {
+                    await this.#mutateAndPersist(() => {
+                        record.status = "expired";
+                    });
+                }
                 throw expiredContext(ctxId, record.expiresAt);
             }
             const environment = contextEnvironment(record, instance);
@@ -417,6 +548,19 @@ export class McpContextRegistry {
             });
             return cloneRecord(record);
         });
+    }
+
+    #externalMatches(
+        external: McpContextExternalBinding,
+        principal: string,
+    ): McpContextStoredRecord[] {
+        return [...this.#contexts.values()].filter(
+            (record) =>
+                record.principal === principal &&
+                (record.externalBindings ?? []).some((candidate) =>
+                    sameExternalBinding(candidate, external),
+                ),
+        );
     }
 
     async #mutateAndPersist(mutate: () => void): Promise<void> {
@@ -460,7 +604,10 @@ export class McpContextRegistry {
     #expireOverdue(now: number): boolean {
         let changed = false;
         for (const record of this.#contexts.values()) {
-            if (record.status === "active" && Date.parse(record.expiresAt) <= now) {
+            if (
+                record.status === "active" &&
+                Date.parse(record.expiresAt) <= now
+            ) {
                 record.status = "expired";
                 changed = true;
             }
@@ -473,7 +620,9 @@ export class McpContextRegistry {
             .filter((record) => record.status !== "active")
             .sort((left, right) => {
                 const created = left.createdAt.localeCompare(right.createdAt);
-                return created === 0 ? left.ctxId.localeCompare(right.ctxId) : created;
+                return created === 0
+                    ? left.ctxId.localeCompare(right.ctxId)
+                    : created;
             });
         let changed = false;
         while (terminal.length > this.#maxTerminalContexts) {
@@ -490,12 +639,18 @@ export class McpContextRegistry {
         }
         await mkdir(dirname(this.#filePath), { recursive: true });
         const document: McpContextDocument = {
-            contexts: [...this.#contexts.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt)),
-            version: 1
+            contexts: [...this.#contexts.values()].sort((left, right) =>
+                left.createdAt.localeCompare(right.createdAt),
+            ),
+            version: 1,
         };
         const temporary = `${this.#filePath}.${process.pid}.${randomUUID()}.tmp`;
         try {
-            await writeFile(temporary, `${JSON.stringify(document, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+            await writeFile(
+                temporary,
+                `${JSON.stringify(document, null, 2)}\n`,
+                { encoding: "utf8", mode: 0o600 },
+            );
             await rename(temporary, this.#filePath);
         } catch (error) {
             await rm(temporary, { force: true }).catch(() => undefined);
@@ -513,7 +668,7 @@ export class McpContextRegistry {
         const result = this.#operation.then(operation, operation);
         this.#operation = result.then(
             () => undefined,
-            () => undefined
+            () => undefined,
         );
         return await result;
     }
@@ -524,32 +679,15 @@ function invalidContext(ctxId: string) {
         code: errorCodes.mcpContextInvalid,
         details: { ctxId },
         message: "ctxId is invalid for the current environment.",
-        retryable: false
+        retryable: false,
     });
 }
 
-function invalidExternalSelectorContext() {
+function invalidExternalBinding() {
     return createError({
         code: errorCodes.mcpContextInvalid,
-        message: "The current external session has no valid environment context. Call environ_info first.",
-        retryable: false
-    });
-}
-
-function expiredExternalSelectorContext(expiresAt: string) {
-    return createError({
-        code: errorCodes.mcpContextExpired,
-        details: { expiresAt },
-        message: "The current external session environment context has expired. Call environ_info again.",
-        retryable: false
-    });
-}
-
-function disabledExternalSelectorContext() {
-    return createError({
-        code: errorCodes.mcpContextDisabled,
-        message: "The current external session environment context is disabled. Call environ_info again.",
-        retryable: false
+        message: "No valid Context is bound to the current external identity.",
+        retryable: false,
     });
 }
 
@@ -557,8 +695,9 @@ function expiredContext(ctxId: string, expiresAt: string) {
     return createError({
         code: errorCodes.mcpContextExpired,
         details: { ctxId, expiresAt },
-        message: "ctxId has expired. Call environ_info to create a new context.",
-        retryable: false
+        message:
+            "ctxId lease has expired. Renew this Context to continue using the same ctxId.",
+        retryable: false,
     });
 }
 
@@ -566,8 +705,9 @@ function disabledContext(ctxId: string) {
     return createError({
         code: errorCodes.mcpContextDisabled,
         details: { ctxId },
-        message: "ctxId is disabled. Call environ_info to create a new context.",
-        retryable: false
+        message:
+            "ctxId is disabled and cannot be renewed. Call context_acquire to bind a new active Context.",
+        retryable: false,
     });
 }
 
@@ -576,34 +716,52 @@ function isCtxId(value: string): boolean {
 }
 
 function cloneRecord(record: McpContextStoredRecord): McpContextRecord {
-    const { externalSelector: _externalSelector, ...publicRecord } = record;
+    const { externalBindings: _externalBindings, ...publicRecord } = record;
     return {
         ...publicRecord,
-        environments: record.environments.map((environment) => ({ ...environment }))
+        environments: record.environments.map((environment) => ({
+            ...environment,
+        })),
     };
 }
 
-function cloneStoredRecord(record: McpContextStoredRecord): McpContextStoredRecord {
+function cloneStoredRecord(
+    record: McpContextStoredRecord,
+): McpContextStoredRecord {
     return {
         ...record,
-        ...(record.externalSelector === undefined ? {} : { externalSelector: { ...record.externalSelector } }),
-        environments: record.environments.map((environment) => ({ ...environment }))
+        externalBindings: record.externalBindings?.map((binding) => ({
+            ...binding,
+        })),
+        environments: record.environments.map((environment) => ({
+            ...environment,
+        })),
     };
 }
 
-function contextEnvironment(record: McpContextRecord, instance: string): McpContextEnvironment | undefined {
-    return record.environments.find((environment) => environment.instance === instance);
+function contextEnvironment(
+    record: McpContextRecord,
+    instance: string,
+): McpContextEnvironment | undefined {
+    return record.environments.find(
+        (environment) => environment.instance === instance,
+    );
 }
 
 function cloneContextMap(
-    contexts: ReadonlyMap<string, McpContextStoredRecord>
+    contexts: ReadonlyMap<string, McpContextStoredRecord>,
 ): Map<string, McpContextStoredRecord> {
-    return new Map([...contexts].map(([ctxId, record]) => [ctxId, cloneStoredRecord(record)]));
+    return new Map(
+        [...contexts].map(([ctxId, record]) => [
+            ctxId,
+            cloneStoredRecord(record),
+        ]),
+    );
 }
 
 function restoreContextMap(
     contexts: Map<string, McpContextStoredRecord>,
-    previous: ReadonlyMap<string, McpContextStoredRecord>
+    previous: ReadonlyMap<string, McpContextStoredRecord>,
 ): void {
     contexts.clear();
     for (const [ctxId, record] of previous) {
@@ -612,8 +770,13 @@ function restoreContextMap(
 }
 
 function isDocument(value: unknown): value is McpContextDocument {
-    return typeof value === "object" && value !== null && !Array.isArray(value) &&
-        (value as { version?: unknown }).version === 1 && Array.isArray((value as { contexts?: unknown }).contexts);
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value) &&
+        (value as { version?: unknown }).version === 1 &&
+        Array.isArray((value as { contexts?: unknown }).contexts)
+    );
 }
 
 function parseRecord(value: unknown): McpContextStoredRecord | undefined {
@@ -622,15 +785,46 @@ function parseRecord(value: unknown): McpContextStoredRecord | undefined {
     }
     const raw = value as Record<string, unknown>;
     const record = value as Partial<McpContextStoredRecord>;
+    const status = raw.status;
+    const parsedBindings = Array.isArray(record.externalBindings)
+        ? record.externalBindings.map(parseExternalBinding)
+        : [];
+    if (parsedBindings.some((binding) => binding === undefined))
+        return undefined;
+    const legacySelectorValue = raw.externalSelector;
+    const legacySelector = parseExternalBinding(legacySelectorValue);
+    if (legacySelectorValue !== undefined && legacySelector === undefined) {
+        return undefined;
+    }
     const legacyOpenAiSessionId = raw.openAiSessionId;
-    if (typeof record.ctxId !== "string" || !isCtxId(record.ctxId) ||
-        typeof record.principal !== "string" || typeof record.instance !== "string" ||
-        typeof record.workspace !== "string" || typeof record.createdAt !== "string" ||
-        typeof record.lastAccessedAt !== "string" || typeof record.expiresAt !== "string" ||
-        (record.externalSelector !== undefined && !isExternalSelector(record.externalSelector)) ||
-        (legacyOpenAiSessionId !== undefined && (typeof legacyOpenAiSessionId !== "string" || legacyOpenAiSessionId.length === 0)) ||
-        (record.temporaryDirectory !== undefined && typeof record.temporaryDirectory !== "string") ||
-        (record.status !== "active" && record.status !== "expired" && record.status !== "disabled")) {
+    if (
+        legacyOpenAiSessionId !== undefined &&
+        (typeof legacyOpenAiSessionId !== "string" || legacyOpenAiSessionId.length === 0)
+    ) {
+        return undefined;
+    }
+    const legacyOpenAiSession =
+        typeof legacyOpenAiSessionId === "string"
+            ? { kind: "openai/session", value: legacyOpenAiSessionId }
+            : undefined;
+    const externalBindings = uniqueExternalBindings([
+        ...(parsedBindings as McpContextExternalBinding[]),
+        ...(legacySelector === undefined ? [] : [legacySelector]),
+        ...(legacyOpenAiSession === undefined ? [] : [legacyOpenAiSession]),
+    ]);
+    if (
+        typeof record.ctxId !== "string" ||
+        !isCtxId(record.ctxId) ||
+        typeof record.principal !== "string" ||
+        typeof record.instance !== "string" ||
+        typeof record.workspace !== "string" ||
+        typeof record.createdAt !== "string" ||
+        typeof record.lastAccessedAt !== "string" ||
+        typeof record.expiresAt !== "string" ||
+        (record.temporaryDirectory !== undefined &&
+            typeof record.temporaryDirectory !== "string") ||
+        (status !== "active" && status !== "expired" && status !== "disabled")
+    ) {
         return undefined;
     }
     const environments = Array.isArray(record.environments)
@@ -646,25 +840,56 @@ function parseRecord(value: unknown): McpContextStoredRecord | undefined {
     byInstance.set(record.instance, {
         instance: record.instance,
         temporaryDirectory: record.temporaryDirectory,
-        workspace: record.workspace
+        workspace: record.workspace,
     });
     return {
         createdAt: record.createdAt,
         ctxId: record.ctxId,
         environments: [...byInstance.values()],
+        ...(externalBindings.length === 0 ? {} : { externalBindings }),
         expiresAt: record.expiresAt,
         instance: record.instance,
         lastAccessedAt: record.lastAccessedAt,
-        externalSelector: record.externalSelector ?? (
-            typeof legacyOpenAiSessionId === "string"
-                ? { kind: "openai/session", value: legacyOpenAiSessionId }
-                : undefined
-        ),
         principal: record.principal,
-        status: record.status,
+        status: status as "active" | "expired" | "disabled",
         temporaryDirectory: record.temporaryDirectory,
-        workspace: record.workspace
+        workspace: record.workspace,
     };
+}
+
+function parseExternalBinding(
+    value: unknown,
+): McpContextExternalBinding | undefined {
+    return isExternalBinding(value) ? { ...value } : undefined;
+}
+
+function isExternalBinding(value: unknown): value is McpContextExternalBinding {
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+        return false;
+    const binding = value as Partial<McpContextExternalBinding>;
+    return (
+        typeof binding.kind === "string" &&
+        binding.kind.length > 0 &&
+        typeof binding.value === "string" &&
+        binding.value.length > 0
+    );
+}
+
+function sameExternalBinding(
+    left: McpContextExternalBinding,
+    right: McpContextExternalBinding,
+): boolean {
+    return left.kind === right.kind && left.value === right.value;
+}
+
+function uniqueExternalBindings(
+    bindings: McpContextExternalBinding[],
+): McpContextExternalBinding[] {
+    const unique = new Map<string, McpContextExternalBinding>();
+    for (const binding of bindings) {
+        unique.set(`${binding.kind}\0${binding.value}`, binding);
+    }
+    return [...unique.values()];
 }
 
 function parseEnvironment(value: unknown): McpContextEnvironment | undefined {
@@ -672,32 +897,28 @@ function parseEnvironment(value: unknown): McpContextEnvironment | undefined {
         return undefined;
     }
     const environment = value as Partial<McpContextEnvironment>;
-    if (typeof environment.instance !== "string" || environment.instance.length === 0 ||
-        (environment.workspace !== undefined && typeof environment.workspace !== "string") ||
-        (environment.temporaryDirectory !== undefined && typeof environment.temporaryDirectory !== "string")) {
+    if (
+        typeof environment.instance !== "string" ||
+        environment.instance.length === 0 ||
+        (environment.workspace !== undefined &&
+            typeof environment.workspace !== "string") ||
+        (environment.temporaryDirectory !== undefined &&
+            typeof environment.temporaryDirectory !== "string")
+    ) {
         return undefined;
     }
     return {
         instance: environment.instance,
         temporaryDirectory: environment.temporaryDirectory,
-        workspace: environment.workspace
+        workspace: environment.workspace,
     };
 }
 
-function isExternalSelector(value: unknown): value is McpContextExternalSelector {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-    const selector = value as Partial<McpContextExternalSelector>;
-    return typeof selector.kind === "string" && selector.kind.length > 0 &&
-        typeof selector.value === "string" && selector.value.length > 0;
-}
-
-function sameExternalSelector(
-    left: McpContextExternalSelector | undefined,
-    right: McpContextExternalSelector,
-): boolean {
-    return left?.kind === right.kind && left.value === right.value;
-}
-
 function isMissing(error: unknown): error is NodeJS.ErrnoException {
-    return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ENOENT"
+    );
 }
