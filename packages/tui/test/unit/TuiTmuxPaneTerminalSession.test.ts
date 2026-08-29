@@ -132,6 +132,28 @@ test("selection moves within bounds and clamps at the edges", async () => {
     assert.equal(session.getSnapshot().selectedIndex, 1);
 });
 
+test("refresh preserves the selected pane identity when pane ordering changes", async () => {
+    const harness = createOperationsHarness();
+    harness.setPanes([
+        { id: "%1", name: "first", status: "idle", workspace: "/work/a" },
+        { id: "%2", name: "second", status: "running", task: { id: "task-2", status: "running" }, workspace: "/work/b" },
+    ]);
+    const session = new TuiTmuxPaneTerminalSession({ operations: harness.operations });
+    await session.bind("alpha");
+    session.selectIndex(1);
+    assert.equal(session.getSnapshot().panes[session.getSnapshot().selectedIndex]?.id, "%2");
+
+    harness.setPanes([
+        { id: "%2", name: "second", status: "running", task: { id: "task-2", status: "running" }, workspace: "/work/b" },
+        { id: "%1", name: "first", status: "idle", workspace: "/work/a" },
+    ]);
+    await session.refresh();
+
+    assert.equal(session.getSnapshot().selectedIndex, 0);
+    assert.equal(session.getSnapshot().panes[session.getSnapshot().selectedIndex]?.id, "%2");
+    assert.equal(session.getSnapshot().panes[session.getSnapshot().selectedIndex]?.workspace, "/work/b");
+});
+
 test("activating a view-only pane opens an unattached panel without a warning", async () => {
     const harness = createOperationsHarness();
     harness.setPanes([idlePane]);

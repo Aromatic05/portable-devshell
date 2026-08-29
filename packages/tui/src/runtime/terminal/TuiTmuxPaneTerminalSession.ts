@@ -151,6 +151,7 @@ export class TuiTmuxPaneTerminalSession {
             return;
         }
         const generation = ++this.#refreshGeneration;
+        const previouslySelected = this.#snapshot.panes[this.#snapshot.selectedIndex];
         let panes: TuiTmuxPaneViewModel[];
         try {
             panes = projectTmuxPanes(await this.#operations.listPanes(instance));
@@ -165,7 +166,12 @@ export class TuiTmuxPaneTerminalSession {
             return;
         }
 
-        const selectedIndex = clampIndex(this.#snapshot.selectedIndex, panes.length);
+        const preservedIndex = previouslySelected === undefined
+            ? -1
+            : panes.findIndex((pane) => pane.id === previouslySelected.id && pane.workspace === previouslySelected.workspace);
+        const selectedIndex = preservedIndex >= 0
+            ? preservedIndex
+            : clampIndex(this.#snapshot.selectedIndex, panes.length);
         let active = this.#snapshot.active;
         if (active !== undefined) {
             const current = panes.find((pane) => pane.id === active?.paneId && pane.workspace === active?.workspace);

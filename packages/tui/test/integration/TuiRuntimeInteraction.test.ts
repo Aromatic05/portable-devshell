@@ -1051,6 +1051,16 @@ test("real Ink runtime switches terminal sources and drives tmux View and Attach
                 provider: "ssh",
             },
         ],
+        toolCallRecords: [{
+            callId: "call-existing-tmux",
+            inputSummary: "{}",
+            instance: "alpha",
+            source: "mcp",
+            startedAt: "2026-08-30T00:00:00.000Z",
+            status: "completed",
+            toolName: "tmux_list",
+            workspace: process.cwd(),
+        } as ToolCallRecord],
         toolCall(_instance, toolName, input) {
             if (toolName === "tmux_list") {
                 return {

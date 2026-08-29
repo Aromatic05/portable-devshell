@@ -110,20 +110,7 @@ export class TuiRuntimeTmuxOperations {
         for (const call of [...toolCalls].sort((left, right) => right.startedAt.localeCompare(left.startedAt))) {
             if (call.toolName.startsWith("tmux_")) add(call.workspace);
         }
-        for (const context of [...state.readModel.contexts].sort((left, right) => right.lastAccessedAt.localeCompare(left.lastAccessedAt))) {
-            if (context.status !== "active") continue;
-            for (const environment of context.environments ?? [{ instance: context.instance, workspace: context.workspace }]) {
-                if (environment.instance === instance) add(environment.workspace);
-            }
-        }
-        add(this.#requireHomeDirectory(instance));
         return workspaces.slice(0, 32);
-    }
-
-    #requireHomeDirectory(instance: string): string {
-        const home = this.options.store.getState().instances.find((candidate) => candidate.name === instance)?.homeDirectory;
-        if (home !== undefined && home.length > 0) return home;
-        throw new Error(`Worker home directory is unavailable for ${instance}.`);
     }
 }
 

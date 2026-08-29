@@ -43,6 +43,22 @@ test("listPanes records a tmux_list call and preserves each task's actual status
             { id: "%2", name: "done", status: "0", task: { id: "task-5", status: "0" } }
         ]
     }));
+    harness.store.patchControlReadModel({
+        instanceState: {
+            alpha: {
+                toolCalls: [{
+                    callId: "call-home-tmux",
+                    inputSummary: "{}",
+                    instance: "alpha",
+                    source: "mcp",
+                    startedAt: "2026-08-29T08:00:00.000Z",
+                    status: "completed",
+                    toolName: "tmux_list",
+                    workspace: "/home/alpha"
+                } as never]
+            }
+        }
+    });
 
     const panes = await harness.operations.listPanes("alpha");
 
@@ -79,9 +95,31 @@ test("listPanes discovers tmux task workspaces from recent tool calls instead of
 
     const panes = await harness.operations.listPanes("alpha");
 
-    assert.deepEqual(harness.calls.map((call) => call.workspace), ["/work/project", "/home/alpha"]);
+    assert.deepEqual(harness.calls.map((call) => call.workspace), ["/work/project"]);
     assert.equal(panes[0]?.task?.id, "task-project");
     assert.equal(panes[0]?.workspace, "/work/project");
+});
+
+test("listPanes does not probe ordinary Context workspaces or home without tmux evidence", async () => {
+    const harness = createHarness((): JsonValue => ({ panes: [{ id: "%0", name: "main", status: "idle" }] }));
+    harness.store.patchControlReadModel({
+        contexts: [{
+            createdAt: "2026-08-29T08:00:00.000Z",
+            ctxId: "ctx-ordinary",
+            environments: [{ instance: "alpha", workspace: "/work/ordinary" }],
+            expiresAt: "2026-08-31T08:00:00.000Z",
+            instance: "alpha",
+            lastAccessedAt: "2026-08-29T08:00:00.000Z",
+            principal: "subject",
+            status: "active",
+            workspace: "/work/ordinary"
+        } as never]
+    });
+
+    const panes = await harness.operations.listPanes("alpha");
+
+    assert.deepEqual(panes, []);
+    assert.deepEqual(harness.calls, []);
 });
 
 test("inspectPane records a tmux_inspect call scoped to the requested pane and line window", async () => {
