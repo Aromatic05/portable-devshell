@@ -27,7 +27,7 @@ use crate::tools::tmux::transcript_ring;
 
 pub const TMUX_SESSION: &str = "devshell";
 pub const MAX_PANES: usize = 16;
-const TMUX_RUNTIME_SCHEMA: &str = "2";
+const TMUX_RUNTIME_SCHEMA: &str = "3";
 const PANE_HISTORY_LINES: i64 = 400;
 const TERMINAL_HISTORY_LINES: usize = 10_000;
 const TERMINAL_COLUMNS: usize = 240;
@@ -46,6 +46,7 @@ pub struct BackendPane {
     pub command: String,
     pub status: Option<String>,
     pub managed_task_id: Option<String>,
+    pub transcript_capture_active: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -225,6 +226,7 @@ impl TmuxBackend {
             "#{pane_dead_status}",
             "#{@devshell_worker_task_id}",
             "#{pane_dead_signal}",
+            "#{pane_pipe}",
         ]
         .join("|");
         let raw = self.run(&[
@@ -312,6 +314,7 @@ impl TmuxBackend {
                         .or_else(|| shell_status.as_ref().map(status_text))
                 }),
                 managed_task_id,
+                transcript_capture_active: fields.get(13).copied() == Some("1"),
             });
         }
         panes.sort_by_key(|pane| pane.created_at_ms);
@@ -436,14 +439,12 @@ impl TmuxBackend {
         let script_path = self.tasks_dir.join(format!("{task_id}.sh"));
         let gate_path = self.tasks_dir.join(format!("{task_id}.start"));
         let exit_path = self.task_exit_path(task_id);
-        let transcript_path = self.transcript_path(task_id);
         let transcript_buffer_name = self.transcript_buffer_name(task_id);
         let transcript_done_path = self.transcript_done_path(task_id);
         let _ = fs::remove_file(&gate_path);
         let _ = fs::remove_file(&exit_path);
         let _ = transcript_ring::remove(&transcript_buffer_name);
         let _ = fs::remove_file(&transcript_done_path);
-        atomic_write_bytes(&transcript_path, b"")?;
         atomic_write_bytes(&script_path, command.as_bytes())?;
         let runner = format!(
             "umask 077; while [ ! -e {} ]; do /bin/sleep 0.02; done; /bin/rm -f {}; /bin/bash --noprofile --norc {}; status=$?; printf '%s\\n' \"$status\" > {}; exit \"$status\"",
@@ -493,7 +494,7 @@ impl TmuxBackend {
                 "-t".into(),
                 tmux_pane_id.clone(),
                 format!(
-                    "exec {} {} {} {} {} 2>/dev/null",
+                    "exec {} {} {} {} 2>/dev/null",
                     shell_quote(
                         &std::env::current_exe()
                             .map_err(|error| {
@@ -502,7 +503,6 @@ impl TmuxBackend {
                             .to_string_lossy()
                     ),
                     TRANSCRIPT_LOGGER_MODE,
-                    shell_quote(&transcript_path.to_string_lossy()),
                     shell_quote(&transcript_buffer_name),
                     shell_quote(&transcript_done_path.to_string_lossy()),
                 ),
@@ -512,7 +512,6 @@ impl TmuxBackend {
         if let Err(error) = setup {
             let _ = self.run(&["kill-pane".into(), "-t".into(), tmux_pane_id.clone()]);
             self.remove_task_runtime(task_id);
-            let _ = fs::remove_file(&transcript_path);
             let _ = transcript_ring::remove(&transcript_buffer_name);
             return Err(error);
         }
@@ -544,8 +543,8 @@ impl TmuxBackend {
         self.wait_task_capture(task_id)
     }
 
-    pub fn transcript_path(&self, task_id: &str) -> PathBuf {
-        self.transcripts_dir.join(format!("{task_id}.log"))
+    pub fn task_record_path(&self, task_id: &str) -> PathBuf {
+        self.transcripts_dir.join(format!("{task_id}.json"))
     }
 
     pub fn transcript_buffer_name(&self, task_id: &str) -> String {
@@ -559,10 +558,7 @@ impl TmuxBackend {
         task_id: &str,
         record: &T,
     ) -> Result<(), ToolError> {
-        atomic_write_json(
-            &self.transcripts_dir.join(format!("{task_id}.json")),
-            record,
-        )
+        atomic_write_json(&self.task_record_path(task_id), record)
     }
 
     pub fn persist_task_offset(&self, task_id: &str, offset: u64) -> Result<(), ToolError> {
@@ -896,13 +892,6 @@ impl TmuxBackend {
     }
 
     fn clear_unpersisted_task_runtime(&self) -> Result<(), ToolError> {
-        for entry in fs::read_dir(&self.tasks_dir).map_err(storage_error)? {
-            let entry = entry.map_err(storage_error)?;
-            if entry.file_type().map_err(storage_error)?.is_file() {
-                fs::remove_file(entry.path()).map_err(storage_error)?;
-            }
-        }
-
         let persisted = fs::read_dir(&self.transcripts_dir)
             .map_err(storage_error)?
             .filter_map(Result::ok)
@@ -916,6 +905,22 @@ impl TmuxBackend {
                     .map(ToOwned::to_owned)
             })
             .collect::<HashSet<_>>();
+        let mut discarded = HashSet::new();
+
+        for entry in fs::read_dir(&self.tasks_dir).map_err(storage_error)? {
+            let entry = entry.map_err(storage_error)?;
+            if !entry.file_type().map_err(storage_error)?.is_file() {
+                continue;
+            }
+            let path = entry.path();
+            if let Some(task_id) = path.file_stem().and_then(|stem| stem.to_str())
+                && !persisted.contains(task_id)
+            {
+                discarded.insert(task_id.to_string());
+            }
+            fs::remove_file(path).map_err(storage_error)?;
+        }
+
         for entry in fs::read_dir(&self.transcripts_dir).map_err(storage_error)? {
             let entry = entry.map_err(storage_error)?;
             let path = entry.path();
@@ -929,8 +934,14 @@ impl TmuxBackend {
                 continue;
             };
             if !persisted.contains(task_id) {
+                discarded.insert(task_id.to_string());
                 fs::remove_file(path).map_err(storage_error)?;
             }
+        }
+
+        for task_id in discarded {
+            transcript_ring::remove(&self.transcript_buffer_name(&task_id))
+                .map_err(storage_error)?;
         }
         Ok(())
     }

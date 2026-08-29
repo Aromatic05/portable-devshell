@@ -80,7 +80,7 @@ impl TmuxState {
                 pane_incarnation_id: String::new(),
                 state,
                 transcript: TranscriptCursor::restore(
-                    backend.transcript_path(&record.task_id),
+                    backend.task_record_path(&record.task_id),
                     backend.transcript_buffer_name(&record.task_id),
                     backend.load_task_offset(&record.task_id)?,
                 ),
@@ -174,7 +174,6 @@ impl TmuxState {
             if let Err(error) = verify_pane_cwd(&pane, &cwd) {
                 let _ = self.backend.close_pane(&pane);
                 self.backend.remove_task_runtime(&task_id);
-                let _ = fs::remove_file(self.backend.transcript_path(&task_id));
                 let _ =
                     super::transcript_ring::remove(&self.backend.transcript_buffer_name(&task_id));
                 return Err(error);
@@ -182,7 +181,6 @@ impl TmuxState {
             if let Err(error) = self.backend.start_task_pane(&task_id) {
                 let _ = self.backend.close_pane(&pane);
                 self.backend.remove_task_runtime(&task_id);
-                let _ = fs::remove_file(self.backend.transcript_path(&task_id));
                 let _ =
                     super::transcript_ring::remove(&self.backend.transcript_buffer_name(&task_id));
                 return Err(error);
@@ -193,7 +191,7 @@ impl TmuxState {
                 pane_incarnation_id: pane.pane_incarnation_id.clone(),
                 state: TaskState::Running,
                 transcript: TranscriptCursor::new(
-                    self.backend.transcript_path(&task_id),
+                    self.backend.task_record_path(&task_id),
                     self.backend.transcript_buffer_name(&task_id),
                 ),
                 finished_at_ms: None,
@@ -738,6 +736,7 @@ impl TmuxState {
         let mut completed_pane = None;
         let mut became_terminal = false;
         let mut lost = false;
+        let mut capture_lost = false;
         {
             let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
             let current = tasks
@@ -747,6 +746,7 @@ impl TmuxState {
             match pane {
                 Some(pane) if pane.pane_incarnation_id == current.pane_incarnation_id => {
                     refresh_task_record(current, pane);
+                    capture_lost = current.state.is_active() && !pane.transcript_capture_active;
                     if !current.state.is_active() && pane.managed_task_id.is_some() {
                         completed_pane = Some(pane.clone());
                         became_terminal = true;
@@ -761,6 +761,13 @@ impl TmuxState {
         if lost {
             self.mark_task_lost(task_id, &task.pane_id)?;
             return Ok(());
+        }
+        if capture_lost {
+            self.push_task_warning(
+                task_id,
+                "tmux.transcriptCaptureLost",
+                "task is still running but tmux pipe-pane output capture is no longer active; subsequent task output may be missing",
+            )?;
         }
         if became_terminal {
             self.persist_task_record(task_id)?;
@@ -822,6 +829,7 @@ impl TmuxState {
         let mut lost = Vec::new();
         let mut finalize_only = Vec::new();
         let mut adopted_panes = Vec::new();
+        let mut capture_lost = Vec::new();
         {
             let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
             tasks.prune();
@@ -842,6 +850,9 @@ impl TmuxState {
                 match workspace.panes.iter().find(|pane| pane.id == task.pane_id) {
                     Some(pane) if pane.pane_incarnation_id == task.pane_incarnation_id => {
                         refresh_task_record(task, pane);
+                        if task.state.is_active() && !pane.transcript_capture_active {
+                            capture_lost.push(task.id.clone());
+                        }
                         if !task.state.is_active() && pane.managed_task_id.is_some() {
                             cleanup.push((task.id.clone(), pane.clone()));
                             finished.push(task.id.clone());
@@ -877,7 +888,7 @@ impl TmuxState {
                     pane_incarnation_id: pane.pane_incarnation_id.clone(),
                     state: TaskState::Running,
                     transcript: TranscriptCursor::restore(
-                        self.backend.transcript_path(task_id),
+                        self.backend.task_record_path(task_id),
                         self.backend.transcript_buffer_name(task_id),
                         self.backend.load_task_offset(task_id)?,
                     ),
@@ -886,6 +897,9 @@ impl TmuxState {
                     warnings: Vec::new(),
                 };
                 refresh_task_record(&mut task, pane);
+                if task.state.is_active() && !pane.transcript_capture_active {
+                    capture_lost.push(task.id.clone());
+                }
                 if !task.state.is_active() && pane.managed_task_id.is_some() {
                     cleanup.push((task.id.clone(), pane.clone()));
                     finished.push(task.id.clone());
@@ -920,6 +934,13 @@ impl TmuxState {
                 Ok(()) => self.backend.remove_task_runtime(&task_id),
                 Err(error) => self.push_pending_warning(cleanup_warning(&task_id, None, &error))?,
             }
+        }
+        for task_id in capture_lost {
+            self.push_task_warning(
+                &task_id,
+                "tmux.transcriptCaptureLost",
+                "task is still running but tmux pipe-pane output capture is no longer active; subsequent task output may be missing",
+            )?;
         }
         for pane_id in adopted_panes {
             self.push_pending_warning(warning(
@@ -1262,6 +1283,17 @@ fn workspace_warnings(workspace: &BackendWorkspace) -> Vec<TmuxWarning> {
             ),
         ));
     }
+    for pane in workspace.panes.iter().filter(|pane| {
+        pane.managed_task_id.is_some()
+            && pane.status.as_deref() == Some("running")
+            && !pane.transcript_capture_active
+    }) {
+        warnings.push(warning(
+            Some(&pane.id),
+            "tmux.transcriptCaptureLost",
+            "task is still running but tmux pipe-pane output capture is no longer active; subsequent task output may be missing",
+        ));
+    }
     if workspace.total_panes >= MAX_PANES {
         warnings.push(warning(
             None,
@@ -1336,6 +1368,7 @@ mod tests {
             command: "bash".to_string(),
             status: Some("idle".to_string()),
             managed_task_id: None,
+            transcript_capture_active: false,
         }
     }
 }

@@ -104,11 +104,11 @@ impl TaskRegistry {
 
     pub fn remove(&mut self, id: &str) {
         if let Some(task) = self.tasks.remove(id) {
-            let _ = std::fs::remove_file(&task.transcript.path);
             let _ = super::transcript_ring::remove(&task.transcript.ring_name);
-            let _ = std::fs::remove_file(task.transcript.path.with_extension("json"));
-            let _ = std::fs::remove_file(task.transcript.path.with_extension("done"));
-            let _ = std::fs::remove_file(task.transcript.path.with_extension("offset"));
+            let _ = std::fs::remove_file(&task.transcript.metadata_path);
+            let _ = std::fs::remove_file(task.transcript.metadata_path.with_extension("done"));
+            let _ = std::fs::remove_file(task.transcript.metadata_path.with_extension("offset"));
+            let _ = std::fs::remove_file(task.transcript.metadata_path.with_extension("log"));
         }
     }
 }
@@ -238,6 +238,7 @@ mod tests {
             command: "bash".to_string(),
             status: Some("idle".to_string()),
             managed_task_id: None,
+            transcript_capture_active: false,
         }
     }
 

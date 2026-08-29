@@ -8,6 +8,9 @@ use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use nix::fcntl::OFlag;
+use nix::sys::mman::shm_open;
+use nix::sys::stat::Mode;
 use serde_json::{Value, json};
 use support::TestEnv;
 
@@ -16,6 +19,24 @@ fn tmux_available() -> bool {
         .arg("-V")
         .output()
         .is_ok_and(|output| output.status.success())
+}
+
+fn tmux_transcript_buffer_name(env: &TestEnv, instance: &str, task_id: &str) -> String {
+    let workspace = env.workspace().canonicalize().unwrap();
+    let identity = format!("{instance}:{}:{task_id}", workspace.display());
+    let digest = blake3::hash(identity.as_bytes()).to_hex();
+    format!("/devshell-tmux-{}", &digest[..32])
+}
+
+fn shared_memory_exists(name: &str) -> bool {
+    match shm_open(name, OFlag::O_RDONLY | OFlag::O_CLOEXEC, Mode::empty()) {
+        Ok(fd) => {
+            drop(fd);
+            true
+        }
+        Err(nix::errno::Errno::ENOENT) => false,
+        Err(error) => panic!("failed to inspect shared memory {name}: {error}"),
+    }
 }
 
 fn start(env: &TestEnv, instance: &str) {
@@ -1786,9 +1807,85 @@ fn tmux_transcript_overflow_rotates_without_stopping_capture() {
     let transcript = tmux_workspace_state_root(&env, instance)
         .join("transcripts")
         .join(format!("{task}.log"));
-    assert_eq!(
-        std::fs::metadata(transcript).unwrap().len(),
-        4 * 1024 * 1024
+    assert!(
+        !transcript.exists(),
+        "tmux task output must not be persisted to a transcript log: {}",
+        transcript.display()
+    );
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
+fn tmux_reports_when_running_task_transcript_capture_is_lost() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-capture-health";
+    start(&env, instance);
+
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({ "command": "printf 'BEFORE\n'; sleep 30", "wait": "nonblock" }),
+        "ctx-capture-health",
+        "run-capture-health",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
+    let pane_id = tmux_pane_id_by_name(&env, instance, &task);
+    let closed = Command::new("tmux")
+        .arg("-S")
+        .arg(env.tmux_socket_file(instance))
+        .args(["pipe-pane", "-t", &pane_id])
+        .output()
+        .expect("tmux pipe-pane close should run");
+    assert!(
+        closed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&closed.stderr)
+    );
+
+    let read = call(
+        &env,
+        instance,
+        "2",
+        "tmux_read",
+        json!({ "task": task, "timeMs": 0 }),
+        "ctx-capture-health",
+        "read-after-capture-loss",
+    );
+    assert_eq!(read["ok"], true, "{read}");
+    assert!(
+        read["result"]["warnings"]
+            .as_array()
+            .is_some_and(|warnings| warnings
+                .iter()
+                .any(|warning| warning["code"] == "tmux.transcriptCaptureLost")),
+        "{read}"
+    );
+
+    let listed = call(
+        &env,
+        instance,
+        "3",
+        "tmux_list",
+        json!({}),
+        "ctx-capture-health",
+        "list-after-capture-loss",
+    );
+    assert_eq!(listed["ok"], true, "{listed}");
+    assert!(
+        listed["result"]["warnings"]
+            .as_array()
+            .is_some_and(|warnings| warnings
+                .iter()
+                .any(|warning| warning["code"] == "tmux.transcriptCaptureLost")),
+        "{listed}"
     );
     stop(&env, instance);
 }
@@ -2177,7 +2274,16 @@ fn incompatible_tmux_runtime_schema_is_rebuilt_once() {
     let task_script = state_root.join("tasks").join(format!("{task}.sh"));
     let task_log = state_root.join("transcripts").join(format!("{task}.log"));
     assert!(task_script.exists());
-    assert!(task_log.exists());
+    assert!(
+        !task_log.exists(),
+        "tmux task output must remain in volatile shared memory"
+    );
+    let transcript_buffer = tmux_transcript_buffer_name(&env, instance, &task);
+    let buffer_deadline = Instant::now() + Duration::from_secs(1);
+    while !shared_memory_exists(&transcript_buffer) && Instant::now() < buffer_deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(shared_memory_exists(&transcript_buffer));
 
     let changed = Command::new("tmux")
         .arg("-S")
@@ -2210,6 +2316,10 @@ fn incompatible_tmux_runtime_schema_is_rebuilt_once() {
         "list-after-schema-migration",
     );
     assert_eq!(migrated["ok"], true, "{migrated}");
+    assert!(
+        !shared_memory_exists(&transcript_buffer),
+        "incompatible running task shared memory must be unlinked during runtime migration"
+    );
     let panes = migrated["result"]["panes"].as_array().unwrap();
     assert!(
         panes.iter().any(|pane| pane["name"] == "main"),
