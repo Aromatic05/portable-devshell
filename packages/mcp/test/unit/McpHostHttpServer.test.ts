@@ -40,6 +40,41 @@ test("MCP HTTP server rejects a declared oversized request body before dispatch"
     }
 });
 
+test("MCP HTTP host bounds graceful shutdown when an active request never completes", async () => {
+    const server = new HttpHost({
+        listenHost: "127.0.0.1",
+        listenPort: 0,
+        shutdownGraceMs: 20
+    });
+    let enteredResolve!: () => void;
+    const entered = new Promise<void>((resolve) => { enteredResolve = resolve; });
+    server.registerBinding("/demo/mcp", {
+        async handleRequest() {
+            enteredResolve();
+            await new Promise<never>(() => undefined);
+        }
+    } as never);
+
+    await server.start();
+    const address = server.address;
+    assert.ok(typeof address === "object" && address !== null);
+    const request = httpRequest({
+        host: "127.0.0.1",
+        method: "POST",
+        path: "/demo/mcp",
+        port: address.port,
+        headers: { "content-type": "application/json" }
+    });
+    request.on("error", () => undefined);
+    request.end("{}");
+    await entered;
+
+    const startedAt = Date.now();
+    await server.stop();
+    assert.ok(Date.now() - startedAt < 500, "shutdown should force-close a stuck active request");
+    request.destroy();
+});
+
 test("HTTP server serves WebUI assets with browser security and cache headers", async () => {
     const directory = await createTestTempDirectory("web-assets");
     await mkdir(join(directory, "assets"));

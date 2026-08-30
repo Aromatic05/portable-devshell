@@ -34,6 +34,7 @@ use crate::storage::permissions::ensure_file_mode;
 const WSS_FAILURES_BEFORE_SSE: u32 = 3;
 const MAX_RECONNECT_BACKOFF: Duration = Duration::from_secs(30);
 const SSE_RETRY_AFTER: Duration = Duration::from_secs(5);
+const SSE_READ_TIMEOUT: Duration = Duration::from_secs(45);
 const REQUEST_CACHE_SIZE: usize = 1024;
 
 #[derive(Clone)]
@@ -71,6 +72,7 @@ impl ReverseConnector {
     fn run(mut self) {
         let client = match Client::builder()
             .connect_timeout(Duration::from_secs(15))
+            .timeout(SSE_READ_TIMEOUT)
             .build()
         {
             Ok(client) => client,

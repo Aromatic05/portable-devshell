@@ -17,12 +17,15 @@ export interface HttpHostOptions {
     listenPort: number;
     oauth?: McpOAuthProtectedResource;
     publicBaseUrl?: string;
+    shutdownGraceMs?: number;
 }
 
 const MCP_MAX_REQUEST_BODY_BYTES = 1024 * 1024;
 const MCP_HEADERS_TIMEOUT_MS = 10_000;
 const MCP_REQUEST_TIMEOUT_MS = 30_000;
 const MCP_KEEP_ALIVE_TIMEOUT_MS = 5_000;
+const MCP_SHUTDOWN_GRACE_MS = 10_000;
+const MCP_FORCE_CLOSE_WAIT_MS = 1_000;
 
 function isRecord(value: unknown): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -39,6 +42,8 @@ export class HttpHost {
     #oauthInstalled = false;
     readonly #publicBaseUrl?: string;
     readonly #registeredPaths = new Set<string>();
+    readonly #shutdownGraceMs: number;
+    readonly #sockets = new Set<Duplex>();
     readonly #upgradeHandlers = new Map<
         string,
         (request: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>
@@ -51,6 +56,7 @@ export class HttpHost {
         this.#listenPort = options.listenPort;
         this.#oauth = options.oauth;
         this.#publicBaseUrl = options.publicBaseUrl;
+        this.#shutdownGraceMs = options.shutdownGraceMs ?? MCP_SHUTDOWN_GRACE_MS;
         this.#app.disable("x-powered-by");
     }
 
@@ -67,6 +73,10 @@ export class HttpHost {
         this.#server.headersTimeout = MCP_HEADERS_TIMEOUT_MS;
         this.#server.requestTimeout = MCP_REQUEST_TIMEOUT_MS;
         this.#server.keepAliveTimeout = MCP_KEEP_ALIVE_TIMEOUT_MS;
+        this.#server.on("connection", (socket) => {
+            this.#sockets.add(socket);
+            socket.once("close", () => this.#sockets.delete(socket));
+        });
         this.#server.on("upgrade", (request, socket, head) => {
             const pathname = readRequestPathname(request);
             const handler = pathname === undefined ? undefined : this.#upgradeHandlers.get(pathname);
@@ -92,7 +102,7 @@ export class HttpHost {
 
         const server = this.#server;
         this.#server = undefined;
-        await new Promise<void>((resolve, reject) => {
+        const closed = new Promise<void>((resolve, reject) => {
             server.close((error) => {
                 if (error) {
                     reject(error);
@@ -102,6 +112,29 @@ export class HttpHost {
                 resolve();
             });
         });
+        server.closeIdleConnections();
+        const graceful = await Promise.race([
+            closed.then(() => true),
+            delay(this.#shutdownGraceMs).then(() => false)
+        ]);
+        if (graceful) {
+            this.#destroyOpenSockets();
+            return;
+        }
+
+        this.#destroyOpenSockets();
+        server.closeAllConnections();
+        await Promise.race([
+            closed,
+            delay(MCP_FORCE_CLOSE_WAIT_MS)
+        ]);
+    }
+
+    #destroyOpenSockets(): void {
+        for (const socket of this.#sockets) {
+            socket.destroy();
+        }
+        this.#sockets.clear();
     }
 
     get address() {
@@ -419,6 +452,13 @@ class McpHttpInputError extends Error {
     constructor(readonly statusCode: 400 | 413, message: string) {
         super(message);
     }
+}
+
+function delay(milliseconds: number): Promise<void> {
+    return new Promise((resolve) => {
+        const timer = setTimeout(resolve, Math.max(0, milliseconds));
+        timer.unref();
+    });
 }
 
 function readContentLength(value: string | string[] | undefined): number | undefined {
