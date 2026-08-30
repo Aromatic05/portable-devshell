@@ -1,8 +1,13 @@
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-const MAGIC: &[u8; 8] = b"DSHTMUX1";
-const HEADER_BYTES: u64 = 32;
+const MAGIC: &[u8; 8] = b"DSHTMUX2";
+const HEADER_BYTES: usize = 40;
+const SEQUENCE_OFFSET: usize = 8;
+const BASE_OFFSET: usize = 16;
+const END_OFFSET: usize = 24;
+const CAPACITY_OFFSET: usize = 32;
+const SNAPSHOT_RETRIES: usize = 64;
 
 #[derive(Debug)]
 pub struct RingSnapshot {
@@ -23,7 +28,7 @@ impl RingSnapshot {
 }
 
 pub struct RingWriter {
-    file: File,
+    mapping: SharedMapping,
     capacity: u64,
 }
 
@@ -35,25 +40,30 @@ impl RingWriter {
                 "ring capacity must be greater than zero",
             ));
         }
-        let mut file = open_shared(name, true)?;
-        resize_shared(&file, HEADER_BYTES + capacity)?;
-        write_header(&mut file, start_offset, start_offset, capacity)?;
-        file.flush()?;
-        Ok(Self { file, capacity })
+        let capacity_bytes = usize::try_from(capacity).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "ring capacity is too large",
+            )
+        })?;
+        let mapping_bytes = HEADER_BYTES.checked_add(capacity_bytes).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "ring mapping size overflow",
+            )
+        })?;
+        let file = open_shared(name, true)?;
+        resize_shared(&file, mapping_bytes as u64)?;
+        let mut mapping = map_shared(&file, mapping_bytes, true)?;
+        initialize_header(&mut mapping, start_offset, capacity);
+        Ok(Self { mapping, capacity })
     }
 
     pub fn append(&mut self, logical_offset: u64, bytes: &[u8]) -> std::io::Result<()> {
         if bytes.is_empty() {
             return Ok(());
         }
-        self.file.lock()?;
-        let result = self.append_locked(logical_offset, bytes);
-        let unlock = self.file.unlock();
-        result.and(unlock)
-    }
-
-    fn append_locked(&mut self, logical_offset: u64, bytes: &[u8]) -> std::io::Result<()> {
-        let (base, end, capacity) = read_header(&mut self.file)?;
+        let (base, end, capacity) = read_header_fields(self.mapping.as_slice())?;
         if capacity != self.capacity || end != logical_offset {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -66,116 +76,230 @@ impl RingWriter {
         let skipped = keep_start.saturating_sub(logical_offset) as usize;
         let retained = &bytes[skipped.min(bytes.len())..];
         let retained_offset = logical_offset + skipped as u64;
-        write_wrapped(&mut self.file, retained_offset, retained, self.capacity)?;
-
+        let writing = begin_write(&self.mapping);
+        write_wrapped(
+            self.mapping.as_mut_slice(),
+            retained_offset,
+            retained,
+            self.capacity,
+        );
         let next_base = base.max(incoming_end.saturating_sub(self.capacity));
-        write_header(&mut self.file, next_base, incoming_end, self.capacity)?;
-        self.file.flush()
+        write_header_fields(
+            self.mapping.as_mut_slice(),
+            next_base,
+            incoming_end,
+            self.capacity,
+        );
+        finish_write(&self.mapping, writing);
+        Ok(())
     }
 }
 
 pub fn snapshot(name: &str) -> std::io::Result<Option<RingSnapshot>> {
-    let mut file = match open_shared(name, false) {
+    let file = match open_shared(name, false) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    file.lock_shared()?;
-    let result = snapshot_locked(&mut file);
-    let unlock = file.unlock();
-    match (result, unlock) {
-        (Ok(snapshot), Ok(())) => Ok(Some(snapshot)),
-        (Err(error), _) | (_, Err(error)) => Err(error),
+    let mapping_bytes = shared_len(&file)?;
+    if mapping_bytes < HEADER_BYTES {
+        return Err(invalid_data("ring mapping is smaller than its header"));
     }
+    let mapping = map_shared(&file, mapping_bytes, false)?;
+    Ok(Some(snapshot_mapping(&mapping)?))
 }
 
 pub fn remove(name: &str) -> std::io::Result<()> {
     remove_shared(name)
 }
 
-fn snapshot_locked(file: &mut File) -> std::io::Result<RingSnapshot> {
-    let (base, end, capacity) = read_header(file)?;
-    if end < base || end - base > capacity {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "ring header contains an invalid retained range",
-        ));
+fn snapshot_mapping(mapping: &SharedMapping) -> std::io::Result<RingSnapshot> {
+    for _ in 0..SNAPSHOT_RETRIES {
+        let before = sequence(mapping).load(Ordering::SeqCst);
+        if before % 2 != 0 {
+            std::hint::spin_loop();
+            continue;
+        }
+        let fields = read_header_fields(mapping.as_slice());
+        let after_header = sequence(mapping).load(Ordering::SeqCst);
+        if before != after_header || after_header % 2 != 0 {
+            std::hint::spin_loop();
+            continue;
+        }
+        let (base, end, capacity) = match fields {
+            Ok(fields) => fields,
+            Err(_) if before == 0 => {
+                std::hint::spin_loop();
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        validate_range(mapping.as_slice(), base, end, capacity)?;
+        let data = read_wrapped(mapping.as_slice(), base, end - base, capacity);
+        let after = sequence(mapping).load(Ordering::SeqCst);
+        if before == after && after % 2 == 0 {
+            return Ok(RingSnapshot { base, end, data });
+        }
+        std::hint::spin_loop();
     }
-    let len = (end - base) as usize;
-    let mut data = vec![0_u8; len];
-    read_wrapped(file, base, &mut data, capacity)?;
-    Ok(RingSnapshot { base, end, data })
+    Err(std::io::Error::new(
+        std::io::ErrorKind::WouldBlock,
+        "ring changed while taking a snapshot",
+    ))
 }
 
-fn write_header(file: &mut File, base: u64, end: u64, capacity: u64) -> std::io::Result<()> {
-    file.seek(SeekFrom::Start(0))?;
-    file.write_all(MAGIC)?;
-    file.write_all(&base.to_le_bytes())?;
-    file.write_all(&end.to_le_bytes())?;
-    file.write_all(&capacity.to_le_bytes())?;
-    Ok(())
+fn initialize_header(mapping: &mut SharedMapping, offset: u64, capacity: u64) {
+    sequence(mapping).store(1, Ordering::SeqCst);
+    mapping.as_mut_slice()[..MAGIC.len()].copy_from_slice(MAGIC);
+    write_header_fields(mapping.as_mut_slice(), offset, offset, capacity);
+    sequence(mapping).store(2, Ordering::SeqCst);
 }
 
-fn read_header(file: &mut File) -> std::io::Result<(u64, u64, u64)> {
-    file.seek(SeekFrom::Start(0))?;
-    let mut header = [0_u8; HEADER_BYTES as usize];
-    file.read_exact(&mut header)?;
-    if &header[..MAGIC.len()] != MAGIC {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "ring header magic is invalid",
-        ));
+fn begin_write(mapping: &SharedMapping) -> u64 {
+    let current = sequence(mapping).load(Ordering::SeqCst);
+    let writing = if current % 2 == 0 {
+        current.wrapping_add(1)
+    } else {
+        current.wrapping_add(2)
+    };
+    sequence(mapping).store(writing, Ordering::SeqCst);
+    writing
+}
+
+fn finish_write(mapping: &SharedMapping, writing: u64) {
+    sequence(mapping).store(writing.wrapping_add(1), Ordering::SeqCst);
+}
+
+fn sequence(mapping: &SharedMapping) -> &AtomicU64 {
+    debug_assert!(mapping.as_slice().len() >= HEADER_BYTES);
+    // mmap returns page-aligned memory and this field starts at byte 8.
+    unsafe { &*(mapping.as_slice().as_ptr().add(SEQUENCE_OFFSET) as *const AtomicU64) }
+}
+
+fn write_header_fields(bytes: &mut [u8], base: u64, end: u64, capacity: u64) {
+    bytes[BASE_OFFSET..END_OFFSET].copy_from_slice(&base.to_le_bytes());
+    bytes[END_OFFSET..CAPACITY_OFFSET].copy_from_slice(&end.to_le_bytes());
+    bytes[CAPACITY_OFFSET..HEADER_BYTES].copy_from_slice(&capacity.to_le_bytes());
+}
+
+fn read_header_fields(bytes: &[u8]) -> std::io::Result<(u64, u64, u64)> {
+    if bytes.len() < HEADER_BYTES {
+        return Err(invalid_data("ring mapping is smaller than its header"));
     }
-    let base = u64::from_le_bytes(header[8..16].try_into().unwrap());
-    let end = u64::from_le_bytes(header[16..24].try_into().unwrap());
-    let capacity = u64::from_le_bytes(header[24..32].try_into().unwrap());
+    if &bytes[..MAGIC.len()] != MAGIC {
+        return Err(invalid_data("ring header magic is invalid"));
+    }
+    let base = u64::from_le_bytes(bytes[BASE_OFFSET..END_OFFSET].try_into().unwrap());
+    let end = u64::from_le_bytes(bytes[END_OFFSET..CAPACITY_OFFSET].try_into().unwrap());
+    let capacity = u64::from_le_bytes(bytes[CAPACITY_OFFSET..HEADER_BYTES].try_into().unwrap());
     if capacity == 0 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "ring capacity is zero",
-        ));
+        return Err(invalid_data("ring capacity is zero"));
     }
     Ok((base, end, capacity))
 }
 
-fn write_wrapped(
-    file: &mut File,
-    logical_offset: u64,
-    bytes: &[u8],
-    capacity: u64,
-) -> std::io::Result<()> {
-    if bytes.is_empty() {
-        return Ok(());
+fn validate_range(bytes: &[u8], base: u64, end: u64, capacity: u64) -> std::io::Result<()> {
+    let capacity_bytes = usize::try_from(capacity)
+        .map_err(|_| invalid_data("ring capacity does not fit this platform"))?;
+    let expected = HEADER_BYTES
+        .checked_add(capacity_bytes)
+        .ok_or_else(|| invalid_data("ring mapping size overflow"))?;
+    if expected > bytes.len() {
+        return Err(invalid_data(
+            "ring capacity exceeds its shared-memory mapping",
+        ));
     }
-    let start = logical_offset % capacity;
-    let first = bytes.len().min((capacity - start) as usize);
-    file.seek(SeekFrom::Start(HEADER_BYTES + start))?;
-    file.write_all(&bytes[..first])?;
-    if first < bytes.len() {
-        file.seek(SeekFrom::Start(HEADER_BYTES))?;
-        file.write_all(&bytes[first..])?;
+    if end < base || end - base > capacity {
+        return Err(invalid_data(
+            "ring header contains an invalid retained range",
+        ));
     }
     Ok(())
 }
 
-fn read_wrapped(
-    file: &mut File,
-    logical_offset: u64,
-    output: &mut [u8],
-    capacity: u64,
-) -> std::io::Result<()> {
-    if output.is_empty() {
-        return Ok(());
+fn write_wrapped(mapping: &mut [u8], logical_offset: u64, bytes: &[u8], capacity: u64) {
+    if bytes.is_empty() {
+        return;
     }
-    let start = logical_offset % capacity;
-    let first = output.len().min((capacity - start) as usize);
-    file.seek(SeekFrom::Start(HEADER_BYTES + start))?;
-    file.read_exact(&mut output[..first])?;
-    if first < output.len() {
-        file.seek(SeekFrom::Start(HEADER_BYTES))?;
-        file.read_exact(&mut output[first..])?;
+    let start = (logical_offset % capacity) as usize;
+    let capacity = capacity as usize;
+    let first = bytes.len().min(capacity - start);
+    mapping[HEADER_BYTES + start..HEADER_BYTES + start + first].copy_from_slice(&bytes[..first]);
+    if first < bytes.len() {
+        mapping[HEADER_BYTES..HEADER_BYTES + bytes.len() - first].copy_from_slice(&bytes[first..]);
     }
-    Ok(())
+}
+
+fn read_wrapped(mapping: &[u8], logical_offset: u64, len: u64, capacity: u64) -> Vec<u8> {
+    if len == 0 {
+        return Vec::new();
+    }
+    let len = len as usize;
+    let start = (logical_offset % capacity) as usize;
+    let capacity = capacity as usize;
+    let first = len.min(capacity - start);
+    let mut output = Vec::with_capacity(len);
+    output.extend_from_slice(&mapping[HEADER_BYTES + start..HEADER_BYTES + start + first]);
+    if first < len {
+        output.extend_from_slice(&mapping[HEADER_BYTES..HEADER_BYTES + len - first]);
+    }
+    output
+}
+
+fn invalid_data(message: &str) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, message)
+}
+
+#[cfg(all(unix, not(target_os = "android")))]
+struct SharedMapping {
+    pointer: std::ptr::NonNull<u8>,
+    len: usize,
+}
+
+#[cfg(all(unix, not(target_os = "android")))]
+impl SharedMapping {
+    fn as_slice(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.pointer.as_ptr(), self.len) }
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        unsafe { std::slice::from_raw_parts_mut(self.pointer.as_ptr(), self.len) }
+    }
+}
+
+#[cfg(all(unix, not(target_os = "android")))]
+impl Drop for SharedMapping {
+    fn drop(&mut self) {
+        let pointer = self.pointer.cast();
+        let _ = unsafe { nix::sys::mman::munmap(pointer, self.len) };
+    }
+}
+
+#[cfg(all(unix, not(target_os = "android")))]
+fn map_shared(file: &File, len: usize, writable: bool) -> std::io::Result<SharedMapping> {
+    use std::num::NonZeroUsize;
+
+    use nix::sys::mman::{MapFlags, ProtFlags, mmap};
+
+    let length = NonZeroUsize::new(len).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "ring mapping is empty")
+    })?;
+    let prot = ProtFlags::PROT_READ
+        | if writable {
+            ProtFlags::PROT_WRITE
+        } else {
+            ProtFlags::empty()
+        };
+    let pointer = unsafe { mmap(None, length, prot, MapFlags::MAP_SHARED, file, 0) }
+        .map_err(nix_error)?
+        .cast();
+    Ok(SharedMapping { pointer, len })
+}
+
+#[cfg(all(unix, not(target_os = "android")))]
+fn shared_len(file: &File) -> std::io::Result<usize> {
+    usize::try_from(file.metadata()?.len())
+        .map_err(|_| invalid_data("ring mapping length does not fit this platform"))
 }
 
 #[cfg(all(unix, not(target_os = "android")))]
@@ -220,6 +344,32 @@ fn open_shared(_name: &str, _create: bool) -> std::io::Result<File> {
 
 #[cfg(any(not(unix), target_os = "android"))]
 fn resize_shared(_file: &File, _len: u64) -> std::io::Result<()> {
+    Err(shared_memory_unsupported())
+}
+
+#[cfg(any(not(unix), target_os = "android"))]
+struct SharedMapping {
+    bytes: Vec<u8>,
+}
+
+#[cfg(any(not(unix), target_os = "android"))]
+impl SharedMapping {
+    fn as_slice(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        &mut self.bytes
+    }
+}
+
+#[cfg(any(not(unix), target_os = "android"))]
+fn map_shared(_file: &File, _len: usize, _writable: bool) -> std::io::Result<SharedMapping> {
+    Err(shared_memory_unsupported())
+}
+
+#[cfg(any(not(unix), target_os = "android"))]
+fn shared_len(_file: &File) -> std::io::Result<usize> {
     Err(shared_memory_unsupported())
 }
 

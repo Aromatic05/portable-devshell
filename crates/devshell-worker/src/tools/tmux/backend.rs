@@ -27,7 +27,7 @@ use crate::tools::tmux::transcript_ring;
 
 pub const TMUX_SESSION: &str = "devshell";
 pub const MAX_PANES: usize = 16;
-const TMUX_RUNTIME_SCHEMA: &str = "3";
+const TMUX_RUNTIME_SCHEMA: &str = "4";
 const PANE_HISTORY_LINES: i64 = 400;
 const TERMINAL_HISTORY_LINES: usize = 10_000;
 const TERMINAL_COLUMNS: usize = 240;
