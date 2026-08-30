@@ -109,6 +109,10 @@ export class McpEndpointWorker {
         );
     }
 
+    async restoreTmuxWaits(): Promise<void> {
+        await this.#dispatch.restoreTmuxWaits();
+    }
+
     catalogSnapshot() {
         return this.#catalog.snapshot();
     }

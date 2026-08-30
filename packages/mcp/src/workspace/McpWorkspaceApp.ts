@@ -116,6 +116,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var confirmingTaskCancel = new Map();
   var expandedQuestions = new Set();
   var WIDGET_STATE_KEY = "portableDevshellWorkspace";
+  var LIVE_SNAPSHOT_TIMEOUT_MS = 5000;
+  var LIVE_WATCH_TIMEOUT_MS = 30000;
   var RESUME_MESSAGE = "Resume the existing portable-devshell work from the current Workspace state. Do not repeat completed work or restart the original command. Read the Workspace state and triggering result before acting. Reuse any existing tmux task instead of starting it again. For tmux waits, a timeout or user interruption ends only the wait and does not stop the task. If a blocked Workspace Goal can now proceed, call workspace_goal with action=resume before continuing.";
   var bridgeReady = false;
   var pendingToolResult = null;
@@ -134,13 +136,19 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     if (!initialized) return Promise.reject(new Error("Workspace App is not initialized"));
     if (requiresToken && !appToken) return Promise.reject(new Error("Workspace App authorization is unavailable"));
     if (!ctxId) return Promise.reject(new Error("Workspace context is unavailable"));
+    var requestCtxId = ctxId;
+    var requestToken = appToken;
+    var requestLiveBaseUrl = liveBaseUrl;
     var input = Object.assign({}, args || {});
-    input.ctxId = ctxId;
-    if (requiresToken) input.token = appToken;
+    input.ctxId = requestCtxId;
+    if (requiresToken) input.token = requestToken;
     return app.callServerTool(
       { name: name, arguments: input },
       signal ? { signal: signal } : undefined
     ).then(function (result) {
+      if (ctxId !== requestCtxId || appToken !== requestToken || liveBaseUrl !== requestLiveBaseUrl) {
+        throw new Error("Workspace Context changed while the request was in flight");
+      }
       acceptMeta(result && result._meta, true);
       return result;
     });
@@ -150,40 +158,77 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return result && result.structuredContent ? result.structuredContent : result;
   }
 
-  async function callLive(path, signal) {
+  async function callLive(path, signal, timeoutMs) {
     if (!liveBaseUrl || !appToken || !ctxId) throw new Error("Live Workspace transport is unavailable");
+    var requestCtxId = ctxId;
+    var requestToken = appToken;
+    var requestLiveBaseUrl = liveBaseUrl;
     var separator = path.indexOf("?") >= 0 ? "&" : "?";
     var response;
+    var requestController = new AbortController();
+    var timedOut = false;
+    var timer = setTimeout(function () {
+      timedOut = true;
+      requestController.abort("Live Workspace request timed out");
+    }, timeoutMs);
+    function abortFromCaller() {
+      requestController.abort(signal && signal.reason);
+    }
+    if (signal) {
+      if (signal.aborted) abortFromCaller();
+      else signal.addEventListener("abort", abortFromCaller, { once: true });
+    }
     try {
       response = await fetch(
-        liveBaseUrl + path + separator + "ctxId=" + encodeURIComponent(ctxId),
+        requestLiveBaseUrl + path + separator + "ctxId=" + encodeURIComponent(requestCtxId),
         {
           cache: "no-store",
           credentials: "omit",
-          headers: { Authorization: "Bearer " + appToken },
-          signal: signal
+          headers: { Authorization: "Bearer " + requestToken },
+          signal: requestController.signal
         }
       );
     } catch (error) {
+      if (signal && signal.aborted) throw error;
       var unavailable = new Error("Live Workspace transport is unavailable");
+      if (timedOut) unavailable.message = "Live Workspace transport timed out";
       unavailable.cause = error;
       throw unavailable;
+    } finally {
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener("abort", abortFromCaller);
     }
-    if (response.status === 401 || response.status === 403) {
-      throw new Error("Workspace App authorization is invalid for the current Context.");
+    if (ctxId !== requestCtxId || appToken !== requestToken || liveBaseUrl !== requestLiveBaseUrl) {
+      throw new Error("Live Workspace request became stale");
     }
     if (!response.ok) {
+      var responseError = "";
+      try {
+        var errorBody = await response.json();
+        responseError = errorBody && errorBody.error ? String(errorBody.error) : "";
+      } catch (_) {}
+      if (response.status === 401 || response.status === 403) {
+        if (workspaceContextExpired(responseError) || workspaceContextDisabled(responseError)) {
+          throw new Error(responseError);
+        }
+        throw new Error("Workspace App authorization is invalid for the current Context.");
+      }
       throw new Error("Live Workspace transport failed with HTTP " + response.status);
     }
-    return await response.json();
+    var value = await response.json();
+    if (ctxId !== requestCtxId || appToken !== requestToken || liveBaseUrl !== requestLiveBaseUrl) {
+      throw new Error("Live Workspace request became stale");
+    }
+    liveAuthorizationEstablished = true;
+    return value;
   }
 
   async function readLiveSnapshot(signal) {
-    return await callLive("/snapshot", signal);
+    return await callLive("/snapshot", signal, LIVE_SNAPSHOT_TIMEOUT_MS);
   }
 
   async function readLiveWatch(signal) {
-    return await callLive("/watch?cursor=" + encodeURIComponent(String(cursor)), signal);
+    return await callLive("/watch?cursor=" + encodeURIComponent(String(cursor)), signal, LIVE_WATCH_TIMEOUT_MS);
   }
 
   function acceptMeta(meta, authoritative) {
@@ -578,6 +623,9 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   }
 
   async function applySnapshot(nextSnapshot, allowRecovery) {
+    if (nextSnapshot && nextSnapshot.ctxId && ctxId && String(nextSnapshot.ctxId) !== ctxId) {
+      throw new Error("Workspace snapshot belongs to a different Context");
+    }
     snapshot = nextSnapshot;
     if (snapshot && snapshot.ctxId) ctxId = String(snapshot.ctxId);
     if (snapshot && Number.isSafeInteger(snapshot.cursor)) cursor = snapshot.cursor;
@@ -597,7 +645,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         try {
           nextSnapshot = await readLiveSnapshot();
         } catch (error) {
-          if (workspaceAuthorizationFailed(error)) throw error;
+          if (workspaceTerminalStatus(error)) throw error;
           nextSnapshot = structured(await callTool("workspace_snapshot", {}, true));
         }
       } else {
@@ -606,7 +654,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       await applySnapshot(nextSnapshot, allowRecovery);
       status.textContent = "";
     } catch (error) {
-      status.textContent = "Reconnecting";
+      status.textContent = workspaceTerminalStatus(error) || "Reconnecting";
       throw error;
     }
   }
@@ -621,6 +669,23 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   function workspaceAuthorizationFailed(error) {
     var message = error && error.message ? String(error.message) : String(error || "");
     return message.indexOf("Workspace App authorization is invalid") >= 0;
+  }
+
+  function workspaceContextExpired(error) {
+    var message = error && error.message ? String(error.message) : String(error || "");
+    return /expired|renew this Context|context_renew/i.test(message);
+  }
+
+  function workspaceContextDisabled(error) {
+    var message = error && error.message ? String(error.message) : String(error || "");
+    return /ctxId is disabled|Context is disabled/i.test(message);
+  }
+
+  function workspaceTerminalStatus(error) {
+    if (workspaceContextExpired(error)) return "Context expired — renew in chat";
+    if (workspaceContextDisabled(error)) return "Context disabled";
+    if (workspaceAuthorizationFailed(error)) return "Reopen Workspace";
+    return "";
   }
 
   function sleep(milliseconds) {
@@ -638,7 +703,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
           try {
             update = await readLiveWatch(controller.signal);
           } catch (error) {
-            if (workspaceAuthorizationFailed(error)) throw error;
+            if (controller.signal.aborted) throw error;
+            if (workspaceTerminalStatus(error)) throw error;
             update = structured(await callTool("workspace_watch", { cursor: cursor }, true, controller.signal)) || {};
           }
         } else {
@@ -655,9 +721,10 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         status.textContent = "Reconnecting";
         console.error(error);
         if (generation !== watchGeneration) return;
-        if (workspaceAuthorizationFailed(error)) {
+        var terminalStatus = workspaceTerminalStatus(error);
+        if (terminalStatus) {
           watchStarted = false;
-          status.textContent = "Reopen Workspace";
+          status.textContent = terminalStatus;
           return;
         } else {
           await sleep(1000);
@@ -786,7 +853,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       }
       await startLive();
     } catch (error) {
-      status.textContent = "Host bridge unavailable";
+      status.textContent = workspaceTerminalStatus(error) || "Host bridge unavailable";
       console.error(error);
     }
   }

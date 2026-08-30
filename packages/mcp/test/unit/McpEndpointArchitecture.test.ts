@@ -441,8 +441,11 @@ test("OpenAI session resolves Workspace once and the App continues by ctxId with
         resolveWait: unused,
         waitForWait: unused,
     } as never;
+    let now = 1_000;
     const registry = new McpContextRegistry({
         idFactory: () => "ctx-workspace-session",
+        now: () => now,
+        ttlMs: 100,
     });
     await registry.initialize();
     const contextSelector = createMcpContextSelector("openai-session");
@@ -489,6 +492,8 @@ test("OpenAI session resolves Workspace once and the App continues by ctxId with
             { token?: string } | undefined
     )?.token;
     if (typeof token !== "string") throw new Error("workspace token missing");
+    const beforeSnapshot = await registry.lookup(acquired.ctxId, { principal: "tester" });
+    now += 50;
 
     const snapshot = await dispatch.callTool(
         "workspace_snapshot",
@@ -500,6 +505,8 @@ test("OpenAI session resolves Workspace once and the App continues by ctxId with
         (snapshot.structuredContent as { ctxId?: string }).ctxId,
         acquired.ctxId,
     );
+    const afterSnapshot = await registry.lookup(acquired.ctxId, { principal: "tester" });
+    assert.equal(afterSnapshot.expiresAt, beforeSnapshot.expiresAt);
 });
 
 test("legacy aliases still obey the current MCP policy", async () => {

@@ -146,7 +146,7 @@ export class McpEndpointDispatch {
         const selected = snapshot.exposed.find((entry) => entry.definition.name === toolName);
 
         if (known?.owner === "environment") {
-            await this.#restoreTmuxWaits(this.#instanceName);
+            await this.restoreTmuxWaits(this.#instanceName);
             return await this.#environment.call(
                 toolName,
                 input,
@@ -160,18 +160,19 @@ export class McpEndpointDispatch {
             throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
         }
 
+        const appOnlyInteraction = selected.owner === "workspace" && isAppOnlyInteractionTool(toolName);
         const resolvedContext = await this.#contextSelector.resolve(
             this.#contextRegistry,
             input,
             requestContext,
             this.#instanceName,
+            { touch: !isPassiveWorkspaceRead(toolName) },
         );
         input = resolvedContext.input;
-        const appOnlyInteraction = selected.owner === "workspace" && isAppOnlyInteractionTool(toolName);
         const routed = selected.owner === "worker" || selected.owner === "artifact"
             ? readMcpRoutedInput(input, snapshot.instanceRoutingEnabled, this.#instanceName)
             : { input, instance: this.#instanceName };
-        await this.#restoreTmuxWaits(routed.instance);
+        await this.restoreTmuxWaits(routed.instance);
         const context = await this.#createToolContext(
             toolName,
             resolvedContext.record,
@@ -446,7 +447,7 @@ export class McpEndpointDispatch {
         return tracker;
     }
 
-    async #restoreTmuxWaits(instance: string): Promise<void> {
+    async restoreTmuxWaits(instance: string = this.#instanceName): Promise<void> {
         if (!isMcpTmuxWaitGateway(this.#gateway)) return;
         const existing = this.#tmuxWaitRestores.get(instance);
         if (existing !== undefined) {
@@ -715,6 +716,12 @@ function isAppOnlyInteractionTool(toolName: string): boolean {
         toolName === "workspace_task_control" ||
         toolName === "workspace_wait_recover" ||
         toolName === "workspace_approval_decide";
+}
+
+function isPassiveWorkspaceRead(toolName: string): boolean {
+    return toolName === "workspace_reconnect" ||
+        toolName === "workspace_snapshot" ||
+        toolName === "workspace_watch";
 }
 
 function readTmuxBlock(input: JsonValue): boolean {

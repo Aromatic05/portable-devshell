@@ -162,6 +162,7 @@ export class McpHost {
             leases: this.#workspaceAppLeases,
             presence: this.#workspaceAppPresence,
             publicBaseUrl: this.#config.publicBaseUrl,
+            restoreTmuxWaits: async () => await binding.restoreTmuxWaits(),
         }));
 
         if (this.#started) {

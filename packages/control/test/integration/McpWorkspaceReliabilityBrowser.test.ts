@@ -68,6 +68,28 @@ test("Live Workspace requests PiP and uses direct state transport before MCP fal
         await page.evaluate("(window.__liveToolCalls || []).some(call => call.name === 'workspace_snapshot' || call.name === 'workspace_watch' || call.name === 'workspace_reconnect')"),
         false,
     );
+    await frame.evaluate(() => {
+        window.dispatchEvent(new CustomEvent("openai:set_globals", {
+            detail: {
+                globals: {
+                    toolOutput: { ctxId: "ctx-stale", instance: "browser-instance" },
+                    toolResponseMetadata: {
+                        mcp_tool_result: {
+                            _meta: { "portable-devshell/workspace": {
+                                liveBaseUrl: "https://stale.example/api/live/demo/workspace",
+                                token: "stale-token",
+                            } },
+                            structuredContent: { ctxId: "ctx-stale", instance: "browser-instance" },
+                        },
+                    },
+                },
+            },
+        }));
+    });
+    await page.waitForTimeout(100);
+    const afterStaleResult = await frame.evaluate("window.__liveFetchCalls") as Array<{ authorization?: string; url: string }>;
+    assert.equal(afterStaleResult.some((call) => call.url.includes("ctxId=ctx-stale")), false);
+    assert.equal(afterStaleResult.some((call) => call.authorization === "Bearer stale-token"), false);
 });
 
 const LIVE_TRANSPORT_BRIDGE_SCRIPT = String.raw`
@@ -117,6 +139,219 @@ window.addEventListener("message", function (event) {
         window.__liveToolCalls.push(message.params || {});
         reply({ structuredContent: {} });
     }
+});
+`;
+
+test("Live Workspace times out stalled direct transport and falls back to MCP", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
+    await page.evaluate(STALLED_LIVE_TRANSPORT_BRIDGE_SCRIPT);
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html
+            .replace("var LIVE_SNAPSHOT_TIMEOUT_MS = 5000;", "var LIVE_SNAPSHOT_TIMEOUT_MS = 50;")
+            .replace("var LIVE_WATCH_TIMEOUT_MS = 30000;", "var LIVE_WATCH_TIMEOUT_MS = 50;")
+            .replace("<script>", `<script>
+                window.__stalledLiveFetchCalls = [];
+                window.fetch = function (url, options) {
+                    window.__stalledLiveFetchCalls.push(String(url));
+                    return new Promise(function (_resolve, reject) {
+                        if (options && options.signal) {
+                            options.signal.addEventListener("abort", function () {
+                                reject(new DOMException("Aborted", "AbortError"));
+                            }, { once: true });
+                        }
+                    });
+                };
+            <\/script><script>`);
+    }, workspaceAppHtml);
+
+    await page.waitForFunction("(window.__stalledLiveToolCalls || []).some(call => call.name === 'workspace_snapshot')");
+    await page.waitForFunction("(window.__stalledLiveToolCalls || []).some(call => call.name === 'workspace_watch')");
+    const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
+    if (frame === undefined) throw new Error("Workspace frame is missing.");
+    const directCalls = await frame.evaluate("window.__stalledLiveFetchCalls || []") as string[];
+    assert.equal(directCalls.some((url) => url.includes("/snapshot")), true);
+    assert.equal(directCalls.some((url) => url.includes("/watch")), true);
+    const toolCalls = await page.evaluate("window.__stalledLiveToolCalls || []") as Array<{ name?: string }>;
+    assert.equal(toolCalls.some((call) => call.name === "workspace_snapshot"), true);
+    assert.equal(toolCalls.some((call) => call.name === "workspace_watch"), true);
+});
+
+const STALLED_LIVE_TRANSPORT_BRIDGE_SCRIPT = String.raw`
+window.__stalledLiveToolCalls = [];
+window.__stalledLiveWatchReplied = false;
+function stalledLiveSnapshot() {
+    return {
+        approvals: [], background: [], ctxId: "ctx-stalled-live", currentEvent: null,
+        cursor: 3, goal: null, instance: "browser-instance", questions: [], tasks: []
+    };
+}
+window.addEventListener("message", function (event) {
+    if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
+    var source = event.source;
+    var message = event.data;
+    function reply(result) {
+        if (message.id === undefined) return;
+        source.postMessage({ id: message.id, jsonrpc: "2.0", result: result }, "*");
+    }
+    if (message.method === "ui/initialize") {
+        source.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-input",
+            params: { arguments: { ctxId: "ctx-stalled-live" } }
+        }, "*");
+        source.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-result",
+            params: {
+                _meta: { "portable-devshell/workspace": {
+                    liveBaseUrl: "https://stalled.example/api/live/demo/workspace",
+                    token: "stalled-live-token"
+                } },
+                structuredContent: { ctxId: "ctx-stalled-live", instance: "browser-instance" }
+            }
+        }, "*");
+        reply({
+            hostCapabilities: {}, hostContext: {},
+            hostInfo: { name: "test-host", version: "1.0.0" }, protocolVersion: "2026-01-26"
+        });
+        return;
+    }
+    if (message.method === "ui/update-model-context") { reply({}); return; }
+    if (message.method !== "tools/call") return;
+    var call = message.params || {};
+    window.__stalledLiveToolCalls.push(call);
+    if (call.name === "workspace_snapshot" || call.name === "workspace_reconnect") {
+        reply({
+            _meta: { "portable-devshell/workspace": { token: "stalled-live-token" } },
+            structuredContent: stalledLiveSnapshot()
+        });
+        return;
+    }
+    if (call.name === "workspace_watch" && !window.__stalledLiveWatchReplied) {
+        window.__stalledLiveWatchReplied = true;
+        reply({ structuredContent: { changed: false, cursor: 3, snapshot: stalledLiveSnapshot() } });
+    }
+});
+`;
+
+test("Workspace ignores an old direct response after the host switches Context", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
+    await page.evaluate(SWITCHED_CONTEXT_BRIDGE_SCRIPT);
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html.replace("<script>", `<script>
+            window.__oldSnapshotResolve = null;
+            window.fetch = function (url, options) {
+                var text = String(url);
+                if (text.indexOf("ctxId=ctx-old-direct") >= 0 && text.indexOf("/snapshot") >= 0) {
+                    return new Promise(function (resolve, reject) {
+                        window.__oldSnapshotResolve = function () {
+                            resolve(new Response(JSON.stringify({
+                                approvals: [], background: [], ctxId: "ctx-old-direct", currentEvent: null,
+                                cursor: 1, goal: null, instance: "browser-instance", questions: [], tasks: []
+                            }), { headers: { "content-type": "application/json" }, status: 200 }));
+                        };
+                        if (options && options.signal) options.signal.addEventListener("abort", function () {
+                            reject(new DOMException("Aborted", "AbortError"));
+                        }, { once: true });
+                    });
+                }
+                var next = {
+                    approvals: [], background: [], ctxId: "ctx-new-direct", currentEvent: null,
+                    cursor: 2, goal: null, instance: "browser-instance", questions: [], tasks: []
+                };
+                if (text.indexOf("/snapshot") >= 0) {
+                    return Promise.resolve(new Response(JSON.stringify(next), {
+                        headers: { "content-type": "application/json" }, status: 200
+                    }));
+                }
+                return new Promise(function (_resolve, reject) {
+                    if (options && options.signal) options.signal.addEventListener("abort", function () {
+                        reject(new DOMException("Aborted", "AbortError"));
+                    }, { once: true });
+                });
+            };
+        <\/script><script>`);
+    }, workspaceAppHtml);
+
+    const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
+    if (frame === undefined) throw new Error("Workspace frame is missing.");
+    await frame.waitForFunction("typeof window.__oldSnapshotResolve === 'function'");
+    await frame.evaluate(() => {
+        window.dispatchEvent(new CustomEvent("openai:set_globals", {
+            detail: { globals: {
+                toolOutput: { ctxId: "ctx-new-direct", instance: "browser-instance" },
+                toolResponseMetadata: { mcp_tool_result: {
+                    _meta: { "portable-devshell/workspace": {
+                        liveBaseUrl: "https://new.example/api/live/demo/workspace",
+                        token: "new-direct-token"
+                    } },
+                    structuredContent: { ctxId: "ctx-new-direct", instance: "browser-instance" }
+                } }
+            } }
+        }));
+    });
+    await page.waitForFunction("(window.__switchedContextModelUpdates || []).some(update => update && update.portableDevshellWorkspace && update.portableDevshellWorkspace.ctxId === 'ctx-new-direct')");
+    assert.equal(await frame.evaluate("window.__oldSnapshotResolve() || true"), true);
+    await page.waitForTimeout(100);
+    const updates = await page.evaluate("window.__switchedContextModelUpdates || []") as Array<{
+        portableDevshellWorkspace?: { ctxId?: string };
+    }>;
+    assert.equal(updates.at(-1)?.portableDevshellWorkspace?.ctxId, "ctx-new-direct");
+});
+
+const SWITCHED_CONTEXT_BRIDGE_SCRIPT = String.raw`
+window.__switchedContextModelUpdates = [];
+window.addEventListener("message", function (event) {
+    if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
+    var source = event.source;
+    var message = event.data;
+    function reply(result) {
+        if (message.id === undefined) return;
+        source.postMessage({ id: message.id, jsonrpc: "2.0", result: result }, "*");
+    }
+    if (message.method === "ui/initialize") {
+        source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-input", params: {
+            arguments: { ctxId: "ctx-old-direct" }
+        } }, "*");
+        source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: {
+            _meta: { "portable-devshell/workspace": {
+                liveBaseUrl: "https://old.example/api/live/demo/workspace",
+                token: "old-direct-token"
+            } },
+            structuredContent: { ctxId: "ctx-old-direct", instance: "browser-instance" }
+        } }, "*");
+        reply({ hostCapabilities: {}, hostContext: {}, hostInfo: { name: "test-host", version: "1.0.0" }, protocolVersion: "2026-01-26" });
+        return;
+    }
+    if (message.method === "ui/update-model-context") {
+        window.__switchedContextModelUpdates.push(message.params && message.params.structuredContent);
+        reply({});
+        return;
+    }
+    if (message.method !== "tools/call") return;
+    var call = message.params || {};
+    if (call.name === "workspace_snapshot") {
+        reply({ _meta: { "portable-devshell/workspace": {
+            liveBaseUrl: "https://new.example/api/live/demo/workspace", token: "new-direct-token"
+        } }, structuredContent: {
+            approvals: [], background: [], ctxId: "ctx-new-direct", currentEvent: null,
+            cursor: 2, goal: null, instance: "browser-instance", questions: [], tasks: []
+        } });
+        return;
+    }
+    if (call.name === "workspace_watch") return;
 });
 `;
 

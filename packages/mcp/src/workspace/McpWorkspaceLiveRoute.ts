@@ -28,6 +28,7 @@ export interface McpWorkspaceLiveRouteOptions {
     pollMs?: number;
     presence: WorkspaceAppPresenceStore;
     publicBaseUrl?: string;
+    restoreTmuxWaits?: () => Promise<void>;
 }
 
 export function workspaceLiveRoutePath(instanceName: string): string {
@@ -83,6 +84,7 @@ function registerLiveRouteBase(
             writeCors(response);
             try {
                 const { ctxId } = await authorize(request, options);
+                await options.restoreTmuxWaits?.();
                 options.presence.touch(options.instanceName, ctxId);
                 writeJson(response, 200, await readWorkspaceSnapshot(gateway, options.instanceName, ctxId));
             } catch (error) {
@@ -101,6 +103,7 @@ function registerLiveRouteBase(
             try {
                 const authorized = await authorize(request, options);
                 ctxId = authorized.ctxId;
+                await options.restoreTmuxWaits?.();
                 let cursor = readCursor(request);
                 const startedAt = Date.now();
                 options.presence.beginWatch(options.instanceName, ctxId);
@@ -151,8 +154,10 @@ async function authorize(
         throw new LiveRouteError(401, "Workspace App authorization is invalid for the current Context.");
     }
     try {
-        await options.contextRegistry.validateAndTouchForInstance(ctxId, options.instanceName);
-    } catch {
+        await options.contextRegistry.validateForInstance(ctxId, options.instanceName);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        if (/expired|disabled/iu.test(message)) throw new LiveRouteError(401, message);
         throw new LiveRouteError(401, "Workspace Context is unavailable for this capability.");
     }
     return { ctxId };

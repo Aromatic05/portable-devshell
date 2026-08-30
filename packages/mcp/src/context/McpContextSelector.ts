@@ -30,6 +30,7 @@ export interface McpContextSelector {
         input: JsonValue,
         requestContext: McpEndpointCallContext,
         instanceName: string,
+        options?: { touch?: boolean },
     ): Promise<McpResolvedContext>;
 }
 
@@ -67,14 +68,16 @@ class UnifiedContextSelector implements McpContextSelector {
         input: JsonValue,
         requestContext: McpEndpointCallContext,
         _instanceName: string,
+        options?: { touch?: boolean },
     ): Promise<McpResolvedContext> {
+        const validate = async (ctxId: string) => options?.touch === false
+            ? await registry.validate(ctxId, { principal: requestContext.principal })
+            : await registry.validateAndTouch(ctxId, { principal: requestContext.principal });
         const contextInput = readOptionalMcpContextInput(input);
         if (contextInput.ctxId !== undefined) {
             return {
                 input: contextInput.input,
-                record: await registry.validateAndTouch(contextInput.ctxId, {
-                    principal: requestContext.principal,
-                }),
+                record: await validate(contextInput.ctxId),
             };
         }
         let boundCtxId: string | undefined;
@@ -95,9 +98,7 @@ class UnifiedContextSelector implements McpContextSelector {
         if (boundCtxId !== undefined) {
             return {
                 input: contextInput.input,
-                record: await registry.validateAndTouch(boundCtxId, {
-                    principal: requestContext.principal,
-                }),
+                record: await validate(boundCtxId),
             };
         }
         throw createError({

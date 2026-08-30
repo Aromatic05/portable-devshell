@@ -320,6 +320,16 @@ export class McpContextRegistry {
         });
     }
 
+    async validate(
+        ctxId: string,
+        binding: McpContextValidationBinding,
+    ): Promise<McpContextRecord> {
+        const record = await this.lookup(ctxId, binding);
+        if (record.status === "disabled") throw disabledContext(ctxId);
+        if (record.status === "expired") throw expiredContext(ctxId, record.expiresAt);
+        return record;
+    }
+
     async validateForInstance(
         ctxId: string,
         instance: string,
@@ -351,34 +361,6 @@ export class McpContextRegistry {
             if (contextEnvironment(record, instance) === undefined) {
                 throw invalidContext(ctxId);
             }
-            return cloneRecord(record);
-        });
-    }
-
-    async validateAndTouchForInstance(
-        ctxId: string,
-        instance: string,
-    ): Promise<McpContextRecord> {
-        return await this.#run(async () => {
-            this.#assertInitialized();
-            if (!isCtxId(ctxId)) throw invalidContext(ctxId);
-            const record = this.#contexts.get(ctxId);
-            if (record === undefined) throw invalidContext(ctxId);
-            if (record.status === "disabled") throw disabledContext(ctxId);
-            const now = this.#now();
-            if (record.status === "expired" || Date.parse(record.expiresAt) <= now) {
-                if (record.status !== "expired") {
-                    await this.#mutateAndPersist(() => {
-                        record.status = "expired";
-                    });
-                }
-                throw expiredContext(ctxId, record.expiresAt);
-            }
-            if (contextEnvironment(record, instance) === undefined) throw invalidContext(ctxId);
-            await this.#mutateAndPersist(() => {
-                record.lastAccessedAt = new Date(now).toISOString();
-                record.expiresAt = new Date(now + this.#ttlMs).toISOString();
-            });
             return cloneRecord(record);
         });
     }

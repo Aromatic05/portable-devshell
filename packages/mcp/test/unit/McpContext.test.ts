@@ -299,7 +299,11 @@ test("McpContextRegistry distinguishes invalid and expired ctxId values", async 
         hasCode("mcp.contextInvalid")
     );
 
+    now = 1_050;
+    const passive = await registry.validate("ctx-expiring", binding);
+    assert.equal(passive.expiresAt, "1970-01-01T00:00:01.100Z");
     now = 1_101;
+    await assert.rejects(registry.validate("ctx-expiring", binding), hasCode("mcp.contextExpired"));
     await assert.rejects(registry.validateAndTouch("ctx-expiring", binding), hasCode("mcp.contextExpired"));
     await assert.rejects(registry.validateAndTouch("ctx-expiring", binding), hasCode("mcp.contextExpired"));
 });

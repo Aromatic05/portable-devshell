@@ -33,6 +33,10 @@ export class McpEndpointBinding {
         return this.#worker.instanceName;
     }
 
+    async restoreTmuxWaits(): Promise<void> {
+        await this.#worker.restoreTmuxWaits();
+    }
+
     async handleRequest(request: IncomingMessage, response: ServerResponse, body: JsonValue): Promise<void> {
         const disconnect = new AbortController();
         const abortOnDisconnect = () => {
