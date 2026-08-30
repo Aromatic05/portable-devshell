@@ -88,7 +88,7 @@ export class McpToolCatalogInteraction {
             requiredCapabilities: [],
         },
         {
-            description: "Manage optional Workspace Goal mode for the current Context. Bootstrap the Live Workspace once with workspace_open before start; start requires it to be active so Goal controls and continuation remain visible across later chat turns. start creates one durable Goal with an objective and ordered steps. update revises the objective, complete step list, or one step. block suspends automatic continuation with a reason; resume reactivates it. finish succeeds only after every step is completed or skipped. stop terminates Goal mode without stopping shell or tmux processes. get reads the current Goal.",
+            description: "Manage optional Workspace Goal mode for the current Context. For multi-step or long-running work, proactively bootstrap the Live Workspace with workspace_open before action=start instead of waiting for the user to request the panel. start requires it to be active so Goal controls and continuation remain visible across later chat turns. start creates one durable Goal with an objective and ordered steps. update revises the objective, complete step list, or one step. block suspends automatic continuation with a reason; resume reactivates it. finish succeeds only after every step is completed or skipped. stop terminates Goal mode without stopping shell or tmux processes. get reads the current Goal.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
@@ -115,7 +115,7 @@ export class McpToolCatalogInteraction {
                 "openai/outputTemplate": workspaceAppResourceUri,
                 "openai/widgetAccessible": true,
             },
-            description: "Bootstrap the portable-devshell Live Workspace for the current Context. Call it once when a task benefits from persistent Goal, Task, Approval, Question, or background-work controls. The App requests PiP presentation when the host supports it and reconnects to durable state through the live service; do not reopen it every model turn.",
+            description: "Bootstrap the portable-devshell Live Workspace for the current Context. Proactively call it once at the start of multi-step, long-running, potentially detached, or human-interactive work; do not wait for the user to ask for the panel. The App requests PiP presentation when the host supports it and reconnects to durable state through the live service, so this is a bootstrap operation rather than something to reopen every model turn.",
             group: "workspace",
             inputSchema: { additionalProperties: false, properties: {}, type: "object" },
             name: "workspace_open",

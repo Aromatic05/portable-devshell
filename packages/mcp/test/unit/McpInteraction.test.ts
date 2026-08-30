@@ -1382,7 +1382,10 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     assert.deepEqual((goalResume._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.deepEqual((goalStop._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.match(open.description, /Bootstrap the portable-devshell Live Workspace/u);
-    assert.match(open.description, /do not reopen it every model turn/u);
+    assert.match(open.description, /Proactively call it once at the start of multi-step, long-running/u);
+    assert.match(open.description, /do not wait for the user to ask for the panel/u);
+    assert.match(open.description, /bootstrap operation rather than something to reopen every model turn/u);
+    assert.match(goal.description, /proactively bootstrap the Live Workspace with workspace_open before action=start/u);
 
     const compatibilityDefinitions = new McpToolCatalogInteraction().list();
     const compatibilityOpen = compatibilityDefinitions.find((definition) => definition.name === "workspace_open");
