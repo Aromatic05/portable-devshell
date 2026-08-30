@@ -1,6 +1,7 @@
 pub mod enroll;
 pub mod gc;
 pub mod logs;
+pub mod retire;
 pub mod rpc;
 pub mod start;
 pub mod status;
@@ -23,6 +24,7 @@ enum Command {
     Status(InstanceArgs),
     Logs(InstanceArgs),
     Rpc(InstanceArgs),
+    Retire(InstanceArgs),
     Gc(GcArgs),
 }
 
@@ -55,6 +57,7 @@ pub fn run() -> Result<String, String> {
         Command::Status(args) => status::run(args),
         Command::Logs(args) => logs::run(args),
         Command::Rpc(args) => rpc::run(args),
+        Command::Retire(args) => retire::run(args),
         Command::Gc(args) => gc::run(args),
     }
 }

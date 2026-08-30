@@ -42,7 +42,7 @@ test("runtime stop does not settle until owned cleanup completes", async (t) => 
             async stopOwned() {}
         } as never,
         mcp: {
-            configEditor: undefined,
+            configEditor: testConfigEditor(),
             instanceCreate: undefined,
             oauthApprovals: () => undefined,
             async start() {},
@@ -88,6 +88,14 @@ async function waitFor(predicate: () => boolean): Promise<void> {
     throw new Error("Timed out waiting for condition.");
 }
 
+function testConfigEditor() {
+    return {
+        registerInstanceDeleteRetirement() {
+            return () => undefined;
+        },
+    };
+}
+
 test("runtime stop attempts every cleanup step after failures", async (t) => {
     const runtimeDir = await createTestTempDirectory("runtime-failure");
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
@@ -109,7 +117,7 @@ test("runtime stop attempts every cleanup step after failures", async (t) => {
             }
         } as never,
         mcp: {
-            configEditor: undefined,
+            configEditor: testConfigEditor(),
             instanceCreate: undefined,
             oauthApprovals: () => undefined,
             async start() {},
@@ -151,7 +159,7 @@ test("MCP hot replacement preserves the original failure when runtime rollback a
         }
     };
     const mcp = {
-        configEditor: undefined,
+        configEditor: testConfigEditor(),
         host: undefined,
         instanceCreate: undefined,
         oauthApprovals: undefined,
@@ -206,7 +214,7 @@ test("Web hot replacement preserves the original failure when host rollback also
     let applyWebConfig!: (previous: ControlConfig, next: ControlConfig) => Promise<void>;
     const http = {};
     const mcp = {
-        configEditor: undefined,
+        configEditor: testConfigEditor(),
         instanceCreate: undefined,
         oauthApprovals: undefined,
         webAuth: { mode: "none" },
@@ -294,7 +302,7 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
             async stopOwned() {}
         } as never,
         mcp: {
-            configEditor: undefined,
+            configEditor: testConfigEditor(),
             instanceCreate: undefined,
             oauthApprovals: undefined,
             webAuth: { mode: "none" },
@@ -345,7 +353,7 @@ test("runtime does not mount WebUI routes when web.enabled is false", async (t) 
             async stopOwned() {}
         } as never,
         mcp: {
-            configEditor: undefined,
+            configEditor: testConfigEditor(),
             host: {
                 server: new Proxy({}, {
                     get() {

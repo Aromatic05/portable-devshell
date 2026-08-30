@@ -66,6 +66,9 @@ export class ControlRuntime {
             reverse: options.reverse.service,
             shutdown: options.shutdown
         });
+        this.#mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
+            await this.#routes.retireInstance(instance.name);
+        });
         this.#socketListener = new ControlSocketListener({ socketPath: options.socketPath });
         const listeners: ControlChannelListener[] = [this.#socketListener];
         const webRuntime = this.#createWebRuntime();

@@ -15,7 +15,10 @@ export interface WorkerTransportContainerProvision {
     ): string[];
     buildShellExecArgs(commandLine: string): string[];
     ensureReady(operation: string): Promise<void>;
+    finishRuntimeRetire(): Promise<void>;
     isAvailable(): Promise<boolean>;
+    prepareRuntimeRetire(): Promise<boolean>;
+    retire(): Promise<void>;
 }
 
 export interface WorkerTransportContainerProvisionOperations {

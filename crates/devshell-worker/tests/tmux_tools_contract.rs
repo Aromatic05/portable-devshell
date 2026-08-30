@@ -2240,6 +2240,73 @@ fn worker_restart_adopts_existing_panes() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
+fn instance_retire_destroys_recoverable_tmux_generation_but_keeps_control_history() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-retire-generation";
+    start(&env, instance);
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({ "command": "printf 'BEFORE-RETIRE\\n'; sleep 30", "wait": "nonblock" }),
+        "ctx-a",
+        "run-before-retire",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
+    let ring = tmux_transcript_buffer_name(&env, instance, &task);
+    let ring_deadline = Instant::now() + Duration::from_secs(2);
+    while !shared_memory_exists(&ring) && Instant::now() < ring_deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(shared_memory_exists(&ring));
+
+    let control_history = env
+        .instance_root(instance)
+        .join("control-worker/history.keep");
+    std::fs::create_dir_all(control_history.parent().unwrap()).unwrap();
+    std::fs::write(&control_history, "keep\n").unwrap();
+
+    env.json_command(&["stop", "--instance", instance]);
+    assert!(env.tmux_socket_file(instance).exists());
+    let retired = env.json_command(&["retire", "--instance", instance]);
+    assert_eq!(retired["ok"], true, "{retired}");
+    assert_eq!(retired["retired"], true, "{retired}");
+    assert!(!env.instance_root(instance).join("tmux").exists());
+    assert!(!env.instance_root(instance).join("config.toml").exists());
+    assert!(!env.instance_root(instance).join("logs").exists());
+    assert!(control_history.exists());
+    assert!(!shared_memory_exists(&ring));
+
+    start(&env, instance);
+    let listed = call(
+        &env,
+        instance,
+        "2",
+        "tmux_list",
+        json!({}),
+        "ctx-b",
+        "list-after-retire",
+    );
+    assert_eq!(listed["ok"], true, "{listed}");
+    assert!(
+        listed["result"]["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|pane| pane["task"]["id"].as_str() != Some(task.as_str())),
+        "retired task was resurrected: {listed}"
+    );
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
 fn incompatible_tmux_runtime_schema_is_rebuilt_once() {
     assert!(
         tmux_available(),

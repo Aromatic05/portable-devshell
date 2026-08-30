@@ -1471,6 +1471,24 @@ test("docker transport creates and starts managed containers before starting the
     ]);
 });
 
+test("managed container retirement removes the devshell-owned container", async () => {
+    const recorder = createSpawnRecorder();
+    const transport = new WorkerTransportDriverDocker({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
+        container: createManagedContainerConfig(),
+        dockerBinary: "docker-bin",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+
+    await transport.retireProviderResources();
+
+    assert.deepEqual(recorder.calls.map((call) => call.args), [
+        ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"],
+        ["rm", "-f", "worker-container"]
+    ]);
+});
+
 test("dockerfile container mode builds the image before creating the managed container", async () => {
     const recorder = createSpawnRecorder((call, child) => {
         if (call.args[0] === "image" && call.args[1] === "inspect") {
@@ -1561,6 +1579,112 @@ test("compose container mode starts the configured service and executes the work
             "--instance",
             "task-3-compose"
         ]
+    ]);
+});
+
+test("container retirement leaves compose and user-owned stopped containers intact", async () => {
+    const composeRecorder = createSpawnRecorder();
+    const compose = new WorkerTransportDriverDocker({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
+        container: {
+            compose: {
+                file: "/project/compose.yaml",
+                projectName: "devshell-test",
+                service: "workspace"
+            },
+            mode: "compose"
+        },
+        dockerBinary: "docker-bin",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: composeRecorder.spawn
+    });
+    const adoptedRecorder = createSpawnRecorder();
+    const adopted = new WorkerTransportDriverPodman({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
+        container: {
+            adoptLifecycle: true,
+            containerName: "user-container",
+            mode: "existingStoppedContainer"
+        },
+        podmanBinary: "podman-bin",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: adoptedRecorder.spawn
+    });
+
+    await compose.retireProviderResources();
+    await adopted.retireProviderResources();
+
+    assert.deepEqual(composeRecorder.calls, []);
+    assert.deepEqual(adoptedRecorder.calls, []);
+});
+
+test("runtime retirement temporarily starts and restores an adopted stopped container", async () => {
+    const recorder = createSpawnRecorder((call, child, callIndex) => {
+        if (callIndex === 0 && call.args[0] === "inspect") {
+            closeRecordedChild(child, { stdout: "stopped\n" });
+            return true;
+        }
+        return false;
+    });
+    const transport = new WorkerTransportDriverPodman({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
+        container: {
+            adoptLifecycle: true,
+            containerName: "user-container",
+            mode: "existingStoppedContainer"
+        },
+        podmanBinary: "podman-bin",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+
+    const result = await transport.runWorkerCommand("retire", {
+        instanceName: "task-3-adopted"
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(recorder.calls.map((call) => call.args), [
+        ["inspect", "--type", "container", "--format", "{{.State.Status}}", "user-container"],
+        ["start", "user-container"],
+        ["exec", "-i", "user-container", "/usr/local/bin/devshell-worker", "retire", "--instance", "task-3-adopted"],
+        ["stop", "user-container"]
+    ]);
+});
+
+test("runtime retirement temporarily starts and restores a stopped compose service", async () => {
+    const recorder = createSpawnRecorder((call, child) => {
+        if (call.args.includes("-a") && call.args.includes("ps")) {
+            closeRecordedChild(child, { stdout: "compose-container-id\n" });
+            return true;
+        }
+        return false;
+    });
+    const transport = new WorkerTransportDriverDocker({
+        skillsDirectory: NO_SKILLS_DIRECTORY,
+        container: {
+            compose: {
+                file: "/project/compose.yaml",
+                projectName: "devshell-test",
+                service: "workspace"
+            },
+            mode: "compose"
+        },
+        dockerBinary: "docker-bin",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn
+    });
+
+    const result = await transport.runWorkerCommand("retire", {
+        instanceName: "task-3-compose"
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(recorder.calls.map((call) => call.args), [
+        ["compose", "-f", "/project/compose.yaml", "-p", "devshell-test", "ps", "-q", "workspace"],
+        ["compose", "-f", "/project/compose.yaml", "-p", "devshell-test", "ps", "-a", "-q", "workspace"],
+        ["compose", "-f", "/project/compose.yaml", "-p", "devshell-test", "start", "workspace"],
+        ["compose", "-f", "/project/compose.yaml", "-p", "devshell-test", "exec", "-T", "workspace", "/usr/local/bin/devshell-worker", "retire", "--instance", "task-3-compose"],
+        ["compose", "-f", "/project/compose.yaml", "-p", "devshell-test", "stop", "workspace"]
     ]);
 });
 

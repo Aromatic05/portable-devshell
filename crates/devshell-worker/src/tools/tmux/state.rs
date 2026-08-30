@@ -66,6 +66,7 @@ impl TmuxState {
             if record.schema_version != 1 {
                 continue;
             }
+            backend.persist_transcript_ring_name(&record.task_id)?;
             let state = match record.status.as_str() {
                 "terminated" => TaskState::Terminated,
                 "unknown" => TaskState::Lost,
@@ -871,6 +872,7 @@ impl TmuxState {
                 let Some(task_id) = pane.managed_task_id.as_ref() else {
                     continue;
                 };
+                self.backend.persist_transcript_ring_name(task_id)?;
                 if let Some(task) = tasks.tasks.get_mut(task_id) {
                     if !task.state.is_active()
                         && task.last_pane.is_none()

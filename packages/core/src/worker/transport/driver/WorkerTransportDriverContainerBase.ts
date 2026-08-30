@@ -83,8 +83,13 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
         }
     }
 
+    async retireProviderResources(): Promise<void> {
+        await this.#provision.retire();
+    }
+
     async runWorkerCommand(command: WorkerCommandName, options: WorkerCommandOptions): Promise<WorkerCommandResult> {
         const environment = this.#workerCommandEnvironment(options.env);
+        let preparedRuntimeRetire = false;
         switch (command) {
             case "start":
                 await this.#provision.ensureReady("start");
@@ -98,27 +103,38 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
                     return this.#syntheticResult("logs", options.instanceName, "");
                 }
                 break;
+            case "retire":
+                preparedRuntimeRetire = await this.#provision.prepareRuntimeRetire();
+                if (!preparedRuntimeRetire) {
+                    return this.#syntheticResult("retire", options.instanceName, JSON.stringify({ retired: false }));
+                }
+                break;
         }
-
-        const executable = await this.#resolveExecutable();
-        if (command === "start") {
-            await this.#installer.syncSkills();
+        try {
+            const executable = await this.#resolveExecutable();
+            if (command === "start") {
+                await this.#installer.syncSkills();
+            }
+            const workerCommand = new WorkerBinary(executable).buildCommand(
+                command,
+                options.instanceName,
+                options.extraArgs
+            );
+            const invocation = this.#createExecInvocation(
+                command,
+                [workerCommand.command, ...workerCommand.args],
+                options.instanceName,
+                environment.keys
+            );
+            return await this.#process.run(invocation.context, {
+                env: environment.processEnv,
+                stdio: ["ignore", "pipe", "pipe"]
+            });
+        } finally {
+            if (preparedRuntimeRetire) {
+                await this.#provision.finishRuntimeRetire();
+            }
         }
-        const workerCommand = new WorkerBinary(executable).buildCommand(
-            command,
-            options.instanceName,
-            options.extraArgs
-        );
-        const invocation = this.#createExecInvocation(
-            command,
-            [workerCommand.command, ...workerCommand.args],
-            options.instanceName,
-            environment.keys
-        );
-        return await this.#process.run(invocation.context, {
-            env: environment.processEnv,
-            stdio: ["ignore", "pipe", "pipe"]
-        });
     }
 
     async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {

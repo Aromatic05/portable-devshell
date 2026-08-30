@@ -1,4 +1,4 @@
-export type WorkerCommandName = "start" | "status" | "stop" | "logs";
+export type WorkerCommandName = "start" | "status" | "stop" | "logs" | "retire";
 
 export interface WorkerCommandOptions {
     instanceName: string;

@@ -42,4 +42,15 @@ export class WorkerCommandClient {
             env: this.#env
         });
     }
+
+    retireRuntime(): Promise<WorkerCommandResult> {
+        return this.#transport.runWorkerCommand("retire", {
+            instanceName: this.#instanceName,
+            env: this.#env
+        });
+    }
+
+    async retireProviderResources(): Promise<void> {
+        await this.#transport.retireProviderResources?.();
+    }
 }

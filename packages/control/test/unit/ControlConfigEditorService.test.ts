@@ -696,6 +696,12 @@ test("instance delete terminalizes live state and detaches Context environments 
             actions.push(`approval.cancel:${approvalId}`);
             return { approvalId, status: "cancelled" };
         },
+        async retireRuntime() {
+            actions.push("runtime.retire");
+        },
+        async retireProviderResources() {
+            actions.push("provider.retire");
+        },
     }, {
         contextMessages: {
             async failAllPending() { actions.push("comments.failAll"); return []; },
@@ -759,6 +765,8 @@ test("instance delete terminalizes live state and detaches Context environments 
         "comments.failAll",
         "goals.stopAll",
         "todos.cancelAll",
+        "runtime.retire",
+        "provider.retire",
         "context.detach:demo-local",
         "mcp.unregister:demo-local",
     ]);
@@ -951,7 +959,30 @@ test("config editor rejects delete and rebuild patches while an instance is runn
 
 test("config editor reconciles instance MCP bindings from patches without restarting control", async () => {
     let config = createConfig();
-    const registry = new InstanceRegistryFactory().build(config);
+    const registry = new InstanceRegistry([descriptor({
+        async reconfigure() {},
+        snapshot: stoppedSnapshot,
+    }, {
+        goal: {
+            async continuation() { return {}; },
+            async manage() { return undefined; },
+            async read() { return undefined; },
+            async stopAll() { return []; },
+            async touch() {},
+        },
+        mcpCapabilities: ["read", "write", "execute"],
+        mcpContextMode: "explicit",
+        mcpGroups: ["file", "bash", "artifact"],
+        todo: {
+            async cancelAll() {},
+            async control() { throw new Error("unused"); },
+            currentAssociation() { return undefined; },
+            async delete() {},
+            async read() { return { items: [], revision: 0, summary: { completed: 0, total: 0 } }; },
+            summaries() { return []; },
+            async write() { throw new Error("unused"); },
+        },
+    })]);
     const registered: Array<Record<string, unknown>> = [];
     const unregistered: string[] = [];
     const gateway = {} as never;
@@ -1086,6 +1117,8 @@ function descriptor(worker: Record<string, unknown>, extra: Record<string, unkno
             managementMode: "controllerManaged",
             async listApprovals() { return []; },
             async cancelApproval() { throw new Error("no pending approval"); },
+            async retireRuntime() {},
+            async retireProviderResources() {},
             ...worker,
         },
         ...extra,

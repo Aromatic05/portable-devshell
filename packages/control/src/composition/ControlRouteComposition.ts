@@ -75,6 +75,10 @@ export class ControlRouteComposition {
         this.#subscriptions.unsubscribeConnection(connectionId);
     }
 
+    async retireInstance(instance: string): Promise<void> {
+        await this.#terminals.closeInstance(instance);
+    }
+
     dispose(): void {
         this.#unsubscribeInstances();
         this.#terminals.close();

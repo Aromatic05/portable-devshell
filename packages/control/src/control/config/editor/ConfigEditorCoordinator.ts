@@ -447,6 +447,8 @@ export class ConfigEditorCoordinator {
         );
         await descriptor.goal.stopAll();
         await descriptor.todo.cancelAll();
+        await descriptor.worker.retireRuntime();
+        await descriptor.worker.retireProviderResources();
     }
 
     async #retireInteractionsForDisable(

@@ -47,11 +47,27 @@ export class WorkerTransportContainerProvisionManaged implements WorkerTransport
         return (await this.#operations.readContainerStatus(this.#config.containerName)) === "running";
     }
 
+    async prepareRuntimeRetire(): Promise<boolean> {
+        return await this.isAvailable();
+    }
+
+    async finishRuntimeRetire(): Promise<void> {}
+
     async afterWorkerStop(): Promise<void> {
         await this.#operations.runProviderCommand(
             "stopContainer",
             ["stop", this.#config.containerName],
             { allowNonZeroExit: true }
+        );
+    }
+
+    async retire(): Promise<void> {
+        if ((await this.#operations.readContainerStatus(this.#config.containerName)) === "missing") {
+            return;
+        }
+        await this.#operations.runProviderCommand(
+            "removeContainer",
+            ["rm", "-f", this.#config.containerName]
         );
     }
 

@@ -21,6 +21,7 @@ export interface ProviderCommandContext extends CommandDiagnostic {
 }
 
 export interface WorkerCommandTransport {
+    retireProviderResources?(): Promise<void>;
     runWorkerCommand(
         command: WorkerCommandName,
         options: WorkerCommandOptions,

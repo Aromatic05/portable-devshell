@@ -17,6 +17,7 @@ export class WorkerTransportContainerProvisionExistingStopped implements WorkerT
     readonly #config: ExistingStoppedContainerConfig;
     readonly #operations: WorkerTransportContainerProvisionOperations;
     #adopted = false;
+    #startedForRuntimeRetire = false;
 
     constructor(options: WorkerTransportContainerProvisionExistingStoppedOptions) {
         this.#config = options.config;
@@ -49,6 +50,30 @@ export class WorkerTransportContainerProvisionExistingStopped implements WorkerT
         return status === "running";
     }
 
+    async prepareRuntimeRetire(): Promise<boolean> {
+        const status = await this.#operations.readContainerStatus(this.#config.containerName);
+        if (status === "missing") return false;
+        if (status === "running") return true;
+        await this.#operations.runProviderCommand(
+            "startContainerForRetire",
+            ["start", this.#config.containerName]
+        );
+        this.#startedForRuntimeRetire = true;
+        return true;
+    }
+
+    async finishRuntimeRetire(): Promise<void> {
+        if (!this.#startedForRuntimeRetire) return;
+        try {
+            await this.#operations.runProviderCommand(
+                "stopContainerAfterRetire",
+                ["stop", this.#config.containerName]
+            );
+        } finally {
+            this.#startedForRuntimeRetire = false;
+        }
+    }
+
     async afterWorkerStop(): Promise<void> {
         if (!this.#config.adoptLifecycle) {
             return;
@@ -61,6 +86,8 @@ export class WorkerTransportContainerProvisionExistingStopped implements WorkerT
         );
         this.#adopted = false;
     }
+
+    async retire(): Promise<void> {}
 
     buildExecArgs(
         command: readonly string[],

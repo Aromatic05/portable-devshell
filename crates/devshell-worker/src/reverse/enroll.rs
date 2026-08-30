@@ -80,9 +80,11 @@ pub fn run(options: EnrollOptions) -> Result<String, String> {
     ensure_dir(&paths.state_dir, 0o700)?;
 
     // Re-enrollment replaces the server-side token immediately. Stop any old
-    // daemon before changing its local credential or replacing its installed
-    // binary so the new enrollment can start under the same instance identity.
+    // daemon and retire the previous local execution generation before changing
+    // its credential or binary. A new controller enrollment must not inherit
+    // old tmux tasks, artifact handles, or worker runtime from the same name.
     crate::cli::stop::stop_instance(&instance)?;
+    crate::cli::retire::retire_instance(&instance)?;
     let installed_binary = install_current_binary()?;
 
     {

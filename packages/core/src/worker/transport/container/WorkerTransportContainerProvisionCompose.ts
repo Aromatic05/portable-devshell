@@ -16,6 +16,7 @@ interface WorkerTransportContainerProvisionComposeOptions {
 export class WorkerTransportContainerProvisionCompose implements WorkerTransportContainerProvision {
     readonly #config: ComposeContainerConfig;
     readonly #operations: WorkerTransportContainerProvisionOperations;
+    #startedForRuntimeRetire = false;
 
     constructor(options: WorkerTransportContainerProvisionComposeOptions) {
         this.#config = options.config;
@@ -42,7 +43,37 @@ export class WorkerTransportContainerProvisionCompose implements WorkerTransport
         return result.exitCode === 0 && result.stdout.trim().length > 0;
     }
 
+    async prepareRuntimeRetire(): Promise<boolean> {
+        if (await this.isAvailable()) return true;
+        const existing = await this.#operations.runProviderCommand(
+            "composePsAll",
+            this.#buildComposeArgs(["ps", "-a", "-q", this.#config.compose.service]),
+            { allowNonZeroExit: true }
+        );
+        if (existing.exitCode !== 0 || existing.stdout.trim().length === 0) return false;
+        await this.#operations.runProviderCommand(
+            "composeStartForRetire",
+            this.#buildComposeArgs(["start", this.#config.compose.service])
+        );
+        this.#startedForRuntimeRetire = true;
+        return true;
+    }
+
+    async finishRuntimeRetire(): Promise<void> {
+        if (!this.#startedForRuntimeRetire) return;
+        try {
+            await this.#operations.runProviderCommand(
+                "composeStopAfterRetire",
+                this.#buildComposeArgs(["stop", this.#config.compose.service])
+            );
+        } finally {
+            this.#startedForRuntimeRetire = false;
+        }
+    }
+
     async afterWorkerStop(): Promise<void> {}
+
+    async retire(): Promise<void> {}
 
     buildExecArgs(
         command: readonly string[],

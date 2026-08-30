@@ -2,6 +2,7 @@ pub mod backend;
 pub mod codec;
 pub mod output;
 pub mod replay;
+mod retire;
 pub mod shell;
 pub mod state;
 pub mod task;
@@ -29,6 +30,8 @@ use crate::tools::tmux::types::{
 use crate::tools::{
     ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName, ToolRegistry,
 };
+
+pub use retire::retire_instance_runtime;
 
 fn warning(pane: Option<&str>, code: &str, message: &str) -> TmuxWarning {
     TmuxWarning {

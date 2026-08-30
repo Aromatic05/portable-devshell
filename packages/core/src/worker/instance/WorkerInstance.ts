@@ -154,6 +154,14 @@ export class WorkerInstance {
         return this.#config.managementMode;
     }
 
+    async retireProviderResources(): Promise<void> {
+        await this.#lifecycle.retireProviderResources();
+    }
+
+    async retireRuntime(): Promise<void> {
+        await this.#lifecycle.retireRuntime();
+    }
+
     async setReverseEnrollmentState(enrollmentState: ReverseEnrollmentState): Promise<InstanceSnapshot> {
         return await this.#connection.setReverseEnrollmentState(enrollmentState);
     }

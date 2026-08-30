@@ -55,6 +55,10 @@ export class WorkerTransportDriverLocal implements WorkerCommandTransport {
     }
 
     async runWorkerCommand(command: WorkerCommandName, options: WorkerCommandOptions) {
+        if (command === "retire" && this.#workerBinary.executable === "devshell-worker") {
+            const installed = await this.#provisionExecutable(options.env);
+            return await this.#runResolvedCommand(installed.executablePath, command, options);
+        }
         if (command === "start" && this.#workerBinary.executable === "devshell-worker") {
             const installed = await this.#provisionExecutable(options.env);
             const statusResult = await this.#runResolvedCommand(installed.executablePath, "status", {

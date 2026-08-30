@@ -445,6 +445,7 @@ impl TmuxBackend {
         let _ = fs::remove_file(&exit_path);
         let _ = transcript_ring::remove(&transcript_buffer_name);
         let _ = fs::remove_file(&transcript_done_path);
+        self.persist_transcript_ring_name(task_id)?;
         atomic_write_bytes(&script_path, command.as_bytes())?;
         let runner = format!(
             "umask 077; while [ ! -e {} ]; do /bin/sleep 0.02; done; /bin/rm -f {}; /bin/bash --noprofile --norc {}; status=$?; printf '%s\\n' \"$status\" > {}; exit \"$status\"",
@@ -553,6 +554,13 @@ impl TmuxBackend {
         format!("/devshell-tmux-{}", &digest[..32])
     }
 
+    pub fn persist_transcript_ring_name(&self, task_id: &str) -> Result<(), ToolError> {
+        atomic_write_bytes(
+            &self.transcripts_dir.join(format!("{task_id}.ring")),
+            self.transcript_buffer_name(task_id).as_bytes(),
+        )
+    }
+
     pub fn persist_task_record<T: Serialize>(
         &self,
         task_id: &str,
@@ -650,6 +658,7 @@ impl TmuxBackend {
         let _ = fs::remove_file(self.tasks_dir.join(format!("{task_id}.start")));
         let _ = fs::remove_file(self.task_exit_path(task_id));
         let _ = fs::remove_file(self.transcript_done_path(task_id));
+        let _ = fs::remove_file(self.transcripts_dir.join(format!("{task_id}.ring")));
     }
 
     pub fn task_runtime_pending(&self, task_id: &str) -> bool {
@@ -927,7 +936,7 @@ impl TmuxBackend {
             let Some(extension) = path.extension().and_then(|extension| extension.to_str()) else {
                 continue;
             };
-            if !matches!(extension, "log" | "offset" | "done") {
+            if !matches!(extension, "log" | "offset" | "done" | "ring") {
                 continue;
             }
             let Some(task_id) = path.file_stem().and_then(|stem| stem.to_str()) else {

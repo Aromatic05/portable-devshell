@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 use crate::cli::GcArgs;
+use crate::cli::retire::retire_instance;
 use crate::daemon::process::{self, DaemonState};
 use crate::instance::{InstanceName, read_config};
 use crate::socket::SocketPaths;
@@ -65,12 +66,7 @@ pub fn run(args: GcArgs) -> Result<String, String> {
         }
 
         if !args.dry_run {
-            std::fs::remove_dir_all(&instance_paths.instance_root).map_err(|error| {
-                format!(
-                    "failed to remove {}: {error}",
-                    instance_paths.instance_root.display()
-                )
-            })?;
+            retire_instance(&instance)?;
         }
         removed_instances.push(raw_name);
     }

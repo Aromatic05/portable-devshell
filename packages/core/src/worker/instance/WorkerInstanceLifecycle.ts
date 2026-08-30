@@ -163,6 +163,27 @@ export class WorkerInstanceLifecycle {
         await this.#runExclusive(async () => await this.#connection.close());
     }
 
+    async retireRuntime(): Promise<void> {
+        await this.#runExclusive(async () => {
+            if (this.#commandClient === undefined) return;
+            const result = await this.#commandClient.retireRuntime();
+            if (result.exitCode !== 0) {
+                throw createError({
+                    code: errorCodes.coreProviderFailed,
+                    message: `Worker runtime retirement failed for instance ${this.#config.name}.`,
+                    retryable: false,
+                    details: toJsonDetails(withInstanceDetails(result.details, this.#config.name))
+                });
+            }
+        });
+    }
+
+    async retireProviderResources(): Promise<void> {
+        await this.#runExclusive(async () => {
+            await this.#commandClient?.retireProviderResources();
+        });
+    }
+
     async #refreshStatus(): Promise<InstanceSnapshot> {
         if (this.#config.managementMode === "selfManaged") {
             if (!this.#connection.connected) {

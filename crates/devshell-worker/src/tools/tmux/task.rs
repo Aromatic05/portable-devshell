@@ -109,6 +109,7 @@ impl TaskRegistry {
             let _ = std::fs::remove_file(task.transcript.metadata_path.with_extension("done"));
             let _ = std::fs::remove_file(task.transcript.metadata_path.with_extension("offset"));
             let _ = std::fs::remove_file(task.transcript.metadata_path.with_extension("log"));
+            let _ = std::fs::remove_file(task.transcript.metadata_path.with_extension("ring"));
         }
     }
 }

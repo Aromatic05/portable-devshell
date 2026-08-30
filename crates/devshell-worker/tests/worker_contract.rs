@@ -1091,6 +1091,9 @@ fn gc_skips_invalid_markers_and_responsive_instances() {
         .assert()
         .success();
     env.json_command(&["stop", "--instance", stopped]);
+    let control_history = env.instance_root(stopped).join("control-worker/history.keep");
+    fs::create_dir_all(control_history.parent().unwrap()).unwrap();
+    fs::write(&control_history, "keep\n").unwrap();
 
     fs::create_dir_all(&no_config).unwrap();
     fs::create_dir_all(&bad_config).unwrap();
@@ -1109,6 +1112,12 @@ fn gc_skips_invalid_markers_and_responsive_instances() {
     assert!(no_config.exists());
     assert!(bad_config.exists());
     assert!(mismatch.exists());
+
+    let applied = env.json_command(&["gc"]);
+    assert_eq!(applied["removed_instances"][0], stopped);
+    assert!(!env.instance_root(stopped).join("config.toml").exists());
+    assert!(!env.instance_root(stopped).join("logs").exists());
+    assert!(control_history.exists());
 
     env.json_command(&["stop", "--instance", running]);
 }
