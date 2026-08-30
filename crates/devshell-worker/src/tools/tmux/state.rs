@@ -233,7 +233,11 @@ impl TmuxState {
             self.refresh_task(&task_id)?;
         }
 
-        let output = self.task_output(&task_id, line, true)?;
+        let output = if params.consume_output.unwrap_or(true) {
+            self.task_output(&task_id, line, true)?
+        } else {
+            self.task_observation(&task_id, true)?
+        };
         Ok(TmuxRunOutput {
             task: output.task,
             timeout: params.timeout,
@@ -398,7 +402,11 @@ impl TmuxState {
             thread::sleep(Duration::from_millis(50));
         }
         call.check_cancelled()?;
-        self.task_output(&params.task, line, false)
+        if params.consume_output.unwrap_or(true) {
+            self.task_output(&params.task, line, false)
+        } else {
+            self.task_observation(&params.task, false)
+        }
     }
 
     pub fn inspect(
@@ -1033,6 +1041,29 @@ impl TmuxState {
             pane,
             output: non_empty(output),
             warnings: non_empty(warnings),
+        })
+    }
+
+    fn task_observation(
+        &self,
+        task_id: &str,
+        include_pane: bool,
+    ) -> Result<TmuxReadOutput, ToolError> {
+        let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
+        tasks.prune();
+        let task = tasks
+            .tasks
+            .get(task_id)
+            .ok_or_else(|| task_expired(task_id))?;
+        let view = task_view(task);
+        let pane = (include_pane && task.state.is_active())
+            .then(|| task.last_pane.as_ref().map(pane_ref))
+            .flatten();
+        Ok(TmuxReadOutput {
+            task: view,
+            pane,
+            output: None,
+            warnings: None,
         })
     }
 

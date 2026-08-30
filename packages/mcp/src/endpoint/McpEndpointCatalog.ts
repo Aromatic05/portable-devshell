@@ -123,10 +123,11 @@ export class McpEndpointCatalog {
     }
 
     adapt(tool: ToolDefinition): McpTool {
-        const exposed = isMcpEnvironmentToolName(tool.name)
-            ? tool
+        const modelTool = hideInternalWorkerInput(tool);
+        const exposed = isMcpEnvironmentToolName(modelTool.name)
+            ? modelTool
             : withMcpCommentOutputSchema(
-                  withMcpContextId(tool, this.#contextSelector.requiresExplicitContextId)
+                  withMcpContextId(modelTool, this.#contextSelector.requiresExplicitContextId)
               );
         const adapted = this.#schemaAdapter.toMcpTool(
             exposed,
@@ -215,6 +216,21 @@ export class McpEndpointCatalog {
         }
         return entry.definition;
     }
+}
+
+function hideInternalWorkerInput(tool: ToolDefinition): ToolDefinition {
+    if (tool.name !== "tmux_run" && tool.name !== "tmux_read") return tool;
+    const inputSchema = asRecord(tool.inputSchema);
+    const properties = { ...asRecord(inputSchema.properties) };
+    if (!("consumeOutput" in properties)) return tool;
+    delete properties.consumeOutput;
+    return {
+        ...tool,
+        inputSchema: {
+            ...inputSchema,
+            properties,
+        },
+    };
 }
 
 function mcpToolSecuritySchemes(auth: McpAuthConfig): JsonValue[] | undefined {

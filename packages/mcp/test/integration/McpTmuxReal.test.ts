@@ -26,6 +26,7 @@ test("MCP tmux supports a complete interactive lifecycle when JSON-RPC request i
         assert.notEqual(runTool, undefined);
         assert.equal(runTool?.inputSchema.properties?.timeMs, undefined);
         assert.equal(runTool?.inputSchema.properties?.resume, undefined);
+        assert.equal(runTool?.inputSchema.properties?.consumeOutput, undefined);
         assert.notEqual(runTool?.inputSchema.properties?.timeout, undefined);
         assert.match(String(runTool?.description), /Prefer wait=block for unattended tasks on the current critical path/u);
         assert.match(String(runTool?.inputSchema.properties?.wait?.description), /completion is required before continuing and there is no useful parallel work/u);
@@ -33,6 +34,7 @@ test("MCP tmux supports a complete interactive lifecycle when JSON-RPC request i
         assert.match(String(runTool?.inputSchema.properties?.timeout?.description), /Set it long enough for the expected runtime/u);
         const readTool = tools.find((entry) => entry.name === "tmux_read");
         assert.notEqual(readTool, undefined);
+        assert.equal(readTool?.inputSchema.properties?.consumeOutput, undefined);
         assert.equal(readTool?.inputSchema.properties?.timeMs?.minimum, 0);
         assert.equal(readTool?.inputSchema.properties?.timeMs?.maximum, 3_600_000);
         const inputTool = tools.find((entry) => entry.name === "tmux_input");
@@ -83,6 +85,24 @@ test("MCP tmux supports a complete interactive lifecycle when JSON-RPC request i
         });
         assert.equal(closed.error, undefined, JSON.stringify(closed));
         assert.equal(closed.result?.structuredContent?.closedPaneId, created.result?.structuredContent?.pane?.id);
+    });
+});
+
+test("MCP tmux block wait returns the full unread transcript instead of discarding it", tmuxTestOptions(workerBinaryPath), async () => {
+    await withTmuxHarness("aromatic-mcp-tmux-block-output", async ({ callTool, createContext }) => {
+        const ctxId = await createContext();
+        const result = await callTool("block-output", "tmux_run", {
+            command: "printf 'EARLY\\n'; printf 'LATE\\n'",
+            ctxId,
+            line: 80,
+            timeout: 30_000,
+            wait: "block"
+        });
+        assert.equal(result.error, undefined, JSON.stringify(result));
+        assert.notEqual(result.result?.structuredContent?.task?.status, "running");
+        const output = result.result?.structuredContent?.output ?? [];
+        assert.equal(output.some((line) => line === "EARLY"), true, JSON.stringify(result));
+        assert.equal(output.some((line) => line === "LATE"), true, JSON.stringify(result));
     });
 });
 

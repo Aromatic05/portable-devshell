@@ -448,6 +448,83 @@ fn tmux_run_returns_a_task_and_preserves_clean_first_output() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
+fn tmux_run_can_start_without_consuming_transcript_output() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-no-consume";
+    start(&env, instance);
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({
+            "command": "printf 'EARLY\\n'; sleep 0.2; printf 'LATE\\n'",
+            "consumeOutput": false,
+            "wait": "nonblock",
+            "line": 80
+        }),
+        "ctx-a",
+        "run-no-consume",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    assert!(run["result"].get("output").is_none(), "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap();
+    let observed = call(
+        &env,
+        instance,
+        "2-observe",
+        "tmux_read",
+        json!({ "task": task, "line": 0, "timeMs": 100, "consumeOutput": false }),
+        "ctx-a",
+        "observe-no-consume-read",
+    );
+    assert_eq!(observed["ok"], true, "{observed}");
+    assert!(observed["result"].get("output").is_none(), "{observed}");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let listed = call(
+            &env,
+            instance,
+            "2",
+            "tmux_list",
+            json!({}),
+            "ctx-a",
+            "observe-no-consume",
+        );
+        assert_eq!(listed["ok"], true, "{listed}");
+        let running = listed["result"]["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|pane| pane["task"]["id"].as_str() == Some(task));
+        if !running {
+            break;
+        }
+        assert!(Instant::now() < deadline, "task did not finish: {listed}");
+        thread::sleep(Duration::from_millis(20));
+    }
+    let finished = call(
+        &env,
+        instance,
+        "3",
+        "tmux_read",
+        json!({ "task": task, "line": 80 }),
+        "ctx-a",
+        "read-no-consume",
+    );
+    assert_eq!(finished["ok"], true, "{finished}");
+    let output = finished["result"]["output"].as_array().unwrap();
+    assert!(output.iter().any(|line| line == "EARLY"), "{finished}");
+    assert!(output.iter().any(|line| line == "LATE"), "{finished}");
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
 fn tmux_run_defaults_to_nonblock_for_long_tasks() {
     assert!(
         tmux_available(),

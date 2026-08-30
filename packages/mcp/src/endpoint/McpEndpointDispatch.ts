@@ -260,9 +260,11 @@ export class McpEndpointDispatch {
             throw new Error("tmux_run block wait state is unavailable.");
         }
         const timeout = readTmuxTimeout(input);
+        const line = readTmuxLine(input);
         const startedAt = Date.now();
         const initialInput = {
             ...(isRecord(input) ? input : {}),
+            consumeOutput: false,
             wait: "nonblock",
         } as JsonValue;
         const started = instance === this.#instanceName
@@ -272,7 +274,20 @@ export class McpEndpointDispatch {
             throw new Error("tmux_run returned an invalid task result.");
         }
         if (started.task.status !== "running") {
-            return await this.#attachComments("tmux_run", started, context, callId, instance);
+            const completed = await this.#readTmuxTaskOutput(
+                instance,
+                started.task.id,
+                line,
+                context,
+                signal,
+            );
+            return await this.#attachComments(
+                "tmux_run",
+                { ...started, ...completed },
+                context,
+                callId,
+                instance,
+            );
         }
 
         const task = started.task.id;
@@ -284,6 +299,7 @@ export class McpEndpointDispatch {
             ...(goalId === undefined ? {} : { goalId }),
             kind: "tmux",
             ownerCallId: callId,
+            payload: { line },
             ...(taskId === undefined ? {} : { taskId }),
             targetId: task,
         });
@@ -337,9 +353,19 @@ export class McpEndpointDispatch {
             if (current.result === undefined || !isRecord(current.result)) {
                 throw new Error("tmux_run wait resolved without a task result.");
             }
+            if (isTmuxTaskRunning(current.result, task)) {
+                return await this.#attachComments(
+                    "tmux_run",
+                    { ...started, ...current.result },
+                    context,
+                    callId,
+                    instance,
+                );
+            }
+            const completed = await this.#readTmuxTaskOutput(instance, task, line, context, signal);
             return await this.#attachComments(
                 "tmux_run",
-                { ...started, ...current.result },
+                { ...started, ...current.result, ...completed },
                 context,
                 callId,
                 instance,
@@ -468,6 +494,23 @@ export class McpEndpointDispatch {
                 signal
             );
         }
+    }
+
+    async #readTmuxTaskOutput(
+        instance: string,
+        taskId: string,
+        line: number,
+        context: ToolCallContext,
+        signal?: AbortSignal,
+    ): Promise<Record<string, JsonValue>> {
+        const input = { line, task: taskId };
+        const result = instance === this.#instanceName
+            ? await this.#worker.callTool("tmux_read", input, context, signal)
+            : await this.#gateway!.callTool(instance, "tmux_read", input, context, signal);
+        if (!isRecord(result)) {
+            throw new Error(`tmux_read returned an invalid result for task ${taskId}.`);
+        }
+        return result;
     }
 
     #interruptTmuxWaitTracker(instance: string, waitId: string): void {
@@ -696,6 +739,19 @@ function readTmuxTimeout(input: JsonValue): number | undefined {
         throw new Error("tmux_run timeout must be a positive integer in milliseconds.");
     }
     return input.timeout;
+}
+
+function readTmuxLine(input: JsonValue): number {
+    if (!isRecord(input) || input.line === undefined) return 80;
+    if (
+        typeof input.line !== "number" ||
+        !Number.isInteger(input.line) ||
+        input.line < -400 ||
+        input.line > 400
+    ) {
+        throw new Error("tmux_run line must be an integer between -400 and 400.");
+    }
+    return input.line;
 }
 
 function isTmuxTaskRunning(result: JsonValue, taskId: string): boolean {

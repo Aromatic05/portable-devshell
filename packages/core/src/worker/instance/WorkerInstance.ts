@@ -342,7 +342,12 @@ export class WorkerInstance {
         const listed = await this.#toolInvoker.invoke("tmux_list", {}, context, signal);
         const active = findTmuxTask(listed, taskId);
         if (active !== undefined) return { task: active };
-        return await this.#toolInvoker.invoke("tmux_read", { task: taskId, line: 0 }, context, signal);
+        return await this.#toolInvoker.invoke(
+            "tmux_read",
+            { task: taskId, line: 0, consumeOutput: false },
+            context,
+            signal
+        );
     }
 
     async auditToolCall<T extends JsonValue>(

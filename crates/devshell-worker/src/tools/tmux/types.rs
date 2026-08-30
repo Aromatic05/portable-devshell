@@ -36,6 +36,9 @@ pub struct TmuxRunParams {
     /// Output lines to consume. Defaults to 80. Range: -400..=400.
     #[schemars(range(min = -400, max = 400))]
     pub line: Option<i64>,
+    #[serde(default)]
+    /// Whether this call consumes transcript output into the response. Defaults to true. Set false when a caller needs to start a task without advancing its transcript cursor.
+    pub consume_output: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -89,6 +92,9 @@ pub struct TmuxReadParams {
     /// Output lines to consume. Defaults to 80. Range: -400..=400.
     #[schemars(range(min = -400, max = 400))]
     pub line: Option<i64>,
+    #[serde(default)]
+    /// Whether this call consumes transcript output into the response. Defaults to true. Set false for internal status observation without advancing the transcript cursor.
+    pub consume_output: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

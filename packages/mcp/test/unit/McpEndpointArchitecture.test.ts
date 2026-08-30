@@ -536,6 +536,7 @@ test("tmux_run block waits are interruptible before handoff and detach after the
             assert.equal(toolName, "tmux_run");
             assert.deepEqual(input, {
                 command: "sleep 10",
+                consumeOutput: false,
                 timeout: 660_000,
                 wait: "nonblock",
             });
@@ -549,6 +550,7 @@ test("tmux_run block waits are interruptible before handoff and detach after the
         detachedAt?: string;
         kind: "tmux";
         ownerCallId?: string;
+        payload?: JsonValue;
         result?: JsonValue;
         status: "waiting" | "detached" | "resolved" | "consumed" | "cancelled";
         taskId?: string;
@@ -581,7 +583,7 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     const gateway = {
         async cancelWait(_instance: string, waitId: string) { return update(waitId, "cancelled"); },
         async consumeWait(_instance: string, waitId: string) { return update(waitId, "consumed"); },
-        async createWait(_instance: string, input: { createdByCtxId: string; kind: "tmux"; ownerCallId?: string; taskId?: string; targetId: string }) {
+        async createWait(_instance: string, input: { createdByCtxId: string; kind: "tmux"; ownerCallId?: string; payload?: JsonValue; taskId?: string; targetId: string }) {
             const now = new Date().toISOString();
             const wait: Wait = {
                 ...input,
@@ -669,6 +671,7 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     ) as Promise<{ interrupted?: boolean; task?: { id?: string; status?: string } }>;
     await waitUntil(() => waits.length === 1 && observeCalls > 0);
     assert.equal(waits[0]?.taskId, "todo-task-1");
+    assert.deepEqual(waits[0]?.payload, { line: 80 });
     assert.equal(waits[0]?.status, "waiting");
     const interrupt = await dispatch.callTool(
         "workspace_wait_interrupt",
@@ -707,6 +710,7 @@ test("tmux_run block waits are interruptible before handoff and detach after the
         deadlineAt: new Date(Date.now() + 30_000).toISOString(),
         detachedAt: restoredNow,
         kind: "tmux",
+        payload: { line: 17 },
         status: "detached",
         targetId: "task-2",
         updatedAt: restoredNow,
