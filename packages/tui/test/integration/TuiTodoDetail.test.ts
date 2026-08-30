@@ -236,6 +236,7 @@ function createTodoServer(socketPath: string): {
                 async continuation() { return {}; },
                 async manage() { return undefined; },
                 async read() { return undefined; },
+                async stopAll() { return []; },
                 async touch() {},
             },
             mcpCapabilities: [],
@@ -245,6 +246,7 @@ function createTodoServer(socketPath: string): {
             name: "alpha",
             provider: "local",
             todo: {
+                async cancelAll() {},
                 async control() {
                     return todoFixture;
                 },

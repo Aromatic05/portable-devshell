@@ -41,6 +41,9 @@ export class ControlRuntimeFactory {
                 state: options.state
             });
             const reverse = new ControlRuntimeReverse({ mcp, state: options.state });
+            mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
+                await artifact.service.retireInstance(instance.name);
+            });
             return new ControlRuntime({
                 artifact,
                 instances: options.state.instances,

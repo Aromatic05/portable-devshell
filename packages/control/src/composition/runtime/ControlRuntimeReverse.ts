@@ -39,6 +39,10 @@ export class ControlRuntimeReverse {
         });
         this.install(options.mcp.host.server);
         this.service.setDisconnectHandler((instance) => this.#gateway?.disconnect(instance));
+        options.mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
+            if (instance.provider !== "reverse") return;
+            await this.service?.retireInstance(instance.name);
+        });
     }
 
     stop(): void {

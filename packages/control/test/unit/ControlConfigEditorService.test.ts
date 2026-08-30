@@ -606,6 +606,246 @@ test("instance reconfigure failure restores persisted and runtime configuration"
     assert.equal(runtimeSecurityMode, "disabled");
 });
 
+test("instance delete terminalizes live state and detaches Context environments before descriptor removal", async () => {
+    let config = createConfig();
+    const actions: string[] = [];
+    const waits = [
+        { status: "waiting", waitId: "wait-live" },
+        { status: "resolved", waitId: "wait-result" },
+        { status: "consumed", waitId: "wait-history" },
+    ];
+    const registry = new InstanceRegistry([descriptor({
+        snapshot: stoppedSnapshot,
+        async listApprovals() {
+            return [{ approvalId: "approval-live", status: "pending" }];
+        },
+        async cancelApproval(approvalId: string) {
+            actions.push(`approval.cancel:${approvalId}`);
+            return { approvalId, status: "cancelled" };
+        },
+    }, {
+        contextMessages: {
+            async failAllPending() { actions.push("comments.failAll"); return []; },
+            async failPending() { return []; },
+            async list() { return []; },
+            async queue() { throw new Error("unused"); },
+            async consumePending() { return { callId: "unused", messages: [] }; },
+        },
+        goal: {
+            async continuation() { return {}; },
+            async manage() { return undefined; },
+            async read() { return undefined; },
+            async stopAll() { actions.push("goals.stopAll"); return []; },
+            async touch() {},
+        },
+        todo: {
+            async cancelAll() { actions.push("todos.cancelAll"); },
+            async control() { throw new Error("unused"); },
+            currentAssociation() { return undefined; },
+            async delete() {},
+            async read() { return { items: [], revision: 0, summary: { completed: 0, total: 0 } }; },
+            summaries() { return []; },
+            async write() { throw new Error("unused"); },
+        },
+        wait: {
+            async cancel(waitId: string) {
+                actions.push(`wait.cancel:${waitId}`);
+                const wait = waits.find((entry) => entry.waitId === waitId)!;
+                wait.status = "cancelled";
+                return wait;
+            },
+            async consume(waitId: string) {
+                actions.push(`wait.consume:${waitId}`);
+                const wait = waits.find((entry) => entry.waitId === waitId)!;
+                wait.status = "consumed";
+                return wait;
+            },
+            async get(waitId: string) { return waits.find((entry) => entry.waitId === waitId); },
+            async list() { return waits; },
+        },
+    })]);
+    const service = new ConfigEditorCoordinator({
+        configStore: { async write(nextConfig: ControlConfig) { config = nextConfig; } },
+        getConfig: () => config,
+        getMcpHost: () => ({
+            contextAdmin: {
+                async detachInstance(instance: string) { actions.push(`context.detach:${instance}`); return []; },
+            },
+            unregisterInstance(instance: string) { actions.push(`mcp.unregister:${instance}`); },
+        }) as never,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => { config = nextConfig; },
+    });
+
+    await service.deleteInstance({ instanceName: "demo-local" });
+
+    assert.deepEqual(actions, [
+        "approval.cancel:approval-live",
+        "wait.cancel:wait-live",
+        "wait.consume:wait-result",
+        "comments.failAll",
+        "goals.stopAll",
+        "todos.cancelAll",
+        "context.detach:demo-local",
+        "mcp.unregister:demo-local",
+    ]);
+    assert.equal(config.instances.length, 0);
+    assert.equal(registry.get("demo-local"), undefined);
+});
+
+test("instance delete runs generation retirement before any configuration deletion write", async () => {
+    let config = createConfig();
+    const actions: string[] = [];
+    const registry = new InstanceRegistry([descriptor({ snapshot: stoppedSnapshot }, {
+        goal: {
+            async continuation() { return {}; },
+            async manage() { return undefined; },
+            async read() { return undefined; },
+            async stopAll() { return []; },
+            async touch() {},
+        },
+        todo: {
+            async cancelAll() {},
+            async control() { throw new Error("unused"); },
+            currentAssociation() { return undefined; },
+            async delete() {},
+            async read() { return { items: [], revision: 0, summary: { completed: 0, total: 0 } }; },
+            summaries() { return []; },
+            async write() { throw new Error("unused"); },
+        },
+    })]);
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                actions.push(`config.write:${nextConfig.instances.length}`);
+                config = nextConfig;
+            },
+        },
+        getConfig: () => config,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => { config = nextConfig; },
+    });
+    service.registerInstanceDeleteRetirement(async (instance) => {
+        actions.push(`generation.retire:${instance.name}`);
+    });
+
+    await service.deleteInstance({ instanceName: "demo-local" });
+
+    assert.deepEqual(actions, [
+        "generation.retire:demo-local",
+        "config.write:0",
+    ]);
+});
+
+test("instance delete leaves configuration untouched when generation retirement fails", async () => {
+    let config = createConfig();
+    const writes: number[] = [];
+    const registry = new InstanceRegistry([descriptor({ snapshot: stoppedSnapshot })]);
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                writes.push(nextConfig.instances.length);
+                config = nextConfig;
+            },
+        },
+        getConfig: () => config,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => { config = nextConfig; },
+    });
+    service.registerInstanceDeleteRetirement(async () => {
+        throw new Error("generation retirement failed");
+    });
+
+    await assert.rejects(
+        service.deleteInstance({ instanceName: "demo-local" }),
+        /generation retirement failed/u,
+    );
+    assert.deepEqual(writes, []);
+    assert.equal(config.instances.length, 1);
+    assert.notEqual(registry.get("demo-local"), undefined);
+});
+
+test("instance delete leaves configuration untouched when live-state retirement fails", async () => {
+    let config = createConfig();
+    const writes: number[] = [];
+    const registry = new InstanceRegistry([descriptor({
+        snapshot: stoppedSnapshot,
+    }, {
+        goal: {
+            async continuation() { return {}; },
+            async manage() { return undefined; },
+            async read() { return undefined; },
+            async stopAll() { throw new Error("goal retirement failed"); },
+            async touch() {},
+        },
+    })]);
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                writes.push(nextConfig.instances.length);
+                config = nextConfig;
+            },
+        },
+        getConfig: () => config,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => { config = nextConfig; },
+    });
+
+    await assert.rejects(
+        service.deleteInstance({ instanceName: "demo-local" }),
+        /goal retirement failed/u,
+    );
+    assert.deepEqual(writes, []);
+    assert.equal(config.instances.length, 1);
+    assert.notEqual(registry.get("demo-local"), undefined);
+});
+
+test("instance delete keeps retired live state when final config persistence fails", async () => {
+    let config = createConfig();
+    const actions: string[] = [];
+    const registry = new InstanceRegistry([descriptor({
+        snapshot: stoppedSnapshot,
+    }, {
+        goal: {
+            async continuation() { return {}; },
+            async manage() { return undefined; },
+            async read() { return undefined; },
+            async stopAll() { actions.push("goals.stopAll"); return []; },
+            async touch() {},
+        },
+        todo: {
+            async cancelAll() { actions.push("todos.cancelAll"); },
+            async control() { throw new Error("unused"); },
+            currentAssociation() { return undefined; },
+            async delete() {},
+            async read() { return { items: [], revision: 0, summary: { completed: 0, total: 0 } }; },
+            summaries() { return []; },
+            async write() { throw new Error("unused"); },
+        },
+    })]);
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write() { throw new Error("delete persistence failed"); },
+        },
+        getConfig: () => config,
+        getMcpHost: () => ({
+            contextAdmin: {
+                async detachInstance(instance: string) { actions.push(`context.detach:${instance}`); return []; },
+            },
+        }) as never,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => { config = nextConfig; },
+    });
+
+    await assert.rejects(
+        service.deleteInstance({ instanceName: "demo-local" }),
+        /delete persistence failed/u,
+    );
+    assert.deepEqual(actions, ["goals.stopAll", "todos.cancelAll", "context.detach:demo-local"]);
+    assert.equal(config.instances.length, 1);
+    assert.notEqual(registry.get("demo-local"), undefined);
+});
+
 test("config editor rejects delete and rebuild patches while an instance is running before persistence", async () => {
     let config = createConfig();
     const writes: unknown[] = [];
@@ -643,6 +883,9 @@ test("config editor reconciles instance MCP bindings from patches without restar
     const unregistered: string[] = [];
     const gateway = {} as never;
     const host = {
+        contextAdmin: {
+            async detachInstance() { return []; },
+        },
         registerInstance(instance: Record<string, unknown>) {
             registered.push(instance);
         },
@@ -774,6 +1017,18 @@ function descriptor(worker: Record<string, unknown>, extra: Record<string, unkno
         },
         ...extra,
     } as never;
+}
+
+function stoppedSnapshot() {
+    return {
+        connectionState: "disconnected",
+        daemonState: "stopped",
+        effectiveSecurityMode: "disabled",
+        lastSeq: 0,
+        name: "demo-local",
+        ready: false,
+        status: "stopped"
+    };
 }
 
 function runningSnapshot() {

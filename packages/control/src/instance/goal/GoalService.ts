@@ -44,6 +44,21 @@ export class GoalService {
         });
     }
 
+    async stopAll(): Promise<GoalSnapshot[]> {
+        return await this.#runExclusive(async () => {
+            let document = this.#store.read();
+            const stopped: GoalSnapshot[] = [];
+            for (const goal of [...document.goals]) {
+                if (goal.status !== "active" && goal.status !== "blocked") continue;
+                const transition = this.#state.manage(document, { action: "stop" }, goal.createdByCtxId);
+                await this.#persist(document, transition, goal.createdByCtxId);
+                document = transition.document;
+                if (transition.result !== undefined) stopped.push(transition.result);
+            }
+            return stopped;
+        });
+    }
+
     async touch(ctxId: string): Promise<void> {
         await this.#runExclusive(async () => {
             const before = this.#store.read();

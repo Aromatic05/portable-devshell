@@ -19,6 +19,7 @@ import type {
 } from "@portable-devshell/shared";
 
 export interface InstanceContextMessagePort {
+    failAllPending(reason: string): Promise<ContextMessageRecord[]>;
     failPending(ctxId: string, reason: string): Promise<ContextMessageRecord[]>;
     list(ctxId?: string): Promise<ContextMessageRecord[]>;
     queue(input: ContextMessageQueueInput): Promise<ContextMessageRecord>;
@@ -26,6 +27,7 @@ export interface InstanceContextMessagePort {
 }
 
 export interface InstanceTodoPort {
+    cancelAll(): Promise<void>;
     control(taskId: string, action: TodoTaskControlAction, ctxId: string, expectedRevision?: number): Promise<TodoReadResult>;
     currentAssociation(): ToolCallAssociation | undefined;
     delete(taskId: string): Promise<void>;
@@ -36,6 +38,7 @@ export interface InstanceTodoPort {
 
 export interface InstanceGoalPort {
     continuation(ctxId: string, input: GoalContinuationInput): Promise<JsonValue>;
+    stopAll(): Promise<GoalSnapshot[]>;
     manage(ctxId: string, input: GoalManageInput): Promise<GoalSnapshot | undefined>;
     read(ctxId: string): Promise<GoalSnapshot | undefined>;
     touch(ctxId: string): Promise<void>;

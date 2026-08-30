@@ -130,6 +130,14 @@ export class ArtifactService {
         await this.#shareService.recordShareDownloaded(token, details);
     }
 
+    async retireInstance(instance: string): Promise<void> {
+        if (!this.#initialized) {
+            throw new Error("ArtifactService is not initialized.");
+        }
+        await this.#shareService.retireInstance(instance);
+        await this.#transferService.retireInstance(instance);
+    }
+
     async startTransfer(
         input: ArtifactTransferStartInput,
         defaultInstance: string

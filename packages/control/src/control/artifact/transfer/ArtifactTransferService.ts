@@ -228,6 +228,24 @@ export class ArtifactTransferService {
             .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
     }
 
+    async retireInstance(instance: string): Promise<void> {
+        this.#assertInitialized();
+        const transferIds = [...this.#transfers.values()]
+            .filter((transfer) =>
+                !isArtifactTransferTerminal(transfer.record.status) &&
+                (
+                    transfer.defaultInstance === instance ||
+                    transfer.record.source.instance === instance ||
+                    transfer.record.target.instance === instance
+                )
+            )
+            .map((transfer) => transfer.record.transferId);
+        for (const transferId of transferIds) {
+            await this.cancelTransfer(transferId);
+            await this.#waitForTerminalOrRemoval(transferId);
+        }
+    }
+
     async lookupTransfer(
         input: ArtifactTransferLookupInput
     ): Promise<ArtifactTransferResult> {
@@ -289,6 +307,16 @@ export class ArtifactTransferService {
         return await new Promise<ArtifactTransferRecord>((resolve) => {
             const waiters = this.#transferWaiters.get(transferId) ?? new Set();
             waiters.add(resolve);
+            this.#transferWaiters.set(transferId, waiters);
+        });
+    }
+
+    async #waitForTerminalOrRemoval(transferId: string): Promise<void> {
+        const current = this.#transfers.get(transferId);
+        if (current === undefined || isArtifactTransferTerminal(current.record.status)) return;
+        await new Promise<void>((resolve) => {
+            const waiters = this.#transferWaiters.get(transferId) ?? new Set();
+            waiters.add(() => resolve());
             this.#transferWaiters.set(transferId, waiters);
         });
     }

@@ -104,6 +104,25 @@ test("token rotation and revocation invalidate the previous credential", async (
     assert.equal(await store.authenticate("remote-test", rotated), false);
 });
 
+test("retiring a reverse instance invalidates both its device token and pending enrollment code", async () => {
+    const home = await createTestTempDirectory("devshell-reverse-retire");
+    const store = new ReverseCredentialStore(home);
+    assert.equal(await store.retire("missing-instance"), false);
+
+    const firstCode = await store.createDeviceCode("remote-test");
+    const enrolled = await store.consumeDeviceCode(firstCode.deviceCode);
+    const pendingCode = await store.createDeviceCode("remote-test");
+    assert.equal(await store.authenticate("remote-test", enrolled.deviceToken), true);
+
+    assert.equal(await store.retire("remote-test"), true);
+    assert.equal(await store.authenticate("remote-test", enrolled.deviceToken), false);
+    await assert.rejects(
+        store.consumeDeviceCode(pendingCode.deviceCode),
+        (error: unknown) => hasCode(error, "reverse.deviceCodeInvalid"),
+    );
+    assert.equal(await store.enrollmentState("remote-test"), "revoked");
+});
+
 test("failed replacement preparation leaves the previous reverse credential active", async () => {
     const home = await createTestTempDirectory("devshell-reverse-atomic-replace");
     const initialStore = new ReverseCredentialStore(home);

@@ -12,6 +12,7 @@ export function createTestGoalPort(): InstanceGoalPort {
         async continuation() { return {}; },
         async manage() { return undefined; },
         async read() { return undefined; },
+        async stopAll() { return []; },
         async touch() {},
     };
 }
@@ -23,6 +24,7 @@ export function createTestTodoPort(): InstanceTodoPort {
         summary: { completed: 0, total: 0 }
     };
     return {
+        async cancelAll() {},
         async control() {
             return empty;
         },

@@ -355,6 +355,27 @@ export class McpContextRegistry {
         });
     }
 
+    async detachInstance(instance: string): Promise<McpContextRecord[]> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            const affected = [...this.#contexts.values()].filter((record) =>
+                record.environments.some((environment) => environment.instance === instance),
+            );
+            if (affected.length === 0) return [];
+            await this.#mutateAndPersist(() => {
+                for (const record of affected) {
+                    record.environments = record.environments.filter(
+                        (environment) => environment.instance !== instance,
+                    );
+                    if (record.environments.length === 0) {
+                        record.status = "disabled";
+                    }
+                }
+            });
+            return affected.map(cloneRecord);
+        });
+    }
+
     async attachEnvironment(
         ctxId: string,
         binding: McpContextEnvironmentBinding,

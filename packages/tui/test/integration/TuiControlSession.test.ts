@@ -520,6 +520,7 @@ function createServer(
                 async continuation() { return {}; },
                 async manage() { return undefined; },
                 async read() { return undefined; },
+                async stopAll() { return []; },
                 async touch() {},
             },
             mcpCapabilities: [],
@@ -529,6 +530,7 @@ function createServer(
             name: "alpha",
             provider: "local",
             todo: {
+                async cancelAll() {},
                 async control() {
                     return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
                 },

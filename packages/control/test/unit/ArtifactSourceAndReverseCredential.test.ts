@@ -175,12 +175,16 @@ test("reverse credential service coordinates enrollment, rotation, revocation, a
         instance: "reverse-one",
         revoked: true
     });
+    await service.retireInstance("reverse-one");
     assert.deepEqual(calls, [
         "store:create:reverse-one",
         "worker:pending",
         "store:rotate:reverse-one",
         "disconnect:reverse-one",
         "store:revoke:reverse-one",
+        "disconnect:reverse-one",
+        "worker:revoked",
+        "store:retire:reverse-one",
         "disconnect:reverse-one",
         "worker:revoked"
     ]);
@@ -198,6 +202,10 @@ function credentialStore(calls: string[]) {
         },
         async revoke(instance: string) {
             calls.push(`store:revoke:${instance}`);
+        },
+        async retire(instance: string) {
+            calls.push(`store:retire:${instance}`);
+            return true;
         },
         async rotateToken(instance: string) {
             calls.push(`store:rotate:${instance}`);

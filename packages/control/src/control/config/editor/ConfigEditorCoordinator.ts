@@ -72,6 +72,7 @@ export class ConfigEditorCoordinator {
     readonly #homeDirectory?: string;
     readonly #instanceConfigMapper: InstanceFactory;
     readonly #instanceRegistry: InstanceRegistry;
+    readonly #instanceDeleteRetirements = new Set<(instance: ControlConfig["instances"][number]) => Promise<void>>();
     readonly #markRestartControlRequired: () => void;
     readonly #mcpEndpointConfigMapper: McpEndpointFactory;
     readonly #mutationRunner: ControlConfigMutationRunner;
@@ -96,6 +97,13 @@ export class ConfigEditorCoordinator {
         this.#runtimePreflight = options.runtimePreflight ?? new HttpEndpointPreflight();
         this.#runtimeApply = options.runtimeApply;
         this.#validator = options.validator ?? new ControlConfigValidator();
+    }
+
+    registerInstanceDeleteRetirement(
+        retire: (instance: ControlConfig["instances"][number]) => Promise<void>,
+    ): () => void {
+        this.#instanceDeleteRetirements.add(retire);
+        return () => this.#instanceDeleteRetirements.delete(retire);
     }
 
     getConfigView(): JsonValue {
@@ -329,6 +337,11 @@ export class ConfigEditorCoordinator {
             instances: currentConfig.instances.filter((entry) => entry.name !== instanceName)
         });
 
+        for (const retire of [...this.#instanceDeleteRetirements]) {
+            await retire(existing);
+        }
+        await this.#retireStateForDelete(this.#instanceRegistry.get(instanceName));
+        await this.#getMcpHost()?.contextAdmin.detachInstance(instanceName);
         await this.#persistConfig(nextConfig);
         this.#getMcpHost()?.unregisterInstance(instanceName);
         this.#instanceRegistry.delete(instanceName);
@@ -387,6 +400,53 @@ export class ConfigEditorCoordinator {
             nextConfig,
             [{ kind: enabled ? "instance.enabled" : "instance.disabled", target: instanceName }]
         );
+    }
+
+    async #retireStateForDelete(
+        descriptor: ReturnType<InstanceRegistry["get"]>,
+    ): Promise<void> {
+        if (descriptor === undefined) return;
+        const reason = `Instance ${descriptor.name} was deleted.`;
+
+        for (const approval of await descriptor.worker.listApprovals()) {
+            if (approval.status === "pending") {
+                await descriptor.worker.cancelApproval(approval.approvalId, reason);
+            }
+        }
+
+        if (descriptor.wait !== undefined) {
+            for (const wait of await descriptor.wait.list()) {
+                if (wait.status === "waiting" || wait.status === "detached") {
+                    try {
+                        await descriptor.wait.cancel(wait.waitId);
+                    } catch (error) {
+                        const current = await descriptor.wait.get(wait.waitId);
+                        if (
+                            current === undefined || current.status === "cancelled" ||
+                            current.status === "consumed" || current.status === "resolved"
+                        ) continue;
+                        throw error;
+                    }
+                } else if (wait.status === "resolved") {
+                    try {
+                        await descriptor.wait.consume(wait.waitId);
+                    } catch (error) {
+                        const current = await descriptor.wait.get(wait.waitId);
+                        if (
+                            current === undefined || current.status === "cancelled" ||
+                            current.status === "consumed"
+                        ) continue;
+                        throw error;
+                    }
+                }
+            }
+        }
+
+        await descriptor.contextMessages?.failAllPending(
+            `Instance ${descriptor.name} was deleted before Comment delivery.`,
+        );
+        await descriptor.goal.stopAll();
+        await descriptor.todo.cancelAll();
     }
 
     async #retireInteractionsForDisable(

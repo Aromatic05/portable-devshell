@@ -83,6 +83,24 @@ export class TodoService {
         });
     }
 
+    async cancelAll(): Promise<void> {
+        await this.#runExclusive(async () => {
+            let document = this.#store.read();
+            for (const task of [...document.active]) {
+                const transition = this.#state.control(
+                    document,
+                    task.taskId,
+                    "cancel",
+                    task.activeCtxId ?? task.createdByCtxId,
+                    task.revision,
+                );
+                await this.#persistTransition(transition);
+                await this.#emitTransition(transition);
+                document = transition.document;
+            }
+        });
+    }
+
     async delete(taskId: string): Promise<void> {
         await this.#runExclusive(async () => {
             const transition = this.#state.delete(this.#store.read(), taskId);

@@ -153,6 +153,19 @@ export class ArtifactShareService {
             .sort((left, right) => right.expiresAtMs - left.expiresAtMs);
     }
 
+    async retireInstance(instance: string): Promise<void> {
+        this.#assertInitialized();
+        const shareIds = [...this.#shares.values()]
+            .filter((share) =>
+                share.result.state === "active" &&
+                (share.sourceInstance === instance || share.authorityInstance === instance)
+            )
+            .map((share) => share.result.shareId);
+        for (const shareId of shareIds) {
+            await this.revokeShare(shareId);
+        }
+    }
+
     async revokeShare(shareId: string): Promise<ArtifactShareRevokeResult> {
         this.#assertInitialized();
         const share = this.#shares.get(shareId);

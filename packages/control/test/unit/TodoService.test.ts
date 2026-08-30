@@ -171,6 +171,32 @@ test("TodoService emits terminal events once, archives terminal tasks, and reloa
     assert.equal(persisted.archived.length, 1);
 });
 
+test("TodoService cancelAll archives every active task while preserving prior history", async () => {
+    const root = await createTestTempDirectory("todo-cancel-all");
+    const service = new TodoService({
+        appendEvent: async () => undefined,
+        filePath: join(root, "todo.json"),
+        instanceName: "alpha",
+    });
+    const first = await service.write({
+        revision: 0,
+        title: "First active",
+        todos: [{ content: "Continue first", id: "first", status: "in_progress" }],
+    }, "ctx-first");
+    await service.write({
+        revision: 0,
+        title: "Second active",
+        todos: [{ content: "Continue second", id: "second", status: "pending" }],
+    }, "ctx-second");
+
+    await service.cancelAll();
+
+    assert.deepEqual(service.summaries(), []);
+    const firstRead = await service.read({ taskId: first.taskId });
+    assert.equal(typeof firstRead.cancelledAt, "string");
+    assert.equal(firstRead.tasks?.every((task) => task.status === "cancelled"), true);
+});
+
 test("TodoService permanently deletes an active or archived todo project", async () => {
     const root = await createTestTempDirectory("todo-delete");
     const filePath = join(root, "todo.json");

@@ -169,6 +169,22 @@ export class ReverseCredentialStore {
         });
     }
 
+    async retire(instance: string): Promise<boolean> {
+        return await this.#exclusive(async () => {
+            const record = await this.#readOptional(instance);
+            if (record === undefined) return false;
+            await this.#write({
+                ...record,
+                deviceCodeExpiresAt: undefined,
+                deviceCodeHash: undefined,
+                enrollmentState: "revoked",
+                revokedAt: new Date().toISOString(),
+                tokenHash: undefined
+            });
+            return true;
+        });
+    }
+
     async enrollmentState(instance: string): Promise<ReverseEnrollmentState> {
         return (await this.#readOptional(instance))?.enrollmentState ?? "pending";
     }

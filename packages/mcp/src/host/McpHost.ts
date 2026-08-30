@@ -168,12 +168,14 @@ export class McpHost {
     }
 
     get contextAdmin(): {
+        detachInstance(instance: string): Promise<McpContextRecord[]>;
         disable(ctxId: string): Promise<McpContextRecord>;
         list(): Promise<McpContextRecord[]>;
         renew(ctxId: string): Promise<McpContextRecord>;
         validateForInstance(ctxId: string, instance: string): Promise<McpContextRecord>;
     } {
         return {
+            detachInstance: async (instance) => await this.#contextRegistry.detachInstance(instance),
             disable: async (ctxId) => {
                 const disabled = await this.#contextRegistry.disable(ctxId);
                 const contexts = await this.#contextRegistry.list();

@@ -143,6 +143,26 @@ test("ContextMessageService fails undelivered Comments when their Context is ret
     });
 });
 
+test("ContextMessageService failAllPending retires all undelivered Comments for instance deletion", async () => {
+    const root = await createTestTempDirectory("context-message-delete");
+    const service = new ContextMessageService({
+        appendEvent: async () => undefined,
+        filePath: join(root, "context-messages.json"),
+        instanceName: "alpha",
+    });
+    await service.queue({ ctxId: "ctx-a", text: "First" });
+    const delivered = await service.queue({ ctxId: "ctx-b", text: "Delivered history" });
+    await service.consumePending("ctx-b", "call-b");
+    await service.queue({ ctxId: "ctx-c", text: "Second" });
+
+    const failed = await service.failAllPending("Instance alpha was deleted before Comment delivery.");
+
+    assert.deepEqual(failed.map((message) => message.ctxId).sort(), ["ctx-a", "ctx-c"]);
+    assert.equal(failed.every((message) => message.status === "failed"), true);
+    assert.equal((await service.list("ctx-b"))[0]?.id, delivered.id);
+    assert.equal((await service.list("ctx-b"))[0]?.status, "delivered");
+});
+
 test("ContextMessageService delivery event failure never blocks or requeues a completed call", async () => {
     const root = await createTestTempDirectory("context-message-retry");
     const service = new ContextMessageService({
