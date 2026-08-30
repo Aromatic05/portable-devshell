@@ -231,11 +231,11 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
         worker: harness.worker
     });
 
-    const environment = await dispatch.callTool(
+    const environment = structuredResult<{ ctxId: string; workspace: string }>(await dispatch.callTool(
         "environ_info",
         { workspace: "/workspace" },
         { principal: "tester", requestId: "request-environment" }
-    ) as { ctxId: string; workspace: string };
+    ));
     assert.equal(environment.workspace, "/workspace");
     assert.equal(typeof environment.ctxId, "string");
 
@@ -339,11 +339,11 @@ test("cached MCP tool names stay callable without re-exposing stale recipients",
     assert.equal(catalog.listTools().some((tool) => tool.name === "instance_start"), false);
     assert.equal(catalog.listTools().some((tool) => tool.name === "context_message_read"), false);
 
-    const environment = await dispatch.callTool(
+    const environment = structuredResult<{ ctxId: string }>(await dispatch.callTool(
         "environ_info",
         { workspace: "/workspace" },
         { principal: "tester", requestId: "request-environment" },
-    ) as { ctxId: string };
+    ));
     assert.deepEqual(await dispatch.callTool(
         "instance_start",
         { ctxId: environment.ctxId, instance: "remote" },
@@ -395,15 +395,24 @@ test("Workspace authorization metadata never enters audit results or MCP events"
         "environ_info",
         { workspace: "/workspace" },
         { principal: "tester", requestId: "workspace-environment" },
-    ) as { ctxId: string };
+    );
+    assert.ok(environment instanceof McpNativeToolResult);
+    const environmentState = environment.structuredContent as { ctxId: string };
+    const token = (environment._meta?.["portable-devshell/workspace"] as { token?: string } | undefined)?.token;
+    if (typeof token !== "string") throw new Error("workspace token missing");
+    assert.equal(JSON.stringify(environment.structuredContent).includes(token), false);
+    const environmentAudit = harness.auditResults.find((entry) => entry.toolName === "environ_info");
+    assert.notEqual(environmentAudit, undefined);
+    assert.equal(JSON.stringify(environmentAudit?.result).includes(token), false);
+
     const opened = await dispatch.callTool(
         "workspace_open",
-        { ctxId: environment.ctxId },
+        { ctxId: environmentState.ctxId },
         { principal: "tester", requestId: "workspace-open" },
     );
     assert.ok(opened instanceof McpNativeToolResult);
-    const token = (opened._meta?.["portable-devshell/workspace"] as { token?: string } | undefined)?.token;
-    if (typeof token !== "string") throw new Error("workspace token missing");
+    const reopenedToken = (opened._meta?.["portable-devshell/workspace"] as { token?: string } | undefined)?.token;
+    assert.equal(reopenedToken, token);
     assert.equal(JSON.stringify(opened.structuredContent).includes(token), false);
     const workspaceAudit = harness.auditResults.find((entry) => entry.toolName === "workspace_open");
     assert.notEqual(workspaceAudit, undefined);
@@ -470,11 +479,11 @@ test("OpenAI session resolves Workspace once and the App continues by ctxId with
         requestMeta: { "openai/session": "openai-workspace-session" },
     };
 
-    const acquired = (await dispatch.callTool(
+    const acquired = structuredResult<{ ctxId: string }>(await dispatch.callTool(
         "environ_info",
         { workspace: "/workspace" },
         sessionContext,
-    )) as { ctxId: string };
+    ));
     assert.equal(acquired.ctxId, "ctx-workspace-session");
 
     const opened = await dispatch.callTool(
@@ -661,11 +670,11 @@ test("tmux_run block waits are interruptible before handoff and detach after the
         tmuxWaitPollMs: 1,
         worker,
     });
-    const environment = await dispatch.callTool(
+    const environment = structuredResult<{ ctxId: string }>(await dispatch.callTool(
         "environ_info",
         { workspace: "/workspace" },
         { principal: "tester", requestId: "request-environment" },
-    ) as { ctxId: string };
+    ));
 
     const opened = await dispatch.callTool(
         "workspace_open",
@@ -870,7 +879,7 @@ test("successful environ_info creates a new explicit Context without retiring ol
         { principal: "tester", requestId: "request-explicit" },
     );
 
-    const createdCtxId = (created as { ctxId?: string }).ctxId;
+    const createdCtxId = structuredResult<{ ctxId?: string }>(created).ctxId;
     assert.equal(createdCtxId, "ctx-session-new");
     const selected = await registry.validateAndTouch(createdCtxId!, {
         principal: "tester",
@@ -915,7 +924,7 @@ test("environ_info releases the previous workspace alert lease after an explicit
         { principal: "tester", requestId: "request-switch-workspace" },
     );
 
-    assert.equal((result as { ctxId?: string }).ctxId, context.ctxId);
+    assert.equal(structuredResult<{ ctxId?: string }>(result).ctxId, context.ctxId);
     assert.equal((await registry.list())[0]?.workspace, "/projects/new");
     assert.deepEqual(harness.releasedAlerts, ["/projects/old"]);
 });
@@ -985,6 +994,10 @@ test("environ_info rollback keeps alerts leased by another Context attachment", 
     assert.deepEqual((await registry.list()).map(({ ctxId }) => ctxId), [existing.ctxId]);
     assert.deepEqual(harness.releasedAlerts, []);
 });
+
+function structuredResult<T>(result: JsonValue | McpNativeToolResult): T {
+    return (result instanceof McpNativeToolResult ? result.structuredContent : result) as T;
+}
 
 function goalSnapshot(goalId: string) {
     return {

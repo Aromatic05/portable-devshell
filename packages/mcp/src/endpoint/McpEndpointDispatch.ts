@@ -147,12 +147,20 @@ export class McpEndpointDispatch {
 
         if (known?.owner === "environment") {
             await this.restoreTmuxWaits(this.#instanceName);
-            return await this.#environment.call(
+            const environment = await this.#environment.call(
                 toolName,
                 input,
                 requestContext,
                 selected !== undefined,
                 signal
+            );
+            const workspaceApp = snapshot.exposed.some((entry) =>
+                entry.owner === "workspace" && entry.definition.name === "workspace_open"
+            );
+            if (!workspaceApp) return environment;
+            return await this.#interaction.bootstrapWorkspace(
+                requireEnvironmentContextId(environment),
+                environment,
             );
         }
 
@@ -702,6 +710,17 @@ export class McpEndpointDispatch {
         }
     }
 
+}
+
+function requireEnvironmentContextId(result: JsonValue): string {
+    if (typeof result !== "object" || result === null || Array.isArray(result)) {
+        throw new Error("environ_info returned an invalid structured result.");
+    }
+    const ctxId = result.ctxId;
+    if (typeof ctxId !== "string" || ctxId.length === 0) {
+        throw new Error("environ_info result is missing ctxId.");
+    }
+    return ctxId;
 }
 
 function isAppOnlyInteractionTool(toolName: string): boolean {

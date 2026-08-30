@@ -1,8 +1,14 @@
 import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
 
+import { workspaceAppResourceUri } from "../../workspace/McpWorkspaceApp.js";
+
 export const mcpEnvironmentToolName = "environ_info" as const;
 
 export type McpToolCatalogEnvironmentName = typeof mcpEnvironmentToolName;
+
+export interface McpToolCatalogEnvironmentListOptions {
+    workspaceApp?: boolean;
+}
 
 const contextIdentityProperties: Record<string, JsonValue> = {
     ctxId: {
@@ -30,7 +36,7 @@ export function isMcpEnvironmentToolName(
 export class McpToolCatalogEnvironment {
     readonly #definition: ToolDefinition = {
         description:
-            "Prepare and inspect the workspace environment for the current portable-devshell Context. This is the single Context bootstrap tool: with workspace it creates or attaches a Context when needed, stable external session bindings are reused automatically, and an expired Context lease is renewed without changing ctxId. Pass ctxId only when explicitly selecting an existing Context.",
+            "Prepare and inspect the workspace environment for the current portable-devshell Context. This is the single Context bootstrap tool: with workspace it creates or attaches a Context when needed, stable external session bindings are reused automatically, and an expired Context lease is renewed without changing ctxId. Call it once before using other portable-devshell tools. Pass ctxId only when explicitly selecting an existing Context.",
         group: "environment",
         inputSchema: {
             additionalProperties: false,
@@ -110,7 +116,18 @@ export class McpToolCatalogEnvironment {
         requiredCapabilities: [],
     };
 
-    list(): ToolDefinition[] {
-        return [structuredClone(this.#definition)];
+    list(options: McpToolCatalogEnvironmentListOptions = {}): ToolDefinition[] {
+        const definition = structuredClone(this.#definition);
+        if (options.workspaceApp === true) {
+            definition._meta = {
+                ui: { resourceUri: workspaceAppResourceUri, visibility: ["model", "app"] },
+                "ui/resourceUri": workspaceAppResourceUri,
+                "openai/outputTemplate": workspaceAppResourceUri,
+                "openai/widgetAccessible": true,
+            };
+            definition.description =
+                "Prepare and inspect the workspace environment for the current portable-devshell Context; the same call also bootstraps the Live Workspace App. This is the single Context and Workspace bootstrap tool: with workspace it creates or attaches a Context when needed, stable external session bindings are reused automatically, and an expired Context lease is renewed without changing ctxId. Call it once before using other portable-devshell tools. Pass ctxId only when explicitly selecting an existing Context.";
+        }
+        return [definition];
     }
 }

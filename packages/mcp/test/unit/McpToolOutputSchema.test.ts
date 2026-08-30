@@ -8,12 +8,13 @@ import {
     McpToolCatalogInstance,
     McpToolCatalogInteraction,
     McpToolSchemaAdapter,
+    workspaceAppResourceUri,
 } from "@portable-devshell/mcp/testing";
 
 test("Control-owned MCP tools describe their structured output instead of generic objects", () => {
     const definitions = [
         ...new McpToolCatalogArtifact().list(),
-        ...new McpToolCatalogEnvironment().list(),
+        ...new McpToolCatalogEnvironment().list({ workspaceApp: true }),
         ...new McpToolCatalogInstance().list(),
         ...new McpToolCatalogInteraction().list(),
     ];
@@ -28,6 +29,11 @@ test("Control-owned MCP tools describe their structured output instead of generi
     assertProperties(definition(definitions, "artifact_transfer").outputSchema, ["operation", "transfer"]);
 
     const environment = definition(definitions, "environ_info");
+    assert.equal((environment._meta as { ui?: { resourceUri?: string } })?.ui?.resourceUri, workspaceAppResourceUri);
+    assert.equal((environment._meta as Record<string, unknown>)["ui/resourceUri"], workspaceAppResourceUri);
+    assert.equal((environment._meta as Record<string, unknown>)["openai/outputTemplate"], workspaceAppResourceUri);
+    assert.equal((environment._meta as Record<string, unknown>)["openai/widgetAccessible"], true);
+    assert.match(environment.description, /bootstraps the Live Workspace/u);
     const platform = property(environment.outputSchema, "platform");
     assert.equal(record(platform).additionalProperties, false);
     assert.deepEqual(required(platform), ["arch", "os"]);

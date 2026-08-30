@@ -1329,7 +1329,7 @@ test("Workspace Goal continuation rechecks live tool activity before every dispa
     assert.equal(continuationInputs[1]?.available, false);
 });
 
-test("Workspace tool metadata uses one render tool and app-only action tools", () => {
+test("Workspace tool metadata keeps the explicit reopen compatibility tool and app-only action tools", () => {
     const definitions = new McpToolCatalogInteraction().list();
     const adapter = new McpToolSchemaAdapter();
     const open = definitions.find((definition) => definition.name === "workspace_open");
@@ -1381,11 +1381,10 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     assert.equal(goal._meta, undefined);
     assert.deepEqual((goalResume._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.deepEqual((goalStop._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
-    assert.match(open.description, /Bootstrap the portable-devshell Live Workspace/u);
-    assert.match(open.description, /Proactively call it once at the start of multi-step, long-running/u);
-    assert.match(open.description, /do not wait for the user to ask for the panel/u);
-    assert.match(open.description, /bootstrap operation rather than something to reopen every model turn/u);
-    assert.match(goal.description, /proactively bootstrap the Live Workspace with workspace_open before action=start/u);
+    assert.match(open.description, /re-present or restore/u);
+    assert.match(open.description, /environ_info normally bootstraps/u);
+    assert.match(goal.description, /environ_info normally bootstraps the Live Workspace/u);
+    assert.match(ask.description, /environ_info normally bootstraps the Live Workspace/u);
 
     const compatibilityDefinitions = new McpToolCatalogInteraction().list();
     const compatibilityOpen = compatibilityDefinitions.find((definition) => definition.name === "workspace_open");

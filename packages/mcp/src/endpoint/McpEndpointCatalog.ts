@@ -157,9 +157,15 @@ export class McpEndpointCatalog {
     }
 
     #sources(hasWorkerSchema: boolean): McpToolCatalogEndpointSource[] {
+        const workspaceTools = this.#gateway !== undefined && isMcpInteractionGateway(this.#gateway)
+            ? this.#interactionTools.list()
+            : [];
+        const workspaceApp = workspaceTools.some((tool) =>
+            tool.name === "workspace_open" && this.#catalog.isAllowed(tool)
+        );
         const sources: McpToolCatalogEndpointSource[] = [{
             owner: "environment",
-            tools: this.#environmentTools.list()
+            tools: this.#environmentTools.list({ workspaceApp })
         }];
 
         if (hasWorkerSchema) {
@@ -181,10 +187,10 @@ export class McpEndpointCatalog {
                     tools: artifactTools
                 });
             }
-            if (isMcpInteractionGateway(this.#gateway)) {
+            if (workspaceTools.length > 0) {
                 sources.push({
                     owner: "workspace",
-                    tools: this.#interactionTools.list()
+                    tools: workspaceTools
                 });
             }
             sources.push(

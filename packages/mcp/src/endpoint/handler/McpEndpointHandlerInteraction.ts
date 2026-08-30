@@ -93,6 +93,22 @@ export class McpEndpointHandlerInteraction {
         }
     }
 
+    async bootstrapWorkspace(
+        ctxId: string,
+        structuredContent: JsonValue,
+        content: McpNativeToolResult["content"] = [],
+    ): Promise<McpNativeToolResult> {
+        const token = await this.#appLeases.issue(this.options.instanceName, ctxId);
+        this.#appPresence.open(this.options.instanceName, ctxId);
+        return this.#workspaceResult(
+            ctxId,
+            token,
+            structuredContent,
+            content,
+            false,
+        );
+    }
+
     async #askQuestion(
         gateway: McpInteractionGateway,
         input: JsonValue,
@@ -104,7 +120,7 @@ export class McpEndpointHandlerInteraction {
         const ctxId = requireCtxId(context);
         await this.#requireActiveWorkspace(
             ctxId,
-            "workspace_ask requires an active Live Workspace for this ctxId; call workspace_open once to bootstrap it.",
+            "workspace_ask requires an active Live Workspace for this ctxId. environ_info normally bootstraps the Live Workspace; call workspace_open only to re-present or restore it when the App is no longer active.",
         );
         const goalGateway = isMcpGoalGateway(this.options.gateway) ? this.options.gateway : undefined;
         const goal = await goalGateway?.readGoal(this.options.instanceName, ctxId);
@@ -164,14 +180,14 @@ export class McpEndpointHandlerInteraction {
 
     async #openWorkspace(context: ToolCallContext): Promise<McpNativeToolResult> {
         const ctxId = requireCtxId(context);
-        const token = await this.#appLeases.issue(this.options.instanceName, ctxId);
-        this.#appPresence.open(this.options.instanceName, ctxId);
-        return this.#workspaceResult(ctxId, token, {
+        return await this.bootstrapWorkspace(
             ctxId,
-            instance: this.options.instanceName,
-        }, [
-            { type: "text", text: "portable-devshell Workspace opened." }
-        ], false);
+            {
+                ctxId,
+                instance: this.options.instanceName,
+            },
+            [{ type: "text", text: "portable-devshell Workspace opened." }],
+        );
     }
 
     async #manageGoal(input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
@@ -181,7 +197,7 @@ export class McpEndpointHandlerInteraction {
         if (request.action === "start") {
             await this.#requireActiveWorkspace(
                 ctxId,
-                "workspace_goal start requires an active Live Workspace for this ctxId; call workspace_open once and wait for it to connect.",
+                "workspace_goal start requires an active Live Workspace for this ctxId. environ_info normally bootstraps the Live Workspace; call workspace_open only to re-present or restore it when the App is no longer active.",
             );
         }
         const goal = await gateway.manageGoal(

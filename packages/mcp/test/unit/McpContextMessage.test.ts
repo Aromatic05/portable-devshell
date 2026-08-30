@@ -10,6 +10,11 @@ import type {
 
 import { McpEndpointCatalog } from "../../src/endpoint/McpEndpointCatalog.ts";
 import { McpEndpointDispatch } from "../../src/endpoint/McpEndpointDispatch.ts";
+import { McpNativeToolResult } from "../../src/endpoint/McpEndpointResult.ts";
+
+function structuredResult<T>(result: JsonValue | McpNativeToolResult): T {
+    return (result instanceof McpNativeToolResult ? result.structuredContent : result) as T;
+}
 
 const bashTool: ToolDefinition = {
     description: "Run a command.",
@@ -243,11 +248,11 @@ test("a routed artifact result consumes Comments from the routed instance Contex
         instanceName: "alpha",
         worker: worker as never,
     });
-    const environment = (await dispatch.callTool(
+    const environment = structuredResult<{ ctxId: string }>(await dispatch.callTool(
         "environ_info",
         { workspace: "/projects/alpha" },
         { principal: "tester", requestId: "environment-alpha" },
-    )) as { ctxId: string };
+    ));
     await dispatch.callTool(
         "instance_connect",
         { ctxId: environment.ctxId, instance: "beta", workspace: "/projects/beta" },
@@ -281,11 +286,11 @@ async function createContext(
     dispatch: McpEndpointDispatch,
     requestId: string,
 ): Promise<string> {
-    const result = (await dispatch.callTool(
+    const result = structuredResult<{ ctxId: string }>(await dispatch.callTool(
         "environ_info",
         { workspace: "/workspace" },
         { principal: "tester", requestId },
-    )) as { ctxId: string };
+    ));
     return result.ctxId;
 }
 

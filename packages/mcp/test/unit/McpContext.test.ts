@@ -3,9 +3,13 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-import { McpContextRegistry, McpEndpointWorker, McpHost } from "@portable-devshell/mcp/testing";
+import { McpContextRegistry, McpEndpointWorker, McpHost, McpNativeToolResult } from "@portable-devshell/mcp/testing";
 import type { JsonValue, ToolCallContext, ToolDefinition } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+
+function structuredResult<T>(result: JsonValue | McpNativeToolResult): T {
+    return (result instanceof McpNativeToolResult ? result.structuredContent : result) as T;
+}
 
 const bashRun: ToolDefinition = {
     description: "Run a shell command.",
@@ -616,6 +620,7 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
     assert.ok(bashSchema.properties?.ctxId);
     assert.equal(bashTool?.title, "Run shell command");
     assert.equal(environmentTool?.title, "Create environment");
+    assert.equal((environmentTool?._meta as Record<string, unknown> | undefined)?.["openai/outputTemplate"], undefined);
     assert.deepEqual(bashTool?.annotations, {
         destructiveHint: true,
         idempotentHint: false,
@@ -638,7 +643,7 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
         { workspace: "/projects/alpha" },
         { principal: "local", requestId: "env" }
     );
-    const environmentRecord = environment as Record<string, JsonValue>;
+    const environmentRecord = structuredResult<Record<string, JsonValue>>(environment);
     assert.equal(environmentRecord.ctxId, "ctx-created");
     assert.equal(typeof environmentRecord.expiresAt, "string");
     assert.equal(environmentRecord.instance, "demo-local");

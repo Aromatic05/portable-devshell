@@ -13,6 +13,7 @@ import {
     McpContextRegistry,
     McpEndpointBinding,
     McpEndpointWorker,
+    McpNativeToolResult,
     workspaceAppLegacyResourceUris,
     workspaceAppResourceMeta,
     workspaceAppResourceUri,
@@ -28,6 +29,10 @@ type CommandResult = {
     stderr: string;
     stdout: string;
 } & Record<string, JsonValue>;
+
+function structuredResult<T>(result: JsonValue | McpNativeToolResult): T {
+    return (result instanceof McpNativeToolResult ? result.structuredContent : result) as T;
+}
 
 interface ToolDefinition {
     group: string;
@@ -119,7 +124,11 @@ test("HTTP tools/list keeps Workspace actions app-only while advertising host au
             securitySchemes?: JsonValue;
         }> | undefined;
         const answer = tools?.find((tool) => tool.name === "workspace_question_answer");
+        const environment = tools?.find((tool) => tool.name === "environ_info");
         const open = tools?.find((tool) => tool.name === "workspace_open");
+        assert.notEqual(environment, undefined);
+        assert.equal(environment?._meta?.["openai/outputTemplate"], workspaceAppResourceUri);
+        assert.deepEqual((environment?._meta?.ui as { visibility?: JsonValue } | undefined)?.visibility, ["model", "app"]);
         assert.notEqual(answer, undefined);
         assert.deepEqual(answer?._meta?.ui, { visibility: ["app"] });
         assert.equal(answer?._meta?.["openai/visibility"], "private");
@@ -530,7 +539,7 @@ test("environment and control-owned tools execute through the endpoint audit pat
         { workspace: "/workspace" },
         requestContext,
     );
-    const ctxId = String((environment as { ctxId?: string }).ctxId);
+    const ctxId = String(structuredResult<{ ctxId?: string }>(environment).ctxId);
     await endpoint.callTool("todo_read", { ctxId }, requestContext);
     await endpoint.callTool("instance_list", { ctxId }, requestContext);
     await endpoint.callTool(
@@ -618,7 +627,7 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
         { workspace: "/workspace" },
         requestContext,
     );
-    const ctxIdValue = (environment as { ctxId?: unknown }).ctxId;
+    const ctxIdValue = structuredResult<{ ctxId?: unknown }>(environment).ctxId;
     assert.equal(typeof ctxIdValue, "string");
     const ctxId = ctxIdValue as string;
 
@@ -733,16 +742,16 @@ test("OpenAI session binding resolves one internal ctxId without making models c
     };
     assert.notEqual(bashSchema.properties?.ctxId, undefined);
     assert.equal(bashSchema.required?.includes("ctxId") ?? false, false);
-    const first = (await endpoint.callTool(
+    const first = structuredResult<{ ctxId: string; status: string; workspace: string }>(await endpoint.callTool(
         "environ_info",
         { workspace: "/workspace/one" },
         requestContext,
-    )) as { ctxId: string; status: string; workspace: string };
-    const second = (await endpoint.callTool(
+    ));
+    const second = structuredResult<{ ctxId: string; status: string; workspace: string }>(await endpoint.callTool(
         "environ_info",
         { workspace: "/workspace/two" },
         requestContext,
-    )) as { ctxId: string; status: string; workspace: string };
+    ));
 
     assert.equal(first.ctxId, "ctx-openai-stable");
     assert.equal(first.workspace, "/workspace/one");
@@ -789,11 +798,11 @@ test("expired OpenAI session binding renews the same ctxId on ordinary activity"
         requestId: "request-openai-renew",
     };
 
-    const acquired = (await endpoint.callTool(
+    const acquired = structuredResult<{ ctxId: string; status: string }>(await endpoint.callTool(
         "environ_info",
         { workspace: "/workspace" },
         requestContext,
-    )) as { ctxId: string; status: string };
+    ));
     assert.equal(acquired.ctxId, "ctx-openai-renew");
 
     now = 1_101;
@@ -821,11 +830,11 @@ test("disabled OpenAI session binding reacquires a new Context and moves the bin
         requestId: "request-openai-disabled",
     };
 
-    const first = (await endpoint.callTool(
+    const first = structuredResult<{ ctxId: string; status: string }>(await endpoint.callTool(
         "environ_info",
         { workspace: "/workspace/old" },
         requestContext,
-    )) as { ctxId: string; status: string };
+    ));
     assert.equal(first.ctxId, "ctx-openai-disabled");
     await registry.disable(first.ctxId);
 
@@ -835,11 +844,11 @@ test("disabled OpenAI session binding reacquires a new Context and moves the bin
             (error as { code?: string }).code === "mcp.contextDisabled",
     );
 
-    const replacement = (await endpoint.callTool(
+    const replacement = structuredResult<{ ctxId: string; status: string; workspace: string }>(await endpoint.callTool(
         "environ_info",
         { workspace: "/workspace/new" },
         requestContext,
-    )) as { ctxId: string; status: string; workspace: string };
+    ));
     assert.equal(replacement.ctxId, "ctx-openai-replacement");
     assert.equal(replacement.status, "active");
     assert.equal(replacement.workspace, "/workspace/new");
