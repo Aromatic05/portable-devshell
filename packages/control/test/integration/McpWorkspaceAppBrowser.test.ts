@@ -683,6 +683,10 @@ test("Workspace remount follows current ChatGPT tool output and falls back to wi
     await page.waitForFunction("(window.__remountCalls || []).some(call => (call.name === 'workspace_snapshot' || call.name === 'workspace_reconnect') && call.arguments.ctxId === 'ctx-current' && call.arguments.token === 'current-token')");
     await page.waitForTimeout(100);
     const currentFrame = page.frames().find((frame) => frame !== page.mainFrame());
+    const currentApp = page.frameLocator("#workspace");
+    await currentApp.getByText("Workspace", { exact: true }).waitFor({ state: "visible" });
+    await currentApp.getByText("Ready", { exact: true }).waitFor({ state: "visible" });
+    await currentApp.getByText("No active goal, task, question, approval, or background wait.", { exact: true }).waitFor({ state: "visible" });
     assert.equal(
         await currentFrame?.evaluate("window.openai.widgetState.privateContent.portableDevshellWorkspace.ctxId"),
         "ctx-current"

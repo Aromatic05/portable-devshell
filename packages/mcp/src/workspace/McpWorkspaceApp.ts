@@ -840,7 +840,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       await requestPreferredDisplayMode(app.getHostContext());
       bridgeReady = true;
       initialized = true;
-      status.textContent = "";
       var initialResult = await waitForInitialToolResult(300);
       if (initialResult) acceptToolResult(initialResult);
       else {
@@ -1036,7 +1035,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       : item.kind === "question" ? questionCard(item)
       : item.kind === "approval" ? approvalCard(item)
       : "";
-    root.innerHTML = eventCard + goalCard() + (item ? "" : taskCards()) + backgroundWaitCards();
+    var content = eventCard + goalCard() + (item ? "" : taskCards()) + backgroundWaitCards();
+    root.innerHTML = content || '<div class="card"><div class="card-head"><div class="row"><span class="event-name">Workspace</span><span class="badge">Ready</span></div></div><div class="card-body"><div class="muted">No active goal, task, question, approval, or background wait.</div></div></div>';
   }
 
   root.addEventListener("click", function (event) {
