@@ -1070,7 +1070,7 @@ test("workspace_ask refuses to hold a call before Workspace is open", async () =
             context,
             "call-agent-open-only",
         ),
-        /active Workspace App/i,
+        /active Live Workspace/i,
     );
     assert.equal(fake.waits.length, 0);
 });
@@ -1121,6 +1121,7 @@ test("workspace_ask waits briefly for the Workspace App to establish a live watc
 });
 
 test("workspace_ask refuses to create a held call after the live Workspace watch is torn down", async () => {
+    let now = 1_000;
     const fake = createInteractionGateway();
     const gateway = Object.assign(fake.gateway, {
         async readToolCalls() { return []; },
@@ -1129,6 +1130,7 @@ test("workspace_ask refuses to create a held call after the live Workspace watch
     const handler = new McpEndpointHandlerInteraction({
         gateway,
         instanceName: "demo",
+        now: () => now,
         watchHeartbeatMs: 60_000,
         watchPollMs: 1,
         workspaceActivationGraceMs: 5,
@@ -1145,6 +1147,7 @@ test("workspace_ask refuses to create a held call after the live Workspace watch
     await new Promise((resolve) => setTimeout(resolve, 5));
     watchAbort.abort();
     await assert.rejects(watch);
+    now += 5_001;
 
     const askAbort = new AbortController();
     const held = handler.call(
@@ -1155,7 +1158,7 @@ test("workspace_ask refuses to create a held call after the live Workspace watch
         askAbort.signal,
     );
     setTimeout(() => askAbort.abort(), 50);
-    await assert.rejects(held, /active Workspace App/i);
+    await assert.rejects(held, /active Live Workspace/i);
     assert.equal(fake.waits.length, 0);
 });
 
@@ -1187,7 +1190,7 @@ test("workspace_goal start requires an active Workspace", async () => {
 
     await assert.rejects(
         handler.call("workspace_goal", start, context, "call-goal-headless"),
-        /active Workspace App/u,
+        /active Live Workspace/u,
     );
     assert.equal(starts, 0);
 
@@ -1197,7 +1200,7 @@ test("workspace_goal start requires an active Workspace", async () => {
     if (typeof meta?.token !== "string") throw new Error("workspace token missing");
     await assert.rejects(
         handler.call("workspace_goal", start, context, "call-goal-open-only"),
-        /active Workspace App/u,
+        /active Live Workspace/u,
     );
     assert.equal(starts, 0);
 
@@ -1378,8 +1381,8 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     assert.equal(goal._meta, undefined);
     assert.deepEqual((goalResume._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.deepEqual((goalStop._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
-    assert.match(open.description, /visible App is attached to this tool result/u);
-    assert.match(open.description, /Workspace state remains durable/u);
+    assert.match(open.description, /Bootstrap the portable-devshell Live Workspace/u);
+    assert.match(open.description, /do not reopen it every model turn/u);
 
     const compatibilityDefinitions = new McpToolCatalogInteraction().list();
     const compatibilityOpen = compatibilityDefinitions.find((definition) => definition.name === "workspace_open");

@@ -238,7 +238,7 @@ test("oauth2 keeps a public path prefix on resources while using the origin as i
     }
 });
 
-test("Workspace App capability survives MCP host restart and is revoked at an instance generation boundary", async () => {
+test("Live Workspace capability survives MCP host restart and drives the direct state route", async () => {
     const root = await createTestTempDirectory("mcp-workspace-lease-host");
     const contextFile = join(root, "contexts.json");
     const workspaceAppLeaseFile = join(root, "workspace-app-leases.json");
@@ -260,9 +260,18 @@ test("Workspace App capability survives MCP host restart and is revoked at an in
         const opened = await callMcpTool(firstEndpoint, "workspace_open", { ctxId: created.ctxId });
         assert.notEqual(opened.result?.isError, true);
         const token = (opened.result?._meta?.["portable-devshell/workspace"] as { token?: unknown } | undefined)?.token;
+        const liveBaseUrl = (opened.result?._meta?.["portable-devshell/workspace"] as { liveBaseUrl?: unknown } | undefined)?.liveBaseUrl;
         assert.equal(typeof token, "string");
+        assert.equal(liveBaseUrl, "https://mcp.example.test/devshell/api/live/demo/workspace");
         if (typeof token !== "string") throw new Error("Workspace capability was not returned.");
         assert.equal(JSON.stringify(opened.result?.structuredContent).includes(token), false);
+        const firstLive = await fetch(
+            `http://127.0.0.1:${requireTcpPort(first.server.address)}/devshell/api/live/demo/workspace/snapshot?ctxId=${encodeURIComponent(created.ctxId)}`,
+            { headers: { authorization: `Bearer ${token}` } },
+        );
+        assert.equal(firstLive.status, 200);
+        assert.equal(firstLive.headers.get("access-control-allow-origin"), "*");
+        assert.equal((await firstLive.json() as { ctxId?: unknown }).ctxId, created.ctxId);
 
         await first.stop();
         first = undefined;
@@ -270,6 +279,12 @@ test("Workspace App capability survives MCP host restart and is revoked at an in
         restarted = createWorkspaceHost(contextFile, workspaceAppLeaseFile);
         await restarted.start();
         const restartedEndpoint = `http://127.0.0.1:${requireTcpPort(restarted.server.address)}/demo/mcp`;
+        const restartedLive = await fetch(
+            `http://127.0.0.1:${requireTcpPort(restarted.server.address)}/devshell/api/live/demo/workspace/snapshot?ctxId=${encodeURIComponent(created.ctxId)}`,
+            { headers: { authorization: `Bearer ${token}` } },
+        );
+        assert.equal(restartedLive.status, 200);
+        assert.equal((await restartedLive.json() as { ctxId?: unknown }).ctxId, created.ctxId);
         const reconnected = await callMcpTool(restartedEndpoint, "workspace_reconnect", {
             ctxId: created.ctxId,
             token,
@@ -298,6 +313,11 @@ test("Workspace App capability survives MCP host restart and is revoked at an in
             afterGenerationChange.error?.message ?? afterGenerationChange.result?.content?.[0]?.text ?? "",
             /authorization is invalid/i,
         );
+        const revokedLive = await fetch(
+            `http://127.0.0.1:${requireTcpPort(restarted.server.address)}/devshell/api/live/demo/workspace/snapshot?ctxId=${encodeURIComponent(created.ctxId)}`,
+            { headers: { authorization: `Bearer ${token}` } },
+        );
+        assert.equal(revokedLive.status, 401);
     } finally {
         await first?.stop().catch(() => undefined);
         await restarted?.stop().catch(() => undefined);
@@ -316,9 +336,11 @@ function createWorkspaceHost(contextFile: string, workspaceAppLeaseFile: string)
                 async detachWait() { throw new Error("unused"); },
                 async listApprovals() { return []; },
                 async listWaits() { return []; },
+                async readToolCalls() { return []; },
                 async readTodo() {
                     return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks: [] };
                 },
+                async readWorkspaceEvents() { return { events: [], gap: false, lastSeq: 0 }; },
                 async resolveWait() { throw new Error("unused"); },
                 async waitForWait() { throw new Error("unused"); },
             } as never,
@@ -339,6 +361,7 @@ function createWorkspaceHost(contextFile: string, workspaceAppLeaseFile: string)
         }],
         listenHost: "127.0.0.1",
         listenPort: 0,
+        publicBaseUrl: "https://mcp.example.test/devshell",
         workspaceAppLeaseFile,
     });
 }

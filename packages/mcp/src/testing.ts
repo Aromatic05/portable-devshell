@@ -30,3 +30,4 @@ export * from "./endpoint/handler/McpEndpointHandlerInteraction.js";
 export * from "./workspace/McpWorkspaceApp.js";
 
 export * from "./workspace/WorkspaceAppLeaseStore.js";
+export * from "./workspace/WorkspaceAppPresenceStore.js";

@@ -201,6 +201,10 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
         assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_wait_interrupt/);
         assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_goal_resume/);
         assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_watch/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /availableDisplayModes: \["inline", "pip", "fullscreen"\]/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /requestDisplayMode/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /readLiveSnapshot/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /readLiveWatch/);
         assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /tmux\.task\.completed/);
         assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /Waiting for Workspace state/);
         assert.match(String(read.body.result?.contents?.[0]?.text), /Do not repeat completed work or restart the original command/);
@@ -253,7 +257,15 @@ test("Workspace MCP App uses the configured public origin as its ChatGPT compone
             ...workspaceAppResourceMeta,
             ui: {
                 ...workspaceAppResourceMeta.ui,
+                csp: {
+                    connectDomains: ["https://devshell.example.com"],
+                    resourceDomains: [],
+                },
                 domain: "https://devshell.example.com",
+            },
+            "openai/widgetCSP": {
+                connect_domains: ["https://devshell.example.com"],
+                resource_domains: [],
             },
             "openai/widgetDomain": "https://devshell.example.com",
         });
@@ -1447,6 +1459,7 @@ function createWorkerHarness(options?: {
                 return {
                     projectMemoryAgentFile: `${workspace}/.devshell/AGENT.md`,
                     projectMemoryDirectory: `${workspace}/.devshell`,
+                    projectMemoryPresent: true,
                     temporaryDirectory: "/tmp/workspace-123456",
                     workspace
                 };

@@ -1,10 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 import type {
-    ApprovalRequest,
     GoalContinuationInput,
     GoalManageInput,
-    InstanceEvent,
     JsonValue,
     TodoTaskControlAction,
     ToolCallContext,
@@ -21,15 +19,15 @@ import {
     type McpInteractionGateway
 } from "../../instance/McpInstanceGateway.js";
 import type { McpToolCatalogInteractionName } from "../../tool/catalog/McpToolCatalogInteraction.js";
+import { readWorkspaceSnapshot, workspaceEventBelongsTo } from "../../workspace/McpWorkspaceSnapshot.js";
 import { WorkspaceAppLeaseStore } from "../../workspace/WorkspaceAppLeaseStore.js";
+import { WorkspaceAppPresenceStore } from "../../workspace/WorkspaceAppPresenceStore.js";
 import { throwIfMcpEndpointAborted, waitForMcpEndpointAbortable } from "../McpEndpointCancellation.js";
 import { McpNativeToolResult, type McpEndpointResult } from "../McpEndpointResult.js";
 
 export class McpEndpointHandlerInteraction {
-    readonly #appStates = new Map<string, { lastSeenAt?: number }>();
-    readonly #appReadyWaiters = new Map<string, Set<() => void>>();
-    readonly #activeAppWatches = new Map<string, number>();
     readonly #appLeases: WorkspaceAppLeaseStore;
+    readonly #appPresence: WorkspaceAppPresenceStore;
 
     constructor(private readonly options: {
         gateway?: McpInstanceGateway;
@@ -40,8 +38,11 @@ export class McpEndpointHandlerInteraction {
         workspaceActivationGraceMs?: number;
         workspaceLivenessMs?: number;
         workspaceAppLeases?: WorkspaceAppLeaseStore;
+        workspaceAppPresence?: WorkspaceAppPresenceStore;
+        workspaceLiveBaseUrl?: string;
     }) {
         this.#appLeases = options.workspaceAppLeases ?? new WorkspaceAppLeaseStore();
+        this.#appPresence = options.workspaceAppPresence ?? new WorkspaceAppPresenceStore({ now: options.now });
     }
 
     async call(
@@ -103,7 +104,7 @@ export class McpEndpointHandlerInteraction {
         const ctxId = requireCtxId(context);
         await this.#requireActiveWorkspace(
             ctxId,
-            "workspace_ask requires an active Workspace App for this ctxId; call workspace_open and keep the panel open.",
+            "workspace_ask requires an active Live Workspace for this ctxId; call workspace_open once to bootstrap it.",
         );
         const goalGateway = isMcpGoalGateway(this.options.gateway) ? this.options.gateway : undefined;
         const goal = await goalGateway?.readGoal(this.options.instanceName, ctxId);
@@ -164,7 +165,7 @@ export class McpEndpointHandlerInteraction {
     async #openWorkspace(context: ToolCallContext): Promise<McpNativeToolResult> {
         const ctxId = requireCtxId(context);
         const token = await this.#appLeases.issue(this.options.instanceName, ctxId);
-        this.#appStates.set(ctxId, {});
+        this.#appPresence.open(this.options.instanceName, ctxId);
         return this.#workspaceResult(ctxId, token, {
             ctxId,
             instance: this.options.instanceName,
@@ -180,7 +181,7 @@ export class McpEndpointHandlerInteraction {
         if (request.action === "start") {
             await this.#requireActiveWorkspace(
                 ctxId,
-                "workspace_goal start requires an active Workspace App for this ctxId; call workspace_open and wait for the panel to connect.",
+                "workspace_goal start requires an active Live Workspace for this ctxId; call workspace_open once and wait for it to connect.",
             );
         }
         const goal = await gateway.manageGoal(
@@ -251,7 +252,11 @@ export class McpEndpointHandlerInteraction {
     ): Promise<McpNativeToolResult> {
         const ctxId = requireCtxId(context);
         const token = await this.#assertAppToken(input, context);
-        return this.#workspaceResult(ctxId, token, await this.#snapshot(gateway, context));
+        return this.#workspaceResult(
+            ctxId,
+            token,
+            await readWorkspaceSnapshot(gateway, this.options.instanceName, ctxId),
+        );
     }
 
     async #reconnectWorkspace(
@@ -261,7 +266,11 @@ export class McpEndpointHandlerInteraction {
     ): Promise<McpNativeToolResult> {
         const ctxId = requireCtxId(context);
         const token = await this.#assertAppToken(input, context);
-        return this.#workspaceResult(ctxId, token, await this.#snapshot(gateway, context));
+        return this.#workspaceResult(
+            ctxId,
+            token,
+            await readWorkspaceSnapshot(gateway, this.options.instanceName, ctxId),
+        );
     }
 
     async #watchWorkspace(
@@ -289,14 +298,14 @@ export class McpEndpointHandlerInteraction {
                     return this.#workspaceResult(ctxId, token, {
                         changed: true,
                         cursor,
-                        snapshot: await this.#snapshot(gateway, context),
+                        snapshot: await readWorkspaceSnapshot(gateway, this.options.instanceName, ctxId),
                     });
                 }
                 if (Date.now() - startedAt >= heartbeatMs) {
                     return this.#workspaceResult(ctxId, token, {
                         changed: false,
                         cursor,
-                        snapshot: await this.#snapshot(gateway, context),
+                        snapshot: await readWorkspaceSnapshot(gateway, this.options.instanceName, ctxId),
                     });
                 }
                 await waitForMcpEndpointAbortable(delay(pollMs), signal);
@@ -313,71 +322,50 @@ export class McpEndpointHandlerInteraction {
         content: McpNativeToolResult["content"] = [],
         markAppSeen = true,
     ): McpNativeToolResult {
-        const existing = this.#appStates.get(ctxId);
-        if (existing === undefined) {
+        if (!this.#appPresence.has(this.options.instanceName, ctxId)) {
             throw new Error("Workspace App authorization is unavailable for the current Context.");
         }
-        if (markAppSeen) existing.lastSeenAt = (this.options.now ?? Date.now)();
+        if (markAppSeen) this.#appPresence.touch(this.options.instanceName, ctxId);
         return new McpNativeToolResult({
-            _meta: { "portable-devshell/workspace": { token } },
+            _meta: {
+                "portable-devshell/workspace": {
+                    token,
+                    ...(this.options.workspaceLiveBaseUrl === undefined
+                        ? {}
+                        : { liveBaseUrl: this.options.workspaceLiveBaseUrl }),
+                },
+            },
             content,
             structuredContent,
         });
     }
 
     #workspaceIsActive(ctxId: string): boolean {
-        const app = this.#appStates.get(ctxId);
-        const now = (this.options.now ?? Date.now)();
-        return app?.lastSeenAt !== undefined &&
-            now - app.lastSeenAt <= (this.options.workspaceLivenessMs ?? 60_000);
+        return this.#appPresence.isActive(
+            this.options.instanceName,
+            ctxId,
+            this.options.workspaceLivenessMs ?? 60_000,
+        );
     }
 
     #beginWorkspaceWatch(ctxId: string): void {
-        this.#activeAppWatches.set(ctxId, (this.#activeAppWatches.get(ctxId) ?? 0) + 1);
-        const app = this.#appStates.get(ctxId);
-        if (app !== undefined) app.lastSeenAt = (this.options.now ?? Date.now)();
-        this.#notifyWorkspaceReady(ctxId);
+        this.#appPresence.beginWatch(this.options.instanceName, ctxId);
     }
 
     #endWorkspaceWatch(ctxId: string): void {
-        const next = (this.#activeAppWatches.get(ctxId) ?? 0) - 1;
-        if (next > 0) {
-            this.#activeAppWatches.set(ctxId, next);
-            return;
-        }
-        this.#activeAppWatches.delete(ctxId);
-        const app = this.#appStates.get(ctxId);
-        if (app !== undefined) delete app.lastSeenAt;
+        this.#appPresence.endWatch(this.options.instanceName, ctxId);
     }
 
     async #requireActiveWorkspace(ctxId: string, message: string): Promise<void> {
         if (this.#workspaceIsActive(ctxId)) return;
-        if (!this.#appStates.has(ctxId)) throw new Error(message);
+        if (!this.#appPresence.has(this.options.instanceName, ctxId)) throw new Error(message);
         const graceMs = this.options.workspaceActivationGraceMs ?? 5_000;
-        if (graceMs > 0) {
-            await new Promise<void>((resolve) => {
-                const waiter = () => {
-                    clearTimeout(timer);
-                    this.#appReadyWaiters.get(ctxId)?.delete(waiter);
-                    resolve();
-                };
-                const timer = setTimeout(() => {
-                    this.#appReadyWaiters.get(ctxId)?.delete(waiter);
-                    resolve();
-                }, graceMs);
-                const waiters = this.#appReadyWaiters.get(ctxId) ?? new Set<() => void>();
-                waiters.add(waiter);
-                this.#appReadyWaiters.set(ctxId, waiters);
-            });
-        }
-        if (!this.#workspaceIsActive(ctxId)) throw new Error(message);
-    }
-
-    #notifyWorkspaceReady(ctxId: string): void {
-        const waiters = this.#appReadyWaiters.get(ctxId);
-        if (waiters === undefined) return;
-        this.#appReadyWaiters.delete(ctxId);
-        for (const ready of waiters) ready();
+        if (!await this.#appPresence.waitUntilActive(
+            this.options.instanceName,
+            ctxId,
+            this.options.workspaceLivenessMs ?? 60_000,
+            graceMs,
+        )) throw new Error(message);
     }
 
     async #answerQuestion(
@@ -576,85 +564,6 @@ export class McpEndpointHandlerInteraction {
         return visible as unknown as JsonValue;
     }
 
-    async #snapshot(gateway: McpInteractionGateway, context: ToolCallContext): Promise<JsonValue> {
-        const ctxId = requireCtxId(context);
-        const workspaceGateway = isMcpWorkspaceGateway(gateway) ? gateway : undefined;
-        const goalGateway = isMcpGoalGateway(gateway) ? gateway : undefined;
-        const [todo, waits, approvals, eventSlice, goal, toolCalls] = await Promise.all([
-            gateway.readTodo(this.options.instanceName),
-            gateway.listWaits(this.options.instanceName),
-            gateway.listApprovals(this.options.instanceName),
-            workspaceGateway?.readWorkspaceEvents(this.options.instanceName, Number.MAX_SAFE_INTEGER) ?? {
-                events: [],
-                gap: false,
-                lastSeq: 0,
-            },
-            goalGateway?.readGoal(this.options.instanceName, ctxId),
-            workspaceGateway?.readToolCalls(this.options.instanceName, ctxId, 64) ?? [],
-        ]);
-        const todoRecord = asRecord(todo);
-        const tasks = Array.isArray(todoRecord?.tasks)
-            ? todoRecord.tasks.filter((task) => asRecord(task)?.ctxId === ctxId)
-            : [];
-        const ownedWaits = waits.filter((wait) => wait.createdByCtxId === ctxId);
-        const ownedApprovals = approvals.filter((approval) => approval.ctxId === ctxId && approval.status === "pending");
-        const visibleTasks = tasks.flatMap((task) => {
-            const record = asRecord(task);
-            if (record === undefined) return [];
-            const { ctxId: _ctxId, ...visible } = record;
-            return [visible];
-        });
-        const visibleWaits = ownedWaits.map((wait) => {
-            const {
-                createdByCtxId: _createdByCtxId,
-                ownerCallId: _ownerCallId,
-                recoveryClaimedAt: _recoveryClaimedAt,
-                recoveryClaimId: _recoveryClaimId,
-                ...visible
-            } = wait;
-            return visible;
-        });
-        const visibleApprovals = ownedApprovals.map((approval) => {
-            const { ctxId: _ctxId, ...visible } = approval;
-            return visible;
-        });
-        const agentBusy = toolCalls.some((call) =>
-            call.status === "queued" || call.status === "pendingApproval" || call.status === "running"
-        );
-        return {
-            agentBusy,
-            approvals: visibleApprovals,
-            background: ownedWaits
-                .filter((wait) => (
-                    wait.kind === "tmux" && (wait.status === "waiting" || wait.status === "detached")
-                ) || (
-                    (wait.kind === "tmux" || wait.kind === "question") &&
-                    wait.status === "resolved" && wait.detachedAt !== undefined
-                ))
-                .map((wait) => ({
-                    ...(wait.detachedAt === undefined ? {} : { detachedAt: wait.detachedAt }),
-                    ...(wait.goalId === undefined ? {} : { goalId: wait.goalId }),
-                    kind: wait.kind,
-                    ...(wait.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: wait.recoveryMessageAttemptedAt }),
-                    ...(wait.recoveryMessageId === undefined ? {} : { recoveryMessageId: wait.recoveryMessageId }),
-                    ...(wait.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: wait.recoveryMessageSentAt }),
-                    ...(wait.result === undefined ? {} : { result: wait.result }),
-                    status: wait.status,
-                    ...(wait.taskId === undefined ? {} : { taskId: wait.taskId }),
-                    ...(wait.kind === "tmux" ? { tmuxTaskId: wait.targetId } : {}),
-                    updatedAt: wait.updatedAt,
-                    waitId: wait.waitId,
-                })),
-            ctxId,
-            currentEvent: workspaceCurrentEvent(ownedWaits, ownedApprovals),
-            cursor: eventSlice.lastSeq,
-            goal: goal ?? null,
-            instance: this.options.instanceName,
-            questions: visibleWaits.filter((wait) => wait.kind === "question" && (wait.status === "waiting" || wait.status === "detached")),
-            tasks: visibleTasks,
-        } as unknown as JsonValue;
-    }
-
     async #assertAppToken(input: JsonValue, context: ToolCallContext): Promise<string> {
         const ctxId = requireCtxId(context);
         const record = asRecord(input);
@@ -665,55 +574,9 @@ export class McpEndpointHandlerInteraction {
         ) {
             throw new Error("Workspace App authorization is invalid for the current Context.");
         }
-        const existing = this.#appStates.get(ctxId);
-        this.#appStates.set(ctxId, {
-            ...(existing?.lastSeenAt === undefined ? {} : { lastSeenAt: existing.lastSeenAt }),
-        });
+        this.#appPresence.touch(this.options.instanceName, ctxId);
         return token;
     }
-}
-
-function workspaceCurrentEvent(waits: WaitRecord[], approvals: ApprovalRequest[]): JsonValue {
-    const candidates: Array<{ rank: number; updatedAt: string; value: JsonValue }> = [];
-    for (const approval of approvals) {
-        candidates.push({
-            rank: 0,
-            updatedAt: approval.createdAt,
-            value: {
-                eventName: "approval.decision",
-                approvalId: approval.approvalId,
-                inputSummary: approval.inputSummary,
-                kind: "approval",
-                name: approval.toolName,
-                reason: approval.reason,
-                riskLevel: approval.riskLevel,
-                status: "waiting",
-                toolName: approval.toolName,
-                updatedAt: approval.createdAt,
-            },
-        });
-    }
-    for (const wait of waits) {
-        if (wait.kind === "question" && (wait.status === "waiting" || wait.status === "detached")) {
-            candidates.push({
-                rank: wait.status === "waiting" ? 0 : 1,
-                updatedAt: wait.updatedAt,
-                value: {
-                    eventName: "user.answer",
-                    kind: "question",
-                    name: "workspace_ask",
-                    ...(wait.payload === undefined ? {} : { payload: wait.payload }),
-                    ...(wait.goalId === undefined ? {} : { goalId: wait.goalId }),
-                    status: wait.status,
-                    ...(wait.taskId === undefined ? {} : { taskId: wait.taskId }),
-                    updatedAt: wait.updatedAt,
-                    waitId: wait.waitId,
-                },
-            });
-        }
-    }
-    candidates.sort((left, right) => left.rank - right.rank || left.updatedAt.localeCompare(right.updatedAt));
-    return candidates[0]?.value ?? null;
 }
 
 function requireInteractionGateway(
@@ -850,12 +713,6 @@ function readWorkspaceCursor(input: JsonValue): number {
         throw new Error("workspace_watch cursor must be a non-negative integer.");
     }
     return cursor;
-}
-
-function workspaceEventBelongsTo(event: InstanceEvent, ctxId: string): boolean {
-    if (event.type === "wait.recoveryClaimed" || event.type === "wait.recoveryReleased") return false;
-    const data = asRecord(event.data);
-    return data?.ctxId === ctxId || data?.createdByCtxId === ctxId;
 }
 
 function taskBelongsToContext(todo: Record<string, JsonValue>, taskId: string, ctxId: string): boolean {

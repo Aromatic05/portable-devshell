@@ -6,7 +6,9 @@ import { McpOAuthProtectedResource } from "../auth/oauth/McpOAuthProtectedResour
 import type { McpOAuthApprovalService } from "../auth/oauth/McpOAuthApprovalService.js";
 import { McpEndpointBinding } from "../endpoint/McpEndpointBinding.js";
 import { McpEndpointWorker } from "../endpoint/McpEndpointWorker.js";
+import { installMcpWorkspaceLiveRoute, workspaceLiveBaseUrl } from "../workspace/McpWorkspaceLiveRoute.js";
 import { WorkspaceAppLeaseStore } from "../workspace/WorkspaceAppLeaseStore.js";
+import { WorkspaceAppPresenceStore } from "../workspace/WorkspaceAppPresenceStore.js";
 import { HttpHost } from "./HttpHost.js";
 import { McpHostRouteRegistry } from "./route/McpHostRouteRegistry.js";
 
@@ -32,6 +34,7 @@ interface WorkerInstanceLike {
     prepareWorkspace?(workspace: string): Promise<{
         projectMemoryAgentFile: string;
         projectMemoryDirectory: string;
+        projectMemoryPresent?: boolean;
         temporaryDirectory: string;
         workspace: string;
     }>;
@@ -70,8 +73,10 @@ export class McpHost {
     readonly #oauth?: McpOAuthProtectedResource;
     readonly #registry = new McpHostRouteRegistry();
     readonly #gateways = new Map<string, McpInstanceGateway | undefined>();
+    readonly #liveRouteCleanups = new Map<string, () => void>();
     readonly #workers = new Map<string, WorkerInstanceLike>();
     readonly #workspaceAppLeases: WorkspaceAppLeaseStore;
+    readonly #workspaceAppPresence = new WorkspaceAppPresenceStore();
     #started = false;
 
     constructor(config: McpHostConfig) {
@@ -89,16 +94,16 @@ export class McpHost {
                   )
                 : undefined;
 
-        for (const instance of config.instances) {
-            this.registerInstance(instance);
-        }
-
         this.#httpServer = new HttpHost({
             listenHost: config.listenHost,
             listenPort: config.listenPort,
             oauth: this.#oauth,
             publicBaseUrl: config.publicBaseUrl
         });
+
+        for (const instance of config.instances) {
+            this.registerInstance(instance);
+        }
     }
 
     async start(): Promise<void> {
@@ -121,8 +126,11 @@ export class McpHost {
     }
 
     registerInstance(instance: McpHostInstanceConfig): void {
+        this.#liveRouteCleanups.get(instance.name)?.();
+        this.#liveRouteCleanups.delete(instance.name);
         this.#gateways.set(instance.name, instance.gateway);
         this.#workers.set(instance.name, instance.worker);
+        const liveBaseUrl = workspaceLiveBaseUrl(this.#config.publicBaseUrl, instance.name);
         const binding = new McpEndpointBinding(
             new McpEndpointWorker({
                 auth: instance.auth,
@@ -132,7 +140,9 @@ export class McpHost {
                 policy: instance.policy,
                 instanceName: instance.name,
                 worker: instance.worker,
-                workspaceAppLeases: this.#workspaceAppLeases
+                workspaceAppLeases: this.#workspaceAppLeases,
+                workspaceAppPresence: this.#workspaceAppPresence,
+                ...(liveBaseUrl === undefined ? {} : { workspaceLiveBaseUrl: liveBaseUrl })
             }),
             this.#config.serverVersion,
             this.#config.publicBaseUrl,
@@ -144,6 +154,15 @@ export class McpHost {
             binding,
             path
         });
+        this.#liveRouteCleanups.set(instance.name, installMcpWorkspaceLiveRoute({
+            contextRegistry: this.#contextRegistry,
+            gateway: instance.gateway,
+            host: this.#httpServer,
+            instanceName: instance.name,
+            leases: this.#workspaceAppLeases,
+            presence: this.#workspaceAppPresence,
+            publicBaseUrl: this.#config.publicBaseUrl,
+        }));
 
         if (this.#started) {
             if (previous !== undefined && previous.path !== path) {
@@ -154,6 +173,9 @@ export class McpHost {
     }
 
     unregisterInstance(instanceName: string): void {
+        this.#liveRouteCleanups.get(instanceName)?.();
+        this.#liveRouteCleanups.delete(instanceName);
+        this.#workspaceAppPresence.revokeInstance(instanceName);
         this.#gateways.delete(instanceName);
         this.#workers.delete(instanceName);
         const previous = this.#registry.unregister(instanceName);
@@ -183,11 +205,13 @@ export class McpHost {
         return {
             detachInstance: async (instance) => {
                 await this.#workspaceAppLeases.revokeInstance(instance);
+                this.#workspaceAppPresence.revokeInstance(instance);
                 return await this.#contextRegistry.detachInstance(instance);
             },
             disable: async (ctxId) => {
                 const disabled = await this.#contextRegistry.disable(ctxId);
                 await this.#workspaceAppLeases.revokeContext(ctxId);
+                this.#workspaceAppPresence.revokeContext(ctxId);
                 const contexts = await this.#contextRegistry.list();
                 const now = Date.now();
                 const reconciledInstances = new Set<string>();

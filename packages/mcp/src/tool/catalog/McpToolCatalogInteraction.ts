@@ -51,7 +51,7 @@ const goalStepSchema: JsonValue = {
 export class McpToolCatalogInteraction {
     readonly #definitions: readonly ToolDefinition[] = [
         {
-            description: "Ask the user one question in the active Workspace and wait for their answer without ending the current model turn. An active Workspace App is required for the current Context; call workspace_open again if the App is no longer active. Use this only when progress genuinely requires human input. Durable Goal or Todo association is inferred automatically when available.",
+            description: "Ask the user one question in the active Live Workspace and wait for their answer without ending the current model turn. A Live Workspace must already be bootstrapped for the current Context with workspace_open. Use this only when progress genuinely requires human input. Durable Goal or Todo association is inferred automatically when available.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
@@ -88,7 +88,7 @@ export class McpToolCatalogInteraction {
             requiredCapabilities: [],
         },
         {
-            description: "Manage optional Workspace Goal mode for the current Context. Call workspace_open before start; start requires an active Workspace so Goal controls and continuation remain visible. start creates one durable Goal with an objective and ordered steps. update revises the objective, complete step list, or one step. block suspends automatic continuation with a reason; resume reactivates it. finish succeeds only after every step is completed or skipped. stop terminates Goal mode without stopping shell or tmux processes. get reads the current Goal.",
+            description: "Manage optional Workspace Goal mode for the current Context. Bootstrap the Live Workspace once with workspace_open before start; start requires it to be active so Goal controls and continuation remain visible across later chat turns. start creates one durable Goal with an objective and ordered steps. update revises the objective, complete step list, or one step. block suspends automatic continuation with a reason; resume reactivates it. finish succeeds only after every step is completed or skipped. stop terminates Goal mode without stopping shell or tmux processes. get reads the current Goal.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
@@ -115,7 +115,7 @@ export class McpToolCatalogInteraction {
                 "openai/outputTemplate": workspaceAppResourceUri,
                 "openai/widgetAccessible": true,
             },
-            description: "Open the portable-devshell Workspace control surface for the current Context. The visible App is attached to this tool result, while Workspace state remains durable for the Context. Reopen it only when the user needs the panel again or a human-interaction tool reports that the App is no longer active.",
+            description: "Bootstrap the portable-devshell Live Workspace for the current Context. Call it once when a task benefits from persistent Goal, Task, Approval, Question, or background-work controls. The App requests PiP presentation when the host supports it and reconnects to durable state through the live service; do not reopen it every model turn.",
             group: "workspace",
             inputSchema: { additionalProperties: false, properties: {}, type: "object" },
             name: "workspace_open",
@@ -124,7 +124,7 @@ export class McpToolCatalogInteraction {
         },
         {
             _meta: appOnlyMeta,
-            description: "Re-establish the Workspace App lifecycle after a remount or MCP restart by presenting the existing App capability. App-only helper; models should not call it.",
+            description: "Compatibility fallback for re-establishing the Workspace App lifecycle when direct Live Workspace transport is unavailable. App-only helper; models should not call it.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
@@ -138,7 +138,7 @@ export class McpToolCatalogInteraction {
         },
         {
             _meta: appOnlyMeta,
-            description: "Read the authoritative Workspace snapshot for the current Context. App-only helper; models should not call it.",
+            description: "Compatibility fallback for reading the authoritative Workspace snapshot when direct Live Workspace transport is unavailable. App-only helper; models should not call it.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
@@ -151,7 +151,7 @@ export class McpToolCatalogInteraction {
         },
         {
             _meta: appOnlyMeta,
-            description: "Wait for relevant Workspace state changes after a cursor. App-only helper; models should not call it.",
+            description: "Compatibility fallback for waiting on Workspace state changes when direct Live Workspace transport is unavailable. App-only helper; models should not call it.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,

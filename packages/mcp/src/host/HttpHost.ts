@@ -117,7 +117,7 @@ export class HttpHost {
     }
 
     registerRawRoute(
-        method: "delete" | "get" | "head" | "post",
+        method: "delete" | "get" | "head" | "options" | "post",
         path: string,
         handler: (request: IncomingMessage, response: ServerResponse) => void | Promise<void>
     ): () => void {

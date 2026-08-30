@@ -23,6 +23,7 @@ import type { McpToolCatalogInstanceName } from "../tool/catalog/McpToolCatalogI
 import type { McpToolCatalogInteractionName } from "../tool/catalog/McpToolCatalogInteraction.js";
 import type { McpToolCatalogTodoName } from "../tool/catalog/McpToolCatalogTodo.js";
 import type { WorkspaceAppLeaseStore } from "../workspace/WorkspaceAppLeaseStore.js";
+import type { WorkspaceAppPresenceStore } from "../workspace/WorkspaceAppPresenceStore.js";
 import { throwIfMcpEndpointAborted, waitForMcpEndpointAbortable } from "./McpEndpointCancellation.js";
 import { mcpLegacyToolTombstone, resolveMcpLegacyTool } from "./McpEndpointCompatibility.js";
 import { attachMcpComments } from "./McpEndpointFeedback.js";
@@ -55,6 +56,8 @@ export interface McpEndpointDispatchOptions {
     tmuxWaitPollMs?: number;
     worker: McpEndpointWorkerPort;
     workspaceAppLeases?: WorkspaceAppLeaseStore;
+    workspaceAppPresence?: WorkspaceAppPresenceStore;
+    workspaceLiveBaseUrl?: string;
 }
 
 const MCP_TMUX_WAIT_POLL_MS = 1_000;
@@ -90,7 +93,9 @@ export class McpEndpointDispatch {
         const controlOptions = {
             gateway: options.gateway,
             instanceName: options.instanceName,
-            workspaceAppLeases: options.workspaceAppLeases
+            workspaceAppLeases: options.workspaceAppLeases,
+            workspaceAppPresence: options.workspaceAppPresence,
+            workspaceLiveBaseUrl: options.workspaceLiveBaseUrl
         };
         this.#artifact = new McpEndpointHandlerArtifact(controlOptions);
         this.#environment = new McpEndpointHandlerEnvironment({

@@ -19,7 +19,7 @@ export const workspaceAppResourceMeta = {
     },
     "openai/widgetCSP": { connect_domains: [], resource_domains: [] },
     "openai/widgetDescription":
-        "Compact portable-devshell human interaction surface for the current blocking event.",
+        "Persistent portable-devshell Live Workspace for goals, tasks, approvals, questions, and background work.",
     "openai/widgetPrefersBorder": false,
 } as const;
 
@@ -35,8 +35,10 @@ export function workspaceAppResourceMetaForPublicBaseUrl(
         ...workspaceAppResourceMeta,
         ui: {
             ...workspaceAppResourceMeta.ui,
+            csp: { connectDomains: [domain], resourceDomains: [] },
             domain,
         },
+        "openai/widgetCSP": { connect_domains: [domain], resource_domains: [] },
         "openai/widgetDomain": domain,
     } as const;
 }
@@ -95,9 +97,13 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var status = document.getElementById("status");
   var McpApps = globalThis.__portableDevshellMcpApps;
   var App = McpApps.App;
-  var app = new App({ name: "portable-devshell-workspace", version: "0.6.8" }, {});
+  var app = new App(
+    { name: "portable-devshell-workspace", version: "0.6.8" },
+    { availableDisplayModes: ["inline", "pip", "fullscreen"] }
+  );
   var ctxId = "";
   var appToken = "";
+  var liveBaseUrl = "";
   var liveAuthorizationEstablished = false;
   var initialized = false;
   var snapshot = null;
@@ -144,11 +150,50 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return result && result.structuredContent ? result.structuredContent : result;
   }
 
+  async function callLive(path, signal) {
+    if (!liveBaseUrl || !appToken || !ctxId) throw new Error("Live Workspace transport is unavailable");
+    var separator = path.indexOf("?") >= 0 ? "&" : "?";
+    var response;
+    try {
+      response = await fetch(
+        liveBaseUrl + path + separator + "ctxId=" + encodeURIComponent(ctxId),
+        {
+          cache: "no-store",
+          credentials: "omit",
+          headers: { Authorization: "Bearer " + appToken },
+          signal: signal
+        }
+      );
+    } catch (error) {
+      var unavailable = new Error("Live Workspace transport is unavailable");
+      unavailable.cause = error;
+      throw unavailable;
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new Error("Workspace App authorization is invalid for the current Context.");
+    }
+    if (!response.ok) {
+      throw new Error("Live Workspace transport failed with HTTP " + response.status);
+    }
+    return await response.json();
+  }
+
+  async function readLiveSnapshot(signal) {
+    return await callLive("/snapshot", signal);
+  }
+
+  async function readLiveWatch(signal) {
+    return await callLive("/watch?cursor=" + encodeURIComponent(String(cursor)), signal);
+  }
+
   function acceptMeta(meta, authoritative) {
     var hidden = meta && meta["portable-devshell/workspace"];
     if (!hidden || !hidden.token) return;
     if (liveAuthorizationEstablished && authoritative !== true) return;
     appToken = String(hidden.token);
+    if (typeof hidden.liveBaseUrl === "string" && hidden.liveBaseUrl) {
+      liveBaseUrl = String(hidden.liveBaseUrl).replace(/\/$/, "");
+    }
     if (authoritative === true) liveAuthorizationEstablished = true;
     persistWorkspaceHint();
   }
@@ -204,9 +249,16 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         ? String(previousHint.token)
         : "";
     var persistedToken = appToken || retainedToken;
-    privateContent[WIDGET_STATE_KEY] = persistedToken
-      ? { ctxId: ctxId, token: persistedToken }
-      : { ctxId: ctxId };
+    var retainedLiveBaseUrl = !liveBaseUrl && previousHint && String(previousHint.ctxId || "") === ctxId &&
+      typeof previousHint.liveBaseUrl === "string" && previousHint.liveBaseUrl
+        ? String(previousHint.liveBaseUrl)
+        : "";
+    var persistedLiveBaseUrl = liveBaseUrl || retainedLiveBaseUrl;
+    privateContent[WIDGET_STATE_KEY] = Object.assign(
+      { ctxId: ctxId },
+      persistedToken ? { token: persistedToken } : {},
+      persistedLiveBaseUrl ? { liveBaseUrl: persistedLiveBaseUrl } : {}
+    );
     var state = {
       modelContent: current.modelContent === undefined ? null : current.modelContent,
       privateContent: privateContent,
@@ -225,6 +277,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       snapshot = null;
       cursor = 0;
       appToken = "";
+      liveBaseUrl = "";
       liveAuthorizationEstablished = false;
     }
     ctxId = nextCtxId;
@@ -259,6 +312,12 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       typeof hint.token === "string" && hint.token
     ) {
       appToken = String(hint.token);
+    }
+    if (
+      hint && hint.ctxId && String(hint.ctxId) === ctxId &&
+      typeof hint.liveBaseUrl === "string" && hint.liveBaseUrl
+    ) {
+      liveBaseUrl = String(hint.liveBaseUrl).replace(/\/$/, "");
     }
     return configured || !!ctxId;
   }
@@ -533,8 +592,18 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   async function refresh(allowRecovery) {
     if (!initialized || !ctxId) return;
     try {
-      var result = await callTool("workspace_snapshot", {}, true);
-      await applySnapshot(structured(result), allowRecovery);
+      var nextSnapshot;
+      if (liveBaseUrl) {
+        try {
+          nextSnapshot = await readLiveSnapshot();
+        } catch (error) {
+          if (workspaceAuthorizationFailed(error)) throw error;
+          nextSnapshot = structured(await callTool("workspace_snapshot", {}, true));
+        }
+      } else {
+        nextSnapshot = structured(await callTool("workspace_snapshot", {}, true));
+      }
+      await applySnapshot(nextSnapshot, allowRecovery);
       status.textContent = "";
     } catch (error) {
       status.textContent = "Reconnecting";
@@ -564,9 +633,18 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       var controller = new AbortController();
       liveAbortController = controller;
       try {
-        var result = await callTool("workspace_watch", { cursor: cursor }, true, controller.signal);
+        var update;
+        if (liveBaseUrl) {
+          try {
+            update = await readLiveWatch(controller.signal);
+          } catch (error) {
+            if (workspaceAuthorizationFailed(error)) throw error;
+            update = structured(await callTool("workspace_watch", { cursor: cursor }, true, controller.signal)) || {};
+          }
+        } else {
+          update = structured(await callTool("workspace_watch", { cursor: cursor }, true, controller.signal)) || {};
+        }
         if (generation !== watchGeneration) return;
-        var update = structured(result) || {};
         if (Number.isSafeInteger(update.cursor)) cursor = update.cursor;
         if (update.snapshot) {
           await applySnapshot(update.snapshot, true);
@@ -602,7 +680,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     try {
       if (reconnectOnStart) {
         reconnectOnStart = false;
-        await reconnectWorkspace();
+        if (liveBaseUrl) await refresh();
+        else await reconnectWorkspace();
       } else {
         await refresh();
       }
@@ -666,16 +745,32 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     status.textContent = "";
     if (initialized) void startLive();
   };
-  app.onhostcontextchanged = applyHostContext;
+  app.onhostcontextchanged = function (context) {
+    applyHostContext(context);
+    if (initialized) void requestPreferredDisplayMode(context);
+  };
   app.onteardown = async function () {
     stopLive();
     return {};
   };
 
+  async function requestPreferredDisplayMode(context) {
+    try {
+      var hostContext = asRecord(context) || asRecord(app.getHostContext());
+      var modes = hostContext && Array.isArray(hostContext.availableDisplayModes)
+        ? hostContext.availableDisplayModes
+        : [];
+      if (hostContext && hostContext.displayMode !== "pip" && modes.indexOf("pip") >= 0) {
+        await app.requestDisplayMode({ mode: "pip" });
+      }
+    } catch (_) {}
+  }
+
   async function connect() {
     try {
       await app.connect();
       applyHostContext(app.getHostContext());
+      await requestPreferredDisplayMode(app.getHostContext());
       bridgeReady = true;
       initialized = true;
       status.textContent = "";

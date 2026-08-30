@@ -10,6 +10,116 @@ import { chromiumTestOptions } from "../../../../test/TestPlatformSupport.ts";
 const CHROMIUM_EXECUTABLE = resolveChromiumExecutable();
 const BROWSER_TEST_OPTIONS = chromiumTestOptions(CHROMIUM_EXECUTABLE);
 
+test("Live Workspace requests PiP and uses direct state transport before MCP fallbacks", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
+    await page.evaluate(LIVE_TRANSPORT_BRIDGE_SCRIPT);
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html.replace("<script>", `<script>
+            window.__liveFetchCalls = [];
+            window.__liveWatchReplied = false;
+            window.fetch = function (url, options) {
+                window.__liveFetchCalls.push({
+                    authorization: options && options.headers && options.headers.Authorization,
+                    url: String(url)
+                });
+                var snapshot = {
+                    approvals: [], background: [], ctxId: "ctx-live-direct", currentEvent: null,
+                    cursor: 7, goal: null, instance: "browser-instance", questions: [], tasks: []
+                };
+                if (String(url).indexOf("/snapshot") >= 0) {
+                    return Promise.resolve(new Response(JSON.stringify(snapshot), {
+                        headers: { "content-type": "application/json" }, status: 200
+                    }));
+                }
+                if (!window.__liveWatchReplied) {
+                    window.__liveWatchReplied = true;
+                    return Promise.resolve(new Response(JSON.stringify({
+                        changed: false, cursor: 7, snapshot: snapshot
+                    }), { headers: { "content-type": "application/json" }, status: 200 }));
+                }
+                return new Promise(function (_resolve, reject) {
+                    if (options && options.signal) {
+                        options.signal.addEventListener("abort", function () {
+                            reject(new DOMException("Aborted", "AbortError"));
+                        }, { once: true });
+                    }
+                });
+            };
+        <\/script><script>`);
+    }, workspaceAppHtml);
+
+    await page.waitForFunction("(window.__liveDisplayModeRequests || []).length === 1");
+    const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
+    if (frame === undefined) throw new Error("Workspace frame is missing.");
+    await frame.waitForFunction("(window.__liveFetchCalls || []).some(call => call.url.includes('/snapshot'))");
+    await frame.waitForFunction("(window.__liveFetchCalls || []).some(call => call.url.includes('/watch'))");
+
+    assert.deepEqual(await page.evaluate("window.__liveDisplayModeRequests"), [{ mode: "pip" }]);
+    const fetchCalls = await frame.evaluate("window.__liveFetchCalls") as Array<{ authorization?: string; url: string }>;
+    assert.equal(fetchCalls.every((call) => call.authorization === "Bearer live-direct-token"), true);
+    assert.equal(fetchCalls.some((call) => call.url.includes("ctxId=ctx-live-direct")), true);
+    assert.equal(
+        await page.evaluate("(window.__liveToolCalls || []).some(call => call.name === 'workspace_snapshot' || call.name === 'workspace_watch' || call.name === 'workspace_reconnect')"),
+        false,
+    );
+});
+
+const LIVE_TRANSPORT_BRIDGE_SCRIPT = String.raw`
+window.__liveDisplayModeRequests = [];
+window.__liveToolCalls = [];
+window.addEventListener("message", function (event) {
+    if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
+    var source = event.source;
+    var message = event.data;
+    function reply(result) {
+        if (message.id === undefined) return;
+        source.postMessage({ id: message.id, jsonrpc: "2.0", result: result }, "*");
+    }
+    if (message.method === "ui/initialize") {
+        source.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-input",
+            params: { arguments: { ctxId: "ctx-live-direct" } }
+        }, "*");
+        source.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-result",
+            params: {
+                _meta: { "portable-devshell/workspace": {
+                    liveBaseUrl: "https://live.example/api/live/demo/workspace",
+                    token: "live-direct-token"
+                } },
+                content: [{ type: "text", text: "portable-devshell Live Workspace opened." }],
+                structuredContent: { ctxId: "ctx-live-direct", instance: "browser-instance" }
+            }
+        }, "*");
+        reply({
+            hostCapabilities: {},
+            hostContext: { availableDisplayModes: ["inline", "pip"], displayMode: "inline" },
+            hostInfo: { name: "test-host", version: "1.0.0" },
+            protocolVersion: "2026-01-26"
+        });
+        return;
+    }
+    if (message.method === "ui/request-display-mode") {
+        window.__liveDisplayModeRequests.push(message.params);
+        reply({ mode: "pip" });
+        return;
+    }
+    if (message.method === "ui/update-model-context") { reply({}); return; }
+    if (message.method === "tools/call") {
+        window.__liveToolCalls.push(message.params || {});
+        reply({ structuredContent: {} });
+    }
+});
+`;
+
 test("Workspace refreshes authoritative state after a stale Goal action is fenced", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
