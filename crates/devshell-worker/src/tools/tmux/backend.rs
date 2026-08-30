@@ -551,7 +551,9 @@ impl TmuxBackend {
     pub fn transcript_buffer_name(&self, task_id: &str) -> String {
         let identity = format!("{}:{}:{task_id}", self.instance, self.workspace.display());
         let digest = blake3::hash(identity.as_bytes()).to_hex();
-        format!("/devshell-tmux-{}", &digest[..32])
+        // Darwin's POSIX shm name limit is much shorter than Linux's. Keep the
+        // complete name below 31 bytes while retaining 96 bits of digest.
+        format!("/dsh-{}", &digest[..24])
     }
 
     pub fn persist_transcript_ring_name(&self, task_id: &str) -> Result<(), ToolError> {

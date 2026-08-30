@@ -25,7 +25,14 @@ fn tmux_transcript_buffer_name(env: &TestEnv, instance: &str, task_id: &str) -> 
     let workspace = env.workspace().canonicalize().unwrap();
     let identity = format!("{instance}:{}:{task_id}", workspace.display());
     let digest = blake3::hash(identity.as_bytes()).to_hex();
-    format!("/devshell-tmux-{}", &digest[..32])
+    format!("/dsh-{}", &digest[..24])
+}
+
+#[test]
+fn transcript_shared_memory_name_fits_darwin_limit() {
+    let env = TestEnv::new();
+    let name = tmux_transcript_buffer_name(&env, "instance", "task");
+    assert!(name.len() < 31, "shared-memory name is too long: {name}");
 }
 
 fn shared_memory_exists(name: &str) -> bool {

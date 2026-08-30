@@ -242,7 +242,8 @@ mod tests {
     use uuid::Uuid;
 
     fn ring_name() -> String {
-        format!("/devshell-test-tmux-{}", Uuid::new_v4().simple())
+        let id = Uuid::new_v4().simple().to_string();
+        format!("/dsh-test-{}", &id[..20])
     }
 
     #[test]
