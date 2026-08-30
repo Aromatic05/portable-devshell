@@ -80,27 +80,42 @@ export class WorkerInstanceToolApproval {
             return await this.#denyToolCall(callId, toolName, context, startedAt, evaluation.error);
         }
 
-        onPendingApproval();
-        await this.#toolCallHistory.pendingApproval(callId, evaluation.request.approvalId);
-        await this.#appendEvent("approval.requested", toApprovalEventData(evaluation.request));
-        await this.#appendEvent(
-            "toolCall.pendingApproval",
-            toEventData({
-                approvalId: evaluation.request.approvalId,
-                callId,
-                createdAt: evaluation.request.createdAt,
-                expiresAt: evaluation.request.expiresAt,
-                inputSummary,
-                reason: evaluation.request.reason,
-                requestId: context.requestId,
-                riskLevel: evaluation.request.riskLevel,
-                ctxId: context.ctxId,
-                source: context.source,
-                startedAt,
-                status: "pendingApproval",
-                toolName
-            })
-        );
+        try {
+            onPendingApproval();
+            await this.#toolCallHistory.pendingApproval(callId, evaluation.request.approvalId);
+            await this.#appendEvent("approval.requested", toApprovalEventData(evaluation.request));
+            await this.#appendEvent(
+                "toolCall.pendingApproval",
+                toEventData({
+                    approvalId: evaluation.request.approvalId,
+                    callId,
+                    createdAt: evaluation.request.createdAt,
+                    expiresAt: evaluation.request.expiresAt,
+                    inputSummary,
+                    reason: evaluation.request.reason,
+                    requestId: context.requestId,
+                    riskLevel: evaluation.request.riskLevel,
+                    ctxId: context.ctxId,
+                    source: context.source,
+                    startedAt,
+                    status: "pendingApproval",
+                    toolName
+                })
+            );
+        } catch (error) {
+            try {
+                await this.#approvalManager.cancel(
+                    evaluation.request.approvalId,
+                    "Approval setup failed before the tool call could wait for a decision."
+                );
+            } catch (cleanupError) {
+                throw new AggregateError(
+                    [error, cleanupError],
+                    `Approval ${evaluation.request.approvalId} setup failed and could not be cancelled.`,
+                );
+            }
+            throw error;
+        }
 
         const onAbort = () => {
             void this.#approvalManager.cancel(

@@ -117,3 +117,78 @@ test("ApprovalManager reconciles persisted pending approvals after restart", asy
         /already decided/u,
     );
 });
+
+test("ApprovalManager serializes concurrent decisions for the same approval", async () => {
+    const records: ApprovalRequest[] = [];
+    const store = new ApprovalStore({
+        async append(request: ApprovalRequest) {
+            if (request.status !== "pending") await new Promise<void>((resolve) => setImmediate(resolve));
+            records.push(structuredClone(request));
+        },
+        async readAll() {
+            return records.map((request) => structuredClone(request));
+        },
+    } as never);
+    const manager = new ApprovalManager({
+        instanceName: asInstanceName("approval-concurrent-decision"),
+        policy: { mode: "ask" },
+        store,
+        timeout: { ms: 60_000 },
+    });
+    const evaluation = await manager.evaluate({
+        callId: "call-concurrent",
+        context: { ctxId: "ctx-concurrent", source: "mcp" },
+        inputSummary: "{}",
+        toolName: "bash_run",
+    });
+    assert.equal(evaluation.decision, "ask");
+    if (evaluation.decision !== "ask") throw new Error("approval was not requested");
+
+    const decisions = await Promise.allSettled([
+        manager.decideApproval(evaluation.request.approvalId, { decision: "approve", decidedBy: "web" }),
+        manager.decideApproval(evaluation.request.approvalId, { decision: "deny", decidedBy: "web" }),
+    ]);
+    assert.equal(decisions.filter((result) => result.status === "fulfilled").length, 1);
+    assert.equal(decisions.filter((result) => result.status === "rejected").length, 1);
+
+    const resolution = await evaluation.awaitDecision;
+    const persisted = await manager.getApproval(evaluation.request.approvalId);
+    assert.equal(persisted.status, resolution.status);
+});
+
+test("ApprovalManager serializes a decision racing its expiry timer", async () => {
+    const records: ApprovalRequest[] = [];
+    const store = new ApprovalStore({
+        async append(request: ApprovalRequest) {
+            if (request.status === "approved") await new Promise<void>((resolve) => setTimeout(resolve, 20));
+            records.push(structuredClone(request));
+        },
+        async readAll() {
+            return records.map((request) => structuredClone(request));
+        },
+    } as never);
+    const manager = new ApprovalManager({
+        instanceName: asInstanceName("approval-decision-expiry-race"),
+        policy: { mode: "ask" },
+        store,
+        timeout: { ms: 5 },
+    });
+    const evaluation = await manager.evaluate({
+        callId: "call-expiry-race",
+        context: { ctxId: "ctx-expiry-race", source: "mcp" },
+        inputSummary: "{}",
+        toolName: "bash_run",
+    });
+    assert.equal(evaluation.decision, "ask");
+    if (evaluation.decision !== "ask") throw new Error("approval was not requested");
+
+    const decided = manager.decideApproval(
+        evaluation.request.approvalId,
+        { decision: "approve", decidedBy: "web" },
+    );
+    const [decision, resolution] = await Promise.all([decided, evaluation.awaitDecision]);
+    assert.equal(decision.status, "approved");
+    assert.equal(resolution.status, "approved");
+    assert.equal((await manager.getApproval(evaluation.request.approvalId)).status, "approved");
+    assert.equal(records.filter((request) => request.status === "expired").length, 0);
+});

@@ -37,6 +37,7 @@ interface PendingApproval {
 
 export class ApprovalManager {
     readonly #instanceName: InstanceName;
+    #operation: Promise<void> = Promise.resolve();
     #policy: ApprovalPolicy;
     readonly #store: ApprovalStore;
     readonly #timeoutMs: number;
@@ -52,6 +53,10 @@ export class ApprovalManager {
 
     async evaluate(input: ApprovalEvaluationInput): Promise<ApprovalEvaluation> {
         await this.#ensureReady();
+        return await this.#runExclusive(() => this.#evaluate(input));
+    }
+
+    async #evaluate(input: ApprovalEvaluationInput): Promise<ApprovalEvaluation> {
         const policyDecision = resolvePolicyDecision(this.#policy, input.context.source, input.toolName);
 
         if (policyDecision === "allow") {
@@ -133,6 +138,19 @@ export class ApprovalManager {
         }
     ): Promise<ApprovalRequest> {
         await this.#ensureReady();
+        return await this.#runExclusive(() => this.#decideApproval(approvalId, input));
+    }
+
+    async #decideApproval(
+        approvalId: string,
+        input: {
+            decision: "approve" | "deny";
+            decidedBy: ApprovalDecisionBy;
+            policyPatch?: JsonValue;
+            reason?: string;
+            remember?: boolean;
+        }
+    ): Promise<ApprovalRequest> {
         const pending = this.#pending.get(approvalId);
         const request = pending?.request ?? (await this.#store.get(approvalId));
 
@@ -196,6 +214,10 @@ export class ApprovalManager {
 
     async cancel(approvalId: string, reason?: string): Promise<ApprovalRequest> {
         await this.#ensureReady();
+        return await this.#runExclusive(() => this.#cancel(approvalId, reason));
+    }
+
+    async #cancel(approvalId: string, reason?: string): Promise<ApprovalRequest> {
         const pending = this.#pending.get(approvalId);
         const request = pending?.request ?? (await this.#store.get(approvalId));
 
@@ -290,9 +312,16 @@ export class ApprovalManager {
     }
 
     async #expire(approvalId: string): Promise<ApprovalResolution> {
+        return await this.#runExclusive(() => this.#expireMutation(approvalId));
+    }
+
+    async #expireMutation(approvalId: string): Promise<ApprovalResolution> {
         const pending = this.#pending.get(approvalId);
         if (pending === undefined) {
             const request = await this.#store.get(approvalId);
+            if (request !== undefined && request.status !== "pending") {
+                return resolutionFromSettledRequest(this.#instanceName, request);
+            }
             return {
                 error: createApprovalExpiredError(this.#instanceName, request?.toolName ?? "unknown"),
                 status: "expired"
@@ -317,6 +346,20 @@ export class ApprovalManager {
             error: createApprovalExpiredError(this.#instanceName, expiredRequest.toolName),
             status: "expired"
         };
+    }
+
+    async #runExclusive<T>(operation: () => Promise<T>): Promise<T> {
+        const previous = this.#operation;
+        let release!: () => void;
+        this.#operation = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        await previous;
+        try {
+            return await operation();
+        } finally {
+            release();
+        }
     }
 }
 
