@@ -150,6 +150,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     if (liveAuthorizationEstablished && authoritative !== true) return;
     appToken = String(hidden.token);
     if (authoritative === true) liveAuthorizationEstablished = true;
+    persistWorkspaceHint();
   }
 
   function asRecord(value) {
@@ -182,14 +183,35 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   function workspaceHintFromOpenAiGlobals(globals) {
     var openai = asRecord(globals);
     var widgetState = asRecord(openai && openai.widgetState);
-    return asRecord(widgetState && widgetState[WIDGET_STATE_KEY]);
+    if (!widgetState) return null;
+    var privateContent = asRecord(widgetState.privateContent);
+    return asRecord(privateContent && privateContent[WIDGET_STATE_KEY]) ||
+      asRecord(widgetState[WIDGET_STATE_KEY]);
   }
 
   function persistWorkspaceHint() {
     var openai = asRecord(window.openai);
     if (!openai || typeof openai.setWidgetState !== "function") return;
-    var state = Object.assign({}, asRecord(openai.widgetState) || {});
-    state[WIDGET_STATE_KEY] = { ctxId: ctxId };
+    var current = asRecord(openai.widgetState) || {};
+    var privateContent = Object.assign({}, asRecord(current.privateContent) || {});
+    var legacyHint = asRecord(current[WIDGET_STATE_KEY]);
+    if (!privateContent[WIDGET_STATE_KEY] && legacyHint) {
+      privateContent[WIDGET_STATE_KEY] = legacyHint;
+    }
+    var previousHint = asRecord(privateContent[WIDGET_STATE_KEY]);
+    var retainedToken = !appToken && previousHint && String(previousHint.ctxId || "") === ctxId &&
+      typeof previousHint.token === "string" && previousHint.token
+        ? String(previousHint.token)
+        : "";
+    var persistedToken = appToken || retainedToken;
+    privateContent[WIDGET_STATE_KEY] = persistedToken
+      ? { ctxId: ctxId, token: persistedToken }
+      : { ctxId: ctxId };
+    var state = {
+      modelContent: current.modelContent === undefined ? null : current.modelContent,
+      privateContent: privateContent,
+      imageIds: Array.isArray(current.imageIds) ? current.imageIds : []
+    };
     try { openai.setWidgetState(state); } catch (_) {}
   }
 
@@ -231,6 +253,12 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     var configured = acceptToolResult(result);
     var hint = workspaceHintFromOpenAiGlobals(source);
     if (!configured && hint && hint.ctxId) configured = activateCtxId(hint.ctxId);
+    if (
+      !liveAuthorizationEstablished && hint && hint.ctxId && String(hint.ctxId) === ctxId &&
+      typeof hint.token === "string" && hint.token
+    ) {
+      appToken = String(hint.token);
+    }
     return configured || !!ctxId;
   }
 
@@ -500,7 +528,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
 
   async function reconnectWorkspace() {
     if (!initialized || !ctxId) return;
-    var result = await callTool("workspace_reconnect", {}, false);
+    var result = await callTool("workspace_reconnect", {}, true);
     await applySnapshot(structured(result), true);
     status.textContent = "";
   }
@@ -534,11 +562,9 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         console.error(error);
         if (generation !== watchGeneration) return;
         if (workspaceAuthorizationFailed(error)) {
-          try {
-            await reconnectWorkspace();
-          } catch (_) {
-            await sleep(1000);
-          }
+          watchStarted = false;
+          status.textContent = "Reopen Workspace";
+          return;
         } else {
           await sleep(1000);
           if (generation !== watchGeneration) return;
@@ -552,6 +578,10 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
 
   async function startLive() {
     if (!initialized || !ctxId || watchStarted) return;
+    if (reconnectOnStart && !appToken) {
+      status.textContent = "Waiting for Workspace authorization";
+      return;
+    }
     watchStarted = true;
     try {
       if (reconnectOnStart) {

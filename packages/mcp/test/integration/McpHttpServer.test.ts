@@ -238,6 +238,141 @@ test("oauth2 keeps a public path prefix on resources while using the origin as i
     }
 });
 
+test("Workspace App capability survives MCP host restart and is revoked at an instance generation boundary", async () => {
+    const root = await createTestTempDirectory("mcp-workspace-lease-host");
+    const contextFile = join(root, "contexts.json");
+    const workspaceAppLeaseFile = join(root, "workspace-app-leases.json");
+    let first: McpHost | undefined;
+    let restarted: McpHost | undefined;
+    try {
+        first = createWorkspaceHost(contextFile, workspaceAppLeaseFile);
+        await first.start();
+        const created = await first.contextRegistry.create({
+            instance: "demo",
+            principal: "local",
+            workspace: "/workspace",
+        });
+        await first.contextRegistry.attachEnvironment(created.ctxId, {
+            instance: "beta",
+            workspace: "/beta",
+        });
+        const firstEndpoint = `http://127.0.0.1:${requireTcpPort(first.server.address)}/demo/mcp`;
+        const opened = await callMcpTool(firstEndpoint, "workspace_open", { ctxId: created.ctxId });
+        assert.notEqual(opened.result?.isError, true);
+        const token = (opened.result?._meta?.["portable-devshell/workspace"] as { token?: unknown } | undefined)?.token;
+        assert.equal(typeof token, "string");
+        if (typeof token !== "string") throw new Error("Workspace capability was not returned.");
+        assert.equal(JSON.stringify(opened.result?.structuredContent).includes(token), false);
+
+        await first.stop();
+        first = undefined;
+
+        restarted = createWorkspaceHost(contextFile, workspaceAppLeaseFile);
+        await restarted.start();
+        const restartedEndpoint = `http://127.0.0.1:${requireTcpPort(restarted.server.address)}/demo/mcp`;
+        const reconnected = await callMcpTool(restartedEndpoint, "workspace_reconnect", {
+            ctxId: created.ctxId,
+            token,
+        });
+        assert.notEqual(reconnected.result?.isError, true);
+        assert.equal(
+            (reconnected.result?._meta?.["portable-devshell/workspace"] as { token?: unknown } | undefined)?.token,
+            token,
+        );
+
+        const unauthenticated = await callMcpTool(restartedEndpoint, "workspace_reconnect", {
+            ctxId: created.ctxId,
+        });
+        assert.match(unauthenticated.error?.message ?? "", /token|required|invalid/i);
+
+        await restarted.contextAdmin.detachInstance("demo");
+        await restarted.contextRegistry.attachEnvironment(created.ctxId, {
+            instance: "demo",
+            workspace: "/replacement-workspace",
+        });
+        const afterGenerationChange = await callMcpTool(restartedEndpoint, "workspace_reconnect", {
+            ctxId: created.ctxId,
+            token,
+        });
+        assert.match(
+            afterGenerationChange.error?.message ?? afterGenerationChange.result?.content?.[0]?.text ?? "",
+            /authorization is invalid/i,
+        );
+    } finally {
+        await first?.stop().catch(() => undefined);
+        await restarted?.stop().catch(() => undefined);
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+function createWorkspaceHost(contextFile: string, workspaceAppLeaseFile: string): McpHost {
+    return new McpHost({
+        contextFile,
+        instances: [{
+            gateway: {
+                async consumeWait() { throw new Error("unused"); },
+                async createWait() { throw new Error("unused"); },
+                async decideApproval() { throw new Error("unused"); },
+                async detachWait() { throw new Error("unused"); },
+                async listApprovals() { return []; },
+                async listWaits() { return []; },
+                async readTodo() {
+                    return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks: [] };
+                },
+                async resolveWait() { throw new Error("unused"); },
+                async waitForWait() { throw new Error("unused"); },
+            } as never,
+            name: "demo",
+            policy: { capabilities: [], groups: ["workspace"] },
+            worker: {
+                async auditToolCall(_toolName: string, _input: unknown, _context: unknown, operation: () => Promise<unknown>) {
+                    return await operation();
+                },
+                async appendMcpSessionClosed() {},
+                async appendMcpSessionOpened() {},
+                async appendMcpToolCalled() {},
+                async callTool() { return {}; },
+                listTools() { return []; },
+                async readAlerts() { return { advice: [] }; },
+                snapshot() { return { ready: true }; },
+            } as never,
+        }],
+        listenHost: "127.0.0.1",
+        listenPort: 0,
+        workspaceAppLeaseFile,
+    });
+}
+
+async function callMcpTool(
+    endpoint: string,
+    name: string,
+    args: Record<string, JsonValue>,
+): Promise<{
+    error?: { code?: number; message?: string };
+    result?: {
+        _meta?: Record<string, unknown>;
+        content?: Array<{ text?: string }>;
+        isError?: boolean;
+        structuredContent?: unknown;
+    };
+}> {
+    const response = await fetch(endpoint, {
+        body: JSON.stringify({
+            id: `call-${name}`,
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: { arguments: args, name },
+        }),
+        headers: {
+            accept: "application/json, text/event-stream",
+            "content-type": "application/json",
+        },
+        method: "POST",
+    });
+    assert.equal(response.status, 200);
+    return parseMcpHttpResponse(await response.text());
+}
+
 async function readFixture(name: string): Promise<JsonValue> {
     return JSON.parse(await readFile(resolve(fixturesDirectory, name), "utf8")) as JsonValue;
 }

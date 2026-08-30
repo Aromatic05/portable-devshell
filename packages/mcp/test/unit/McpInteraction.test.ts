@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 
 import type { GoalContinuationInput, JsonValue, ToolCallContext, WaitCreateInput, WaitRecord } from "@portable-devshell/shared";
@@ -7,10 +9,12 @@ import {
     McpNativeToolResult,
     McpToolCatalogInteraction,
     McpToolSchemaAdapter,
+    WorkspaceAppLeaseStore,
     type McpInteractionGateway,
     type McpWorkspaceGateway,
     workspaceAppResourceUri,
 } from "@portable-devshell/mcp/testing";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const context: ToolCallContext = { ctxId: "ctx-question", source: "mcp" };
 
@@ -201,16 +205,14 @@ test("Workspace authorization stays in hidden metadata and gates app-only tools"
 test("Workspace App can re-establish its lifecycle after remount", async () => {
     const fake = createInteractionGateway();
     const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
-    await handler.call("workspace_open", {}, context, "call-open");
+    const token = await openWorkspace(handler);
 
-    const reconnected = await handler.call("workspace_reconnect", {}, context, "call-reconnect");
+    const reconnected = await handler.call("workspace_reconnect", { token }, context, "call-reconnect");
 
     assert.ok(reconnected instanceof McpNativeToolResult);
     assert.equal((reconnected.structuredContent as { ctxId?: string }).ctxId, context.ctxId);
     const meta = reconnected._meta?.["portable-devshell/workspace"] as { token?: string } | undefined;
-    const token = meta?.token;
-    assert.equal(typeof token, "string");
-    if (token === undefined) throw new Error("Workspace reconnect token is missing.");
+    assert.equal(meta?.token, token);
     const held = handler.call(
         "workspace_ask",
         { question: "Can the reconnected App receive a question?" },
@@ -227,11 +229,69 @@ test("Workspace App can re-establish its lifecycle after remount", async () => {
     await assert.doesNotReject(held);
 });
 
+test("Workspace reconnect refuses to mint App authorization without the existing capability", async () => {
+    const fake = createInteractionGateway();
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
+
+    await assert.rejects(
+        handler.call("workspace_reconnect", {}, context, "call-no-token"),
+        /authorization is invalid/i,
+    );
+    await assert.rejects(
+        handler.call("workspace_reconnect", { token: `${token}-wrong` }, context, "call-wrong-token"),
+        /authorization is invalid/i,
+    );
+});
+
+test("Workspace App capability survives MCP handler restart without rotating the token", async () => {
+    const root = await createTestTempDirectory("workspace-app-handler-restart");
+    const filePath = join(root, "workspace-app-leases.json");
+    try {
+        const fake = createInteractionGateway();
+        const firstStore = new WorkspaceAppLeaseStore({ filePath });
+        await firstStore.initialize();
+        const firstHandler = new McpEndpointHandlerInteraction({
+            gateway: fake.gateway,
+            instanceName: "demo",
+            workspaceAppLeases: firstStore,
+        });
+        const token = await openWorkspace(firstHandler);
+
+        const restartedStore = new WorkspaceAppLeaseStore({ filePath });
+        await restartedStore.initialize();
+        const restartedHandler = new McpEndpointHandlerInteraction({
+            gateway: fake.gateway,
+            instanceName: "demo",
+            workspaceAppLeases: restartedStore,
+        });
+        const reconnected = await restartedHandler.call(
+            "workspace_reconnect",
+            { token },
+            context,
+            "call-after-restart",
+        );
+        assert.ok(reconnected instanceof McpNativeToolResult);
+        assert.equal(
+            (reconnected._meta?.["portable-devshell/workspace"] as { token?: string } | undefined)?.token,
+            token,
+        );
+        await assert.doesNotReject(restartedHandler.call(
+            "workspace_snapshot",
+            { token },
+            context,
+            "call-snapshot-after-restart",
+        ));
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
 test("Workspace reconnect reuses a live App token instead of invalidating sibling mounts", async () => {
     const fake = createInteractionGateway();
     const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
     const firstToken = await openWorkspace(handler);
-    const reconnected = await handler.call("workspace_reconnect", {}, context, "call-reconnect");
+    const reconnected = await handler.call("workspace_reconnect", { token: firstToken }, context, "call-reconnect");
     assert.ok(reconnected instanceof McpNativeToolResult);
     const secondToken = (reconnected._meta?.["portable-devshell/workspace"] as { token: string }).token;
     assert.equal(secondToken, firstToken);
@@ -1047,6 +1107,7 @@ test("Workspace tool metadata uses one render tool and app-only action tools", (
     assert.ok(goal);
     assert.ok(goalResume);
     assert.ok(goalStop);
+    assert.deepEqual((reconnect.inputSchema as { required?: string[] }).required, ["token"]);
     const adaptedOpen = adapter.toMcpTool(open, open.description);
     const adaptedAnswer = adapter.toMcpTool(answer, answer.description);
     const adaptedInterrupt = adapter.toMcpTool(interrupt, interrupt.description);

@@ -28,3 +28,5 @@ export * from "./tool/catalog/McpToolCatalogEnvironment.js";
 export * from "./endpoint/McpEndpointResult.js";
 export * from "./endpoint/handler/McpEndpointHandlerInteraction.js";
 export * from "./workspace/McpWorkspaceApp.js";
+
+export * from "./workspace/WorkspaceAppLeaseStore.js";

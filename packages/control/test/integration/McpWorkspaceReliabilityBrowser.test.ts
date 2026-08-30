@@ -80,6 +80,10 @@ window.addEventListener("message", function (event) {
     }
     if (message.method === "ui/initialize") {
         source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-input", params: { arguments: { ctxId: "ctx-stale-goal" } } }, "*");
+        source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: {
+            _meta: { "portable-devshell/workspace": { token: "stale-goal-token" } },
+            structuredContent: { ctxId: "ctx-stale-goal", instance: "browser-instance" }
+        } }, "*");
         reply({ hostCapabilities: {}, hostContext: {}, hostInfo: { name: "test-host", version: "1.0.0" }, protocolVersion: "2026-01-26" });
         return;
     }
@@ -228,6 +232,10 @@ window.addEventListener("message", function (event) {
             method: "ui/notifications/tool-input",
             params: { arguments: { ctxId: "ctx-wait-ambiguous" } }
         }, "*");
+        source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: {
+            _meta: { "portable-devshell/workspace": { token: "wait-ambiguous-token" } },
+            structuredContent: { ctxId: "ctx-wait-ambiguous", instance: "browser-instance" }
+        } }, "*");
         reply({ hostCapabilities: {}, hostContext: {}, hostInfo: { name: "test-host", version: "1.0.0" }, protocolVersion: "2026-01-26" });
         return;
     }
@@ -337,6 +345,10 @@ window.addEventListener("message", function (event) {
     }
     if (message.method === "ui/initialize") {
         source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-input", params: { arguments: { ctxId: "ctx-goal-ambiguous" } } }, "*");
+        source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: {
+            _meta: { "portable-devshell/workspace": { token: "goal-ambiguous-token" } },
+            structuredContent: { ctxId: "ctx-goal-ambiguous", instance: "browser-instance" }
+        } }, "*");
         reply({ hostCapabilities: {}, hostContext: {}, hostInfo: { name: "test-host", version: "1.0.0" }, protocolVersion: "2026-01-26" });
         return;
     }
@@ -430,6 +442,10 @@ window.addEventListener("message", function (event) {
     }
     if (message.method === "ui/initialize") {
         source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-input", params: { arguments: { ctxId: "ctx-missed-event" } } }, "*");
+        source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: {
+            _meta: { "portable-devshell/workspace": { token: "missed-event-token" } },
+            structuredContent: { ctxId: "ctx-missed-event", instance: "browser-instance" }
+        } }, "*");
         reply({ hostCapabilities: {}, hostContext: {}, hostInfo: { name: "test-host", version: "1.0.0" }, protocolVersion: "2026-01-26" });
         return;
     }
@@ -448,16 +464,14 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-test("Workspace App recovers from a stale in-memory token after MCP restart", BROWSER_TEST_OPTIONS, async (t) => {
+test("Workspace App reconnects after MCP restart with its persisted private capability", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
 
     const page = await browser.newPage();
     const browserFailures: string[] = [];
     page.on("console", (message) => {
-        if (message.type() === "error" && !message.text().includes("authorization is invalid")) {
-            browserFailures.push(`console: ${message.text()}`);
-        }
+        if (message.type() === "error") browserFailures.push(`console: ${message.text()}`);
     });
     page.on("pageerror", (error) => browserFailures.push(`pageerror: ${error.message}`));
     await page.setContent('<iframe id="workspace" style="width:800px;height:320px"></iframe>');
@@ -465,27 +479,48 @@ test("Workspace App recovers from a stale in-memory token after MCP restart", BR
     await page.evaluate((html) => {
         const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
         if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
+        iframe.srcdoc = html.replace("<script>", `<script>
+            window.openai = {
+                widgetState: {
+                    modelContent: null,
+                    privateContent: {
+                        portableDevshellWorkspace: {
+                            ctxId: "ctx-token-restart",
+                            token: "token-stable"
+                        }
+                    },
+                    imageIds: []
+                },
+                setWidgetState: function (state) { this.widgetState = state; }
+            };
+        <\/script><script>`);
     }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__tokenRestartCalls || []).filter(call => call.name === 'workspace_reconnect').length >= 2");
-    await page.waitForFunction("(window.__tokenRestartCalls || []).some(call => call.name === 'workspace_watch' && call.arguments.token === 'token-new')");
+    await page.waitForFunction("(window.__tokenRestartCalls || []).some(call => call.name === 'workspace_reconnect')");
+    await page.waitForFunction("(window.__tokenRestartCalls || []).some(call => call.name === 'workspace_watch' && call.arguments.token === 'token-stable')");
     const calls = await page.evaluate("window.__tokenRestartCalls || []") as Array<{
         arguments?: Record<string, unknown>;
         name?: string;
     }>;
     const reconnects = calls.filter((call) => call.name === "workspace_reconnect");
-    assert.equal(reconnects.length >= 2, true);
-    assert.equal(reconnects.every((call) => call.arguments?.token === undefined), true);
-    assert.equal(calls.some((call) => call.name === "workspace_watch" && call.arguments?.token === "token-old"), true);
-    assert.equal(calls.some((call) => call.name === "workspace_watch" && call.arguments?.token === "token-new"), true);
+    assert.equal(reconnects.length >= 1, true);
+    assert.equal(reconnects.every((call) => call.arguments?.token === "token-stable"), true);
+    assert.equal(calls.some((call) => call.name === "workspace_watch" && call.arguments?.token === "token-stable"), true);
+    const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
+    assert.equal(
+        await frame?.evaluate("window.openai.widgetState.privateContent.portableDevshellWorkspace.token"),
+        "token-stable",
+    );
+    assert.equal(
+        await frame?.evaluate("JSON.stringify(window.openai.widgetState.modelContent || null).includes('token-stable')"),
+        false,
+    );
     assert.deepEqual(browserFailures, []);
 });
 
 const TOKEN_RESTART_BRIDGE_SCRIPT = String.raw`
 window.__tokenRestartCalls = [];
-window.__tokenRestartReconnects = 0;
-window.__tokenRestartFailedOldWatch = false;
+window.__tokenRestartWatchReplied = false;
 
 function tokenRestartSnapshot() {
     return {
@@ -531,41 +566,36 @@ window.addEventListener("message", function (event) {
         });
         return;
     }
-    if (message.method === "ui/update-model-context") {
-        reply({});
-        return;
-    }
+    if (message.method === "ui/update-model-context") { reply({}); return; }
     if (message.method !== "tools/call") return;
     var call = message.params || {};
     window.__tokenRestartCalls.push(call);
-    if (call.name === "workspace_reconnect") {
-        window.__tokenRestartReconnects += 1;
+    if (call.name === "workspace_reconnect" || call.name === "workspace_snapshot") {
+        if (call.arguments.token !== "token-stable") {
+            reject("Workspace App authorization is invalid for the current Context.");
+            return;
+        }
         reply({
-            _meta: { "portable-devshell/workspace": { token: window.__tokenRestartReconnects === 1 ? "token-old" : "token-new" } },
+            _meta: { "portable-devshell/workspace": { token: "token-stable" } },
             structuredContent: tokenRestartSnapshot()
         });
         return;
     }
     if (call.name === "workspace_watch") {
-        if (call.arguments.token === "token-old" && !window.__tokenRestartFailedOldWatch) {
-            window.__tokenRestartFailedOldWatch = true;
+        if (call.arguments.token !== "token-stable") {
             reject("Workspace App authorization is invalid for the current Context.");
             return;
         }
-        reply({ structuredContent: { changed: false, cursor: 1, snapshot: tokenRestartSnapshot() } });
-        return;
-    }
-    if (call.name === "workspace_snapshot") {
-        reply({
-            _meta: { "portable-devshell/workspace": { token: "token-new" } },
-            structuredContent: tokenRestartSnapshot()
-        });
+        if (!window.__tokenRestartWatchReplied) {
+            window.__tokenRestartWatchReplied = true;
+            reply({ structuredContent: { changed: false, cursor: 1, snapshot: tokenRestartSnapshot() } });
+        }
     }
 });
 `;
 
 
-test("Workspace ignores a stale initial tool-result token after live reconnect succeeds", BROWSER_TEST_OPTIONS, async (t) => {
+test("Workspace waits for a delayed initial capability instead of minting reconnect authorization", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
 
@@ -579,16 +609,19 @@ test("Workspace ignores a stale initial tool-result token after live reconnect s
     }, workspaceAppHtml);
 
     const app = page.frameLocator("#workspace");
-    await app.getByText("Continue after reconnect?", { exact: true }).waitFor({ state: "visible" });
-    await page.waitForFunction("(window.__lateInitialCalls || []).some(call => call.name === 'workspace_reconnect')");
+    await page.waitForTimeout(450);
+    assert.equal(await page.evaluate("(window.__lateInitialCalls || []).length"), 0);
+    await app.getByText("Waiting for Workspace authorization", { exact: true }).waitFor({ state: "visible" });
     assert.equal(await page.evaluate("window.__deliverLateInitialResult()"), true);
+    await page.waitForFunction("(window.__lateInitialCalls || []).some(call => call.name === 'workspace_reconnect' && call.arguments.token === 'token-initial')");
+    await app.getByText("Continue after reconnect?", { exact: true }).waitFor({ state: "visible" });
     await app.getByRole("button", { name: "Continue", exact: true }).click();
     await page.waitForFunction("(window.__lateInitialCalls || []).some(call => call.name === 'workspace_question_answer')");
 
     const answerToken = await page.evaluate(
         "(window.__lateInitialCalls || []).find(call => call.name === 'workspace_question_answer')?.arguments?.token",
     );
-    assert.equal(answerToken, "token-new");
+    assert.equal(answerToken, "token-initial");
     await app.getByText("Continue after reconnect?", { exact: true }).waitFor({ state: "hidden" });
 });
 
@@ -619,7 +652,7 @@ window.__deliverLateInitialResult = function () {
         jsonrpc: "2.0",
         method: "ui/notifications/tool-result",
         params: {
-            _meta: { "portable-devshell/workspace": { token: "token-old" } },
+            _meta: { "portable-devshell/workspace": { token: "token-initial" } },
             content: [{ type: "text", text: "portable-devshell Workspace opened." }],
             structuredContent: { ctxId: "ctx-late-initial", instance: "browser-instance" }
         }
@@ -653,12 +686,16 @@ window.addEventListener("message", function (event) {
     var call = message.params || {};
     window.__lateInitialCalls.push(call);
     if (call.name === "workspace_reconnect" || call.name === "workspace_snapshot") {
-        reply({ _meta: { "portable-devshell/workspace": { token: "token-new" } }, structuredContent: lateInitialSnapshot() });
+        if (call.arguments.token !== "token-initial") {
+            reject("Workspace App authorization is invalid for the current Context.");
+            return;
+        }
+        reply({ _meta: { "portable-devshell/workspace": { token: "token-initial" } }, structuredContent: lateInitialSnapshot() });
         return;
     }
     if (call.name === "workspace_watch") return;
     if (call.name === "workspace_question_answer") {
-        if (call.arguments.token !== "token-new") {
+        if (call.arguments.token !== "token-initial") {
             reject("Workspace App authorization is invalid for the current Context.");
             return;
         }

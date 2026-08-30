@@ -10,6 +10,7 @@ import { McpContextRegistry } from "../context/McpContextRegistry.js";
 import { createMcpContextSelector } from "../context/McpContextSelector.js";
 import type { McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import type { McpTool } from "../tool/McpToolSchemaAdapter.js";
+import type { WorkspaceAppLeaseStore } from "../workspace/WorkspaceAppLeaseStore.js";
 import { McpEndpointCatalog } from "./McpEndpointCatalog.js";
 import type { McpEndpointResult } from "./McpEndpointResult.js";
 import {
@@ -33,6 +34,7 @@ export interface McpEndpointWorkerOptions {
     policy: ToolPolicy;
     readyWaitMs?: number;
     worker: McpEndpointWorkerPort;
+    workspaceAppLeases?: WorkspaceAppLeaseStore;
 }
 
 export class McpEndpointWorker {
@@ -58,7 +60,8 @@ export class McpEndpointWorker {
             gateway: options.gateway,
             instanceName: options.instanceName,
             readyWaitMs: options.readyWaitMs,
-            worker: options.worker
+            worker: options.worker,
+            workspaceAppLeases: options.workspaceAppLeases
         });
         this.#instanceName = options.instanceName;
         this.#worker = options.worker;

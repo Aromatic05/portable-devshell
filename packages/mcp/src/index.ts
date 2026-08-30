@@ -14,3 +14,5 @@ export type {
     McpInstanceGateway,
     McpSshInstanceCreateInput
 } from "./instance/McpInstanceGateway.js";
+
+export * from "./workspace/WorkspaceAppLeaseStore.js";

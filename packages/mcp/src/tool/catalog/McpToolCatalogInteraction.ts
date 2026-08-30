@@ -124,11 +124,12 @@ export class McpToolCatalogInteraction {
         },
         {
             _meta: appOnlyMeta,
-            description: "Re-establish the Workspace App lifecycle after a remount or transport reconnect. App-only helper; models should not call it.",
+            description: "Re-establish the Workspace App lifecycle after a remount or MCP restart by presenting the existing App capability. App-only helper; models should not call it.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
-                properties: {},
+                properties: { token: { minLength: 1, type: "string" } },
+                required: ["token"],
                 type: "object"
             },
             name: "workspace_reconnect",

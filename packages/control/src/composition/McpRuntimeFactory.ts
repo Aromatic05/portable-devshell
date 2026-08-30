@@ -20,7 +20,7 @@ export class McpRuntimeFactory {
     wire(
         config: ControlConfig,
         registry: InstanceRegistry,
-        options?: { contextFile?: string; gateway?: McpInstanceGateway; storageDir?: string }
+        options?: { contextFile?: string; gateway?: McpInstanceGateway; storageDir?: string; workspaceAppLeaseFile?: string }
     ): McpHost | undefined {
         if (!config.mcp.enabled) {
             return undefined;
@@ -44,7 +44,8 @@ export class McpRuntimeFactory {
             listenPort: config.mcp.listenPort,
             publicBaseUrl: config.mcp.publicBaseUrl,
             serverVersion: this.#serverVersion ?? resolveApplicationVersion(),
-            storageDir: options?.storageDir
+            storageDir: options?.storageDir,
+            workspaceAppLeaseFile: options?.workspaceAppLeaseFile
         });
     }
 }

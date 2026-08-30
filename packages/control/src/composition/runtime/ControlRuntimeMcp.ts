@@ -68,7 +68,8 @@ export class ControlRuntimeMcp {
         this.#host = factory.wire(options.state.requireConfig(), options.state.instances, {
             contextFile: options.controlPaths.contextsFile,
             gateway: decorateMcpInstanceGatewayArtifact(this.instanceGateway, options.artifact.service),
-            storageDir: options.controlPaths.oauthDir
+            storageDir: options.controlPaths.oauthDir,
+            workspaceAppLeaseFile: options.controlPaths.workspaceAppLeasesFile
         });
         if (config.web.enabled) {
             this.#webPublicBaseUrl = config.web.publicBaseUrl;
@@ -114,7 +115,8 @@ export class ControlRuntimeMcp {
         const next = this.#factory.wire(config, this.#state.instances, {
             contextFile: this.#controlPaths.contextsFile,
             gateway: decorateMcpInstanceGatewayArtifact(this.instanceGateway, this.#artifact.service),
-            storageDir: this.#controlPaths.oauthDir
+            storageDir: this.#controlPaths.oauthDir,
+            workspaceAppLeaseFile: this.#controlPaths.workspaceAppLeasesFile
         });
         const previous = this.#host;
         const sameEndpointAsPrevious = previous !== undefined && sameEndpoint(previousConfig.mcp, config.mcp);

@@ -6,6 +6,7 @@ import { McpOAuthProtectedResource } from "../auth/oauth/McpOAuthProtectedResour
 import type { McpOAuthApprovalService } from "../auth/oauth/McpOAuthApprovalService.js";
 import { McpEndpointBinding } from "../endpoint/McpEndpointBinding.js";
 import { McpEndpointWorker } from "../endpoint/McpEndpointWorker.js";
+import { WorkspaceAppLeaseStore } from "../workspace/WorkspaceAppLeaseStore.js";
 import { HttpHost } from "./HttpHost.js";
 import { McpHostRouteRegistry } from "./route/McpHostRouteRegistry.js";
 
@@ -59,6 +60,7 @@ export interface McpHostConfig {
     publicBaseUrl?: string;
     serverVersion?: string;
     storageDir?: string;
+    workspaceAppLeaseFile?: string;
 }
 
 export class McpHost {
@@ -69,11 +71,13 @@ export class McpHost {
     readonly #registry = new McpHostRouteRegistry();
     readonly #gateways = new Map<string, McpInstanceGateway | undefined>();
     readonly #workers = new Map<string, WorkerInstanceLike>();
+    readonly #workspaceAppLeases: WorkspaceAppLeaseStore;
     #started = false;
 
     constructor(config: McpHostConfig) {
         this.#config = config;
         this.#contextRegistry = new McpContextRegistry({ filePath: config.contextFile });
+        this.#workspaceAppLeases = new WorkspaceAppLeaseStore({ filePath: config.workspaceAppLeaseFile });
         const configuredOAuth = oauthConfig(config.instances);
         this.#oauth =
             config.publicBaseUrl !== undefined && config.storageDir !== undefined
@@ -102,6 +106,7 @@ export class McpHost {
             throw new Error("mcp.publicBaseUrl and storageDir are required when an instance uses oauth2 auth");
         }
         await this.#contextRegistry.initialize();
+        await this.#workspaceAppLeases.initialize();
         await this.#oauth?.warmup();
         for (const binding of this.#registry.list()) {
             this.#httpServer.registerBinding(binding.path, binding.binding, binding.auth);
@@ -126,7 +131,8 @@ export class McpHost {
                 gateway: instance.gateway,
                 policy: instance.policy,
                 instanceName: instance.name,
-                worker: instance.worker
+                worker: instance.worker,
+                workspaceAppLeases: this.#workspaceAppLeases
             }),
             this.#config.serverVersion,
             this.#config.publicBaseUrl,
@@ -175,9 +181,13 @@ export class McpHost {
         validateForInstance(ctxId: string, instance: string): Promise<McpContextRecord>;
     } {
         return {
-            detachInstance: async (instance) => await this.#contextRegistry.detachInstance(instance),
+            detachInstance: async (instance) => {
+                await this.#workspaceAppLeases.revokeInstance(instance);
+                return await this.#contextRegistry.detachInstance(instance);
+            },
             disable: async (ctxId) => {
                 const disabled = await this.#contextRegistry.disable(ctxId);
+                await this.#workspaceAppLeases.revokeContext(ctxId);
                 const contexts = await this.#contextRegistry.list();
                 const now = Date.now();
                 const reconciledInstances = new Set<string>();

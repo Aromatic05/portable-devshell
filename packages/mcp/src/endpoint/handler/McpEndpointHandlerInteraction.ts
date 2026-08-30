@@ -21,6 +21,7 @@ import {
     type McpInteractionGateway
 } from "../../instance/McpInstanceGateway.js";
 import type { McpToolCatalogInteractionName } from "../../tool/catalog/McpToolCatalogInteraction.js";
+import { WorkspaceAppLeaseStore } from "../../workspace/WorkspaceAppLeaseStore.js";
 import { throwIfMcpEndpointAborted, waitForMcpEndpointAbortable } from "../McpEndpointCancellation.js";
 import { McpNativeToolResult, type McpEndpointResult } from "../McpEndpointResult.js";
 
@@ -28,6 +29,7 @@ export class McpEndpointHandlerInteraction {
     readonly #appStates = new Map<string, { lastSeenAt?: number; token: string }>();
     readonly #appReadyWaiters = new Map<string, Set<() => void>>();
     readonly #activeAppWatches = new Map<string, number>();
+    readonly #appLeases: WorkspaceAppLeaseStore;
 
     constructor(private readonly options: {
         gateway?: McpInstanceGateway;
@@ -37,7 +39,10 @@ export class McpEndpointHandlerInteraction {
         watchPollMs?: number;
         workspaceActivationGraceMs?: number;
         workspaceLivenessMs?: number;
-    }) {}
+        workspaceAppLeases?: WorkspaceAppLeaseStore;
+    }) {
+        this.#appLeases = options.workspaceAppLeases ?? new WorkspaceAppLeaseStore();
+    }
 
     async call(
         toolName: McpToolCatalogInteractionName,
@@ -53,36 +58,36 @@ export class McpEndpointHandlerInteraction {
             case "workspace_goal":
                 return await this.#manageGoal(input, context);
             case "workspace_open":
-                return this.#openWorkspace(context);
+                return await this.#openWorkspace(context);
             case "workspace_reconnect":
-                return await this.#reconnectWorkspace(gateway, context);
+                return await this.#reconnectWorkspace(gateway, input, context);
             case "workspace_snapshot":
                 return await this.#readWorkspace(gateway, input, context);
             case "workspace_watch":
                 return await this.#watchWorkspace(gateway, input, context, signal);
             case "workspace_question_answer":
-                this.#assertAppToken(input, context);
+                await this.#assertAppToken(input, context);
                 return await this.#answerQuestion(gateway, input, context);
             case "workspace_wait_interrupt":
-                this.#assertAppToken(input, context);
+                await this.#assertAppToken(input, context);
                 return await this.#interruptWait(gateway, input, context);
             case "workspace_task_control":
-                this.#assertAppToken(input, context);
+                await this.#assertAppToken(input, context);
                 return await this.#controlTask(gateway, input, context);
             case "workspace_wait_recover":
-                this.#assertAppToken(input, context);
+                await this.#assertAppToken(input, context);
                 return await this.#recoverWait(gateway, input, context);
             case "workspace_goal_continue":
-                this.#assertAppToken(input, context);
+                await this.#assertAppToken(input, context);
                 return await this.#continueGoal(gateway, input, context);
             case "workspace_goal_resume":
-                this.#assertAppToken(input, context);
+                await this.#assertAppToken(input, context);
                 return await this.#resumeGoal(input, context);
             case "workspace_goal_stop":
-                this.#assertAppToken(input, context);
+                await this.#assertAppToken(input, context);
                 return await this.#stopGoal(input, context);
             case "workspace_approval_decide":
-                this.#assertAppToken(input, context);
+                await this.#assertAppToken(input, context);
                 return await this.#decideApproval(gateway, input, context);
         }
     }
@@ -146,8 +151,10 @@ export class McpEndpointHandlerInteraction {
         return { answer, questionId };
     }
 
-    #openWorkspace(context: ToolCallContext): McpNativeToolResult {
+    async #openWorkspace(context: ToolCallContext): Promise<McpNativeToolResult> {
         const ctxId = requireCtxId(context);
+        const token = await this.#appLeases.issue(this.options.instanceName, ctxId);
+        this.#appStates.set(ctxId, { token });
         return this.#workspaceResult(ctxId, {
             ctxId,
             instance: this.options.instanceName,
@@ -228,15 +235,17 @@ export class McpEndpointHandlerInteraction {
         context: ToolCallContext,
     ): Promise<McpNativeToolResult> {
         const ctxId = requireCtxId(context);
-        this.#assertAppToken(input, context);
+        await this.#assertAppToken(input, context);
         return this.#workspaceResult(ctxId, await this.#snapshot(gateway, context));
     }
 
     async #reconnectWorkspace(
         gateway: McpInteractionGateway,
+        input: JsonValue,
         context: ToolCallContext,
     ): Promise<McpNativeToolResult> {
         const ctxId = requireCtxId(context);
+        await this.#assertAppToken(input, context);
         return this.#workspaceResult(ctxId, await this.#snapshot(gateway, context));
     }
 
@@ -250,7 +259,7 @@ export class McpEndpointHandlerInteraction {
             throw new Error(`Workspace live events are unavailable for ${this.options.instanceName}.`);
         }
         const ctxId = requireCtxId(context);
-        this.#assertAppToken(input, context);
+        await this.#assertAppToken(input, context);
         const startedAt = Date.now();
         const heartbeatMs = this.options.watchHeartbeatMs ?? 20_000;
         const pollMs = this.options.watchPollMs ?? 250;
@@ -287,16 +296,14 @@ export class McpEndpointHandlerInteraction {
         structuredContent: JsonValue,
         content: McpNativeToolResult["content"] = [],
         markAppSeen = true,
-        rotateToken = false,
     ): McpNativeToolResult {
         const existing = this.#appStates.get(ctxId);
-        const token = rotateToken || existing === undefined ? randomUUID() : existing.token;
-        this.#appStates.set(ctxId, {
-            ...(markAppSeen ? { lastSeenAt: (this.options.now ?? Date.now)() } : {}),
-            token,
-        });
+        if (existing === undefined) {
+            throw new Error("Workspace App authorization is unavailable for the current Context.");
+        }
+        if (markAppSeen) existing.lastSeenAt = (this.options.now ?? Date.now)();
         return new McpNativeToolResult({
-            _meta: { "portable-devshell/workspace": { token } },
+            _meta: { "portable-devshell/workspace": { token: existing.token } },
             content,
             structuredContent,
         });
@@ -619,13 +626,21 @@ export class McpEndpointHandlerInteraction {
         } as unknown as JsonValue;
     }
 
-    #assertAppToken(input: JsonValue, context: ToolCallContext): void {
+    async #assertAppToken(input: JsonValue, context: ToolCallContext): Promise<void> {
         const ctxId = requireCtxId(context);
         const record = asRecord(input);
         const token = record === undefined ? undefined : record.token;
-        if (typeof token !== "string" || token !== this.#appStates.get(ctxId)?.token) {
+        if (
+            typeof token !== "string" || token.length === 0 ||
+            !await this.#appLeases.verify(this.options.instanceName, ctxId, token)
+        ) {
             throw new Error("Workspace App authorization is invalid for the current Context.");
         }
+        const existing = this.#appStates.get(ctxId);
+        this.#appStates.set(ctxId, {
+            ...(existing?.lastSeenAt === undefined ? {} : { lastSeenAt: existing.lastSeenAt }),
+            token,
+        });
     }
 }
 

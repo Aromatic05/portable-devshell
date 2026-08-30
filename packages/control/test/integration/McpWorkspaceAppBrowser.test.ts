@@ -666,27 +666,38 @@ test("Workspace remount follows current ChatGPT tool output and falls back to wi
     }, { html: workspaceAppHtml, globals });
 
     await mount(`{
-        widgetState: { portableDevshellWorkspace: { ctxId: "ctx-widget-stale" } },
-        toolResponseMetadata: { mcp_tool_result: { structuredContent: { ctxId: "ctx-stale" } } },
+        widgetState: {
+            modelContent: null,
+            privateContent: { portableDevshellWorkspace: { ctxId: "ctx-widget-stale", token: "stale-token" } },
+            imageIds: []
+        },
+        toolResponseMetadata: { mcp_tool_result: {
+            _meta: { "portable-devshell/workspace": { token: "current-token" } },
+            structuredContent: { ctxId: "ctx-stale" }
+        } },
         toolOutput: { ctxId: "ctx-current" },
         setWidgetState: function (state) {
             this.widgetState = state;
         }
     }`);
-    await page.waitForFunction("(window.__remountCalls || []).some(call => (call.name === 'workspace_snapshot' || call.name === 'workspace_reconnect') && call.arguments.ctxId === 'ctx-current')");
+    await page.waitForFunction("(window.__remountCalls || []).some(call => (call.name === 'workspace_snapshot' || call.name === 'workspace_reconnect') && call.arguments.ctxId === 'ctx-current' && call.arguments.token === 'current-token')");
     await page.waitForTimeout(100);
     const currentFrame = page.frames().find((frame) => frame !== page.mainFrame());
     assert.equal(
-        await currentFrame?.evaluate("window.openai.widgetState.portableDevshellWorkspace.ctxId"),
+        await currentFrame?.evaluate("window.openai.widgetState.privateContent.portableDevshellWorkspace.ctxId"),
         "ctx-current"
     );
 
     await page.evaluate("window.__remountCalls = []");
     await mount(`{
-        widgetState: { portableDevshellWorkspace: { ctxId: "ctx-widget-only" } },
+        widgetState: {
+            modelContent: null,
+            privateContent: { portableDevshellWorkspace: { ctxId: "ctx-widget-only", token: "widget-token" } },
+            imageIds: []
+        },
         setWidgetState: function (state) { this.widgetState = state; }
     }`);
-    await page.waitForFunction("(window.__remountCalls || []).some(call => (call.name === 'workspace_snapshot' || call.name === 'workspace_reconnect') && call.arguments.ctxId === 'ctx-widget-only')");
+    await page.waitForFunction("(window.__remountCalls || []).some(call => (call.name === 'workspace_snapshot' || call.name === 'workspace_reconnect') && call.arguments.ctxId === 'ctx-widget-only' && call.arguments.token === 'widget-token')");
     assert.equal(await page.evaluate("(window.__remountCalls || []).some(call => call.arguments.ctxId === 'ctx-stale')"), false);
 });
 
@@ -741,8 +752,9 @@ window.addEventListener("message", function (event) {
     var call = message.params || {};
     window.__remountCalls.push(call);
     if (call.name === "workspace_snapshot" || call.name === "workspace_reconnect") {
+        if (!call.arguments.token) return;
         reply({
-            _meta: { "portable-devshell/workspace": { token: "remount-token" } },
+            _meta: { "portable-devshell/workspace": { token: call.arguments.token } },
             structuredContent: {
                 activity: [], approvals: [], background: [], currentEvent: null, questions: [], tasks: [], waits: [],
                 contextSelector: { requiresExplicitContextId: true },
@@ -896,6 +908,15 @@ window.addEventListener("message", function (event) {
             jsonrpc: "2.0",
             method: "ui/notifications/tool-input",
             params: { arguments: { ctxId: "ctx-browser" } }
+        }, "*");
+        source.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-result",
+            params: {
+                _meta: { "portable-devshell/workspace": { token: "browser-secret-token" } },
+                content: [{ type: "text", text: "portable-devshell Workspace opened." }],
+                structuredContent: { ctxId: "ctx-browser", instance: "browser-instance" }
+            }
         }, "*");
         reply({
             hostCapabilities: {},
@@ -1305,6 +1326,15 @@ window.addEventListener("message", function (event) {
             method: "ui/notifications/tool-input",
             params: { arguments: { ctxId: "ctx-recovery" } }
         }, "*");
+        source.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-result",
+            params: {
+                _meta: { "portable-devshell/workspace": { token: "recovery-secret-token" } },
+                content: [{ type: "text", text: "portable-devshell Workspace opened." }],
+                structuredContent: { ctxId: "ctx-recovery", instance: "browser-instance" }
+            }
+        }, "*");
         reply({
             hostCapabilities: {},
             hostContext: {},
@@ -1431,6 +1461,15 @@ window.addEventListener("message", function (event) {
             jsonrpc: "2.0",
             method: "ui/notifications/tool-input",
             params: { arguments: { ctxId: "ctx-resume" } }
+        }, "*");
+        source.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-result",
+            params: {
+                _meta: { "portable-devshell/workspace": { token: "resume-secret-token" } },
+                content: [{ type: "text", text: "portable-devshell Workspace opened." }],
+                structuredContent: { ctxId: "ctx-resume", instance: "browser-instance" }
+            }
         }, "*");
         reply({
             hostCapabilities: {},
@@ -1567,6 +1606,15 @@ window.addEventListener("message", function (event) {
             jsonrpc: "2.0",
             method: "ui/notifications/tool-input",
             params: { arguments: { ctxId: "ctx-detached" } }
+        }, "*");
+        source.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-result",
+            params: {
+                _meta: { "portable-devshell/workspace": { token: "detached-secret-token" } },
+                content: [{ type: "text", text: "portable-devshell Workspace opened." }],
+                structuredContent: { ctxId: "ctx-detached", instance: "browser-instance" }
+            }
         }, "*");
         reply({
             hostCapabilities: {},
