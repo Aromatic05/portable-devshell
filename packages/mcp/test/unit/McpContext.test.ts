@@ -72,44 +72,52 @@ test("McpContextRegistry persists active contexts and renews their sliding expir
     }
 });
 
-test("McpContextRegistry detaches deleted instances and disables Contexts with no environments left", async () => {
+test("McpContextRegistry persists detached instance environments across restart", async () => {
+    const root = await createTestTempDirectory("context-detach-instance");
+    const filePath = join(root, "contexts.json");
     const ids = ["ctx-single-env", "ctx-multi-env"];
-    const registry = new McpContextRegistry({ idFactory: () => ids.shift() ?? "ctx-unexpected" });
-    await registry.initialize();
-    const single = await registry.create({
-        instance: "alpha",
-        principal: "subject",
-        workspace: "/alpha/single",
-    });
-    const multi = await registry.create({
-        instance: "alpha",
-        principal: "subject",
-        workspace: "/alpha/multi",
-    });
-    await registry.attachEnvironment(multi.ctxId, {
-        instance: "beta",
-        workspace: "/beta/multi",
-    });
+    try {
+        const registry = new McpContextRegistry({ filePath, idFactory: () => ids.shift() ?? "ctx-unexpected" });
+        await registry.initialize();
+        const single = await registry.create({
+            instance: "alpha",
+            principal: "subject",
+            workspace: "/alpha/single",
+        });
+        const multi = await registry.create({
+            instance: "alpha",
+            principal: "subject",
+            workspace: "/alpha/multi",
+        });
+        await registry.attachEnvironment(multi.ctxId, {
+            instance: "beta",
+            workspace: "/beta/multi",
+        });
 
-    const detached = await registry.detachInstance("alpha");
+        const detached = await registry.detachInstance("alpha");
+        assert.deepEqual(detached.map((record) => record.ctxId).sort(), [multi.ctxId, single.ctxId].sort());
 
-    assert.deepEqual(detached.map((record) => record.ctxId).sort(), [multi.ctxId, single.ctxId].sort());
-    const singleAfter = await registry.lookup(single.ctxId, { principal: "subject" });
-    assert.equal(singleAfter.status, "disabled");
-    assert.deepEqual(singleAfter.environments, []);
-    const multiAfter = await registry.lookup(multi.ctxId, { principal: "subject" });
-    assert.equal(multiAfter.status, "active");
-    assert.deepEqual(multiAfter.environments, [{
-        instance: "beta",
-        temporaryDirectory: undefined,
-        workspace: "/beta/multi",
-    }]);
-    await assert.rejects(
-        registry.validateForInstance(multi.ctxId, "alpha"),
-        hasCode("mcp.contextInvalid"),
-    );
-    assert.equal((await registry.validateForInstance(multi.ctxId, "beta")).ctxId, multi.ctxId);
-    assert.deepEqual(await registry.detachInstance("missing"), []);
+        const reloaded = new McpContextRegistry({ filePath });
+        await reloaded.initialize();
+        const singleAfter = await reloaded.lookup(single.ctxId, { principal: "subject" });
+        assert.equal(singleAfter.status, "disabled");
+        assert.deepEqual(singleAfter.environments, []);
+        const multiAfter = await reloaded.lookup(multi.ctxId, { principal: "subject" });
+        assert.equal(multiAfter.status, "active");
+        assert.deepEqual(multiAfter.environments, [{
+            instance: "beta",
+            temporaryDirectory: undefined,
+            workspace: "/beta/multi",
+        }]);
+        await assert.rejects(
+            reloaded.validateForInstance(multi.ctxId, "alpha"),
+            hasCode("mcp.contextInvalid"),
+        );
+        assert.equal((await reloaded.validateForInstance(multi.ctxId, "beta")).ctxId, multi.ctxId);
+        assert.deepEqual(await reloaded.detachInstance("missing"), []);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
 });
 
 test("McpContextRegistry keeps external bindings private and does not retire the previous Context", async () => {

@@ -848,8 +848,9 @@ function parseRecord(value: unknown): McpContextStoredRecord | undefined {
     ) {
         return undefined;
     }
-    const environments = Array.isArray(record.environments)
-        ? record.environments.map(parseEnvironment)
+    const hasStoredEnvironments = Array.isArray(record.environments);
+    const environments = hasStoredEnvironments
+        ? record.environments!.map(parseEnvironment)
         : [];
     if (environments.some((environment) => environment === undefined)) {
         return undefined;
@@ -858,11 +859,13 @@ function parseRecord(value: unknown): McpContextStoredRecord | undefined {
     for (const environment of environments as McpContextEnvironment[]) {
         byInstance.set(environment.instance, environment);
     }
-    byInstance.set(record.instance, {
-        instance: record.instance,
-        temporaryDirectory: record.temporaryDirectory,
-        workspace: record.workspace,
-    });
+    if (!hasStoredEnvironments) {
+        byInstance.set(record.instance, {
+            instance: record.instance,
+            temporaryDirectory: record.temporaryDirectory,
+            workspace: record.workspace,
+        });
+    }
     return {
         createdAt: record.createdAt,
         ctxId: record.ctxId,
