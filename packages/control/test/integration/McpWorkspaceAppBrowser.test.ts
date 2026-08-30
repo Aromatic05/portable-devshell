@@ -533,6 +533,10 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
     await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
 
+    const completedMessage = String(await page.evaluate("(window.__modelMessages || [])[0]?.content?.[0]?.text || ''"));
+    assert.match(completedMessage, /tmux task tmux-recovery finished while detached/u);
+    assert.match(completedMessage, /status 0/u);
+
     const firstEvents = await page.evaluate("window.__bridgeEvents || []") as string[];
     const firstMessage = firstEvents.indexOf("message");
     assert.equal(firstMessage > 0 && firstEvents[firstMessage - 1] === "context", true);
@@ -554,6 +558,28 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     assert.equal(recoverCalls[2]?.arguments?.claimId, "recovery-claim");
     assert.equal(recoverCalls[3]?.arguments?.action, "complete");
     assert.equal(recoverCalls[3]?.arguments?.claimId, "recovery-claim");
+});
+
+test("Workspace wake message explains a detached tmux wait deadline", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
+    await page.evaluate(RECOVERY_BRIDGE_SCRIPT);
+    await page.evaluate(() => {
+        (window as typeof window & { __recoveryTimedOut: boolean }).__recoveryTimedOut = true;
+    });
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    await page.waitForFunction("(window.__modelMessages || []).length === 1");
+    const message = String(await page.evaluate("(window.__modelMessages || [])[0]?.content?.[0]?.text || ''"));
+    assert.match(message, /wait deadline elapsed for tmux task tmux-recovery/u);
+    assert.match(message, /task is still running/u);
 });
 
 test("Workspace Goal recovers a resolved detached wait without Todo", BROWSER_TEST_OPTIONS, async (t) => {
@@ -618,10 +644,9 @@ test("Workspace Stop waiting resumes the agent after a detached tmux wait", BROW
     await app.getByText("Stop waiting", { exact: true }).click();
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_wait_interrupt')");
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    assert.match(
-        String(await page.evaluate("(window.__modelMessages || [])[0]?.content?.[0]?.text || ''")),
-        /Do not repeat completed work or restart the original command/u,
-    );
+    const interruptedMessage = String(await page.evaluate("(window.__modelMessages || [])[0]?.content?.[0]?.text || ''"));
+    assert.match(interruptedMessage, /user stopped waiting for tmux task tmux-resume/u);
+    assert.match(interruptedMessage, /tmux task was not stopped/u);
     await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
     const recoveryActions = await page.evaluate(
         "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)",
@@ -645,6 +670,9 @@ test("Workspace re-enters after a detached answer without surfacing detached tmu
     const app = page.frameLocator("#workspace");
     await app.locator('[data-question-choice="wait-question-detached"]').click();
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
+    const answerMessage = String(await page.evaluate("(window.__modelMessages || [])[0]?.content?.[0]?.text || ''"));
+    assert.match(answerMessage, /user answered the pending Workspace question/u);
+    assert.match(answerMessage, /Continue/u);
     await app.getByText("Background task", { exact: true }).waitFor({ state: "visible" });
     assert.equal(await app.getByText("No blocking event.", { exact: true }).count(), 0);
     assert.equal(await app.getByRole("button", { name: "Resume agent", exact: true }).count(), 0);
@@ -1262,6 +1290,7 @@ window.__bridgeEvents = [];
 window.__recovered = false;
 window.__goalRecovery = false;
 window.__unassociatedRecovery = false;
+window.__recoveryTimedOut = false;
 
 function recoverySnapshot() {
     var goalMode = window.__goalRecovery;
@@ -1379,7 +1408,9 @@ window.addEventListener("message", function (event) {
                 claimId: "recovery-claim",
                 goalId: window.__goalRecovery ? "goal-recovery" : undefined,
                 kind: "tmux",
-                result: { task: { status: "0" } },
+                result: window.__recoveryTimedOut
+                    ? { task: { id: "tmux-recovery", status: "running" }, timedOut: true }
+                    : { task: { id: "tmux-recovery", status: "0" } },
                 taskId: window.__goalRecovery || window.__unassociatedRecovery ? undefined : "task-recovery",
                 targetId: "tmux-recovery",
                 waitId: "wait-recovery"

@@ -118,7 +118,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var WIDGET_STATE_KEY = "portableDevshellWorkspace";
   var LIVE_SNAPSHOT_TIMEOUT_MS = 5000;
   var LIVE_WATCH_TIMEOUT_MS = 30000;
-  var RESUME_MESSAGE = "Resume the existing portable-devshell work from the current Workspace state. Do not repeat completed work or restart the original command. Read the Workspace state and triggering result before acting. Reuse any existing tmux task instead of starting it again. For tmux waits, a timeout or user interruption ends only the wait and does not stop the task. If a blocked Workspace Goal can now proceed, call workspace_goal with action=resume before continuing.";
+  var RECOVERY_MESSAGE_SUFFIX = " Resume the existing portable-devshell work from the current Workspace state. Read the Workspace state and triggering result before acting. Do not repeat completed work. Reuse existing tmux tasks instead of restarting them. If a blocked Workspace Goal can now proceed, call workspace_goal with action=resume before continuing.";
   var bridgeReady = false;
   var pendingToolResult = null;
   var initialToolResultResolve = null;
@@ -245,6 +245,34 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
 
   function asRecord(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  }
+
+  function recoveryMessage(item) {
+    var result = asRecord(item && item.result) || {};
+    var task = asRecord(result.task) || {};
+    var taskId = String((item && item.targetId) || task.id || "the existing tmux task");
+    if (item && item.kind === "question") {
+      var answer = typeof result.answer === "string" ? result.answer : "";
+      if (answer.length > 500) answer = answer.slice(0, 500) + "…";
+      return "Workspace wake event: the user answered the pending Workspace question" +
+        (answer ? " with " + JSON.stringify(answer) : "") + "." + RECOVERY_MESSAGE_SUFFIX;
+    }
+    if (item && item.kind === "tmux") {
+      if (result.interrupted === true) {
+        return "Workspace wake event: the user stopped waiting for tmux task " + taskId +
+          "; the wait ended, but the tmux task was not stopped." + RECOVERY_MESSAGE_SUFFIX;
+      }
+      if (result.timedOut === true) {
+        return "Workspace wake event: wait deadline elapsed for tmux task " + taskId +
+          "; the task is still running." + RECOVERY_MESSAGE_SUFFIX;
+      }
+      if (task.status !== undefined && String(task.status) !== "running") {
+        return "Workspace wake event: tmux task " + taskId + " finished while detached with status " +
+          String(task.status) + ". Read its retained transcript/result before continuing." + RECOVERY_MESSAGE_SUFFIX;
+      }
+      return "Workspace wake event: the detached wait for tmux task " + taskId + " resolved." + RECOVERY_MESSAGE_SUFFIX;
+    }
+    return "Workspace wake event: a detached Workspace wait resolved." + RECOVERY_MESSAGE_SUFFIX;
   }
 
   function applyHostContext(context) {
@@ -541,7 +569,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return !!task && task.status !== "paused";
   }
 
-  async function dispatchRecovery(waitId, message, extra) {
+  async function dispatchRecovery(waitId, extra) {
     var claimed = structured(await callTool("workspace_wait_recover", { action: "claim", waitId: waitId }, true));
     var attempted = !!claimed.recoveryMessageAttemptedAt;
     var dispatched = false;
@@ -549,7 +577,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       dispatched = !!claimed.recoveryMessageSentAt;
       if (!dispatched) {
         dispatched = await sendModelMessage(
-          message,
+          recoveryMessage(claimed),
           Object.assign({}, extra || {}, {
             recoveredWait: claimed,
             recoveryMessageId: claimed.recoveryMessageId
@@ -610,7 +638,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     try {
       await dispatchRecovery(
         item.waitId,
-        RESUME_MESSAGE,
         { backgroundWait: item }
       );
       await refresh(false);
@@ -886,7 +913,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       try {
         await dispatchRecovery(
           result.waitId,
-          RESUME_MESSAGE,
           { answeredQuestion: result }
         );
         await refresh(false);

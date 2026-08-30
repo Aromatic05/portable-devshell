@@ -216,8 +216,11 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
         assert.match(String(read.body.result?.contents?.[0]?.text), /readLiveWatch/);
         assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /tmux\.task\.completed/);
         assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /Waiting for Workspace state/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /Do not repeat completed work or restart the original command/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /timeout or user interruption ends only the wait and does not stop the task/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /Workspace wake event:/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /wait deadline elapsed for tmux task/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /user stopped waiting for tmux task/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /user answered the pending Workspace question/);
+        assert.match(String(read.body.result?.contents?.[0]?.text), /Do not repeat completed work/);
         assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /A detached background wait completed/);
         assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /The user answered the detached question/);
         assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /Current tasks/);
