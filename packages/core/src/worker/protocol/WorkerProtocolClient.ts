@@ -210,15 +210,15 @@ export class WorkerProtocolClient {
         await this.#rpcClient.request("tool.session.close", { sessionId });
     }
 
-    async openArtifactPayload(input: WorkerArtifactPayloadOpenInput): Promise<WorkerArtifactPayloadOpenResult> {
+    async openArtifactPayload(input: WorkerArtifactPayloadOpenInput, signal?: AbortSignal): Promise<WorkerArtifactPayloadOpenResult> {
         return asObjectResult<WorkerArtifactPayloadOpenResult>(
-            await this.#rpcClient.request("artifact.payload.open", input as unknown as JsonValue)
+            await this.#rpcClient.request("artifact.payload.open", input as unknown as JsonValue, undefined, signal)
         );
     }
 
-    async readArtifactPayload(input: WorkerArtifactPayloadReadInput): Promise<WorkerArtifactPayloadReadResult> {
+    async readArtifactPayload(input: WorkerArtifactPayloadReadInput, signal?: AbortSignal): Promise<WorkerArtifactPayloadReadResult> {
         return asObjectResult<WorkerArtifactPayloadReadResult>(
-            await this.#rpcClient.request("artifact.payload.read", input as unknown as JsonValue)
+            await this.#rpcClient.request("artifact.payload.read", input as unknown as JsonValue, undefined, signal)
         );
     }
 
@@ -226,15 +226,15 @@ export class WorkerProtocolClient {
         await this.#rpcClient.request("artifact.payload.close", { payloadId });
     }
 
-    async beginArtifactReceive(input: WorkerArtifactReceiveBeginInput): Promise<WorkerArtifactReceiveBeginResult> {
+    async beginArtifactReceive(input: WorkerArtifactReceiveBeginInput, signal?: AbortSignal): Promise<WorkerArtifactReceiveBeginResult> {
         return asObjectResult<WorkerArtifactReceiveBeginResult>(
-            await this.#rpcClient.request("artifact.receive.begin", input as unknown as JsonValue)
+            await this.#rpcClient.request("artifact.receive.begin", input as unknown as JsonValue, undefined, signal)
         );
     }
 
-    async writeArtifactReceive(input: WorkerArtifactReceiveWriteInput): Promise<WorkerArtifactReceiveWriteResult> {
+    async writeArtifactReceive(input: WorkerArtifactReceiveWriteInput, signal?: AbortSignal): Promise<WorkerArtifactReceiveWriteResult> {
         return asObjectResult<WorkerArtifactReceiveWriteResult>(
-            await this.#rpcClient.request("artifact.receive.write", input as unknown as JsonValue)
+            await this.#rpcClient.request("artifact.receive.write", input as unknown as JsonValue, undefined, signal)
         );
     }
 
@@ -249,10 +249,11 @@ export class WorkerProtocolClient {
     }
 
     async openArtifactDirectReceive(
-        input: WorkerArtifactDirectReceiveOpenInput
+        input: WorkerArtifactDirectReceiveOpenInput,
+        signal?: AbortSignal
     ): Promise<WorkerArtifactDirectReceiveOpenResult> {
         return asObjectResult<WorkerArtifactDirectReceiveOpenResult>(
-            await this.#rpcClient.request("artifact.receive.direct.open", input as unknown as JsonValue)
+            await this.#rpcClient.request("artifact.receive.direct.open", input as unknown as JsonValue, undefined, signal)
         );
     }
 

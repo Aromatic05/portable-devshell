@@ -17,7 +17,7 @@ use crate::security::path::{
     FilesystemCapability, PathNamespace, ResolvedDirectory, ResolvedMetadata, ResolvedPath,
     parse_requested_path, resolve_existing_target,
 };
-use crate::tools::ToolError;
+use crate::tools::{ToolCancellation, ToolError};
 use crate::tools::artifact::storage;
 use crate::tools::artifact::store::{ArtifactLease, ArtifactStore};
 use crate::tools::artifact::types::ArtifactStream;
@@ -91,7 +91,7 @@ struct ArtifactPayloadMetadata {
     backing: ArtifactPayloadBacking,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct DirectoryEntry {
     relative_path: String,
     entry_type: DirectoryEntryType,
@@ -173,6 +173,7 @@ impl ArtifactPayloadStore {
         })
     }
 
+    #[cfg(test)]
     pub fn open_path(
         &self,
         workspace: &Path,
@@ -180,6 +181,24 @@ impl ArtifactPayloadStore {
         policy: &dyn SecurityPolicy,
         expires_at_ms: u128,
     ) -> Result<ArtifactPayloadOpenResult, ToolError> {
+        self.open_path_cancellable(
+            workspace,
+            raw_path,
+            policy,
+            expires_at_ms,
+            &ToolCancellation::default(),
+        )
+    }
+
+    pub fn open_path_cancellable(
+        &self,
+        workspace: &Path,
+        raw_path: &str,
+        policy: &dyn SecurityPolicy,
+        expires_at_ms: u128,
+        cancellation: &ToolCancellation,
+    ) -> Result<ArtifactPayloadOpenResult, ToolError> {
+        cancellation.check()?;
         validate_expiration(expires_at_ms)?;
         let requested = parse_requested_path(raw_path)?;
         let capability = match requested.namespace {
@@ -207,14 +226,29 @@ impl ArtifactPayloadStore {
             ));
         }
         let resolved = resolve_existing_target(workspace, &requested)?;
-        self.open_resolved_path(&resolved, expires_at_ms)
+        self.open_resolved_path_cancellable(&resolved, expires_at_ms, cancellation)
     }
 
+    #[cfg(test)]
     fn open_resolved_path(
         &self,
         resolved: &ResolvedPath,
         expires_at_ms: u128,
     ) -> Result<ArtifactPayloadOpenResult, ToolError> {
+        self.open_resolved_path_cancellable(
+            resolved,
+            expires_at_ms,
+            &ToolCancellation::default(),
+        )
+    }
+
+    fn open_resolved_path_cancellable(
+        &self,
+        resolved: &ResolvedPath,
+        expires_at_ms: u128,
+        cancellation: &ToolCancellation,
+    ) -> Result<ArtifactPayloadOpenResult, ToolError> {
+        cancellation.check()?;
         let metadata = resolved
             .metadata()
             .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
@@ -230,6 +264,7 @@ impl ArtifactPayloadStore {
                     .open_file()
                     .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?,
                 &resolved.canonical,
+                cancellation,
             )?
         } else if metadata.is_dir() {
             self.create_directory_payload(
@@ -238,6 +273,7 @@ impl ArtifactPayloadStore {
                     .open_directory()
                     .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?,
                 &resolved.canonical,
+                cancellation,
             )?
         } else {
             return Err(ToolError::new(
@@ -245,6 +281,7 @@ impl ArtifactPayloadStore {
                 "artifact source must be a regular file or directory",
             ));
         };
+        cancellation.check()?;
         let payload_metadata = ArtifactPayloadMetadata {
             version: METADATA_VERSION,
             payload_id: payload_id.clone(),
@@ -344,7 +381,9 @@ impl ArtifactPayloadStore {
         payload_id: &str,
         mut source: File,
         display_path: &Path,
+        cancellation: &ToolCancellation,
     ) -> Result<ArtifactPayloadDescriptor, ToolError> {
+        cancellation.check()?;
         let name = utf8_file_name(display_path)?;
         if !source
             .metadata()
@@ -357,7 +396,8 @@ impl ArtifactPayloadStore {
             ));
         }
         let mut temp = self.new_temp("payload-file-")?;
-        let (payload_bytes, payload_blake3) = copy_and_hash(&mut source, &mut temp)?;
+        let (payload_bytes, payload_blake3) =
+            copy_and_hash(&mut source, &mut temp, cancellation)?;
         temp.flush()
             .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
         temp.as_file()
@@ -382,9 +422,11 @@ impl ArtifactPayloadStore {
         payload_id: &str,
         source: ResolvedDirectory,
         display_path: &Path,
+        cancellation: &ToolCancellation,
     ) -> Result<ArtifactPayloadDescriptor, ToolError> {
+        cancellation.check()?;
         let source_name = utf8_file_name(display_path).unwrap_or_else(|_| "directory".to_string());
-        let entries = collect_directory_entries(&source)?;
+        let entries = collect_directory_entries(&source, cancellation)?;
         let mut temp = self.new_temp("payload-directory-")?;
         let mut manifest_hasher = blake3::Hasher::new();
         let mut logical_bytes = 0usize;
@@ -395,7 +437,14 @@ impl ArtifactPayloadStore {
             let mut archive = tar::Builder::new(encoder);
             archive.mode(tar::HeaderMode::Deterministic);
             for entry in &entries {
-                append_directory_entry(&source, &mut archive, entry, &mut manifest_hasher)?;
+                cancellation.check()?;
+                append_directory_entry(
+                    &source,
+                    &mut archive,
+                    entry,
+                    &mut manifest_hasher,
+                    cancellation,
+                )?;
                 if entry.entry_type == DirectoryEntryType::File {
                     logical_bytes = logical_bytes.saturating_add(entry.size as usize);
                 }
@@ -408,12 +457,21 @@ impl ArtifactPayloadStore {
                 .map_err(|error| ToolError::new("artifact.archiveFailed", error.to_string()))?;
         }
 
+        cancellation.check()?;
+        let final_entries = collect_directory_entries(&source, cancellation)?;
+        if final_entries != entries {
+            return Err(ToolError::new(
+                "artifact.directoryChanged",
+                "directory membership or metadata changed while it was archived",
+            ));
+        }
+
         temp.flush()
             .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
         temp.as_file()
             .sync_all()
             .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
-        let (payload_bytes, payload_blake3) = hash_file(temp.as_file_mut())?;
+        let (payload_bytes, payload_blake3) = hash_file(temp.as_file_mut(), cancellation)?;
         let manifest_blake3 = manifest_hasher.finalize().to_hex().to_string();
         temp.persist(self.data_path(payload_id))
             .map_err(|error| ToolError::new("artifact.storageFailed", error.error.to_string()))?;
@@ -539,9 +597,13 @@ fn descriptor_from_lease(lease: &ArtifactLease) -> ArtifactPayloadDescriptor {
     }
 }
 
-fn collect_directory_entries(root: &ResolvedDirectory) -> Result<Vec<DirectoryEntry>, ToolError> {
+fn collect_directory_entries(
+    root: &ResolvedDirectory,
+    cancellation: &ToolCancellation,
+) -> Result<Vec<DirectoryEntry>, ToolError> {
+    cancellation.check()?;
     let mut entries = Vec::new();
-    collect_directory_entries_from(root, Path::new(""), &mut entries)?;
+    collect_directory_entries_from(root, Path::new(""), &mut entries, cancellation)?;
     entries.sort_by(|left, right| {
         left.relative_path
             .as_bytes()
@@ -554,7 +616,9 @@ fn collect_directory_entries_from(
     root: &ResolvedDirectory,
     current: &Path,
     entries: &mut Vec<DirectoryEntry>,
+    cancellation: &ToolCancellation,
 ) -> Result<(), ToolError> {
+    cancellation.check()?;
     let directory = root
         .open_directory(current)
         .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
@@ -563,6 +627,7 @@ fn collect_directory_entries_from(
         .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
     children.sort_by(|left, right| os_sort_key(left).cmp(&os_sort_key(right)));
     for name in children {
+        cancellation.check()?;
         let relative = current.join(&name);
         let metadata = root
             .metadata(&relative, false)
@@ -601,7 +666,7 @@ fn collect_directory_entries_from(
             size,
         });
         if entry_type == DirectoryEntryType::Directory {
-            collect_directory_entries_from(root, &relative, entries)?;
+            collect_directory_entries_from(root, &relative, entries, cancellation)?;
         }
     }
     Ok(())
@@ -612,7 +677,9 @@ fn append_directory_entry<W: Write>(
     archive: &mut tar::Builder<W>,
     entry: &DirectoryEntry,
     manifest_hasher: &mut blake3::Hasher,
+    cancellation: &ToolCancellation,
 ) -> Result<(), ToolError> {
+    cancellation.check()?;
     let mut header = tar::Header::new_gnu();
     header.set_uid(0);
     header.set_gid(0);
@@ -644,15 +711,31 @@ fn append_directory_entry<W: Write>(
                     ),
                 ));
             }
-            let (_, content_blake3) = hash_file(&mut file)?;
             file.seek(SeekFrom::Start(0))
                 .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
             header.set_entry_type(tar::EntryType::Regular);
             header.set_size(entry.size);
             header.set_cksum();
-            archive
-                .append_data(&mut header, &entry.relative_path, &mut file)
-                .map_err(|error| ToolError::new("artifact.archiveFailed", error.to_string()))?;
+            let mut reader = CancellableHashingReader::new(&mut file, cancellation);
+            if let Err(error) = archive.append_data(&mut header, &entry.relative_path, &mut reader) {
+                cancellation.check()?;
+                return Err(ToolError::new("artifact.archiveFailed", error.to_string()));
+            }
+            let (archived_bytes, content_blake3) = reader.finish();
+            if archived_bytes != entry.size as usize {
+                return Err(ToolError::new(
+                    "artifact.directoryChanged",
+                    format!("directory member changed during archive: {}", entry.relative_path),
+                ));
+            }
+            cancellation.check()?;
+            let (_, current_blake3) = hash_file(&mut file, cancellation)?;
+            if current_blake3 != content_blake3 {
+                return Err(ToolError::new(
+                    "artifact.directoryChanged",
+                    format!("directory member changed while it was archived: {}", entry.relative_path),
+                ));
+            }
             update_manifest_hash(manifest_hasher, entry, Some(&content_blake3));
         }
     }
@@ -688,11 +771,13 @@ fn update_manifest_hash(
 fn copy_and_hash<R: Read, W: Write>(
     reader: &mut R,
     writer: &mut W,
+    cancellation: &ToolCancellation,
 ) -> Result<(usize, String), ToolError> {
     let mut hasher = blake3::Hasher::new();
     let mut total = 0usize;
     let mut buffer = [0u8; 64 * 1024];
     loop {
+        cancellation.check()?;
         let read = reader
             .read(&mut buffer)
             .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
@@ -708,13 +793,17 @@ fn copy_and_hash<R: Read, W: Write>(
     Ok((total, hasher.finalize().to_hex().to_string()))
 }
 
-fn hash_file(file: &mut File) -> Result<(usize, String), ToolError> {
+fn hash_file(
+    file: &mut File,
+    cancellation: &ToolCancellation,
+) -> Result<(usize, String), ToolError> {
     file.seek(SeekFrom::Start(0))
         .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
     let mut hasher = blake3::Hasher::new();
     let mut total = 0usize;
     let mut buffer = [0u8; 64 * 1024];
     loop {
+        cancellation.check()?;
         let read = file
             .read(&mut buffer)
             .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
@@ -725,6 +814,43 @@ fn hash_file(file: &mut File) -> Result<(usize, String), ToolError> {
         total = total.saturating_add(read);
     }
     Ok((total, hasher.finalize().to_hex().to_string()))
+}
+
+struct CancellableHashingReader<'a> {
+    cancellation: &'a ToolCancellation,
+    hasher: blake3::Hasher,
+    inner: &'a mut File,
+    total: usize,
+}
+
+impl<'a> CancellableHashingReader<'a> {
+    fn new(inner: &'a mut File, cancellation: &'a ToolCancellation) -> Self {
+        Self {
+            cancellation,
+            hasher: blake3::Hasher::new(),
+            inner,
+            total: 0,
+        }
+    }
+
+    fn finish(self) -> (usize, String) {
+        (self.total, self.hasher.finalize().to_hex().to_string())
+    }
+}
+
+impl Read for CancellableHashingReader<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if self.cancellation.is_cancelled() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "artifact snapshot cancelled",
+            ));
+        }
+        let read = self.inner.read(buffer)?;
+        self.hasher.update(&buffer[..read]);
+        self.total = self.total.saturating_add(read);
+        Ok(read)
+    }
 }
 
 fn validate_expiration(expires_at_ms: u128) -> Result<(), ToolError> {

@@ -35,13 +35,13 @@ export type ArtifactServiceSchedule = (task: () => void) => void;
 export interface ArtifactServiceEndpoint {
     abortArtifactReceive(receiveId: string): Promise<void>;
     appendControlEvent(type: ArtifactEventType, data?: JsonValue): Promise<unknown>;
-    beginArtifactReceive(input: WorkerArtifactReceiveBeginInput): Promise<WorkerArtifactReceiveBeginResult>;
+    beginArtifactReceive(input: WorkerArtifactReceiveBeginInput, signal?: AbortSignal): Promise<WorkerArtifactReceiveBeginResult>;
     closeArtifactPayload(payloadId: string): Promise<void>;
     finishArtifactReceive(receiveId: string): Promise<WorkerArtifactReceiveFinishResult>;
-    openArtifactPayload(input: WorkerArtifactPayloadOpenInput): Promise<WorkerArtifactPayloadOpenResult>;
-    readArtifactPayload(input: WorkerArtifactPayloadReadInput): Promise<WorkerArtifactPayloadReadResult>;
-    writeArtifactReceive(input: WorkerArtifactReceiveWriteInput): Promise<WorkerArtifactReceiveWriteResult>;
-    openArtifactDirectReceive?(input: WorkerArtifactDirectReceiveOpenInput): Promise<WorkerArtifactDirectReceiveOpenResult>;
+    openArtifactPayload(input: WorkerArtifactPayloadOpenInput, signal?: AbortSignal): Promise<WorkerArtifactPayloadOpenResult>;
+    readArtifactPayload(input: WorkerArtifactPayloadReadInput, signal?: AbortSignal): Promise<WorkerArtifactPayloadReadResult>;
+    writeArtifactReceive(input: WorkerArtifactReceiveWriteInput, signal?: AbortSignal): Promise<WorkerArtifactReceiveWriteResult>;
+    openArtifactDirectReceive?(input: WorkerArtifactDirectReceiveOpenInput, signal?: AbortSignal): Promise<WorkerArtifactDirectReceiveOpenResult>;
     closeArtifactDirectReceive?(receiverId: string): Promise<void>;
     pushArtifactPayloadDirect?(input: WorkerArtifactDirectPushInput): Promise<WorkerArtifactDirectPushResult>;
 }

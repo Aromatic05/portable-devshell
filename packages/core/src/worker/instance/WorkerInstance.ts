@@ -257,24 +257,24 @@ export class WorkerInstance {
         return this.#catalog.hasSchema();
     }
 
-    async openArtifactPayload(input: WorkerArtifactPayloadOpenInput): Promise<WorkerArtifactPayloadOpenResult> {
-        return await this.#artifact.openPayload(input);
+    async openArtifactPayload(input: WorkerArtifactPayloadOpenInput, signal?: AbortSignal): Promise<WorkerArtifactPayloadOpenResult> {
+        return await this.#artifact.openPayload(input, signal);
     }
 
-    async readArtifactPayload(input: WorkerArtifactPayloadReadInput): Promise<WorkerArtifactPayloadReadResult> {
-        return await this.#artifact.readPayload(input);
+    async readArtifactPayload(input: WorkerArtifactPayloadReadInput, signal?: AbortSignal): Promise<WorkerArtifactPayloadReadResult> {
+        return await this.#artifact.readPayload(input, signal);
     }
 
     async closeArtifactPayload(payloadId: string): Promise<void> {
         await this.#artifact.closePayload(payloadId);
     }
 
-    async beginArtifactReceive(input: WorkerArtifactReceiveBeginInput): Promise<WorkerArtifactReceiveBeginResult> {
-        return await this.#artifact.beginReceive(input);
+    async beginArtifactReceive(input: WorkerArtifactReceiveBeginInput, signal?: AbortSignal): Promise<WorkerArtifactReceiveBeginResult> {
+        return await this.#artifact.beginReceive(input, signal);
     }
 
-    async writeArtifactReceive(input: WorkerArtifactReceiveWriteInput): Promise<WorkerArtifactReceiveWriteResult> {
-        return await this.#artifact.writeReceive(input);
+    async writeArtifactReceive(input: WorkerArtifactReceiveWriteInput, signal?: AbortSignal): Promise<WorkerArtifactReceiveWriteResult> {
+        return await this.#artifact.writeReceive(input, signal);
     }
 
     async finishArtifactReceive(receiveId: string): Promise<WorkerArtifactReceiveFinishResult> {
@@ -286,9 +286,10 @@ export class WorkerInstance {
     }
 
     async openArtifactDirectReceive(
-        input: WorkerArtifactDirectReceiveOpenInput
+        input: WorkerArtifactDirectReceiveOpenInput,
+        signal?: AbortSignal
     ): Promise<WorkerArtifactDirectReceiveOpenResult> {
-        return await this.#artifact.openDirectReceive(input);
+        return await this.#artifact.openDirectReceive(input, signal);
     }
 
     async closeArtifactDirectReceive(receiverId: string): Promise<void> {

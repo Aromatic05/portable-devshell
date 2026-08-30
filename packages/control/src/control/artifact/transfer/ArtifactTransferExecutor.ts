@@ -52,6 +52,7 @@ export class ArtifactTransferExecutor {
     readonly #resolveEndpoint: ArtifactTransferExecutorOptions["resolveEndpoint"];
     readonly #schedule: ArtifactServiceSchedule;
     readonly #commitBarriers = new Set<Promise<void>>();
+    readonly #controllers = new Map<string, AbortController>();
     readonly #runningTransfers = new Set<string>();
 
     constructor(options: ArtifactTransferExecutorOptions) {
@@ -77,6 +78,16 @@ export class ArtifactTransferExecutor {
         await Promise.all([...this.#commitBarriers]);
     }
 
+    cancel(transferId: string, reason = "Artifact transfer was cancelled."): void {
+        this.#controllers.get(transferId)?.abort(reason);
+    }
+
+    cancelAll(reason = "Artifact service stopped."): void {
+        for (const controller of this.#controllers.values()) {
+            controller.abort(reason);
+        }
+    }
+
     async cleanupResources(transfer: StoredArtifactTransfer): Promise<void> {
         const sourceEndpoint = this.#resolveEndpoint(transfer.record.source.instance, transfer.defaultInstance);
         const targetEndpoint = this.#resolveEndpoint(transfer.record.target.instance, transfer.defaultInstance);
@@ -97,6 +108,9 @@ export class ArtifactTransferExecutor {
             return;
         }
         this.#runningTransfers.add(transferId);
+        const controller = new AbortController();
+        this.#controllers.set(transferId, controller);
+        const signal = controller.signal;
         let sourceEndpoint: ArtifactServiceEndpoint | undefined;
         let targetEndpoint: ArtifactServiceEndpoint | undefined;
         let commitBarrier: Promise<void> | undefined;
@@ -117,7 +131,7 @@ export class ArtifactTransferExecutor {
             const opened = await sourceEndpoint.openArtifactPayload({
                 ...sourceInput,
                 expiresAtMs: Date.now() + ARTIFACT_TRANSFER_PAYLOAD_TTL_MS
-            });
+            }, signal);
             transfer.payloadId = opened.payloadId;
             this.#assertRunActive(generation);
             transfer.record.payload = opened.descriptor;
@@ -133,7 +147,7 @@ export class ArtifactTransferExecutor {
                 overwrite: transfer.request.overwrite ?? false,
                 targetPath: transfer.request.targetPath,
                 workspace: transfer.request.targetWorkspace
-            });
+            }, signal);
             transfer.receiveId = receive.receiveId;
             this.#assertRunActive(generation);
             transfer.record.status = "transferring";
@@ -156,7 +170,7 @@ export class ArtifactTransferExecutor {
                     const direct = await targetEndpoint.openArtifactDirectReceive({
                         expiresAtMs: Date.now() + 5 * 60_000,
                         receiveId
-                    });
+                    }, signal);
                     receiverId = direct.receiverId;
                     if (direct.urls.length === 0 || direct.nextOffsetBytes !== offsetBytes) {
                         throw new Error("Artifact direct receiver returned invalid state.");
@@ -195,7 +209,7 @@ export class ArtifactTransferExecutor {
                         overwrite: transfer.request.overwrite ?? false,
                         targetPath: transfer.request.targetPath,
                         workspace: transfer.request.targetWorkspace
-                    });
+                    }, signal);
                     receiveId = restarted.receiveId;
                     transfer.receiveId = receiveId;
                     offsetBytes = restarted.nextOffsetBytes;
@@ -215,14 +229,14 @@ export class ArtifactTransferExecutor {
                         maxBytes: Math.min(this.#chunkBytes, opened.descriptor.payloadBytes - offsetBytes),
                         offsetBytes,
                         payloadId: opened.payloadId
-                    });
+                    }, signal);
                     this.#assertRunActive(generation);
                     validatePayloadChunk(chunk, offsetBytes, opened.descriptor.payloadBytes);
                     const written = await targetEndpoint.writeArtifactReceive({
                         content: chunk.content,
                         offsetBytes,
                         receiveId
-                    });
+                    }, signal);
                     this.#assertRunActive(generation);
                     if (written.nextOffsetBytes !== offsetBytes + chunk.returnedBytes) {
                         throw createError({
@@ -285,6 +299,7 @@ export class ArtifactTransferExecutor {
         } finally {
             await this.#closePayload(transfer, sourceEndpoint);
             this.#runningTransfers.delete(transferId);
+            this.#controllers.delete(transferId);
             if (commitBarrier !== undefined) {
                 this.#commitBarriers.delete(commitBarrier);
                 resolveCommitBarrier?.();

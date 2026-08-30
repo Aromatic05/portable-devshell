@@ -129,6 +129,7 @@ export class ArtifactTransferService {
 
         this.#initialized = false;
         this.#generation += 1;
+        this.#transferExecutor.cancelAll("Artifact service stopped.");
         await this.#transferExecutor.waitForCommits();
         for (const transfer of this.#transfers.values()) {
             if (
@@ -290,6 +291,7 @@ export class ArtifactTransferService {
                 transfer.record.status = "cancelling";
                 transfer.record.updatedAt = now;
             });
+            this.#transferExecutor.cancel(transferId);
         }
 
         return {

@@ -173,6 +173,32 @@ fn handle_connection(stream: LocalIpcStream, router: Arc<RpcRouter>) -> Result<(
                 }
             }
             Ok(request) if router.is_control_method(&request.method) => {
+                if router.is_cancellable_control_method(&request.method) {
+                    match router.acquire_control_permit(&request) {
+                        Ok(permit) => {
+                            #[cfg(unix)]
+                            {
+                                let router = Arc::clone(&router);
+                                let writer = Arc::clone(&writer);
+                                thread::spawn(move || {
+                                    let response =
+                                        router.dispatch_cancellable_control(request, permit);
+                                    let _ = write_serialized_response(&writer, &response);
+                                });
+                            }
+                            #[cfg(windows)]
+                            {
+                                let response = router.dispatch_cancellable_control(request, permit);
+                                write_serialized_response(&writer, &response)?;
+                            }
+                        }
+                        Err(error) => {
+                            let response = RpcResponse::failure(request.id, error);
+                            write_serialized_response(&writer, &response)?;
+                        }
+                    }
+                    continue;
+                }
                 let response = router.dispatch_control(request);
                 write_serialized_response(&writer, &response)?;
                 if router.shutdown_requested() {

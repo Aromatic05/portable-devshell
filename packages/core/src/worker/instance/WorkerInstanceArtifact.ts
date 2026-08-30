@@ -29,14 +29,14 @@ export class WorkerInstanceArtifact {
         this.#protocolClient = options.protocolClient;
     }
 
-    async openPayload(input: WorkerArtifactPayloadOpenInput): Promise<WorkerArtifactPayloadOpenResult> {
+    async openPayload(input: WorkerArtifactPayloadOpenInput, signal?: AbortSignal): Promise<WorkerArtifactPayloadOpenResult> {
         this.#assertReady();
-        return await this.#protocolClient.openArtifactPayload(input);
+        return await this.#protocolClient.openArtifactPayload(input, signal);
     }
 
-    async readPayload(input: WorkerArtifactPayloadReadInput): Promise<WorkerArtifactPayloadReadResult> {
+    async readPayload(input: WorkerArtifactPayloadReadInput, signal?: AbortSignal): Promise<WorkerArtifactPayloadReadResult> {
         this.#assertReady();
-        return await this.#protocolClient.readArtifactPayload(input);
+        return await this.#protocolClient.readArtifactPayload(input, signal);
     }
 
     async closePayload(payloadId: string): Promise<void> {
@@ -44,14 +44,14 @@ export class WorkerInstanceArtifact {
         await this.#protocolClient.closeArtifactPayload(payloadId);
     }
 
-    async beginReceive(input: WorkerArtifactReceiveBeginInput): Promise<WorkerArtifactReceiveBeginResult> {
+    async beginReceive(input: WorkerArtifactReceiveBeginInput, signal?: AbortSignal): Promise<WorkerArtifactReceiveBeginResult> {
         this.#assertReady();
-        return await this.#protocolClient.beginArtifactReceive(input);
+        return await this.#protocolClient.beginArtifactReceive(input, signal);
     }
 
-    async writeReceive(input: WorkerArtifactReceiveWriteInput): Promise<WorkerArtifactReceiveWriteResult> {
+    async writeReceive(input: WorkerArtifactReceiveWriteInput, signal?: AbortSignal): Promise<WorkerArtifactReceiveWriteResult> {
         this.#assertReady();
-        return await this.#protocolClient.writeArtifactReceive(input);
+        return await this.#protocolClient.writeArtifactReceive(input, signal);
     }
 
     async finishReceive(receiveId: string): Promise<WorkerArtifactReceiveFinishResult> {
@@ -65,10 +65,11 @@ export class WorkerInstanceArtifact {
     }
 
     async openDirectReceive(
-        input: WorkerArtifactDirectReceiveOpenInput
+        input: WorkerArtifactDirectReceiveOpenInput,
+        signal?: AbortSignal
     ): Promise<WorkerArtifactDirectReceiveOpenResult> {
         this.#assertReady();
-        return await this.#protocolClient.openArtifactDirectReceive(input);
+        return await this.#protocolClient.openArtifactDirectReceive(input, signal);
     }
 
     async closeDirectReceive(receiverId: string): Promise<void> {

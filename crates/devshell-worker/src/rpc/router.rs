@@ -78,12 +78,45 @@ impl RpcRouter {
         self.control_handlers.contains_key(method)
     }
 
+    pub fn is_cancellable_control_method(&self, method: &str) -> bool {
+        matches!(
+            method,
+            "artifact.payload.open"
+                | "artifact.payload.read"
+                | "artifact.receive.begin"
+                | "artifact.receive.write"
+                | "artifact.receive.direct.open"
+        )
+    }
+
     pub fn dispatch_control(&self, request: RpcRequest) -> RpcResponse {
         let result = self
             .control_handlers
             .get(&request.method)
             .ok_or_else(|| RpcError::new("rpc.methodNotFound", "Control method not found."))
             .and_then(|handler| handler.handle(&request));
+        Self::response(request.id, result)
+    }
+
+    pub fn acquire_control_permit(
+        &self,
+        request: &RpcRequest,
+    ) -> Result<ControlCallPermit, RpcError> {
+        self.active_tool_calls.acquire_control(request)
+    }
+
+    pub fn dispatch_cancellable_control(
+        &self,
+        request: RpcRequest,
+        permit: ControlCallPermit,
+    ) -> RpcResponse {
+        let result = self
+            .control_handlers
+            .get(&request.method)
+            .ok_or_else(|| RpcError::new("rpc.methodNotFound", "Control method not found."))
+            .and_then(|handler| {
+                handler.handle_with_cancellation(&request, &permit.cancellation())
+            });
         Self::response(request.id, result)
     }
 
@@ -171,6 +204,7 @@ pub struct ActiveToolCallRegistry {
 struct ActiveToolCallState {
     active: usize,
     calls: HashMap<ActiveToolCallKey, ToolCancellation>,
+    control_active: usize,
     standard_active: usize,
     stopping: bool,
 }
@@ -254,6 +288,40 @@ impl ActiveToolCallRegistry {
         })
     }
 
+    pub fn acquire_control(
+        self: &Arc<Self>,
+        request: &RpcRequest,
+    ) -> Result<ControlCallPermit, RpcError> {
+        let mut state = self.state.lock().map_err(|_| {
+            RpcError::new(
+                "worker.toolSchedulerFailed",
+                "Active call registry lock poisoned.",
+            )
+        })?;
+        if state.stopping {
+            return Err(RpcError::new(
+                "worker.stopping",
+                "Worker is stopping and cannot accept new artifact operations.",
+            ));
+        }
+
+        let key = ActiveToolCallKey::from_request(request);
+        if state.calls.contains_key(&key) {
+            return Err(RpcError::new(
+                "worker.duplicateRpcRequest",
+                "A request with the same context and RPC request id is already active.",
+            ));
+        }
+        let cancellation = ToolCancellation::default();
+        state.calls.insert(key.clone(), cancellation.clone());
+        state.control_active += 1;
+        Ok(ControlCallPermit {
+            cancellation,
+            key,
+            registry: Arc::clone(self),
+        })
+    }
+
     pub fn cancel(&self, ctx_id: &str, rpc_request_id: &str) -> Result<bool, RpcError> {
         let state = self.state.lock().map_err(|_| {
             RpcError::new(
@@ -288,12 +356,12 @@ impl ActiveToolCallRegistry {
             .lock()
             .map_err(|_| "active tool call registry lock poisoned".to_string())?;
 
-        while state.active > 0 {
+        while state.active > 0 || state.control_active > 0 {
             let now = Instant::now();
             if now >= deadline {
                 return Err(format!(
                     "timed out waiting for {} active tool call(s) to stop",
-                    state.active
+                    state.active + state.control_active
                 ));
             }
 
@@ -304,10 +372,10 @@ impl ActiveToolCallRegistry {
                 .map_err(|_| "active tool call registry lock poisoned".to_string())?;
             state = next_state;
 
-            if wait_result.timed_out() && state.active > 0 {
+            if wait_result.timed_out() && (state.active > 0 || state.control_active > 0) {
                 return Err(format!(
                     "timed out waiting for {} active tool call(s) to stop",
-                    state.active
+                    state.active + state.control_active
                 ));
             }
         }
@@ -324,7 +392,18 @@ impl ActiveToolCallRegistry {
         if !urgent {
             state.standard_active = state.standard_active.saturating_sub(1);
         }
-        if state.active == 0 {
+        if state.active == 0 && state.control_active == 0 {
+            self.idle.notify_all();
+        }
+    }
+
+    fn release_control(&self, key: &ActiveToolCallKey) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        state.calls.remove(key);
+        state.control_active = state.control_active.saturating_sub(1);
+        if state.active == 0 && state.control_active == 0 {
             self.idle.notify_all();
         }
     }
@@ -349,12 +428,38 @@ impl Drop for ToolCallPermit {
     }
 }
 
+pub struct ControlCallPermit {
+    cancellation: ToolCancellation,
+    key: ActiveToolCallKey,
+    registry: Arc<ActiveToolCallRegistry>,
+}
+
+impl ControlCallPermit {
+    fn cancellation(&self) -> ToolCancellation {
+        self.cancellation.clone()
+    }
+}
+
+impl Drop for ControlCallPermit {
+    fn drop(&mut self) {
+        self.registry.release_control(&self.key);
+    }
+}
+
 fn is_urgent_tool(method: &str) -> bool {
     matches!(method, "tmux_input" | "tmux_inspect" | "tmux_list")
 }
 
 pub trait ControlHandler: Send + Sync {
     fn handle(&self, request: &RpcRequest) -> Result<serde_json::Value, RpcError>;
+
+    fn handle_with_cancellation(
+        &self,
+        request: &RpcRequest,
+        _cancellation: &ToolCancellation,
+    ) -> Result<serde_json::Value, RpcError> {
+        self.handle(request)
+    }
 }
 
 struct ClosureControlHandler<F>(F);
@@ -375,6 +480,35 @@ where
     Arc::new(ClosureControlHandler(handle))
 }
 
+struct CancellableClosureControlHandler<F>(F);
+
+impl<F> ControlHandler for CancellableClosureControlHandler<F>
+where
+    F: Fn(&RpcRequest, &ToolCancellation) -> Result<serde_json::Value, RpcError> + Send + Sync,
+{
+    fn handle(&self, request: &RpcRequest) -> Result<serde_json::Value, RpcError> {
+        (self.0)(request, &ToolCancellation::default())
+    }
+
+    fn handle_with_cancellation(
+        &self,
+        request: &RpcRequest,
+        cancellation: &ToolCancellation,
+    ) -> Result<serde_json::Value, RpcError> {
+        (self.0)(request, cancellation)
+    }
+}
+
+pub fn cancellable_control_handler<F>(handle: F) -> Arc<dyn ControlHandler>
+where
+    F: Fn(&RpcRequest, &ToolCancellation) -> Result<serde_json::Value, RpcError>
+        + Send
+        + Sync
+        + 'static,
+{
+    Arc::new(CancellableClosureControlHandler(handle))
+}
+
 pub fn parse_params<T: DeserializeOwned>(request: &RpcRequest) -> Result<T, RpcError> {
     serde_json::from_value(request.params.clone())
         .map_err(|error| RpcError::new("rpc.invalidParams", error.to_string()))
@@ -388,6 +522,7 @@ pub fn serialize(value: impl Serialize) -> Result<serde_json::Value, RpcError> {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::time::Duration;
 
     use super::ActiveToolCallRegistry;
     use crate::rpc::request::RpcRequest;
@@ -440,5 +575,27 @@ mod tests {
                 .acquire(&RpcRequest::request("2", "bash_run", serde_json::json!({})))
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn cancellable_control_calls_share_request_cancellation_registry() {
+        let registry = Arc::new(ActiveToolCallRegistry::new());
+        let request = RpcRequest::request(
+            "artifact-open",
+            "artifact.payload.open",
+            serde_json::json!({}),
+        );
+        let permit = registry.acquire_control(&request).unwrap();
+
+        assert!(
+            registry
+                .cancel("ctx-worker-default", "artifact-open")
+                .unwrap()
+        );
+        let error = permit.cancellation().check().unwrap_err();
+        assert_eq!(error.code, "tool.cancelled");
+
+        drop(permit);
+        registry.wait_idle(Duration::from_millis(10)).unwrap();
     }
 }

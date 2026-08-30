@@ -4,7 +4,9 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::rpc::error::RpcError;
-use crate::rpc::router::{ControlHandler, control_handler, parse_params, serialize};
+use crate::rpc::router::{
+    ControlHandler, cancellable_control_handler, control_handler, parse_params, serialize,
+};
 use crate::security::SecurityPolicy;
 use crate::tools::ToolError;
 use crate::tools::artifact::direct::{ArtifactDirectPushInput, ArtifactDirectReceiveOpenInput, ArtifactDirectTransfer};
@@ -68,12 +70,19 @@ pub fn payload_open(
     payloads: Arc<ArtifactPayloadStore>,
     policy: Arc<dyn SecurityPolicy>,
 ) -> Arc<dyn ControlHandler> {
-    control_handler(move |request| {
+    cancellable_control_handler(move |request, cancellation| {
+        cancellation.check().map_err(RpcError::from)?;
         let input: ArtifactPayloadOpenInput = parse_params(request)?;
         let result = match (input.handle.as_deref(), input.path.as_deref(), input.workspace.as_deref()) {
             (Some(handle), None, None) => payloads.open_handle(handle, input.expires_at_ms),
             (None, Some(path), Some(workspace)) if PathBuf::from(workspace).is_absolute() => {
-                payloads.open_path(PathBuf::from(workspace).as_path(), path, policy.as_ref(), input.expires_at_ms)
+                payloads.open_path_cancellable(
+                    PathBuf::from(workspace).as_path(),
+                    path,
+                    policy.as_ref(),
+                    input.expires_at_ms,
+                    cancellation,
+                )
             }
             (None, Some(_), Some(_)) => Err(ToolError::new(
                 "rpc.invalidContext",
@@ -90,17 +99,18 @@ pub fn payload_open(
 }
 
 pub fn payload_read(payloads: Arc<ArtifactPayloadStore>) -> Arc<dyn ControlHandler> {
-    control_handler(move |request| {
+    cancellable_control_handler(move |request, cancellation| {
+        cancellation.check().map_err(RpcError::from)?;
         let input: ArtifactPayloadReadInput = parse_params(request)?;
-        serialize(
-            payloads
-                .read(
-                    &input.payload_id,
-                    input.offset_bytes.unwrap_or(0),
-                    input.max_bytes.unwrap_or(64 * 1024),
-                )
-                .map_err(RpcError::from)?,
-        )
+        let result = payloads
+            .read(
+                &input.payload_id,
+                input.offset_bytes.unwrap_or(0),
+                input.max_bytes.unwrap_or(64 * 1024),
+            )
+            .map_err(RpcError::from)?;
+        cancellation.check().map_err(RpcError::from)?;
+        serialize(result)
     })
 }
 
@@ -119,7 +129,8 @@ pub fn receive_begin(
     receives: Arc<ArtifactReceiveStore>,
     policy: Arc<dyn SecurityPolicy>,
 ) -> Arc<dyn ControlHandler> {
-    control_handler(move |request| {
+    cancellable_control_handler(move |request, cancellation| {
+        cancellation.check().map_err(RpcError::from)?;
         let input: ArtifactReceiveBeginRpcInput = parse_params(request)?;
         if !PathBuf::from(&input.workspace).is_absolute() {
             return Err(RpcError::new(
@@ -127,30 +138,31 @@ pub fn receive_begin(
                 "artifact workspace must be an absolute path",
             ));
         }
-        serialize(
-            receives
-                .begin(
-                    PathBuf::from(&input.workspace).as_path(),
-                    policy.as_ref(),
-                    ArtifactReceiveBeginInput {
-                        descriptor: input.descriptor,
-                        overwrite: input.overwrite,
-                        target_path: input.target_path,
-                    },
-                )
-                .map_err(RpcError::from)?,
-        )
+        let result = receives
+            .begin(
+                PathBuf::from(&input.workspace).as_path(),
+                policy.as_ref(),
+                ArtifactReceiveBeginInput {
+                    descriptor: input.descriptor,
+                    overwrite: input.overwrite,
+                    target_path: input.target_path,
+                },
+            )
+            .map_err(RpcError::from)?;
+        cancellation.check().map_err(RpcError::from)?;
+        serialize(result)
     })
 }
 
 pub fn receive_write(receives: Arc<ArtifactReceiveStore>) -> Arc<dyn ControlHandler> {
-    control_handler(move |request| {
+    cancellable_control_handler(move |request, cancellation| {
+        cancellation.check().map_err(RpcError::from)?;
         let input: ArtifactReceiveWriteInput = parse_params(request)?;
-        serialize(
-            receives
-                .write(&input.receive_id, input.offset_bytes, input.content)
-                .map_err(RpcError::from)?,
-        )
+        let result = receives
+            .write(&input.receive_id, input.offset_bytes, input.content)
+            .map_err(RpcError::from)?;
+        cancellation.check().map_err(RpcError::from)?;
+        serialize(result)
     })
 }
 
@@ -173,9 +185,12 @@ pub fn receive_abort(receives: Arc<ArtifactReceiveStore>) -> Arc<dyn ControlHand
 }
 
 pub fn direct_receive_open(direct: Arc<ArtifactDirectTransfer>) -> Arc<dyn ControlHandler> {
-    control_handler(move |request| {
+    cancellable_control_handler(move |request, cancellation| {
+        cancellation.check().map_err(RpcError::from)?;
         let input: ArtifactDirectReceiveOpenInput = parse_params(request)?;
-        serialize(direct.open_receiver(input).map_err(RpcError::from)?)
+        let result = direct.open_receiver(input).map_err(RpcError::from)?;
+        cancellation.check().map_err(RpcError::from)?;
+        serialize(result)
     })
 }
 

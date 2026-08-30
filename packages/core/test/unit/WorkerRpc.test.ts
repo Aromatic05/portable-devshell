@@ -171,6 +171,38 @@ test("WorkerRpcClient propagates abort as tool.call.cancel", async () => {
     bridge.close();
 });
 
+test("WorkerProtocolClient propagates artifact abort as tool.call.cancel", async () => {
+    const harness = createRpcHarness({ slowMethods: new Set(["artifact.payload.open"]) });
+    const bridge = new WorkerRpcBridge({
+        transport: harness.transport,
+        rpcOptions: { instanceName: "artifact-rpc-cancel" }
+    });
+    const client = new WorkerProtocolClient(new WorkerRpcClient(bridge));
+    const controller = new AbortController();
+
+    const pending = client.openArtifactPayload({
+        expiresAtMs: Date.now() + 60_000,
+        path: "./large-directory",
+        workspace: "/workspace"
+    }, controller.signal);
+    await harness.waitForMethod("artifact.payload.open");
+    controller.abort("transfer cancelled");
+
+    await assert.rejects(pending, (error: unknown) => {
+        assert.equal((error as { code?: string }).code, errorCodes.coreToolCallCancelled);
+        return true;
+    });
+    await harness.waitForMethod("tool.call.cancel");
+    const original = harness.requests.find((request) => request.method === "artifact.payload.open");
+    const cancel = harness.requests.find((request) => request.method === "tool.call.cancel");
+    assert.equal((cancel?.params as { rpcRequestId?: string } | undefined)?.rpcRequestId, original?.id);
+    assert.equal(
+        (cancel?.params as { ctxId?: string } | undefined)?.ctxId,
+        original?.context?.ctxId
+    );
+    bridge.close();
+});
+
 test("WorkerRpcBridge rejects pending calls when the rpc bridge disconnects", async () => {
     const harness = createRpcHarness({
         slowMethods: new Set(["tools.list"])

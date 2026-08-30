@@ -35,6 +35,32 @@ class Deferred {
     }
 }
 
+async function waitWithAbort(
+    promise: Promise<void>,
+    signal: AbortSignal | undefined,
+    onAbort: () => void
+): Promise<void> {
+    if (signal === undefined) {
+        await promise;
+        return;
+    }
+    if (signal.aborted) {
+        onAbort();
+        throw new Error(String(signal.reason ?? "aborted"));
+    }
+    await new Promise<void>((resolve, reject) => {
+        const abort = () => {
+            onAbort();
+            reject(new Error(String(signal.reason ?? "aborted")));
+        };
+        signal.addEventListener("abort", abort, { once: true });
+        void promise.then(() => {
+            signal.removeEventListener("abort", abort);
+            resolve();
+        }, reject);
+    });
+}
+
 class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
     readonly events: Array<{ type: string; data?: JsonValue }> = [];
     readonly closedPayloads: string[] = [];
@@ -42,7 +68,9 @@ class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
     readonly abortedReceives: string[] = [];
     readonly received = new Map<string, Buffer>();
     readonly openStarted = new Deferred();
+    readonly openAborted = new Deferred();
     readonly finishStarted = new Deferred();
+    readonly finishAborted = new Deferred();
     readPayloadCalls = 0;
     writeReceiveCalls = 0;
     readonly #bytes: Buffer;
@@ -60,13 +88,15 @@ class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
         this.events.push({ type, data });
     }
 
-    async openArtifactPayload(): Promise<{
+    async openArtifactPayload(_input?: unknown, signal?: AbortSignal): Promise<{
         descriptor: ArtifactPayloadDescriptor;
         expiresAtMs: number;
         payloadId: string;
     }> {
         this.openStarted.resolve();
-        await this.#openGate?.promise;
+        if (this.#openGate !== undefined) {
+            await waitWithAbort(this.#openGate.promise, signal, () => this.openAborted.resolve());
+        }
         return {
             descriptor: {
                 mediaType: "application/octet-stream",
@@ -120,9 +150,11 @@ class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
         };
     }
 
-    async finishArtifactReceive(receiveId: string) {
+    async finishArtifactReceive(receiveId: string, signal?: AbortSignal) {
         this.finishStarted.resolve();
-        await this.#finishGate?.promise;
+        if (this.#finishGate !== undefined) {
+            await waitWithAbort(this.#finishGate.promise, signal, () => this.finishAborted.resolve());
+        }
         return {
             blake3: "a".repeat(64),
             bytes: this.received.get(receiveId)?.length ?? 0,
@@ -493,6 +525,7 @@ test("queued transfer resumes after restart while active transfer becomes interr
     await waitForStatus(active, activeTransfer.transfer.transferId, "preparing");
     await blockedSource.openStarted.promise;
     await active.stop();
+    await blockedSource.openAborted.promise;
 
     const restarted = new ArtifactService({
         resolveEndpoint: resolver({ "source-a": blockedSource, "target-b": target }),
@@ -501,8 +534,6 @@ test("queued transfer resumes after restart while active transfer becomes interr
     });
     await restarted.initialize();
     assert.equal(restarted.getTransfer(activeTransfer.transfer.transferId).status, "interrupted");
-    gate.resolve();
-    await blockedSource.payloadClosed.promise;
     const verified = new ArtifactService({
         resolveEndpoint: resolver({ "source-a": blockedSource, "target-b": target }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
@@ -510,7 +541,7 @@ test("queued transfer resumes after restart while active transfer becomes interr
     });
     await verified.initialize();
     assert.equal(verified.getTransfer(activeTransfer.transfer.transferId).status, "interrupted");
-    assert.deepEqual(blockedSource.closedPayloads, ["payload-1"]);
+    assert.deepEqual(blockedSource.closedPayloads, []);
 });
 
 test("control stop waits for an in-flight artifact commit and preserves completed state", async (t) => {
@@ -829,7 +860,7 @@ test("artifact instance retirement revokes shares and queued transfers bound to 
     assert.equal(service.getTransfer(unrelatedTransfer.transfer.transferId).status, "queued");
 });
 
-test("artifact instance retirement waits until an in-flight transfer reaches terminal state", async (t) => {
+test("artifact instance retirement aborts an in-flight transfer before waiting for terminal state", async (t) => {
     const storageDir = await createTestTempDirectory("artifact-instance-retirement-active");
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const gate = new Deferred();
@@ -851,14 +882,9 @@ test("artifact instance retirement waits until an in-flight transfer reaches ter
     }, "source-a");
     await source.openStarted.promise;
 
-    let retired = false;
-    const retirement = service.retireInstance("source-a").then(() => { retired = true; });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.equal(retired, false);
-    assert.equal(service.getTransfer(started.transfer.transferId).status, "cancelling");
-
-    gate.resolve();
+    const retirement = service.retireInstance("source-a");
+    await source.openAborted.promise;
     await retirement;
     assert.equal(service.getTransfer(started.transfer.transferId).status, "cancelled");
-    assert.deepEqual(source.closedPayloads, ["payload-1"]);
+    assert.deepEqual(source.closedPayloads, []);
 });
