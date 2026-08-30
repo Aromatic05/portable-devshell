@@ -306,16 +306,31 @@ test("Workspace reconnect reuses a live App token instead of invalidating siblin
 test("Workspace snapshot projects only compact task and background state", async () => {
     const fake = createInteractionGateway();
     const now = new Date().toISOString();
-    fake.waits.push({
-        createdAt: now,
-        createdByCtxId: context.ctxId!,
-        kind: "tmux",
-        status: "waiting",
-        targetId: "tmux-task-1",
-        taskId: "task-1",
-        updatedAt: now,
-        waitId: "wait-tmux",
-    });
+    fake.waits.push(
+        {
+            createdAt: now,
+            createdByCtxId: context.ctxId!,
+            kind: "tmux",
+            status: "waiting",
+            targetId: "tmux-task-1",
+            taskId: "task-1",
+            updatedAt: now,
+            waitId: "wait-tmux",
+        },
+        {
+            createdAt: now,
+            createdByCtxId: context.ctxId!,
+            detachedAt: now,
+            kind: "question",
+            payload: { allowText: true, choices: [], question: "Continue?" },
+            resolvedAt: now,
+            result: { answer: "yes" },
+            status: "resolved",
+            targetId: "question-resolved",
+            updatedAt: now,
+            waitId: "wait-question-resolved",
+        },
+    );
     const gateway = Object.assign(fake.gateway, {
         async controlTodo() { return {}; },
         async readTodo() {
@@ -356,8 +371,12 @@ test("Workspace snapshot projects only compact task and background state", async
     };
     assert.equal(snapshot.cursor, 7);
     assert.equal(snapshot.agentBusy, true);
-    assert.equal(snapshot.background?.[0]?.tmuxTaskId, "tmux-task-1");
-    assert.equal(snapshot.background?.[0]?.taskId, "task-1");
+    const tmuxBackground = snapshot.background?.find((entry) => entry.waitId === "wait-tmux");
+    const questionRecovery = snapshot.background?.find((entry) => entry.waitId === "wait-question-resolved");
+    assert.equal(tmuxBackground?.tmuxTaskId, "tmux-task-1");
+    assert.equal(tmuxBackground?.taskId, "task-1");
+    assert.equal(questionRecovery?.kind, "question");
+    assert.equal(questionRecovery?.tmuxTaskId, undefined);
     assert.equal(snapshot.currentEvent, null);
     assert.equal(Object.hasOwn(snapshot, "activity"), false);
     assert.equal(Object.hasOwn(snapshot.tasks?.[0] ?? {}, "ctxId"), false);
@@ -732,6 +751,56 @@ test("Workspace detached-wait recovery accepts an active Goal without Todo", asy
     assert.match(recovered.claimId, /^recovery-/u);
 });
 
+test("Workspace detached-wait recovery revalidates an associated task before dispatch attempt", async () => {
+    const fake = createInteractionGateway();
+    const now = new Date().toISOString();
+    fake.waits.push({
+        createdAt: now,
+        createdByCtxId: context.ctxId!,
+        detachedAt: now,
+        kind: "tmux",
+        resolvedAt: now,
+        result: { task: { status: "0" } },
+        status: "resolved",
+        targetId: "tmux-race",
+        taskId: "task-race",
+        updatedAt: now,
+        waitId: "wait-race",
+    });
+    let taskStatus = "in_progress";
+    const gateway = Object.assign(fake.gateway, {
+        async readTodo() {
+            return {
+                items: [],
+                revision: 1,
+                summary: { completed: 0, total: 1 },
+                tasks: [{ ctxId: context.ctxId, status: taskStatus, taskId: "task-race" }],
+            };
+        },
+    });
+    const handler = new McpEndpointHandlerInteraction({ gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
+
+    const claimed = await handler.call(
+        "workspace_wait_recover",
+        { action: "claim", token, waitId: "wait-race" },
+        context,
+        "call-race-claim",
+    ) as { claimId: string };
+
+    taskStatus = "paused";
+    await assert.rejects(
+        handler.call(
+            "workspace_wait_recover",
+            { action: "attempt", claimId: claimed.claimId, token, waitId: "wait-race" },
+            context,
+            "call-race-attempt",
+        ),
+        /not available for automatic recovery/u,
+    );
+    assert.equal(fake.waits.find((entry) => entry.waitId === "wait-race")?.recoveryMessageAttemptedAt, undefined);
+});
+
 test("Workspace detached-wait recovery accepts Context-only durable state", async () => {
     const fake = createInteractionGateway();
     const now = new Date().toISOString();
@@ -814,6 +883,43 @@ test("workspace_watch skips unrelated events and returns on the current Context 
     assert.equal(update.cursor, 2);
     assert.equal(update.snapshot?.cursor, 2);
     assert.equal(watchReads, 2);
+});
+
+test("workspace_watch ignores internal wait recovery ownership events", async () => {
+    const fake = createInteractionGateway();
+    const gateway = Object.assign(fake.gateway, {
+        async controlTodo() { return {}; },
+        async readToolCalls() { return []; },
+        async readWorkspaceEvents(_instance: string, fromSeq: number) {
+            if (fromSeq === Number.MAX_SAFE_INTEGER) {
+                return { events: [], gap: false, lastSeq: 1 };
+            }
+            return {
+                events: [{
+                    at: new Date().toISOString(),
+                    data: { createdByCtxId: context.ctxId },
+                    instanceName: "demo",
+                    seq: 1,
+                    type: "wait.recoveryReleased" as const,
+                }],
+                gap: false,
+                lastSeq: 1,
+            };
+        },
+    }) as McpWorkspaceGateway;
+    const handler = new McpEndpointHandlerInteraction({
+        gateway,
+        instanceName: "demo",
+        watchHeartbeatMs: 0,
+        watchPollMs: 1,
+    });
+    const token = await openWorkspace(handler);
+
+    const result = await handler.call("workspace_watch", { cursor: 0, token }, context, "call-watch-internal");
+    assert.ok(result instanceof McpNativeToolResult);
+    const update = result.structuredContent as { changed?: boolean; cursor?: number };
+    assert.equal(update.changed, false);
+    assert.equal(update.cursor, 1);
 });
 
 test("workspace_watch heartbeat reconciles from an authoritative snapshot", async () => {
@@ -1080,6 +1186,57 @@ test("Workspace Goal continuation is unavailable while the current Context still
 
     assert.equal(continuationInputs.length, 1);
     assert.equal(continuationInputs[0]?.available, false);
+});
+
+test("Workspace Goal continuation rechecks live tool activity before every dispatch phase", async () => {
+    const fake = createInteractionGateway();
+    const continuationInputs: GoalContinuationInput[] = [];
+    Object.assign(fake.gateway, {
+        async goalContinuation(_instance: string, input: GoalContinuationInput) {
+            continuationInputs.push({ ...input });
+            return { claimed: false, goal: null };
+        },
+        async manageGoal() {
+            return undefined;
+        },
+        async readGoal() {
+            return undefined;
+        },
+        async readToolCalls() {
+            return [{
+                callId: "call-running",
+                ctxId: context.ctxId,
+                inputSummary: "long command",
+                instance: "demo",
+                source: "mcp",
+                startedAt: "2026-08-30T00:00:00.000Z",
+                status: "running",
+                toolName: "bash_run",
+            }];
+        },
+        async readWorkspaceEvents() {
+            return { events: [], gap: false, lastSeq: 0 };
+        },
+    });
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
+
+    await handler.call(
+        "workspace_goal_continue",
+        { action: "validate", available: true, claimId: "claim-running", token },
+        context,
+        "call-goal-validate-running",
+    );
+    await handler.call(
+        "workspace_goal_continue",
+        { action: "attempt", available: true, claimId: "claim-running", token },
+        context,
+        "call-goal-attempt-running",
+    );
+
+    assert.equal(continuationInputs.length, 2);
+    assert.equal(continuationInputs[0]?.available, false);
+    assert.equal(continuationInputs[1]?.available, false);
 });
 
 test("Workspace tool metadata uses one render tool and app-only action tools", () => {

@@ -190,15 +190,20 @@ export class McpEndpointHandlerInteraction {
         const ctxId = requireCtxId(context);
         const request = readGoalContinuationInput(input);
         if (request.action !== "report") {
-            const [waits, approvals] = await Promise.all([
+            const workspaceGateway = isMcpWorkspaceGateway(interactionGateway) ? interactionGateway : undefined;
+            const [waits, approvals, toolCalls] = await Promise.all([
                 interactionGateway.listWaits(this.options.instanceName),
                 interactionGateway.listApprovals(this.options.instanceName),
+                workspaceGateway?.readToolCalls(this.options.instanceName, ctxId, 64) ?? [],
             ]);
             request.available = request.available !== false &&
                 !waits.some((wait) => (
                     wait.createdByCtxId === ctxId && wait.status !== "consumed" && wait.status !== "cancelled"
                 )) &&
-                !approvals.some((approval) => approval.ctxId === ctxId && approval.status === "pending");
+                !approvals.some((approval) => approval.ctxId === ctxId && approval.status === "pending") &&
+                !toolCalls.some((call) => (
+                    call.status === "queued" || call.status === "pendingApproval" || call.status === "running"
+                ));
         }
         return await goalGateway.goalContinuation(
             this.options.instanceName,
@@ -467,6 +472,7 @@ export class McpEndpointHandlerInteraction {
             };
         }
         if (recovery.action === "attempt") {
+            await this.#assertWaitRecoveryAssociationAvailable(gateway, wait, requireCtxId(context));
             const attempted = await gateway.markWaitRecoveryAttempted(this.options.instanceName, waitId, recovery.claimId);
             return {
                 attempted: true,
@@ -499,6 +505,28 @@ export class McpEndpointHandlerInteraction {
             };
         }
         const ctxId = requireCtxId(context);
+        await this.#assertWaitRecoveryAssociationAvailable(gateway, wait, ctxId);
+        const claimId = `recovery-${randomUUID()}`;
+        const claimed = await gateway.claimWaitRecovery(this.options.instanceName, waitId, claimId);
+        return {
+            claimId,
+            ...(claimed.goalId === undefined ? {} : { goalId: claimed.goalId }),
+            kind: claimed.kind,
+            ...(claimed.result === undefined ? {} : { result: claimed.result }),
+            ...(claimed.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: claimed.recoveryMessageAttemptedAt }),
+            ...(claimed.recoveryMessageId === undefined ? {} : { recoveryMessageId: claimed.recoveryMessageId }),
+            ...(claimed.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: claimed.recoveryMessageSentAt }),
+            ...(claimed.taskId === undefined ? {} : { taskId: claimed.taskId }),
+            targetId: claimed.targetId,
+            waitId: claimed.waitId,
+        };
+    }
+
+    async #assertWaitRecoveryAssociationAvailable(
+        gateway: McpInteractionGateway,
+        wait: WaitRecord,
+        ctxId: string,
+    ): Promise<void> {
         if (wait.goalId !== undefined) {
             const goalGateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
             const goal = await goalGateway.readGoal(this.options.instanceName, ctxId);
@@ -519,20 +547,6 @@ export class McpEndpointHandlerInteraction {
                 throw new Error(`Durable task ${wait.taskId} is not available for automatic recovery.`);
             }
         }
-        const claimId = `recovery-${randomUUID()}`;
-        const claimed = await gateway.claimWaitRecovery(this.options.instanceName, waitId, claimId);
-        return {
-            claimId,
-            ...(claimed.goalId === undefined ? {} : { goalId: claimed.goalId }),
-            kind: claimed.kind,
-            ...(claimed.result === undefined ? {} : { result: claimed.result }),
-            ...(claimed.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: claimed.recoveryMessageAttemptedAt }),
-            ...(claimed.recoveryMessageId === undefined ? {} : { recoveryMessageId: claimed.recoveryMessageId }),
-            ...(claimed.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: claimed.recoveryMessageSentAt }),
-            ...(claimed.taskId === undefined ? {} : { taskId: claimed.taskId }),
-            targetId: claimed.targetId,
-            waitId: claimed.waitId,
-        };
     }
 
     async #decideApproval(
@@ -600,19 +614,22 @@ export class McpEndpointHandlerInteraction {
             agentBusy,
             approvals: visibleApprovals,
             background: ownedWaits
-                .filter((wait) => wait.kind === "tmux" && (
-                    wait.status === "waiting" || wait.status === "detached" ||
-                    (wait.status === "resolved" && wait.detachedAt !== undefined)
+                .filter((wait) => (
+                    wait.kind === "tmux" && (wait.status === "waiting" || wait.status === "detached")
+                ) || (
+                    (wait.kind === "tmux" || wait.kind === "question") &&
+                    wait.status === "resolved" && wait.detachedAt !== undefined
                 ))
                 .map((wait) => ({
                     ...(wait.detachedAt === undefined ? {} : { detachedAt: wait.detachedAt }),
                     ...(wait.goalId === undefined ? {} : { goalId: wait.goalId }),
+                    kind: wait.kind,
                     ...(wait.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: wait.recoveryMessageAttemptedAt }),
                     ...(wait.recoveryMessageId === undefined ? {} : { recoveryMessageId: wait.recoveryMessageId }),
                     ...(wait.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: wait.recoveryMessageSentAt }),
                     status: wait.status,
                     ...(wait.taskId === undefined ? {} : { taskId: wait.taskId }),
-                    tmuxTaskId: wait.targetId,
+                    ...(wait.kind === "tmux" ? { tmuxTaskId: wait.targetId } : {}),
                     updatedAt: wait.updatedAt,
                     waitId: wait.waitId,
                 })),
@@ -824,6 +841,7 @@ function readWorkspaceCursor(input: JsonValue): number {
 }
 
 function workspaceEventBelongsTo(event: InstanceEvent, ctxId: string): boolean {
+    if (event.type === "wait.recoveryClaimed" || event.type === "wait.recoveryReleased") return false;
     const data = asRecord(event.data);
     return data?.ctxId === ctxId || data?.createdByCtxId === ctxId;
 }

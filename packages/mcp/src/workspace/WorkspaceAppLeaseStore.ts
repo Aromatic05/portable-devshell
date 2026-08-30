@@ -6,14 +6,16 @@ interface WorkspaceAppLeaseRecord {
     createdAt: string;
     ctxId: string;
     instance: string;
-    tokenHash: string;
+    tokenHashes: string[];
     updatedAt: string;
 }
 
 interface WorkspaceAppLeaseDocument {
     leases: WorkspaceAppLeaseRecord[];
-    version: 1;
+    version: 2;
 }
+
+const MAX_TOKENS_PER_LEASE = 8;
 
 export interface WorkspaceAppLeaseStoreOptions {
     filePath?: string;
@@ -51,7 +53,7 @@ export class WorkspaceAppLeaseStore {
             const key = leaseKey(instance, ctxId);
             const current = this.#leases.get(key);
             const plain = this.#plainTokens.get(key);
-            if (current !== undefined && plain !== undefined && tokenMatches(current.tokenHash, plain)) {
+            if (current !== undefined && plain !== undefined && tokenMatchesAny(current.tokenHashes, plain)) {
                 return plain;
             }
 
@@ -59,11 +61,16 @@ export class WorkspaceAppLeaseStore {
             if (token.length < 16) throw new Error("Workspace App token factory returned an invalid token.");
             const now = new Date(this.#now()).toISOString();
             const previous = cloneLeaseMap(this.#leases);
+            const tokenHash = hashToken(token);
+            const tokenHashes = [
+                ...(current?.tokenHashes ?? []).filter((hash) => hash !== tokenHash),
+                tokenHash,
+            ].slice(-MAX_TOKENS_PER_LEASE);
             this.#leases.set(key, {
                 createdAt: current?.createdAt ?? now,
                 ctxId,
                 instance,
-                tokenHash: hashToken(token),
+                tokenHashes,
                 updatedAt: now,
             });
             try {
@@ -82,7 +89,7 @@ export class WorkspaceAppLeaseStore {
             this.#assertInitialized();
             const key = leaseKey(instance, ctxId);
             const lease = this.#leases.get(key);
-            if (lease === undefined || !tokenMatches(lease.tokenHash, token)) return false;
+            if (lease === undefined || !tokenMatchesAny(lease.tokenHashes, token)) return false;
             this.#plainTokens.set(key, token);
             return true;
         });
@@ -141,7 +148,7 @@ export class WorkspaceAppLeaseStore {
             leases: [...this.#leases.values()].sort((left, right) =>
                 left.instance.localeCompare(right.instance) || left.ctxId.localeCompare(right.ctxId)
             ),
-            version: 1,
+            version: 2,
         };
         const temporary = `${this.#filePath}.${process.pid}.${randomUUID()}.tmp`;
         try {
@@ -181,10 +188,14 @@ function tokenMatches(expectedHash: string, token: string): boolean {
     return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
+function tokenMatchesAny(expectedHashes: readonly string[], token: string): boolean {
+    return expectedHashes.some((expectedHash) => tokenMatches(expectedHash, token));
+}
+
 function cloneLeaseMap(
     leases: ReadonlyMap<string, WorkspaceAppLeaseRecord>,
 ): Map<string, WorkspaceAppLeaseRecord> {
-    return new Map([...leases].map(([key, lease]) => [key, { ...lease }]));
+    return new Map([...leases].map(([key, lease]) => [key, { ...lease, tokenHashes: [...lease.tokenHashes] }]));
 }
 
 function restoreLeaseMap(
@@ -192,14 +203,16 @@ function restoreLeaseMap(
     previous: ReadonlyMap<string, WorkspaceAppLeaseRecord>,
 ): void {
     leases.clear();
-    for (const [key, lease] of previous) leases.set(key, { ...lease });
+    for (const [key, lease] of previous) leases.set(key, { ...lease, tokenHashes: [...lease.tokenHashes] });
 }
 
 function parseDocument(value: unknown): WorkspaceAppLeaseDocument | undefined {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
     const document = value as { leases?: unknown; version?: unknown };
-    if (document.version !== 1 || !Array.isArray(document.leases)) return undefined;
-    const leases = document.leases.map(parseLease);
+    if ((document.version !== 1 && document.version !== 2) || !Array.isArray(document.leases)) return undefined;
+    const leases = document.leases.map((lease) => (
+        document.version === 1 ? parseLegacyLease(lease) : parseLease(lease)
+    ));
     if (leases.some((lease) => lease === undefined)) return undefined;
     const keys = new Set<string>();
     for (const lease of leases as WorkspaceAppLeaseRecord[]) {
@@ -207,12 +220,37 @@ function parseDocument(value: unknown): WorkspaceAppLeaseDocument | undefined {
         if (keys.has(key)) return undefined;
         keys.add(key);
     }
-    return { leases: leases as WorkspaceAppLeaseRecord[], version: 1 };
+    return { leases: leases as WorkspaceAppLeaseRecord[], version: 2 };
 }
 
 function parseLease(value: unknown): WorkspaceAppLeaseRecord | undefined {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-    const lease = value as Partial<WorkspaceAppLeaseRecord>;
+    const lease = value as Partial<WorkspaceAppLeaseRecord> & { tokenHashes?: unknown };
+    if (!Array.isArray(lease.tokenHashes) || lease.tokenHashes.length === 0 || lease.tokenHashes.length > MAX_TOKENS_PER_LEASE) {
+        return undefined;
+    }
+    const tokenHashes = lease.tokenHashes.filter((hash): hash is string => (
+        typeof hash === "string" && /^[0-9a-f]{64}$/u.test(hash)
+    ));
+    if (tokenHashes.length !== lease.tokenHashes.length || new Set(tokenHashes).size !== tokenHashes.length) return undefined;
+    if (
+        typeof lease.createdAt !== "string" ||
+        typeof lease.ctxId !== "string" || lease.ctxId.length === 0 ||
+        typeof lease.instance !== "string" || lease.instance.length === 0 ||
+        typeof lease.updatedAt !== "string"
+    ) return undefined;
+    return {
+        createdAt: lease.createdAt,
+        ctxId: lease.ctxId,
+        instance: lease.instance,
+        tokenHashes,
+        updatedAt: lease.updatedAt,
+    };
+}
+
+function parseLegacyLease(value: unknown): WorkspaceAppLeaseRecord | undefined {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+    const lease = value as Partial<Omit<WorkspaceAppLeaseRecord, "tokenHashes">> & { tokenHash?: unknown };
     if (
         typeof lease.createdAt !== "string" ||
         typeof lease.ctxId !== "string" || lease.ctxId.length === 0 ||
@@ -224,7 +262,7 @@ function parseLease(value: unknown): WorkspaceAppLeaseRecord | undefined {
         createdAt: lease.createdAt,
         ctxId: lease.ctxId,
         instance: lease.instance,
-        tokenHash: lease.tokenHash,
+        tokenHashes: [lease.tokenHash],
         updatedAt: lease.updatedAt,
     };
 }

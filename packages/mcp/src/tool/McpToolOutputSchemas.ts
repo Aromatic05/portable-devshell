@@ -278,6 +278,7 @@ export const approvalRequestOutputSchema = objectSchema({
 const workspaceBackgroundSchema = objectSchema({
     detachedAt: stringValue,
     goalId: nonEmptyString,
+    kind: { enum: ["question", "tmux"], type: "string" },
     recoveryMessageAttemptedAt: stringValue,
     recoveryMessageId: nonEmptyString,
     recoveryMessageSentAt: stringValue,
@@ -286,7 +287,7 @@ const workspaceBackgroundSchema = objectSchema({
     tmuxTaskId: stringValue,
     updatedAt: stringValue,
     waitId: nonEmptyString,
-}, ["status", "tmuxTaskId", "updatedAt", "waitId"]);
+}, ["kind", "status", "updatedAt", "waitId"]);
 
 const workspaceApprovalEventSchema = objectSchema({
     approvalId: nonEmptyString,

@@ -107,7 +107,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var reconnectOnStart = false;
   var recovering = false;
   var busy = new Set();
-  var confirmingTaskCancel = new Set();
+  var confirmingTaskCancel = new Map();
   var expandedQuestions = new Set();
   var WIDGET_STATE_KEY = "portableDevshellWorkspace";
   var RESUME_MESSAGE = "Resume the existing portable-devshell work from the current Workspace state. Do not repeat completed work or restart the original command. Read the Workspace state and triggering result before acting. Reuse any existing tmux task instead of starting it again. For tmux waits, a timeout or user interruption ends only the wait and does not stop the task. If a blocked Workspace Goal can now proceed, call workspace_goal with action=resume before continuing.";
@@ -218,6 +218,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   function assignCtxId(value) {
     if (!value) return false;
     var nextCtxId = String(value);
+    if (ctxId && ctxId !== nextCtxId && liveAuthorizationEstablished) return false;
     if (ctxId && ctxId !== nextCtxId) {
       watchGeneration += 1;
       watchStarted = false;
@@ -278,6 +279,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       }; }),
       background: background.map(function (item) { return {
         goalId: item.goalId,
+        kind: item.kind,
         taskId: item.taskId,
         tmuxTaskId: item.tmuxTaskId,
         status: item.status,
@@ -299,8 +301,13 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     } catch (_) {}
   }
 
+  async function requireModelContext(extra) {
+    if (!initialized || !snapshot) throw new Error("Workspace state is unavailable for model re-entry");
+    await app.updateModelContext(modelContext(extra));
+  }
+
   async function sendModelMessage(text, extra, canSend, beforeSend) {
-    await syncModelContext(extra);
+    await requireModelContext(extra);
     if (canSend && !canSend()) return false;
     if (beforeSend) await beforeSend();
     await app.sendMessage({
@@ -411,6 +418,13 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return tasks.find(function (task) { return task.taskId === taskId; });
   }
 
+  function reconcileTaskCancelConfirmations() {
+    confirmingTaskCancel.forEach(function (revision, taskId) {
+      var task = findTask(taskId);
+      if (!task || task.revision !== revision) confirmingTaskCancel.delete(taskId);
+    });
+  }
+
   function hasRecoverableWork(item) {
     if (!item) return false;
     if (item.goalId) {
@@ -507,6 +521,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     snapshot = nextSnapshot;
     if (snapshot && snapshot.ctxId) ctxId = String(snapshot.ctxId);
     if (snapshot && Number.isSafeInteger(snapshot.cursor)) cursor = snapshot.cursor;
+    reconcileTaskCancelConfirmations();
     persistWorkspaceHint();
     render();
     await syncModelContext();
@@ -706,12 +721,18 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   async function answerQuestion(waitId, answer) {
     var result = await act(waitId, "workspace_question_answer", { waitId: waitId, answer: answer });
     if (result && result.detached && hasRecoverableWork(result)) {
-      await dispatchRecovery(
-        result.waitId,
-        RESUME_MESSAGE,
-        { answeredQuestion: result }
-      );
-      await refresh(false);
+      try {
+        await dispatchRecovery(
+          result.waitId,
+          RESUME_MESSAGE,
+          { answeredQuestion: result }
+        );
+        await refresh(false);
+      } catch (error) {
+        console.error(error);
+        await refresh(false).catch(function () {});
+        status.textContent = "Resume available";
+      }
     }
   }
 
@@ -810,7 +831,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     var checkpoint = task.checkpoint && task.checkpoint.summary ? '<div class="detail"><div class="muted">Checkpoint</div><div>' + escapeHtml(task.checkpoint.summary) + '</div></div>' : '';
     var action = task.status === "paused" ? "resume" : "pause";
     var actionLabel = task.status === "paused" ? "Resume task" : "Pause task";
-    var cancelPending = confirmingTaskCancel.has(task.taskId);
+    var cancelPending = confirmingTaskCancel.get(task.taskId) === task.revision;
     var cancelLabel = cancelPending ? "Confirm cancel" : "Cancel task";
     var cancelDetail = cancelPending ? "click again · processes keep running" : "keep processes running";
     var controls = '<button type="button" class="action-row" aria-label="' + actionLabel + '" data-task-control="' + action + '" data-task-id="' + escapeHtml(task.taskId) + '" data-task-revision="' + escapeHtml(task.revision) + '"' + disabled + '><span>' + actionLabel + '</span><span class="muted">model re-entry only</span></button>' +
@@ -887,8 +908,9 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     if (taskControl && !taskControl.hasAttribute("disabled")) {
       var taskId = taskControl.getAttribute("data-task-id");
       var taskAction = taskControl.getAttribute("data-task-control");
-      if (taskId && taskAction === "cancel" && !confirmingTaskCancel.has(taskId)) {
-        confirmingTaskCancel.add(taskId);
+      var taskRevision = Number(taskControl.getAttribute("data-task-revision"));
+      if (taskId && taskAction === "cancel" && confirmingTaskCancel.get(taskId) !== taskRevision) {
+        confirmingTaskCancel.set(taskId, taskRevision);
         render();
         return;
       }

@@ -39,6 +39,100 @@ test("Workspace refreshes authoritative state after a stale Goal action is fence
     assert.equal(calls.filter((call) => call.name === "workspace_goal_stop").length, 1);
 });
 
+test("Workspace clears task cancel confirmation when the authoritative task revision changes", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
+    await page.evaluate(STALE_TASK_CONFIRM_BRIDGE_SCRIPT);
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    const app = page.frameLocator("#workspace");
+    await app.getByRole("button", { name: "Cancel task", exact: true }).click();
+    await app.getByRole("button", { name: "Confirm cancel", exact: true }).waitFor({ state: "visible" });
+    assert.equal(await page.evaluate("window.__advanceTaskConfirmRevision()"), true);
+    await app.getByText("Task · Updated work", { exact: true }).waitFor({ state: "visible" });
+    await app.getByRole("button", { name: "Cancel task", exact: true }).waitFor({ state: "visible" });
+    assert.equal(await app.getByRole("button", { name: "Confirm cancel", exact: true }).count(), 0);
+    assert.equal(await page.evaluate("(window.__staleTaskConfirmCalls || []).some(call => call.name === 'workspace_task_control')"), false);
+});
+
+const STALE_TASK_CONFIRM_BRIDGE_SCRIPT = String.raw`
+window.__staleTaskConfirmCalls = [];
+window.__staleTaskConfirmRevision = 1;
+window.__staleTaskConfirmWatch = null;
+function staleTaskConfirmSnapshot() {
+    var updated = window.__staleTaskConfirmRevision === 2;
+    return {
+        approvals: [], background: [], ctxId: "ctx-stale-task", currentEvent: null,
+        cursor: window.__staleTaskConfirmRevision,
+        goal: null,
+        instance: "browser-instance",
+        questions: [],
+        tasks: [{
+            completed: 0,
+            currentItem: updated ? "Review new work" : "Review work",
+            revision: window.__staleTaskConfirmRevision,
+            status: "in_progress",
+            taskId: "task-stale-confirm",
+            title: updated ? "Updated work" : "Original work",
+            total: 1,
+            updatedAt: updated ? "2026-08-30T00:01:00.000Z" : "2026-08-30T00:00:00.000Z"
+        }]
+    };
+}
+window.__advanceTaskConfirmRevision = function () {
+    var pending = window.__staleTaskConfirmWatch;
+    if (!pending) return false;
+    window.__staleTaskConfirmRevision = 2;
+    window.__staleTaskConfirmWatch = null;
+    pending.source.postMessage({
+        id: pending.id,
+        jsonrpc: "2.0",
+        result: { structuredContent: { changed: true, cursor: 2, snapshot: staleTaskConfirmSnapshot() } }
+    }, "*");
+    return true;
+};
+window.addEventListener("message", function (event) {
+    if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
+    var source = event.source;
+    var message = event.data;
+    function reply(result) {
+        if (message.id === undefined) return;
+        source.postMessage({ id: message.id, jsonrpc: "2.0", result: result }, "*");
+    }
+    if (message.method === "ui/initialize") {
+        source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-input", params: { arguments: { ctxId: "ctx-stale-task" } } }, "*");
+        source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: {
+            _meta: { "portable-devshell/workspace": { token: "stale-task-token" } },
+            structuredContent: { ctxId: "ctx-stale-task", instance: "browser-instance" }
+        } }, "*");
+        reply({ hostCapabilities: {}, hostContext: {}, hostInfo: { name: "test-host", version: "1.0.0" }, protocolVersion: "2026-01-26" });
+        return;
+    }
+    if (message.method === "ui/update-model-context") { reply({}); return; }
+    if (message.method !== "tools/call") return;
+    var call = message.params || {};
+    window.__staleTaskConfirmCalls.push(call);
+    if (call.name === "workspace_snapshot" || call.name === "workspace_reconnect") {
+        reply({ _meta: { "portable-devshell/workspace": { token: "stale-task-token" } }, structuredContent: staleTaskConfirmSnapshot() });
+        return;
+    }
+    if (call.name === "workspace_watch") {
+        window.__staleTaskConfirmWatch = { id: message.id, source: source };
+        return;
+    }
+    if (call.name === "workspace_task_control") {
+        reply({ structuredContent: { taskId: call.arguments.taskId } });
+    }
+});
+`;
+
 const STALE_GOAL_BRIDGE_SCRIPT = String.raw`
 window.__staleGoalCalls = [];
 window.__staleGoalVersion = 1;
@@ -391,6 +485,156 @@ window.addEventListener("message", function (event) {
 });
 `;
 
+test("Workspace does not dispatch automatic recovery when model context injection fails", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    const pageFailures: string[] = [];
+    page.on("pageerror", (error) => pageFailures.push(error.message));
+    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
+    await page.evaluate(MODEL_CONTEXT_FAILURE_BRIDGE_SCRIPT);
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    const app = page.frameLocator("#workspace");
+    await app.getByText("Resume after answer?", { exact: true }).waitFor({ state: "visible" });
+    await app.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.waitForFunction("(window.__modelContextFailureActions || []).length >= 2");
+    assert.deepEqual(
+        await page.evaluate("window.__modelContextFailureActions || []"),
+        ["claim", "release"],
+    );
+    assert.equal(await page.evaluate("(window.__modelContextFailureMessages || []).length"), 0);
+    await page.waitForTimeout(250);
+    assert.deepEqual(
+        await page.evaluate("window.__modelContextFailureActions || []"),
+        ["claim", "release"],
+    );
+    assert.deepEqual(pageFailures, []);
+});
+
+const MODEL_CONTEXT_FAILURE_BRIDGE_SCRIPT = String.raw`
+window.__modelContextFailureActions = [];
+window.__modelContextFailureMessages = [];
+window.__modelContextFailureAnswered = false;
+function modelContextFailureSnapshot() {
+    var question = {
+        detachedAt: "2026-08-30T00:00:00.000Z",
+        eventName: "user.answer",
+        kind: "question",
+        name: "workspace_ask",
+        payload: { allowText: false, choices: ["Continue"], question: "Resume after answer?" },
+        status: "detached",
+        targetId: "question-model-context",
+        updatedAt: "2026-08-30T00:00:01.000Z",
+        waitId: "wait-model-context"
+    };
+    return {
+        approvals: [],
+        background: window.__modelContextFailureAnswered ? [{
+            detachedAt: question.detachedAt,
+            kind: "question",
+            status: "resolved",
+            updatedAt: "2026-08-30T00:00:02.000Z",
+            waitId: question.waitId
+        }] : [],
+        ctxId: "ctx-model-context",
+        currentEvent: window.__modelContextFailureAnswered ? null : question,
+        cursor: 1,
+        goal: null,
+        instance: "browser-instance",
+        questions: window.__modelContextFailureAnswered ? [] : [question],
+        tasks: []
+    };
+}
+window.addEventListener("message", function (event) {
+    if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
+    var source = event.source;
+    var message = event.data;
+    function reply(result) {
+        if (message.id === undefined) return;
+        source.postMessage({ id: message.id, jsonrpc: "2.0", result: result }, "*");
+    }
+    function reject(text) {
+        if (message.id === undefined) return;
+        source.postMessage({ error: { code: -32010, message: text }, id: message.id, jsonrpc: "2.0" }, "*");
+    }
+    if (message.method === "ui/initialize") {
+        source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-input", params: { arguments: { ctxId: "ctx-model-context" } } }, "*");
+        source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: {
+            _meta: { "portable-devshell/workspace": { token: "model-context-token" } },
+            structuredContent: { ctxId: "ctx-model-context", instance: "browser-instance" }
+        } }, "*");
+        reply({ hostCapabilities: {}, hostContext: {}, hostInfo: { name: "test-host", version: "1.0.0" }, protocolVersion: "2026-01-26" });
+        return;
+    }
+    if (message.method === "ui/update-model-context") {
+        reject("model context unavailable");
+        return;
+    }
+    if (message.method === "ui/message") {
+        window.__modelContextFailureMessages.push(message.params || {});
+        reply({});
+        return;
+    }
+    if (message.method !== "tools/call") return;
+    var call = message.params || {};
+    if (call.name === "workspace_snapshot" || call.name === "workspace_reconnect") {
+        reply({ _meta: { "portable-devshell/workspace": { token: "model-context-token" } }, structuredContent: modelContextFailureSnapshot() });
+        return;
+    }
+    if (call.name === "workspace_watch") return;
+    if (call.name === "workspace_question_answer") {
+        window.__modelContextFailureAnswered = true;
+        reply({ structuredContent: {
+            answer: call.arguments.answer,
+            detached: true,
+            questionId: "question-model-context",
+            waitId: "wait-model-context"
+        } });
+        return;
+    }
+    if (call.name === "workspace_wait_recover") {
+        window.__modelContextFailureActions.push(call.arguments.action);
+        if (call.arguments.action === "claim") {
+            reply({ structuredContent: {
+                claimId: "model-context-claim",
+                kind: "question",
+                recoveryMessageId: "model-context-message",
+                result: { answer: "Continue" },
+                targetId: "question-model-context",
+                waitId: "wait-model-context"
+            } });
+            return;
+        }
+        if (call.arguments.action === "attempt") {
+            reply({ structuredContent: {
+                attempted: true,
+                recoveryMessageAttemptedAt: "2026-08-30T00:00:02.000Z",
+                recoveryMessageId: "model-context-message",
+                waitId: "wait-model-context"
+            } });
+            return;
+        }
+        if (call.arguments.action === "release") {
+            reply({ structuredContent: { released: true, waitId: "wait-model-context" } });
+            return;
+        }
+        if (call.arguments.action === "sent") {
+            reply({ structuredContent: { recoveryMessageSentAt: "2026-08-30T00:00:03.000Z", sent: true, waitId: "wait-model-context" } });
+            return;
+        }
+        if (call.arguments.action === "complete") {
+            reply({ structuredContent: { completed: true, kind: "question", targetId: "question-model-context", waitId: "wait-model-context" } });
+        }
+    }
+});
+`;
+
 test("Workspace heartbeat reconciles durable state even when the event stream reports no change", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
@@ -516,6 +760,64 @@ test("Workspace App reconnects after MCP restart with its persisted private capa
         false,
     );
     assert.deepEqual(browserFailures, []);
+});
+
+test("Workspace ignores a stale host tool result after live Context authorization is established", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:320px"></iframe>');
+    await page.evaluate(TOKEN_RESTART_BRIDGE_SCRIPT);
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html.replace("<script>", `<script>
+            window.openai = {
+                widgetState: {
+                    modelContent: null,
+                    privateContent: {
+                        portableDevshellWorkspace: {
+                            ctxId: "ctx-token-restart",
+                            token: "token-stable"
+                        }
+                    },
+                    imageIds: []
+                },
+                setWidgetState: function (state) { this.widgetState = state; }
+            };
+        <\/script><script>`);
+    }, workspaceAppHtml);
+
+    await page.waitForFunction("(window.__tokenRestartCalls || []).some(call => call.name === 'workspace_watch' && call.arguments.ctxId === 'ctx-token-restart')");
+    const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
+    if (frame === undefined) throw new Error("Workspace frame is missing.");
+    await frame.evaluate(() => {
+        window.dispatchEvent(new CustomEvent("openai:set_globals", {
+            detail: {
+                globals: {
+                    toolOutput: { ctxId: "ctx-stale", instance: "browser-instance" },
+                    toolResponseMetadata: {
+                        mcp_tool_result: {
+                            _meta: { "portable-devshell/workspace": { token: "token-stale" } },
+                            structuredContent: { ctxId: "ctx-stale", instance: "browser-instance" },
+                        },
+                    },
+                },
+            },
+        }));
+    });
+    await page.waitForTimeout(100);
+
+    const calls = await page.evaluate("window.__tokenRestartCalls || []") as Array<{
+        arguments?: Record<string, unknown>;
+        name?: string;
+    }>;
+    assert.equal(calls.some((call) => call.arguments?.ctxId === "ctx-stale"), false);
+    assert.equal(
+        await frame.evaluate("window.openai.widgetState.privateContent.portableDevshellWorkspace.ctxId"),
+        "ctx-token-restart",
+    );
 });
 
 const TOKEN_RESTART_BRIDGE_SCRIPT = String.raw`
