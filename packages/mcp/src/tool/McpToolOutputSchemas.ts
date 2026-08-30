@@ -282,6 +282,7 @@ const workspaceBackgroundSchema = objectSchema({
     recoveryMessageAttemptedAt: stringValue,
     recoveryMessageId: nonEmptyString,
     recoveryMessageSentAt: stringValue,
+    result: anyValue,
     status: { enum: ["detached", "resolved", "waiting"], type: "string" },
     taskId: nonEmptyString,
     tmuxTaskId: stringValue,

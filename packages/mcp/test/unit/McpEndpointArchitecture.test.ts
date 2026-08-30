@@ -276,7 +276,11 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
         { principal: "tester", requestId: "request-worker" }
     );
     assert.deepEqual(workerResult, { ok: true, toolName: "bash_run" });
-    assert.deepEqual(dismissedRecoveries, ["wait-recovery-1", "wait-recovery-raced"]);
+    assert.deepEqual(
+        dismissedRecoveries,
+        [],
+        "ordinary Agent activity must not guess which ambiguous recovery message the host accepted",
+    );
     assert.deepEqual(harness.calls[0]?.input, { command: "pwd" });
     assert.deepEqual(harness.audited, [
         {

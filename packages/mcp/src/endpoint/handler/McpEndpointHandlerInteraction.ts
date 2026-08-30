@@ -26,7 +26,7 @@ import { throwIfMcpEndpointAborted, waitForMcpEndpointAbortable } from "../McpEn
 import { McpNativeToolResult, type McpEndpointResult } from "../McpEndpointResult.js";
 
 export class McpEndpointHandlerInteraction {
-    readonly #appStates = new Map<string, { lastSeenAt?: number; token: string }>();
+    readonly #appStates = new Map<string, { lastSeenAt?: number }>();
     readonly #appReadyWaiters = new Map<string, Set<() => void>>();
     readonly #activeAppWatches = new Map<string, number>();
     readonly #appLeases: WorkspaceAppLeaseStore;
@@ -146,16 +146,26 @@ export class McpEndpointHandlerInteraction {
             throwIfMcpEndpointAborted(signal);
         }
         const answer = readAnswer(resolved.result);
-        await gateway.consumeWait(this.options.instanceName, wait.waitId);
-        await gateway.touchGoal?.(this.options.instanceName, ctxId);
+        try {
+            await gateway.touchGoal?.(this.options.instanceName, ctxId);
+            throwIfMcpEndpointAborted(signal);
+            await gateway.consumeWait(this.options.instanceName, wait.waitId);
+        } catch (error) {
+            const current = (await gateway.listWaits(this.options.instanceName))
+                .find((entry) => entry.waitId === wait.waitId);
+            if (current?.status === "resolved" && current.detachedAt === undefined) {
+                await gateway.detachWait(this.options.instanceName, wait.waitId).catch(() => undefined);
+            }
+            throw error;
+        }
         return { answer, questionId };
     }
 
     async #openWorkspace(context: ToolCallContext): Promise<McpNativeToolResult> {
         const ctxId = requireCtxId(context);
         const token = await this.#appLeases.issue(this.options.instanceName, ctxId);
-        this.#appStates.set(ctxId, { token });
-        return this.#workspaceResult(ctxId, {
+        this.#appStates.set(ctxId, {});
+        return this.#workspaceResult(ctxId, token, {
             ctxId,
             instance: this.options.instanceName,
         }, [
@@ -240,8 +250,8 @@ export class McpEndpointHandlerInteraction {
         context: ToolCallContext,
     ): Promise<McpNativeToolResult> {
         const ctxId = requireCtxId(context);
-        await this.#assertAppToken(input, context);
-        return this.#workspaceResult(ctxId, await this.#snapshot(gateway, context));
+        const token = await this.#assertAppToken(input, context);
+        return this.#workspaceResult(ctxId, token, await this.#snapshot(gateway, context));
     }
 
     async #reconnectWorkspace(
@@ -250,8 +260,8 @@ export class McpEndpointHandlerInteraction {
         context: ToolCallContext,
     ): Promise<McpNativeToolResult> {
         const ctxId = requireCtxId(context);
-        await this.#assertAppToken(input, context);
-        return this.#workspaceResult(ctxId, await this.#snapshot(gateway, context));
+        const token = await this.#assertAppToken(input, context);
+        return this.#workspaceResult(ctxId, token, await this.#snapshot(gateway, context));
     }
 
     async #watchWorkspace(
@@ -264,7 +274,7 @@ export class McpEndpointHandlerInteraction {
             throw new Error(`Workspace live events are unavailable for ${this.options.instanceName}.`);
         }
         const ctxId = requireCtxId(context);
-        await this.#assertAppToken(input, context);
+        const token = await this.#assertAppToken(input, context);
         const startedAt = Date.now();
         const heartbeatMs = this.options.watchHeartbeatMs ?? 20_000;
         const pollMs = this.options.watchPollMs ?? 250;
@@ -276,14 +286,14 @@ export class McpEndpointHandlerInteraction {
                 const changed = batch.gap || batch.lastSeq < cursor || batch.events.some((event) => workspaceEventBelongsTo(event, ctxId));
                 cursor = batch.lastSeq;
                 if (changed) {
-                    return this.#workspaceResult(ctxId, {
+                    return this.#workspaceResult(ctxId, token, {
                         changed: true,
                         cursor,
                         snapshot: await this.#snapshot(gateway, context),
                     });
                 }
                 if (Date.now() - startedAt >= heartbeatMs) {
-                    return this.#workspaceResult(ctxId, {
+                    return this.#workspaceResult(ctxId, token, {
                         changed: false,
                         cursor,
                         snapshot: await this.#snapshot(gateway, context),
@@ -298,6 +308,7 @@ export class McpEndpointHandlerInteraction {
 
     #workspaceResult(
         ctxId: string,
+        token: string,
         structuredContent: JsonValue,
         content: McpNativeToolResult["content"] = [],
         markAppSeen = true,
@@ -308,7 +319,7 @@ export class McpEndpointHandlerInteraction {
         }
         if (markAppSeen) existing.lastSeenAt = (this.options.now ?? Date.now)();
         return new McpNativeToolResult({
-            _meta: { "portable-devshell/workspace": { token: existing.token } },
+            _meta: { "portable-devshell/workspace": { token } },
             content,
             structuredContent,
         });
@@ -627,6 +638,7 @@ export class McpEndpointHandlerInteraction {
                     ...(wait.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: wait.recoveryMessageAttemptedAt }),
                     ...(wait.recoveryMessageId === undefined ? {} : { recoveryMessageId: wait.recoveryMessageId }),
                     ...(wait.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: wait.recoveryMessageSentAt }),
+                    ...(wait.result === undefined ? {} : { result: wait.result }),
                     status: wait.status,
                     ...(wait.taskId === undefined ? {} : { taskId: wait.taskId }),
                     ...(wait.kind === "tmux" ? { tmuxTaskId: wait.targetId } : {}),
@@ -643,7 +655,7 @@ export class McpEndpointHandlerInteraction {
         } as unknown as JsonValue;
     }
 
-    async #assertAppToken(input: JsonValue, context: ToolCallContext): Promise<void> {
+    async #assertAppToken(input: JsonValue, context: ToolCallContext): Promise<string> {
         const ctxId = requireCtxId(context);
         const record = asRecord(input);
         const token = record === undefined ? undefined : record.token;
@@ -656,8 +668,8 @@ export class McpEndpointHandlerInteraction {
         const existing = this.#appStates.get(ctxId);
         this.#appStates.set(ctxId, {
             ...(existing?.lastSeenAt === undefined ? {} : { lastSeenAt: existing.lastSeenAt }),
-            token,
         });
+        return token;
     }
 }
 

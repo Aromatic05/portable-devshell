@@ -280,6 +280,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       background: background.map(function (item) { return {
         goalId: item.goalId,
         kind: item.kind,
+        result: item.result,
         taskId: item.taskId,
         tmuxTaskId: item.tmuxTaskId,
         status: item.status,

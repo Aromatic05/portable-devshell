@@ -84,6 +84,36 @@ test("workspace_ask detaches durable wait state when the host cancels the held c
     });
 });
 
+test("workspace_ask keeps a resolved answer recoverable when post-answer processing fails", async () => {
+    const fake = createInteractionGateway();
+    const gateway = Object.assign(fake.gateway, {
+        async touchGoal() {
+            throw new Error("goal store unavailable");
+        },
+    }) as McpInteractionGateway;
+    const handler = new McpEndpointHandlerInteraction({ gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
+    const held = handler.call(
+        "workspace_ask",
+        { question: "Keep this answer?" },
+        context,
+        "call-agent-post-answer-failure",
+    );
+    const wait = await fake.created;
+
+    await handler.call(
+        "workspace_question_answer",
+        { answer: "yes", token, waitId: wait.waitId },
+        context,
+        "call-answer-post-answer-failure",
+    );
+    await assert.rejects(held, /goal store unavailable/u);
+    const recovered = fake.waits.find((entry) => entry.waitId === wait.waitId);
+    assert.equal(recovered?.status, "resolved");
+    assert.equal(typeof recovered?.detachedAt, "string");
+    assert.deepEqual(recovered?.result, { answer: "yes" });
+});
+
 test("workspace_ask infers the current Todo association instead of requiring taskId", async () => {
     const fake = createInteractionGateway();
     const gateway = Object.assign(fake.gateway, {
@@ -303,6 +333,62 @@ test("Workspace reconnect reuses a live App token instead of invalidating siblin
     ));
 });
 
+test("Workspace sibling requests keep their own verified capability token", async () => {
+    const root = await createTestTempDirectory("workspace-app-sibling-capabilities");
+    const filePath = join(root, "workspace-app-leases.json");
+    try {
+        const firstStore = new WorkspaceAppLeaseStore({ filePath, tokenFactory: () => "token-sibling-first" });
+        await firstStore.initialize();
+        const firstToken = await firstStore.issue("demo", context.ctxId!);
+        const secondStore = new WorkspaceAppLeaseStore({ filePath, tokenFactory: () => "token-sibling-second" });
+        await secondStore.initialize();
+        const secondToken = await secondStore.issue("demo", context.ctxId!);
+        assert.notEqual(firstToken, secondToken);
+
+        const fake = createInteractionGateway();
+        let listCalls = 0;
+        let releaseFirst!: () => void;
+        let markFirstStarted!: () => void;
+        const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+        const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+        const gateway = Object.assign(fake.gateway, {
+            async listWaits() {
+                listCalls += 1;
+                if (listCalls === 1) {
+                    markFirstStarted();
+                    await firstBlocked;
+                }
+                return [];
+            },
+            async readToolCalls() { return []; },
+            async readWorkspaceEvents() { return { events: [], gap: false, lastSeq: 0 }; },
+        }) as McpWorkspaceGateway;
+        const handler = new McpEndpointHandlerInteraction({
+            gateway,
+            instanceName: "demo",
+            workspaceAppLeases: secondStore,
+        });
+
+        const first = handler.call("workspace_snapshot", { token: firstToken }, context, "call-sibling-first");
+        await firstStarted;
+        const second = await handler.call("workspace_snapshot", { token: secondToken }, context, "call-sibling-second");
+        releaseFirst();
+        const firstResult = await first;
+        assert.ok(firstResult instanceof McpNativeToolResult);
+        assert.ok(second instanceof McpNativeToolResult);
+        assert.equal(
+            (firstResult._meta?.["portable-devshell/workspace"] as { token?: string } | undefined)?.token,
+            firstToken,
+        );
+        assert.equal(
+            (second._meta?.["portable-devshell/workspace"] as { token?: string } | undefined)?.token,
+            secondToken,
+        );
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
 test("Workspace snapshot projects only compact task and background state", async () => {
     const fake = createInteractionGateway();
     const now = new Date().toISOString();
@@ -377,6 +463,7 @@ test("Workspace snapshot projects only compact task and background state", async
     assert.equal(tmuxBackground?.taskId, "task-1");
     assert.equal(questionRecovery?.kind, "question");
     assert.equal(questionRecovery?.tmuxTaskId, undefined);
+    assert.deepEqual(questionRecovery?.result, { answer: "yes" });
     assert.equal(snapshot.currentEvent, null);
     assert.equal(Object.hasOwn(snapshot, "activity"), false);
     assert.equal(Object.hasOwn(snapshot.tasks?.[0] ?? {}, "ctxId"), false);
@@ -1490,11 +1577,11 @@ function createInteractionGateway(): {
         },
         async detachWait(_instance: string, waitId: string) {
             const record = requireWait(waits, waitId);
-            Object.assign(record, {
-                detachedAt: new Date().toISOString(),
-                status: "detached" as const,
-                updatedAt: new Date().toISOString(),
-            });
+            const detachedAt = new Date().toISOString();
+            record.detachedAt = detachedAt;
+            if (record.status === "waiting") record.status = "detached";
+            else if (record.status !== "resolved") throw new Error(`Wait ${waitId} cannot be detached while ${record.status}.`);
+            record.updatedAt = detachedAt;
             pending.get(waitId)?.resolve(structuredClone(record));
             pending.delete(waitId);
             return structuredClone(record);

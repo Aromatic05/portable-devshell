@@ -15,7 +15,6 @@ import { createMcpContextSelector, type McpContextSelector } from "../context/Mc
 import {
     isMcpGoalGateway,
     isMcpTmuxWaitGateway,
-    isMcpWaitRecoveryGateway,
     type McpInstanceGateway,
     type McpTmuxWaitGateway,
 } from "../instance/McpInstanceGateway.js";
@@ -178,7 +177,6 @@ export class McpEndpointDispatch {
             signal
         );
         if (!appOnlyInteraction && context.ctxId !== undefined) {
-            await this.#settleRecoveredWaits(routed.instance, context.ctxId);
             if (toolName !== "workspace_goal") {
                 await this.#gateway?.touchGoal?.(this.#instanceName, context.ctxId);
             }
@@ -597,21 +595,6 @@ export class McpEndpointDispatch {
             workspace: prepared.workspace
         });
         return contextEnvironment(updated, instance)!;
-    }
-
-    async #settleRecoveredWaits(instance: string, ctxId: string): Promise<void> {
-        if (!isMcpWaitRecoveryGateway(this.#gateway)) return;
-        const waits = await this.#gateway.listWaits(instance);
-        for (const wait of waits) {
-            if (
-                wait.createdByCtxId !== ctxId || wait.status !== "resolved" ||
-                wait.detachedAt === undefined || wait.recoveryMessageAttemptedAt === undefined ||
-                wait.recoveryMessageId === undefined
-            ) continue;
-            await this.#gateway
-                .dismissWaitRecovery(instance, wait.waitId, wait.recoveryMessageId)
-                .catch(() => undefined);
-        }
     }
 
     async #appendMcpToolCalled(
