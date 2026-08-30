@@ -203,6 +203,7 @@ test("instance_connect reuses a live workspace attachment and releases a replace
             return {
                 projectMemoryAgentFile: `${workspace}/AGENT.md`,
                 projectMemoryDirectory: `${workspace}/.memory`,
+                projectMemoryPresent: true,
                 temporaryDirectory: `/tmp/${instance}-${prepareCalls}`,
                 workspace
             };
@@ -254,6 +255,7 @@ test("instance_connect cleans an unused alert lease and reference when workspace
             return {
                 projectMemoryAgentFile: `${workspace}/AGENT.md`,
                 projectMemoryDirectory: `${workspace}/.memory`,
+                projectMemoryPresent: true,
                 temporaryDirectory: `/tmp/${instance}`,
                 workspace
             };
@@ -593,6 +595,7 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
             return await (overrides.prepareWorkspace?.(instance, workspace) ?? Promise.resolve({
                 projectMemoryAgentFile: `${workspace}/.memory/AGENT.md`,
                 projectMemoryDirectory: `${workspace}/.memory`,
+                projectMemoryPresent: true,
                 temporaryDirectory: `/tmp/${instance}-context`,
                 workspace
             }));

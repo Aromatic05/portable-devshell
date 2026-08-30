@@ -199,6 +199,7 @@ test("a routed artifact result consumes Comments from the routed instance Contex
             return {
                 projectMemoryAgentFile: `${workspace}/AGENT.md`,
                 projectMemoryDirectory: workspace,
+                projectMemoryPresent: true,
                 temporaryDirectory: `${workspace}/tmp`,
                 workspace,
             };
@@ -332,6 +333,7 @@ function createHarness(
             return {
                 projectMemoryAgentFile: `${workspace}/AGENT.md`,
                 projectMemoryDirectory: workspace,
+                projectMemoryPresent: true,
                 temporaryDirectory: `${workspace}/tmp`,
                 workspace,
             };

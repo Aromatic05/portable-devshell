@@ -61,6 +61,7 @@ export interface WorkerToolsListResult {
 export interface WorkerWorkspacePrepareResult {
     projectMemoryAgentFile: string;
     projectMemoryDirectory: string;
+    projectMemoryPresent?: boolean;
     temporaryDirectory: string;
     workspace: string;
 }

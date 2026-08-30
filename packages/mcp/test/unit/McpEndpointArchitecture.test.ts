@@ -126,6 +126,7 @@ function createWorker(options: {
             return {
                 projectMemoryAgentFile: `${workspace}/AGENT.md`,
                 projectMemoryDirectory: workspace,
+                projectMemoryPresent: true,
                 temporaryDirectory: `${workspace}/tmp`,
                 workspace: workspace,
             };

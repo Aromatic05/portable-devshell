@@ -584,6 +584,7 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
                 return {
                     projectMemoryAgentFile: `${workspace}/.memory/AGENT.md`,
                     projectMemoryDirectory: `${workspace}/.memory`,
+                    projectMemoryPresent: false,
                     temporaryDirectory,
                     workspace
                 };
@@ -652,12 +653,10 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
     assert.equal(environmentRecord.instance, "demo-local");
     assert.equal(environmentRecord.skillsDirectory, "/home/demo/.devshell/skill");
     assert.equal(environmentRecord.workspace, "/projects/alpha");
-    assert.equal(environmentRecord.projectMemoryAgentFile, "/projects/alpha/.memory/AGENT.md");
-    assert.equal(environmentRecord.projectMemoryDirectory, "/projects/alpha/.memory");
+    assert.equal("projectMemoryAgentFile" in environmentRecord, false);
+    assert.equal("projectMemoryDirectory" in environmentRecord, false);
     assert.equal(environmentRecord.temporaryDirectory, "/tmp/demo-local-123456");
     assert.deepEqual(environmentRecord.comment, [
-        "Read /projects/alpha/.memory/AGENT.md before working.",
-        "Use /projects/alpha/.memory for durable project memory; keep it useful for future sessions.",
         "Use /tmp/demo-local-123456 for all temporary files.",
         "Worker memory is high."
     ]);

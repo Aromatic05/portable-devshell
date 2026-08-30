@@ -99,6 +99,7 @@ export interface McpInstanceGateway {
     prepareWorkspace(instance: string, workspace: string): Promise<{
         projectMemoryAgentFile: string;
         projectMemoryDirectory: string;
+        projectMemoryPresent?: boolean;
         temporaryDirectory: string;
         workspace: string;
     }>;

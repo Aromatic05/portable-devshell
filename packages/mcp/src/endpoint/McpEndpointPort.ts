@@ -26,6 +26,7 @@ export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
     prepareWorkspace?(workspace: string): Promise<{
         projectMemoryAgentFile: string;
         projectMemoryDirectory: string;
+        projectMemoryPresent?: boolean;
         temporaryDirectory: string;
         workspace: string;
     }>;

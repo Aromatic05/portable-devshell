@@ -105,6 +105,7 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
             return {
                 projectMemoryAgentFile: `${workspace}/.devshell/AGENT.md`,
                 projectMemoryDirectory: `${workspace}/.devshell`,
+                projectMemoryPresent: true,
                 temporaryDirectory: "/tmp/mcp-comment",
                 workspace
             };

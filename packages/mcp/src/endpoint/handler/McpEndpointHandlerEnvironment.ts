@@ -234,8 +234,12 @@ export class McpEndpointHandlerEnvironment {
                     expiresAt: record.expiresAt,
                     status: record.status,
                     comment: [
-                        `Read ${prepared.projectMemoryAgentFile} before working.`,
-                        `Use ${prepared.projectMemoryDirectory} for durable project memory; keep it useful for future sessions.`,
+                        ...(prepared.projectMemoryPresent !== false
+                            ? [
+                                  `Read ${prepared.projectMemoryAgentFile} before working.`,
+                                  `Use ${prepared.projectMemoryDirectory} for durable project memory; keep it useful for future sessions.`,
+                              ]
+                            : []),
                         `Use ${prepared.temporaryDirectory} for all temporary files.`,
                         ...alerts.map((advice) => advice.text),
                     ],
@@ -259,8 +263,12 @@ export class McpEndpointHandlerEnvironment {
                             ? {}
                             : { shell: environment.platform.shell.kind }),
                     },
-                    projectMemoryAgentFile: prepared.projectMemoryAgentFile,
-                    projectMemoryDirectory: prepared.projectMemoryDirectory,
+                    ...(prepared.projectMemoryPresent !== false
+                        ? {
+                              projectMemoryAgentFile: prepared.projectMemoryAgentFile,
+                              projectMemoryDirectory: prepared.projectMemoryDirectory,
+                          }
+                        : {}),
                     skillsDirectory: environment.skillsDirectory,
                     temporaryDirectory: prepared.temporaryDirectory,
                     workspace: prepared.workspace,

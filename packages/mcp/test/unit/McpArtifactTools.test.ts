@@ -247,6 +247,7 @@ function createGateway(overrides: Partial<McpInstanceGateway>): McpInstanceGatew
             return {
                 projectMemoryAgentFile: `${workspace}/.devshell/AGENT.md`,
                 projectMemoryDirectory: `${workspace}/.devshell`,
+                projectMemoryPresent: true,
                 temporaryDirectory: "/tmp/mcp-artifact",
                 workspace
             };

@@ -106,13 +106,21 @@ export class McpEndpointHandlerInstance {
             return {
                 ...base,
                 comment: [
-                    `Read ${prepared.projectMemoryAgentFile} before working.`,
-                    `Use ${prepared.projectMemoryDirectory} for durable project memory; keep it useful for future sessions.`,
+                    ...(prepared.projectMemoryPresent !== false
+                        ? [
+                              `Read ${prepared.projectMemoryAgentFile} before working.`,
+                              `Use ${prepared.projectMemoryDirectory} for durable project memory; keep it useful for future sessions.`,
+                          ]
+                        : []),
                     `Use ${prepared.temporaryDirectory} for all temporary files.`,
                     ...alerts.advice.map((advice) => advice.text)
                 ],
-                projectMemoryAgentFile: prepared.projectMemoryAgentFile,
-                projectMemoryDirectory: prepared.projectMemoryDirectory,
+                ...(prepared.projectMemoryPresent !== false
+                    ? {
+                          projectMemoryAgentFile: prepared.projectMemoryAgentFile,
+                          projectMemoryDirectory: prepared.projectMemoryDirectory,
+                      }
+                    : {}),
                 temporaryDirectory: prepared.temporaryDirectory,
                 workspace: prepared.workspace
             };

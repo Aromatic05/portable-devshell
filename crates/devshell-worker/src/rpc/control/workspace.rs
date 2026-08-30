@@ -28,6 +28,7 @@ struct WorkspaceTouchTemporaryInput {
 struct WorkspacePrepareResult {
     project_memory_agent_file: String,
     project_memory_directory: String,
+    project_memory_present: bool,
     temporary_directory: String,
     workspace: String,
 }
@@ -84,6 +85,11 @@ fn prepare(workspace: &Path) -> Result<WorkspacePrepareResult, RpcError> {
         .map_err(|error| RpcError::new("workspace.storageUnavailable", error.to_string()))?;
     ensure_file_mode(&project_memory_agent_file, 0o600)
         .map_err(|error| RpcError::new("workspace.storageUnavailable", error))?;
+    let project_memory_present = project_memory_agent_file
+        .metadata()
+        .map_err(|error| RpcError::new("workspace.storageUnavailable", error.to_string()))?
+        .len()
+        > 0;
 
     let context_temp_root = ensure_context_temp_root(&home)?;
     gc_stale_context_temp(&context_temp_root, CONTEXT_TEMP_TTL);
@@ -97,6 +103,7 @@ fn prepare(workspace: &Path) -> Result<WorkspacePrepareResult, RpcError> {
     Ok(WorkspacePrepareResult {
         project_memory_agent_file: protocol_path(&project_memory_agent_file),
         project_memory_directory: protocol_path(&project_memory_directory),
+        project_memory_present,
         temporary_directory: protocol_path(&temporary_directory),
         workspace: protocol_path(&workspace),
     })
@@ -338,6 +345,11 @@ mod tests {
         assert_eq!(first.project_memory_directory, second.project_memory_directory);
         assert_ne!(first.temporary_directory, second.temporary_directory);
         assert!(std::path::Path::new(&first.project_memory_agent_file).is_file());
+        assert!(!first.project_memory_present);
+
+        std::fs::write(&first.project_memory_agent_file, "# Durable memory\n").unwrap();
+        let third = prepare(workspace.path()).unwrap();
+        assert!(third.project_memory_present);
     }
 
     #[test]

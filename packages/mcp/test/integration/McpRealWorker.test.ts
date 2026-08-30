@@ -297,11 +297,9 @@ async function createContext(endpoint: string, headers: Record<string, string>, 
     const memoryAgentFile = response.result?.structuredContent?.projectMemoryAgentFile;
     const temporaryDirectory = response.result?.structuredContent?.temporaryDirectory;
     assert.equal(typeof ctxId, "string");
-    assert.equal(typeof memoryDirectory, "string");
-    assert.equal(typeof memoryAgentFile, "string");
+    assert.equal(memoryDirectory, undefined);
+    assert.equal(memoryAgentFile, undefined);
     assert.equal(typeof temporaryDirectory, "string");
-    assert.match(memoryDirectory, /\/\.devshell\/project-memory\/[a-f0-9]{64}$/u);
-    assert.equal((await stat(memoryAgentFile)).isFile(), true);
     assert.equal((await stat(temporaryDirectory)).isDirectory(), true);
     return ctxId;
 }
