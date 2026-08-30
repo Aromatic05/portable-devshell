@@ -673,7 +673,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
 
   function workspaceContextExpired(error) {
     var message = error && error.message ? String(error.message) : String(error || "");
-    return /expired|renew this Context|context_renew/i.test(message);
+    return /expired|reactivate the same Context/i.test(message);
   }
 
   function workspaceContextDisabled(error) {
@@ -682,7 +682,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   }
 
   function workspaceTerminalStatus(error) {
-    if (workspaceContextExpired(error)) return "Context expired — renew in chat";
+    if (workspaceContextExpired(error)) return "Context expired — continue in chat";
     if (workspaceContextDisabled(error)) return "Context disabled";
     if (workspaceAuthorizationFailed(error)) return "Reopen Workspace";
     return "";

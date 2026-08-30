@@ -26,7 +26,7 @@ export function readMcpContextInput(input: JsonValue): { ctxId: string; input: J
     if (context.ctxId === undefined) {
         throw createError({
             code: errorCodes.mcpContextInvalid,
-            message: "No Context is referenced by this request. Call context_acquire or provide ctxId.",
+            message: "No Context is referenced by this request. Call environ_info with workspace or provide ctxId.",
             retryable: false
         });
     }
@@ -195,14 +195,6 @@ export function readMcpWorkspace(input: JsonValue, toolName: string): string {
         throw invalidArguments(`${toolName} accepts only workspace.`);
     }
     return requiredString(input.workspace, "workspace");
-}
-
-export function readMcpContextRenewInput(input: JsonValue): { ctxId?: string } {
-    if (!isRecord(input) || Object.keys(input).some((key) => key !== "ctxId")) {
-        throw invalidArguments("context_renew accepts only optional ctxId.");
-    }
-    const ctxId = optionalString(input.ctxId, "ctxId");
-    return ctxId === undefined ? {} : { ctxId };
 }
 
 export function readMcpEnvironmentInfoInput(input: JsonValue): { ctxId?: string; workspace?: string } {

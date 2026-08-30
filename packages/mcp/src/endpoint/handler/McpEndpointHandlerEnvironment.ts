@@ -12,16 +12,8 @@ import {
 } from "../../context/McpContextRegistry.js";
 import type { McpContextSelector } from "../../context/McpContextSelector.js";
 import type { McpInstanceGateway } from "../../instance/McpInstanceGateway.js";
-import {
-    mcpContextAcquireToolName,
-    mcpContextRenewToolName,
-    mcpEnvironmentToolName,
-} from "../../tool/catalog/McpToolCatalogEnvironment.js";
-import {
-    readMcpContextRenewInput,
-    readMcpEnvironmentInfoInput,
-    readMcpWorkspace,
-} from "../McpEndpointInput.js";
+import { mcpEnvironmentToolName } from "../../tool/catalog/McpToolCatalogEnvironment.js";
+import { readMcpEnvironmentInfoInput } from "../McpEndpointInput.js";
 import type {
     McpEndpointCallContext,
     McpEndpointWorkerPort,
@@ -69,14 +61,6 @@ export class McpEndpointHandlerEnvironment {
             throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
         }
         switch (toolName) {
-            case mcpContextAcquireToolName:
-                return await this.#acquireContext(
-                    input,
-                    requestContext,
-                    signal,
-                );
-            case mcpContextRenewToolName:
-                return await this.#renewContext(input, requestContext, signal);
             case mcpEnvironmentToolName:
                 return await this.#environmentInfo(
                     input,
@@ -86,113 +70,6 @@ export class McpEndpointHandlerEnvironment {
             default:
                 throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
         }
-    }
-
-    async #acquireContext(
-        input: JsonValue,
-        requestContext: McpEndpointCallContext,
-        signal?: AbortSignal,
-    ): Promise<JsonValue> {
-        const requestedWorkspace = readMcpWorkspace(
-            input,
-            mcpContextAcquireToolName,
-        );
-        const bound = await this.#lookupBoundContext(requestContext);
-        let record = bound.record;
-        let created = false;
-
-        if (record?.status === "active") {
-            record = await this.#contextRegistry.validateAndTouch(
-                record.ctxId,
-                {
-                    principal: requestContext.principal,
-                },
-            );
-        } else if (record === undefined || record.status === "disabled") {
-            record = await this.#contextRegistry.create({
-                instance: this.#instanceName,
-                principal: requestContext.principal,
-                workspace: requestedWorkspace,
-            });
-            created = true;
-        }
-
-        const attachedWorkspace = contextWorkspace(record, this.#instanceName);
-        const shouldAttachWorkspace =
-            record.status === "active" && attachedWorkspace === undefined;
-        const outputWorkspace = attachedWorkspace ?? requestedWorkspace;
-
-        try {
-            const result = await this.#auditIdentityTool(
-                mcpContextAcquireToolName,
-                input,
-                record,
-                outputWorkspace,
-                requestContext,
-                signal,
-            );
-            if (record.status === "active") {
-                if (!created && shouldAttachWorkspace) {
-                    record = await this.#contextRegistry.attachEnvironment(
-                        record.ctxId,
-                        {
-                            instance: this.#instanceName,
-                            workspace: requestedWorkspace,
-                        },
-                    );
-                }
-                for (const binding of bound.bindings) {
-                    await this.#contextRegistry.bindExternal(
-                        record.ctxId,
-                        binding,
-                        {
-                            principal: requestContext.principal,
-                        },
-                    );
-                }
-            }
-            return result;
-        } catch (error) {
-            if (created) {
-                await this.#contextRegistry
-                    .discard(record.ctxId)
-                    .catch(() => undefined);
-            }
-            throw error;
-        }
-    }
-
-    async #renewContext(
-        input: JsonValue,
-        requestContext: McpEndpointCallContext,
-        signal?: AbortSignal,
-    ): Promise<JsonValue> {
-        const renewInput = readMcpContextRenewInput(input);
-        let record: McpContextRecord;
-        if (renewInput.ctxId !== undefined) {
-            record = await this.#contextRegistry.lookup(renewInput.ctxId, {
-                principal: requestContext.principal,
-            });
-        } else {
-            const bound = await this.#lookupBoundContext(requestContext);
-            if (bound.record === undefined) throw unboundContext();
-            record = bound.record;
-        }
-        const renewed = await this.#contextRegistry.renewForPrincipal(
-            record.ctxId,
-            {
-                principal: requestContext.principal,
-            },
-        );
-        return await this.#auditIdentityTool(
-            mcpContextRenewToolName,
-            input,
-            renewed,
-            contextWorkspace(renewed, this.#instanceName) ?? renewed.workspace,
-            requestContext,
-            signal,
-            false,
-        );
     }
 
     async #environmentInfo(
@@ -332,15 +209,19 @@ export class McpEndpointHandlerEnvironment {
         record: McpContextRecord;
     }> {
         if (input.ctxId !== undefined) {
+            const record = await this.#contextRegistry.lookup(input.ctxId, {
+                principal: requestContext.principal,
+            });
             return {
                 bindings: [],
                 created: false,
-                record: await this.#contextRegistry.validateAndTouch(
-                    input.ctxId,
-                    {
-                        principal: requestContext.principal,
-                    },
-                ),
+                record: record.status === "expired"
+                    ? await this.#contextRegistry.renewForPrincipal(record.ctxId, {
+                          principal: requestContext.principal,
+                      })
+                    : await this.#contextRegistry.validateAndTouch(record.ctxId, {
+                          principal: requestContext.principal,
+                      }),
             };
         }
 
@@ -357,11 +238,11 @@ export class McpEndpointHandlerEnvironment {
                 ),
             };
         }
-        if (bound.record !== undefined) {
+        if (bound.record?.status === "expired") {
             return {
                 bindings: bound.bindings,
                 created: false,
-                record: await this.#contextRegistry.validateAndTouch(
+                record: await this.#contextRegistry.renewForPrincipal(
                     bound.record.ctxId,
                     {
                         principal: requestContext.principal,
@@ -369,17 +250,19 @@ export class McpEndpointHandlerEnvironment {
                 ),
             };
         }
-        if (bound.bindings.length > 0 || input.workspace === undefined) {
-            throw unboundContext();
-        }
+
+        const workspace = input.workspace ?? (bound.record === undefined
+            ? undefined
+            : contextWorkspace(bound.record, this.#instanceName) ?? bound.record.workspace);
+        if (workspace === undefined) throw unboundContext();
 
         return {
-            bindings: [],
+            bindings: bound.bindings,
             created: true,
             record: await this.#contextRegistry.create({
                 instance: this.#instanceName,
                 principal: requestContext.principal,
-                workspace: input.workspace,
+                workspace,
             }),
         };
     }
@@ -403,44 +286,6 @@ export class McpEndpointHandlerEnvironment {
             record = candidate;
         }
         return { bindings, record };
-    }
-
-    async #auditIdentityTool(
-        toolName: string,
-        input: JsonValue,
-        record: McpContextRecord,
-        workspace: string,
-        requestContext: McpEndpointCallContext,
-        signal?: AbortSignal,
-        includeWorkspace = true,
-    ): Promise<JsonValue> {
-        await this.#worker.appendMcpToolCalled(toolName, {
-            ctxId: record.ctxId,
-            requestId: requestContext.requestId,
-        });
-        const context: ToolCallContext = {
-            ctxId: record.ctxId,
-            requestId: requestContext.requestId,
-            source: "mcp",
-            workspace,
-        };
-        return await auditMcpEndpointTool({
-            context,
-            input,
-            localInstance: this.#instanceName,
-            operation: async () => ({
-                ctxId: record.ctxId,
-                expiresAt: record.expiresAt,
-                status: record.status,
-                ...(includeWorkspace
-                    ? { instance: this.#instanceName, workspace }
-                    : {}),
-            }),
-            signal,
-            targetInstance: this.#instanceName,
-            toolName,
-            worker: this.#worker,
-        });
     }
 
     async #prepareEnvironment(workspace: string) {
@@ -517,7 +362,7 @@ function contextWorkspaceRequired(ctxId: string, instance: string) {
     return createError({
         code: errorCodes.mcpContextWorkspaceRequired,
         details: { ctxId, instance },
-        message: `No workspace is attached to ${instance} for ${ctxId}. Call context_acquire or instance_connect with an absolute workspace.`,
+        message: `No workspace is attached to ${instance} for ${ctxId}. Call environ_info or instance_connect with an absolute workspace.`,
         retryable: false,
     });
 }
@@ -535,7 +380,7 @@ function unboundContext() {
     return createError({
         code: errorCodes.mcpContextInvalid,
         message:
-            "No Context is bound to this request. Call context_acquire or provide ctxId.",
+            "No Context is bound to this request. Call environ_info with workspace or provide ctxId.",
         retryable: false,
     });
 }

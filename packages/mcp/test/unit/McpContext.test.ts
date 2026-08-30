@@ -612,22 +612,10 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
     const tools = endpoint.listTools();
     const bashTool = tools.find((tool) => tool.name === "bash_run");
     const environmentTool = tools.find((tool) => tool.name === "environ_info");
-    const acquireTool = tools.find((tool) => tool.name === "context_acquire");
-    const renewTool = tools.find((tool) => tool.name === "context_renew");
-    const renewSchema = renewTool?.inputSchema as { required?: string[] } | undefined;
     const bashSchema = bashTool?.inputSchema as { properties?: Record<string, unknown>; required?: string[] };
     assert.ok(bashSchema.properties?.ctxId);
     assert.equal(bashTool?.title, "Run shell command");
-    assert.equal(acquireTool?.title, "Acquire context");
-    assert.equal(renewTool?.title, "Renew context");
     assert.equal(environmentTool?.title, "Create environment");
-    assert.deepEqual(acquireTool?.annotations, {
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: false,
-        readOnlyHint: false
-    });
-    assert.deepEqual(renewTool?.annotations, acquireTool?.annotations);
     assert.deepEqual(bashTool?.annotations, {
         destructiveHint: true,
         idempotentHint: false,
@@ -642,9 +630,8 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
     });
     assert.equal(bashSchema.required?.includes("ctxId"), true);
     assert.equal(bashSchema.required?.includes("command"), true);
-    assert.notEqual(tools.find((tool) => tool.name === "context_acquire"), undefined);
-    assert.notEqual(renewTool, undefined);
-    assert.equal(renewSchema?.required?.includes("ctxId"), true);
+    assert.equal(tools.find((tool) => tool.name === "context_acquire"), undefined);
+    assert.equal(tools.find((tool) => tool.name === "context_renew"), undefined);
 
     const environment = await endpoint.callTool(
         "environ_info",

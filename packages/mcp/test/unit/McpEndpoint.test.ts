@@ -733,31 +733,13 @@ test("OpenAI session binding resolves one internal ctxId without making models c
     };
     assert.notEqual(bashSchema.properties?.ctxId, undefined);
     assert.equal(bashSchema.required?.includes("ctxId") ?? false, false);
-    const renewTool = endpoint
-        .listTools()
-        .find((tool) => tool.name === "context_renew");
-    const renewSchema = renewTool?.inputSchema as
-        { required?: string[] } | undefined;
-    assert.equal(renewSchema?.required?.includes("ctxId") ?? false, false);
-
-    await assert.rejects(
-        endpoint.callTool(
-            "environ_info",
-            { workspace: "/workspace/legacy-bootstrap" },
-            requestContext,
-        ),
-        (error: unknown) =>
-            (error as { code?: string }).code === "mcp.contextInvalid",
-    );
-    assert.deepEqual(await registry.list(), []);
-
     const first = (await endpoint.callTool(
-        "context_acquire",
+        "environ_info",
         { workspace: "/workspace/one" },
         requestContext,
     )) as { ctxId: string; status: string; workspace: string };
     const second = (await endpoint.callTool(
-        "context_acquire",
+        "environ_info",
         { workspace: "/workspace/two" },
         requestContext,
     )) as { ctxId: string; status: string; workspace: string };
@@ -766,8 +748,9 @@ test("OpenAI session binding resolves one internal ctxId without making models c
     assert.equal(first.workspace, "/workspace/one");
     assert.equal(second.ctxId, first.ctxId);
     assert.equal(second.status, "active");
-    assert.equal(second.workspace, "/workspace/one");
-    assert.equal((await registry.list())[0]?.workspace, "/workspace/one");
+    assert.equal(second.workspace, "/workspace/two");
+    assert.equal(endpoint.listTools().some((tool) => tool.name === "context_acquire"), false);
+    assert.equal(endpoint.listTools().some((tool) => tool.name === "context_renew"), false);
 
     await endpoint.callTool("bash_run", { command: "pwd" }, requestContext);
     assert.equal(harness.calls[0]?.ctxId, first.ctxId);
@@ -784,7 +767,7 @@ test("OpenAI session binding resolves one internal ctxId without making models c
     assert.equal(harness.calls[1]?.ctxId, first.ctxId);
 });
 
-test("expired OpenAI session binding keeps its ctxId and context_renew reactivates that same Context", async () => {
+test("expired OpenAI session binding renews the same ctxId on ordinary activity", async () => {
     let now = 1_000;
     const harness = createWorkerHarness();
     const registry = new McpContextRegistry({
@@ -807,40 +790,17 @@ test("expired OpenAI session binding keeps its ctxId and context_renew reactivat
     };
 
     const acquired = (await endpoint.callTool(
-        "context_acquire",
+        "environ_info",
         { workspace: "/workspace" },
         requestContext,
     )) as { ctxId: string; status: string };
     assert.equal(acquired.ctxId, "ctx-openai-renew");
 
     now = 1_101;
-    await assert.rejects(
-        endpoint.callTool("bash_run", { command: "pwd" }, requestContext),
-        (error: unknown) =>
-            (error as { code?: string }).code === "mcp.contextExpired",
-    );
-
-    const expired = (await endpoint.callTool(
-        "context_acquire",
-        { workspace: "/workspace/ignored-until-renew" },
-        requestContext,
-    )) as { ctxId: string; status: string };
-    assert.equal(expired.ctxId, acquired.ctxId);
-    assert.equal(expired.status, "expired");
-
-    const renewed = (await endpoint.callTool(
-        "context_renew",
-        {},
-        requestContext,
-    )) as {
-        ctxId: string;
-        status: string;
-    };
-    assert.equal(renewed.ctxId, acquired.ctxId);
-    assert.equal(renewed.status, "active");
-
     await endpoint.callTool("bash_run", { command: "pwd" }, requestContext);
     assert.equal(harness.calls.at(-1)?.ctxId, acquired.ctxId);
+    const renewed = await registry.lookup(acquired.ctxId, { principal: "subject-1" });
+    assert.equal(renewed.status, "active");
 });
 
 test("disabled OpenAI session binding reacquires a new Context and moves the binding", async () => {
@@ -862,15 +822,21 @@ test("disabled OpenAI session binding reacquires a new Context and moves the bin
     };
 
     const first = (await endpoint.callTool(
-        "context_acquire",
+        "environ_info",
         { workspace: "/workspace/old" },
         requestContext,
     )) as { ctxId: string; status: string };
     assert.equal(first.ctxId, "ctx-openai-disabled");
     await registry.disable(first.ctxId);
 
+    await assert.rejects(
+        endpoint.callTool("bash_run", { command: "pwd" }, requestContext),
+        (error: unknown) =>
+            (error as { code?: string }).code === "mcp.contextDisabled",
+    );
+
     const replacement = (await endpoint.callTool(
-        "context_acquire",
+        "environ_info",
         { workspace: "/workspace/new" },
         requestContext,
     )) as { ctxId: string; status: string; workspace: string };
@@ -907,7 +873,7 @@ test("HTTP forwards OpenAI session metadata into the generic Context binding", a
                     params: {
                         _meta: meta,
                         arguments: { workspace },
-                        name: "context_acquire",
+                        name: "environ_info",
                     },
                 },
                 session.headers,

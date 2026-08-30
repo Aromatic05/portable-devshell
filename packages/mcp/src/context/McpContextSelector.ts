@@ -96,15 +96,23 @@ class UnifiedContextSelector implements McpContextSelector {
             boundCtxId = record.ctxId;
         }
         if (boundCtxId !== undefined) {
+            const bound = await registry.lookup(boundCtxId, {
+                principal: requestContext.principal,
+            });
             return {
                 input: contextInput.input,
-                record: await validate(boundCtxId),
+                record:
+                    bound.status === "expired" && options?.touch !== false
+                        ? await registry.renewForPrincipal(boundCtxId, {
+                              principal: requestContext.principal,
+                          })
+                        : await validate(boundCtxId),
             };
         }
         throw createError({
             code: errorCodes.mcpContextInvalid,
             message:
-                "No Context is bound to this request. Call context_acquire or provide ctxId.",
+                "No Context is bound to this request. Call environ_info with workspace or provide ctxId.",
             retryable: false,
         });
     }

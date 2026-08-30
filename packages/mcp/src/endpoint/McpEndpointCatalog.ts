@@ -159,9 +159,7 @@ export class McpEndpointCatalog {
     #sources(hasWorkerSchema: boolean): McpToolCatalogEndpointSource[] {
         const sources: McpToolCatalogEndpointSource[] = [{
             owner: "environment",
-            tools: this.#environmentTools.list({
-                requireExplicitContextId: this.#contextSelector.requiresExplicitContextId
-            })
+            tools: this.#environmentTools.list()
         }];
 
         if (hasWorkerSchema) {

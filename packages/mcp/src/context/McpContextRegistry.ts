@@ -727,7 +727,7 @@ function expiredContext(ctxId: string, expiresAt: string) {
         code: errorCodes.mcpContextExpired,
         details: { ctxId, expiresAt },
         message:
-            "ctxId lease has expired. Renew this Context to continue using the same ctxId.",
+            "ctxId lease has expired. Call environ_info to reactivate the same Context.",
         retryable: false,
     });
 }
@@ -737,7 +737,7 @@ function disabledContext(ctxId: string) {
         code: errorCodes.mcpContextDisabled,
         details: { ctxId },
         message:
-            "ctxId is disabled and cannot be renewed. Call context_acquire to bind a new active Context.",
+            "ctxId is disabled and cannot be reactivated. Call environ_info with workspace to establish a new active Context.",
         retryable: false,
     });
 }

@@ -471,7 +471,7 @@ test("OpenAI session resolves Workspace once and the App continues by ctxId with
     };
 
     const acquired = (await dispatch.callTool(
-        "context_acquire",
+        "environ_info",
         { workspace: "/workspace" },
         sessionContext,
     )) as { ctxId: string };
