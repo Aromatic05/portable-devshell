@@ -170,9 +170,9 @@ export class ConfigEditorCoordinator {
             await this.#runtimePreflight.assertAvailable(currentConfig, nextConfig);
         }
         const stoppedForDisable = await this.#stopForDisable(existing, instance, descriptor);
-        await this.#retireInteractionsForDisable(existing, instance, descriptor);
         let hotApplied = false;
         try {
+            await this.#retireInteractionsForDisable(existing, instance, descriptor);
             await this.#persistConfig(nextConfig);
 
             const runtimeChanges: ConfigRuntimeChangeSet = {
@@ -232,9 +232,9 @@ export class ConfigEditorCoordinator {
         if (rebuildRequired) this.#assertInstanceStopped(request.instanceName, "update");
 
         const stoppedForDisable = await this.#stopForDisable(existing, instance, descriptor);
-        await this.#retireInteractionsForDisable(existing, instance, descriptor);
         let hotApplied = false;
         try {
+            await this.#retireInteractionsForDisable(existing, instance, descriptor);
             await this.#persistConfig(nextConfig);
             hotApplied = await this.#applyPersistedChanges({
                 currentConfig,
@@ -379,8 +379,8 @@ export class ConfigEditorCoordinator {
         const descriptor = this.#instanceRegistry.get(instanceName);
         const preparedDescriptor = this.#prepareInstanceDescriptor(instance, descriptor, false);
         const stoppedForDisable = await this.#stopForDisable(existing, instance, descriptor);
-        await this.#retireInteractionsForDisable(existing, instance, descriptor);
         try {
+            await this.#retireInteractionsForDisable(existing, instance, descriptor);
             await this.#persistConfig(nextConfig);
             await this.#applyPersistedChanges({
                 currentConfig,

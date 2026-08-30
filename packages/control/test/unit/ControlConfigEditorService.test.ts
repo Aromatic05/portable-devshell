@@ -487,6 +487,79 @@ test("failed managed-instance stop leaves enabled configuration unchanged", asyn
     assert.equal(registry.get("demo-local")?.enabled, true);
 });
 
+test("every disable entrypoint restores a managed worker when interaction retirement fails after stop", async (t) => {
+    const entrypoints: Array<{
+        name: string;
+        run(service: ConfigEditorCoordinator): Promise<unknown>;
+    }> = [
+        {
+            name: "disableInstance",
+            run: async (service) => await service.disableInstance({ instanceName: "demo-local" }),
+        },
+        {
+            name: "updateInstanceConfig",
+            run: async (service) => await service.updateInstanceConfig({
+                instanceName: "demo-local",
+                patch: { enabled: false },
+            }),
+        },
+        {
+            name: "updateConfig",
+            run: async (service) => await service.updateConfig({
+                instance: {
+                    instanceName: "demo-local",
+                    patch: { enabled: false },
+                },
+            }),
+        },
+    ];
+
+    for (const entrypoint of entrypoints) {
+        await t.test(entrypoint.name, async () => {
+            let config = createConfig();
+            const writes: ControlConfig[] = [];
+            let stopCalls = 0;
+            let startCalls = 0;
+            const waiting = { status: "waiting", waitId: "wait-retirement-failure" };
+            const registry = new InstanceRegistry([descriptor({
+                snapshot: runningSnapshot,
+                async stop() {
+                    stopCalls += 1;
+                    return { ...runningSnapshot(), daemonState: "stopped", ready: false, status: "stopped" };
+                },
+                async start() {
+                    startCalls += 1;
+                    return runningSnapshot();
+                },
+            }, {
+                wait: {
+                    async cancel() { throw new Error("wait retirement failed"); },
+                    async get() { return waiting; },
+                    async list() { return [waiting]; },
+                },
+            })]);
+            const service = new ConfigEditorCoordinator({
+                configStore: {
+                    async write(nextConfig: ControlConfig) {
+                        writes.push(nextConfig);
+                        config = nextConfig;
+                    },
+                },
+                getConfig: () => config,
+                instanceRegistry: registry,
+                setConfig: (nextConfig) => { config = nextConfig; },
+            });
+
+            await assert.rejects(entrypoint.run(service), /wait retirement failed/u);
+            assert.equal(stopCalls, 1);
+            assert.equal(startCalls, 1);
+            assert.equal(writes.length, 0);
+            assert.equal(config.instances[0]?.enabled, true);
+            assert.equal(registry.get("demo-local")?.enabled, true);
+        });
+    }
+});
+
 test("disable restarts a managed worker when persistence fails after stop", async () => {
     let config = createConfig();
     let stopCalls = 0;
