@@ -288,7 +288,18 @@ export class McpEndpointDispatch {
                 selected.definition,
                 snapshot.instanceRoutingEnabled,
                 signal,
-                async (result, callId) => await this.#attachComments(toolName, result, context, callId, routed.instance)
+                async (result, callId) => {
+                    if (toolName === "tmux_read" && context.ctxId !== undefined) {
+                        await this.#supersedeObservedTmuxWaits(
+                            routed.instance,
+                            readTmuxReadTask(routed.input),
+                            context.ctxId,
+                            result,
+                            false,
+                        );
+                    }
+                    return await this.#attachComments(toolName, result, context, callId, routed.instance);
+                }
             );
         } finally {
             if (touchGoalAfter) {
@@ -322,8 +333,11 @@ export class McpEndpointDispatch {
         );
         if (tmuxReadReady(observed)) {
             const completed = await this.#consumeTmuxRead(instance, task, line, context, signal);
+            await this.#supersedeObservedTmuxWaits(instance, task, context.ctxId, completed, false);
             return await this.#attachComments("tmux_read", completed, context, callId, instance);
         }
+
+        await this.#supersedeObservedTmuxWaits(instance, task, context.ctxId, observed, true);
 
         const goal = await this.#currentGoal(this.#instanceName, context.ctxId);
         const taskAssociation = goal === undefined
@@ -804,6 +818,38 @@ export class McpEndpointDispatch {
             : await this.#gateway!.callTool(instance, "tmux_read", input, context, signal);
         if (!isRecord(result)) throw new Error(`tmux_read returned an invalid result for task ${taskId}.`);
         return result;
+    }
+
+    async #supersedeObservedTmuxWaits(
+        targetInstance: string,
+        taskId: string,
+        ctxId: string,
+        observation: JsonValue,
+        replacePending: boolean,
+    ): Promise<void> {
+        const gateway = this.#gateway;
+        if (!isMcpTmuxWaitGateway(gateway) || !isRecord(observation)) return;
+        const running = isTmuxTaskRunning(observation, taskId);
+        const now = Date.now();
+        const waits = await gateway.listWaits(this.#instanceName);
+        for (const wait of waits) {
+            if (
+                wait.kind !== "tmux" || wait.createdByCtxId !== ctxId || wait.targetId !== taskId ||
+                (wait.targetInstance ?? this.#instanceName) !== targetInstance
+            ) continue;
+            if (wait.status === "resolved" && wait.detachedAt !== undefined) {
+                if (wait.recoveryMessageAttemptedAt === undefined) {
+                    await gateway.consumeWait(this.#instanceName, wait.waitId).catch(() => undefined);
+                }
+                continue;
+            }
+            if (wait.status !== "detached") continue;
+            const deadline = wait.deadlineAt === undefined ? Number.NaN : Date.parse(wait.deadlineAt);
+            const triggerAlreadyObserved = Number.isFinite(deadline) && deadline <= now;
+            if (!replacePending && running && !triggerAlreadyObserved) continue;
+            await gateway.cancelWait(this.#instanceName, wait.waitId).catch(() => undefined);
+            this.#interruptTmuxWaitTracker(this.#instanceName, wait.waitId);
+        }
     }
 
     async #readTmuxTaskOutput(

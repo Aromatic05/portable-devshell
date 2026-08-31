@@ -789,22 +789,31 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
     const harness = createWorker({ tools: [tmuxReadBlockTool()] });
     const worker = {
         ...harness.worker,
-        async callTool(toolName: string, input: JsonValue): Promise<JsonValue> {
+        async callTool(
+            toolName: string,
+            input: JsonValue,
+            _context?: ToolCallContext,
+            _signal?: AbortSignal,
+            transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
+        ): Promise<JsonValue> {
             assert.equal(toolName, "tmux_read");
             const record = input as Record<string, JsonValue>;
             assert.equal(record.task, "task-existing");
+            let result: JsonValue;
             if (record.consumeOutput === false) {
                 const timeMs = typeof record.timeMs === "number" ? record.timeMs : 0;
                 if (timeMs > 0) await new Promise((resolve) => setTimeout(resolve, timeMs));
-                return {
+                result = {
                     task: { id: "task-existing", status: "running" },
                     waitReason: ready ? "output" : "timeout",
                 };
+            } else {
+                result = {
+                    task: { id: "task-existing", status: "running" },
+                    waitReason: "output",
+                };
             }
-            return {
-                task: { id: "task-existing", status: "running" },
-                waitReason: "output",
-            };
+            return transformResult === undefined ? result : await transformResult(result, "call-tmux-read");
         },
     };
     type Wait = WaitRecord;
@@ -875,21 +884,62 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
         { principal: "tester", requestId: "request-environment-read" },
     ));
 
+    const observedNow = new Date().toISOString();
+    waits.push({
+        createdAt: observedNow,
+        createdByCtxId: environment.ctxId,
+        detachedAt: observedNow,
+        kind: "tmux",
+        resolvedAt: observedNow,
+        result: { task: { id: "task-existing", status: "running" }, timedOut: true },
+        status: "resolved",
+        targetId: "task-existing",
+        targetInstance: "demo-local",
+        updatedAt: observedNow,
+        waitId: "wait-observed",
+    });
+    await dispatch.callTool(
+        "tmux_read",
+        { ctxId: environment.ctxId, line: 17, task: "task-existing", timeMs: 0 },
+        { principal: "tester", requestId: "read-observed-wait" },
+    );
+    assert.equal(waits.find((entry) => entry.waitId === "wait-observed")?.status, "consumed");
+
+    const pendingNow = new Date().toISOString();
+    waits.push({
+        createdAt: pendingNow,
+        createdByCtxId: environment.ctxId,
+        detachedAt: pendingNow,
+        kind: "tmux",
+        status: "detached",
+        targetId: "task-existing",
+        targetInstance: "demo-local",
+        updatedAt: pendingNow,
+        waitId: "wait-older-detached",
+    });
+    await dispatch.callTool(
+        "tmux_read",
+        { ctxId: environment.ctxId, line: 17, task: "task-existing", timeMs: 0 },
+        { principal: "tester", requestId: "read-running-task" },
+    );
+    assert.equal(waits.find((entry) => entry.waitId === "wait-older-detached")?.status, "detached");
+
     const result = await dispatch.callTool(
         "tmux_read",
         { ctxId: environment.ctxId, line: 17, task: "task-existing", timeMs: 1_000 },
         { principal: "tester", requestId: "wait-read-detached" },
     ) as { detached?: boolean };
     assert.equal(result.detached, true);
-    assert.equal(waits.length, 1);
-    assert.equal(waits[0]?.status, "detached");
-    assert.equal(waits[0]?.targetId, "task-existing");
-    assert.equal(waits[0]?.targetInstance, "demo-local");
-    assert.deepEqual(waits[0]?.payload, { line: 17, operation: "read" });
+    assert.equal(waits.find((entry) => entry.waitId === "wait-older-detached")?.status, "cancelled");
+    const replacement = waits.find((entry) => entry.waitId.startsWith("wait-read-"));
+    assert.equal(replacement?.status, "detached");
+    assert.equal(replacement?.targetId, "task-existing");
+    assert.equal(replacement?.targetInstance, "demo-local");
+    assert.deepEqual(replacement?.payload, { line: 17, operation: "read" });
 
     ready = true;
-    await waitUntil(() => waits[0]?.status === "resolved");
-    assert.equal(waits[0]?.status, "resolved");
+    await waitUntil(() => replacement?.status === "resolved");
+    assert.equal(replacement?.status, "resolved");
 });
 
 test("failed environ_info rolls back only the undisclosed explicit Context", async () => {
