@@ -1030,13 +1030,13 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return {};
   };
 
-  async function requestPreferredDisplayMode(context) {
+  async function requestPreferredDisplayMode(context, force) {
     try {
       var hostContext = asRecord(context) || asRecord(app.getHostContext());
       var modes = hostContext && Array.isArray(hostContext.availableDisplayModes)
         ? hostContext.availableDisplayModes
         : [];
-      if (hostContext && hostContext.displayMode !== "pip" && modes.indexOf("pip") >= 0) {
+      if (hostContext && modes.indexOf("pip") >= 0 && (force === true || hostContext.displayMode !== "pip")) {
         await app.requestDisplayMode({ mode: "pip" });
       }
     } catch (_) {}
@@ -1046,7 +1046,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     try {
       await app.connect();
       applyHostContext(app.getHostContext());
-      await requestPreferredDisplayMode(app.getHostContext());
+      await requestPreferredDisplayMode(app.getHostContext(), true);
       bridgeReady = true;
       initialized = true;
       var initialResult = await waitForInitialToolResult(300);

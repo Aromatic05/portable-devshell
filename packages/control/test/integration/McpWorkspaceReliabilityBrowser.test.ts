@@ -92,6 +92,38 @@ test("Live Workspace requests PiP and uses direct state transport before MCP fal
     assert.equal(afterStaleResult.some((call) => call.authorization === "Bearer stale-token"), false);
 });
 
+test("Live Workspace reclaims PiP presentation after its iframe is refreshed", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
+    const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT
+        .replace(
+            "window.__liveDisplayModeRequests = [];",
+            'window.__liveDisplayModeRequests = []; window.__liveHostDisplayMode = "inline";',
+        )
+        .replace('displayMode: "inline"', "displayMode: window.__liveHostDisplayMode")
+        .replace(
+            "window.__liveDisplayModeRequests.push(message.params);",
+            'window.__liveDisplayModeRequests.push(message.params); window.__liveHostDisplayMode = "pip";',
+        );
+    await page.evaluate(bridge);
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    await page.waitForFunction("(window.__liveDisplayModeRequests || []).length === 1");
+    const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
+    if (frame === undefined) throw new Error("Workspace frame is missing.");
+    await frame.evaluate(() => window.location.reload());
+
+    await page.waitForFunction("(window.__liveDisplayModeRequests || []).length === 2");
+    assert.equal(await page.evaluate("window.__liveHostDisplayMode"), "pip");
+});
+
 const LIVE_TRANSPORT_BRIDGE_SCRIPT = String.raw`
 window.__liveDisplayModeRequests = [];
 window.__liveToolCalls = [];
