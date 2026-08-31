@@ -1234,7 +1234,59 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
 
   function startHostSizeTracking() {
     stopHostSizeTracking();
-    try { sizeChangedCleanup = app.setupSizeChangedNotifications(); } catch (_) {}
+    var active = true;
+    var generation = hostBridgeGeneration;
+    var frame = 0;
+    var lastWidth = 0;
+    var lastHeight = 0;
+    var observer = null;
+
+    function handleSizeSendFailure(error) {
+      if (!active || generation !== hostBridgeGeneration || !bridgeReady || shuttingDown || bridgeResetting) return;
+      console.error(error);
+      if (hostBridgeTransportFailure(error)) void resetHostBridge();
+    }
+
+    function measureAndSendSize() {
+      frame = 0;
+      if (!active || generation !== hostBridgeGeneration || !bridgeReady || shuttingDown || bridgeResetting) return;
+      var element = document.documentElement;
+      var previousHeight = element.style.height;
+      element.style.height = "max-content";
+      var height = Math.ceil(element.getBoundingClientRect().height);
+      element.style.height = previousHeight;
+      var width = Math.ceil(window.innerWidth);
+      if (width === lastWidth && height === lastHeight) return;
+      lastWidth = width;
+      lastHeight = height;
+      try {
+        Promise.resolve(app.sendSizeChanged({ width: width, height: height })).catch(handleSizeSendFailure);
+      } catch (error) {
+        handleSizeSendFailure(error);
+      }
+    }
+
+    function scheduleSizeMeasurement() {
+      if (!active || generation !== hostBridgeGeneration || frame) return;
+      frame = requestAnimationFrame(measureAndSendSize);
+    }
+
+    try {
+      observer = new ResizeObserver(scheduleSizeMeasurement);
+      observer.observe(document.documentElement);
+      observer.observe(document.body);
+      scheduleSizeMeasurement();
+      sizeChangedCleanup = function () {
+        active = false;
+        if (frame) cancelAnimationFrame(frame);
+        frame = 0;
+        observer.disconnect();
+      };
+    } catch (_) {
+      active = false;
+      if (frame) cancelAnimationFrame(frame);
+      if (observer) observer.disconnect();
+    }
   }
 
   app.ontoolinput = function (params) {
@@ -1335,10 +1387,10 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     bridgeConnecting = true;
     try {
       await app.connect(undefined, { timeout: HOST_CONNECT_TIMEOUT_MS });
-      startHostSizeTracking();
       applyHostContext(app.getHostContext());
       bridgeReady = true;
       initialized = true;
+      startHostSizeTracking();
       presentationGeneration += 1;
       var presentationEpoch = presentationGeneration;
       displayModeRetryCount = 0;
