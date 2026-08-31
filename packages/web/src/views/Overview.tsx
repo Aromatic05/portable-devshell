@@ -2,7 +2,6 @@ import type { WebState } from "../state/WebStore.js";
 import { webFailures } from "../state/WebState.js";
 import { SystemResources } from "../components/diagnostics/SystemResources.js";
 import { overviewAlertRoute, overviewAlerts, overviewToolCalls } from "../selectors/readModel.js";
-import { workspaceFolderName } from "@portable-devshell/shared/browser";
 
 export function Overview({ state }: { state: WebState }) {
     const overview = state.readModel.overview;
@@ -16,9 +15,6 @@ export function Overview({ state }: { state: WebState }) {
         return <section><h2>Overview</h2><p className={failure === undefined ? "empty" : "error"}>{message}</p></section>;
     }
     const currentAlerts = overviewAlerts(overview);
-    const goals = Object.entries(state.readModel.instanceState).flatMap(([instance, value]) =>
-        value.goals.map((goal) => ({ goal, instance })),
-    );
     return (
         <section>
             <h2>Overview</h2>
@@ -27,7 +23,6 @@ export function Overview({ state }: { state: WebState }) {
                 <Metric label="Instances" value={`${overview.counts.instancesTotal} total · ${overview.counts.instancesAttention} attention · ${overview.counts.instancesCritical} critical`} />
                 <Metric label="Pending approvals" value={String(overview.counts.pendingApprovals)} />
                 <Metric label="Open todos" value={String(overview.counts.activeTodos)} />
-                <Metric label="Active goals" value={String(goals.length)} />
             </div>
             <SystemResources system={overview.controller.system} uptimeSeconds={overview.controller.uptimeSeconds} />
             <div className="overview-grid">
@@ -48,13 +43,6 @@ export function Overview({ state }: { state: WebState }) {
                 <section>
                     <h3><a href="#/todos">Todo summary</a></h3>
                     {overview.todos.length === 0 ? <p className="empty">No active todos.</p> : <ul className="summary-list">{overview.todos.slice(0, 6).map((todo) => <li key={`${todo.instance}-${todo.taskId}`}><strong>{todo.title}</strong> {todo.instance} · {todo.completed}/{todo.total} complete · {todo.status}</li>)}</ul>}
-                </section>
-                <section>
-                    <h3>Goal summary</h3>
-                    {goals.length === 0 ? <p className="empty">No active Workspace Goals.</p> : <ul className="summary-list">{goals.slice(0, 6).map(({ goal, instance }) => {
-                        const completed = goal.steps.filter((step) => step.status === "completed" || step.status === "skipped").length;
-                        return <li data-goal-id={goal.goalId} data-goal-status={goal.status} key={`${instance}-${goal.goalId}`}><strong>{goal.objective}</strong> {instance} · {workspaceFolderName(goal.workspace)} · {completed}/{goal.steps.length} steps · {goal.status}</li>;
-                    })}</ul>}
                 </section>
             </div>
         </section>

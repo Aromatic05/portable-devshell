@@ -86,12 +86,10 @@ export function isRenderRelevantChange(
     const after = selectedInstanceState(next);
     switch (next.ui.selectedPage) {
         case "overview":
-            return previous.readModel.overview !== next.readModel.overview ||
-                anyInstanceFieldChanged(previous, next, "goals");
+            return previous.readModel.overview !== next.readModel.overview;
         case "instances":
             return anyInstanceFieldChanged(previous, next, "snapshot") ||
                 anyInstanceFieldChanged(previous, next, "approvals") ||
-                anyInstanceFieldChanged(previous, next, "goals") ||
                 previous.readModel.artifactShares !== next.readModel.artifactShares ||
                 previous.readModel.artifactTransfers !== next.readModel.artifactTransfers ||
                 previous.readModel.configView !== next.readModel.configView;
@@ -113,7 +111,9 @@ export function isRenderRelevantChange(
         case "logs":
             return before?.logs !== after?.logs || before?.snapshot !== after?.snapshot;
         case "todo":
-            return before?.todo !== after?.todo || before?.snapshot !== after?.snapshot;
+            return before?.todo !== after?.todo ||
+                before?.goals !== after?.goals ||
+                before?.snapshot !== after?.snapshot;
         default:
             return false;
     }
@@ -127,7 +127,7 @@ function selectedInstanceState(state: TuiAppState) {
 function anyInstanceFieldChanged(
     previous: TuiAppState,
     next: TuiAppState,
-    field: "approvals" | "goals" | "snapshot",
+    field: "approvals" | "snapshot",
 ): boolean {
     const names = new Set([
         ...Object.keys(previous.readModel.instanceState),

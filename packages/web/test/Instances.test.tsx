@@ -97,42 +97,6 @@ it("starts a stopped local instance directly and marks the selected card", () =>
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
-it("projects active Workspace Goals into the selected instance", () => {
-    const store = localStore("ready");
-    store.state.readModel.instanceState["local-one"] = {
-        approvals: [],
-        commentCalls: [],
-        contextMessages: [],
-        goals: [{
-            autoContinueExhausted: false,
-            continuationCount: 0,
-            continuationDue: false,
-            continuationDueAt: "2026-08-31T10:01:00.000Z",
-            continuationPending: false,
-            continuationUncertain: false,
-            createdAt: "2026-08-31T10:00:00.000Z",
-            goalId: "goal-visible",
-            lastAgentActivityAt: "2026-08-31T10:00:00.000Z",
-            lastProgressAt: "2026-08-31T10:00:00.000Z",
-            maxContinuations: 10,
-            objective: "Visible goal",
-            revision: 2,
-            status: "active",
-            steps: [{ id: "work", status: "active", text: "Work" }],
-            updatedAt: "2026-08-31T10:00:00.000Z",
-            workspace: "/workspace/project",
-        }],
-        logs: [],
-        sequence: 1,
-        toolCalls: [],
-    };
-    const { container } = render(<Instances store={store} />);
-    fireEvent.click(screen.getByRole("button", { name: /local-one/u }));
-    const goal = container.querySelector('[data-goal-id="goal-visible"]');
-    expect(goal).not.toBeNull();
-    expect(goal).toHaveAttribute("data-goal-status", "active");
-});
-
 it("keeps confirmation for stopping a running local instance", () => {
     const store = localStore("ready");
     render(<Instances store={store} />);

@@ -572,8 +572,30 @@ test("Comment conversation disables editing for the latest observed disabled Con
     assert.deepEqual(sent, []);
 });
 
-test("Todo uses a dedicated instance-scoped page and does not appear in Instances boxes", async () => {
+test("Todo owns Goal presentation and does not leak it into Instances", async () => {
     const harness = createHarness();
+    harness.store.patchControlReadModel({ instanceState: { alpha: { goals: [{
+        autoContinueExhausted: false,
+        continuationCount: 1,
+        continuationDue: false,
+        continuationDueAt: "2026-08-31T10:00:00.000Z",
+        continuationPending: false,
+        continuationUncertain: false,
+        createdAt: "2026-08-31T09:00:00.000Z",
+        goalId: "goal-visible",
+        lastAgentActivityAt: "2026-08-31T09:30:00.000Z",
+        lastProgressAt: "2026-08-31T09:30:00.000Z",
+        maxContinuations: 10,
+        objective: "Ship Workspace recovery",
+        revision: 4,
+        status: "active",
+        steps: [
+            { id: "inspect", status: "completed", text: "Inspect" },
+            { id: "fix", status: "active", text: "Fix" },
+        ],
+        updatedAt: "2026-08-31T09:30:00.000Z",
+        workspace: "/home/aromatic/Applications/OwnProject/portable-devshell",
+    }] } } });
     assert.equal(
         selectMainScreenModel(harness.store.getState()).boxes.some((box) =>
             box.id.startsWith("todo-"),
@@ -582,18 +604,19 @@ test("Todo uses a dedicated instance-scoped page and does not appear in Instance
     );
 
     harness.store.setSelectedPage("todo");
+    const overviewBoxes = selectMainScreenModel(harness.store.getState()).boxes;
     assert.deepEqual(
-        selectMainScreenModel(harness.store.getState()).boxes.map(
-            (box) => box.id,
-        ),
+        overviewBoxes.map((box) => box.id),
         [
+            "todo-goal:goal-visible",
             "todo-task:task-1",
             "todo-item:inspect",
             "todo-item:implement",
             "todo-item:verify",
         ],
     );
-    for (const box of selectMainScreenModel(harness.store.getState()).boxes) {
+    assert.equal(overviewBoxes[0]?.primaryAction, undefined);
+    for (const box of overviewBoxes.slice(1)) {
         assert.notEqual(box.primaryAction, undefined);
     }
     await openPrimaryRoute(harness, "todo-task:task-1");
@@ -607,6 +630,7 @@ test("Todo uses a dedicated instance-scoped page and does not appear in Instance
             (box) => box.id,
         ),
         [
+            "todo-goal:goal-visible",
             "todo-summary:task-1",
             "todo-item:inspect",
             "todo-item:implement",

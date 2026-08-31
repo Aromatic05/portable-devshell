@@ -120,35 +120,6 @@ const overview: OperationalOverview = {
 test("overview projects system meters and an instance table without expandable boxes", () => {
     const store = new TuiAppStore();
     store.patchControlReadModel({ overview: overview });
-    store.patchControlReadModel({ instanceState: {
-        alpha: {
-            approvals: [],
-            commentCalls: [],
-            contextMessages: [],
-            goals: [{
-                autoContinueExhausted: false,
-                continuationCount: 0,
-                continuationDue: false,
-                continuationDueAt: "2026-08-31T10:01:00.000Z",
-                continuationPending: false,
-                continuationUncertain: false,
-                createdAt: "2026-08-31T10:00:00.000Z",
-                goalId: "goal-visible",
-                lastAgentActivityAt: "2026-08-31T10:00:00.000Z",
-                lastProgressAt: "2026-08-31T10:00:00.000Z",
-                maxContinuations: 10,
-                objective: "Visible goal",
-                revision: 1,
-                status: "active",
-                steps: [{ id: "work", status: "active", text: "Work" }],
-                updatedAt: "2026-08-31T10:00:00.000Z",
-                workspace: "/workspace/project",
-            }],
-            logs: [],
-            sequence: 1,
-            toolCalls: [],
-        },
-    } });
     store.setSelectedPage("overview");
     store.setMainFocusId("overview-instance:alpha");
 
@@ -170,7 +141,6 @@ test("overview projects system meters and an instance table without expandable b
         presentation.instances.map((instance) => ({
             approvals: instance.approvals,
             focused: instance.focused,
-            goals: instance.goals,
             id: instance.id,
             runtime: instance.runtime,
             todos: instance.todos,
@@ -180,7 +150,6 @@ test("overview projects system meters and an instance table without expandable b
             {
                 approvals: 1,
                 focused: true,
-                goals: 1,
                 id: "overview-instance:alpha",
                 runtime: "failed",
                 todos: 1,
@@ -188,7 +157,6 @@ test("overview projects system meters and an instance table without expandable b
             },
         ],
     );
-    assert.equal(presentation.counts.activeGoals, 1);
     assert.equal(presentation.alerts.length, 1);
     assert.equal(presentation.activity[0]?.toolName, "bash_run");
     assert.deepEqual(selectMainBoxIds(store.getState()), [

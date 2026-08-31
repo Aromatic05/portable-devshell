@@ -38,7 +38,6 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
         ...state.instances.map((entry) => {
             const snapshot = state.readModel.instanceState[entry.name]?.snapshot;
             const approvals = (state.readModel.instanceState[entry.name]?.approvals ?? []).filter((approval) => approval.status === "pending");
-            const goals = state.readModel.instanceState[entry.name]?.goals ?? [];
             const lifecycle = lifecycleAvailability(state, entry.name, entry.enabled, entry.provider, snapshot);
             const artifactActivity = buildArtifactActivityView(
                 entry.name,
@@ -56,16 +55,7 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
                     formatField("provider", entry.provider ?? "unknown"),
                     formatField("home", entry.homeDirectory ?? "-"),
                     formatField("runtime", instanceRuntimeSummary(snapshot)),
-                    formatField("goals", String(goals.length)),
                     formatField("approvals", String(approvals.length)),
-                    ...goals.flatMap((goal) => {
-                        const done = goal.steps.filter((step) => step.status === "completed" || step.status === "skipped").length;
-                        return [
-                            formatField(`goal ${goal.status}`, goal.objective),
-                            formatField("  progress", `${done}/${goal.steps.length} steps`),
-                            formatField("  workspace", goal.workspace ?? "-")
-                        ];
-                    }),
                     ...(snapshot?.reverse === undefined
                         ? []
                         : [
@@ -102,7 +92,6 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
                     compactSummary(
                         ["provider", entry.provider ?? "unknown"],
                         ["home", entry.homeDirectory ?? "-"],
-                        ["goals", String(goals.length)],
                         ["approvals", String(approvals.length)]
                     ),
                     artifactActivity.summary

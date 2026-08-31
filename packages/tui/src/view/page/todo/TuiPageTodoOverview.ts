@@ -1,4 +1,4 @@
-import type { TodoItem, TodoTaskSummary } from "@portable-devshell/shared";
+import { workspaceFolderName, type GoalSnapshot, type TodoItem, type TodoTaskSummary } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
@@ -14,6 +14,33 @@ const symbols: Record<TodoItem["status"], string> = {
     in_progress: "●",
     pending: "○",
 };
+
+
+export function buildTodoGoalBoxes(state: TuiAppState, instance: string): BoxModel[] {
+    const goals = state.readModel.instanceState[instance]?.goals ?? [];
+    return goals.map((goal) => goalBox(state, instance, goal));
+}
+
+function goalBox(state: TuiAppState, instance: string, goal: GoalSnapshot): BoxModel {
+    const completed = goal.steps.filter((step) => step.status === "completed" || step.status === "skipped").length;
+    return makeBox(state, "todo", instance, {
+        detailLines: [
+            formatField("Goal", goal.goalId),
+            formatField("Revision", String(goal.revision)),
+            formatField("Status", goal.status),
+            formatField("Progress", `${completed}/${goal.steps.length} steps`),
+            formatField("Workspace", workspaceFolderName(goal.workspace)),
+            ...goal.steps.map((step) => formatField(step.status, step.text)),
+        ],
+        id: `todo-goal:${goal.goalId}`,
+        searchText: `${goal.goalId} ${goal.objective} ${goal.status} ${goal.workspace ?? ""}`,
+        status: goal.status === "blocked" ? "warning" : goal.status === "active" ? "running" : goal.status === "completed" ? "ready" : "disabled",
+        summaryLines: [
+            compactSummary(["progress", `${completed}/${goal.steps.length}`], ["status", goal.status], ["workspace", workspaceFolderName(goal.workspace)]),
+        ],
+        title: `Goal · ${goal.objective}`,
+    });
+}
 
 export function buildTodoOverviewBoxes(state: TuiAppState, instance: string): BoxModel[] {
     const todo = state.readModel.instanceState[instance]?.todo;

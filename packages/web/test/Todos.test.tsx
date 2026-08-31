@@ -78,3 +78,51 @@ it("disables Todo deletion during a session-level operation", () => {
 
     expect(screen.getByRole("button", { name: "Delete project" })).toBeDisabled();
 });
+
+it("renders active Workspace Goals on the Todo page", () => {
+    const state: WebState = {
+        connection: "online",
+        operations: {},
+        readModel: {
+            ...createInitialControlReadModelState(),
+            instances: [{ mcpEnabled: true, name: "alpha" }],
+            instanceState: {
+                alpha: {
+                    approvals: [],
+                    commentCalls: [],
+                    contextMessages: [],
+                    goals: [{
+                        autoContinueExhausted: false,
+                        continuationCount: 1,
+                        continuationDue: false,
+                        continuationDueAt: "2026-08-31T10:00:00.000Z",
+                        continuationPending: false,
+                        continuationUncertain: false,
+                        createdAt: "2026-08-31T09:00:00.000Z",
+                        goalId: "goal-visible",
+                        lastAgentActivityAt: "2026-08-31T09:30:00.000Z",
+                        lastProgressAt: "2026-08-31T09:30:00.000Z",
+                        maxContinuations: 10,
+                        objective: "Ship Workspace recovery",
+                        revision: 4,
+                        status: "active",
+                        steps: [
+                            { id: "inspect", status: "completed", text: "Inspect" },
+                            { id: "fix", status: "active", text: "Fix" },
+                        ],
+                        updatedAt: "2026-08-31T09:30:00.000Z",
+                        workspace: "/home/aromatic/Applications/OwnProject/portable-devshell",
+                    }],
+                    logs: [],
+                    sequence: 0,
+                    toolCalls: [],
+                },
+            },
+        },
+    };
+
+    const { container } = render(<Todos state={state} store={{} as WebStore} />);
+    const goal = container.querySelector('[data-goal-id="goal-visible"]');
+    expect(goal).not.toBeNull();
+    expect(goal).toHaveAttribute("data-goal-status", "active");
+});

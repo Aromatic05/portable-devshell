@@ -41,9 +41,7 @@ export function Instances({
         {model.instances.length === 0
             ? <p className="empty">No instances are available.</p>
             : <div className={`instances${entry === undefined ? "" : " has-selection"}`}>
-                {model.instances.map((item) => {
-                    const goals = model.instanceState[item.name]?.goals ?? [];
-                    return <button
+                {model.instances.map((item) => <button
                     aria-pressed={selected === item.name}
                     className={`instance card${selected === item.name ? " selected" : ""}`}
                     key={item.name}
@@ -53,12 +51,11 @@ export function Instances({
                     }}
                 >
                     <strong>{item.name}</strong>
-                    <span>{item.snapshot.status} · {item.snapshot.connectionState} · {goals.length} active goals</span>
+                    <span>{item.snapshot.status} · {item.snapshot.connectionState}</span>
                     <WorkerSummary worker={model.overview?.instances.find(
                         ({ name }) => name === item.name,
                     )?.worker} />
-                </button>;
-                })}
+                </button>)}
             </div>}
         {entry === undefined ? null : <article className="detail">
             <button className="back" onClick={() => setSelected(undefined)}>
@@ -75,13 +72,6 @@ export function Instances({
                 {" · Lifecycle is managed on the remote machine."}
             </p> : null}
             <WorkerDiagnostics worker={selectedWorker} />
-            <h4>Workspace Goals</h4>
-            {(model.instanceState[entry.name]?.goals ?? []).length === 0 ? <p className="empty">No active Workspace Goals.</p> : <ul className="summary-list">
-                {(model.instanceState[entry.name]?.goals ?? []).map((goal) => {
-                    const completed = goal.steps.filter((step) => step.status === "completed" || step.status === "skipped").length;
-                    return <li data-goal-id={goal.goalId} data-goal-status={goal.status} key={goal.goalId}><strong>{goal.objective}</strong> · {goal.status} · {completed}/{goal.steps.length} steps · {goal.workspace ?? "workspace unavailable"}</li>;
-                })}
-            </ul>}
             <div className="actions">
                 {lifecycleAction === undefined ? null : <button
                     className={lifecycleAction === "Start" ? "primary" : "danger"}

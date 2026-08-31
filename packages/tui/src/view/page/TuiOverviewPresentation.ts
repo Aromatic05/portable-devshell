@@ -27,7 +27,6 @@ export interface TuiOverviewInstanceViewport {
 }
 
 const EMPTY_COUNTS: TuiOverviewPresentation["counts"] = {
-    activeGoals: 0,
     activeTodos: 0,
     failedCalls24h: 0,
     instancesAttention: 0,
@@ -59,12 +58,6 @@ export function selectTuiOverviewPresentation(
         };
     }
 
-    const activeGoalCountByInstance = new Map<string, number>();
-    for (const [instance, value] of Object.entries(state.readModel.instanceState)) {
-        activeGoalCountByInstance.set(instance, value.goals.length);
-    }
-    const activeGoalCount = [...activeGoalCountByInstance.values()].reduce((sum, count) => sum + count, 0);
-
     const activeTodoCountByInstance = new Map<string, number>();
     for (const todo of overview.todos) {
         if (todo.status === "completed" || todo.status === "cancelled")
@@ -80,7 +73,6 @@ export function selectTuiOverviewPresentation(
             toInstanceRow(
                 instance,
                 activeTodoCountByInstance.get(instance.name) ?? 0,
-                activeGoalCountByInstance.get(instance.name) ?? 0,
                 state.ui.mainFocusId === `overview-instance:${instance.name}`,
             ),
         )
@@ -121,10 +113,10 @@ export function selectTuiOverviewPresentation(
         available: true,
         controller: {
             pid: overview.controller.pid,
-            summary: controllerSummary(overview, activeGoalCount),
+            summary: controllerSummary(overview),
             uptime: formatOverviewDuration(overview.controller.uptimeSeconds),
         },
-        counts: { ...overview.counts, activeGoals: activeGoalCount },
+        counts: overview.counts,
         generatedAt: overview.generatedAt,
         health: overview.health,
         instances,
@@ -176,7 +168,6 @@ export function selectTuiOverviewInstanceViewport(
 function toInstanceRow(
     instance: OperationalOverviewInstance,
     todos: number,
-    goals: number,
     focused: boolean,
 ): TuiOverviewInstanceRowModel {
     const snapshot = instance.snapshot;
@@ -185,7 +176,6 @@ function toInstanceRow(
         connection: snapshot.connectionState,
         daemon: snapshot.daemonState,
         focused,
-        goals,
         id: `overview-instance:${instance.name}`,
         lastError: snapshot.lastErrorMessage,
         mcpEnabled: instance.mcpEnabled,
@@ -307,12 +297,11 @@ function meterTone(percent: number | undefined): TuiOverviewTone {
     return "success";
 }
 
-function controllerSummary(overview: OperationalOverview, activeGoals: number): string {
+function controllerSummary(overview: OperationalOverview): string {
     const counts = overview.counts;
     return [
         `instances ${counts.instancesReady}/${counts.instancesTotal} ready`,
         `approvals ${counts.pendingApprovals}`,
-        `goals ${activeGoals}`,
         `todos ${counts.activeTodos}`,
         `failed calls 24h ${counts.failedCalls24h}`,
     ].join(" · ");
