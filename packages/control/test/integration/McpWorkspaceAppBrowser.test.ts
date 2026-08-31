@@ -257,6 +257,11 @@ test("Workspace Goal requests one model continuation after inactivity", BROWSER_
 
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
     await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue').length >= 4");
+    const continuationMessage = String(await page.evaluate("(window.__modelMessages || [])[0]?.content?.[0]?.text || ''"));
+    assert.match(continuationMessage, /WORKSPACE CONTINUATION FAILURE/u);
+    assert.match(continuationMessage, /Do not reply with an acknowledgement/u);
+    assert.match(continuationMessage, /execute the next required action in this same turn/u);
+    assert.match(continuationMessage, /recovery has failed again/u);
     const continuationCalls = await page.evaluate(
         "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue')",
     ) as Array<{ arguments?: Record<string, unknown> }>;
@@ -536,6 +541,9 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     const completedMessage = String(await page.evaluate("(window.__modelMessages || [])[0]?.content?.[0]?.text || ''"));
     assert.match(completedMessage, /tmux task tmux-recovery finished while detached/u);
     assert.match(completedMessage, /status 0/u);
+    assert.match(completedMessage, /THIS IS A WORK RESUMPTION EVENT, NOT A CHAT MESSAGE/u);
+    assert.match(completedMessage, /Do not reply with an acknowledgement/u);
+    assert.match(completedMessage, /execute the next required action in this same turn/u);
 
     const firstEvents = await page.evaluate("window.__bridgeEvents || []") as string[];
     const firstMessage = firstEvents.indexOf("message");
@@ -580,6 +588,7 @@ test("Workspace wake message explains a detached tmux wait deadline", BROWSER_TE
     const message = String(await page.evaluate("(window.__modelMessages || [])[0]?.content?.[0]?.text || ''"));
     assert.match(message, /wait deadline elapsed for tmux task tmux-recovery/u);
     assert.match(message, /task is still running/u);
+    assert.match(message, /re-enter a real blocking wait on that task instead of ending the turn/u);
 });
 
 test("Workspace Goal recovers a resolved detached wait without Todo", BROWSER_TEST_OPTIONS, async (t) => {

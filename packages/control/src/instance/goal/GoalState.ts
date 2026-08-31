@@ -10,7 +10,7 @@ import type {
     GoalStepStatus,
 } from "@portable-devshell/shared";
 
-export const GOAL_EXECUTION_LEASE_MS = 15 * 60 * 1_000;
+export const GOAL_EXECUTION_LEASE_MS = 60 * 1_000;
 export const GOAL_MAX_CONTINUATIONS = 10;
 const GOAL_CONTINUATION_CLAIM_TTL_MS = 5 * 60 * 1_000;
 const GOAL_CONTINUATION_RETRY_MS = 5 * 60 * 1_000;

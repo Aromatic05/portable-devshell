@@ -3,6 +3,10 @@ import test from "node:test";
 
 import { GOAL_EXECUTION_LEASE_MS, GoalState } from "../../src/instance/goal/GoalState.ts";
 
+test("GoalState detects an abandoned active Goal after one minute", () => {
+    assert.equal(GOAL_EXECUTION_LEASE_MS, 60_000);
+});
+
 test("GoalState manages start, step updates, finish, and stop", () => {
     let now = Date.parse("2026-08-20T12:00:00.000Z");
     let ids = 0;

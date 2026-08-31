@@ -118,7 +118,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var WIDGET_STATE_KEY = "portableDevshellWorkspace";
   var LIVE_SNAPSHOT_TIMEOUT_MS = 5000;
   var LIVE_WATCH_TIMEOUT_MS = 30000;
-  var RECOVERY_MESSAGE_SUFFIX = " Resume the existing portable-devshell work from the current Workspace state. Read the Workspace state and triggering result before acting. Do not repeat completed work. Reuse existing tmux tasks instead of restarting them. If a blocked Workspace Goal can now proceed, call workspace_goal with action=resume before continuing.";
+  var RECOVERY_MESSAGE_SUFFIX = " THIS IS A WORK RESUMPTION EVENT, NOT A CHAT MESSAGE. Do not reply with an acknowledgement, plan, status update, or a statement that you will continue. Immediately read the current Workspace state and the triggering result, then execute the next required action in this same turn. Do not repeat completed work or restart an existing tmux task. If the result is still required and an existing task is still running, re-enter a real blocking wait on that task instead of ending the turn. If a blocked Workspace Goal can now proceed, call workspace_goal with action=resume and continue executing it. You may end the turn only after the Goal is finished, progress genuinely requires user input and the Goal is blocked, or you have entered a real blocking wait.";
   var bridgeReady = false;
   var pendingToolResult = null;
   var initialToolResultResolve = null;
@@ -514,7 +514,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         return;
       }
       accepted = await sendModelMessage(
-        "Continue working on the active portable-devshell Workspace Goal from its current state. Do not repeat completed steps. Keep the Goal synchronized with execution using workspace_goal(action=\"update\"). When every step is completed or skipped, call workspace_goal(action=\"finish\"). If progress genuinely cannot continue, call workspace_goal(action=\"block\", note=...).",
+        "WORKSPACE CONTINUATION FAILURE: You stopped working while an active portable-devshell Workspace Goal still has executable steps, with no blocking wait, background task, approval, or user question preventing progress. Your previous turn ended without advancing or correctly blocking the Goal. Do not reply with an acknowledgement, apology, plan, status update, or a statement that you will continue. Immediately read the current Workspace Goal and execute the next required action in this same turn. Reuse existing work and do not repeat completed steps. Keep the Goal synchronized with execution using workspace_goal(action=\"update\"). You may end the turn only after entering a real blocking wait, blocking the Goal because user input is genuinely required, or completing every step and calling workspace_goal(action=\"finish\"). If you merely describe what you are going to do instead of doing it, recovery has failed again.",
         { goalContinuation: claim, continuationMessageId: claim && claim.goal && claim.goal.continuationMessageId },
         goalContinuationAvailable,
         async function () {
