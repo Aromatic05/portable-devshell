@@ -76,6 +76,8 @@ export interface McpInstanceGateway {
     dismissWaitRecovery?(instance: string, waitId: string, recoveryMessageId: string): Promise<WaitRecord>;
     reattachWait?(instance: string, waitId: string, ownerCallId?: string): Promise<WaitRecord>;
     releaseWaitRecovery?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
+    rejectWaitRecovery?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
+    disableWaitRecovery?(instance: string, waitId: string): Promise<WaitRecord>;
     consumeWait?(instance: string, waitId: string): Promise<WaitRecord>;
     resolveWait?(instance: string, waitId: string, result?: JsonValue): Promise<WaitRecord>;
     waitForWait?(instance: string, waitId: string): Promise<WaitRecord>;
@@ -153,7 +155,7 @@ export function isMcpInteractionGateway(
 
 export type McpWaitRecoveryGateway = McpInteractionGateway & Required<Pick<
     McpInstanceGateway,
-    "claimWaitRecovery" | "completeWaitRecovery" | "dismissWaitRecovery" | "markWaitRecoveryAttempted" | "markWaitRecoverySent" | "releaseWaitRecovery"
+    "claimWaitRecovery" | "completeWaitRecovery" | "disableWaitRecovery" | "dismissWaitRecovery" | "markWaitRecoveryAttempted" | "markWaitRecoverySent" | "rejectWaitRecovery" | "releaseWaitRecovery"
 >>;
 
 export function isMcpWaitRecoveryGateway(
@@ -165,6 +167,8 @@ export function isMcpWaitRecoveryGateway(
         gateway.dismissWaitRecovery !== undefined &&
         gateway.markWaitRecoveryAttempted !== undefined &&
         gateway.markWaitRecoverySent !== undefined &&
+        gateway.rejectWaitRecovery !== undefined &&
+        gateway.disableWaitRecovery !== undefined &&
         gateway.releaseWaitRecovery !== undefined;
 }
 

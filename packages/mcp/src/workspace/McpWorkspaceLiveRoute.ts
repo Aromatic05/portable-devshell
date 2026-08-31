@@ -83,10 +83,14 @@ function registerLiveRouteBase(
         options.host.registerRawRoute("get", `${base}/snapshot`, async (request, response) => {
             writeCors(response);
             try {
-                const { ctxId } = await authorize(request, options);
+                const authorized = await authorize(request, options);
+                const { ctxId } = authorized;
                 await options.restoreTmuxWaits?.();
                 options.presence.touch(options.instanceName, ctxId);
-                writeJson(response, 200, await readWorkspaceSnapshot(gateway, options.instanceName, ctxId));
+                writeJson(response, 200, await readWorkspaceSnapshot(gateway, options.instanceName, ctxId, {
+                    instances: authorized.instances,
+                    reentry: authorized.reentry,
+                }));
             } catch (error) {
                 writeLiveError(response, error);
             }
@@ -106,17 +110,23 @@ function registerLiveRouteBase(
                 await options.restoreTmuxWaits?.();
                 let cursor = readCursor(request);
                 const startedAt = Date.now();
+                const heartbeatMs = authorized.instances.length > 1
+                    ? Math.min(options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS, 1_000)
+                    : options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
                 options.presence.beginWatch(options.instanceName, ctxId);
                 while (!disconnect.signal.aborted) {
                     const batch = await workspaceGateway.readWorkspaceEvents(options.instanceName, cursor + 1);
                     const changed = batch.gap || batch.lastSeq < cursor ||
                         batch.events.some((event) => workspaceEventBelongsTo(event, ctxId!));
                     cursor = batch.lastSeq;
-                    if (changed || Date.now() - startedAt >= (options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS)) {
+                    if (changed || Date.now() - startedAt >= heartbeatMs) {
                         writeJson(response, 200, {
                             changed,
                             cursor,
-                            snapshot: await readWorkspaceSnapshot(gateway, options.instanceName, ctxId),
+                            snapshot: await readWorkspaceSnapshot(gateway, options.instanceName, ctxId, {
+                                instances: authorized.instances,
+                                reentry: await options.contextRegistry.readAutomaticReentry(ctxId, options.instanceName) as unknown as JsonValue,
+                            }),
                         });
                         return;
                     }
@@ -145,7 +155,7 @@ function liveRouteBases(instanceName: string, publicBaseUrl: string | undefined)
 async function authorize(
     request: IncomingMessage,
     options: McpWorkspaceLiveRouteOptions,
-): Promise<{ ctxId: string }> {
+): Promise<{ ctxId: string; instances: string[]; reentry: JsonValue }> {
     const url = new URL(request.url ?? "/", "http://localhost");
     const ctxId = url.searchParams.get("ctxId") ?? "";
     if (ctxId.length === 0) throw new LiveRouteError(400, "ctxId is required");
@@ -154,13 +164,18 @@ async function authorize(
         throw new LiveRouteError(401, "Workspace App authorization is invalid for the current Context.");
     }
     try {
-        await options.contextRegistry.validateForInstance(ctxId, options.instanceName);
+        const record = await options.contextRegistry.validateForInstance(ctxId, options.instanceName);
+        const reentry = await options.contextRegistry.readAutomaticReentry(ctxId, options.instanceName);
+        return {
+            ctxId,
+            instances: record.environments.map((environment) => environment.instance),
+            reentry: reentry as unknown as JsonValue,
+        };
     } catch (error) {
         const message = error instanceof Error ? error.message : "";
         if (/expired|disabled/iu.test(message)) throw new LiveRouteError(401, message);
         throw new LiveRouteError(401, "Workspace Context is unavailable for this capability.");
     }
-    return { ctxId };
 }
 
 function readCursor(request: IncomingMessage): number {

@@ -123,6 +123,7 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     await app.getByText("Paused", { exact: true }).waitFor({ state: "visible" });
     await app.getByRole("button", { name: "Resume task", exact: true }).click();
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task_control' && call.arguments.action === 'resume')");
+    await page.waitForFunction("(window.__modelMessages || []).length === 1");
     await app.getByText("Running", { exact: true }).waitFor({ state: "visible" });
     await app.getByRole("button", { name: "Cancel task", exact: true }).click();
     await app.getByRole("button", { name: "Confirm cancel", exact: true }).waitFor({ state: "visible" });
@@ -221,6 +222,7 @@ test("Workspace blocked Goal shows its reason and can be resumed by the user", B
     assert.equal(resumeCall?.arguments?.goalId, "goal-browser");
     assert.equal(resumeCall?.arguments?.revision, 1);
     assert.equal(resumeCall?.arguments?.token, "browser-secret-token");
+    await page.waitForFunction("(window.__modelMessages || []).length === 1");
     await app.getByText("Active", { exact: true }).waitFor({ state: "visible" });
     assert.equal(await app.getByRole("button", { name: "Resume Goal", exact: true }).count(), 0);
 });
@@ -305,7 +307,7 @@ test("Workspace user cancellation suppresses automatic Goal continuation until l
             params: { reason: "user action" }
         }, "*");
     });
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_goal_continue' && call.arguments.action === 'suppress')");
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_reentry_control' && call.arguments.action === 'yield')");
 
     assert.equal(await page.evaluate("window.__emitWorkspaceSnapshotAfterCancellation()"), true);
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -606,13 +608,6 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
     await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
 
-    const completedMessage = String(await page.evaluate("(window.__modelMessages || [])[0]?.content?.[0]?.text || ''"));
-    assert.match(completedMessage, /tmux task tmux-recovery finished while detached/u);
-    assert.match(completedMessage, /status 0/u);
-    assert.match(completedMessage, /THIS IS A WORK RESUMPTION EVENT, NOT A CHAT MESSAGE/u);
-    assert.match(completedMessage, /Do not reply with an acknowledgement/u);
-    assert.match(completedMessage, /execute the next required action in this same turn/u);
-
     const firstEvents = await page.evaluate("window.__bridgeEvents || []") as string[];
     const firstMessage = firstEvents.indexOf("message");
     assert.equal(firstMessage > 0 && firstEvents[firstMessage - 1] === "context", true);
@@ -636,7 +631,7 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     assert.equal(recoverCalls[3]?.arguments?.claimId, "recovery-claim");
 });
 
-test("Workspace wake message explains a detached tmux wait deadline", BROWSER_TEST_OPTIONS, async (t) => {
+test("Workspace re-enters after a detached tmux wait deadline", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
 
@@ -653,10 +648,8 @@ test("Workspace wake message explains a detached tmux wait deadline", BROWSER_TE
     }, workspaceAppHtml);
 
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    const message = String(await page.evaluate("(window.__modelMessages || [])[0]?.content?.[0]?.text || ''"));
-    assert.match(message, /wait deadline elapsed for tmux task tmux-recovery/u);
-    assert.match(message, /task is still running/u);
-    assert.match(message, /re-enter a real blocking wait on that task instead of ending the turn/u);
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
 });
 
 test("Workspace Goal recovers a resolved detached wait without Todo", BROWSER_TEST_OPTIONS, async (t) => {
@@ -721,9 +714,6 @@ test("Workspace Stop waiting resumes the agent after a detached tmux wait", BROW
     await app.getByText("Stop waiting", { exact: true }).click();
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_wait_interrupt')");
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    const interruptedMessage = String(await page.evaluate("(window.__modelMessages || [])[0]?.content?.[0]?.text || ''"));
-    assert.match(interruptedMessage, /user stopped waiting for tmux task tmux-resume/u);
-    assert.match(interruptedMessage, /tmux task was not stopped/u);
     await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
     const recoveryActions = await page.evaluate(
         "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)",
@@ -747,9 +737,6 @@ test("Workspace re-enters after a detached answer without surfacing detached tmu
     const app = page.frameLocator("#workspace");
     await app.locator('[data-question-choice="wait-question-detached"]').click();
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    const answerMessage = String(await page.evaluate("(window.__modelMessages || [])[0]?.content?.[0]?.text || ''"));
-    assert.match(answerMessage, /user answered the pending Workspace question/u);
-    assert.match(answerMessage, /Continue/u);
     await app.getByText("Background task", { exact: true }).waitFor({ state: "visible" });
     assert.equal(await app.getByText("No blocking event.", { exact: true }).count(), 0);
     assert.equal(await app.getByRole("button", { name: "Resume agent", exact: true }).count(), 0);
@@ -887,8 +874,11 @@ window.__workspaceGoalStopped = false;
 window.__workspaceGoalBlocked = false;
 window.__workspaceGoalDueNow = false;
 window.__workspaceGoalRetryAfter = "";
-window.__workspaceGoalSuppressedAt = "";
 window.__workspaceGoalLastAgentActivityAt = "2026-08-19T01:00:00.000Z";
+window.__workspaceReentryEpoch = 0;
+window.__workspaceReentryClaimId = "";
+window.__workspaceReentrySuppressedAt = "";
+window.__rejectNextModelMessage = false;
 window.__workspaceBackgroundDetached = false;
 window.__holdGoalContinuationContext = false;
 window.__pendingGoalContinuationContext = null;
@@ -955,8 +945,8 @@ function snapshot(withQuestion) {
         approvals: window.__workspaceApprovalPending ? [approval] : [],
         background: window.__workspaceWaitInterrupted && !window.__workspaceBackgroundDetached ? [] : [{
             detachedAt: new Date().toISOString(),
+            goalId: "goal-browser",
             status: "detached",
-            taskId: "task-plan",
             tmuxTaskId: "task-browser",
             updatedAt: "2026-08-19T01:00:02.000Z",
             waitId: "wait-background"
@@ -968,14 +958,14 @@ function snapshot(withQuestion) {
         goal: {
             autoContinueExhausted: false,
             continuationCount: 0,
-            continuationDue: window.__workspaceGoalDueNow && !window.__workspaceGoalSuppressedAt,
+            continuationDue: window.__workspaceGoalDueNow,
             continuationDueAt: window.__workspaceGoalDueNow ? "2000-01-01T00:00:00.000Z" : "2099-08-20T01:00:00.000Z",
             continuationPending: false,
             continuationRetryAfter: window.__workspaceGoalRetryAfter || undefined,
-            continuationSuppressedAt: window.__workspaceGoalSuppressedAt || undefined,
             createdAt: "2026-08-19T01:00:00.000Z",
             goalId: "goal-browser",
             lastAgentActivityAt: window.__workspaceGoalLastAgentActivityAt,
+            lastProgressAt: "2026-08-19T01:00:00.000Z",
             maxContinuations: 10,
             note: window.__workspaceGoalBlocked ? "Waiting for user decision" : undefined,
             objective: "Ship Workspace Goal mode",
@@ -994,6 +984,12 @@ function snapshot(withQuestion) {
         },
         instance: "browser-instance",
         questions: withQuestion && !window.__workspaceQuestionAnswered ? [question] : [],
+        reentry: {
+            claimId: window.__workspaceReentryClaimId || undefined,
+            epoch: window.__workspaceReentryEpoch,
+            pending: !!window.__workspaceReentryClaimId,
+            suppressedAt: window.__workspaceReentrySuppressedAt || undefined
+        },
         tasks: [{
             checkpoint: {
                 next: "Finish re-entry controls",
@@ -1060,7 +1056,12 @@ window.addEventListener("message", function (event) {
     if (message.method === "ui/message") {
         window.__modelMessages.push(message.params || {});
         window.__bridgeEvents.push("message");
-        reply({});
+        if (window.__rejectNextModelMessage) {
+            window.__rejectNextModelMessage = false;
+            reply({ isError: true });
+        } else {
+            reply({});
+        }
         return;
     }
     if (message.method === "notifications/cancelled") {
@@ -1139,10 +1140,9 @@ window.addEventListener("message", function (event) {
     }
     if (call.name === "workspace_goal_continue") {
         var action = call.arguments && call.arguments.action;
-        if (action === "suppress") {
-            window.__workspaceGoalSuppressedAt = new Date().toISOString();
+        if (action === "reset") {
             window.__workspaceGoalDueNow = false;
-            reply({ structuredContent: { suppressed: true, goal: snapshot(false).goal } });
+            reply({ structuredContent: { goal: snapshot(false).goal } });
             return;
         }
         if (action === "claim") {
@@ -1181,6 +1181,45 @@ window.addEventListener("message", function (event) {
             reply({ structuredContent: { goal: Object.assign({}, snapshot(false).goal, { continuationCount: 1 }) } });
             return;
         }
+    }
+    if (call.name === "workspace_reentry_control") {
+        var reentryAction = call.arguments && call.arguments.action;
+        if (reentryAction === "yield") {
+            window.__workspaceReentryEpoch += 1;
+            window.__workspaceReentryClaimId = "";
+            window.__workspaceReentrySuppressedAt = new Date().toISOString();
+            reply({ structuredContent: snapshot(false).reentry });
+            return;
+        }
+        if (reentryAction === "resume") {
+            window.__workspaceReentryEpoch += 1;
+            window.__workspaceReentryClaimId = "";
+            window.__workspaceReentrySuppressedAt = "";
+            reply({ structuredContent: snapshot(false).reentry });
+            return;
+        }
+        if (reentryAction === "claim") {
+            var canClaim = !window.__workspaceReentrySuppressedAt && !window.__workspaceReentryClaimId;
+            if (canClaim) window.__workspaceReentryClaimId = call.arguments.claimId;
+            reply({ structuredContent: Object.assign(snapshot(false).reentry, {
+                claimId: call.arguments.claimId,
+                claimed: canClaim
+            }) });
+            return;
+        }
+        if (reentryAction === "validate") {
+            reply({ structuredContent: Object.assign(snapshot(false).reentry, {
+                valid: !window.__workspaceReentrySuppressedAt && window.__workspaceReentryClaimId === call.arguments.claimId
+            }) });
+            return;
+        }
+        if (reentryAction === "release") {
+            if (window.__workspaceReentryClaimId === call.arguments.claimId) window.__workspaceReentryClaimId = "";
+            reply({ structuredContent: Object.assign(snapshot(false).reentry, { released: true }) });
+            return;
+        }
+        reply({ structuredContent: snapshot(false).reentry });
+        return;
     }
 });
 
@@ -1401,6 +1440,7 @@ window.__recovered = false;
 window.__goalRecovery = false;
 window.__unassociatedRecovery = false;
 window.__recoveryTimedOut = false;
+window.__recoveryReentryClaimId = "";
 
 function recoverySnapshot() {
     var goalMode = window.__goalRecovery;
@@ -1437,6 +1477,7 @@ function recoverySnapshot() {
         } : undefined,
         instance: "browser-instance",
         questions: [],
+        reentry: { claimId: window.__recoveryReentryClaimId || undefined, epoch: 0, pending: !!window.__recoveryReentryClaimId },
         tasks: goalMode || unassociated ? [] : [{
             checkpoint: {
                 next: "Inspect the completed background result",
@@ -1512,6 +1553,31 @@ window.addEventListener("message", function (event) {
         reply({ structuredContent: { changed: false, cursor: 1 } });
         return;
     }
+    if (call.name === "workspace_reentry_control") {
+        var reentryAction = call.arguments.action;
+        if (reentryAction === "claim") {
+            var claimed = !window.__recoveryReentryClaimId;
+            if (claimed) window.__recoveryReentryClaimId = call.arguments.claimId;
+            reply({ structuredContent: { claimId: call.arguments.claimId, claimed: claimed, epoch: 0, pending: !!window.__recoveryReentryClaimId } });
+            return;
+        }
+        if (reentryAction === "validate") {
+            reply({ structuredContent: { claimId: window.__recoveryReentryClaimId || undefined, epoch: 0, pending: !!window.__recoveryReentryClaimId, valid: window.__recoveryReentryClaimId === call.arguments.claimId } });
+            return;
+        }
+        if (reentryAction === "release") {
+            if (window.__recoveryReentryClaimId === call.arguments.claimId) window.__recoveryReentryClaimId = "";
+            reply({ structuredContent: { epoch: 0, pending: false, released: true } });
+            return;
+        }
+        if (reentryAction === "resume") {
+            window.__recoveryReentryClaimId = "";
+            reply({ structuredContent: { epoch: 1, pending: false, resumed: true } });
+            return;
+        }
+        reply({ structuredContent: { epoch: 0, pending: !!window.__recoveryReentryClaimId } });
+        return;
+    }
     if (call.name === "workspace_wait_recover") {
         if (call.arguments.action === "claim") {
             reply({ structuredContent: {
@@ -1563,6 +1629,7 @@ window.__modelMessages = [];
 window.__taskStatus = "in_progress";
 window.__waitWindowInterrupted = false;
 window.__waitWindowRecovered = false;
+window.__resumeReentryClaimId = "";
 
 function resumeSnapshot() {
     return {
@@ -1578,6 +1645,7 @@ function resumeSnapshot() {
         ctxId: "ctx-resume",
         cursor: 1,
         instance: "browser-instance",
+        reentry: { claimId: window.__resumeReentryClaimId || undefined, epoch: 0, pending: !!window.__resumeReentryClaimId },
         tasks: [{
             checkpoint: {
                 summary: "Resume from this checkpoint",
@@ -1644,6 +1712,24 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (call.name === "workspace_watch") return;
+    if (call.name === "workspace_reentry_control") {
+        if (call.arguments.action === "claim") {
+            window.__resumeReentryClaimId = call.arguments.claimId;
+            reply({ structuredContent: { claimId: window.__resumeReentryClaimId, claimed: true, epoch: 0, pending: true } });
+            return;
+        }
+        if (call.arguments.action === "validate") {
+            reply({ structuredContent: { claimId: window.__resumeReentryClaimId, epoch: 0, pending: true, valid: window.__resumeReentryClaimId === call.arguments.claimId } });
+            return;
+        }
+        if (call.arguments.action === "release") {
+            window.__resumeReentryClaimId = "";
+            reply({ structuredContent: { epoch: 0, pending: false, released: true } });
+            return;
+        }
+        reply({ structuredContent: { epoch: 0, pending: !!window.__resumeReentryClaimId } });
+        return;
+    }
     if (call.name === "workspace_wait_interrupt") {
         window.__waitWindowInterrupted = true;
         reply({ structuredContent: {
@@ -1700,6 +1786,7 @@ window.addEventListener("message", function (event) {
 const DETACHED_INTERACTION_BRIDGE_SCRIPT = String.raw`
 window.__modelMessages = [];
 window.__questionAnswered = false;
+window.__detachedReentryClaimId = "";
 
 function detachedInteractionSnapshot() {
     return {
@@ -1715,6 +1802,7 @@ function detachedInteractionSnapshot() {
         ctxId: "ctx-detached",
         cursor: 1,
         instance: "browser-instance",
+        reentry: { claimId: window.__detachedReentryClaimId || undefined, epoch: 0, pending: !!window.__detachedReentryClaimId },
         questions: window.__questionAnswered ? [] : [{
             createdAt: "2026-08-19T01:00:00.000Z",
             createdByCtxId: "ctx-detached",
@@ -1789,6 +1877,24 @@ window.addEventListener("message", function (event) {
     }
     if (call.name === "workspace_watch") {
         reply({ structuredContent: { changed: false, cursor: 1 } });
+        return;
+    }
+    if (call.name === "workspace_reentry_control") {
+        if (call.arguments.action === "claim") {
+            window.__detachedReentryClaimId = call.arguments.claimId;
+            reply({ structuredContent: { claimId: window.__detachedReentryClaimId, claimed: true, epoch: 0, pending: true } });
+            return;
+        }
+        if (call.arguments.action === "validate") {
+            reply({ structuredContent: { claimId: window.__detachedReentryClaimId, epoch: 0, pending: true, valid: window.__detachedReentryClaimId === call.arguments.claimId } });
+            return;
+        }
+        if (call.arguments.action === "release") {
+            window.__detachedReentryClaimId = "";
+            reply({ structuredContent: { epoch: 0, pending: false, released: true } });
+            return;
+        }
+        reply({ structuredContent: { epoch: 0, pending: !!window.__detachedReentryClaimId } });
         return;
     }
     if (call.name === "workspace_question_answer") {

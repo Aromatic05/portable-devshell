@@ -15,21 +15,28 @@ export async function readWorkspaceSnapshot(
     gateway: McpInteractionGateway,
     instanceName: string,
     ctxId: string,
+    options: {
+        instances?: string[];
+        reentry?: JsonValue;
+    } = {},
 ): Promise<JsonValue> {
     const workspaceGateway = isMcpWorkspaceGateway(gateway) ? gateway : undefined;
     const goalGateway = isMcpGoalGateway(gateway) ? gateway : undefined;
-    const [todo, waits, approvals, eventSlice, goal, toolCalls] = await Promise.all([
+    const instances = [...new Set([instanceName, ...(options.instances ?? [])])];
+    const [todo, waits, eventSlice, goal, approvalSlices, toolCallSlices] = await Promise.all([
         gateway.readTodo(instanceName),
         gateway.listWaits(instanceName),
-        gateway.listApprovals(instanceName),
         workspaceGateway?.readWorkspaceEvents(instanceName, Number.MAX_SAFE_INTEGER) ?? {
             events: [],
             gap: false,
             lastSeq: 0,
         },
         goalGateway?.readGoal(instanceName, ctxId),
-        workspaceGateway?.readToolCalls(instanceName, ctxId, 64) ?? [],
+        Promise.allSettled(instances.map(async (instance) => await gateway.listApprovals(instance))),
+        Promise.allSettled(instances.map(async (instance) => await (workspaceGateway?.readToolCalls(instance, ctxId, 64) ?? []))),
     ]);
+    const approvals = approvalSlices.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+    const toolCalls = toolCallSlices.flatMap((result) => result.status === "fulfilled" ? result.value : []);
     const todoRecord = asRecord(todo);
     const tasks = Array.isArray(todoRecord?.tasks)
         ? todoRecord.tasks.filter((task) => asRecord(task)?.ctxId === ctxId)
@@ -67,18 +74,26 @@ export async function readWorkspaceSnapshot(
                 wait.kind === "tmux" && (wait.status === "waiting" || wait.status === "detached")
             ) || (
                 (wait.kind === "tmux" || wait.kind === "question") &&
-                wait.status === "resolved" && wait.detachedAt !== undefined
+                wait.status === "resolved" && wait.detachedAt !== undefined &&
+                (wait.recoveryDisabledAt === undefined ||
+                    (wait.recoveryMessageAttemptedAt !== undefined && wait.recoveryMessageSentAt === undefined))
             ))
             .map((wait) => ({
+                ...(wait.automaticRecovery === undefined ? {} : { automaticRecovery: wait.automaticRecovery }),
                 ...(wait.detachedAt === undefined ? {} : { detachedAt: wait.detachedAt }),
                 ...(wait.goalId === undefined ? {} : { goalId: wait.goalId }),
+                ...(wait.goalRevision === undefined ? {} : { goalRevision: wait.goalRevision }),
+                ...(wait.goalStepId === undefined ? {} : { goalStepId: wait.goalStepId }),
                 kind: wait.kind,
+                ...(wait.recoveryDisabledAt === undefined ? {} : { recoveryDisabledAt: wait.recoveryDisabledAt }),
                 ...(wait.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: wait.recoveryMessageAttemptedAt }),
                 ...(wait.recoveryMessageId === undefined ? {} : { recoveryMessageId: wait.recoveryMessageId }),
                 ...(wait.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: wait.recoveryMessageSentAt }),
                 ...(wait.result === undefined ? {} : { result: wait.result }),
                 status: wait.status,
+                ...(wait.targetInstance === undefined ? {} : { targetInstance: wait.targetInstance }),
                 ...(wait.taskId === undefined ? {} : { taskId: wait.taskId }),
+                ...(wait.todoItemId === undefined ? {} : { todoItemId: wait.todoItemId }),
                 ...(wait.kind === "tmux" ? { tmuxTaskId: wait.targetId } : {}),
                 updatedAt: wait.updatedAt,
                 waitId: wait.waitId,
@@ -89,6 +104,7 @@ export async function readWorkspaceSnapshot(
         goal: goal ?? null,
         instance: instanceName,
         questions: visibleWaits.filter((wait) => wait.kind === "question" && (wait.status === "waiting" || wait.status === "detached")),
+        reentry: options.reentry ?? { epoch: 0, pending: false },
         tasks: visibleTasks,
     } as unknown as JsonValue;
 }

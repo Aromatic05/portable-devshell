@@ -10,14 +10,21 @@ export type WaitStatus =
     | "cancelled";
 
 export interface WaitCreateInput {
+    automaticRecovery?: boolean;
     createdByCtxId: string;
     deadlineAt?: string;
     goalId?: string;
+    goalRevision?: number;
+    goalStepId?: string;
     kind: WaitKind;
     ownerCallId?: string;
     payload?: JsonValue;
+    targetInstance?: string;
     targetId: string;
     taskId?: string;
+    taskRevision?: number;
+    todoItemId?: string;
+    workspace?: string;
 }
 
 export interface WaitRecord extends WaitCreateInput {
@@ -27,6 +34,7 @@ export interface WaitRecord extends WaitCreateInput {
     detachedAt?: string;
     recoveryClaimedAt?: string;
     recoveryClaimId?: string;
+    recoveryDisabledAt?: string;
     recoveryDismissedAt?: string;
     recoveryMessageAttemptedAt?: string;
     recoveryMessageId?: string;

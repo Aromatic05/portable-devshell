@@ -281,11 +281,23 @@ pub struct TmuxRunOutput {
 pub struct TmuxReadOutput {
     pub task: TmuxTaskView,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub detached: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_reason: Option<TmuxReadWaitReason>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pane: Option<TmuxPaneRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warnings: Option<Vec<TmuxWarning>>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum TmuxReadWaitReason {
+    Output,
+    Terminal,
+    Timeout,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

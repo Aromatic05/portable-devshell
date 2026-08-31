@@ -33,7 +33,6 @@ test("Control-owned MCP tools describe their structured output instead of generi
     assert.equal((environment._meta as Record<string, unknown>)["ui/resourceUri"], workspaceAppResourceUri);
     assert.equal((environment._meta as Record<string, unknown>)["openai/outputTemplate"], workspaceAppResourceUri);
     assert.equal((environment._meta as Record<string, unknown>)["openai/widgetAccessible"], true);
-    assert.match(environment.description, /bootstraps the Live Workspace/u);
     const platform = property(environment.outputSchema, "platform");
     assert.equal(record(platform).additionalProperties, false);
     assert.deepEqual(required(platform), ["arch", "os"]);

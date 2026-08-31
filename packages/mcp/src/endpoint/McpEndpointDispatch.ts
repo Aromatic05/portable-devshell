@@ -91,6 +91,7 @@ export class McpEndpointDispatch {
         this.#tmuxWaitPollMs = options.tmuxWaitPollMs ?? MCP_TMUX_WAIT_POLL_MS;
         this.#worker = options.worker;
         const controlOptions = {
+            contextRegistry: this.#contextRegistry,
             gateway: options.gateway,
             instanceName: options.instanceName,
             workspaceAppLeases: options.workspaceAppLeases,
@@ -180,7 +181,7 @@ export class McpEndpointDispatch {
         const routed = selected.owner === "worker" || selected.owner === "artifact"
             ? readMcpRoutedInput(input, snapshot.instanceRoutingEnabled, this.#instanceName)
             : { input, instance: this.#instanceName };
-        await this.restoreTmuxWaits(routed.instance);
+        await this.restoreTmuxWaits(this.#instanceName);
         const context = await this.#createToolContext(
             toolName,
             resolvedContext.record,
@@ -191,73 +192,222 @@ export class McpEndpointDispatch {
             signal
         );
         if (!appOnlyInteraction && context.ctxId !== undefined) {
+            await this.#contextRegistry.clearAutomaticReentryClaim(context.ctxId, this.#instanceName).catch(() => undefined);
             if (toolName !== "workspace_goal") {
                 await this.#gateway?.touchGoal?.(this.#instanceName, context.ctxId);
             }
         }
 
-        if (appOnlyInteraction) {
-            this.#catalog.assertAdaptable(selected.definition);
-            const result = await this.#interaction.call(
-                toolName as McpToolCatalogInteractionName,
-                input,
-                context,
-                context.requestId ?? "workspace-app",
-                signal
-            );
-            if (toolName === "workspace_wait_interrupt") {
-                const waitId = readWorkspaceWaitId(input);
-                if (waitId !== undefined) this.#interruptTmuxWaitTracker(this.#instanceName, waitId);
-            }
-            return result;
-        }
-
-        if (
-            selected.owner === "todo" || selected.owner === "artifact" ||
-            selected.owner === "instance" || selected.owner === "workspace"
-        ) {
-            const owner = selected.owner;
-            this.#catalog.assertAdaptable(selected.definition);
-            return await this.#auditControlTool(
-                owner,
-                toolName,
-                input,
-                context,
-                routed.instance,
-                signal
-            );
-        }
-
-        if (toolName === "tmux_run" && isMcpTmuxWaitGateway(this.#gateway) && readTmuxBlock(routed.input)) {
-            this.#catalog.assertAdaptable(selected.definition);
-            return await auditMcpEndpointTool({
-                context,
-                gateway: this.#gateway,
-                input: routed.input,
-                localInstance: this.#instanceName,
-                operation: async (callId) => await this.#callTmuxRun(
-                    routed.input,
+        const touchGoalAfter = !appOnlyInteraction && context.ctxId !== undefined && toolName !== "workspace_goal";
+        try {
+            if (appOnlyInteraction) {
+                this.#catalog.assertAdaptable(selected.definition);
+                const result = await this.#interaction.call(
+                    toolName as McpToolCatalogInteractionName,
+                    input,
                     context,
-                    callId,
+                    context.requestId ?? "workspace-app",
+                    signal
+                );
+                if (toolName === "workspace_wait_interrupt") {
+                    const waitId = readWorkspaceWaitId(input);
+                    if (waitId !== undefined) this.#interruptTmuxWaitTracker(this.#instanceName, waitId);
+                }
+                return result;
+            }
+
+            if (
+                selected.owner === "todo" || selected.owner === "artifact" ||
+                selected.owner === "instance" || selected.owner === "workspace"
+            ) {
+                const owner = selected.owner;
+                this.#catalog.assertAdaptable(selected.definition);
+                return await this.#auditControlTool(
+                    owner,
+                    toolName,
+                    input,
+                    context,
                     routed.instance,
+                    signal
+                );
+            }
+
+            if (toolName === "tmux_run" && isMcpTmuxWaitGateway(this.#gateway) && readTmuxBlock(routed.input)) {
+                this.#catalog.assertAdaptable(selected.definition);
+                const ownerWorkspace = contextEnvironment(resolvedContext.record, this.#instanceName)?.workspace;
+                return await auditMcpEndpointTool({
+                    context,
+                    gateway: this.#gateway,
+                    input: routed.input,
+                    localInstance: this.#instanceName,
+                    operation: async (callId) => await this.#callTmuxRun(
+                        routed.input,
+                        context,
+                        callId,
+                        routed.instance,
+                        ownerWorkspace,
+                        signal,
+                    ),
                     signal,
-                ),
-                signal,
-                targetInstance: routed.instance,
+                    targetInstance: routed.instance,
+                    toolName,
+                    worker: this.#worker,
+                });
+            }
+
+            if (
+                toolName === "tmux_read" && isMcpTmuxWaitGateway(this.#gateway) &&
+                readTmuxReadTimeMs(routed.input) >= this.#tmuxBlockSyncMs
+            ) {
+                this.#catalog.assertAdaptable(selected.definition);
+                const ownerWorkspace = contextEnvironment(resolvedContext.record, this.#instanceName)?.workspace;
+                return await auditMcpEndpointTool({
+                    context,
+                    gateway: this.#gateway,
+                    input: routed.input,
+                    localInstance: this.#instanceName,
+                    operation: async (callId) => await this.#callTmuxRead(
+                        routed.input,
+                        context,
+                        callId,
+                        routed.instance,
+                        ownerWorkspace,
+                        signal,
+                    ),
+                    signal,
+                    targetInstance: routed.instance,
+                    toolName,
+                    worker: this.#worker,
+                });
+            }
+
+            return await this.#workerHandler.call(
                 toolName,
-                worker: this.#worker,
-            });
+                input,
+                context,
+                selected.definition,
+                snapshot.instanceRoutingEnabled,
+                signal,
+                async (result, callId) => await this.#attachComments(toolName, result, context, callId, routed.instance)
+            );
+        } finally {
+            if (touchGoalAfter) {
+                await this.#gateway?.touchGoal?.(this.#instanceName, context.ctxId!).catch(() => undefined);
+            }
+        }
+    }
+
+    async #callTmuxRead(
+        input: JsonValue,
+        context: ToolCallContext,
+        callId: string,
+        instance: string,
+        ownerWorkspace: string | undefined,
+        signal?: AbortSignal,
+    ): Promise<JsonValue> {
+        const gateway = this.#gateway;
+        if (!isMcpTmuxWaitGateway(gateway) || context.ctxId === undefined) {
+            throw new Error("tmux_read durable wait state is unavailable.");
+        }
+        const task = readTmuxReadTask(input);
+        const timeout = readTmuxReadTimeMs(input);
+        const line = readTmuxLine(input);
+        const startedAt = Date.now();
+        const observed = await this.#observeTmuxRead(
+            instance,
+            task,
+            context,
+            0,
+            signal,
+        );
+        if (tmuxReadReady(observed)) {
+            const completed = await this.#consumeTmuxRead(instance, task, line, context, signal);
+            return await this.#attachComments("tmux_read", completed, context, callId, instance);
         }
 
-        return await this.#workerHandler.call(
-            toolName,
-            input,
+        const goal = await this.#currentGoal(this.#instanceName, context.ctxId);
+        const taskAssociation = goal === undefined
+            ? await this.#currentTaskAssociation(this.#instanceName, context.ctxId)
+            : { kind: "none" as const };
+        const goalStep = goal?.steps.find((step) => step.status === "active");
+        const wait = await gateway.createWait(this.#instanceName, {
+            automaticRecovery: taskAssociation.kind !== "ambiguous",
+            createdByCtxId: context.ctxId,
+            deadlineAt: new Date(startedAt + timeout).toISOString(),
+            ...(goal === undefined ? {} : { goalId: goal.goalId, goalRevision: goal.revision }),
+            ...(goalStep === undefined ? {} : { goalStepId: goalStep.id }),
+            kind: "tmux",
+            ownerCallId: callId,
+            payload: { line, operation: "read" },
+            targetInstance: instance,
+            targetId: task,
+            ...(taskAssociation.kind !== "one" ? {} : {
+                taskId: taskAssociation.taskId,
+                taskRevision: taskAssociation.revision,
+                todoItemId: taskAssociation.todoItemId,
+            }),
+            ...(ownerWorkspace === undefined ? {} : { workspace: ownerWorkspace }),
+        });
+        this.#ensureTmuxReadWaitTracker(
+            this.#instanceName,
+            wait.waitId,
+            instance,
+            task,
             context,
-            selected.definition,
-            snapshot.instanceRoutingEnabled,
-            signal,
-            async (result, callId) => await this.#attachComments(toolName, result, context, callId, routed.instance)
+            startedAt + timeout,
         );
+
+        let boundaryTimer: ReturnType<typeof setTimeout> | undefined;
+        const boundary = new Promise<{ kind: "boundary" }>((resolve) => {
+            boundaryTimer = setTimeout(() => resolve({ kind: "boundary" }), this.#tmuxBlockSyncMs);
+        });
+        const resolution = gateway.waitForWait(this.#instanceName, wait.waitId).then(
+            (record) => ({ kind: "wait" as const, record }),
+            (error: unknown) => ({ kind: "waitError" as const, error }),
+        );
+
+        let outcome: Awaited<typeof resolution> | { kind: "boundary" };
+        try {
+            outcome = await waitForMcpEndpointAbortable(Promise.race([resolution, boundary]), signal);
+        } catch (error) {
+            if (signal?.aborted === true) {
+                const current = (await gateway.listWaits(this.#instanceName)).find((entry) => entry.waitId === wait.waitId);
+                if (current?.status === "waiting" || (current?.status === "resolved" && current.detachedAt === undefined)) {
+                    await gateway.detachWait(this.#instanceName, wait.waitId).catch(() => undefined);
+                }
+            }
+            throw error;
+        } finally {
+            if (boundaryTimer !== undefined) clearTimeout(boundaryTimer);
+        }
+
+        let current = outcome.kind === "wait"
+            ? outcome.record
+            : (await gateway.listWaits(this.#instanceName)).find((entry) => entry.waitId === wait.waitId);
+        if (outcome.kind === "boundary" && current?.status === "waiting") {
+            try {
+                current = await gateway.detachWait(this.#instanceName, wait.waitId);
+            } catch {
+                current = (await gateway.listWaits(this.#instanceName)).find((entry) => entry.waitId === wait.waitId);
+            }
+        }
+        if (current?.status === "resolved") {
+            await gateway.consumeWait(this.#instanceName, wait.waitId);
+            const completed = await this.#consumeTmuxRead(instance, task, line, context, signal);
+            return await this.#attachComments("tmux_read", completed, context, callId, instance);
+        }
+        if (current?.status === "detached") {
+            return await this.#attachComments(
+                "tmux_read",
+                { ...observed, detached: true },
+                context,
+                callId,
+                instance,
+            );
+        }
+        if (current?.status === "cancelled" && outcome.kind === "waitError") throw outcome.error;
+        if (outcome.kind === "waitError") throw outcome.error;
+        throw new Error(`tmux_read wait ${wait.waitId} entered an unexpected state.`);
     }
 
     async #callTmuxRun(
@@ -265,6 +415,7 @@ export class McpEndpointDispatch {
         context: ToolCallContext,
         callId: string,
         instance: string,
+        ownerWorkspace: string | undefined,
         signal?: AbortSignal,
     ): Promise<JsonValue> {
         const gateway = this.#gateway;
@@ -303,23 +454,35 @@ export class McpEndpointDispatch {
         }
 
         const task = started.task.id;
-        const goalId = await this.#currentGoalId(instance, context.ctxId);
-        const taskId = goalId === undefined ? await this.#currentTaskId(instance, context.ctxId) : undefined;
-        const wait = await gateway.createWait(instance, {
+        const goal = await this.#currentGoal(this.#instanceName, context.ctxId);
+        const taskAssociation = goal === undefined
+            ? await this.#currentTaskAssociation(this.#instanceName, context.ctxId)
+            : { kind: "none" as const };
+        const goalStep = goal?.steps.find((step) => step.status === "active");
+        const wait = await gateway.createWait(this.#instanceName, {
+            automaticRecovery: taskAssociation.kind !== "ambiguous",
             createdByCtxId: context.ctxId,
             ...(timeout === undefined ? {} : { deadlineAt: new Date(startedAt + timeout).toISOString() }),
-            ...(goalId === undefined ? {} : { goalId }),
+            ...(goal === undefined ? {} : { goalId: goal.goalId, goalRevision: goal.revision }),
+            ...(goalStep === undefined ? {} : { goalStepId: goalStep.id }),
             kind: "tmux",
             ownerCallId: callId,
             payload: { line },
-            ...(taskId === undefined ? {} : { taskId }),
+            targetInstance: instance,
             targetId: task,
+            ...(taskAssociation.kind !== "one" ? {} : {
+                taskId: taskAssociation.taskId,
+                taskRevision: taskAssociation.revision,
+                todoItemId: taskAssociation.todoItemId,
+            }),
+            ...(ownerWorkspace === undefined ? {} : { workspace: ownerWorkspace }),
         });
         this.#ensureTmuxWaitTracker(
+            this.#instanceName,
             wait.waitId,
+            instance,
             task,
             context,
-            instance,
             timeout === undefined ? undefined : startedAt + timeout,
         );
 
@@ -327,7 +490,7 @@ export class McpEndpointDispatch {
         const boundary = new Promise<{ kind: "boundary" }>((resolve) => {
             boundaryTimer = setTimeout(() => resolve({ kind: "boundary" }), this.#tmuxBlockSyncMs);
         });
-        const resolution = gateway.waitForWait(instance, wait.waitId).then(
+        const resolution = gateway.waitForWait(this.#instanceName, wait.waitId).then(
             (record) => ({ kind: "wait" as const, record }),
             (error: unknown) => ({ kind: "waitError" as const, error }),
         );
@@ -337,12 +500,12 @@ export class McpEndpointDispatch {
             outcome = await waitForMcpEndpointAbortable(Promise.race([resolution, boundary]), signal);
         } catch (error) {
             if (signal?.aborted === true) {
-                const current = (await gateway.listWaits(instance)).find((entry) => entry.waitId === wait.waitId);
+                const current = (await gateway.listWaits(this.#instanceName)).find((entry) => entry.waitId === wait.waitId);
                 if (
                     current?.status === "waiting" ||
                     (current?.status === "resolved" && current.detachedAt === undefined)
                 ) {
-                    await gateway.detachWait(instance, wait.waitId).catch(() => undefined);
+                    await gateway.detachWait(this.#instanceName, wait.waitId).catch(() => undefined);
                 }
             }
             throw error;
@@ -352,16 +515,16 @@ export class McpEndpointDispatch {
 
         let current = outcome.kind === "wait"
             ? outcome.record
-            : (await gateway.listWaits(instance)).find((entry) => entry.waitId === wait.waitId);
+            : (await gateway.listWaits(this.#instanceName)).find((entry) => entry.waitId === wait.waitId);
         if (outcome.kind === "boundary" && current?.status === "waiting") {
             try {
-                current = await gateway.detachWait(instance, wait.waitId);
+                current = await gateway.detachWait(this.#instanceName, wait.waitId);
             } catch {
-                current = (await gateway.listWaits(instance)).find((entry) => entry.waitId === wait.waitId);
+                current = (await gateway.listWaits(this.#instanceName)).find((entry) => entry.waitId === wait.waitId);
             }
         }
         if (current?.status === "resolved") {
-            await gateway.consumeWait(instance, wait.waitId);
+            await gateway.consumeWait(this.#instanceName, wait.waitId);
             if (current.result === undefined || !isRecord(current.result)) {
                 throw new Error("tmux_run wait resolved without a task result.");
             }
@@ -397,54 +560,112 @@ export class McpEndpointDispatch {
         throw new Error(`tmux_run wait ${wait.waitId} entered an unexpected state.`);
     }
 
-    async #currentGoalId(instance: string, ctxId: string): Promise<string | undefined> {
+    async #currentGoal(instance: string, ctxId: string) {
         const gateway = this.#gateway;
         if (!isMcpGoalGateway(gateway)) return undefined;
         const goal = await gateway.readGoal(instance, ctxId);
-        return goal !== undefined && (goal.status === "active" || goal.status === "blocked")
-            ? goal.goalId
-            : undefined;
+        return goal !== undefined && (goal.status === "active" || goal.status === "blocked") ? goal : undefined;
     }
 
-    async #currentTaskId(instance: string, ctxId: string): Promise<string | undefined> {
+    async #currentTaskAssociation(instance: string, ctxId: string): Promise<
+        | { kind: "none" }
+        | { kind: "ambiguous" }
+        | { kind: "one"; revision: number; taskId: string; todoItemId: string }
+    > {
         const gateway = this.#gateway;
-        if (gateway === undefined) return undefined;
+        if (gateway === undefined) return { kind: "none" };
         const todo = await gateway.readTodo(instance);
         if (typeof todo !== "object" || todo === null || Array.isArray(todo) || !Array.isArray(todo.tasks)) {
-            return undefined;
+            return { kind: "none" };
         }
         const active = todo.tasks.filter((task) => (
             typeof task === "object" && task !== null && !Array.isArray(task) &&
             task.ctxId === ctxId && task.status === "in_progress" && typeof task.taskId === "string"
         ));
-        if (active.length !== 1) return undefined;
+        if (active.length === 0) return { kind: "none" };
+        if (active.length !== 1) return { kind: "ambiguous" };
         const task = active[0];
-        return typeof task === "object" && task !== null && !Array.isArray(task)
-            ? task.taskId as string
-            : undefined;
+        if (typeof task !== "object" || task === null || Array.isArray(task) || typeof task.taskId !== "string") {
+            return { kind: "none" };
+        }
+        const detail = await gateway.readTodo(instance, { taskId: task.taskId });
+        if (typeof detail !== "object" || detail === null || Array.isArray(detail) || !Array.isArray(detail.items)) {
+            return { kind: "ambiguous" };
+        }
+        const current = detail.items.filter((item) => (
+            typeof item === "object" && item !== null && !Array.isArray(item) &&
+            item.status === "in_progress" && typeof item.id === "string"
+        ));
+        if (current.length !== 1 || typeof detail.revision !== "number") return { kind: "ambiguous" };
+        return {
+            kind: "one",
+            revision: detail.revision,
+            taskId: task.taskId,
+            todoItemId: (current[0] as { id: string }).id,
+        };
     }
 
     #ensureTmuxWaitTracker(
+        waitInstance: string,
         waitId: string,
+        targetInstance: string,
         taskId: string,
         context: ToolCallContext,
-        instance: string,
         deadlineAt?: number,
     ): Promise<JsonValue> {
         const gateway = this.#gateway;
         if (!isMcpTmuxWaitGateway(gateway)) {
             throw new Error("tmux_run block wait state is unavailable.");
         }
-        const key = `${instance}:${waitId}`;
+        const key = `${waitInstance}:${waitId}`;
         const existing = this.#tmuxWaitTrackers.get(key);
         if (existing !== undefined) return existing.promise;
         const controller = new AbortController();
-        const tracker = this.#trackTmuxTask(gateway, instance, taskId, context, controller.signal, deadlineAt).then(async (result) => {
-            await gateway.resolveWait(instance, waitId, result);
+        const tracker = this.#trackTmuxTask(gateway, targetInstance, taskId, context, controller.signal, deadlineAt).then(async (result) => {
+            await gateway.resolveWait(waitInstance, waitId, result);
             return result;
         }, async (error: unknown) => {
             if (!controller.signal.aborted) {
-                await gateway.cancelWait(instance, waitId).catch(() => undefined);
+                await gateway.cancelWait(waitInstance, waitId).catch(() => undefined);
+            }
+            throw error;
+        }).finally(() => {
+            this.#tmuxWaitTrackers.delete(key);
+        });
+        this.#tmuxWaitTrackers.set(key, { controller, promise: tracker });
+        void tracker.catch(() => undefined);
+        return tracker;
+    }
+
+    #ensureTmuxReadWaitTracker(
+        waitInstance: string,
+        waitId: string,
+        targetInstance: string,
+        taskId: string,
+        context: ToolCallContext,
+        deadlineAt: number,
+    ): Promise<JsonValue> {
+        const gateway = this.#gateway;
+        if (!isMcpTmuxWaitGateway(gateway)) {
+            throw new Error("tmux_read durable wait state is unavailable.");
+        }
+        const key = `${waitInstance}:${waitId}`;
+        const existing = this.#tmuxWaitTrackers.get(key);
+        if (existing !== undefined) return existing.promise;
+        const controller = new AbortController();
+        const tracker = this.#trackTmuxReadReady(
+            gateway,
+            targetInstance,
+            taskId,
+            context,
+            controller.signal,
+            deadlineAt,
+        ).then(async (result) => {
+            await gateway.resolveWait(waitInstance, waitId, result);
+            return result;
+        }, async (error: unknown) => {
+            if (!controller.signal.aborted) {
+                await gateway.cancelWait(waitInstance, waitId).catch(() => undefined);
             }
             throw error;
         }).finally(() => {
@@ -466,13 +687,26 @@ export class McpEndpointDispatch {
             const waits = await this.#gateway!.listWaits!(instance);
             for (const wait of waits) {
                 if (wait.kind !== "tmux" || wait.status !== "detached") continue;
-                this.#ensureTmuxWaitTracker(
-                    wait.waitId,
-                    wait.targetId,
-                    { ctxId: wait.createdByCtxId, source: "mcp" },
-                    instance,
-                    wait.deadlineAt === undefined ? undefined : Date.parse(wait.deadlineAt),
-                );
+                const payload = isRecord(wait.payload) ? wait.payload : undefined;
+                if (payload?.operation === "read" && wait.deadlineAt !== undefined) {
+                    this.#ensureTmuxReadWaitTracker(
+                        instance,
+                        wait.waitId,
+                        wait.targetInstance ?? instance,
+                        wait.targetId,
+                        { ctxId: wait.createdByCtxId, source: "mcp" },
+                        Date.parse(wait.deadlineAt),
+                    );
+                } else {
+                    this.#ensureTmuxWaitTracker(
+                        instance,
+                        wait.waitId,
+                        wait.targetInstance ?? instance,
+                        wait.targetId,
+                        { ctxId: wait.createdByCtxId, source: "mcp" },
+                        wait.deadlineAt === undefined ? undefined : Date.parse(wait.deadlineAt),
+                    );
+                }
             }
         })().catch(() => undefined);
         this.#tmuxWaitRestores.set(instance, restore);
@@ -506,6 +740,70 @@ export class McpEndpointDispatch {
                 signal
             );
         }
+    }
+
+    async #trackTmuxReadReady(
+        gateway: McpTmuxWaitGateway,
+        instance: string,
+        taskId: string,
+        context: ToolCallContext,
+        signal: AbortSignal,
+        deadlineAt: number,
+    ): Promise<JsonValue> {
+        while (true) {
+            throwIfMcpEndpointAborted(signal);
+            const remaining = Math.max(0, deadlineAt - Date.now());
+            try {
+                const result = await this.#observeTmuxRead(
+                    instance,
+                    taskId,
+                    context,
+                    Math.min(this.#tmuxWaitPollMs, remaining),
+                    signal,
+                );
+                if (tmuxReadReady(result) || Date.now() >= deadlineAt) return result;
+            } catch (error) {
+                if (!isRetryableTmuxObservationError(error)) throw error;
+                if (Date.now() >= deadlineAt) throw error;
+                await waitForMcpEndpointAbortable(
+                    new Promise<void>((resolve) => setTimeout(
+                        resolve,
+                        Math.min(this.#tmuxWaitPollMs, Math.max(1, deadlineAt - Date.now())),
+                    )),
+                    signal,
+                );
+            }
+        }
+    }
+
+    async #observeTmuxRead(
+        instance: string,
+        taskId: string,
+        context: ToolCallContext,
+        timeMs: number,
+        signal?: AbortSignal,
+    ): Promise<Record<string, JsonValue>> {
+        const input = { consumeOutput: false, line: 0, task: taskId, timeMs };
+        const result = instance === this.#instanceName
+            ? await this.#worker.callTool("tmux_read", input, context, signal)
+            : await this.#gateway!.callTool(instance, "tmux_read", input, context, signal);
+        if (!isRecord(result)) throw new Error(`tmux_read returned an invalid observation for task ${taskId}.`);
+        return result;
+    }
+
+    async #consumeTmuxRead(
+        instance: string,
+        taskId: string,
+        line: number,
+        context: ToolCallContext,
+        signal?: AbortSignal,
+    ): Promise<Record<string, JsonValue>> {
+        const input = { line, task: taskId, timeMs: 0 };
+        const result = instance === this.#instanceName
+            ? await this.#worker.callTool("tmux_read", input, context, signal)
+            : await this.#gateway!.callTool(instance, "tmux_read", input, context, signal);
+        if (!isRecord(result)) throw new Error(`tmux_read returned an invalid result for task ${taskId}.`);
+        return result;
     }
 
     async #readTmuxTaskOutput(
@@ -728,6 +1026,7 @@ function isAppOnlyInteractionTool(toolName: string): boolean {
         toolName === "workspace_snapshot" ||
         toolName === "workspace_watch" ||
         toolName === "workspace_goal_continue" ||
+        toolName === "workspace_reentry_control" ||
         toolName === "workspace_goal_resume" ||
         toolName === "workspace_goal_stop" ||
         toolName === "workspace_question_answer" ||
@@ -755,6 +1054,24 @@ function readTmuxTimeout(input: JsonValue): number | undefined {
     return input.timeout;
 }
 
+function readTmuxReadTask(input: JsonValue): string {
+    if (!isRecord(input) || typeof input.task !== "string" || input.task.trim().length === 0) {
+        throw new Error("tmux_read task must be a non-empty string.");
+    }
+    return input.task.trim();
+}
+
+function readTmuxReadTimeMs(input: JsonValue): number {
+    if (!isRecord(input) || input.timeMs === undefined) return 0;
+    if (
+        typeof input.timeMs !== "number" || !Number.isInteger(input.timeMs) ||
+        input.timeMs < 0 || input.timeMs > 3_600_000
+    ) {
+        throw new Error("tmux_read timeMs must be an integer between 0 and 3600000.");
+    }
+    return input.timeMs;
+}
+
 function readTmuxLine(input: JsonValue): number {
     if (!isRecord(input) || input.line === undefined) return 80;
     if (
@@ -777,6 +1094,11 @@ function isTmuxTaskRunning(result: JsonValue, taskId: string): boolean {
         throw new Error(`tmux task observation for ${taskId} returned an invalid task.`);
     }
     return task.status === "running";
+}
+
+function tmuxReadReady(result: JsonValue): boolean {
+    if (!isRecord(result)) return false;
+    return result.waitReason === "output" || result.waitReason === "terminal";
 }
 
 function isRetryableTmuxObservationError(error: unknown): boolean {

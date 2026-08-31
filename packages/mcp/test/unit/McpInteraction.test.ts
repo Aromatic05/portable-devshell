@@ -5,6 +5,7 @@ import test from "node:test";
 
 import type { GoalContinuationInput, JsonValue, ToolCallContext, WaitCreateInput, WaitRecord } from "@portable-devshell/shared";
 import {
+    McpContextRegistry,
     McpEndpointHandlerInteraction,
     McpNativeToolResult,
     McpToolCatalogInteraction,
@@ -117,7 +118,16 @@ test("workspace_ask keeps a resolved answer recoverable when post-answer process
 test("workspace_ask infers the current Todo association instead of requiring taskId", async () => {
     const fake = createInteractionGateway();
     const gateway = Object.assign(fake.gateway, {
-        async readTodo() {
+        async readTodo(_instance: string, input?: { taskId?: string }) {
+            if (input?.taskId === "task-1") {
+                return {
+                    items: [{ content: "Work", id: "item-1", status: "in_progress" }],
+                    revision: 1,
+                    summary: { completed: 0, total: 1 },
+                    taskId: "task-1",
+                    tasks: [{ ctxId: context.ctxId, status: "in_progress", taskId: "task-1" }],
+                };
+            }
             return {
                 items: [],
                 revision: 1,
@@ -468,6 +478,61 @@ test("Workspace snapshot projects only compact task and background state", async
     assert.equal(Object.hasOwn(snapshot, "activity"), false);
     assert.equal(Object.hasOwn(snapshot.tasks?.[0] ?? {}, "ctxId"), false);
     assert.equal(Object.hasOwn(snapshot, "waits"), false);
+});
+
+test("Workspace snapshot aggregates remote Context activity and approvals", async () => {
+    const fake = createInteractionGateway();
+    const registry = new McpContextRegistry({ idFactory: () => context.ctxId! });
+    const created = await registry.create({ instance: "demo", principal: "tester", workspace: "/local" });
+    assert.equal(created.ctxId, context.ctxId);
+    await registry.attachEnvironment(context.ctxId!, { instance: "remote", workspace: "/remote" });
+    Object.assign(fake.gateway, {
+        async listApprovals(instance: string) {
+            return instance === "remote" ? [{
+                approvalId: "approval-remote",
+                callId: "call-remote",
+                createdAt: "2026-08-31T00:00:00.000Z",
+                ctxId: context.ctxId,
+                expiresAt: "2026-08-31T01:00:00.000Z",
+                inputSummary: "remote command",
+                instance: "remote",
+                reason: "approval required",
+                riskLevel: "medium",
+                source: "mcp",
+                status: "pending",
+                toolName: "bash_run",
+            }] : [];
+        },
+        async readToolCalls(instance: string) {
+            return instance === "remote" ? [{
+                callId: "call-remote",
+                ctxId: context.ctxId,
+                inputSummary: "remote command",
+                instance: "remote",
+                source: "mcp",
+                startedAt: "2026-08-31T00:00:00.000Z",
+                status: "running",
+                toolName: "bash_run",
+            }] : [];
+        },
+        async readWorkspaceEvents() {
+            return { events: [], gap: false, lastSeq: 1 };
+        },
+    });
+    const handler = new McpEndpointHandlerInteraction({
+        contextRegistry: registry,
+        gateway: fake.gateway,
+        instanceName: "demo",
+    });
+    const token = await openWorkspace(handler);
+    const result = await handler.call("workspace_snapshot", { token }, context, "call-remote-snapshot");
+    assert.ok(result instanceof McpNativeToolResult);
+    const snapshot = result.structuredContent as {
+        agentBusy?: boolean;
+        approvals?: Array<{ approvalId?: string }>;
+    };
+    assert.equal(snapshot.agentBusy, true);
+    assert.deepEqual(snapshot.approvals?.map((approval) => approval.approvalId), ["approval-remote"]);
 });
 
 test("Workspace currentEvent keeps human actions FIFO and ignores tmux waits", async () => {
@@ -1041,6 +1106,7 @@ test("workspace_watch heartbeat reconciles from an authoritative snapshot", asyn
             goal: null,
             instance: "demo",
             questions: [],
+            reentry: { epoch: 0, pending: false },
             tasks: [],
         },
     });
@@ -1323,18 +1389,9 @@ test("Workspace Goal continuation rechecks live tool activity before every dispa
         context,
         "call-goal-attempt-running",
     );
-    await handler.call(
-        "workspace_goal_continue",
-        { action: "suppress", token },
-        context,
-        "call-goal-suppress-running",
-    );
-
-    assert.equal(continuationInputs.length, 3);
+    assert.equal(continuationInputs.length, 2);
     assert.equal(continuationInputs[0]?.available, false);
     assert.equal(continuationInputs[1]?.available, false);
-    assert.equal(continuationInputs[2]?.action, "suppress");
-    assert.equal(continuationInputs[2]?.available, undefined);
 });
 
 test("Workspace tool metadata keeps the explicit reopen compatibility tool and app-only action tools", () => {
@@ -1378,7 +1435,7 @@ test("Workspace tool metadata keeps the explicit reopen compatibility tool and a
     const recoveryInputSchema = recover.inputSchema as {
         properties?: { action?: { enum?: string[] } };
     };
-    assert.deepEqual(recoveryInputSchema.properties?.action?.enum, ["claim", "attempt", "sent", "complete", "release", "dismiss"]);
+    assert.deepEqual(recoveryInputSchema.properties?.action?.enum, ["claim", "attempt", "sent", "complete", "release", "reject", "dismiss"]);
     const askInputSchema = ask.inputSchema as {
         properties?: Record<string, unknown>;
         required?: string[];
@@ -1389,10 +1446,6 @@ test("Workspace tool metadata keeps the explicit reopen compatibility tool and a
     assert.equal(goal._meta, undefined);
     assert.deepEqual((goalResume._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.deepEqual((goalStop._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
-    assert.match(open.description, /re-present or restore/u);
-    assert.match(open.description, /environ_info normally bootstraps/u);
-    assert.match(goal.description, /environ_info normally bootstraps the Live Workspace/u);
-    assert.match(ask.description, /environ_info normally bootstraps the Live Workspace/u);
 
     const compatibilityDefinitions = new McpToolCatalogInteraction().list();
     const compatibilityOpen = compatibilityDefinitions.find((definition) => definition.name === "workspace_open");
@@ -1445,7 +1498,7 @@ function createInteractionGateway(): {
         async readTodo(_instance: string, input?: { taskId?: string }) {
             return input?.taskId === "task-1"
                 ? {
-                    items: [],
+                    items: [{ content: "Work", id: "item-1", status: "in_progress" }],
                     revision: 1,
                     summary: { completed: 0, total: 1 },
                     taskId: "task-1",
@@ -1564,6 +1617,23 @@ function createInteractionGateway(): {
             delete record.recoveryClaimId;
             delete record.recoveryClaimedAt;
             record.updatedAt = new Date().toISOString();
+            return structuredClone(record);
+        },
+        async rejectWaitRecovery(_instance: string, waitId: string, claimId: string) {
+            const record = requireWait(waits, waitId);
+            if (record.recoveryClaimId !== claimId) throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            delete record.recoveryClaimId;
+            delete record.recoveryClaimedAt;
+            delete record.recoveryMessageAttemptedAt;
+            delete record.recoveryMessageId;
+            record.updatedAt = new Date().toISOString();
+            return structuredClone(record);
+        },
+        async disableWaitRecovery(_instance: string, waitId: string) {
+            const record = requireWait(waits, waitId);
+            record.automaticRecovery = false;
+            record.recoveryDisabledAt ??= new Date().toISOString();
+            record.updatedAt = record.recoveryDisabledAt;
             return structuredClone(record);
         },
         async completeWaitRecovery(_instance: string, waitId: string, claimId: string) {

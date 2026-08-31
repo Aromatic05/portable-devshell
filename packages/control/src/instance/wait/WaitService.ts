@@ -68,6 +68,20 @@ export class WaitService {
         );
     }
 
+    async rejectRecovery(waitId: string, claimId: string): Promise<WaitRecord> {
+        return await this.#commit(
+            "wait.recoveryReleased",
+            (document) => this.#state.rejectRecovery(document, waitId, claimId),
+        );
+    }
+
+    async disableRecovery(waitId: string): Promise<WaitRecord> {
+        return await this.#commit(
+            "wait.recoveryReleased",
+            (document) => this.#state.disableRecovery(document, waitId),
+        );
+    }
+
     async markRecoveryAttempted(waitId: string, claimId: string): Promise<WaitRecord> {
         return await this.#commit(
             "wait.recoveryMessageAttempted",

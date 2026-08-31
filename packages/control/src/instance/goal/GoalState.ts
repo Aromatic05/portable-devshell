@@ -59,6 +59,13 @@ export class GoalState {
         return record === undefined ? undefined : snapshot(record, this.#now());
     }
 
+    list(document: GoalDocument): GoalSnapshot[] {
+        const now = this.#now();
+        return document.goals
+            .filter((goal) => goal.status === "active" || goal.status === "blocked")
+            .map((goal) => snapshot(goal, now));
+    }
+
     manage(document: GoalDocument, input: GoalManageInput, ctxId: string): GoalTransition {
         const action = input.action;
         if (action === "get") return { document, result: this.read(document, ctxId) };
@@ -76,6 +83,9 @@ export class GoalState {
         if (current.status === "completed" || current.status === "stopped") {
             throw new Error(`Workspace Goal ${current.goalId} is already ${current.status}.`);
         }
+        if (input.workspace !== undefined && current.workspace !== undefined && input.workspace !== current.workspace) {
+            throw new Error(`Workspace Goal ${current.goalId} belongs to ${current.workspace}, not ${input.workspace}.`);
+        }
 
         const now = this.#now();
         let next: GoalRecord;
@@ -85,10 +95,11 @@ export class GoalState {
                 break;
             case "block":
                 next = {
-                    ...clearContinuationSuppression(clearContinuation(current)),
+                    ...clearContinuation(current),
                     continuationCount: 0,
                     continuationRetryAfter: undefined,
                     lastAgentActivityAt: now,
+                    lastProgressAt: now,
                     note: requiredText(input.note, "note", GOAL_NOTE_LIMIT),
                     revision: current.revision + 1,
                     status: "blocked",
@@ -98,10 +109,11 @@ export class GoalState {
             case "resume":
                 if (current.status !== "blocked") throw new Error("Only a blocked Workspace Goal can be resumed.");
                 next = {
-                    ...clearContinuationSuppression(clearContinuation(current)),
+                    ...clearContinuation(current),
                     continuationCount: 0,
                     continuationRetryAfter: undefined,
                     lastAgentActivityAt: now,
+                    lastProgressAt: now,
                     note: undefined,
                     revision: current.revision + 1,
                     status: "active",
@@ -113,9 +125,10 @@ export class GoalState {
                     throw new Error("Workspace Goal cannot finish until every step is completed or skipped.");
                 }
                 next = {
-                    ...clearContinuationSuppression(clearContinuation(current)),
+                    ...clearContinuation(current),
                     continuationCount: 0,
                     lastAgentActivityAt: now,
+                    lastProgressAt: now,
                     revision: current.revision + 1,
                     status: "completed",
                     updatedAt: now,
@@ -123,9 +136,10 @@ export class GoalState {
                 break;
             case "stop":
                 next = {
-                    ...clearContinuationSuppression(clearContinuation(current)),
+                    ...clearContinuation(current),
                     continuationCount: 0,
                     lastAgentActivityAt: now,
+                    lastProgressAt: now,
                     revision: current.revision + 1,
                     status: "stopped",
                     updatedAt: now,
@@ -146,10 +160,10 @@ export class GoalState {
         const current = document.goals[index]!;
         if (current.status !== "active") return { document, result: snapshot(current, this.#now()) };
         const now = this.#now();
-        const active = clearContinuationSuppression(current);
-        const next = current.continuationAttemptedAt === undefined
-            ? { ...clearContinuation(active), continuationCount: 0, continuationRetryAfter: undefined, lastAgentActivityAt: now }
-            : { ...active, continuationCount: 0, continuationRetryAfter: undefined, lastAgentActivityAt: now };
+        const next = {
+            ...clearContinuation(current),
+            lastAgentActivityAt: now,
+        };
         const goals = [...document.goals];
         goals[index] = next;
         return { document: { goals, version: 1 }, result: snapshot(next, now) };
@@ -171,18 +185,14 @@ export class GoalState {
         let next = current;
         let result: Record<string, unknown>;
 
-        if (input.action === "suppress") {
-            if (current.status !== "active") {
-                result = { goal: snapshot(current, now), suppressed: false };
-            } else {
-                next = {
-                    ...clearContinuation(current),
-                    continuationCount: 0,
-                    continuationRetryAfter: undefined,
-                    continuationSuppressedAt: now,
-                };
-                result = { goal: snapshot(next, now), suppressed: true };
-            }
+        if (input.action === "reset") {
+            next = {
+                ...clearContinuation(current),
+                continuationCount: 0,
+                continuationRetryAfter: undefined,
+                lastAgentActivityAt: now,
+            };
+            result = { goal: snapshot(next, now), reset: true };
         } else if (input.action === "claim") {
             const claimId = requiredText(input.claimId, "claimId", 128);
             const state = snapshot(current, now);
@@ -213,23 +223,29 @@ export class GoalState {
         } else if (input.action === "attempt") {
             const claimId = requiredText(input.claimId, "claimId", 128);
             if (!claimMatches(current, claimId)) throw new Error("Workspace Goal continuation claim is no longer active.");
-            if (current.continuationAttemptedAt === undefined) {
+            if (input.available === false) {
+                next = clearContinuation(current);
+                result = { attempted: false, goal: snapshot(next, now) };
+            } else if (current.continuationAttemptedAt === undefined) {
                 next = { ...current, continuationAttemptedAt: now };
+                result = {
+                    attempted: true,
+                    goal: snapshot(next, now),
+                    ...(next.continuationMessageId === undefined ? {} : { messageId: next.continuationMessageId }),
+                };
+            } else {
+                result = {
+                    attempted: true,
+                    goal: snapshot(next, now),
+                    ...(next.continuationMessageId === undefined ? {} : { messageId: next.continuationMessageId }),
+                };
             }
-            result = {
-                attempted: true,
-                goal: snapshot(next, now),
-                ...(next.continuationMessageId === undefined ? {} : { messageId: next.continuationMessageId }),
-            };
         } else if (input.action === "report") {
             const claimId = requiredText(input.claimId, "claimId", 128);
             if (!claimMatches(current, claimId)) throw new Error("Workspace Goal continuation claim is no longer active.");
             if (typeof input.accepted !== "boolean") throw new Error("accepted must be a boolean for continuation report.");
             if (input.accepted && current.continuationAttemptedAt === undefined) {
                 throw new Error("Workspace Goal continuation was not marked attempted.");
-            }
-            if (!input.accepted && current.continuationAttemptedAt !== undefined) {
-                throw new Error("Workspace Goal continuation delivery is uncertain and cannot be reported as rejected automatically.");
             }
             next = {
                 ...clearContinuation(current),
@@ -276,11 +292,13 @@ export class GoalState {
             createdByCtxId: ctxId,
             goalId: this.#goalId(),
             lastAgentActivityAt: now,
+            lastProgressAt: now,
             objective: requiredText(input.objective, "objective", GOAL_OBJECTIVE_LIMIT),
             revision: 1,
             status: "active",
             steps: normalizeSteps(input.steps, true),
             updatedAt: now,
+            ...(input.workspace === undefined ? {} : { workspace: requiredText(input.workspace, "workspace", 16_384) }),
         };
         const goals = document.goals.filter((goal) => goal.createdByCtxId !== ctxId);
         goals.push(next);
@@ -311,18 +329,34 @@ function updateGoal(current: GoalRecord, input: GoalManageInput, now: string): G
     if (input.steps === undefined && input.stepId === undefined && input.objective === undefined && input.note === undefined) {
         throw new Error("workspace_goal update requires objective, steps, stepId, or note.");
     }
+    const nextObjective = input.objective === undefined
+        ? current.objective
+        : requiredText(input.objective, "objective", GOAL_OBJECTIVE_LIMIT);
+    const progressed = nextObjective !== current.objective || goalStepsProgressed(current.steps, steps);
+    const base = clearContinuation(current);
     return {
-        ...clearContinuationSuppression(clearContinuation(current)),
-        continuationCount: 0,
-        continuationRetryAfter: undefined,
+        ...base,
+        ...(progressed ? { continuationCount: 0, continuationRetryAfter: undefined, lastProgressAt: now } : {}),
         lastAgentActivityAt: now,
         ...(input.note === undefined ? {} : { note: requiredText(input.note, "note", GOAL_NOTE_LIMIT) }),
-        ...(input.objective === undefined ? {} : { objective: requiredText(input.objective, "objective", GOAL_OBJECTIVE_LIMIT) }),
+        objective: nextObjective,
         revision: current.revision + 1,
         status: current.status,
         steps,
         updatedAt: now,
+        ...(current.workspace === undefined && input.workspace !== undefined ? { workspace: input.workspace } : {}),
     };
+}
+
+function goalStepsProgressed(previous: GoalStep[], next: GoalStep[]): boolean {
+    if (previous.length !== next.length) return true;
+    return previous.some((step, index) => {
+        const candidate = next[index];
+        return candidate === undefined ||
+            candidate.id !== step.id ||
+            candidate.status !== step.status ||
+            candidate.text !== step.text;
+    });
 }
 
 function normalizeSteps(value: GoalStepInput[] | undefined, requireNonEmpty: boolean): GoalStep[] {
@@ -366,13 +400,17 @@ function normalizeStoredGoal(value: unknown): GoalRecord {
         createdByCtxId: requiredStoredString(value.createdByCtxId, "createdByCtxId"),
         goalId: requiredStoredString(value.goalId, "goalId"),
         lastAgentActivityAt: requiredStoredString(value.lastAgentActivityAt, "lastAgentActivityAt"),
+        lastProgressAt: typeof value.lastProgressAt === "string" && value.lastProgressAt.length > 0
+            ? value.lastProgressAt
+            : requiredStoredString(value.lastAgentActivityAt, "lastAgentActivityAt"),
         objective: requiredText(value.objective, "objective", GOAL_OBJECTIVE_LIMIT),
         revision: positiveInteger(value.revision, "revision"),
         status: normalizeGoalStatus(value.status),
         steps: normalizeSteps(value.steps as GoalStepInput[], true),
         updatedAt: requiredStoredString(value.updatedAt, "updatedAt"),
+        ...(typeof value.workspace === "string" && value.workspace.length > 0 ? { workspace: value.workspace } : {}),
     };
-    for (const key of ["continuationAttemptedAt", "continuationClaimActivityAt", "continuationClaimedAt", "continuationClaimId", "continuationMessageId", "continuationRetryAfter", "continuationSuppressedAt", "lastContinuationAt", "note"] as const) {
+    for (const key of ["continuationAttemptedAt", "continuationClaimActivityAt", "continuationClaimedAt", "continuationClaimId", "continuationMessageId", "continuationRetryAfter", "lastContinuationAt", "note"] as const) {
         const field = value[key];
         if (typeof field === "string" && field.length > 0) record[key] = field;
     }
@@ -391,22 +429,23 @@ function snapshot(record: GoalRecord, now: string): GoalSnapshot {
     const claimFresh = uncertain || (record.continuationPending && record.continuationClaimedAt !== undefined &&
         nowMs - Date.parse(record.continuationClaimedAt) < GOAL_CONTINUATION_CLAIM_TTL_MS);
     const retryReady = record.continuationRetryAfter === undefined || nowMs >= Date.parse(record.continuationRetryAfter);
-    const exhausted = record.continuationCount >= GOAL_MAX_CONTINUATIONS;
+    const hasExecutableSteps = record.steps.some((step) => step.status === "pending" || step.status === "active");
+    const exhausted = hasExecutableSteps && record.continuationCount >= GOAL_MAX_CONTINUATIONS;
     return {
         autoContinueExhausted: exhausted,
         ...(record.continuationAttemptedAt === undefined ? {} : { continuationAttemptedAt: record.continuationAttemptedAt }),
         continuationCount: record.continuationCount,
         ...(record.continuationMessageId === undefined ? {} : { continuationMessageId: record.continuationMessageId }),
-        continuationDue: record.status === "active" && record.continuationSuppressedAt === undefined && !claimFresh && !exhausted && retryReady && nowMs >= dueAtMs,
+        continuationDue: record.status === "active" && !claimFresh && !exhausted && retryReady && nowMs >= dueAtMs,
         continuationDueAt: new Date(dueAtMs).toISOString(),
         continuationPending: claimFresh,
         ...(record.continuationRetryAfter === undefined ? {} : { continuationRetryAfter: record.continuationRetryAfter }),
-        ...(record.continuationSuppressedAt === undefined ? {} : { continuationSuppressedAt: record.continuationSuppressedAt }),
         continuationUncertain: uncertain,
         createdAt: record.createdAt,
         goalId: record.goalId,
         lastAgentActivityAt: record.lastAgentActivityAt,
         ...(record.lastContinuationAt === undefined ? {} : { lastContinuationAt: record.lastContinuationAt }),
+        lastProgressAt: record.lastProgressAt,
         maxContinuations: GOAL_MAX_CONTINUATIONS,
         ...(record.note === undefined ? {} : { note: record.note }),
         objective: record.objective,
@@ -414,6 +453,7 @@ function snapshot(record: GoalRecord, now: string): GoalSnapshot {
         status: record.status,
         steps: record.steps.map((step) => ({ ...step })),
         updatedAt: record.updatedAt,
+        ...(record.workspace === undefined ? {} : { workspace: record.workspace }),
     };
 }
 
@@ -434,11 +474,6 @@ function clearContinuation(record: GoalRecord): GoalRecord {
         ...rest
     } = record;
     return { ...rest, continuationPending: false };
-}
-
-function clearContinuationSuppression(record: GoalRecord): GoalRecord {
-    const { continuationSuppressedAt: _suppressedAt, ...rest } = record;
-    return rest;
 }
 
 function claimMatches(record: GoalRecord, claimId: string): boolean {

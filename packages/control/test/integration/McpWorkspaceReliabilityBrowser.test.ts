@@ -614,6 +614,7 @@ test("Workspace fences an ambiguous Goal continuation instead of replaying it", 
 });
 
 const WAIT_AMBIGUOUS_BRIDGE_SCRIPT = String.raw`
+window.__waitAmbiguousReentryClaimId = "";
 window.__waitAmbiguousCalls = [];
 window.__waitAmbiguousMessages = [];
 window.__waitAmbiguousAttempted = false;
@@ -695,6 +696,24 @@ window.addEventListener("message", function (event) {
         window.__waitAmbiguousPendingWatch = { id: message.id, source: source };
         return;
     }
+    if (call.name === "workspace_reentry_control") {
+        if (call.arguments.action === "claim") {
+            window.__waitAmbiguousReentryClaimId = call.arguments.claimId;
+            reply({ structuredContent: { claimId: window.__waitAmbiguousReentryClaimId, claimed: true, epoch: 0, pending: true } });
+            return;
+        }
+        if (call.arguments.action === "validate") {
+            reply({ structuredContent: { claimId: window.__waitAmbiguousReentryClaimId, epoch: 0, pending: true, valid: window.__waitAmbiguousReentryClaimId === call.arguments.claimId } });
+            return;
+        }
+        if (call.arguments.action === "release") {
+            window.__waitAmbiguousReentryClaimId = "";
+            reply({ structuredContent: { epoch: 0, pending: false, released: true } });
+            return;
+        }
+        reply({ structuredContent: { epoch: 0, pending: !!window.__waitAmbiguousReentryClaimId } });
+        return;
+    }
     if (call.name === "workspace_wait_recover") {
         if (call.arguments.action === "claim") {
             reply({ structuredContent: {
@@ -739,6 +758,7 @@ window.addEventListener("message", function (event) {
 `;
 
 const GOAL_AMBIGUOUS_BRIDGE_SCRIPT = String.raw`
+window.__goalAmbiguousReentryClaimId = "";
 window.__goalAmbiguousCalls = [];
 window.__goalAmbiguousMessages = [];
 window.__goalAmbiguousAttempted = false;
@@ -808,6 +828,24 @@ window.addEventListener("message", function (event) {
         window.__goalAmbiguousPendingWatch = { id: message.id, source: source };
         return;
     }
+    if (call.name === "workspace_reentry_control") {
+        if (call.arguments.action === "claim") {
+            window.__goalAmbiguousReentryClaimId = call.arguments.claimId;
+            reply({ structuredContent: { claimId: window.__goalAmbiguousReentryClaimId, claimed: true, epoch: 0, pending: true } });
+            return;
+        }
+        if (call.arguments.action === "validate") {
+            reply({ structuredContent: { claimId: window.__goalAmbiguousReentryClaimId, epoch: 0, pending: true, valid: window.__goalAmbiguousReentryClaimId === call.arguments.claimId } });
+            return;
+        }
+        if (call.arguments.action === "release") {
+            window.__goalAmbiguousReentryClaimId = "";
+            reply({ structuredContent: { epoch: 0, pending: false, released: true } });
+            return;
+        }
+        reply({ structuredContent: { epoch: 0, pending: !!window.__goalAmbiguousReentryClaimId } });
+        return;
+    }
     if (call.name === "workspace_goal_continue") {
         if (call.arguments.action === "claim") {
             reply({ structuredContent: {
@@ -851,18 +889,19 @@ test("Workspace does not dispatch automatic recovery when model context injectio
     await page.waitForFunction("(window.__modelContextFailureActions || []).length >= 2");
     assert.deepEqual(
         await page.evaluate("window.__modelContextFailureActions || []"),
-        ["claim", "release"],
+        ["claim", "attempt", "reject"],
     );
     assert.equal(await page.evaluate("(window.__modelContextFailureMessages || []).length"), 0);
     await page.waitForTimeout(250);
     assert.deepEqual(
         await page.evaluate("window.__modelContextFailureActions || []"),
-        ["claim", "release"],
+        ["claim", "attempt", "reject"],
     );
     assert.deepEqual(pageFailures, []);
 });
 
 const MODEL_CONTEXT_FAILURE_BRIDGE_SCRIPT = String.raw`
+window.__modelContextFailureReentryClaimId = "";
 window.__modelContextFailureActions = [];
 window.__modelContextFailureMessages = [];
 window.__modelContextFailureAnswered = false;
@@ -933,6 +972,24 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (call.name === "workspace_watch") return;
+    if (call.name === "workspace_reentry_control") {
+        if (call.arguments.action === "claim") {
+            window.__modelContextFailureReentryClaimId = call.arguments.claimId;
+            reply({ structuredContent: { claimId: window.__modelContextFailureReentryClaimId, claimed: true, epoch: 0, pending: true } });
+            return;
+        }
+        if (call.arguments.action === "validate") {
+            reply({ structuredContent: { claimId: window.__modelContextFailureReentryClaimId, epoch: 0, pending: true, valid: window.__modelContextFailureReentryClaimId === call.arguments.claimId } });
+            return;
+        }
+        if (call.arguments.action === "release") {
+            window.__modelContextFailureReentryClaimId = "";
+            reply({ structuredContent: { epoch: 0, pending: false, released: true } });
+            return;
+        }
+        reply({ structuredContent: { epoch: 0, pending: !!window.__modelContextFailureReentryClaimId } });
+        return;
+    }
     if (call.name === "workspace_question_answer") {
         window.__modelContextFailureAnswered = true;
         reply({ structuredContent: {

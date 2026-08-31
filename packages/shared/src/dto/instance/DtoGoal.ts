@@ -1,7 +1,7 @@
 export type GoalStepStatus = "pending" | "active" | "completed" | "skipped";
 export type GoalStatus = "active" | "blocked" | "completed" | "stopped";
 export type GoalAction = "start" | "get" | "update" | "block" | "resume" | "finish" | "stop";
-export type GoalContinuationAction = "claim" | "validate" | "attempt" | "report" | "suppress";
+export type GoalContinuationAction = "claim" | "validate" | "attempt" | "report" | "reset";
 
 export interface GoalStep {
     id: string;
@@ -27,6 +27,8 @@ export interface GoalManageInput {
     stepId?: string;
     steps?: GoalStepInput[];
     text?: string;
+    /** Internal execution binding. Model-facing schemas do not expose this field. */
+    workspace?: string;
 }
 
 export interface GoalContinuationInput {
@@ -46,18 +48,19 @@ export interface GoalRecord {
     continuationMessageId?: string;
     continuationPending: boolean;
     continuationRetryAfter?: string;
-    continuationSuppressedAt?: string;
     createdAt: string;
     createdByCtxId: string;
     goalId: string;
     lastAgentActivityAt: string;
     lastContinuationAt?: string;
+    lastProgressAt: string;
     note?: string;
     objective: string;
     revision: number;
     status: GoalStatus;
     steps: GoalStep[];
     updatedAt: string;
+    workspace?: string;
 }
 
 export interface GoalSnapshot {
@@ -69,12 +72,12 @@ export interface GoalSnapshot {
     continuationDueAt: string;
     continuationPending: boolean;
     continuationRetryAfter?: string;
-    continuationSuppressedAt?: string;
     continuationUncertain: boolean;
     createdAt: string;
     goalId: string;
     lastAgentActivityAt: string;
     lastContinuationAt?: string;
+    lastProgressAt: string;
     maxContinuations: number;
     note?: string;
     objective: string;
@@ -82,4 +85,10 @@ export interface GoalSnapshot {
     status: GoalStatus;
     steps: GoalStep[];
     updatedAt: string;
+    workspace?: string;
+}
+
+export interface GoalRpcEnvelope {
+    goals: GoalSnapshot[];
+    lastSeq: number;
 }

@@ -3,6 +3,7 @@ import type { JsonValue } from "@portable-devshell/shared";
 const anyValue: JsonValue = {};
 const booleanValue: JsonValue = { type: "boolean" };
 const nonNegativeInteger: JsonValue = { minimum: 0, type: "integer" };
+const positiveInteger: JsonValue = { minimum: 1, type: "integer" };
 const stringValue: JsonValue = { type: "string" };
 const nonEmptyString: JsonValue = { minLength: 1, type: "string" };
 
@@ -276,16 +277,22 @@ export const approvalRequestOutputSchema = objectSchema({
 }, ["approvalId", "callId", "createdAt", "expiresAt", "inputSummary", "instance", "reason", "riskLevel", "source", "status", "toolName"]);
 
 const workspaceBackgroundSchema = objectSchema({
+    automaticRecovery: booleanValue,
     detachedAt: stringValue,
     goalId: nonEmptyString,
+    goalRevision: positiveInteger,
+    goalStepId: nonEmptyString,
     kind: { enum: ["question", "tmux"], type: "string" },
+    recoveryDisabledAt: stringValue,
     recoveryMessageAttemptedAt: stringValue,
     recoveryMessageId: nonEmptyString,
     recoveryMessageSentAt: stringValue,
     result: anyValue,
     status: { enum: ["detached", "resolved", "waiting"], type: "string" },
+    targetInstance: nonEmptyString,
     taskId: nonEmptyString,
     tmuxTaskId: stringValue,
+    todoItemId: nonEmptyString,
     updatedAt: stringValue,
     waitId: nonEmptyString,
 }, ["kind", "status", "updatedAt", "waitId"]);
@@ -350,12 +357,12 @@ export const workspaceGoalOutputSchema = objectSchema({
     continuationDueAt: nonEmptyString,
     continuationPending: booleanValue,
     continuationRetryAfter: stringValue,
-    continuationSuppressedAt: stringValue,
     continuationUncertain: booleanValue,
     createdAt: nonEmptyString,
     goalId: nonEmptyString,
     lastAgentActivityAt: nonEmptyString,
     lastContinuationAt: stringValue,
+    lastProgressAt: nonEmptyString,
     maxContinuations: nonNegativeInteger,
     note: stringValue,
     objective: nonEmptyString,
@@ -363,9 +370,10 @@ export const workspaceGoalOutputSchema = objectSchema({
     status: { enum: ["active", "blocked", "completed", "stopped"], type: "string" },
     steps: arraySchema(workspaceGoalStepOutputSchema),
     updatedAt: nonEmptyString,
+    workspace: stringValue,
 }, [
     "autoContinueExhausted", "continuationCount", "continuationDue", "continuationDueAt",
-    "continuationPending", "continuationUncertain", "createdAt", "goalId", "lastAgentActivityAt", "maxContinuations",
+    "continuationPending", "continuationUncertain", "createdAt", "goalId", "lastAgentActivityAt", "lastProgressAt", "maxContinuations",
     "objective", "revision", "status", "steps", "updatedAt"
 ]);
 
@@ -383,17 +391,38 @@ export const workspaceGoalContinuationOutputSchema = objectSchema({
     valid: booleanValue,
 }, ["goal"]);
 
+export const workspaceReentryOutputSchema = objectSchema({
+    claimId: nonEmptyString,
+    claimed: booleanValue,
+    epoch: nonNegativeInteger,
+    pending: booleanValue,
+    reason: stringValue,
+    released: booleanValue,
+    resumed: booleanValue,
+    suppressed: booleanValue,
+    suppressedAt: stringValue,
+    valid: booleanValue,
+}, ["epoch", "pending"]);
+
 const workspaceQuestionWaitOutputSchema = objectSchema({
+    automaticRecovery: booleanValue,
     createdAt: stringValue,
     detachedAt: stringValue,
     goalId: nonEmptyString,
+    goalRevision: positiveInteger,
+    goalStepId: nonEmptyString,
     kind: { const: "question", type: "string" },
     payload: workspaceQuestionPayloadSchema,
+    recoveryDisabledAt: stringValue,
     status: { enum: ["detached", "waiting"], type: "string" },
+    targetInstance: nonEmptyString,
     targetId: nonEmptyString,
     taskId: nonEmptyString,
+    taskRevision: positiveInteger,
+    todoItemId: nonEmptyString,
     updatedAt: stringValue,
     waitId: nonEmptyString,
+    workspace: stringValue,
 }, ["createdAt", "kind", "status", "targetId", "updatedAt", "waitId"]);
 
 export const workspaceApprovalRequestOutputSchema = objectSchema({
@@ -423,8 +452,9 @@ export const workspaceSnapshotOutputSchema: JsonValue = objectSchema({
         goal: { anyOf: [{ type: "null" }, workspaceGoalOutputSchema] },
         instance: nonEmptyString,
         questions: arraySchema(workspaceQuestionWaitOutputSchema),
+        reentry: workspaceReentryOutputSchema,
         tasks: arraySchema(workspaceTodoTaskSummaryOutputSchema),
-}, ["agentBusy", "approvals", "background", "ctxId", "currentEvent", "cursor", "goal", "instance", "questions", "tasks"]);
+}, ["agentBusy", "approvals", "background", "ctxId", "currentEvent", "cursor", "goal", "instance", "questions", "reentry", "tasks"]);
 
 export const workspaceOpenOutputSchema: JsonValue = objectSchema({
     ctxId: nonEmptyString,
@@ -466,6 +496,7 @@ export const workspaceWaitRecoveryOutputSchema = objectSchema({
     recoveryMessageAttemptedAt: stringValue,
     recoveryMessageId: nonEmptyString,
     recoveryMessageSentAt: stringValue,
+    rejected: { const: true, type: "boolean" },
     released: { const: true, type: "boolean" },
     sent: { const: true, type: "boolean" },
     result: anyValue,

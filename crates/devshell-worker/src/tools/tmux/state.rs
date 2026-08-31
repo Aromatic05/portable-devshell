@@ -24,7 +24,8 @@ use crate::tools::tmux::task::{
 use crate::tools::tmux::types::{
     TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams, TmuxInputOutput,
     TmuxInputParams, TmuxInspectParams, TmuxListOutput, TmuxPaneDetail, TmuxPaneOperationOutput,
-    TmuxReadOutput, TmuxReadParams, TmuxRunOutput, TmuxRunParams, TmuxWaitMode, TmuxWarning,
+    TmuxReadOutput, TmuxReadParams, TmuxReadWaitReason, TmuxRunOutput, TmuxRunParams,
+    TmuxWaitMode, TmuxWarning,
 };
 use crate::tools::{ToolCall, ToolError};
 
@@ -390,23 +391,28 @@ impl TmuxState {
         let time_ms = validate_time(params.time_ms.unwrap_or(DEFAULT_READ_TIME_MS))?;
         let line = validate_line(params.line.unwrap_or(DEFAULT_LINE))?;
         let deadline = Instant::now() + Duration::from_millis(time_ms);
-        loop {
+        let wait_reason = loop {
             call.check_cancelled()?;
             self.refresh_task(&params.task)?;
-            if self.task_has_output(&params.task)?
-                || self.task_is_terminal(&params.task)?
-                || Instant::now() >= deadline
-            {
-                break;
+            if self.task_has_output(&params.task)? {
+                break TmuxReadWaitReason::Output;
+            }
+            if self.task_is_terminal(&params.task)? {
+                break TmuxReadWaitReason::Terminal;
+            }
+            if Instant::now() >= deadline {
+                break TmuxReadWaitReason::Timeout;
             }
             thread::sleep(Duration::from_millis(50));
-        }
+        };
         call.check_cancelled()?;
-        if params.consume_output.unwrap_or(true) {
+        let mut output = if params.consume_output.unwrap_or(true) {
             self.task_output(&params.task, line, false)
         } else {
             self.task_observation(&params.task, false)
-        }
+        }?;
+        output.wait_reason = Some(wait_reason);
+        Ok(output)
     }
 
     pub fn inspect(
@@ -1038,6 +1044,8 @@ impl TmuxState {
         warnings.append(&mut self.take_pending_warnings()?);
         Ok(TmuxReadOutput {
             task: view,
+            detached: None,
+            wait_reason: None,
             pane,
             output: non_empty(output),
             warnings: non_empty(warnings),
@@ -1061,6 +1069,8 @@ impl TmuxState {
             .flatten();
         Ok(TmuxReadOutput {
             task: view,
+            detached: None,
+            wait_reason: None,
             pane,
             output: None,
             warnings: None,

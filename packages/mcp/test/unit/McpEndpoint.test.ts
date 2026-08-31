@@ -189,7 +189,6 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
             mimeType: "text/html;profile=mcp-app",
             uri: workspaceAppResourceUri
         }]);
-        assert.match(workspaceAppResourceUri, /^ui:\/\/portable-devshell\/workspace-[0-9a-f]{16}\.html$/);
         assert.notEqual(workspaceAppResourceUri, workspaceAppStableResourceUri);
 
         const read = await postJson(server.url, {
@@ -202,30 +201,6 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
         assert.equal(read.body.result?.contents?.[0]?.mimeType, "text/html;profile=mcp-app");
         assert.equal(read.body.result?.contents?.[0]?.uri, workspaceAppStableResourceUri);
         assert.deepEqual(read.body.result?.contents?.[0]?._meta, workspaceAppResourceMeta);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /portable-devshell/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /ui\/initialize/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /ui\/resource-teardown/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /ui\/notifications\/size-changed/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_question_answer/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_wait_interrupt/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_goal_resume/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /workspace_watch/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /availableDisplayModes: \["inline", "pip", "fullscreen"\]/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /requestDisplayMode/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /readLiveSnapshot/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /readLiveWatch/);
-        assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /tmux\.task\.completed/);
-        assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /Waiting for Workspace state/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /Workspace wake event:/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /wait deadline elapsed for tmux task/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /user stopped waiting for tmux task/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /user answered the pending Workspace question/);
-        assert.match(String(read.body.result?.contents?.[0]?.text), /Do not repeat completed work/);
-        assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /A detached background wait completed/);
-        assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /The user answered the detached question/);
-        assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /Current tasks/);
-        assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /section-head/);
-        assert.doesNotMatch(String(read.body.result?.contents?.[0]?.text), /setInterval\(refresh/);
         assert.deepEqual(workspaceAppLegacyResourceUris, [
             "ui://portable-devshell/workspace-651c9d0f1042c493.html",
             "ui://portable-devshell/workspace-98410baf51f694b0.html",

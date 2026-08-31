@@ -132,7 +132,7 @@ test("GoalState continuation claims are validated against agent activity and cou
 
     now += 1_000;
     document = state.touch(document, "ctx-goal").document;
-    assert.equal(state.read(document, "ctx-goal")?.continuationCount, 0);
+    assert.equal(state.read(document, "ctx-goal")?.continuationCount, 1);
 
     now += GOAL_EXECUTION_LEASE_MS + 1;
     continuation = state.continuation(document, {
@@ -147,7 +147,7 @@ test("GoalState continuation claims are validated against agent activity and cou
         claimId: "claim-rejected",
     }, "ctx-goal");
     document = continuation.document;
-    assert.equal(state.read(document, "ctx-goal")?.continuationCount, 0);
+    assert.equal(state.read(document, "ctx-goal")?.continuationCount, 1);
 
     document = state.manage(document, { action: "block", note: "Need user input" }, "ctx-goal").document;
     assert.equal(state.read(document, "ctx-goal")?.continuationCount, 0);
@@ -157,37 +157,42 @@ test("GoalState continuation claims are validated against agent activity and cou
     assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
 });
 
-test("GoalState suppresses automatic continuation after host cancellation until agent activity resumes", () => {
+test("GoalState separates agent activity from durable Goal progress", () => {
     let now = Date.parse("2026-08-20T12:00:00.000Z");
     const state = new GoalState({
-        goalId: () => "goal-interrupted",
+        goalId: () => "goal-progress",
         now: () => new Date(now).toISOString(),
     });
     let document = state.manage(state.emptyDocument(), {
         action: "start",
-        objective: "Keep working unless the user interrupts",
+        objective: "Track real progress",
         steps: [{ id: "work", status: "active", text: "Work" }],
     }, "ctx-goal").document;
 
     now += GOAL_EXECUTION_LEASE_MS + 1;
-    assert.equal(state.read(document, "ctx-goal")?.continuationDue, true);
+    let continuation = state.continuation(document, { action: "claim", available: true, claimId: "claim-1" }, "ctx-goal");
+    document = continuation.document;
+    continuation = state.continuation(document, { action: "attempt", claimId: "claim-1" }, "ctx-goal");
+    document = continuation.document;
+    continuation = state.continuation(document, { accepted: true, action: "report", claimId: "claim-1" }, "ctx-goal");
+    document = continuation.document;
+    const progressAt = state.read(document, "ctx-goal")?.lastProgressAt;
+    assert.equal(state.read(document, "ctx-goal")?.continuationCount, 1);
 
-    const suppressed = state.continuation(document, { action: "suppress" }, "ctx-goal");
-    document = suppressed.document;
-    assert.equal(suppressed.result.suppressed, true);
-    assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
-    assert.equal(typeof state.read(document, "ctx-goal")?.continuationSuppressedAt, "string");
-
-    now += GOAL_EXECUTION_LEASE_MS * 3;
-    assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
-
+    now += 1_000;
     document = state.touch(document, "ctx-goal").document;
-    assert.equal(state.read(document, "ctx-goal")?.continuationSuppressedAt, undefined);
-    assert.equal(state.read(document, "ctx-goal")?.continuationCount, 0);
-    assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
+    assert.equal(state.read(document, "ctx-goal")?.continuationCount, 1);
+    assert.equal(state.read(document, "ctx-goal")?.lastProgressAt, progressAt);
 
-    now += GOAL_EXECUTION_LEASE_MS + 1;
-    assert.equal(state.read(document, "ctx-goal")?.continuationDue, true);
+    now += 1_000;
+    document = state.manage(document, { action: "update", note: "Status only" }, "ctx-goal").document;
+    assert.equal(state.read(document, "ctx-goal")?.continuationCount, 1);
+    assert.equal(state.read(document, "ctx-goal")?.lastProgressAt, progressAt);
+
+    now += 1_000;
+    document = state.manage(document, { action: "update", status: "completed", stepId: "work" }, "ctx-goal").document;
+    assert.equal(state.read(document, "ctx-goal")?.continuationCount, 0);
+    assert.notEqual(state.read(document, "ctx-goal")?.lastProgressAt, progressAt);
 });
 
 test("GoalState fences stale Workspace UI actions by goal id and revision", () => {
@@ -218,7 +223,7 @@ test("GoalState fences stale Workspace UI actions by goal id and revision", () =
     assert.equal(state.read(started.document, "ctx-goal")?.status, "active");
 });
 
-test("GoalState never automatically retries an ambiguous continuation dispatch", () => {
+test("GoalState clears ambiguous delivery after definitive Host rejection or observed agent activity", () => {
     let now = Date.parse("2026-08-20T12:00:00.000Z");
     const state = new GoalState({
         goalId: () => "goal-fixed",
@@ -242,15 +247,32 @@ test("GoalState never automatically retries an ambiguous continuation dispatch",
     assert.equal(snapshot?.continuationUncertain, true);
     assert.equal(snapshot?.continuationPending, true);
     assert.equal(snapshot?.continuationDue, false);
-    assert.throws(
-        () => state.continuation(document, { accepted: false, action: "report", claimId: "claim-1" }, "ctx-goal"),
-        /delivery is uncertain/u,
-    );
+    document = state.continuation(document, { accepted: false, action: "report", claimId: "claim-1" }, "ctx-goal").document;
+    assert.equal(state.read(document, "ctx-goal")?.continuationUncertain, false);
+    assert.equal(state.read(document, "ctx-goal")?.continuationPending, false);
 
     const observed = state.touch(document, "ctx-goal");
-    assert.equal(observed.result?.continuationUncertain, true);
-    assert.equal(observed.result?.continuationPending, true);
+    assert.equal(observed.result?.continuationUncertain, false);
+    assert.equal(observed.result?.continuationPending, false);
     assert.equal(observed.result?.continuationDue, false);
+});
+
+test("GoalState keeps mandatory finalization resumable after the work retry limit", () => {
+    let now = Date.parse("2026-08-20T12:00:00.000Z");
+    const state = new GoalState({
+        goalId: () => "goal-finalize",
+        now: () => new Date(now).toISOString(),
+    });
+    const transition = state.manage(state.emptyDocument(), {
+        action: "start",
+        objective: "Finalize explicitly",
+        steps: [{ id: "done", status: "completed", text: "Done" }],
+    }, "ctx-goal");
+    transition.document.goals[0]!.continuationCount = 10;
+    now += GOAL_EXECUTION_LEASE_MS + 1;
+    const snapshot = state.read(transition.document, "ctx-goal");
+    assert.equal(snapshot?.autoContinueExhausted, false);
+    assert.equal(snapshot?.continuationDue, true);
 });
 
 test("GoalState bounds terminal history without removing live Goals", () => {

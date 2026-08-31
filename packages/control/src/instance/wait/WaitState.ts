@@ -44,18 +44,25 @@ export class WaitState {
     create(document: WaitDocument, input: WaitCreateInput): WaitTransition {
         const now = this.#now();
         const record: WaitRecord = {
+            ...(input.automaticRecovery === undefined ? {} : { automaticRecovery: input.automaticRecovery }),
             createdAt: now,
             createdByCtxId: text(input.createdByCtxId, "createdByCtxId"),
             ...(input.deadlineAt === undefined ? {} : { deadlineAt: storedText(input.deadlineAt, "deadlineAt") }),
             ...(input.goalId === undefined ? {} : { goalId: text(input.goalId, "goalId") }),
+            ...(input.goalRevision === undefined ? {} : { goalRevision: positiveInteger(input.goalRevision, "goalRevision") }),
+            ...(input.goalStepId === undefined ? {} : { goalStepId: text(input.goalStepId, "goalStepId") }),
             kind: kind(input.kind),
             ...(input.ownerCallId === undefined ? {} : { ownerCallId: text(input.ownerCallId, "ownerCallId") }),
             ...(input.payload === undefined ? {} : { payload: structuredClone(input.payload) }),
             status: "waiting",
+            ...(input.targetInstance === undefined ? {} : { targetInstance: text(input.targetInstance, "targetInstance") }),
             targetId: text(input.targetId, "targetId"),
             ...(input.taskId === undefined ? {} : { taskId: text(input.taskId, "taskId") }),
+            ...(input.taskRevision === undefined ? {} : { taskRevision: positiveInteger(input.taskRevision, "taskRevision") }),
+            ...(input.todoItemId === undefined ? {} : { todoItemId: text(input.todoItemId, "todoItemId") }),
             updatedAt: now,
             waitId: this.#waitId(),
+            ...(input.workspace === undefined ? {} : { workspace: text(input.workspace, "workspace") }),
         };
         return {
             document: this.compact({ ...document, waits: [...document.waits, record] }),
@@ -117,6 +124,9 @@ export class WaitState {
             if (record.recoveryMessageAttemptedAt !== undefined && record.recoveryMessageSentAt === undefined) {
                 throw new Error(`Wait ${waitId} recovery delivery is uncertain; automatic replay is disabled.`);
             }
+            if (record.recoveryDisabledAt !== undefined) {
+                throw new Error(`Wait ${waitId} is not available for automatic recovery.`);
+            }
             const normalizedClaimId = text(claimId, "recoveryClaimId");
             if (record.recoveryClaimId === normalizedClaimId) return record;
             const now = this.#now();
@@ -176,6 +186,35 @@ export class WaitState {
             const { recoveryClaimedAt: _claimedAt, recoveryClaimId: _claimId, ...rest } = record;
             const now = this.#now();
             return { ...rest, updatedAt: now };
+        });
+    }
+
+    rejectRecovery(document: WaitDocument, waitId: string, claimId: string): WaitTransition {
+        return this.#update(document, waitId, (record) => {
+            if (record.status !== "resolved" || record.recoveryClaimId !== claimId) {
+                throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            }
+            if (record.recoveryMessageAttemptedAt === undefined || record.recoveryMessageSentAt !== undefined) {
+                throw new Error(`Wait ${waitId} recovery is not a rejectable attempted delivery.`);
+            }
+            const {
+                recoveryClaimedAt: _claimedAt,
+                recoveryClaimId: _claimId,
+                recoveryMessageAttemptedAt: _attemptedAt,
+                recoveryMessageId: _messageId,
+                ...rest
+            } = record;
+            const now = this.#now();
+            return { ...rest, updatedAt: now };
+        });
+    }
+
+    disableRecovery(document: WaitDocument, waitId: string): WaitTransition {
+        return this.#update(document, waitId, (record) => {
+            if (record.status === "consumed" || record.status === "cancelled") return record;
+            if (record.recoveryDisabledAt !== undefined) return record;
+            const now = this.#now();
+            return { ...record, automaticRecovery: false, recoveryDisabledAt: now, updatedAt: now };
         });
     }
 
@@ -263,6 +302,7 @@ function normalizeRecord(value: unknown): WaitRecord {
     if (!isRecord(value)) throw new Error("wait record must be an object");
     const status = waitStatus(value.status);
     return {
+        ...(typeof value.automaticRecovery === "boolean" ? { automaticRecovery: value.automaticRecovery } : {}),
         ...(typeof value.cancelledAt === "string" ? { cancelledAt: value.cancelledAt } : {}),
         ...(typeof value.consumedAt === "string" ? { consumedAt: value.consumedAt } : {}),
         createdAt: storedText(value.createdAt, "createdAt"),
@@ -270,11 +310,14 @@ function normalizeRecord(value: unknown): WaitRecord {
         ...(typeof value.deadlineAt === "string" ? { deadlineAt: storedText(value.deadlineAt, "deadlineAt") } : {}),
         ...(typeof value.detachedAt === "string" ? { detachedAt: value.detachedAt } : {}),
         ...(typeof value.goalId === "string" ? { goalId: storedText(value.goalId, "goalId") } : {}),
+        ...(typeof value.goalRevision === "number" ? { goalRevision: positiveInteger(value.goalRevision, "goalRevision") } : {}),
+        ...(typeof value.goalStepId === "string" ? { goalStepId: storedText(value.goalStepId, "goalStepId") } : {}),
         kind: kind(value.kind),
         ...(typeof value.ownerCallId === "string" ? { ownerCallId: value.ownerCallId } : {}),
         ...("payload" in value ? { payload: value.payload as JsonValue } : {}),
         ...(typeof value.recoveryClaimedAt === "string" ? { recoveryClaimedAt: value.recoveryClaimedAt } : {}),
         ...(typeof value.recoveryClaimId === "string" ? { recoveryClaimId: value.recoveryClaimId } : {}),
+        ...(typeof value.recoveryDisabledAt === "string" ? { recoveryDisabledAt: value.recoveryDisabledAt } : {}),
         ...(typeof value.recoveryDismissedAt === "string" ? { recoveryDismissedAt: value.recoveryDismissedAt } : {}),
         ...(typeof value.recoveryMessageAttemptedAt === "string" ? { recoveryMessageAttemptedAt: value.recoveryMessageAttemptedAt } : {}),
         ...(typeof value.recoveryMessageId === "string" ? { recoveryMessageId: value.recoveryMessageId } : {}),
@@ -282,10 +325,14 @@ function normalizeRecord(value: unknown): WaitRecord {
         ...(typeof value.resolvedAt === "string" ? { resolvedAt: value.resolvedAt } : {}),
         ...("result" in value ? { result: value.result as JsonValue } : {}),
         status,
+        ...(typeof value.targetInstance === "string" ? { targetInstance: storedText(value.targetInstance, "targetInstance") } : {}),
         targetId: storedText(value.targetId, "targetId"),
         ...(typeof value.taskId === "string" ? { taskId: storedText(value.taskId, "taskId") } : {}),
+        ...(typeof value.taskRevision === "number" ? { taskRevision: positiveInteger(value.taskRevision, "taskRevision") } : {}),
+        ...(typeof value.todoItemId === "string" ? { todoItemId: storedText(value.todoItemId, "todoItemId") } : {}),
         updatedAt: storedText(value.updatedAt, "updatedAt"),
         waitId: storedText(value.waitId, "waitId"),
+        ...(typeof value.workspace === "string" ? { workspace: storedText(value.workspace, "workspace") } : {}),
     };
 }
 
@@ -315,6 +362,13 @@ function text(value: unknown, field: string): string {
 
 function storedText(value: unknown, field: string): string {
     if (typeof value !== "string" || value.length === 0) throw new Error(`wait ${field} is invalid`);
+    return value;
+}
+
+function positiveInteger(value: unknown, field: string): number {
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+        throw new Error(`wait ${field} must be a positive integer`);
+    }
     return value;
 }
 

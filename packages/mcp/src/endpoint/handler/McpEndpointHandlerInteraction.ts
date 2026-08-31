@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type {
     GoalContinuationInput,
     GoalManageInput,
+    GoalSnapshot,
     JsonValue,
     TodoTaskControlAction,
     ToolCallContext,
@@ -18,6 +19,7 @@ import {
     type McpInstanceGateway,
     type McpInteractionGateway
 } from "../../instance/McpInstanceGateway.js";
+import type { McpContextRegistry } from "../../context/McpContextRegistry.js";
 import type { McpToolCatalogInteractionName } from "../../tool/catalog/McpToolCatalogInteraction.js";
 import { readWorkspaceSnapshot, workspaceEventBelongsTo } from "../../workspace/McpWorkspaceSnapshot.js";
 import { WorkspaceAppLeaseStore } from "../../workspace/WorkspaceAppLeaseStore.js";
@@ -30,6 +32,7 @@ export class McpEndpointHandlerInteraction {
     readonly #appPresence: WorkspaceAppPresenceStore;
 
     constructor(private readonly options: {
+        contextRegistry?: McpContextRegistry;
         gateway?: McpInstanceGateway;
         instanceName: string;
         now?: () => number;
@@ -81,6 +84,9 @@ export class McpEndpointHandlerInteraction {
             case "workspace_goal_continue":
                 await this.#assertAppToken(input, context);
                 return await this.#continueGoal(gateway, input, context);
+            case "workspace_reentry_control":
+                await this.#assertAppToken(input, context);
+                return await this.#controlReentry(input, context);
             case "workspace_goal_resume":
                 await this.#assertAppToken(input, context);
                 return await this.#resumeGoal(input, context);
@@ -124,16 +130,17 @@ export class McpEndpointHandlerInteraction {
         );
         const goalGateway = isMcpGoalGateway(this.options.gateway) ? this.options.gateway : undefined;
         const goal = await goalGateway?.readGoal(this.options.instanceName, ctxId);
-        const goalId = goal !== undefined && (goal.status === "active" || goal.status === "blocked")
-            ? goal.goalId
-            : undefined;
-        const taskId = goalId === undefined
-            ? currentTodoTaskId(await gateway.readTodo(this.options.instanceName), ctxId)
-            : undefined;
+        const attachedGoal = goal !== undefined && (goal.status === "active" || goal.status === "blocked") ? goal : undefined;
+        const taskAssociation = attachedGoal === undefined
+            ? await currentTodoAssociation(gateway, this.options.instanceName, ctxId)
+            : { kind: "none" as const };
+        const goalStep = attachedGoal?.steps.find((step) => step.status === "active");
         const questionId = `question-${randomUUID()}`;
         const wait = await gateway.createWait(this.options.instanceName, {
+            automaticRecovery: taskAssociation.kind !== "ambiguous",
             createdByCtxId: ctxId,
-            ...(goalId === undefined ? {} : { goalId }),
+            ...(attachedGoal === undefined ? {} : { goalId: attachedGoal.goalId, goalRevision: attachedGoal.revision }),
+            ...(goalStep === undefined ? {} : { goalStepId: goalStep.id }),
             kind: "question",
             ownerCallId: callId,
             payload: {
@@ -142,7 +149,12 @@ export class McpEndpointHandlerInteraction {
                 question: request.question,
             },
             targetId: questionId,
-            ...(taskId === undefined ? {} : { taskId }),
+            ...(taskAssociation.kind !== "one" ? {} : {
+                taskId: taskAssociation.taskId,
+                taskRevision: taskAssociation.revision,
+                todoItemId: taskAssociation.todoItemId,
+            }),
+            ...(context.workspace === undefined ? {} : { workspace: context.workspace }),
         });
 
         let resolved: WaitRecord;
@@ -194,6 +206,7 @@ export class McpEndpointHandlerInteraction {
         const gateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
         const request = readGoalManageInput(input);
         const ctxId = requireCtxId(context);
+        request.workspace = context.workspace;
         if (request.action === "start") {
             await this.#requireActiveWorkspace(
                 ctxId,
@@ -205,6 +218,10 @@ export class McpEndpointHandlerInteraction {
             request,
             ctxId,
         );
+        if (goal !== undefined) await this.#reconcileGoalWaits(ctxId, goal);
+        if (request.action === "start" || request.action === "update" || request.action === "resume") {
+            await this.options.contextRegistry?.resumeAutomaticReentry(ctxId, this.options.instanceName);
+        }
         return { goal: goal ?? null } as unknown as JsonValue;
     }
 
@@ -216,16 +233,22 @@ export class McpEndpointHandlerInteraction {
         const goalGateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
         const ctxId = requireCtxId(context);
         const request = readGoalContinuationInput(input);
-        if (request.action !== "report" && request.action !== "suppress") {
+        if (request.action !== "report" && request.action !== "reset") {
             const workspaceGateway = isMcpWorkspaceGateway(interactionGateway) ? interactionGateway : undefined;
-            const [waits, approvals, toolCalls] = await Promise.all([
+            const instances = await this.#contextInstances(ctxId);
+            const [goal, waits, approvalSlices, toolCallSlices] = await Promise.all([
+                goalGateway.readGoal(this.options.instanceName, ctxId),
                 interactionGateway.listWaits(this.options.instanceName),
-                interactionGateway.listApprovals(this.options.instanceName),
-                workspaceGateway?.readToolCalls(this.options.instanceName, ctxId, 64) ?? [],
+                Promise.allSettled(instances.map(async (instance) => await interactionGateway.listApprovals(instance))),
+                Promise.allSettled(instances.map(async (instance) => await (workspaceGateway?.readToolCalls(instance, ctxId, 64) ?? []))),
             ]);
+            const approvals = approvalSlices.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+            const toolCalls = toolCallSlices.flatMap((result) => result.status === "fulfilled" ? result.value : []);
             request.available = request.available !== false &&
                 !waits.some((wait) => (
-                    wait.createdByCtxId === ctxId && wait.status !== "consumed" && wait.status !== "cancelled"
+                    wait.createdByCtxId === ctxId && wait.goalId === goal?.goalId &&
+                    wait.automaticRecovery !== false && wait.recoveryDisabledAt === undefined &&
+                    wait.status !== "consumed" && wait.status !== "cancelled"
                 )) &&
                 !approvals.some((approval) => approval.ctxId === ctxId && approval.status === "pending") &&
                 !toolCalls.some((call) => (
@@ -239,25 +262,65 @@ export class McpEndpointHandlerInteraction {
         );
     }
 
+    async #controlReentry(input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
+        const registry = this.options.contextRegistry;
+        if (registry === undefined) throw new Error("Workspace re-entry arbitration is unavailable.");
+        const ctxId = requireCtxId(context);
+        const request = readReentryControl(input);
+        if (request.action === "get") {
+            return await registry.readAutomaticReentry(ctxId, this.options.instanceName) as unknown as JsonValue;
+        }
+        if (request.action === "yield") {
+            const state = await registry.suppressAutomaticReentry(
+                ctxId,
+                this.options.instanceName,
+                request.reason ?? "user interrupted automatic execution",
+            );
+            return { ...state, suppressed: true } as unknown as JsonValue;
+        }
+        if (request.action === "resume") {
+            const state = await registry.resumeAutomaticReentry(ctxId, this.options.instanceName);
+            return { ...state, resumed: true } as unknown as JsonValue;
+        }
+        if (request.action === "claim") {
+            const claimId = request.claimId ?? `workspace-reentry-${randomUUID()}`;
+            const result = await registry.claimAutomaticReentry(ctxId, this.options.instanceName, claimId);
+            return { ...result.state, claimed: result.claimed, claimId } as unknown as JsonValue;
+        }
+        if (request.action === "validate") {
+            if (request.claimId === undefined) throw new Error("workspace_reentry_control validate requires claimId.");
+            const result = await registry.validateAutomaticReentry(ctxId, this.options.instanceName, request.claimId);
+            return { ...result.state, valid: result.valid } as unknown as JsonValue;
+        }
+        if (request.claimId === undefined) throw new Error("workspace_reentry_control release requires claimId.");
+        const state = await registry.releaseAutomaticReentry(ctxId, this.options.instanceName, request.claimId);
+        return { ...state, released: true } as unknown as JsonValue;
+    }
+
     async #stopGoal(input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
         const gateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
         const fence = readGoalFence(input, "workspace_goal_stop");
+        const ctxId = requireCtxId(context);
         const goal = await gateway.manageGoal(
             this.options.instanceName,
-            { action: "stop", expectedGoalId: fence.goalId, expectedRevision: fence.revision },
-            requireCtxId(context),
+            { action: "stop", expectedGoalId: fence.goalId, expectedRevision: fence.revision, workspace: context.workspace },
+            ctxId,
         );
+        if (goal !== undefined) await this.#reconcileGoalWaits(ctxId, goal);
+        await this.options.contextRegistry?.suppressAutomaticReentry(ctxId, this.options.instanceName, "Workspace Goal stopped by user");
         return { goal: goal ?? null } as unknown as JsonValue;
     }
 
     async #resumeGoal(input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
         const gateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
         const fence = readGoalFence(input, "workspace_goal_resume");
+        const ctxId = requireCtxId(context);
         const goal = await gateway.manageGoal(
             this.options.instanceName,
-            { action: "resume", expectedGoalId: fence.goalId, expectedRevision: fence.revision },
-            requireCtxId(context),
+            { action: "resume", expectedGoalId: fence.goalId, expectedRevision: fence.revision, workspace: context.workspace },
+            ctxId,
         );
+        await this.options.contextRegistry?.resumeAutomaticReentry(ctxId, this.options.instanceName);
         return { goal: goal ?? null } as unknown as JsonValue;
     }
 
@@ -271,7 +334,7 @@ export class McpEndpointHandlerInteraction {
         return this.#workspaceResult(
             ctxId,
             token,
-            await readWorkspaceSnapshot(gateway, this.options.instanceName, ctxId),
+            await this.#workspaceSnapshot(gateway, ctxId),
         );
     }
 
@@ -285,7 +348,7 @@ export class McpEndpointHandlerInteraction {
         return this.#workspaceResult(
             ctxId,
             token,
-            await readWorkspaceSnapshot(gateway, this.options.instanceName, ctxId),
+            await this.#workspaceSnapshot(gateway, ctxId),
         );
     }
 
@@ -314,20 +377,72 @@ export class McpEndpointHandlerInteraction {
                     return this.#workspaceResult(ctxId, token, {
                         changed: true,
                         cursor,
-                        snapshot: await readWorkspaceSnapshot(gateway, this.options.instanceName, ctxId),
+                        snapshot: await this.#workspaceSnapshot(gateway, ctxId),
                     });
                 }
                 if (Date.now() - startedAt >= heartbeatMs) {
                     return this.#workspaceResult(ctxId, token, {
                         changed: false,
                         cursor,
-                        snapshot: await readWorkspaceSnapshot(gateway, this.options.instanceName, ctxId),
+                        snapshot: await this.#workspaceSnapshot(gateway, ctxId),
                     });
                 }
                 await waitForMcpEndpointAbortable(delay(pollMs), signal);
             }
         } finally {
             this.#endWorkspaceWatch(ctxId);
+        }
+    }
+
+    async #workspaceSnapshot(gateway: McpInteractionGateway, ctxId: string): Promise<JsonValue> {
+        const registry = this.options.contextRegistry;
+        if (registry === undefined) return await readWorkspaceSnapshot(gateway, this.options.instanceName, ctxId);
+        const record = await registry.validateForInstance(ctxId, this.options.instanceName);
+        const reentry = await registry.readAutomaticReentry(ctxId, this.options.instanceName);
+        return await readWorkspaceSnapshot(gateway, this.options.instanceName, ctxId, {
+            instances: record.environments.map((environment) => environment.instance),
+            reentry: reentry as unknown as JsonValue,
+        });
+    }
+
+    async #contextInstances(ctxId: string): Promise<string[]> {
+        const registry = this.options.contextRegistry;
+        if (registry === undefined) return [this.options.instanceName];
+        const record = await registry.validateForInstance(ctxId, this.options.instanceName);
+        return [...new Set([this.options.instanceName, ...record.environments.map((environment) => environment.instance)])];
+    }
+
+    async #reconcileGoalWaits(ctxId: string, goal: GoalSnapshot): Promise<void> {
+        const gateway = this.options.gateway;
+        if (!isMcpWaitRecoveryGateway(gateway)) return;
+        const currentStepId = goal.steps.find((step) => step.status === "active")?.id;
+        const terminal = goal.status === "completed" || goal.status === "stopped";
+        const waits = await gateway.listWaits(this.options.instanceName);
+        for (const wait of waits) {
+            if (wait.createdByCtxId !== ctxId || wait.goalId !== goal.goalId) continue;
+            if (wait.status === "consumed" || wait.status === "cancelled" || wait.recoveryDisabledAt !== undefined) continue;
+            const staleStep = wait.goalStepId !== undefined && wait.goalStepId !== currentStepId;
+            if (!terminal && !staleStep) continue;
+            if (wait.kind === "question" && (wait.status === "waiting" || wait.status === "detached") && gateway.cancelWait !== undefined) {
+                await gateway.cancelWait(this.options.instanceName, wait.waitId).catch(() => undefined);
+                continue;
+            }
+            await gateway.disableWaitRecovery(this.options.instanceName, wait.waitId).catch(() => undefined);
+        }
+    }
+
+    async #disableTaskWaits(ctxId: string, taskId: string): Promise<void> {
+        const gateway = this.options.gateway;
+        if (!isMcpWaitRecoveryGateway(gateway)) return;
+        const waits = await gateway.listWaits(this.options.instanceName);
+        for (const wait of waits) {
+            if (wait.createdByCtxId !== ctxId || wait.taskId !== taskId) continue;
+            if (wait.status === "consumed" || wait.status === "cancelled" || wait.recoveryDisabledAt !== undefined) continue;
+            if (wait.kind === "question" && (wait.status === "waiting" || wait.status === "detached") && gateway.cancelWait !== undefined) {
+                await gateway.cancelWait(this.options.instanceName, wait.waitId).catch(() => undefined);
+                continue;
+            }
+            await gateway.disableWaitRecovery(this.options.instanceName, wait.waitId).catch(() => undefined);
         }
     }
 
@@ -396,6 +511,7 @@ export class McpEndpointHandlerInteraction {
         }
         validateQuestionAnswer(wait, answer);
         const resolved = await gateway.resolveWait(this.options.instanceName, waitId, { answer });
+        await this.options.contextRegistry?.resumeAutomaticReentry(requireCtxId(context), this.options.instanceName);
         return {
             answer,
             detached: resolved.detachedAt !== undefined,
@@ -427,6 +543,7 @@ export class McpEndpointHandlerInteraction {
             task: { id: wait.targetId, status: "running" },
         } as const;
         const resolved = await gateway.resolveWait(this.options.instanceName, waitId, interrupted);
+        await this.options.contextRegistry?.resumeAutomaticReentry(requireCtxId(context), this.options.instanceName);
         return {
             detached: resolved.detachedAt !== undefined,
             ...(resolved.goalId === undefined ? {} : { goalId: resolved.goalId }),
@@ -452,7 +569,16 @@ export class McpEndpointHandlerInteraction {
         if (task?.taskId !== taskId || !taskBelongsToContext(task, taskId, ctxId)) {
             throw new Error(`Todo task ${taskId} is not attached to the current Context.`);
         }
-        return await gateway.controlTodo(this.options.instanceName, taskId, action, ctxId, revision);
+        const controlled = await gateway.controlTodo(this.options.instanceName, taskId, action, ctxId, revision);
+        if (action === "cancel") {
+            await this.#disableTaskWaits(ctxId, taskId);
+            await this.options.contextRegistry?.suppressAutomaticReentry(ctxId, this.options.instanceName, "Workspace task cancelled by user");
+        } else if (action === "pause") {
+            await this.options.contextRegistry?.suppressAutomaticReentry(ctxId, this.options.instanceName, "Workspace task paused by user");
+        } else {
+            await this.options.contextRegistry?.resumeAutomaticReentry(ctxId, this.options.instanceName);
+        }
+        return controlled;
     }
 
     async #recoverWait(
@@ -487,7 +613,7 @@ export class McpEndpointHandlerInteraction {
             };
         }
         if (recovery.action === "attempt") {
-            await this.#assertWaitRecoveryAssociationAvailable(gateway, wait, requireCtxId(context));
+            await this.#assertWaitRecoveryAssociationAvailable(gateway, wait, context);
             const attempted = await gateway.markWaitRecoveryAttempted(this.options.instanceName, waitId, recovery.claimId);
             return {
                 attempted: true,
@@ -510,6 +636,10 @@ export class McpEndpointHandlerInteraction {
             await gateway.releaseWaitRecovery(this.options.instanceName, waitId, recovery.claimId);
             return { released: true, waitId };
         }
+        if (recovery.action === "reject") {
+            await gateway.rejectWaitRecovery(this.options.instanceName, waitId, recovery.claimId);
+            return { rejected: true, waitId };
+        }
         if (recovery.action === "complete") {
             const consumed = await gateway.completeWaitRecovery(this.options.instanceName, waitId, recovery.claimId);
             return {
@@ -519,8 +649,7 @@ export class McpEndpointHandlerInteraction {
                 waitId: consumed.waitId,
             };
         }
-        const ctxId = requireCtxId(context);
-        await this.#assertWaitRecoveryAssociationAvailable(gateway, wait, ctxId);
+        await this.#assertWaitRecoveryAssociationAvailable(gateway, wait, context);
         const claimId = `recovery-${randomUUID()}`;
         const claimed = await gateway.claimWaitRecovery(this.options.instanceName, waitId, claimId);
         return {
@@ -540,26 +669,53 @@ export class McpEndpointHandlerInteraction {
     async #assertWaitRecoveryAssociationAvailable(
         gateway: McpInteractionGateway,
         wait: WaitRecord,
-        ctxId: string,
+        context: ToolCallContext,
     ): Promise<void> {
+        const ctxId = requireCtxId(context);
+        const explicitHumanResume = wait.kind === "question" || asRecord(wait.result)?.interrupted === true;
+        if (wait.recoveryDisabledAt !== undefined || (wait.automaticRecovery === false && !explicitHumanResume)) {
+            throw new Error(`Wait ${wait.waitId} is not available for automatic recovery.`);
+        }
+        if (wait.workspace !== undefined && context.workspace !== undefined && wait.workspace !== context.workspace) {
+            throw new Error(`Wait ${wait.waitId} belongs to another workspace.`);
+        }
         if (wait.goalId !== undefined) {
             const goalGateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
             const goal = await goalGateway.readGoal(this.options.instanceName, ctxId);
             if (
                 goal?.goalId !== wait.goalId ||
-                (goal.status !== "active" && goal.status !== "blocked")
+                (goal.status !== "active" && !(goal.status === "blocked" && explicitHumanResume))
             ) {
                 throw new Error(`Workspace Goal ${wait.goalId} is not available for automatic recovery.`);
             }
+            if (wait.workspace !== undefined && goal.workspace !== undefined && wait.workspace !== goal.workspace) {
+                throw new Error(`Workspace Goal ${wait.goalId} moved to another workspace.`);
+            }
+            if (wait.goalStepId !== undefined) {
+                const step = goal.steps.find((candidate) => candidate.id === wait.goalStepId);
+                if (step === undefined || step.status !== "active") {
+                    throw new Error(`Workspace Goal step ${wait.goalStepId} is no longer available for automatic recovery.`);
+                }
+            } else if (wait.goalRevision !== undefined && goal.revision !== wait.goalRevision) {
+                throw new Error(`Workspace Goal ${wait.goalId} changed since wait ${wait.waitId} was created.`);
+            }
         } else if (wait.taskId !== undefined) {
-            const todo = asRecord(await gateway.readTodo(this.options.instanceName));
+            const todo = asRecord(await gateway.readTodo(this.options.instanceName, { taskId: wait.taskId }));
             const task = Array.isArray(todo?.tasks)
-                ? todo.tasks.map(asRecord).find((entry) => (
-                    entry?.taskId === wait.taskId && entry?.ctxId === ctxId
-                ))
+                ? todo.tasks.map(asRecord).find((entry) => entry?.taskId === wait.taskId && entry?.ctxId === ctxId)
                 : undefined;
-            if (task === undefined || task.status === "paused") {
+            if (task === undefined || task.status !== "in_progress") {
                 throw new Error(`Durable task ${wait.taskId} is not available for automatic recovery.`);
+            }
+            if (wait.todoItemId !== undefined) {
+                const item = Array.isArray(todo?.items)
+                    ? todo.items.map(asRecord).find((entry) => entry?.id === wait.todoItemId)
+                    : undefined;
+                if (item?.status !== "in_progress") {
+                    throw new Error(`Durable task item ${wait.todoItemId} is no longer available for automatic recovery.`);
+                }
+            } else if (wait.taskRevision !== undefined && todo?.revision !== wait.taskRevision) {
+                throw new Error(`Durable task ${wait.taskId} changed since wait ${wait.waitId} was created.`);
             }
         }
     }
@@ -571,11 +727,21 @@ export class McpEndpointHandlerInteraction {
     ): Promise<JsonValue> {
         const { approvalId, decision } = readApprovalDecision(input);
         const ctxId = requireCtxId(context);
-        const approval = (await gateway.listApprovals(this.options.instanceName)).find((entry) => entry.approvalId === approvalId);
-        if (approval === undefined || approval.ctxId !== ctxId || approval.status !== "pending") {
+        const instances = await this.#contextInstances(ctxId);
+        let approval: Awaited<ReturnType<McpInteractionGateway["listApprovals"]>>[number] | undefined;
+        let approvalInstance: string | undefined;
+        for (const instance of instances) {
+            const candidate = (await gateway.listApprovals(instance).catch(() => [])).find((entry) => entry.approvalId === approvalId);
+            if (candidate !== undefined) {
+                approval = candidate;
+                approvalInstance = instance;
+                break;
+            }
+        }
+        if (approval === undefined || approvalInstance === undefined || approval.ctxId !== ctxId || approval.status !== "pending") {
             throw new Error(`Pending approval ${approvalId} was not found for the current Context.`);
         }
-        const decided = await gateway.decideApproval(this.options.instanceName, approvalId, decision);
+        const decided = await gateway.decideApproval(approvalInstance, approvalId, decision);
         const { ctxId: _ctxId, ...visible } = decided;
         return visible as unknown as JsonValue;
     }
@@ -633,8 +799,8 @@ function readGoalContinuationInput(input: JsonValue): GoalContinuationInput {
     const record = asRecord(input);
     if (record === undefined) throw new Error("workspace_goal_continue requires an object input.");
     const action = record.action;
-    if (action !== "claim" && action !== "validate" && action !== "attempt" && action !== "report" && action !== "suppress") {
-        throw new Error("workspace_goal_continue action must be claim, validate, attempt, report, or suppress.");
+    if (action !== "claim" && action !== "validate" && action !== "attempt" && action !== "report" && action !== "reset") {
+        throw new Error("workspace_goal_continue action must be claim, validate, attempt, report, or reset.");
     }
     return {
         action,
@@ -642,6 +808,27 @@ function readGoalContinuationInput(input: JsonValue): GoalContinuationInput {
         ...(typeof record.available === "boolean" ? { available: record.available } : {}),
         ...(typeof record.claimId === "string" ? { claimId: record.claimId } : {}),
         ...(typeof record.error === "string" ? { error: record.error } : {}),
+    };
+}
+
+function readReentryControl(input: JsonValue): {
+    action: "get" | "yield" | "resume" | "claim" | "validate" | "release";
+    claimId?: string;
+    reason?: string;
+} {
+    const record = asRecord(input);
+    if (record === undefined) throw new Error("workspace_reentry_control requires an object input.");
+    const action = record.action;
+    if (
+        action !== "get" && action !== "yield" && action !== "resume" &&
+        action !== "claim" && action !== "validate" && action !== "release"
+    ) {
+        throw new Error("workspace_reentry_control action is invalid.");
+    }
+    return {
+        action,
+        ...(typeof record.claimId === "string" ? { claimId: record.claimId } : {}),
+        ...(typeof record.reason === "string" ? { reason: record.reason } : {}),
     };
 }
 
@@ -707,7 +894,7 @@ function readWaitId(input: JsonValue, toolName: string): string {
 function readWaitRecovery(input: JsonValue):
     | { action: "claim"; waitId: string }
     | { action: "dismiss"; recoveryMessageId: string; waitId: string }
-    | { action: "attempt" | "complete" | "release" | "sent"; claimId: string; waitId: string } {
+    | { action: "attempt" | "complete" | "release" | "reject" | "sent"; claimId: string; waitId: string } {
     const record = asRecord(input);
     if (record === undefined) throw new Error("workspace_wait_recover requires an object input.");
     const action = record.action;
@@ -716,10 +903,10 @@ function readWaitRecovery(input: JsonValue):
     if (action === "dismiss") {
         return { action, recoveryMessageId: text(record.recoveryMessageId, "recoveryMessageId"), waitId };
     }
-    if (action === "attempt" || action === "complete" || action === "release" || action === "sent") {
+    if (action === "attempt" || action === "complete" || action === "release" || action === "reject" || action === "sent") {
         return { action, claimId: text(record.claimId, "claimId"), waitId };
     }
-    throw new Error("action must be claim, attempt, sent, complete, release, or dismiss.");
+    throw new Error("action must be claim, attempt, sent, complete, release, reject, or dismiss.");
 }
 
 function readWorkspaceCursor(input: JsonValue): number {
@@ -739,13 +926,29 @@ function taskBelongsToContext(todo: Record<string, JsonValue>, taskId: string, c
     });
 }
 
-function currentTodoTaskId(todo: JsonValue, ctxId: string): string | undefined {
-    const record = asRecord(todo);
-    if (!Array.isArray(record?.tasks)) return undefined;
-    const active = record.tasks.map(asRecord).filter((task) => (
+async function currentTodoAssociation(
+    gateway: McpInteractionGateway,
+    instance: string,
+    ctxId: string,
+): Promise<
+    | { kind: "none" }
+    | { kind: "ambiguous" }
+    | { kind: "one"; revision: number; taskId: string; todoItemId: string }
+> {
+    const todo = asRecord(await gateway.readTodo(instance));
+    if (!Array.isArray(todo?.tasks)) return { kind: "none" };
+    const active = todo.tasks.map(asRecord).filter((task) => (
         task?.ctxId === ctxId && task.status === "in_progress" && typeof task.taskId === "string"
     ));
-    return active.length === 1 ? active[0]?.taskId as string : undefined;
+    if (active.length === 0) return { kind: "none" };
+    if (active.length !== 1) return { kind: "ambiguous" };
+    const taskId = active[0]?.taskId;
+    if (typeof taskId !== "string") return { kind: "ambiguous" };
+    const detail = asRecord(await gateway.readTodo(instance, { taskId }));
+    if (!Array.isArray(detail?.items) || typeof detail.revision !== "number") return { kind: "ambiguous" };
+    const current = detail.items.map(asRecord).filter((item) => item?.status === "in_progress" && typeof item.id === "string");
+    if (current.length !== 1 || typeof current[0]?.id !== "string") return { kind: "ambiguous" };
+    return { kind: "one", revision: detail.revision, taskId, todoItemId: current[0].id };
 }
 
 function validateQuestionAnswer(wait: WaitRecord, answer: string): void {

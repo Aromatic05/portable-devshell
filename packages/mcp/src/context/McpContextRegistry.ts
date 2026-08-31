@@ -37,8 +37,23 @@ export interface McpContextExternalBinding {
 }
 
 interface McpContextStoredRecord extends McpContextRecord {
+    automaticReentryClaimedAt?: string;
+    automaticReentryClaimId?: string;
+    automaticReentryEpoch?: number;
+    automaticReentrySuppressedAt?: string;
+    automaticReentrySuppressionReason?: string;
     externalBindings?: McpContextExternalBinding[];
 }
+
+export interface McpContextAutomaticReentryState {
+    claimId?: string;
+    epoch: number;
+    pending: boolean;
+    reason?: string;
+    suppressedAt?: string;
+}
+
+const AUTOMATIC_REENTRY_CLAIM_TTL_MS = 2 * 60_000;
 
 interface McpContextDocument {
     contexts: McpContextStoredRecord[];
@@ -362,6 +377,133 @@ export class McpContextRegistry {
                 throw invalidContext(ctxId);
             }
             return cloneRecord(record);
+        });
+    }
+
+    async readAutomaticReentry(
+        ctxId: string,
+        instance: string,
+    ): Promise<McpContextAutomaticReentryState> {
+        await this.validateForInstance(ctxId, instance);
+        return await this.#run(async () => {
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined) throw invalidContext(ctxId);
+            return automaticReentryState(record);
+        });
+    }
+
+    async suppressAutomaticReentry(
+        ctxId: string,
+        instance: string,
+        reason: string,
+    ): Promise<McpContextAutomaticReentryState> {
+        await this.validateForInstance(ctxId, instance);
+        return await this.#run(async () => {
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined) throw invalidContext(ctxId);
+            const at = new Date(this.#now()).toISOString();
+            await this.#mutateAndPersist(() => {
+                record.automaticReentryEpoch = (record.automaticReentryEpoch ?? 0) + 1;
+                record.automaticReentrySuppressedAt = at;
+                record.automaticReentrySuppressionReason = reason;
+                delete record.automaticReentryClaimedAt;
+                delete record.automaticReentryClaimId;
+            });
+            return automaticReentryState(record);
+        });
+    }
+
+    async resumeAutomaticReentry(
+        ctxId: string,
+        instance: string,
+    ): Promise<McpContextAutomaticReentryState> {
+        await this.validateForInstance(ctxId, instance);
+        return await this.#run(async () => {
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined) throw invalidContext(ctxId);
+            await this.#mutateAndPersist(() => {
+                record.automaticReentryEpoch = (record.automaticReentryEpoch ?? 0) + 1;
+                delete record.automaticReentrySuppressedAt;
+                delete record.automaticReentrySuppressionReason;
+                delete record.automaticReentryClaimedAt;
+                delete record.automaticReentryClaimId;
+            });
+            return automaticReentryState(record);
+        });
+    }
+
+    async claimAutomaticReentry(
+        ctxId: string,
+        instance: string,
+        claimId: string,
+    ): Promise<{ claimed: boolean; state: McpContextAutomaticReentryState }> {
+        await this.validateForInstance(ctxId, instance);
+        return await this.#run(async () => {
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined) throw invalidContext(ctxId);
+            const now = this.#now();
+            const freshClaim = automaticReentryClaimFresh(record, now);
+            if (record.automaticReentrySuppressedAt !== undefined || (freshClaim && record.automaticReentryClaimId !== claimId)) {
+                return { claimed: false, state: automaticReentryState(record, now) };
+            }
+            await this.#mutateAndPersist(() => {
+                record.automaticReentryClaimId = claimId;
+                record.automaticReentryClaimedAt = new Date(now).toISOString();
+            });
+            return { claimed: true, state: automaticReentryState(record, now) };
+        });
+    }
+
+    async validateAutomaticReentry(
+        ctxId: string,
+        instance: string,
+        claimId: string,
+    ): Promise<{ state: McpContextAutomaticReentryState; valid: boolean }> {
+        await this.validateForInstance(ctxId, instance);
+        return await this.#run(async () => {
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined) throw invalidContext(ctxId);
+            const now = this.#now();
+            const valid = record.automaticReentrySuppressedAt === undefined &&
+                automaticReentryClaimFresh(record, now) && record.automaticReentryClaimId === claimId;
+            return { state: automaticReentryState(record, now), valid };
+        });
+    }
+
+    async releaseAutomaticReentry(
+        ctxId: string,
+        instance: string,
+        claimId: string,
+    ): Promise<McpContextAutomaticReentryState> {
+        await this.validateForInstance(ctxId, instance);
+        return await this.#run(async () => {
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined) throw invalidContext(ctxId);
+            if (record.automaticReentryClaimId === claimId) {
+                await this.#mutateAndPersist(() => {
+                    delete record.automaticReentryClaimedAt;
+                    delete record.automaticReentryClaimId;
+                });
+            }
+            return automaticReentryState(record);
+        });
+    }
+
+    async clearAutomaticReentryClaim(
+        ctxId: string,
+        instance: string,
+    ): Promise<McpContextAutomaticReentryState> {
+        await this.validateForInstance(ctxId, instance);
+        return await this.#run(async () => {
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined) throw invalidContext(ctxId);
+            if (record.automaticReentryClaimId !== undefined || record.automaticReentryClaimedAt !== undefined) {
+                await this.#mutateAndPersist(() => {
+                    delete record.automaticReentryClaimedAt;
+                    delete record.automaticReentryClaimId;
+                });
+            }
+            return automaticReentryState(record);
         });
     }
 
@@ -747,7 +889,15 @@ function isCtxId(value: string): boolean {
 }
 
 function cloneRecord(record: McpContextStoredRecord): McpContextRecord {
-    const { externalBindings: _externalBindings, ...publicRecord } = record;
+    const {
+        automaticReentryClaimedAt: _automaticReentryClaimedAt,
+        automaticReentryClaimId: _automaticReentryClaimId,
+        automaticReentryEpoch: _automaticReentryEpoch,
+        automaticReentrySuppressedAt: _automaticReentrySuppressedAt,
+        automaticReentrySuppressionReason: _automaticReentrySuppressionReason,
+        externalBindings: _externalBindings,
+        ...publicRecord
+    } = record;
     return {
         ...publicRecord,
         environments: record.environments.map((environment) => ({
@@ -877,6 +1027,21 @@ function parseRecord(value: unknown): McpContextStoredRecord | undefined {
         });
     }
     return {
+        ...(typeof raw.automaticReentryClaimedAt === "string" && raw.automaticReentryClaimedAt.length > 0
+            ? { automaticReentryClaimedAt: raw.automaticReentryClaimedAt }
+            : {}),
+        ...(typeof raw.automaticReentryClaimId === "string" && raw.automaticReentryClaimId.length > 0
+            ? { automaticReentryClaimId: raw.automaticReentryClaimId }
+            : {}),
+        ...(typeof raw.automaticReentryEpoch === "number" && Number.isSafeInteger(raw.automaticReentryEpoch) && raw.automaticReentryEpoch >= 0
+            ? { automaticReentryEpoch: raw.automaticReentryEpoch }
+            : {}),
+        ...(typeof raw.automaticReentrySuppressedAt === "string" && raw.automaticReentrySuppressedAt.length > 0
+            ? { automaticReentrySuppressedAt: raw.automaticReentrySuppressedAt }
+            : {}),
+        ...(typeof raw.automaticReentrySuppressionReason === "string" && raw.automaticReentrySuppressionReason.length > 0
+            ? { automaticReentrySuppressionReason: raw.automaticReentrySuppressionReason }
+            : {}),
         createdAt: record.createdAt,
         ctxId: record.ctxId,
         environments: [...byInstance.values()],
@@ -889,6 +1054,23 @@ function parseRecord(value: unknown): McpContextStoredRecord | undefined {
         temporaryDirectory: record.temporaryDirectory,
         workspace: record.workspace,
     };
+}
+
+function automaticReentryState(record: McpContextStoredRecord, now = Date.now()): McpContextAutomaticReentryState {
+    const pending = automaticReentryClaimFresh(record, now);
+    return {
+        ...(pending && record.automaticReentryClaimId !== undefined ? { claimId: record.automaticReentryClaimId } : {}),
+        epoch: record.automaticReentryEpoch ?? 0,
+        pending,
+        ...(record.automaticReentrySuppressedAt === undefined ? {} : { suppressedAt: record.automaticReentrySuppressedAt }),
+        ...(record.automaticReentrySuppressionReason === undefined ? {} : { reason: record.automaticReentrySuppressionReason }),
+    };
+}
+
+function automaticReentryClaimFresh(record: McpContextStoredRecord, now: number): boolean {
+    if (record.automaticReentryClaimId === undefined || record.automaticReentryClaimedAt === undefined) return false;
+    const claimedAt = Date.parse(record.automaticReentryClaimedAt);
+    return Number.isFinite(claimedAt) && now - claimedAt < AUTOMATIC_REENTRY_CLAIM_TTL_MS;
 }
 
 function parseExternalBinding(

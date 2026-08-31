@@ -124,6 +124,45 @@ test("McpContextRegistry persists detached instance environments across restart"
     }
 });
 
+test("McpContextRegistry arbitrates one automatic re-entry and preserves explicit user yield", async () => {
+    const root = await createTestTempDirectory("context-reentry");
+    const filePath = join(root, "contexts.json");
+    try {
+        const registry = new McpContextRegistry({
+            filePath,
+            idFactory: () => "ctx-reentry",
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo-local", principal: "local", workspace: "/workspace" });
+
+        const first = await registry.claimAutomaticReentry("ctx-reentry", "demo-local", "claim-1");
+        assert.equal(first.claimed, true);
+        assert.equal(first.state.pending, true);
+        const second = await registry.claimAutomaticReentry("ctx-reentry", "demo-local", "claim-2");
+        assert.equal(second.claimed, false);
+        assert.equal((await registry.validateAutomaticReentry("ctx-reentry", "demo-local", "claim-1")).valid, true);
+
+        await registry.clearAutomaticReentryClaim("ctx-reentry", "demo-local");
+        assert.equal((await registry.readAutomaticReentry("ctx-reentry", "demo-local")).pending, false);
+        await registry.suppressAutomaticReentry("ctx-reentry", "demo-local", "user action");
+        const suppressed = await registry.readAutomaticReentry("ctx-reentry", "demo-local");
+        assert.equal(typeof suppressed.suppressedAt, "string");
+        await registry.clearAutomaticReentryClaim("ctx-reentry", "demo-local");
+        assert.equal(typeof (await registry.readAutomaticReentry("ctx-reentry", "demo-local")).suppressedAt, "string");
+        assert.equal((await registry.claimAutomaticReentry("ctx-reentry", "demo-local", "claim-3")).claimed, false);
+
+        await registry.resumeAutomaticReentry("ctx-reentry", "demo-local");
+        const resumed = await registry.claimAutomaticReentry("ctx-reentry", "demo-local", "claim-4");
+        assert.equal(resumed.claimed, true);
+
+        const reloaded = new McpContextRegistry({ filePath });
+        await reloaded.initialize();
+        assert.equal((await reloaded.readAutomaticReentry("ctx-reentry", "demo-local")).pending, true);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
 test("McpContextRegistry keeps external bindings private and does not retire the previous Context", async () => {
     const root = await createTestTempDirectory("context-external-selector");
     const filePath = join(root, "contexts.json");

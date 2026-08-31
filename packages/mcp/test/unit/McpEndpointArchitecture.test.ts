@@ -61,6 +61,26 @@ function tmuxRunBlockTool(): ToolDefinition {
     };
 }
 
+function tmuxReadBlockTool(): ToolDefinition {
+    return {
+        description: "Read a managed tmux task.",
+        group: "tmux",
+        inputSchema: {
+            additionalProperties: false,
+            properties: {
+                line: { type: "integer" },
+                task: { type: "string" },
+                timeMs: { type: "integer" },
+            },
+            required: ["task"],
+            type: "object",
+        },
+        name: "tmux_read",
+        outputSchema: { type: "object" },
+        requiredCapabilities: ["read"],
+    };
+}
+
 function createWorker(options: {
     cached?: boolean;
     failAuditAfterOperation?: boolean;
@@ -635,7 +655,15 @@ test("tmux_run block waits are interruptible before handoff and detach after the
             else wait.ownerCallId = ownerCallId;
             return wait;
         },
-        async readTodo() {
+        async readTodo(_instance: string, input?: { taskId?: string }) {
+            if (input?.taskId === "todo-task-1") {
+                return {
+                    items: [{ content: "Wait for tmux", id: "item-1", status: "in_progress" }],
+                    revision: 1,
+                    taskId: "todo-task-1",
+                    tasks: [{ ctxId: environment.ctxId, status: "in_progress", taskId: "todo-task-1" }],
+                };
+            }
             return {
                 items: [],
                 revision: 0,
@@ -754,6 +782,114 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     );
     await waitUntil(() => waits.find((entry) => entry.waitId === "wait-restored")?.status === "resolved");
     assert.equal(waits.find((entry) => entry.waitId === "wait-restored")?.result, terminalResults.get("task-2"));
+});
+
+test("tmux_read long waits detach into durable Workspace state", async () => {
+    let ready = false;
+    const harness = createWorker({ tools: [tmuxReadBlockTool()] });
+    const worker = {
+        ...harness.worker,
+        async callTool(toolName: string, input: JsonValue): Promise<JsonValue> {
+            assert.equal(toolName, "tmux_read");
+            const record = input as Record<string, JsonValue>;
+            assert.equal(record.task, "task-existing");
+            if (record.consumeOutput === false) {
+                const timeMs = typeof record.timeMs === "number" ? record.timeMs : 0;
+                if (timeMs > 0) await new Promise((resolve) => setTimeout(resolve, timeMs));
+                return {
+                    task: { id: "task-existing", status: "running" },
+                    waitReason: ready ? "output" : "timeout",
+                };
+            }
+            return {
+                task: { id: "task-existing", status: "running" },
+                waitReason: "output",
+            };
+        },
+    };
+    type Wait = WaitRecord;
+    const waits: Wait[] = [];
+    const pending = new Map<string, { reject(error: Error): void; resolve(wait: Wait): void }>();
+    const update = (waitId: string, status: Wait["status"], result?: JsonValue): Wait => {
+        const wait = waits.find((entry) => entry.waitId === waitId);
+        if (wait === undefined) throw new Error(`missing wait ${waitId}`);
+        Object.assign(wait, {
+            ...(status === "detached" ? { detachedAt: new Date().toISOString() } : {}),
+            ...(result === undefined ? {} : { result }),
+            ...(status === "resolved" ? { resolvedAt: new Date().toISOString() } : {}),
+            status,
+            updatedAt: new Date().toISOString(),
+        });
+        const waiter = pending.get(waitId);
+        if (waiter !== undefined) {
+            pending.delete(waitId);
+            if (status === "resolved") waiter.resolve(wait);
+            if (status === "detached" || status === "cancelled") waiter.reject(new Error(`Wait ${waitId} became ${status}.`));
+        }
+        return wait;
+    };
+    const gateway = {
+        async cancelWait(_instance: string, waitId: string) { return update(waitId, "cancelled"); },
+        async consumeWait(_instance: string, waitId: string) { return update(waitId, "consumed"); },
+        async createWait(_instance: string, input: import("@portable-devshell/shared").WaitCreateInput) {
+            const now = new Date().toISOString();
+            const wait = { ...input, createdAt: now, status: "waiting" as const, updatedAt: now, waitId: `wait-read-${waits.length + 1}` };
+            waits.push(wait);
+            return wait;
+        },
+        async decideApproval() { throw new Error("unused"); },
+        async detachWait(_instance: string, waitId: string) { return update(waitId, "detached"); },
+        async listApprovals() { return []; },
+        async listWaits() { return waits; },
+        listTools: () => [],
+        async observeTmuxTask(_instance: string, taskId: string) { return { task: { id: taskId, status: "running" } }; },
+        async readTodo() { return { items: [], revision: 0, tasks: [] }; },
+        async reattachWait(_instance: string, waitId: string) { return update(waitId, "waiting"); },
+        async resolveWait(_instance: string, waitId: string, result?: JsonValue) { return update(waitId, "resolved", result); },
+        async touchGoal() {},
+        async waitForWait(_instance: string, waitId: string): Promise<Wait> {
+            const wait = waits.find((entry) => entry.waitId === waitId);
+            if (wait === undefined) throw new Error(`missing wait ${waitId}`);
+            if (wait.status === "resolved") return wait;
+            return await new Promise<Wait>((resolve, reject) => pending.set(waitId, { reject, resolve }));
+        },
+    } as never;
+    const catalog = new McpEndpointCatalog({
+        gateway,
+        instanceName: "demo-local",
+        policy: { capabilities: ["read"], groups: ["tmux"] },
+        worker,
+    });
+    const dispatch = new McpEndpointDispatch({
+        catalog,
+        contextRegistry: new McpContextRegistry(),
+        gateway,
+        instanceName: "demo-local",
+        tmuxBlockSyncMs: 20,
+        tmuxWaitPollMs: 1,
+        worker,
+    });
+    const environment = structuredResult<{ ctxId: string }>(await dispatch.callTool(
+        "environ_info",
+        { workspace: "/workspace" },
+        { principal: "tester", requestId: "request-environment-read" },
+    ));
+
+    const result = await dispatch.callTool(
+        "tmux_read",
+        { ctxId: environment.ctxId, line: 17, task: "task-existing", timeMs: 1_000 },
+        { principal: "tester", requestId: "wait-read-detached" },
+    ) as { detached?: boolean };
+    assert.equal(result.detached, true);
+    assert.equal(waits.length, 1);
+    assert.equal(waits[0]?.status, "detached");
+    assert.equal(waits[0]?.targetId, "task-existing");
+    assert.equal(waits[0]?.targetInstance, "demo-local");
+    assert.deepEqual(waits[0]?.payload, { line: 17, operation: "read" });
+
+    ready = true;
+    await waitUntil(() => waits[0]?.status === "resolved");
+    assert.equal(waits[0]?.status, "resolved");
 });
 
 test("failed environ_info rolls back only the undisclosed explicit Context", async () => {

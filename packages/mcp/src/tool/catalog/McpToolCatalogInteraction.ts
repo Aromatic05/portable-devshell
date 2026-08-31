@@ -8,6 +8,7 @@ import {
     workspaceGoalResultOutputSchema,
     workspaceOpenOutputSchema,
     workspaceQuestionAnswerOutputSchema,
+    workspaceReentryOutputSchema,
     workspaceSnapshotOutputSchema,
     workspaceWaitInterruptOutputSchema,
     workspaceWaitRecoveryOutputSchema,
@@ -28,6 +29,7 @@ export type McpToolCatalogInteractionName =
     | "workspace_goal_continue"
     | "workspace_goal_resume"
     | "workspace_goal_stop"
+    | "workspace_reentry_control"
     | "workspace_approval_decide";
 
 const appOnlyMeta: JsonValue = {
@@ -227,7 +229,7 @@ export class McpToolCatalogInteraction {
             inputSchema: {
                 additionalProperties: false,
                 properties: {
-                    action: { enum: ["claim", "attempt", "sent", "complete", "release", "dismiss"], type: "string" },
+                    action: { enum: ["claim", "attempt", "sent", "complete", "release", "reject", "dismiss"], type: "string" },
                     claimId: { minLength: 1, type: "string" },
                     recoveryMessageId: { minLength: 1, type: "string" },
                     token: { minLength: 1, type: "string" },
@@ -242,13 +244,13 @@ export class McpToolCatalogInteraction {
         },
         {
             _meta: appOnlyMeta,
-            description: "Manage automatic Workspace Goal continuation with durable delivery fencing, including user/host interruption suppression. App-only helper; models must not call it.",
+            description: "Manage automatic Workspace Goal continuation with durable delivery fencing. App-only helper; models must not call it.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
                     accepted: { type: "boolean" },
-                    action: { enum: ["claim", "validate", "attempt", "report", "suppress"], type: "string" },
+                    action: { enum: ["claim", "validate", "attempt", "report", "reset"], type: "string" },
                     available: { type: "boolean" },
                     claimId: { maxLength: 128, minLength: 1, type: "string" },
                     error: { maxLength: 2000, minLength: 1, type: "string" },
@@ -259,6 +261,25 @@ export class McpToolCatalogInteraction {
             },
             name: "workspace_goal_continue",
             outputSchema: workspaceGoalContinuationOutputSchema,
+            requiredCapabilities: [],
+        },
+        {
+            _meta: appOnlyMeta,
+            description: "Arbitrate one Context-wide automatic model re-entry across Goal continuation and detached-wait recovery. App-only helper; models must not call it.",
+            group: "workspace",
+            inputSchema: {
+                additionalProperties: false,
+                properties: {
+                    action: { enum: ["get", "yield", "resume", "claim", "validate", "release"], type: "string" },
+                    claimId: { maxLength: 128, minLength: 1, type: "string" },
+                    reason: { maxLength: 2000, minLength: 1, type: "string" },
+                    token: { minLength: 1, type: "string" },
+                },
+                required: ["action", "token"],
+                type: "object",
+            },
+            name: "workspace_reentry_control",
+            outputSchema: workspaceReentryOutputSchema,
             requiredCapabilities: [],
         },
         {

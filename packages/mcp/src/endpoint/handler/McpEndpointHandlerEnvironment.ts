@@ -11,7 +11,7 @@ import {
     type McpContextExternalBinding,
 } from "../../context/McpContextRegistry.js";
 import type { McpContextSelector } from "../../context/McpContextSelector.js";
-import type { McpInstanceGateway } from "../../instance/McpInstanceGateway.js";
+import { isMcpGoalGateway, type McpInstanceGateway } from "../../instance/McpInstanceGateway.js";
 import { mcpEnvironmentToolName } from "../../tool/catalog/McpToolCatalogEnvironment.js";
 import { readMcpEnvironmentInfoInput } from "../McpEndpointInput.js";
 import type {
@@ -92,6 +92,12 @@ export class McpEndpointHandlerEnvironment {
         const { alerts, environment, prepared } =
             await this.#prepareEnvironment(workspace);
         try {
+            if (
+                !resolution.created && previousWorkspace !== undefined &&
+                previousWorkspace !== prepared.workspace
+            ) {
+                await this.#assertWorkspaceSwitchAvailable(record.ctxId, previousWorkspace);
+            }
             await this.#worker.appendMcpToolCalled(mcpEnvironmentToolName, {
                 ctxId: record.ctxId,
                 requestId: requestContext.requestId,
@@ -197,6 +203,29 @@ export class McpEndpointHandlerEnvironment {
                 ).catch(() => undefined);
             }
             throw error;
+        }
+    }
+
+    async #assertWorkspaceSwitchAvailable(ctxId: string, previousWorkspace: string): Promise<void> {
+        const gateway = this.#gateway;
+        if (gateway === undefined) return;
+        if (isMcpGoalGateway(gateway)) {
+            const goal = await gateway.readGoal(this.#instanceName, ctxId);
+            if (goal?.status === "active" || goal?.status === "blocked") {
+                throw new Error(`Workspace Goal ${goal.goalId} is still ${goal.status} in ${goal.workspace ?? previousWorkspace}; finish or stop it before switching workspace.`);
+            }
+        }
+        if (gateway.listWaits !== undefined) {
+            const waits = await gateway.listWaits(this.#instanceName);
+            const blocking = waits.find((wait) => (
+                wait.createdByCtxId === ctxId &&
+                (wait.workspace === undefined || wait.workspace === previousWorkspace) &&
+                wait.automaticRecovery !== false && wait.recoveryDisabledAt === undefined &&
+                wait.status !== "consumed" && wait.status !== "cancelled"
+            ));
+            if (blocking !== undefined) {
+                throw new Error(`Workspace wait ${blocking.waitId} is still attached to ${previousWorkspace}; finish or stop its owner before switching workspace.`);
+            }
         }
     }
 

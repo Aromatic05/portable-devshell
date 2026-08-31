@@ -172,6 +172,46 @@ test("WaitState fences an ambiguous recovery delivery from automatic replay", ()
     assert.equal(settledAfterActivity.record.status, "consumed");
 });
 
+test("WaitState can safely retry a delivery that the Host definitively rejected", () => {
+    const state = new WaitState({ waitId: () => "wait-fixed" });
+    const created = state.create(state.emptyDocument(), {
+        createdByCtxId: "ctx-1",
+        kind: "tmux",
+        targetId: "tmux-task-1",
+    });
+    const detached = state.detach(created.document, created.record.waitId);
+    const resolved = state.resolve(detached.document, created.record.waitId, { task: { status: "0" } });
+    const claimed = state.claimRecovery(resolved.document, created.record.waitId, "claim-1");
+    const attempted = state.markRecoveryAttempted(claimed.document, created.record.waitId, "claim-1");
+    const rejected = state.rejectRecovery(attempted.document, created.record.waitId, "claim-1");
+
+    assert.equal(rejected.record.status, "resolved");
+    assert.equal(rejected.record.recoveryClaimId, undefined);
+    assert.equal(rejected.record.recoveryMessageAttemptedAt, undefined);
+    const reclaimed = state.claimRecovery(rejected.document, created.record.waitId, "claim-2");
+    assert.equal(reclaimed.record.recoveryClaimId, "claim-2");
+});
+
+test("WaitState disables automatic recovery without stopping the underlying wait target", () => {
+    const state = new WaitState({ waitId: () => "wait-fixed" });
+    const created = state.create(state.emptyDocument(), {
+        createdByCtxId: "ctx-1",
+        kind: "tmux",
+        targetId: "tmux-task-1",
+    });
+    const detached = state.detach(created.document, created.record.waitId);
+    const disabled = state.disableRecovery(detached.document, created.record.waitId);
+
+    assert.equal(disabled.record.status, "detached");
+    assert.equal(disabled.record.automaticRecovery, false);
+    assert.equal(typeof disabled.record.recoveryDisabledAt, "string");
+    const resolved = state.resolve(disabled.document, created.record.waitId, { task: { status: "0" } });
+    assert.throws(
+        () => state.claimRecovery(resolved.document, created.record.waitId, "claim-1"),
+        /not available for automatic recovery/u,
+    );
+});
+
 test("WaitStore persists wait state atomically and detaches orphaned calls after restart", async () => {
     const root = await createTestTempDirectory("wait-store-");
     const filePath = join(root, "waits.json");
