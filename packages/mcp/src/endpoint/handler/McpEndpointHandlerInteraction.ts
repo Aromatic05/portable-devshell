@@ -320,6 +320,7 @@ export class McpEndpointHandlerInteraction {
             { action: "resume", expectedGoalId: fence.goalId, expectedRevision: fence.revision, workspace: context.workspace },
             ctxId,
         );
+        if (goal !== undefined) await this.#reconcileGoalWaits(ctxId, goal);
         await this.options.contextRegistry?.resumeAutomaticReentry(ctxId, this.options.instanceName);
         return { goal: goal ?? null } as unknown as JsonValue;
     }
@@ -426,7 +427,8 @@ export class McpEndpointHandlerInteraction {
             if (wait.createdByCtxId !== ctxId || wait.goalId !== goal.goalId) continue;
             if (wait.status === "consumed" || wait.status === "cancelled" || wait.recoveryDisabledAt !== undefined) continue;
             const staleStep = wait.goalStepId !== undefined && wait.goalStepId !== currentStepId;
-            if (!terminal && !staleStep) continue;
+            const staleRevision = wait.goalStepId === undefined && wait.goalRevision !== undefined && wait.goalRevision !== goal.revision;
+            if (!terminal && !staleStep && !staleRevision) continue;
             if (wait.kind === "question" && (wait.status === "waiting" || wait.status === "detached") && gateway.cancelWait !== undefined) {
                 await gateway.cancelWait(this.options.instanceName, wait.waitId).catch(() => undefined);
                 continue;

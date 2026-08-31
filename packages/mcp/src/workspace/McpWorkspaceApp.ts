@@ -558,6 +558,15 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     }
   }
 
+  async function settleAutomaticMessageClaim(outcome) {
+    if (!outcome || !outcome.claimId) return;
+    if (outcome.status === "accepted" || outcome.status === "uncertain") {
+      if (heldReentryClaimId === outcome.claimId) heldReentryClaimId = "";
+      return;
+    }
+    await releaseAutomaticMessage(outcome.claimId);
+  }
+
   async function sendModelMessage(text, extra, canSend, beforeSend) {
     if (automaticMessageInFlight || !automaticReentryAvailable() || (canSend && !canSend())) {
       return { status: "blocked" };
@@ -779,8 +788,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
           console.error(reportError);
         }
       }
-      if (outcome && outcome.claimId && !uncertain) await releaseAutomaticMessage(outcome.claimId);
-      if (uncertain && heldReentryClaimId === outcome.claimId) heldReentryClaimId = "";
+      await settleAutomaticMessageClaim(outcome);
       goalContinuationClaimId = "";
       render();
       scheduleGoalContinuation(0);
@@ -852,7 +860,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
           claimId: claimed.claimId,
           waitId: waitId
         }, true).catch(function () {});
-        if (outcome.claimId) await releaseAutomaticMessage(outcome.claimId);
+        await settleAutomaticMessageClaim(outcome);
         return;
       }
       if (!claimed.recoveryMessageSentAt) {
@@ -867,7 +875,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         claimId: claimed.claimId,
         waitId: waitId
       }, true);
-      if (outcome.claimId) await releaseAutomaticMessage(outcome.claimId);
+      await settleAutomaticMessageClaim(outcome);
     } catch (error) {
       if (!attempted && claimed && claimed.claimId) {
         await callTool("workspace_wait_recover", {
@@ -876,22 +884,22 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
           waitId: waitId
         }, true).catch(function () {});
       }
-      if (outcome && outcome.claimId && outcome.status !== "uncertain") await releaseAutomaticMessage(outcome.claimId);
-      if (outcome && outcome.status === "uncertain" && heldReentryClaimId === outcome.claimId) heldReentryClaimId = "";
+      await settleAutomaticMessageClaim(outcome);
       throw error;
     } finally {
       if (outcome && outcome.bridgeFailure) await resetHostBridge();
     }
   }
 
-  async function recoverDetachedWait() {
+  async function recoverDetachedWait(preferredWaitId) {
     if (
       recovering || automaticMessageInFlight || !appToken || !snapshot ||
       !automaticReentryAvailable() || snapshot.agentBusy || visibleEvent() || busy.size > 0
     ) return;
     var background = Array.isArray(snapshot.background) ? snapshot.background : [];
     var item = background.find(function (entry) {
-      return entry.status === "resolved" && !!entry.detachedAt &&
+      return (!preferredWaitId || entry.waitId === preferredWaitId) &&
+        entry.status === "resolved" && !!entry.detachedAt &&
         !(entry.recoveryMessageAttemptedAt && !entry.recoveryMessageSentAt) &&
         hasRecoverableWork(entry);
     });
@@ -910,6 +918,29 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       recovering = false;
       scheduleGoalContinuation(0);
     }
+  }
+
+  function backgroundWaitForResume(goalId, taskId) {
+    var background = snapshot && Array.isArray(snapshot.background) ? snapshot.background : [];
+    return background.find(function (entry) {
+      if (!entry || entry.status === "consumed" || entry.status === "cancelled" || !hasRecoverableWork(entry)) return false;
+      if (goalId) return entry.goalId === goalId;
+      if (taskId) return entry.taskId === taskId;
+      return false;
+    });
+  }
+
+  async function resumeThroughExistingWait(goalId, taskId) {
+    var item = backgroundWaitForResume(goalId, taskId);
+    if (!item) return false;
+    if (
+      item.status === "resolved" && item.detachedAt &&
+      !(item.recoveryMessageAttemptedAt && !item.recoveryMessageSentAt) &&
+      hasRecoverableWork(item)
+    ) {
+      await recoverDetachedWait(item.waitId);
+    }
+    return true;
   }
 
   async function applySnapshot(nextSnapshot, allowRecovery, requestSerial) {
@@ -1361,9 +1392,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   async function sendExplicitResume(text, extra, canSend) {
     var outcome = await sendModelMessage(text, extra, canSend);
     try {
-      if (outcome && outcome.claimId && outcome.status !== "uncertain") {
-        await releaseAutomaticMessage(outcome.claimId);
-      }
+      await settleAutomaticMessageClaim(outcome);
     } finally {
       if (outcome && outcome.bridgeFailure) await resetHostBridge();
     }
@@ -1378,12 +1407,14 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       revision: revision
     });
     if (!result || !result.goal || result.goal.status !== "active") return;
+    if (await resumeThroughExistingWait(goalId, "")) return;
     await sendExplicitResume(
       "The user resumed the active Workspace Goal. Continue the Goal immediately from its current durable state; do not restart completed work.",
       { resumedGoal: result.goal },
       function () {
         var goal = snapshot && snapshot.goal;
-        return !!goal && goal.goalId === goalId && goal.status === "active" && !snapshot.agentBusy && !visibleEvent();
+        return !!goal && goal.goalId === goalId && goal.status === "active" &&
+          !backgroundWaitForResume(goalId, "") && !snapshot.agentBusy && !visibleEvent();
       }
     );
   }
@@ -1395,12 +1426,14 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       taskId: taskId
     });
     if (!result) return;
+    if (await resumeThroughExistingWait("", taskId)) return;
     await sendExplicitResume(
       "The user resumed this Workspace task. Continue the task immediately from its current durable state.",
       { resumedTask: result },
       function () {
         var task = findTask(taskId);
-        return !!task && task.status === "in_progress" && !snapshot.agentBusy && !visibleEvent();
+        return !!task && task.status === "in_progress" &&
+          !backgroundWaitForResume("", taskId) && !snapshot.agentBusy && !visibleEvent();
       }
     );
   }
@@ -1413,12 +1446,14 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     render();
     var goal = snapshot && snapshot.goal;
     if (!goal || goal.goalId !== goalId || goal.status !== "active") return;
+    if (await resumeThroughExistingWait(goalId, "")) return;
     await sendExplicitResume(
       "The user explicitly retried automatic execution for this Workspace Goal. Continue immediately from the current durable Goal state.",
       { retriedGoal: goal },
       function () {
         var current = snapshot && snapshot.goal;
-        return !!current && current.goalId === goalId && current.status === "active" && !snapshot.agentBusy && !visibleEvent();
+        return !!current && current.goalId === goalId && current.status === "active" &&
+          !backgroundWaitForResume(goalId, "") && !snapshot.agentBusy && !visibleEvent();
       }
     );
   }

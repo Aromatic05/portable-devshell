@@ -629,6 +629,10 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     assert.equal(recoverCalls[2]?.arguments?.claimId, "recovery-claim");
     assert.equal(recoverCalls[3]?.arguments?.action, "complete");
     assert.equal(recoverCalls[3]?.arguments?.claimId, "recovery-claim");
+    assert.deepEqual(
+        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_reentry_control').map(call => call.arguments.action)"),
+        ["claim", "validate"],
+    );
 });
 
 test("Workspace re-enters after a detached tmux wait deadline", BROWSER_TEST_OPTIONS, async (t) => {
@@ -719,6 +723,109 @@ test("Workspace Stop waiting resumes the agent after a detached tmux wait", BROW
         "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)",
     );
     assert.deepEqual(recoveryActions, ["claim", "attempt", "sent", "complete"]);
+});
+
+test("Workspace task Resume uses an already resolved wait as its single model re-entry", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
+    await page.evaluate(RESUME_BRIDGE_SCRIPT);
+    await page.evaluate(() => {
+        const state = window as typeof window & {
+            __taskStatus: string;
+            __waitWindowInterrupted: boolean;
+        };
+        state.__taskStatus = "paused";
+        state.__waitWindowInterrupted = true;
+    });
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    const app = page.frameLocator("#workspace");
+    await app.getByRole("button", { name: "Resume task", exact: true }).click();
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task_control' && call.arguments.action === 'resume')");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
+    await page.waitForFunction("(window.__modelMessages || []).length === 1");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
+    assert.deepEqual(
+        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)"),
+        ["claim", "attempt", "sent", "complete"],
+    );
+});
+
+test("Workspace task Resume ignores a background wait whose recovery ownership is disabled", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
+    await page.evaluate(RESUME_BRIDGE_SCRIPT);
+    await page.evaluate(() => {
+        const state = window as typeof window & {
+            __taskStatus: string;
+            __waitRecoveryDisabled: boolean;
+        };
+        state.__taskStatus = "paused";
+        state.__waitRecoveryDisabled = true;
+    });
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    const app = page.frameLocator("#workspace");
+    await app.getByRole("button", { name: "Resume task", exact: true }).click();
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task_control' && call.arguments.action === 'resume')");
+    await page.waitForFunction("(window.__modelMessages || []).length === 1");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
+    assert.equal(
+        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"),
+        0,
+    );
+});
+
+test("Workspace Goal Resume uses an already resolved wait as its single model re-entry", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
+    await page.evaluate(RESUME_BRIDGE_SCRIPT);
+    await page.evaluate(() => {
+        const state = window as typeof window & {
+            __resumeGoalBlocked: boolean;
+            __resumeGoalMode: boolean;
+            __waitWindowInterrupted: boolean;
+        };
+        state.__resumeGoalMode = true;
+        state.__resumeGoalBlocked = true;
+        state.__waitWindowInterrupted = true;
+    });
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    const app = page.frameLocator("#workspace");
+    await app.getByRole("button", { name: "Resume Goal", exact: true }).click();
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_goal_resume')");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
+    await page.waitForFunction("(window.__modelMessages || []).length === 1");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
+    assert.deepEqual(
+        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)"),
+        ["claim", "attempt", "sent", "complete"],
+    );
 });
 
 test("Workspace re-enters after a detached answer without surfacing detached tmux state", BROWSER_TEST_OPTIONS, async (t) => {
@@ -1627,32 +1734,57 @@ const RESUME_BRIDGE_SCRIPT = String.raw`
 window.__workspaceCalls = [];
 window.__modelMessages = [];
 window.__taskStatus = "in_progress";
+window.__taskRevision = 1;
 window.__waitWindowInterrupted = false;
 window.__waitWindowRecovered = false;
+window.__waitRecoveryDisabled = false;
 window.__resumeReentryClaimId = "";
+window.__resumeGoalMode = false;
+window.__resumeGoalBlocked = false;
 
 function resumeSnapshot() {
     return {
         activity: [], approvals: [], questions: [], waits: [],
         background: window.__waitWindowRecovered ? [] : [{
             detachedAt: new Date().toISOString(),
+            goalId: window.__resumeGoalMode ? "goal-resume" : undefined,
+            recoveryDisabledAt: window.__waitRecoveryDisabled ? new Date().toISOString() : undefined,
             status: window.__waitWindowInterrupted ? "resolved" : "detached",
-            taskId: "task-resume",
+            taskId: window.__resumeGoalMode ? undefined : "task-resume",
             tmuxTaskId: "tmux-resume",
             updatedAt: "2026-08-19T01:00:02.000Z",
             waitId: "wait-resume"
         }],
         ctxId: "ctx-resume",
         cursor: 1,
+        goal: window.__resumeGoalMode ? {
+            autoContinueExhausted: false,
+            continuationCount: 0,
+            continuationDue: false,
+            continuationDueAt: "2099-08-20T01:00:00.000Z",
+            continuationPending: false,
+            createdAt: "2026-08-19T01:00:00.000Z",
+            goalId: "goal-resume",
+            lastAgentActivityAt: "2026-08-19T01:00:00.000Z",
+            lastProgressAt: "2026-08-19T01:00:00.000Z",
+            maxContinuations: 10,
+            note: window.__resumeGoalBlocked ? "Waiting for background result" : undefined,
+            objective: "Resume one Goal",
+            revision: window.__resumeGoalBlocked ? 1 : 2,
+            status: window.__resumeGoalBlocked ? "blocked" : "active",
+            steps: [{ id: "continue", status: "active", text: "Continue work" }],
+            updatedAt: "2026-08-19T01:00:00.000Z"
+        } : null,
         instance: "browser-instance",
         reentry: { claimId: window.__resumeReentryClaimId || undefined, epoch: 0, pending: !!window.__resumeReentryClaimId },
-        tasks: [{
+        tasks: window.__resumeGoalMode ? [] : [{
             checkpoint: {
                 summary: "Resume from this checkpoint",
                 updatedAt: "2026-08-19T01:00:00.000Z"
             },
             completed: 1,
             currentItem: "Continue work",
+            revision: window.__taskRevision,
             status: window.__taskStatus,
             taskId: "task-resume",
             title: "Resume task",
@@ -1736,19 +1868,37 @@ window.addEventListener("message", function (event) {
             detached: true,
             interrupted: true,
             status: "resolved",
-            taskId: "task-resume",
+            taskId: window.__resumeGoalMode ? undefined : "task-resume",
             tmuxTaskId: "tmux-resume",
             waitId: "wait-resume"
         } });
+        return;
+    }
+    if (call.name === "workspace_task_control") {
+        if (call.arguments.action === "resume") window.__taskStatus = "in_progress";
+        window.__taskRevision += 1;
+        reply({ structuredContent: {
+            items: [],
+            revision: window.__taskRevision,
+            summary: { completed: 1, total: 2 },
+            taskId: "task-resume",
+            title: "Resume task"
+        } });
+        return;
+    }
+    if (call.name === "workspace_goal_resume") {
+        window.__resumeGoalBlocked = false;
+        reply({ structuredContent: { goal: resumeSnapshot().goal } });
         return;
     }
     if (call.name === "workspace_wait_recover") {
         if (call.arguments.action === "claim") {
             reply({ structuredContent: {
                 claimId: "resume-claim",
+                goalId: window.__resumeGoalMode ? "goal-resume" : undefined,
                 kind: "tmux",
                 result: { interrupted: true, task: { id: "tmux-resume", status: "running" } },
-                taskId: "task-resume",
+                taskId: window.__resumeGoalMode ? undefined : "task-resume",
                 targetId: "tmux-resume",
                 waitId: "wait-resume"
             } });

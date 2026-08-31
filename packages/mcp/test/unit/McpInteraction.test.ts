@@ -903,6 +903,58 @@ test("Workspace task control and detached-wait recovery use durable server state
     assert.equal(claimed?.status, "consumed");
 });
 
+test("Workspace Goal revision changes disable revision-only detached wait recovery", async () => {
+    const fake = createInteractionGateway();
+    const now = new Date().toISOString();
+    fake.waits.push({
+        createdAt: now,
+        createdByCtxId: context.ctxId!,
+        detachedAt: now,
+        goalId: "goal-revision",
+        goalRevision: 1,
+        kind: "tmux",
+        resolvedAt: now,
+        result: { task: { status: "0" } },
+        status: "resolved",
+        targetId: "tmux-goal-revision",
+        updatedAt: now,
+        waitId: "wait-goal-revision",
+    });
+    const goal = {
+        autoContinueExhausted: false,
+        continuationCount: 0,
+        continuationDue: false,
+        continuationDueAt: "2026-08-20T00:15:00.000Z",
+        continuationPending: false,
+        createdAt: now,
+        goalId: "goal-revision",
+        lastAgentActivityAt: now,
+        maxContinuations: 10,
+        objective: "Finish revision-only Goal work",
+        revision: 2,
+        status: "active" as const,
+        steps: [{ id: "done", status: "completed" as const, text: "Already done" }],
+        updatedAt: now,
+    };
+    Object.assign(fake.gateway, {
+        async goalContinuation() { return { goal }; },
+        async manageGoal() { return goal; },
+        async readGoal() { return goal; },
+    });
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+
+    await handler.call(
+        "workspace_goal",
+        { action: "update", objective: goal.objective },
+        context,
+        "call-goal-revision-update",
+    );
+
+    const wait = fake.waits.find((entry) => entry.waitId === "wait-goal-revision");
+    assert.equal(wait?.automaticRecovery, false);
+    assert.equal(typeof wait?.recoveryDisabledAt, "string");
+});
+
 test("Workspace detached-wait recovery accepts an active Goal without Todo", async () => {
     const fake = createInteractionGateway();
     const now = new Date().toISOString();
@@ -1343,6 +1395,21 @@ test("workspace_goal start requires an active Workspace", async () => {
 test("Workspace can resume a blocked Goal through the app-only control", async () => {
     const fake = createInteractionGateway();
     const actions: string[] = [];
+    const now = new Date().toISOString();
+    fake.waits.push({
+        createdAt: now,
+        createdByCtxId: context.ctxId!,
+        detachedAt: now,
+        goalId: "goal-1",
+        goalRevision: 1,
+        kind: "tmux",
+        resolvedAt: now,
+        result: { task: { status: "0" } },
+        status: "resolved",
+        targetId: "tmux-goal-resume",
+        updatedAt: now,
+        waitId: "wait-goal-resume",
+    });
     Object.assign(fake.gateway, {
         async goalContinuation() {
             return { goal: null };
@@ -1350,11 +1417,11 @@ test("Workspace can resume a blocked Goal through the app-only control", async (
         async manageGoal(_instance: string, input: { action: string }) {
             actions.push(input.action);
             return input.action === "resume"
-                ? { goalId: "goal-1", objective: "Resume work", status: "active", steps: [] }
+                ? { goalId: "goal-1", objective: "Resume work", revision: 2, status: "active", steps: [] }
                 : undefined;
         },
         async readGoal() {
-            return { goalId: "goal-1", objective: "Resume work", status: "blocked", steps: [] };
+            return { goalId: "goal-1", objective: "Resume work", revision: 1, status: "blocked", steps: [] };
         },
     });
     const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
@@ -1368,6 +1435,9 @@ test("Workspace can resume a blocked Goal through the app-only control", async (
     ) as { goal?: { status?: string } };
     assert.deepEqual(actions, ["resume"]);
     assert.equal(result.goal?.status, "active");
+    const wait = fake.waits.find((entry) => entry.waitId === "wait-goal-resume");
+    assert.equal(wait?.automaticRecovery, false);
+    assert.equal(typeof wait?.recoveryDisabledAt, "string");
 });
 
 test("Workspace Goal continuation is unavailable while the current Context still has a detached wait", async () => {
