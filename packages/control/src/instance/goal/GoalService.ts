@@ -35,6 +35,11 @@ export class GoalService {
         return this.#state.read(this.#store.read(), ctxId);
     }
 
+    async list(): Promise<GoalSnapshot[]> {
+        await this.#operation;
+        return this.#state.list(this.#store.read());
+    }
+
     async manage(ctxId: string, input: GoalManageInput): Promise<GoalSnapshot | undefined> {
         return await this.#runExclusive(async () => {
             const before = this.#store.read();

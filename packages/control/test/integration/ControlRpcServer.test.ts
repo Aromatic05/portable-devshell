@@ -97,6 +97,9 @@ test("ControlSocketServer routes canonical control and instance operations over 
     const snapshot = await request(harness.socketPath, asInstanceName("alpha"), "runtime.snapshot");
     assert.equal((snapshot.payload as { lastSeq: number }).lastSeq, 0);
 
+    const goals = await request(harness.socketPath, asInstanceName("alpha"), "goal.get");
+    assert.deepEqual(goals.payload, { goals: [], lastSeq: 0 });
+
     await request(harness.socketPath, asInstanceName("alpha"), "runtime.readLogs", { limit: 1_000 });
     assert.deepEqual(harness.worker.lastReadLogsQuery, { fromSeq: undefined, limit: 100 });
 

@@ -38,6 +38,7 @@ export interface InstanceTodoPort {
 
 export interface InstanceGoalPort {
     continuation(ctxId: string, input: GoalContinuationInput): Promise<JsonValue>;
+    list(): Promise<GoalSnapshot[]>;
     stopAll(): Promise<GoalSnapshot[]>;
     manage(ctxId: string, input: GoalManageInput): Promise<GoalSnapshot | undefined>;
     read(ctxId: string): Promise<GoalSnapshot | undefined>;
@@ -51,12 +52,14 @@ export interface InstanceWaitPort {
     consume(waitId: string): Promise<WaitRecord>;
     create(input: WaitCreateInput): Promise<WaitRecord>;
     detach(waitId: string): Promise<WaitRecord>;
+    disableRecovery(waitId: string): Promise<WaitRecord>;
     dismissRecovery(waitId: string, recoveryMessageId: string): Promise<WaitRecord>;
     get(waitId: string): Promise<WaitRecord | undefined>;
     list(taskId?: string): Promise<WaitRecord[]>;
     markRecoveryAttempted(waitId: string, claimId: string): Promise<WaitRecord>;
     markRecoverySent(waitId: string, claimId: string): Promise<WaitRecord>;
     reattach(waitId: string, ownerCallId?: string): Promise<WaitRecord>;
+    rejectRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
     releaseRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
     resolve(waitId: string, result?: JsonValue): Promise<WaitRecord>;
     waitForResolution(waitId: string): Promise<WaitRecord>;

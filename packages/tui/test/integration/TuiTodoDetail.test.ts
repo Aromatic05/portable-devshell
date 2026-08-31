@@ -234,6 +234,7 @@ function createTodoServer(socketPath: string): {
             enabled: true,
             goal: {
                 async continuation() { return {}; },
+                async list() { return []; },
                 async manage() { return undefined; },
                 async read() { return undefined; },
                 async stopAll() { return []; },

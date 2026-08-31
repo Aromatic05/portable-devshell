@@ -392,6 +392,7 @@ function fakeClients(
                 throw new Error("Not used.");
             },
         },
+        goal: { get: async () => ({ goals: [], lastSeq: 3 }) },
         contextMessage: {
             list: async () => [],
             queue: async (_instance, input) => ({

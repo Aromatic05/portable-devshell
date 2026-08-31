@@ -37,6 +37,7 @@ import type {
     InstanceRuntimeEnvelope,
 } from "../dto/instance/DtoInstanceRuntime.js";
 import type { InstanceSnapshot } from "../dto/instance/DtoInstanceSnapshot.js";
+import type { GoalRpcEnvelope } from "../dto/instance/DtoGoal.js";
 import type { TodoReadInput, TodoRpcEnvelope } from "../dto/instance/DtoTodo.js";
 import type {
     OAuthApprovalDecision,
@@ -122,6 +123,9 @@ export interface ControlClients {
     contextMessage: {
         list(instance: string, ctxId?: string): Promise<ContextMessageRecord[]>;
         queue(instance: string, input: ContextMessageQueueInput): Promise<ContextMessageRecord>;
+    };
+    goal: {
+        get(instance: string): Promise<GoalRpcEnvelope>;
     };
     instance: {
         create(draft: InstanceCreateDraft): Promise<InstanceCreateResult>;
@@ -209,6 +213,7 @@ export function createControlClients(
     const reverse = controlClientModule(connection, "reverse");
     const service = controlClientModule(connection, "service");
     const contextMessage = instanceClientModule(connection, "contextMessage");
+    const goal = instanceClientModule(connection, "goal");
     const runtime = instanceClientModule(connection, "runtime");
     const terminal = instanceClientModule(connection, "terminal");
     const todo = instanceClientModule(connection, "todo");
@@ -253,6 +258,9 @@ export function createControlClients(
                     ctxId === undefined ? {} : { ctxId },
                 ),
             queue: (name, input) => contextMessage.request(name, "queue", input),
+        },
+        goal: {
+            get: (name) => goal.request(name, "get"),
         },
         instance: {
             create: (draft) => instance.request("create", draft),

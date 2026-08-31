@@ -10,6 +10,7 @@ export interface TuiOverviewMeterModel {
 
 export interface TuiOverviewInstanceRowModel {
     readonly approvals: number;
+    readonly goals: number;
     readonly connection: string;
     readonly daemon: string;
     readonly focused: boolean;
@@ -51,6 +52,7 @@ export interface TuiOverviewPresentation {
         readonly uptime: string;
     };
     readonly counts: {
+        readonly activeGoals: number;
         readonly activeTodos: number;
         readonly failedCalls24h: number;
         readonly instancesAttention: number;

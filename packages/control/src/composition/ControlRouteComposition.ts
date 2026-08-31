@@ -22,6 +22,7 @@ import { OperationalOverviewService } from "../control/overview/OperationalOverv
 import type { ReverseCredentialService } from "../control/reverse/credential/ReverseCredentialService.js";
 import { createReverseRouteModule } from "../control/reverse/route/ReverseRouteModule.js";
 import { createContextMessageRouteModule } from "../instance/context/ContextMessageRouteModule.js";
+import { createGoalRouteModule } from "../instance/goal/GoalRouteModule.js";
 import { createRuntimeRouteModule } from "../instance/runtime/RuntimeRouteModule.js";
 import { RuntimeSubscriptionManager } from "../instance/runtime/RuntimeSubscriptionManager.js";
 import { createServiceRouteModule } from "../control/service/ServiceRouteModule.js";
@@ -139,6 +140,7 @@ export class ControlRouteComposition {
                         descriptor.name,
                         this.#options.contextAdmin
                     )]),
+                    createGoalRouteModule(descriptor),
                     createTodoRouteModule(descriptor, this.#subscriptions),
                     createToolRouteModule(descriptor),
                     ...(descriptor.terminal === undefined ? [] : [createTerminalRouteModule({

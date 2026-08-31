@@ -25,6 +25,7 @@ it("aggregates read-only todos without assigning operational health", () => {
                     approvals: [],
                     commentCalls: [],
                     contextMessages: [],
+                    goals: [],
                     logs: [],
                     sequence: 4,
                     todo: {

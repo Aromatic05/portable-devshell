@@ -86,10 +86,12 @@ export function isRenderRelevantChange(
     const after = selectedInstanceState(next);
     switch (next.ui.selectedPage) {
         case "overview":
-            return previous.readModel.overview !== next.readModel.overview;
+            return previous.readModel.overview !== next.readModel.overview ||
+                anyInstanceFieldChanged(previous, next, "goals");
         case "instances":
             return anyInstanceFieldChanged(previous, next, "snapshot") ||
                 anyInstanceFieldChanged(previous, next, "approvals") ||
+                anyInstanceFieldChanged(previous, next, "goals") ||
                 previous.readModel.artifactShares !== next.readModel.artifactShares ||
                 previous.readModel.artifactTransfers !== next.readModel.artifactTransfers ||
                 previous.readModel.configView !== next.readModel.configView;
@@ -125,7 +127,7 @@ function selectedInstanceState(state: TuiAppState) {
 function anyInstanceFieldChanged(
     previous: TuiAppState,
     next: TuiAppState,
-    field: "approvals" | "snapshot",
+    field: "approvals" | "goals" | "snapshot",
 ): boolean {
     const names = new Set([
         ...Object.keys(previous.readModel.instanceState),

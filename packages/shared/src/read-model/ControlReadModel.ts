@@ -9,6 +9,7 @@ import type { InstanceEvent } from "../dto/instance/DtoInstanceEvent.js";
 import type { InstanceListEntry } from "../dto/instance/DtoInstanceRuntime.js";
 import type { InstanceLogEntry } from "../dto/instance/DtoInstanceLog.js";
 import type { InstanceSnapshot } from "../dto/instance/DtoInstanceSnapshot.js";
+import type { GoalSnapshot } from "../dto/instance/DtoGoal.js";
 import type { TodoReadInput, TodoReadResult } from "../dto/instance/DtoTodo.js";
 import type { OAuthApprovalRequest } from "../dto/oauth/DtoOAuthApproval.js";
 import type { OperationalOverview } from "../dto/overview/DtoOperationalOverview.js";
@@ -23,6 +24,7 @@ export type ControlInstanceReadKey =
     | "snapshot"
     | "logs"
     | "approvals"
+    | "goals"
     | "todo"
     | "toolCalls"
     | "comments";
@@ -31,6 +33,7 @@ export interface ControlInstanceReadState {
     approvals: ApprovalRequest[];
     commentCalls: ToolCallRecord[];
     contextMessages: ContextMessageRecord[];
+    goals: GoalSnapshot[];
     logs: InstanceLogEntry[];
     sequence: number;
     snapshot?: InstanceSnapshot;
@@ -78,6 +81,7 @@ type InstanceReadValue =
     | InstanceSnapshot
     | InstanceLogEntry[]
     | ApprovalRequest[]
+    | GoalSnapshot[]
     | TodoReadResult
     | ToolCallRecord[]
     | { commentCalls: ToolCallRecord[]; contextMessages: ContextMessageRecord[] }
@@ -96,6 +100,7 @@ const instanceKeys: readonly ControlInstanceReadKey[] = [
     "snapshot",
     "logs",
     "approvals",
+    "goals",
     "todo",
     "toolCalls",
     "comments",
@@ -472,6 +477,8 @@ export class ControlReadModel {
                 return (await this.#clients.runtime.readLogs(instance, { limit: 100 })).slice(-100);
             case "approvals":
                 return await this.#clients.tool.listApprovals(instance);
+            case "goals":
+                return (await this.#clients.goal.get(instance)).goals;
             case "todo":
                 return (await this.#clients.todo.get(instance, todoInput)).todo;
             case "toolCalls":
@@ -512,6 +519,9 @@ export class ControlReadModel {
                 return;
             case "approvals":
                 state.approvals = this.#filterToolApprovals(instance, value as ApprovalRequest[]);
+                return;
+            case "goals":
+                state.goals = value as GoalSnapshot[];
                 return;
             case "todo":
                 state.todo = value as TodoReadResult;
@@ -802,6 +812,7 @@ export class ControlReadModel {
             approvals: [],
             commentCalls: [],
             contextMessages: [],
+            goals: [],
             logs: [],
             sequence: 1,
             toolCalls: [],
@@ -878,6 +889,7 @@ function snapshotState(state: ControlReadModelState): ControlReadModelState {
                 approvals: [...value.approvals],
                 commentCalls: [...value.commentCalls],
                 contextMessages: [...value.contextMessages],
+                goals: [...value.goals],
                 logs: [...value.logs],
                 toolCalls: [...value.toolCalls],
             }]),
@@ -891,6 +903,7 @@ function keysForEvent(event: InstanceEvent): ControlInstanceReadKey[] {
     if (event.type.startsWith("instance.")) keys.push("snapshot");
     if (event.type === "log.appended") keys.push("logs");
     if (event.type.startsWith("approval.")) keys.push("approvals");
+    if (event.type.startsWith("goal.")) keys.push("goals");
     if (event.type.startsWith("todo.")) keys.push("todo");
     if (event.type.startsWith("toolCall.")) keys.push("toolCalls", "comments");
     if (event.type.startsWith("context.message.")) keys.push("comments");

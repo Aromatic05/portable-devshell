@@ -10,6 +10,7 @@ import type {
 export function createTestGoalPort(): InstanceGoalPort {
     return {
         async continuation() { return {}; },
+        async list() { return []; },
         async manage() { return undefined; },
         async read() { return undefined; },
         async stopAll() { return []; },
