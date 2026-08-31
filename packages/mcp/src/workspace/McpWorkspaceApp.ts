@@ -99,15 +99,19 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var App = McpApps.App;
   var app = new App(
     { name: "portable-devshell-workspace", version: "0.6.8" },
-    { availableDisplayModes: ["inline", "pip", "fullscreen"] }
+    { availableDisplayModes: ["inline", "pip", "fullscreen"] },
+    { autoResize: false }
   );
   var ctxId = "";
   var appToken = "";
   var liveBaseUrl = "";
+  var liveTransportRetryAt = 0;
   var liveAuthorizationEstablished = false;
   var initialized = false;
   var snapshot = null;
   var cursor = 0;
+  var snapshotRequestSerial = 0;
+  var lastAppliedSnapshotSerial = 0;
   var watchGeneration = 0;
   var watchStarted = false;
   var reconnectOnStart = false;
@@ -116,8 +120,16 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var confirmingTaskCancel = new Map();
   var expandedQuestions = new Set();
   var WIDGET_STATE_KEY = "portableDevshellWorkspace";
+  var HOST_CONNECT_TIMEOUT_MS = 3000;
+  var HOST_REQUEST_TIMEOUT_MS = 5000;
+  var APP_TOOL_TIMEOUT_MS = 30000;
+  var LIVE_START_RETRY_MS = 1000;
   var LIVE_SNAPSHOT_TIMEOUT_MS = 5000;
   var LIVE_WATCH_TIMEOUT_MS = 30000;
+  var LIVE_TRANSPORT_BACKOFF_MS = 30000;
+  var DISPLAY_MODE_TIMEOUT_MS = 1000;
+  var DISPLAY_MODE_RETRY_MS = 750;
+  var DISPLAY_MODE_MAX_RETRIES = 2;
   var RECOVERY_MESSAGE_SUFFIX = " THIS IS A WORK RESUMPTION EVENT, NOT A CHAT MESSAGE. Do not reply with an acknowledgement, plan, status update, or a statement that you will continue. Immediately read the current Workspace state and the triggering result, then execute the next required action in this same turn. Do not repeat completed work or restart an existing tmux task. If the result is still required and an existing task is still running, re-enter a real blocking wait on that task instead of ending the turn. If a blocked Workspace Goal can now proceed, call workspace_goal with action=resume and continue executing it. You may end the turn only after the Goal is finished, progress genuinely requires user input and the Goal is blocked, or you have entered a real blocking wait.";
   var bridgeReady = false;
   var pendingToolResult = null;
@@ -127,6 +139,21 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var goalContinuationClaimId = "";
   var automaticMessageInFlight = false;
   var heldReentryClaimId = "";
+  var hostBridgeGeneration = 0;
+  var modelContextEpoch = 0;
+  var modelContextSyncController = null;
+  var modelContextUpdateTail = Promise.resolve();
+  var sizeChangedCleanup = null;
+  var connectRetryTimer = null;
+  var liveStartRetryTimer = null;
+  var displayModeRetryTimer = null;
+  var displayModeRetryCount = 0;
+  var presentationGeneration = 0;
+  var displayModeRequestGeneration = 0;
+  var presentationClaimPending = false;
+  var bridgeConnecting = false;
+  var bridgeResetting = false;
+  var shuttingDown = false;
 
   function escapeHtml(value) {
     return String(value == null ? "" : value)
@@ -144,15 +171,20 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     var input = Object.assign({}, args || {});
     input.ctxId = requestCtxId;
     if (requiresToken) input.token = requestToken;
+    var options = { timeout: APP_TOOL_TIMEOUT_MS };
+    if (signal) options.signal = signal;
     return app.callServerTool(
       { name: name, arguments: input },
-      signal ? { signal: signal } : undefined
+      options
     ).then(function (result) {
       if (ctxId !== requestCtxId || appToken !== requestToken || liveBaseUrl !== requestLiveBaseUrl) {
         throw new Error("Workspace Context changed while the request was in flight");
       }
       acceptMeta(result && result._meta, true);
       return result;
+    }).catch(function (error) {
+      if (!(signal && signal.aborted) && hostBridgeTransportFailure(error)) void resetHostBridge();
+      throw error;
     });
   }
 
@@ -213,7 +245,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         if (workspaceContextExpired(responseError) || workspaceContextDisabled(responseError)) {
           throw new Error(responseError);
         }
-        throw new Error("Workspace App authorization is invalid for the current Context.");
+        throw new Error("Live Workspace transport rejected authorization");
       }
       throw new Error("Live Workspace transport failed with HTTP " + response.status);
     }
@@ -222,7 +254,22 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       throw new Error("Live Workspace request became stale");
     }
     liveAuthorizationEstablished = true;
+    liveTransportRetryAt = 0;
     return value;
+  }
+
+  function directLiveAvailable() {
+    return !!liveBaseUrl && Date.now() >= liveTransportRetryAt;
+  }
+
+  function suppressLiveTransport() {
+    liveTransportRetryAt = Date.now() + LIVE_TRANSPORT_BACKOFF_MS;
+  }
+
+  function setLiveBaseUrl(value) {
+    var next = value ? String(value).replace(/\/$/, "") : "";
+    if (next !== liveBaseUrl) liveTransportRetryAt = 0;
+    liveBaseUrl = next;
   }
 
   async function readLiveSnapshot(signal) {
@@ -239,7 +286,9 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     if (liveAuthorizationEstablished && authoritative !== true) return;
     appToken = String(hidden.token);
     if (typeof hidden.liveBaseUrl === "string" && hidden.liveBaseUrl) {
-      liveBaseUrl = String(hidden.liveBaseUrl).replace(/\/$/, "");
+      setLiveBaseUrl(hidden.liveBaseUrl);
+    } else if (authoritative === true) {
+      setLiveBaseUrl("");
     }
     if (authoritative === true) liveAuthorizationEstablished = true;
     persistWorkspaceHint();
@@ -332,7 +381,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         ? String(previousHint.token)
         : "";
     var persistedToken = appToken || retainedToken;
-    var retainedLiveBaseUrl = !liveBaseUrl && previousHint && String(previousHint.ctxId || "") === ctxId &&
+    var retainedLiveBaseUrl = !liveAuthorizationEstablished && !liveBaseUrl && previousHint && String(previousHint.ctxId || "") === ctxId &&
       typeof previousHint.liveBaseUrl === "string" && previousHint.liveBaseUrl
         ? String(previousHint.liveBaseUrl)
         : "";
@@ -356,11 +405,13 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     if (ctxId && ctxId !== nextCtxId && liveAuthorizationEstablished) return false;
     if (ctxId && ctxId !== nextCtxId) {
       watchGeneration += 1;
+      if (liveAbortController) liveAbortController.abort();
+      liveAbortController = null;
       watchStarted = false;
       snapshot = null;
       cursor = 0;
       appToken = "";
-      liveBaseUrl = "";
+      setLiveBaseUrl("");
       liveAuthorizationEstablished = false;
     }
     ctxId = nextCtxId;
@@ -370,7 +421,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
 
   function activateCtxId(value) {
     var assigned = assignCtxId(value);
-    if (assigned && initialized) void startLive();
+    if (assigned && initialized) void ensureLiveStarted();
     return assigned;
   }
 
@@ -380,7 +431,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     if (!initial || !initial.ctxId) return false;
     var assigned = assignCtxId(initial.ctxId);
     acceptMeta(result._meta, false);
-    if (assigned && initialized) void startLive();
+    if (assigned && initialized) void ensureLiveStarted();
     return assigned;
   }
 
@@ -397,10 +448,10 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       appToken = String(hint.token);
     }
     if (
-      hint && hint.ctxId && String(hint.ctxId) === ctxId &&
+      !liveAuthorizationEstablished && hint && hint.ctxId && String(hint.ctxId) === ctxId &&
       typeof hint.liveBaseUrl === "string" && hint.liveBaseUrl
     ) {
-      liveBaseUrl = String(hint.liveBaseUrl).replace(/\/$/, "");
+      setLiveBaseUrl(hint.liveBaseUrl);
     }
     return configured || !!ctxId;
   }
@@ -438,15 +489,44 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   }
 
   async function syncModelContext(extra) {
-    if (!initialized || !snapshot) return;
+    if (!initialized || !snapshot || automaticMessageInFlight) return;
+    var epoch = modelContextEpoch;
+    var controller = new AbortController();
+    modelContextSyncController = controller;
     try {
-      await app.updateModelContext(modelContext(extra));
-    } catch (_) {}
+      await updateHostModelContext(modelContext(extra), {
+        ordinaryEpoch: epoch,
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (!controller.signal.aborted && hostBridgeTransportFailure(error)) void resetHostBridge();
+    } finally {
+      if (modelContextSyncController === controller) modelContextSyncController = null;
+    }
   }
 
   async function requireModelContext(extra) {
     if (!initialized || !snapshot) throw new Error("Workspace state is unavailable for model re-entry");
-    await app.updateModelContext(modelContext(extra));
+    await updateHostModelContext(modelContext(extra));
+  }
+
+  async function updateHostModelContext(value, options) {
+    var generation = hostBridgeGeneration;
+    var operation = modelContextUpdateTail.then(async function () {
+      if (options && Number.isSafeInteger(options.ordinaryEpoch) && options.ordinaryEpoch !== modelContextEpoch) return;
+      if (generation !== hostBridgeGeneration || !initialized || !bridgeReady) {
+        throw new Error("Host bridge changed before model context delivery");
+      }
+      var requestOptions = { timeout: HOST_REQUEST_TIMEOUT_MS };
+      if (options && options.signal) requestOptions.signal = options.signal;
+      return await app.updateModelContext(value, requestOptions);
+    });
+    modelContextUpdateTail = operation.then(function () {}, function () {});
+    return await operation;
+  }
+
+  async function sendHostMessage(value) {
+    return await app.sendMessage(value, { timeout: HOST_REQUEST_TIMEOUT_MS });
   }
 
   function newReentryClaimId() {
@@ -455,6 +535,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   }
 
   function automaticReentryAvailable() {
+    if (!initialized || !bridgeReady || bridgeResetting || shuttingDown) return false;
     var reentry = snapshot && snapshot.reentry;
     if (!reentry) return true;
     if (reentry.suppressedAt) return false;
@@ -482,6 +563,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       return { status: "blocked" };
     }
     automaticMessageInFlight = true;
+    modelContextEpoch += 1;
+    if (modelContextSyncController) modelContextSyncController.abort("automatic model re-entry");
     var claimId = newReentryClaimId();
     var messageDispatched = false;
     try {
@@ -518,7 +601,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         return { claimId: claimId, status: "blocked" };
       }
       messageDispatched = true;
-      var result = await app.sendMessage({
+      var result = await sendHostMessage({
         role: "user",
         content: [{ type: "text", text: text }]
       });
@@ -526,6 +609,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     } catch (error) {
       console.error(error);
       return {
+        bridgeFailure: hostBridgeTransportFailure(error),
         claimId: heldReentryClaimId === claimId ? claimId : undefined,
         error: error instanceof Error ? error.message : String(error),
         status: messageDispatched ? "uncertain" : "blocked"
@@ -700,6 +784,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       goalContinuationClaimId = "";
       render();
       scheduleGoalContinuation(0);
+      if (outcome && outcome.bridgeFailure) await resetHostBridge();
     }
   }
 
@@ -794,6 +879,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       if (outcome && outcome.claimId && outcome.status !== "uncertain") await releaseAutomaticMessage(outcome.claimId);
       if (outcome && outcome.status === "uncertain" && heldReentryClaimId === outcome.claimId) heldReentryClaimId = "";
       throw error;
+    } finally {
+      if (outcome && outcome.bridgeFailure) await resetHostBridge();
     }
   }
 
@@ -825,13 +912,25 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     }
   }
 
-  async function applySnapshot(nextSnapshot, allowRecovery) {
+  async function applySnapshot(nextSnapshot, allowRecovery, requestSerial) {
     if (nextSnapshot && nextSnapshot.ctxId && ctxId && String(nextSnapshot.ctxId) !== ctxId) {
       throw new Error("Workspace snapshot belongs to a different Context");
     }
+    var nextCursor = nextSnapshot && Number.isSafeInteger(nextSnapshot.cursor)
+      ? nextSnapshot.cursor
+      : undefined;
+    if (nextCursor !== undefined && nextCursor < cursor) return false;
+    if (
+      nextCursor !== undefined && nextCursor === cursor && Number.isSafeInteger(requestSerial) &&
+      requestSerial < lastAppliedSnapshotSerial
+    ) return false;
+    if (nextCursor === undefined && Number.isSafeInteger(requestSerial) && requestSerial < lastAppliedSnapshotSerial) return false;
     snapshot = nextSnapshot;
     if (snapshot && snapshot.ctxId) ctxId = String(snapshot.ctxId);
     if (snapshot && Number.isSafeInteger(snapshot.cursor)) cursor = snapshot.cursor;
+    if (Number.isSafeInteger(requestSerial)) {
+      lastAppliedSnapshotSerial = Math.max(lastAppliedSnapshotSerial, requestSerial);
+    }
     reconcileTaskCancelConfirmations();
     persistWorkspaceHint();
     render();
@@ -840,21 +939,25 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     if (allowRecovery !== false) void recoverDetachedWait();
   }
 
-  async function refresh(allowRecovery) {
-    if (!initialized || !ctxId) return;
+  async function refresh(allowRecovery, generation, signal) {
+    if (!initialized || !ctxId || (generation !== undefined && generation !== watchGeneration) || (signal && signal.aborted)) return;
+    var requestSerial = ++snapshotRequestSerial;
     try {
       var nextSnapshot;
-      if (liveBaseUrl) {
+      if (directLiveAvailable()) {
         try {
-          nextSnapshot = await readLiveSnapshot();
+          nextSnapshot = await readLiveSnapshot(signal);
         } catch (error) {
+          if (signal && signal.aborted) throw error;
           if (workspaceTerminalStatus(error)) throw error;
-          nextSnapshot = structured(await callTool("workspace_snapshot", {}, true));
+          suppressLiveTransport();
+          nextSnapshot = structured(await callTool("workspace_snapshot", {}, true, signal));
         }
       } else {
-        nextSnapshot = structured(await callTool("workspace_snapshot", {}, true));
+        nextSnapshot = structured(await callTool("workspace_snapshot", {}, true, signal));
       }
-      await applySnapshot(nextSnapshot, allowRecovery);
+      if ((generation !== undefined && generation !== watchGeneration) || (signal && signal.aborted)) return;
+      await applySnapshot(nextSnapshot, allowRecovery, requestSerial);
       status.textContent = "";
     } catch (error) {
       status.textContent = workspaceTerminalStatus(error) || "Reconnecting";
@@ -862,10 +965,12 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     }
   }
 
-  async function reconnectWorkspace() {
-    if (!initialized || !ctxId) return;
-    var result = await callTool("workspace_reconnect", {}, true);
-    await applySnapshot(structured(result), true);
+  async function reconnectWorkspace(generation, signal) {
+    if (!initialized || !ctxId || (generation !== undefined && generation !== watchGeneration) || (signal && signal.aborted)) return;
+    var requestSerial = ++snapshotRequestSerial;
+    var result = await callTool("workspace_reconnect", {}, true, signal);
+    if ((generation !== undefined && generation !== watchGeneration) || (signal && signal.aborted)) return;
+    await applySnapshot(structured(result), true, requestSerial);
     status.textContent = "";
   }
 
@@ -891,32 +996,99 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return "";
   }
 
+  function hostBridgeTransportFailure(error) {
+    var code = error && typeof error.code === "number" ? error.code : undefined;
+    return code === -32000 || code === -32001;
+  }
+
+  function invalidateHostBridgeGeneration() {
+    hostBridgeGeneration += 1;
+    modelContextEpoch += 1;
+    if (modelContextSyncController) modelContextSyncController.abort("Host bridge changed");
+  }
+
+  async function resetHostBridge() {
+    if (shuttingDown || bridgeResetting) return;
+    bridgeResetting = true;
+    invalidateHostBridgeGeneration();
+    bridgeReady = false;
+    reconnectOnStart = true;
+    status.textContent = "Reconnecting";
+    stopHostSizeTracking();
+    stopLive();
+    try {
+      await app.close();
+    } catch (_) {
+    } finally {
+      bridgeResetting = false;
+      scheduleConnectRetry();
+    }
+  }
+
+  function scheduleConnectRetry() {
+    if (shuttingDown || bridgeReady || connectRetryTimer) return;
+    connectRetryTimer = setTimeout(function () {
+      connectRetryTimer = null;
+      void connect();
+    }, LIVE_START_RETRY_MS);
+  }
+
+  function scheduleLiveStartRetry(error) {
+    var terminalStatus = workspaceTerminalStatus(error);
+    if (terminalStatus) {
+      status.textContent = terminalStatus;
+      return;
+    }
+    status.textContent = "Reconnecting";
+    if (shuttingDown || !initialized || !ctxId || liveStartRetryTimer) return;
+    liveStartRetryTimer = setTimeout(function () {
+      liveStartRetryTimer = null;
+      void ensureLiveStarted();
+    }, LIVE_START_RETRY_MS);
+  }
+
+  async function ensureLiveStarted() {
+    if (shuttingDown || !initialized || !ctxId) return;
+    if (liveStartRetryTimer) {
+      clearTimeout(liveStartRetryTimer);
+      liveStartRetryTimer = null;
+    }
+    try {
+      await startLive();
+    } catch (error) {
+      console.error(error);
+      scheduleLiveStartRetry(error);
+    }
+  }
+
   function sleep(milliseconds) {
     return new Promise(function (resolve) { setTimeout(resolve, milliseconds); });
   }
 
-  async function watch() {
-    var generation = ++watchGeneration;
+  async function watch(generation) {
     while (generation === watchGeneration) {
+      var requestSerial = ++snapshotRequestSerial;
       var controller = new AbortController();
       liveAbortController = controller;
       try {
         var update;
-        if (liveBaseUrl) {
+        if (directLiveAvailable()) {
           try {
             update = await readLiveWatch(controller.signal);
           } catch (error) {
             if (controller.signal.aborted) throw error;
             if (workspaceTerminalStatus(error)) throw error;
+            suppressLiveTransport();
             update = structured(await callTool("workspace_watch", { cursor: cursor }, true, controller.signal)) || {};
           }
         } else {
           update = structured(await callTool("workspace_watch", { cursor: cursor }, true, controller.signal)) || {};
         }
         if (generation !== watchGeneration) return;
-        if (Number.isSafeInteger(update.cursor)) cursor = update.cursor;
         if (update.snapshot) {
-          await applySnapshot(update.snapshot, true);
+          await applySnapshot(update.snapshot, true, requestSerial);
+        } else if (Number.isSafeInteger(update.cursor) && update.cursor > cursor) {
+          cursor = update.cursor;
         }
         status.textContent = "";
       } catch (error) {
@@ -932,7 +1104,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         } else {
           await sleep(1000);
           if (generation !== watchGeneration) return;
-          try { await refresh(); } catch (_) {}
+          try { await refresh(undefined, generation, controller.signal); } catch (_) {}
         }
       } finally {
         if (liveAbortController === controller) liveAbortController = null;
@@ -947,18 +1119,25 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       return;
     }
     watchStarted = true;
+    var generation = ++watchGeneration;
+    var controller = new AbortController();
+    liveAbortController = controller;
     try {
       if (reconnectOnStart) {
         reconnectOnStart = false;
-        if (liveBaseUrl) await refresh();
-        else await reconnectWorkspace();
+        if (directLiveAvailable()) await refresh(undefined, generation, controller.signal);
+        else await reconnectWorkspace(generation, controller.signal);
       } else {
-        await refresh();
+        await refresh(undefined, generation, controller.signal);
       }
-      void watch();
+      if (generation !== watchGeneration || controller.signal.aborted || !initialized || !watchStarted) return;
+      if (liveAbortController === controller) liveAbortController = null;
+      void watch(generation);
     } catch (error) {
-      watchStarted = false;
+      if (generation === watchGeneration) watchStarted = false;
       throw error;
+    } finally {
+      if (liveAbortController === controller) liveAbortController = null;
     }
   }
 
@@ -998,12 +1177,33 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
 
   function stopLive() {
     watchGeneration += 1;
+    presentationGeneration += 1;
     if (liveAbortController) liveAbortController.abort();
     liveAbortController = null;
     if (goalTimer) clearTimeout(goalTimer);
     goalTimer = null;
+    if (connectRetryTimer) clearTimeout(connectRetryTimer);
+    connectRetryTimer = null;
+    if (liveStartRetryTimer) clearTimeout(liveStartRetryTimer);
+    liveStartRetryTimer = null;
+    if (displayModeRetryTimer) clearTimeout(displayModeRetryTimer);
+    displayModeRetryTimer = null;
+    displayModeRetryCount = 0;
+    displayModeRequestGeneration = 0;
+    presentationClaimPending = false;
     watchStarted = false;
     initialized = false;
+  }
+
+  function stopHostSizeTracking() {
+    if (!sizeChangedCleanup) return;
+    try { sizeChangedCleanup(); } catch (_) {}
+    sizeChangedCleanup = null;
+  }
+
+  function startHostSizeTracking() {
+    stopHostSizeTracking();
+    try { sizeChangedCleanup = app.setupSizeChangedNotifications(); } catch (_) {}
   }
 
   app.ontoolinput = function (params) {
@@ -1015,40 +1215,106 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     status.textContent = "";
     if (initialized && userCancelledTool(params)) {
       void yieldAutomaticReentry(params && params.reason ? String(params.reason) : "user action").finally(function () {
-        void startLive();
+        void ensureLiveStarted();
       });
     } else if (initialized) {
-      void startLive();
+      void ensureLiveStarted();
     }
   };
   app.onhostcontextchanged = function (context) {
     applyHostContext(context);
-    if (initialized) void requestPreferredDisplayMode(context);
+    if (initialized && presentationClaimPending) void requestPreferredDisplayMode(true, presentationGeneration);
+  };
+  app.onclose = function () {
+    if (shuttingDown || bridgeResetting) return;
+    invalidateHostBridgeGeneration();
+    stopHostSizeTracking();
+    bridgeReady = false;
+    reconnectOnStart = true;
+    status.textContent = "Reconnecting";
+    stopLive();
+    scheduleConnectRetry();
   };
   app.onteardown = async function () {
+    shuttingDown = true;
+    stopHostSizeTracking();
     stopLive();
     return {};
   };
 
-  async function requestPreferredDisplayMode(context, force) {
+  async function requestPreferredDisplayMode(force, generation) {
+    var requestGeneration = Number.isSafeInteger(generation) ? generation : presentationGeneration;
+    if (shuttingDown || requestGeneration !== presentationGeneration || displayModeRequestGeneration === requestGeneration) return;
     try {
-      var hostContext = asRecord(context) || asRecord(app.getHostContext());
-      var modes = hostContext && Array.isArray(hostContext.availableDisplayModes)
+      var hostContext = asRecord(app.getHostContext()) || {};
+      var hasModes = Array.isArray(hostContext.availableDisplayModes);
+      var modes = hasModes
         ? hostContext.availableDisplayModes
         : [];
-      if (hostContext && modes.indexOf("pip") >= 0 && (force === true || hostContext.displayMode !== "pip")) {
-        await app.requestDisplayMode({ mode: "pip" });
+      if (!hasModes) return;
+      if (modes.indexOf("pip") < 0) {
+        presentationClaimPending = false;
+        return;
       }
-    } catch (_) {}
+      if (hostContext.displayMode === "pip" && force !== true) {
+        presentationClaimPending = false;
+        displayModeRetryCount = 0;
+        if (displayModeRetryTimer) clearTimeout(displayModeRetryTimer);
+        displayModeRetryTimer = null;
+        return;
+      }
+      if (modes.indexOf("pip") >= 0 && (force === true || hostContext.displayMode !== "pip")) {
+        displayModeRequestGeneration = requestGeneration;
+        var result = await app.requestDisplayMode(
+          { mode: "pip" },
+          { timeout: DISPLAY_MODE_TIMEOUT_MS }
+        );
+        if (result && result.mode === "pip") {
+          if (requestGeneration !== presentationGeneration) return;
+          presentationClaimPending = false;
+          displayModeRetryCount = 0;
+          if (displayModeRetryTimer) clearTimeout(displayModeRetryTimer);
+          displayModeRetryTimer = null;
+        } else {
+          scheduleDisplayModeRetry(requestGeneration);
+        }
+      }
+    } catch (_) {
+      scheduleDisplayModeRetry(requestGeneration);
+    } finally {
+      if (displayModeRequestGeneration === requestGeneration) displayModeRequestGeneration = 0;
+    }
+  }
+
+  function scheduleDisplayModeRetry(generation) {
+    if (generation !== presentationGeneration || shuttingDown || !bridgeReady || !initialized || !presentationClaimPending || displayModeRetryTimer) return;
+    if (displayModeRetryCount >= DISPLAY_MODE_MAX_RETRIES) {
+      presentationClaimPending = false;
+      return;
+    }
+    displayModeRetryCount += 1;
+    displayModeRetryTimer = setTimeout(function () {
+      displayModeRetryTimer = null;
+      void requestPreferredDisplayMode(true, generation);
+    }, DISPLAY_MODE_RETRY_MS * displayModeRetryCount);
   }
 
   async function connect() {
+    if (shuttingDown || bridgeReady || bridgeConnecting) return;
+    bridgeConnecting = true;
     try {
-      await app.connect();
+      await app.connect(undefined, { timeout: HOST_CONNECT_TIMEOUT_MS });
+      startHostSizeTracking();
       applyHostContext(app.getHostContext());
-      await requestPreferredDisplayMode(app.getHostContext(), true);
       bridgeReady = true;
       initialized = true;
+      presentationGeneration += 1;
+      var presentationEpoch = presentationGeneration;
+      displayModeRetryCount = 0;
+      presentationClaimPending = true;
+      if (connectRetryTimer) clearTimeout(connectRetryTimer);
+      connectRetryTimer = null;
+      void requestPreferredDisplayMode(true, presentationEpoch);
       var initialResult = await waitForInitialToolResult(300);
       if (initialResult) acceptToolResult(initialResult);
       else {
@@ -1059,10 +1325,13 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         status.textContent = "Waiting for Workspace context";
         return;
       }
-      await startLive();
+      await ensureLiveStarted();
     } catch (error) {
-      status.textContent = workspaceTerminalStatus(error) || "Host bridge unavailable";
+      status.textContent = "Host bridge unavailable";
       console.error(error);
+      scheduleConnectRetry();
+    } finally {
+      bridgeConnecting = false;
     }
   }
 
@@ -1091,8 +1360,12 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
 
   async function sendExplicitResume(text, extra, canSend) {
     var outcome = await sendModelMessage(text, extra, canSend);
-    if (outcome && outcome.claimId && outcome.status !== "uncertain") {
-      await releaseAutomaticMessage(outcome.claimId);
+    try {
+      if (outcome && outcome.claimId && outcome.status !== "uncertain") {
+        await releaseAutomaticMessage(outcome.claimId);
+      }
+    } finally {
+      if (outcome && outcome.bridgeFailure) await resetHostBridge();
     }
     if (outcome && outcome.status === "rejected") status.textContent = "Host rejected model resume";
     if (outcome && outcome.status === "uncertain") status.textContent = "Resume delivery uncertain";
@@ -1416,9 +1689,10 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   window.addEventListener("openai:set_globals", function (event) {
     var detail = event && event.detail;
     reconnectOnStart = true;
-    if (configureFromOpenAiGlobals(detail && detail.globals) && initialized) void startLive();
+    if (configureFromOpenAiGlobals(detail && detail.globals) && initialized) void ensureLiveStarted();
   });
   window.addEventListener("beforeunload", function () {
+    shuttingDown = true;
     stopLive();
     void app.close();
   });
