@@ -23,14 +23,14 @@ export async function readWorkspaceSnapshot(
     const workspaceGateway = isMcpWorkspaceGateway(gateway) ? gateway : undefined;
     const goalGateway = isMcpGoalGateway(gateway) ? gateway : undefined;
     const instances = [...new Set([instanceName, ...(options.instances ?? [])])];
-    const [todo, waits, eventSlice, goal, approvalSlices, toolCallSlices] = await Promise.all([
+    const eventSlice = await (workspaceGateway?.readWorkspaceEvents(instanceName, Number.MAX_SAFE_INTEGER) ?? Promise.resolve({
+        events: [],
+        gap: false,
+        lastSeq: 0,
+    }));
+    const [todo, waits, goal, approvalSlices, toolCallSlices] = await Promise.all([
         gateway.readTodo(instanceName),
         gateway.listWaits(instanceName),
-        workspaceGateway?.readWorkspaceEvents(instanceName, Number.MAX_SAFE_INTEGER) ?? {
-            events: [],
-            gap: false,
-            lastSeq: 0,
-        },
         goalGateway?.readGoal(instanceName, ctxId),
         Promise.allSettled(instances.map(async (instance) => await gateway.listApprovals(instance))),
         Promise.allSettled(instances.map(async (instance) => await (workspaceGateway?.readToolCalls(instance, ctxId, 64) ?? []))),

@@ -363,8 +363,12 @@ export class McpEndpointHandlerInteraction {
         }
         const ctxId = requireCtxId(context);
         const token = await this.#assertAppToken(input, context);
-        const startedAt = Date.now();
-        const heartbeatMs = this.options.watchHeartbeatMs ?? 20_000;
+        const startedAt = this.options.now?.() ?? Date.now();
+        const instances = await this.#contextInstances(ctxId);
+        const configuredHeartbeatMs = this.options.watchHeartbeatMs ?? 20_000;
+        const heartbeatMs = instances.length > 1
+            ? Math.min(configuredHeartbeatMs, 1_000)
+            : configuredHeartbeatMs;
         const pollMs = this.options.watchPollMs ?? 250;
         let cursor = readWorkspaceCursor(input);
         this.#beginWorkspaceWatch(ctxId);
@@ -380,7 +384,7 @@ export class McpEndpointHandlerInteraction {
                         snapshot: await this.#workspaceSnapshot(gateway, ctxId),
                     });
                 }
-                if (Date.now() - startedAt >= heartbeatMs) {
+                if ((this.options.now?.() ?? Date.now()) - startedAt >= heartbeatMs) {
                     return this.#workspaceResult(ctxId, token, {
                         changed: false,
                         cursor,

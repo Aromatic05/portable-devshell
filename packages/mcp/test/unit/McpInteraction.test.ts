@@ -535,6 +535,71 @@ test("Workspace snapshot aggregates remote Context activity and approvals", asyn
     assert.deepEqual(snapshot.approvals?.map((approval) => approval.approvalId), ["approval-remote"]);
 });
 
+test("Workspace snapshot never advances its cursor past state collected afterward", async () => {
+    const fake = createInteractionGateway();
+    let eventSeq = 5;
+    let snapshotPhase = false;
+    Object.assign(fake.gateway, {
+        async readToolCalls() { return []; },
+        async readTodo() {
+            if (snapshotPhase) eventSeq = 6;
+            return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks: [] };
+        },
+        async readWorkspaceEvents(_instance: string, fromSeq: number) {
+            if (fromSeq === Number.MAX_SAFE_INTEGER) {
+                await new Promise<void>((resolve) => setImmediate(resolve));
+            }
+            return { events: [], gap: false, lastSeq: eventSeq };
+        },
+    });
+    const handler = new McpEndpointHandlerInteraction({
+        gateway: fake.gateway,
+        instanceName: "demo",
+    });
+    const token = await openWorkspace(handler);
+    snapshotPhase = true;
+
+    const result = await handler.call("workspace_snapshot", { token }, context, "call-conservative-cursor");
+    assert.ok(result instanceof McpNativeToolResult);
+    const snapshot = result.structuredContent as { cursor?: number };
+    assert.equal(snapshot.cursor, 5);
+});
+
+test("workspace_watch reconciles multi-instance Contexts within one second even on MCP fallback", async () => {
+    const fake = createInteractionGateway();
+    const registry = new McpContextRegistry({ idFactory: () => context.ctxId! });
+    await registry.create({ instance: "demo", principal: "tester", workspace: "/local" });
+    await registry.attachEnvironment(context.ctxId!, { instance: "remote", workspace: "/remote" });
+    let now = 0;
+    let watchReads = 0;
+    Object.assign(fake.gateway, {
+        async readToolCalls() { return []; },
+        async readWorkspaceEvents(_instance: string, fromSeq: number) {
+            if (fromSeq !== Number.MAX_SAFE_INTEGER) {
+                watchReads += 1;
+                now += 1_000;
+            }
+            return { events: [], gap: false, lastSeq: 0 };
+        },
+    });
+    const handler = new McpEndpointHandlerInteraction({
+        contextRegistry: registry,
+        gateway: fake.gateway,
+        instanceName: "demo",
+        now: () => now,
+        watchHeartbeatMs: 60_000,
+        watchPollMs: 1,
+    });
+    const token = await openWorkspace(handler);
+
+    const result = await handler.call("workspace_watch", { cursor: 0, token }, context, "call-multi-watch");
+    assert.ok(result instanceof McpNativeToolResult);
+    const update = result.structuredContent as { changed?: boolean; snapshot?: unknown };
+    assert.equal(update.changed, false);
+    assert.notEqual(update.snapshot, undefined);
+    assert.equal(watchReads, 1);
+});
+
 test("Workspace currentEvent keeps human actions FIFO and ignores tmux waits", async () => {
     const fake = createInteractionGateway();
     fake.waits.push(
