@@ -294,6 +294,23 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     persistWorkspaceHint();
   }
 
+  function workspaceCapabilityMeta(meta) {
+    var hidden = meta && meta["portable-devshell/workspace"];
+    return hidden && hidden.token ? meta : null;
+  }
+
+  function chatGptToolResultMeta(resultCtxId) {
+    var openai = asRecord(window.openai);
+    if (!openai) return null;
+    var output = asRecord(openai.toolOutput);
+    if (!output || String(output.ctxId || "") !== String(resultCtxId)) return null;
+    var metadata = asRecord(openai.toolResponseMetadata);
+    var envelope = metadata && (asRecord(metadata.mcp_tool_result) || asRecord(metadata.call_tool_result));
+    var envelopeOutput = asRecord(envelope && envelope.structuredContent);
+    if (envelopeOutput && envelopeOutput.ctxId && String(envelopeOutput.ctxId) !== String(resultCtxId)) return null;
+    return workspaceCapabilityMeta(envelope && envelope._meta) || workspaceCapabilityMeta(metadata);
+  }
+
   function asRecord(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : null;
   }
@@ -430,7 +447,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     var initial = asRecord(result.structuredContent);
     if (!initial || !initial.ctxId) return false;
     var assigned = assignCtxId(initial.ctxId);
-    acceptMeta(result._meta, false);
+    var resultMeta = workspaceCapabilityMeta(result._meta);
+    acceptMeta(resultMeta || chatGptToolResultMeta(initial.ctxId), false);
     if (assigned && initialized) void ensureLiveStarted();
     return assigned;
   }

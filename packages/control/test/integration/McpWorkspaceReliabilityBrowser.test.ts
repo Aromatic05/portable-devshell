@@ -1810,6 +1810,77 @@ window.addEventListener("message", function (event) {
 });
 `;
 
+test("Workspace recovers ChatGPT-hidden result metadata from window.openai on first mount", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
+    await page.evaluate(CHATGPT_METADATA_BRIDGE_SCRIPT);
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html.replace("<script>", `<script>
+            window.openai = {
+                toolOutput: { ctxId: "ctx-chatgpt-meta", instance: "browser-instance" },
+                toolResponseMetadata: {
+                    mcp_tool_result: {
+                        _meta: { "portable-devshell/workspace": { token: "chatgpt-meta-token" } },
+                        structuredContent: { ctxId: "ctx-chatgpt-meta", instance: "browser-instance" }
+                    }
+                },
+                widgetState: { modelContent: null, privateContent: {}, imageIds: [] },
+                setWidgetState: function (state) { this.widgetState = state; }
+            };
+        <\/script><script>`);
+    }, workspaceAppHtml);
+
+    await page.waitForFunction(
+        "(window.__chatgptMetadataCalls || []).some(call => call.name === 'workspace_snapshot' && call.arguments.token === 'chatgpt-meta-token')",
+        undefined,
+        { timeout: 2_000 },
+    );
+});
+
+const CHATGPT_METADATA_BRIDGE_SCRIPT = String.raw`
+window.__chatgptMetadataCalls = [];
+window.addEventListener("message", function (event) {
+    if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
+    var source = event.source;
+    var message = event.data;
+    function reply(result) {
+        if (message.id === undefined) return;
+        source.postMessage({ id: message.id, jsonrpc: "2.0", result: result }, "*");
+    }
+    if (message.method === "ui/initialize") {
+        reply({ hostCapabilities: {}, hostContext: {}, hostInfo: { name: "test-host", version: "1.0.0" }, protocolVersion: "2026-01-26" });
+        return;
+    }
+    if (message.method === "ui/notifications/initialized") {
+        source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-input", params: { arguments: {} } }, "*");
+        source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: {
+            structuredContent: { ctxId: "ctx-chatgpt-meta", instance: "browser-instance" }
+        } }, "*");
+        return;
+    }
+    if (message.method === "ui/update-model-context") { reply({}); return; }
+    if (message.method !== "tools/call") return;
+    var call = message.params || {};
+    window.__chatgptMetadataCalls.push(call);
+    if (call.name === "workspace_snapshot") {
+        reply({
+            _meta: { "portable-devshell/workspace": { token: "chatgpt-meta-token" } },
+            structuredContent: {
+                approvals: [], background: [], ctxId: "ctx-chatgpt-meta", currentEvent: null,
+                cursor: 1, goal: null, instance: "browser-instance", questions: [], tasks: []
+            }
+        });
+        return;
+    }
+    if (call.name === "workspace_watch") return;
+});
+`;
+
 
 test("Workspace waits for a delayed initial capability instead of minting reconnect authorization", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
