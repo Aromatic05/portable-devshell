@@ -42,30 +42,21 @@ try {
         method: "tools/list"
     }, headers);
     const toolNames = toolsList.body.result?.tools?.map((tool) => tool.name) ?? [];
-    assert.equal(toolNames.includes("context_acquire"), true);
-    assert.equal(toolNames.includes("context_renew"), true);
     assert.equal(toolNames.includes("environ_info"), true);
     assert.equal(toolNames.includes("bash_run"), true);
-
-    const contextCall = await postJson(endpoint, {
-        jsonrpc: "2.0",
-        id: "req-context-acquire",
-        method: "tools/call",
-        params: { name: "context_acquire", arguments: { workspace: fixture.workspace } }
-    }, headers);
-    const acquired = contextCall.body.result?.structuredContent;
-    const ctxId = acquired?.ctxId;
-    assert.equal(typeof ctxId, "string");
-    assert.notEqual(ctxId, "");
-    assert.equal(acquired?.status, "active");
+    assert.equal(toolNames.includes("context_acquire"), false);
+    assert.equal(toolNames.includes("context_renew"), false);
 
     const environmentCall = await postJson(endpoint, {
         jsonrpc: "2.0",
         id: "req-environ-info",
         method: "tools/call",
-        params: { name: "environ_info", arguments: { ctxId } }
+        params: { name: "environ_info", arguments: { workspace: fixture.workspace } }
     }, headers);
     const environment = environmentCall.body.result?.structuredContent;
+    const ctxId = environment?.ctxId;
+    assert.equal(typeof ctxId, "string");
+    assert.notEqual(ctxId, "");
     assert.equal(environment?.ctxId, ctxId);
     assert.equal(environment?.instance, "aromatic-pc");
     assert.equal(environment?.workspace, fixture.workspace);
@@ -91,7 +82,6 @@ try {
     assert.equal(output.includes(fixture.workspace), true);
 
     process.stdout.write(JSON.stringify({
-        contextCall: contextCall.body,
         environmentCall: environmentCall.body,
         initialize: initialize.body,
         toolsList: toolsList.body,
