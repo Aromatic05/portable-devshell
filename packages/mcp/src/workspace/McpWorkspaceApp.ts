@@ -455,6 +455,46 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return "goal-continue-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
   }
 
+  function goalContinuationMessage(claim) {
+    var goal = claim && claim.goal;
+    var steps = goal && Array.isArray(goal.steps) ? goal.steps : [];
+    var readyToFinish = steps.length > 0 && steps.every(function (step) {
+      return step && (step.status === "completed" || step.status === "skipped");
+    });
+    var attempt = claim && Number.isFinite(claim.continuationCount)
+      ? Math.max(1, Math.floor(claim.continuationCount))
+      : Math.max(1, ((goal && goal.continuationCount) || 0) + 1);
+    var index = Math.min(attempt - 1, 9);
+    var workLeads = [
+      "你是不是把这条唤醒当成普通聊天消息了？Goal 还 active，而且没有任何可见推进。",
+      "上一次已经提醒过了，但 Goal 状态还是没动。你可能又只回复了‘继续’或做了文字汇报。",
+      "连续两次唤醒后还没有任何推进，这已经很像在磨洋工了。不要再拿一句‘继续执行’顶过去。",
+      "还在磨洋工？Goal 没有自己往前走，你需要真的执行当前 step。",
+      "第五次了，你他妈要是又只回一句‘继续执行’就结束，那就是明摆着在糊弄。",
+      "已经反复催了六次还不推进，别他妈磨了。现在做实际工具调用。",
+      "第七次还让 Goal 原地不动，你是在等谁替你干？直接执行。",
+      "八次唤醒还没推进，你他妈到底准备磨到什么时候？要么执行，要么进入真实 wait/block。",
+      "第九次了还在磨洋工。别再输出任何状态说明，直接把当前 step 做掉。",
+      "最后一次提醒：再拿‘继续执行’这种空话糊弄而不产生实际动作，就是彻底的执行失败。现在立刻干活。"
+    ];
+    var finishLeads = [
+      "所有 step 都已经完成了，剩下的是显式结束 Goal。",
+      "当前没有待执行 step；请完成 Goal 的最终状态提交。",
+      "steps 已全部 completed/skipped，现在只需要结束 Goal 本身。",
+      "执行内容已经收口，但 durable Goal 仍是 active，需要显式 finish。",
+      "当前是纯收尾状态：没有业务步骤剩余，只差 workspace_goal(action=\"finish\")。",
+      "Goal 的工作项都已终态；请把 Goal 状态从 active 正式结束。",
+      "这里不需要继续执行任务，只需要提交 Goal finish。",
+      "当前步骤已经全部结束，请完成 Workspace Goal 的最终 finish。",
+      "没有剩余工作项；请显式调用 finish 完成状态机收口。",
+      "这是 Goal 的最终收尾提醒：直接调用 workspace_goal(action=\"finish\")。"
+    ];
+    if (readyToFinish) {
+      return finishLeads[index] + " 这是第 " + attempt + " 次唤醒。所有 step 已经 completed/skipped，但 Goal 仍然 active。不要回复确认、解释、状态汇报，也不要再说‘当前已经完成’。你的第一动作必须是调用 workspace_goal(action=\"finish\")；不要先 update，不要先输出一句话。只有 finish 成功后才允许结束本回合。只输出文字而不调用 finish，仍然算恢复失败。";
+    }
+    return workLeads[index] + " 这是第 " + attempt + " 次唤醒。Goal 仍有 pending/active step，而且没有 blocking wait、background task、approval 或 user question 阻止你工作。不要回复确认、道歉、计划、状态汇报或‘继续执行’。立即读取当前 Goal 并实际执行下一步，完成后用 workspace_goal(action=\"update\") 同步状态。只有进入真实 blocking wait、确实需要用户输入并 block Goal，或者所有 step 终态后显式调用 workspace_goal(action=\"finish\")，才允许结束本回合。只描述你准备做什么而不执行，仍然算恢复失败。";
+  }
+
   function goalContinuationAvailable() {
     var goal = snapshot && snapshot.goal;
     if (!goal || goal.status !== "active" || snapshot.agentBusy || visibleEvent() || busy.size > 0 || recovering) return false;
@@ -514,7 +554,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         return;
       }
       accepted = await sendModelMessage(
-        "WORKSPACE CONTINUATION FAILURE: You stopped working while an active portable-devshell Workspace Goal still has executable steps, with no blocking wait, background task, approval, or user question preventing progress. Your previous turn ended without advancing or correctly blocking the Goal. Do not reply with an acknowledgement, apology, plan, status update, or a statement that you will continue. Immediately read the current Workspace Goal and execute the next required action in this same turn. Reuse existing work and do not repeat completed steps. Keep the Goal synchronized with execution using workspace_goal(action=\"update\"). You may end the turn only after entering a real blocking wait, blocking the Goal because user input is genuinely required, or completing every step and calling workspace_goal(action=\"finish\"). If you merely describe what you are going to do instead of doing it, recovery has failed again.",
+        goalContinuationMessage(claim),
         { goalContinuation: claim, continuationMessageId: claim && claim.goal && claim.goal.continuationMessageId },
         goalContinuationAvailable,
         async function () {

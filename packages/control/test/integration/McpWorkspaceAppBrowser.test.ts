@@ -257,11 +257,6 @@ test("Workspace Goal requests one model continuation after inactivity", BROWSER_
 
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
     await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue').length >= 4");
-    const continuationMessage = String(await page.evaluate("(window.__modelMessages || [])[0]?.content?.[0]?.text || ''"));
-    assert.match(continuationMessage, /WORKSPACE CONTINUATION FAILURE/u);
-    assert.match(continuationMessage, /Do not reply with an acknowledgement/u);
-    assert.match(continuationMessage, /execute the next required action in this same turn/u);
-    assert.match(continuationMessage, /recovery has failed again/u);
     const continuationCalls = await page.evaluate(
         "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue')",
     ) as Array<{ arguments?: Record<string, unknown> }>;
@@ -272,6 +267,36 @@ test("Workspace Goal requests one model continuation after inactivity", BROWSER_
     assert.equal(continuationCalls[3]?.arguments?.accepted, true);
     assert.equal(await page.evaluate("(window.__goalContinuationReports || []).length"), 1);
     assert.deepEqual(browserFailures, []);
+});
+
+test("Workspace Goal still re-enters while every step is terminal but the Goal remains active", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:500px"></iframe>');
+    await page.evaluate(BRIDGE_SCRIPT);
+    await page.evaluate(() => {
+        const state = window as typeof window & {
+            __workspaceApprovalPending: boolean;
+            __workspaceGoalDueNow: boolean;
+            __workspaceGoalStepsDone: boolean;
+            __workspaceQuestionAnswered: boolean;
+            __workspaceWaitInterrupted: boolean;
+        };
+        state.__workspaceGoalDueNow = true;
+        state.__workspaceGoalStepsDone = true;
+        state.__workspaceQuestionAnswered = true;
+        state.__workspaceApprovalPending = false;
+        state.__workspaceWaitInterrupted = true;
+    });
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    await page.waitForFunction("(window.__modelMessages || []).length === 1");
 });
 
 test("Workspace Goal does not auto-continue while an Agent tool call is still running", BROWSER_TEST_OPTIONS, async (t) => {
@@ -827,6 +852,7 @@ window.__workspaceWatchCount = 0;
 window.__workspacePendingWatch = null;
 window.__workspaceQuestionText = "Continue the task?";
 window.__workspaceCursor = 2;
+window.__workspaceGoalStepsDone = false;
 window.__modelContextUpdates = [];
 window.__modelMessages = [];
 window.__bridgeEvents = [];
@@ -909,10 +935,15 @@ function snapshot(withQuestion) {
             objective: "Ship Workspace Goal mode",
             revision: 1,
             status: window.__workspaceGoalStopped ? "stopped" : window.__workspaceGoalBlocked ? "blocked" : "active",
-            steps: [
-                { id: "implement", status: "completed", text: "Implement Goal runtime" },
-                { id: "verify", status: "active", text: "Verify Workspace UI" }
-            ],
+            steps: window.__workspaceGoalStepsDone
+                ? [
+                    { id: "implement", status: "completed", text: "Implement Goal runtime" },
+                    { id: "verify", status: "completed", text: "Verify Workspace UI" }
+                ]
+                : [
+                    { id: "implement", status: "completed", text: "Implement Goal runtime" },
+                    { id: "verify", status: "active", text: "Verify Workspace UI" }
+                ],
             updatedAt: "2026-08-19T01:00:00.000Z"
         },
         instance: "browser-instance",
