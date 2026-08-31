@@ -269,6 +269,49 @@ test("Workspace Goal requests one model continuation after inactivity", BROWSER_
     assert.deepEqual(browserFailures, []);
 });
 
+test("Workspace user cancellation suppresses automatic Goal continuation until later agent activity", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:500px"></iframe>');
+    await page.evaluate(BRIDGE_SCRIPT);
+    await page.evaluate(() => {
+        const state = window as typeof window & {
+            __workspaceAgentBusy: boolean;
+            __workspaceApprovalPending: boolean;
+            __workspaceGoalDueNow: boolean;
+            __workspaceQuestionAnswered: boolean;
+            __workspaceWaitInterrupted: boolean;
+        };
+        state.__workspaceAgentBusy = true;
+        state.__workspaceGoalDueNow = true;
+        state.__workspaceQuestionAnswered = true;
+        state.__workspaceApprovalPending = false;
+        state.__workspaceWaitInterrupted = true;
+    });
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    await page.waitForFunction("(window.__workspaceWatchCount || 0) >= 2");
+    await page.evaluate(() => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        iframe?.contentWindow?.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-cancelled",
+            params: { reason: "user action" }
+        }, "*");
+    });
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_goal_continue' && call.arguments.action === 'suppress')");
+
+    assert.equal(await page.evaluate("window.__emitWorkspaceSnapshotAfterCancellation()"), true);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
+});
+
 test("Workspace Goal still re-enters while every step is terminal but the Goal remains active", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
@@ -844,6 +887,8 @@ window.__workspaceGoalStopped = false;
 window.__workspaceGoalBlocked = false;
 window.__workspaceGoalDueNow = false;
 window.__workspaceGoalRetryAfter = "";
+window.__workspaceGoalSuppressedAt = "";
+window.__workspaceGoalLastAgentActivityAt = "2026-08-19T01:00:00.000Z";
 window.__workspaceBackgroundDetached = false;
 window.__holdGoalContinuationContext = false;
 window.__pendingGoalContinuationContext = null;
@@ -923,13 +968,14 @@ function snapshot(withQuestion) {
         goal: {
             autoContinueExhausted: false,
             continuationCount: 0,
-            continuationDue: window.__workspaceGoalDueNow,
+            continuationDue: window.__workspaceGoalDueNow && !window.__workspaceGoalSuppressedAt,
             continuationDueAt: window.__workspaceGoalDueNow ? "2000-01-01T00:00:00.000Z" : "2099-08-20T01:00:00.000Z",
             continuationPending: false,
             continuationRetryAfter: window.__workspaceGoalRetryAfter || undefined,
+            continuationSuppressedAt: window.__workspaceGoalSuppressedAt || undefined,
             createdAt: "2026-08-19T01:00:00.000Z",
             goalId: "goal-browser",
-            lastAgentActivityAt: "2026-08-19T01:00:00.000Z",
+            lastAgentActivityAt: window.__workspaceGoalLastAgentActivityAt,
             maxContinuations: 10,
             note: window.__workspaceGoalBlocked ? "Waiting for user decision" : undefined,
             objective: "Ship Workspace Goal mode",
@@ -1093,6 +1139,12 @@ window.addEventListener("message", function (event) {
     }
     if (call.name === "workspace_goal_continue") {
         var action = call.arguments && call.arguments.action;
+        if (action === "suppress") {
+            window.__workspaceGoalSuppressedAt = new Date().toISOString();
+            window.__workspaceGoalDueNow = false;
+            reply({ structuredContent: { suppressed: true, goal: snapshot(false).goal } });
+            return;
+        }
         if (action === "claim") {
             reply({ structuredContent: {
                 claimed: call.arguments.available === true,
@@ -1155,6 +1207,24 @@ window.__emitWorkspaceQuestionAfterCancellation = function () {
         result: {
             _meta: { "portable-devshell/workspace": { token: "browser-secret-token" } },
             structuredContent: { changed: true, cursor: 3, snapshot: snapshot(true) }
+        }
+    }, "*");
+    return true;
+};
+
+window.__emitWorkspaceSnapshotAfterCancellation = function () {
+    var pending = window.__workspacePendingWatch;
+    if (!pending || pending.id === undefined || !pending.source) return false;
+    window.__workspacePendingWatch = null;
+    window.__workspaceAgentBusy = false;
+    window.__workspaceGoalDueNow = true;
+    window.__workspaceCursor += 1;
+    pending.source.postMessage({
+        id: pending.id,
+        jsonrpc: "2.0",
+        result: {
+            _meta: { "portable-devshell/workspace": { token: "browser-secret-token" } },
+            structuredContent: { changed: true, cursor: window.__workspaceCursor, snapshot: snapshot(false) }
         }
     }, "*");
     return true;

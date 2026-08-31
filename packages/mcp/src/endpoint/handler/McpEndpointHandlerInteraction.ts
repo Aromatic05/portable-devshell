@@ -216,7 +216,7 @@ export class McpEndpointHandlerInteraction {
         const goalGateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
         const ctxId = requireCtxId(context);
         const request = readGoalContinuationInput(input);
-        if (request.action !== "report") {
+        if (request.action !== "report" && request.action !== "suppress") {
             const workspaceGateway = isMcpWorkspaceGateway(interactionGateway) ? interactionGateway : undefined;
             const [waits, approvals, toolCalls] = await Promise.all([
                 interactionGateway.listWaits(this.options.instanceName),
@@ -633,8 +633,8 @@ function readGoalContinuationInput(input: JsonValue): GoalContinuationInput {
     const record = asRecord(input);
     if (record === undefined) throw new Error("workspace_goal_continue requires an object input.");
     const action = record.action;
-    if (action !== "claim" && action !== "validate" && action !== "attempt" && action !== "report") {
-        throw new Error("workspace_goal_continue action must be claim, validate, attempt, or report.");
+    if (action !== "claim" && action !== "validate" && action !== "attempt" && action !== "report" && action !== "suppress") {
+        throw new Error("workspace_goal_continue action must be claim, validate, attempt, report, or suppress.");
     }
     return {
         action,

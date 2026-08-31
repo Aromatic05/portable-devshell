@@ -242,13 +242,13 @@ export class McpToolCatalogInteraction {
         },
         {
             _meta: appOnlyMeta,
-            description: "Manage one automatic Workspace Goal continuation with durable delivery fencing: claim, validate, mark the outbound attempt before host dispatch, then report only a known accepted or pre-dispatch rejected outcome. App-only helper; models must not call it.",
+            description: "Manage automatic Workspace Goal continuation with durable delivery fencing, including user/host interruption suppression. App-only helper; models must not call it.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
                     accepted: { type: "boolean" },
-                    action: { enum: ["claim", "validate", "attempt", "report"], type: "string" },
+                    action: { enum: ["claim", "validate", "attempt", "report", "suppress"], type: "string" },
                     available: { type: "boolean" },
                     claimId: { maxLength: 128, minLength: 1, type: "string" },
                     error: { maxLength: 2000, minLength: 1, type: "string" },

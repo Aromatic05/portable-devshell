@@ -1323,10 +1323,18 @@ test("Workspace Goal continuation rechecks live tool activity before every dispa
         context,
         "call-goal-attempt-running",
     );
+    await handler.call(
+        "workspace_goal_continue",
+        { action: "suppress", token },
+        context,
+        "call-goal-suppress-running",
+    );
 
-    assert.equal(continuationInputs.length, 2);
+    assert.equal(continuationInputs.length, 3);
     assert.equal(continuationInputs[0]?.available, false);
     assert.equal(continuationInputs[1]?.available, false);
+    assert.equal(continuationInputs[2]?.action, "suppress");
+    assert.equal(continuationInputs[2]?.available, undefined);
 });
 
 test("Workspace tool metadata keeps the explicit reopen compatibility tool and app-only action tools", () => {

@@ -350,6 +350,7 @@ export const workspaceGoalOutputSchema = objectSchema({
     continuationDueAt: nonEmptyString,
     continuationPending: booleanValue,
     continuationRetryAfter: stringValue,
+    continuationSuppressedAt: stringValue,
     continuationUncertain: booleanValue,
     createdAt: nonEmptyString,
     goalId: nonEmptyString,

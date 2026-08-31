@@ -125,6 +125,9 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var liveAbortController = null;
   var goalTimer = null;
   var goalContinuationClaimId = "";
+  var goalContinuationSuppressedLocally = false;
+  var goalContinuationSuppressedGoalId = "";
+  var goalContinuationSuppressionActivityAt = "";
 
   function escapeHtml(value) {
     return String(value == null ? "" : value)
@@ -495,9 +498,45 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return workLeads[index] + " 这是第 " + attempt + " 次唤醒。Goal 仍有 pending/active step，而且没有 blocking wait、background task、approval 或 user question 阻止你工作。不要回复确认、道歉、计划、状态汇报或‘继续执行’。立即读取当前 Goal 并实际执行下一步，完成后用 workspace_goal(action=\"update\") 同步状态。只有进入真实 blocking wait、确实需要用户输入并 block Goal，或者所有 step 终态后显式调用 workspace_goal(action=\"finish\")，才允许结束本回合。只描述你准备做什么而不执行，仍然算恢复失败。";
   }
 
+  function clearLocalGoalContinuationSuppression() {
+    goalContinuationSuppressedLocally = false;
+    goalContinuationSuppressedGoalId = "";
+    goalContinuationSuppressionActivityAt = "";
+  }
+
+  function reconcileGoalContinuationSuppression() {
+    if (!goalContinuationSuppressedLocally) return;
+    var goal = snapshot && snapshot.goal;
+    if (!goal || goal.status !== "active" || goal.goalId !== goalContinuationSuppressedGoalId) {
+      clearLocalGoalContinuationSuppression();
+      return;
+    }
+    if (goal.continuationSuppressedAt) return;
+    if (String(goal.lastAgentActivityAt || "") !== goalContinuationSuppressionActivityAt) {
+      clearLocalGoalContinuationSuppression();
+    }
+  }
+
+  async function suppressGoalContinuationAfterCancellation() {
+    var goal = snapshot && snapshot.goal;
+    if (!goal || goal.status !== "active") return;
+    goalContinuationSuppressedLocally = true;
+    goalContinuationSuppressedGoalId = String(goal.goalId || "");
+    goalContinuationSuppressionActivityAt = String(goal.lastAgentActivityAt || "");
+    if (goalTimer) clearTimeout(goalTimer);
+    goalTimer = null;
+    try {
+      var suppressed = structured(await callTool("workspace_goal_continue", { action: "suppress" }, true));
+      if (suppressed && suppressed.goal) snapshot.goal = suppressed.goal;
+      render();
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
   function goalContinuationAvailable() {
     var goal = snapshot && snapshot.goal;
-    if (!goal || goal.status !== "active" || snapshot.agentBusy || visibleEvent() || busy.size > 0 || recovering) return false;
+    if (!goal || goal.status !== "active" || goal.continuationSuppressedAt || goalContinuationSuppressedLocally || snapshot.agentBusy || visibleEvent() || busy.size > 0 || recovering) return false;
     var background = Array.isArray(snapshot.background) ? snapshot.background : [];
     return background.length === 0;
   }
@@ -696,6 +735,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     snapshot = nextSnapshot;
     if (snapshot && snapshot.ctxId) ctxId = String(snapshot.ctxId);
     if (snapshot && Number.isSafeInteger(snapshot.cursor)) cursor = snapshot.cursor;
+    reconcileGoalContinuationSuppression();
     reconcileTaskCancelConfirmations();
     persistWorkspaceHint();
     render();
@@ -877,7 +917,11 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   app.ontoolresult = acceptInitialOrLiveToolResult;
   app.ontoolcancelled = function () {
     status.textContent = "";
-    if (initialized) void startLive();
+    if (initialized) {
+      void suppressGoalContinuationAfterCancellation().finally(function () {
+        void startLive();
+      });
+    }
   };
   app.onhostcontextchanged = function (context) {
     applyHostContext(context);

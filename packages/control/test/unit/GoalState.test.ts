@@ -130,11 +130,64 @@ test("GoalState continuation claims are validated against agent activity and cou
     assert.equal(state.read(document, "ctx-goal")?.continuationCount, 1);
     assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
 
+    now += 1_000;
+    document = state.touch(document, "ctx-goal").document;
+    assert.equal(state.read(document, "ctx-goal")?.continuationCount, 0);
+
+    now += GOAL_EXECUTION_LEASE_MS + 1;
+    continuation = state.continuation(document, {
+        action: "claim",
+        available: true,
+        claimId: "claim-rejected",
+    }, "ctx-goal");
+    document = continuation.document;
+    continuation = state.continuation(document, {
+        accepted: false,
+        action: "report",
+        claimId: "claim-rejected",
+    }, "ctx-goal");
+    document = continuation.document;
+    assert.equal(state.read(document, "ctx-goal")?.continuationCount, 0);
+
     document = state.manage(document, { action: "block", note: "Need user input" }, "ctx-goal").document;
+    assert.equal(state.read(document, "ctx-goal")?.continuationCount, 0);
     document = state.manage(document, { action: "update", objective: "Still waiting for input" }, "ctx-goal").document;
     assert.equal(state.read(document, "ctx-goal")?.status, "blocked");
     now += GOAL_EXECUTION_LEASE_MS * 2;
     assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
+});
+
+test("GoalState suppresses automatic continuation after host cancellation until agent activity resumes", () => {
+    let now = Date.parse("2026-08-20T12:00:00.000Z");
+    const state = new GoalState({
+        goalId: () => "goal-interrupted",
+        now: () => new Date(now).toISOString(),
+    });
+    let document = state.manage(state.emptyDocument(), {
+        action: "start",
+        objective: "Keep working unless the user interrupts",
+        steps: [{ id: "work", status: "active", text: "Work" }],
+    }, "ctx-goal").document;
+
+    now += GOAL_EXECUTION_LEASE_MS + 1;
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, true);
+
+    const suppressed = state.continuation(document, { action: "suppress" }, "ctx-goal");
+    document = suppressed.document;
+    assert.equal(suppressed.result.suppressed, true);
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
+    assert.equal(typeof state.read(document, "ctx-goal")?.continuationSuppressedAt, "string");
+
+    now += GOAL_EXECUTION_LEASE_MS * 3;
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
+
+    document = state.touch(document, "ctx-goal").document;
+    assert.equal(state.read(document, "ctx-goal")?.continuationSuppressedAt, undefined);
+    assert.equal(state.read(document, "ctx-goal")?.continuationCount, 0);
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
+
+    now += GOAL_EXECUTION_LEASE_MS + 1;
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, true);
 });
 
 test("GoalState fences stale Workspace UI actions by goal id and revision", () => {

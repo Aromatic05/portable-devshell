@@ -1,7 +1,7 @@
 export type GoalStepStatus = "pending" | "active" | "completed" | "skipped";
 export type GoalStatus = "active" | "blocked" | "completed" | "stopped";
 export type GoalAction = "start" | "get" | "update" | "block" | "resume" | "finish" | "stop";
-export type GoalContinuationAction = "claim" | "validate" | "attempt" | "report";
+export type GoalContinuationAction = "claim" | "validate" | "attempt" | "report" | "suppress";
 
 export interface GoalStep {
     id: string;
@@ -46,6 +46,7 @@ export interface GoalRecord {
     continuationMessageId?: string;
     continuationPending: boolean;
     continuationRetryAfter?: string;
+    continuationSuppressedAt?: string;
     createdAt: string;
     createdByCtxId: string;
     goalId: string;
@@ -68,6 +69,7 @@ export interface GoalSnapshot {
     continuationDueAt: string;
     continuationPending: boolean;
     continuationRetryAfter?: string;
+    continuationSuppressedAt?: string;
     continuationUncertain: boolean;
     createdAt: string;
     goalId: string;
