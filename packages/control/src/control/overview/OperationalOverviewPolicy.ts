@@ -7,7 +7,6 @@ import type {
     ToolCallRecord
 } from "@portable-devshell/shared";
 
-const failureWindowMs = 24 * 60 * 60 * 1_000;
 const errorSummaryLimit = 240;
 
 export function createSnapshotAlerts(
@@ -58,26 +57,22 @@ export function createTodoAlerts(
 
 export function createRecentFailureAlert(
     instance: InstanceSnapshot["name"],
-    calls: readonly ToolCallRecord[],
-    now: Date
+    summary: { count: number; latest?: ToolCallRecord }
 ): { alert?: OperationalOverviewAlert; count: number } {
-    const failures = calls.filter((call) => isRecentFailure(call, now));
-    if (failures.length === 0) {
+    if (summary.count === 0) {
         return { count: 0 };
     }
-    const latest = [...failures].sort(
-        (left, right) => right.startedAt.localeCompare(left.startedAt)
-    )[0]!;
+    const latest = summary.latest;
     return {
         alert: {
-            detail: `${failures.length} failed or timed-out call${failures.length === 1 ? "" : "s"} in 24h; latest: ${latest.toolName}.`,
+            detail: `${summary.count} failed or timed-out call${summary.count === 1 ? "" : "s"} in 24h${latest === undefined ? "." : `; latest: ${latest.toolName}.`}`,
             id: `activity.failed:${instance}`,
             instance,
             kind: "activity.failed",
             severity: "attention",
             title: "Recent tool failures"
         },
-        count: failures.length
+        count: summary.count
     };
 }
 
@@ -152,15 +147,6 @@ export function readOperationalHealth(
         return "critical";
     }
     return alerts.length > 0 ? "attention" : "healthy";
-}
-
-function isRecentFailure(record: ToolCallRecord, now: Date): boolean {
-    if (record.status !== "failed" && record.status !== "queueTimeout") {
-        return false;
-    }
-    const timestamp = Date.parse(record.completedAt ?? record.startedAt);
-    const age = now.getTime() - timestamp;
-    return Number.isFinite(timestamp) && age >= 0 && age <= failureWindowMs;
 }
 
 function describeSnapshot(snapshot: InstanceSnapshot): string {

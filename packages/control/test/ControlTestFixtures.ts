@@ -51,6 +51,10 @@ export function createTestInstanceDescriptor(
     worker: WorkerInstance,
     overrides: Partial<Omit<InstanceDescriptor, "worker">> = {}
 ): InstanceDescriptor {
+    const workerWithDefaults = worker as WorkerInstance & {
+        readToolCallFailureSummary?: (sinceMs: number, untilMs: number) => Promise<{ count: number }>;
+    };
+    workerWithDefaults.readToolCallFailureSummary ??= async () => ({ count: 0 });
     return {
         enabled: true,
         goal: createTestGoalPort(),
@@ -61,7 +65,7 @@ export function createTestInstanceDescriptor(
         name: "alpha",
         provider: "local",
         todo: createTestTodoPort(),
-        worker,
+        worker: workerWithDefaults,
         ...overrides
     };
 }

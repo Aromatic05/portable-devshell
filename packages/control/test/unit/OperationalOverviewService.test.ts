@@ -68,6 +68,7 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
             homeDirectory: "/workspace"
         },
         listApprovals: async () => [{ id: "approval-1" }],
+        readToolCallFailureSummary: async () => ({ count: 1, latest: failedCall }),
         readToolCalls: async () => [failedCall],
         snapshot: () => ({
             connectionState: "connected",
@@ -258,9 +259,18 @@ test("operational overview counts the full 24 hour failure window while bounding
         completedAt: new Date(now.getTime() + 60_000).toISOString(),
         startedAt: new Date(now.getTime() + 59_000).toISOString()
     };
+    let activityQuery: unknown;
+    let failureWindow: [number, number] | undefined;
     const descriptor = createTestInstanceDescriptor({
         listApprovals: async () => [],
-        readToolCalls: async () => [olderFailure, futureFailure, ...completedCalls],
+        readToolCallFailureSummary: async (sinceMs: number, untilMs: number) => {
+            failureWindow = [sinceMs, untilMs];
+            return { count: 1, latest: olderFailure };
+        },
+        readToolCalls: async (query: unknown) => {
+            activityQuery = query;
+            return [olderFailure, futureFailure, ...completedCalls];
+        },
         snapshot: () => ({
             connectionState: "connected",
             daemonState: "running",
@@ -281,6 +291,8 @@ test("operational overview counts the full 24 hour failure window while bounding
     assert.equal(overview.activity.length, 20);
     assert.equal(overview.activity.some((activity) => activity.callId === "older-failure"), false);
     assert.equal(overview.activity[0]?.callId, "future-failure");
+    assert.deepEqual(activityQuery, { limit: 20 });
+    assert.deepEqual(failureWindow, [now.getTime() - 24 * 60 * 60 * 1_000, now.getTime()]);
 });
 
 test("operational overview coalesces concurrent reads without caching later refreshes", async () => {
