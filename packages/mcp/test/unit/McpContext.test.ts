@@ -144,12 +144,22 @@ test("McpContextRegistry arbitrates one automatic re-entry and preserves explici
 
         await registry.clearAutomaticReentryClaim("ctx-reentry", "demo-local");
         assert.equal((await registry.readAutomaticReentry("ctx-reentry", "demo-local")).pending, false);
-        await registry.suppressAutomaticReentry("ctx-reentry", "demo-local", "user action");
+        await registry.suppressAutomaticReentry("ctx-reentry", "demo-local", "user action", "user_owned");
         const suppressed = await registry.readAutomaticReentry("ctx-reentry", "demo-local");
         assert.equal(typeof suppressed.suppressedAt, "string");
+        assert.equal(suppressed.mode, "user_owned");
         await registry.clearAutomaticReentryClaim("ctx-reentry", "demo-local");
         assert.equal(typeof (await registry.readAutomaticReentry("ctx-reentry", "demo-local")).suppressedAt, "string");
         assert.equal((await registry.claimAutomaticReentry("ctx-reentry", "demo-local", "claim-3")).claimed, false);
+        await registry.observeAutomaticReentryActivity("ctx-reentry", "demo-local", "observation");
+        assert.equal((await registry.readAutomaticReentry("ctx-reentry", "demo-local")).mode, "user_owned");
+        await registry.observeAutomaticReentryActivity("ctx-reentry", "demo-local", "mutation");
+        assert.equal((await registry.readAutomaticReentry("ctx-reentry", "demo-local")).mode, "automatic");
+
+        await registry.suppressAutomaticReentry("ctx-reentry", "demo-local", "goal paused", "paused");
+        await registry.observeAutomaticReentryActivity("ctx-reentry", "demo-local", "mutation");
+        assert.equal((await registry.readAutomaticReentry("ctx-reentry", "demo-local")).mode, "paused");
+        assert.equal((await registry.claimAutomaticReentry("ctx-reentry", "demo-local", "claim-paused")).claimed, false);
 
         await registry.resumeAutomaticReentry("ctx-reentry", "demo-local");
         const resumed = await registry.claimAutomaticReentry("ctx-reentry", "demo-local", "claim-4");

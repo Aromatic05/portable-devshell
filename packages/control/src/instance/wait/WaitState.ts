@@ -10,6 +10,7 @@ import type {
 
 const MAX_TERMINAL_WAITS = 1_000;
 const RECOVERY_CLAIM_TTL_MS = 5 * 60_000;
+export const WAIT_RECOVERY_EXECUTION_LEASE_MS = 60_000;
 
 export interface WaitDocument {
     version: 1;
@@ -59,6 +60,7 @@ export class WaitState {
             createdByCtxId: text(input.createdByCtxId, "createdByCtxId"),
             ...(input.deadlineAt === undefined ? {} : { deadlineAt: storedText(input.deadlineAt, "deadlineAt") }),
             ...(input.goalId === undefined ? {} : { goalId: text(input.goalId, "goalId") }),
+            ...(input.goalProgressAt === undefined ? {} : { goalProgressAt: storedText(input.goalProgressAt, "goalProgressAt") }),
             ...(input.goalRevision === undefined ? {} : { goalRevision: positiveInteger(input.goalRevision, "goalRevision") }),
             ...(input.goalStepId === undefined ? {} : { goalStepId: text(input.goalStepId, "goalStepId") }),
             kind: kind(input.kind),
@@ -140,11 +142,39 @@ export class WaitState {
             const normalizedClaimId = text(claimId, "recoveryClaimId");
             if (record.recoveryClaimId === normalizedClaimId) return record;
             const now = this.#now();
+            const nowMs = Date.parse(now);
+
+            if (record.recoveryMessageSentAt !== undefined) {
+                const sentAtMs = Date.parse(record.recoveryMessageSentAt);
+                const retryAtMs = record.recoveryRetryAfter === undefined
+                    ? sentAtMs + WAIT_RECOVERY_EXECUTION_LEASE_MS
+                    : Date.parse(record.recoveryRetryAfter);
+                if (!Number.isFinite(retryAtMs) || nowMs < retryAtMs) {
+                    throw new Error(`Wait ${waitId} recovery retry lease has not elapsed.`);
+                }
+                const {
+                    recoveryClaimedAt: _claimedAt,
+                    recoveryClaimId: _claimId,
+                    recoveryMessageAttemptedAt: _attemptedAt,
+                    recoveryMessageId: _messageId,
+                    recoveryMessageSentAt: _sentAt,
+                    recoveryRetryAfter: _retryAfter,
+                    ...rest
+                } = record;
+                return {
+                    ...rest,
+                    recoveryClaimedAt: now,
+                    recoveryClaimId: normalizedClaimId,
+                    recoveryMessageId: `recovery-message-${randomUUID()}`,
+                    recoveryRetryCount: (record.recoveryRetryCount ?? 0) + 1,
+                    updatedAt: now,
+                };
+            }
+
             const claimedAt = record.recoveryClaimedAt === undefined ? Number.NaN : Date.parse(record.recoveryClaimedAt);
             if (
-                record.recoveryMessageSentAt === undefined &&
                 record.recoveryClaimId !== undefined && Number.isFinite(claimedAt) &&
-                Date.parse(now) - claimedAt < RECOVERY_CLAIM_TTL_MS
+                nowMs - claimedAt < RECOVERY_CLAIM_TTL_MS
             ) {
                 throw new Error(`Wait ${waitId} recovery is already claimed.`);
             }
@@ -155,6 +185,7 @@ export class WaitState {
                 ...(record.recoveryMessageId === undefined
                     ? { recoveryMessageId: `recovery-message-${randomUUID()}` }
                     : {}),
+                recoveryRetryCount: record.recoveryRetryCount ?? 0,
                 updatedAt: now,
             };
         });
@@ -181,7 +212,13 @@ export class WaitState {
             }
             if (record.recoveryMessageSentAt !== undefined) return record;
             const now = this.#now();
-            return { ...record, recoveryMessageSentAt: now, updatedAt: now };
+            return {
+                ...record,
+                recoveryMessageSentAt: now,
+                recoveryRetryAfter: new Date(Date.parse(now) + WAIT_RECOVERY_EXECUTION_LEASE_MS).toISOString(),
+                recoveryRetryCount: record.recoveryRetryCount ?? 0,
+                updatedAt: now,
+            };
         });
     }
 
@@ -360,6 +397,7 @@ function normalizeRecord(value: unknown): WaitRecord {
         ...(typeof value.deadlineAt === "string" ? { deadlineAt: storedText(value.deadlineAt, "deadlineAt") } : {}),
         ...(typeof value.detachedAt === "string" ? { detachedAt: value.detachedAt } : {}),
         ...(typeof value.goalId === "string" ? { goalId: storedText(value.goalId, "goalId") } : {}),
+        ...(typeof value.goalProgressAt === "string" ? { goalProgressAt: storedText(value.goalProgressAt, "goalProgressAt") } : {}),
         ...(typeof value.goalRevision === "number" ? { goalRevision: positiveInteger(value.goalRevision, "goalRevision") } : {}),
         ...(typeof value.goalStepId === "string" ? { goalStepId: storedText(value.goalStepId, "goalStepId") } : {}),
         kind: kind(value.kind),
@@ -372,6 +410,8 @@ function normalizeRecord(value: unknown): WaitRecord {
         ...(typeof value.recoveryMessageAttemptedAt === "string" ? { recoveryMessageAttemptedAt: value.recoveryMessageAttemptedAt } : {}),
         ...(typeof value.recoveryMessageId === "string" ? { recoveryMessageId: value.recoveryMessageId } : {}),
         ...(typeof value.recoveryMessageSentAt === "string" ? { recoveryMessageSentAt: value.recoveryMessageSentAt } : {}),
+        ...(typeof value.recoveryRetryAfter === "string" ? { recoveryRetryAfter: storedText(value.recoveryRetryAfter, "recoveryRetryAfter") } : {}),
+        ...(typeof value.recoveryRetryCount === "number" ? { recoveryRetryCount: nonNegativeInteger(value.recoveryRetryCount, "recoveryRetryCount") } : {}),
         ...(typeof value.resolvedAt === "string" ? { resolvedAt: value.resolvedAt } : {}),
         ...("result" in value ? { result: value.result as JsonValue } : {}),
         status,
@@ -446,6 +486,13 @@ function text(value: unknown, field: string): string {
 
 function storedText(value: unknown, field: string): string {
     if (typeof value !== "string" || value.length === 0) throw new Error(`wait ${field} is invalid`);
+    return value;
+}
+
+function nonNegativeInteger(value: unknown, field: string): number {
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+        throw new Error(`wait ${field} must be a non-negative integer`);
+    }
     return value;
 }
 

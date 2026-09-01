@@ -10,6 +10,7 @@ import type {
     ApprovalRequest,
     ContextMessageReadResult,
     ContextMessageRecord,
+    GoalActivityKind,
     GoalContinuationInput,
     GoalManageInput,
     GoalSnapshot,
@@ -73,7 +74,8 @@ export interface McpInstanceGateway {
     goalContinuation?(instance: string, input: GoalContinuationInput, ctxId: string): Promise<JsonValue>;
     manageGoal?(instance: string, input: GoalManageInput, ctxId: string): Promise<GoalSnapshot | undefined>;
     readGoal?(instance: string, ctxId: string): Promise<GoalSnapshot | undefined>;
-    touchGoal?(instance: string, ctxId: string): Promise<void>;
+    recordGoalReentry?(instance: string, ctxId: string): Promise<void>;
+    touchGoal?(instance: string, ctxId: string, kind?: GoalActivityKind): Promise<void>;
     createWait?(instance: string, input: WaitCreateInput): Promise<WaitRecord>;
     cancelWait?(instance: string, waitId: string): Promise<WaitRecord>;
     claimWaitRecovery?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;

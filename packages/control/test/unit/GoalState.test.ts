@@ -195,6 +195,139 @@ test("GoalState separates agent activity from durable Goal progress", () => {
     assert.notEqual(state.read(document, "ctx-goal")?.lastProgressAt, progressAt);
 });
 
+
+test("GoalState observation-only activity does not extend the execution lease", () => {
+    let now = Date.parse("2026-08-20T12:00:00.000Z");
+    const state = new GoalState({ goalId: () => "goal-observation-lease", now: () => new Date(now).toISOString() });
+    let document = state.manage(state.emptyDocument(), {
+        action: "start",
+        objective: "Do real work",
+        steps: [{ id: "work", status: "active", text: "Modify something" }],
+    }, "ctx-goal").document;
+
+    now += GOAL_EXECUTION_LEASE_MS - 5_000;
+    document = state.touch(document, "ctx-goal", "observation").document;
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
+    now += 5_001;
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, true);
+});
+
+test("GoalState distinguishes observation, execution, re-entry, and durable progress", () => {
+    let now = Date.parse("2026-08-20T12:00:00.000Z");
+    const state = new GoalState({
+        goalId: () => "goal-evidence",
+        now: () => new Date(now).toISOString(),
+    });
+    let document = state.manage(state.emptyDocument(), {
+        action: "start",
+        objective: "Track evidence",
+        steps: [{ id: "work", status: "active", text: "Do work" }],
+    }, "ctx-goal").document;
+    const startedAt = state.read(document, "ctx-goal")!.lastAgentActivityAt;
+
+    now += GOAL_EXECUTION_LEASE_MS + 1;
+    let transition = state.continuation(document, { action: "claim", available: true, claimId: "claim-1" }, "ctx-goal");
+    document = transition.document;
+    transition = state.continuation(document, { action: "attempt", claimId: "claim-1" }, "ctx-goal");
+    document = transition.document;
+    transition = state.continuation(document, { accepted: true, action: "report", claimId: "claim-1" }, "ctx-goal");
+    document = transition.document;
+    let snapshot = state.read(document, "ctx-goal")!;
+    assert.equal(snapshot.lastAgentActivityAt, startedAt);
+    assert.equal(snapshot.lastReentryAt, new Date(now).toISOString());
+    assert.equal(snapshot.noActionStreak, 0);
+    assert.equal(snapshot.continuationDue, false);
+
+    now += 1_000;
+    document = state.touch(document, "ctx-goal", "observation").document;
+    snapshot = state.read(document, "ctx-goal")!;
+    assert.equal(snapshot.lastExecutionAt, undefined);
+    assert.equal(snapshot.noActionStreak, 0);
+
+    now += GOAL_EXECUTION_LEASE_MS + 1;
+    transition = state.continuation(document, { action: "claim", available: true, claimId: "claim-2" }, "ctx-goal");
+    document = transition.document;
+    snapshot = state.read(document, "ctx-goal")!;
+    assert.equal(snapshot.noActionStreak, 1);
+    transition = state.continuation(document, { action: "attempt", claimId: "claim-2" }, "ctx-goal");
+    document = transition.document;
+    transition = state.continuation(document, { accepted: true, action: "report", claimId: "claim-2" }, "ctx-goal");
+    document = transition.document;
+
+    now += 1_000;
+    document = state.touch(document, "ctx-goal", "mutation").document;
+    snapshot = state.read(document, "ctx-goal")!;
+    assert.equal(snapshot.noActionStreak, 0);
+    assert.equal(snapshot.lastExecutionAt, new Date(now).toISOString());
+
+    now += GOAL_EXECUTION_LEASE_MS + 1;
+    transition = state.continuation(document, { action: "claim", available: true, claimId: "claim-3" }, "ctx-goal");
+    document = transition.document;
+    snapshot = state.read(document, "ctx-goal")!;
+    assert.equal(snapshot.noActionStreak, 0);
+    assert.equal(snapshot.stagnationStreak, 1);
+
+    now += 1_000;
+    document = state.manage(document, { action: "update", status: "completed", stepId: "work" }, "ctx-goal").document;
+    snapshot = state.read(document, "ctx-goal")!;
+    assert.equal(snapshot.noActionStreak, 0);
+    assert.equal(snapshot.stagnationStreak, 0);
+    assert.equal(snapshot.lastProgressAt, new Date(now).toISOString());
+});
+
+test("GoalState records an external wait wake as re-entry without faking Agent activity", () => {
+    let now = Date.parse("2026-08-20T12:00:00.000Z");
+    const state = new GoalState({ goalId: () => "goal-wait-wake", now: () => new Date(now).toISOString() });
+    let document = state.manage(state.emptyDocument(), {
+        action: "start",
+        objective: "Resume after wait",
+        steps: [{ id: "work", status: "active", text: "Use wait result" }],
+    }, "ctx-goal").document;
+    const activityAt = state.read(document, "ctx-goal")!.lastAgentActivityAt;
+    now += GOAL_EXECUTION_LEASE_MS + 1;
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, true);
+
+    document = state.reentry(document, "ctx-goal").document;
+    let snapshot = state.read(document, "ctx-goal")!;
+    assert.equal(snapshot.lastAgentActivityAt, activityAt);
+    assert.equal(snapshot.lastReentryAt, new Date(now).toISOString());
+    assert.equal(snapshot.continuationDue, false);
+
+    now += GOAL_EXECUTION_LEASE_MS + 1;
+    document = state.continuation(document, { action: "claim", available: true, claimId: "claim-after-wait" }, "ctx-goal").document;
+    snapshot = state.read(document, "ctx-goal")!;
+    assert.equal(snapshot.noActionStreak, 1);
+});
+
+test("GoalState user pause fences continuation until an explicit user resume", () => {
+    let now = Date.parse("2026-08-20T12:00:00.000Z");
+    const state = new GoalState({
+        goalId: () => "goal-paused",
+        now: () => new Date(now).toISOString(),
+    });
+    let document = state.manage(state.emptyDocument(), {
+        action: "start",
+        objective: "Pause safely",
+        steps: [{ id: "work", status: "active", text: "Do work" }],
+    }, "ctx-goal").document;
+    const progressAt = state.read(document, "ctx-goal")?.lastProgressAt;
+    document = state.manage(document, { action: "pause", userControl: true }, "ctx-goal").document;
+    assert.equal(state.read(document, "ctx-goal")?.status, "paused");
+    assert.equal(state.read(document, "ctx-goal")?.lastProgressAt, progressAt);
+    now += GOAL_EXECUTION_LEASE_MS * 3;
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
+    assert.throws(
+        () => state.manage(document, { action: "resume" }, "ctx-goal"),
+        /paused Workspace Goal requires an explicit user resume/u,
+    );
+    document = state.manage(document, { action: "resume", userControl: true }, "ctx-goal").document;
+    assert.equal(state.read(document, "ctx-goal")?.status, "active");
+    assert.equal(state.read(document, "ctx-goal")?.lastProgressAt, progressAt);
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
+    now += GOAL_EXECUTION_LEASE_MS + 1;
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, true);
+});
+
 test("GoalState fences stale Workspace UI actions by goal id and revision", () => {
     const state = new GoalState({ goalId: () => "goal-current" });
     const started = state.manage(state.emptyDocument(), {
@@ -257,7 +390,7 @@ test("GoalState clears ambiguous delivery after definitive Host rejection or obs
     assert.equal(observed.result?.continuationDue, false);
 });
 
-test("GoalState keeps mandatory finalization resumable after the work retry limit", () => {
+test("GoalState never exhausts an actionable Goal solely because wake attempts accumulated", () => {
     let now = Date.parse("2026-08-20T12:00:00.000Z");
     const state = new GoalState({
         goalId: () => "goal-finalize",
@@ -266,7 +399,7 @@ test("GoalState keeps mandatory finalization resumable after the work retry limi
     const transition = state.manage(state.emptyDocument(), {
         action: "start",
         objective: "Finalize explicitly",
-        steps: [{ id: "done", status: "completed", text: "Done" }],
+        steps: [{ id: "done", status: "active", text: "Done" }],
     }, "ctx-goal");
     transition.document.goals[0]!.continuationCount = 10;
     now += GOAL_EXECUTION_LEASE_MS + 1;

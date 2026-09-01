@@ -955,6 +955,60 @@ test("Workspace Goal revision changes disable revision-only detached wait recove
     assert.equal(typeof wait?.recoveryDisabledAt, "string");
 });
 
+test("Workspace Goal metadata revisions preserve progress-bound detached wait recovery", async () => {
+    const fake = createInteractionGateway();
+    const progressAt = "2026-08-20T00:00:00.000Z";
+    fake.waits.push({
+        createdAt: progressAt,
+        createdByCtxId: context.ctxId!,
+        detachedAt: progressAt,
+        goalId: "goal-progress-token",
+        goalProgressAt: progressAt,
+        goalRevision: 1,
+        kind: "tmux",
+        resolvedAt: progressAt,
+        result: { task: { status: "0" } },
+        status: "resolved",
+        targetId: "tmux-goal-progress-token",
+        updatedAt: progressAt,
+        waitId: "wait-goal-progress-token",
+    });
+    const goal = {
+        autoContinueExhausted: false,
+        continuationCount: 0,
+        continuationDue: false,
+        continuationDueAt: "2026-08-20T00:15:00.000Z",
+        continuationPending: false,
+        createdAt: progressAt,
+        goalId: "goal-progress-token",
+        lastAgentActivityAt: "2026-08-20T00:01:00.000Z",
+        lastProgressAt: progressAt,
+        maxContinuations: 10,
+        objective: "Keep recovery across control-only revisions",
+        revision: 2,
+        status: "active" as const,
+        steps: [{ id: "done", status: "completed" as const, text: "Already done" }],
+        updatedAt: "2026-08-20T00:01:00.000Z",
+    };
+    Object.assign(fake.gateway, {
+        async goalContinuation() { return { goal }; },
+        async manageGoal() { return goal; },
+        async readGoal() { return goal; },
+    });
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+
+    await handler.call(
+        "workspace_goal",
+        { action: "update", note: "control metadata only" },
+        context,
+        "call-goal-progress-token-update",
+    );
+
+    const wait = fake.waits.find((entry) => entry.waitId === "wait-goal-progress-token");
+    assert.notEqual(wait?.automaticRecovery, false);
+    assert.equal(wait?.recoveryDisabledAt, undefined);
+});
+
 test("Workspace detached-wait recovery accepts an active Goal without Todo", async () => {
     const fake = createInteractionGateway();
     const now = new Date().toISOString();

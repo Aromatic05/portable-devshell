@@ -14,6 +14,7 @@ export interface WaitCreateInput {
     createdByCtxId: string;
     deadlineAt?: string;
     goalId?: string;
+    goalProgressAt?: string;
     goalRevision?: number;
     goalStepId?: string;
     kind: WaitKind;
@@ -39,6 +40,8 @@ export interface WaitRecord extends WaitCreateInput {
     recoveryMessageAttemptedAt?: string;
     recoveryMessageId?: string;
     recoveryMessageSentAt?: string;
+    recoveryRetryAfter?: string;
+    recoveryRetryCount?: number;
     resolvedAt?: string;
     result?: JsonValue;
     status: WaitStatus;

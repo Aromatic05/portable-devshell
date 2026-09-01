@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+    GoalActivityKind,
     GoalContinuationInput,
     GoalManageInput,
     GoalRecord,
@@ -11,7 +12,7 @@ import type {
 } from "@portable-devshell/shared";
 
 export const GOAL_EXECUTION_LEASE_MS = 60 * 1_000;
-export const GOAL_MAX_CONTINUATIONS = 10;
+export const GOAL_MAX_CONTINUATIONS = 0;
 const GOAL_CONTINUATION_CLAIM_TTL_MS = 5 * 60 * 1_000;
 const GOAL_CONTINUATION_RETRY_MS = 5 * 60 * 1_000;
 const MAX_TERMINAL_GOALS = 1_000;
@@ -62,7 +63,7 @@ export class GoalState {
     list(document: GoalDocument): GoalSnapshot[] {
         const now = this.#now();
         return document.goals
-            .filter((goal) => goal.status === "active" || goal.status === "blocked")
+            .filter((goal) => goal.status === "active" || goal.status === "blocked" || goal.status === "paused")
             .map((goal) => snapshot(goal, now));
     }
 
@@ -86,6 +87,9 @@ export class GoalState {
         if (input.workspace !== undefined && current.workspace !== undefined && input.workspace !== current.workspace) {
             throw new Error(`Workspace Goal ${current.goalId} belongs to ${current.workspace}, not ${input.workspace}.`);
         }
+        if (current.status === "paused" && action !== "resume" && action !== "stop") {
+            throw new Error("A paused Workspace Goal can only be resumed or stopped by the user.");
+        }
 
         const now = this.#now();
         let next: GoalRecord;
@@ -94,28 +98,54 @@ export class GoalState {
                 next = updateGoal(current, input, now);
                 break;
             case "block":
+                if (current.status !== "active") throw new Error("Only an active Workspace Goal can be blocked.");
                 next = {
                     ...clearContinuation(current),
                     continuationCount: 0,
                     continuationRetryAfter: undefined,
                     lastAgentActivityAt: now,
-                    lastProgressAt: now,
+                    lastExecutionAt: now,
+                    noActionStreak: 0,
                     note: requiredText(input.note, "note", GOAL_NOTE_LIMIT),
                     revision: current.revision + 1,
+                    stagnationStreak: 0,
                     status: "blocked",
                     updatedAt: now,
                 };
                 break;
-            case "resume":
-                if (current.status !== "blocked") throw new Error("Only a blocked Workspace Goal can be resumed.");
+            case "pause":
+                if (input.userControl !== true) throw new Error("Workspace Goal pause is a user-control action.");
+                if (current.status !== "active") throw new Error("Only an active Workspace Goal can be paused.");
                 next = {
                     ...clearContinuation(current),
                     continuationCount: 0,
                     continuationRetryAfter: undefined,
                     lastAgentActivityAt: now,
-                    lastProgressAt: now,
+                    lastControlAt: now,
+                    noActionStreak: 0,
+                    revision: current.revision + 1,
+                    stagnationStreak: 0,
+                    status: "paused",
+                    updatedAt: now,
+                };
+                break;
+            case "resume":
+                if (current.status === "paused" && input.userControl !== true) {
+                    throw new Error("A paused Workspace Goal requires an explicit user resume.");
+                }
+                if (current.status !== "blocked" && current.status !== "paused") {
+                    throw new Error("Only a blocked or paused Workspace Goal can be resumed.");
+                }
+                next = {
+                    ...clearContinuation(current),
+                    continuationCount: 0,
+                    continuationRetryAfter: undefined,
+                    lastAgentActivityAt: now,
+                    ...(input.userControl === true ? { lastControlAt: now } : { lastExecutionAt: now }),
+                    noActionStreak: 0,
                     note: undefined,
                     revision: current.revision + 1,
+                    stagnationStreak: 0,
                     status: "active",
                     updatedAt: now,
                 };
@@ -128,8 +158,11 @@ export class GoalState {
                     ...clearContinuation(current),
                     continuationCount: 0,
                     lastAgentActivityAt: now,
+                    lastExecutionAt: now,
                     lastProgressAt: now,
+                    noActionStreak: 0,
                     revision: current.revision + 1,
+                    stagnationStreak: 0,
                     status: "completed",
                     updatedAt: now,
                 };
@@ -140,7 +173,9 @@ export class GoalState {
                     continuationCount: 0,
                     lastAgentActivityAt: now,
                     lastProgressAt: now,
+                    noActionStreak: 0,
                     revision: current.revision + 1,
+                    stagnationStreak: 0,
                     status: "stopped",
                     updatedAt: now,
                 };
@@ -154,16 +189,31 @@ export class GoalState {
         return { document: this.compact({ goals, version: 1 }), result: snapshot(next, now) };
     }
 
-    touch(document: GoalDocument, ctxId: string): GoalTransition {
+    touch(document: GoalDocument, ctxId: string, kind: GoalActivityKind = "execution"): GoalTransition {
         const index = document.goals.findIndex((goal) => goal.createdByCtxId === ctxId);
         if (index === -1) return { document, result: undefined };
         const current = document.goals[index]!;
         if (current.status !== "active") return { document, result: snapshot(current, this.#now()) };
         const now = this.#now();
+        const executionEvidence = kind !== "observation";
         const next = {
             ...clearContinuation(current),
             lastAgentActivityAt: now,
+            ...(executionEvidence ? { lastExecutionAt: now, noActionStreak: 0 } : {}),
         };
+        const goals = [...document.goals];
+        goals[index] = next;
+        return { document: { goals, version: 1 }, result: snapshot(next, now) };
+    }
+
+    reentry(document: GoalDocument, ctxId: string): GoalTransition {
+        const index = document.goals.findIndex((goal) => goal.createdByCtxId === ctxId);
+        if (index === -1) return { document, result: undefined };
+        const current = document.goals[index]!;
+        if (current.status !== "active") return { document, result: snapshot(current, this.#now()) };
+        const now = this.#now();
+        const evaluated = evaluatePreviousReentry(current);
+        const next = { ...evaluated, lastReentryAt: now };
         const goals = [...document.goals];
         goals[index] = next;
         return { document: { goals, version: 1 }, result: snapshot(next, now) };
@@ -191,6 +241,8 @@ export class GoalState {
                 continuationCount: 0,
                 continuationRetryAfter: undefined,
                 lastAgentActivityAt: now,
+                noActionStreak: 0,
+                stagnationStreak: 0,
             };
             result = { goal: snapshot(next, now), reset: true };
         } else if (input.action === "claim") {
@@ -199,9 +251,10 @@ export class GoalState {
             if (input.available === false || !state.continuationDue) {
                 result = { claimed: false, goal: state };
             } else {
+                const evaluated = evaluatePreviousReentry(current);
                 next = {
-                    ...current,
-                    continuationClaimActivityAt: current.lastAgentActivityAt,
+                    ...evaluated,
+                    continuationClaimActivityAt: evaluated.lastAgentActivityAt,
                     continuationClaimedAt: now,
                     continuationClaimId: claimId,
                     continuationMessageId: `goal-message-${randomUUID()}`,
@@ -251,9 +304,8 @@ export class GoalState {
                 ...clearContinuation(current),
                 continuationCount: current.continuationCount + (input.accepted ? 1 : 0),
                 ...(input.accepted
-                    ? { continuationRetryAfter: undefined, lastAgentActivityAt: now }
+                    ? { continuationRetryAfter: undefined, lastReentryAt: now }
                     : { continuationRetryAfter: new Date(Date.parse(now) + GOAL_CONTINUATION_RETRY_MS).toISOString() }),
-                lastContinuationAt: now,
             };
             result = { goal: snapshot(next, now) };
         } else {
@@ -281,7 +333,7 @@ export class GoalState {
 
     #start(document: GoalDocument, input: GoalManageInput, ctxId: string): GoalTransition {
         const existing = document.goals.find((goal) => goal.createdByCtxId === ctxId);
-        if (existing !== undefined && (existing.status === "active" || existing.status === "blocked")) {
+        if (existing !== undefined && (existing.status === "active" || existing.status === "blocked" || existing.status === "paused")) {
             throw new Error(`Workspace Goal ${existing.goalId} is still ${existing.status}; finish or stop it first.`);
         }
         const now = this.#now();
@@ -293,8 +345,10 @@ export class GoalState {
             goalId: this.#goalId(),
             lastAgentActivityAt: now,
             lastProgressAt: now,
+            noActionStreak: 0,
             objective: requiredText(input.objective, "objective", GOAL_OBJECTIVE_LIMIT),
             revision: 1,
+            stagnationStreak: 0,
             status: "active",
             steps: normalizeSteps(input.steps, true),
             updatedAt: now,
@@ -336,7 +390,14 @@ function updateGoal(current: GoalRecord, input: GoalManageInput, now: string): G
     const base = clearContinuation(current);
     return {
         ...base,
-        ...(progressed ? { continuationCount: 0, continuationRetryAfter: undefined, lastProgressAt: now } : {}),
+        ...(progressed ? {
+            continuationCount: 0,
+            continuationRetryAfter: undefined,
+            lastExecutionAt: now,
+            lastProgressAt: now,
+            noActionStreak: 0,
+            stagnationStreak: 0,
+        } : {}),
         lastAgentActivityAt: now,
         ...(input.note === undefined ? {} : { note: requiredText(input.note, "note", GOAL_NOTE_LIMIT) }),
         objective: nextObjective,
@@ -400,17 +461,26 @@ function normalizeStoredGoal(value: unknown): GoalRecord {
         createdByCtxId: requiredStoredString(value.createdByCtxId, "createdByCtxId"),
         goalId: requiredStoredString(value.goalId, "goalId"),
         lastAgentActivityAt: requiredStoredString(value.lastAgentActivityAt, "lastAgentActivityAt"),
+        ...(typeof value.lastControlAt === "string" && value.lastControlAt.length > 0 ? { lastControlAt: value.lastControlAt } : {}),
+        ...(typeof value.lastExecutionAt === "string" && value.lastExecutionAt.length > 0 ? { lastExecutionAt: value.lastExecutionAt } : {}),
+        ...(typeof value.lastReentryAt === "string" && value.lastReentryAt.length > 0
+            ? { lastReentryAt: value.lastReentryAt }
+            : typeof value.lastContinuationAt === "string" && value.lastContinuationAt.length > 0
+                ? { lastReentryAt: value.lastContinuationAt }
+                : {}),
         lastProgressAt: typeof value.lastProgressAt === "string" && value.lastProgressAt.length > 0
             ? value.lastProgressAt
             : requiredStoredString(value.lastAgentActivityAt, "lastAgentActivityAt"),
+        noActionStreak: optionalNonNegativeInteger(value.noActionStreak),
         objective: requiredText(value.objective, "objective", GOAL_OBJECTIVE_LIMIT),
         revision: positiveInteger(value.revision, "revision"),
+        stagnationStreak: optionalNonNegativeInteger(value.stagnationStreak),
         status: normalizeGoalStatus(value.status),
         steps: normalizeSteps(value.steps as GoalStepInput[], true),
         updatedAt: requiredStoredString(value.updatedAt, "updatedAt"),
         ...(typeof value.workspace === "string" && value.workspace.length > 0 ? { workspace: value.workspace } : {}),
     };
-    for (const key of ["continuationAttemptedAt", "continuationClaimActivityAt", "continuationClaimedAt", "continuationClaimId", "continuationMessageId", "continuationRetryAfter", "lastContinuationAt", "note"] as const) {
+    for (const key of ["continuationAttemptedAt", "continuationClaimActivityAt", "continuationClaimedAt", "continuationClaimId", "continuationMessageId", "continuationRetryAfter", "lastStreakEvaluatedReentryAt", "note"] as const) {
         const field = value[key];
         if (typeof field === "string" && field.length > 0) record[key] = field;
     }
@@ -418,25 +488,26 @@ function normalizeStoredGoal(value: unknown): GoalRecord {
 }
 
 function normalizeGoalStatus(value: unknown): GoalRecord["status"] {
-    if (value === "active" || value === "blocked" || value === "completed" || value === "stopped") return value;
+    if (value === "active" || value === "blocked" || value === "paused" || value === "completed" || value === "stopped") return value;
     throw new Error("invalid Workspace Goal status");
 }
 
 function snapshot(record: GoalRecord, now: string): GoalSnapshot {
     const nowMs = Date.parse(now);
-    const dueAtMs = Date.parse(record.lastAgentActivityAt) + GOAL_EXECUTION_LEASE_MS;
+    const executionMs = record.lastExecutionAt === undefined ? Date.parse(record.lastProgressAt) : Date.parse(record.lastExecutionAt);
+    const controlMs = record.lastControlAt === undefined ? Number.NEGATIVE_INFINITY : Date.parse(record.lastControlAt);
+    const reentryMs = record.lastReentryAt === undefined ? Number.NEGATIVE_INFINITY : Date.parse(record.lastReentryAt);
+    const dueAtMs = Math.max(executionMs, controlMs, reentryMs) + GOAL_EXECUTION_LEASE_MS;
     const uncertain = record.continuationPending && record.continuationAttemptedAt !== undefined;
     const claimFresh = uncertain || (record.continuationPending && record.continuationClaimedAt !== undefined &&
         nowMs - Date.parse(record.continuationClaimedAt) < GOAL_CONTINUATION_CLAIM_TTL_MS);
     const retryReady = record.continuationRetryAfter === undefined || nowMs >= Date.parse(record.continuationRetryAfter);
-    const hasExecutableSteps = record.steps.some((step) => step.status === "pending" || step.status === "active");
-    const exhausted = hasExecutableSteps && record.continuationCount >= GOAL_MAX_CONTINUATIONS;
     return {
-        autoContinueExhausted: exhausted,
+        autoContinueExhausted: false,
         ...(record.continuationAttemptedAt === undefined ? {} : { continuationAttemptedAt: record.continuationAttemptedAt }),
         continuationCount: record.continuationCount,
         ...(record.continuationMessageId === undefined ? {} : { continuationMessageId: record.continuationMessageId }),
-        continuationDue: record.status === "active" && !claimFresh && !exhausted && retryReady && nowMs >= dueAtMs,
+        continuationDue: record.status === "active" && !claimFresh && retryReady && nowMs >= dueAtMs,
         continuationDueAt: new Date(dueAtMs).toISOString(),
         continuationPending: claimFresh,
         ...(record.continuationRetryAfter === undefined ? {} : { continuationRetryAfter: record.continuationRetryAfter }),
@@ -444,9 +515,12 @@ function snapshot(record: GoalRecord, now: string): GoalSnapshot {
         createdAt: record.createdAt,
         goalId: record.goalId,
         lastAgentActivityAt: record.lastAgentActivityAt,
-        ...(record.lastContinuationAt === undefined ? {} : { lastContinuationAt: record.lastContinuationAt }),
+        ...(record.lastExecutionAt === undefined ? {} : { lastExecutionAt: record.lastExecutionAt }),
+        ...(record.lastReentryAt === undefined ? {} : { lastReentryAt: record.lastReentryAt, lastContinuationAt: record.lastReentryAt }),
         lastProgressAt: record.lastProgressAt,
         maxContinuations: GOAL_MAX_CONTINUATIONS,
+        noActionStreak: record.noActionStreak,
+        stagnationStreak: record.stagnationStreak,
         ...(record.note === undefined ? {} : { note: record.note }),
         objective: record.objective,
         revision: record.revision,
@@ -454,6 +528,35 @@ function snapshot(record: GoalRecord, now: string): GoalSnapshot {
         steps: record.steps.map((step) => ({ ...step })),
         updatedAt: record.updatedAt,
         ...(record.workspace === undefined ? {} : { workspace: record.workspace }),
+    };
+}
+
+function evaluatePreviousReentry(record: GoalRecord): GoalRecord {
+    const reentryAt = record.lastReentryAt;
+    if (reentryAt === undefined || record.lastStreakEvaluatedReentryAt === reentryAt) return record;
+    const reentryMs = Date.parse(reentryAt);
+    const executionMs = record.lastExecutionAt === undefined ? Number.NEGATIVE_INFINITY : Date.parse(record.lastExecutionAt);
+    const progressMs = Date.parse(record.lastProgressAt);
+    if (progressMs > reentryMs) {
+        return {
+            ...record,
+            lastStreakEvaluatedReentryAt: reentryAt,
+            noActionStreak: 0,
+            stagnationStreak: 0,
+        };
+    }
+    if (executionMs > reentryMs) {
+        return {
+            ...record,
+            lastStreakEvaluatedReentryAt: reentryAt,
+            noActionStreak: 0,
+            stagnationStreak: record.stagnationStreak + 1,
+        };
+    }
+    return {
+        ...record,
+        lastStreakEvaluatedReentryAt: reentryAt,
+        noActionStreak: record.noActionStreak + 1,
     };
 }
 
@@ -495,6 +598,10 @@ function requiredStoredString(value: unknown, field: string): string {
 function nonNegativeInteger(value: unknown, field: string): number {
     if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new Error(`${field} must be a non-negative integer.`);
     return value;
+}
+
+function optionalNonNegativeInteger(value: unknown): number {
+    return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
 function positiveInteger(value: unknown, field: string): number {

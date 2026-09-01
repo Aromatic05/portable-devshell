@@ -1,4 +1,5 @@
 import type {
+    GoalActivityKind,
     GoalContinuationInput,
     GoalManageInput,
     GoalSnapshot,
@@ -54,7 +55,7 @@ export class GoalService {
             let document = this.#store.read();
             const stopped: GoalSnapshot[] = [];
             for (const goal of [...document.goals]) {
-                if (goal.status !== "active" && goal.status !== "blocked") continue;
+                if (goal.status !== "active" && goal.status !== "blocked" && goal.status !== "paused") continue;
                 const transition = this.#state.manage(document, { action: "stop" }, goal.createdByCtxId);
                 await this.#persist(document, transition, goal.createdByCtxId);
                 document = transition.document;
@@ -64,10 +65,18 @@ export class GoalService {
         });
     }
 
-    async touch(ctxId: string): Promise<void> {
+    async recordReentry(ctxId: string): Promise<void> {
         await this.#runExclusive(async () => {
             const before = this.#store.read();
-            const transition = this.#state.touch(before, ctxId);
+            const transition = this.#state.reentry(before, ctxId);
+            await this.#persist(before, transition, ctxId);
+        });
+    }
+
+    async touch(ctxId: string, kind: GoalActivityKind = "execution"): Promise<void> {
+        await this.#runExclusive(async () => {
+            const before = this.#store.read();
+            const transition = this.#state.touch(before, ctxId, kind);
             await this.#persist(before, transition, ctxId);
         });
     }

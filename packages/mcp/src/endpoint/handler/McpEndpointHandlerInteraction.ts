@@ -87,6 +87,9 @@ export class McpEndpointHandlerInteraction {
             case "workspace_reentry_control":
                 await this.#assertAppToken(input, context);
                 return await this.#controlReentry(input, context);
+            case "workspace_goal_pause":
+                await this.#assertAppToken(input, context);
+                return await this.#pauseGoal(input, context);
             case "workspace_goal_resume":
                 await this.#assertAppToken(input, context);
                 return await this.#resumeGoal(input, context);
@@ -139,7 +142,7 @@ export class McpEndpointHandlerInteraction {
         const wait = await gateway.createWait(this.options.instanceName, {
             automaticRecovery: taskAssociation.kind !== "ambiguous",
             createdByCtxId: ctxId,
-            ...(attachedGoal === undefined ? {} : { goalId: attachedGoal.goalId, goalRevision: attachedGoal.revision }),
+            ...(attachedGoal === undefined ? {} : { goalId: attachedGoal.goalId, goalProgressAt: attachedGoal.lastProgressAt, goalRevision: attachedGoal.revision }),
             ...(goalStep === undefined ? {} : { goalStepId: goalStep.id }),
             kind: "question",
             ownerCallId: callId,
@@ -219,8 +222,16 @@ export class McpEndpointHandlerInteraction {
             ctxId,
         );
         if (goal !== undefined) await this.#reconcileGoalWaits(ctxId, goal);
-        if (request.action === "start" || request.action === "update" || request.action === "resume") {
+        if (request.action === "start") {
             await this.options.contextRegistry?.resumeAutomaticReentry(ctxId, this.options.instanceName);
+        } else if (request.action !== "get") {
+            await this.options.contextRegistry?.observeAutomaticReentryActivity(
+                ctxId,
+                this.options.instanceName,
+                request.action === "block" ? "wait" : request.action === "update" && request.objective === undefined && request.steps === undefined && request.stepId === undefined
+                    ? "observation"
+                    : "mutation",
+            );
         }
         return { goal: goal ?? null } as unknown as JsonValue;
     }
@@ -306,6 +317,24 @@ export class McpEndpointHandlerInteraction {
         return { ...state, released: true } as unknown as JsonValue;
     }
 
+    async #pauseGoal(input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
+        const gateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
+        const fence = readGoalFence(input, "workspace_goal_pause");
+        const ctxId = requireCtxId(context);
+        const goal = await gateway.manageGoal(
+            this.options.instanceName,
+            { action: "pause", expectedGoalId: fence.goalId, expectedRevision: fence.revision, userControl: true, workspace: context.workspace },
+            ctxId,
+        );
+        await this.options.contextRegistry?.suppressAutomaticReentry(
+            ctxId,
+            this.options.instanceName,
+            "Workspace Goal paused by user",
+            "paused",
+        );
+        return { goal: goal ?? null } as unknown as JsonValue;
+    }
+
     async #stopGoal(input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
         const gateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
         const fence = readGoalFence(input, "workspace_goal_stop");
@@ -326,7 +355,7 @@ export class McpEndpointHandlerInteraction {
         const ctxId = requireCtxId(context);
         const goal = await gateway.manageGoal(
             this.options.instanceName,
-            { action: "resume", expectedGoalId: fence.goalId, expectedRevision: fence.revision, workspace: context.workspace },
+            { action: "resume", expectedGoalId: fence.goalId, expectedRevision: fence.revision, userControl: true, workspace: context.workspace },
             ctxId,
         );
         if (goal !== undefined) await this.#reconcileGoalWaits(ctxId, goal);
@@ -436,8 +465,11 @@ export class McpEndpointHandlerInteraction {
             if (wait.createdByCtxId !== ctxId || wait.goalId !== goal.goalId) continue;
             if (wait.status === "consumed" || wait.status === "cancelled" || wait.recoveryDisabledAt !== undefined) continue;
             const staleStep = wait.goalStepId !== undefined && wait.goalStepId !== currentStepId;
-            const staleRevision = wait.goalStepId === undefined && wait.goalRevision !== undefined && wait.goalRevision !== goal.revision;
-            if (!terminal && !staleStep && !staleRevision) continue;
+            const staleProgress = wait.goalStepId === undefined && wait.goalProgressAt !== undefined &&
+                wait.goalProgressAt !== goal.lastProgressAt;
+            const staleLegacyRevision = wait.goalStepId === undefined && wait.goalProgressAt === undefined &&
+                wait.goalRevision !== undefined && wait.goalRevision !== goal.revision;
+            if (!terminal && !staleStep && !staleProgress && !staleLegacyRevision) continue;
             if (wait.kind === "question" && (wait.status === "waiting" || wait.status === "detached") && gateway.cancelWait !== undefined) {
                 await gateway.cancelWait(this.options.instanceName, wait.waitId).catch(() => undefined);
                 continue;
@@ -598,7 +630,7 @@ export class McpEndpointHandlerInteraction {
             await this.#disableTaskWaits(ctxId, taskId);
             await this.options.contextRegistry?.suppressAutomaticReentry(ctxId, this.options.instanceName, "Workspace task cancelled by user");
         } else if (action === "pause") {
-            await this.options.contextRegistry?.suppressAutomaticReentry(ctxId, this.options.instanceName, "Workspace task paused by user");
+            await this.options.contextRegistry?.suppressAutomaticReentry(ctxId, this.options.instanceName, "Workspace task paused by user", "paused");
         } else {
             await this.options.contextRegistry?.resumeAutomaticReentry(ctxId, this.options.instanceName);
         }
@@ -648,10 +680,15 @@ export class McpEndpointHandlerInteraction {
         }
         if (recovery.action === "sent") {
             const sent = await gateway.markWaitRecoverySent(this.options.instanceName, waitId, recovery.claimId);
+            if (sent.goalId !== undefined && this.options.gateway?.recordGoalReentry !== undefined) {
+                await this.options.gateway.recordGoalReentry(this.options.instanceName, requireCtxId(context));
+            }
             return {
                 ...(sent.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: sent.recoveryMessageAttemptedAt }),
                 ...(sent.recoveryMessageId === undefined ? {} : { recoveryMessageId: sent.recoveryMessageId }),
                 ...(sent.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: sent.recoveryMessageSentAt }),
+                ...(sent.recoveryRetryAfter === undefined ? {} : { recoveryRetryAfter: sent.recoveryRetryAfter }),
+                ...(sent.recoveryRetryCount === undefined ? {} : { recoveryRetryCount: sent.recoveryRetryCount }),
                 sent: true,
                 waitId: sent.waitId,
             };
@@ -684,6 +721,8 @@ export class McpEndpointHandlerInteraction {
             ...(claimed.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: claimed.recoveryMessageAttemptedAt }),
             ...(claimed.recoveryMessageId === undefined ? {} : { recoveryMessageId: claimed.recoveryMessageId }),
             ...(claimed.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: claimed.recoveryMessageSentAt }),
+            ...(claimed.recoveryRetryAfter === undefined ? {} : { recoveryRetryAfter: claimed.recoveryRetryAfter }),
+            ...(claimed.recoveryRetryCount === undefined ? {} : { recoveryRetryCount: claimed.recoveryRetryCount }),
             ...(claimed.taskId === undefined ? {} : { taskId: claimed.taskId }),
             targetId: claimed.targetId,
             waitId: claimed.waitId,
@@ -720,7 +759,9 @@ export class McpEndpointHandlerInteraction {
                 if (step === undefined || step.status !== "active") {
                     throw new Error(`Workspace Goal step ${wait.goalStepId} is no longer available for automatic recovery.`);
                 }
-            } else if (wait.goalRevision !== undefined && goal.revision !== wait.goalRevision) {
+            } else if (wait.goalProgressAt !== undefined && goal.lastProgressAt !== wait.goalProgressAt) {
+                throw new Error(`Workspace Goal ${wait.goalId} progressed since wait ${wait.waitId} was created.`);
+            } else if (wait.goalProgressAt === undefined && wait.goalRevision !== undefined && goal.revision !== wait.goalRevision) {
                 throw new Error(`Workspace Goal ${wait.goalId} changed since wait ${wait.waitId} was created.`);
             }
         } else if (wait.taskId !== undefined) {

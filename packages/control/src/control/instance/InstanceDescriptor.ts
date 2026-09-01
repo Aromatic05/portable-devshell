@@ -4,6 +4,7 @@ import type { ContextMessageQueueInput, ContextMessageReadResult, ContextMessage
 import type {
     ActiveTodoSummary,
     ControlMcpContextMode,
+    GoalActivityKind,
     GoalContinuationInput,
     GoalManageInput,
     GoalSnapshot,
@@ -42,7 +43,8 @@ export interface InstanceGoalPort {
     stopAll(): Promise<GoalSnapshot[]>;
     manage(ctxId: string, input: GoalManageInput): Promise<GoalSnapshot | undefined>;
     read(ctxId: string): Promise<GoalSnapshot | undefined>;
-    touch(ctxId: string): Promise<void>;
+    recordReentry(ctxId: string): Promise<void>;
+    touch(ctxId: string, kind?: GoalActivityKind): Promise<void>;
 }
 
 export interface InstanceWaitPort {

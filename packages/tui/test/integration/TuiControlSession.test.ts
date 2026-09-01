@@ -521,6 +521,7 @@ function createServer(
                 async list() { return []; },
                 async manage() { return undefined; },
                 async read() { return undefined; },
+                async recordReentry() {},
                 async stopAll() { return []; },
                 async touch() {},
             },

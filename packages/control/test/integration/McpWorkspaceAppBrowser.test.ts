@@ -231,6 +231,40 @@ test("Workspace blocked Goal shows its reason and can be resumed by the user", B
     assert.equal(await app.getByRole("button", { name: "Resume Goal", exact: true }).count(), 0);
 });
 
+test("Workspace user can pause an active Goal without triggering model re-entry", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:500px"></iframe>');
+    await page.evaluate(BRIDGE_SCRIPT);
+    await page.evaluate(() => {
+        const state = window as typeof window & {
+            __workspaceApprovalPending: boolean;
+            __workspaceGoalDueNow: boolean;
+            __workspaceQuestionAnswered: boolean;
+            __workspaceWaitInterrupted: boolean;
+        };
+        state.__workspaceQuestionAnswered = true;
+        state.__workspaceApprovalPending = false;
+        state.__workspaceWaitInterrupted = true;
+        state.__workspaceGoalDueNow = false;
+    });
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    const app = page.frameLocator("#workspace");
+    await app.getByRole("button", { name: "Pause Goal", exact: true }).click();
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_goal_pause')");
+    await app.getByText("Paused", { exact: true }).waitFor({ state: "visible" });
+    assert.equal(await app.getByRole("button", { name: "Resume Goal", exact: true }).count(), 1);
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
+    assert.equal(await page.evaluate("window.__workspaceReentryMode"), "paused");
+});
+
 test("Workspace Goal requests one model continuation after inactivity", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
@@ -696,11 +730,77 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     assert.equal(recoverCalls[1]?.arguments?.claimId, "recovery-claim");
     assert.equal(recoverCalls[2]?.arguments?.action, "sent");
     assert.equal(recoverCalls[2]?.arguments?.claimId, "recovery-claim");
-    assert.equal(recoverCalls[3]?.arguments?.action, "complete");
+    assert.equal(recoverCalls[3]?.arguments?.action, "release");
     assert.equal(recoverCalls[3]?.arguments?.claimId, "recovery-claim");
     assert.deepEqual(
         await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_reentry_control').map(call => call.arguments.action)"),
         ["claim", "validate"],
+    );
+});
+
+test("Workspace retries a sent detached wait after its execution lease expires", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
+    await page.evaluate(RECOVERY_BRIDGE_SCRIPT);
+    await page.evaluate(() => {
+        const state = window as typeof window & { __recoveryRetryDue: boolean; __recoverySent: boolean };
+        state.__recoverySent = true;
+        state.__recoveryRetryDue = true;
+    });
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    await page.waitForFunction("(window.__modelMessages || []).length === 1");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
+    assert.deepEqual(
+        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)"),
+        ["claim", "attempt", "sent", "release"],
+    );
+    await page.waitForTimeout(100);
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
+    assert.equal(await page.evaluate("window.__recoverySent"), true);
+    assert.equal(await page.evaluate("window.__recoveryRetryDue"), false);
+});
+
+test("Workspace user ownership fences an overdue sent wait recovery", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
+    await page.evaluate(RECOVERY_BRIDGE_SCRIPT);
+    await page.evaluate(() => {
+        const state = window as typeof window & {
+            __recoveryReentryMode: string;
+            __recoveryRetryDue: boolean;
+            __recoverySent: boolean;
+            __recoverySuppressedAt: string;
+        };
+        state.__recoverySent = true;
+        state.__recoveryRetryDue = true;
+        state.__recoveryReentryMode = "user_owned";
+        state.__recoverySuppressedAt = new Date().toISOString();
+    });
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    await page.waitForFunction(
+        "(window.__workspaceCalls || []).some(call => call.name === 'workspace_snapshot' || call.name === 'workspace_reconnect')",
+    );
+    await page.waitForTimeout(250);
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
+    assert.equal(
+        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"),
+        0,
     );
 });
 
@@ -794,7 +894,7 @@ test("Workspace Stop waiting resumes the agent after a detached tmux wait", BROW
     const recoveryActions = await page.evaluate(
         "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)",
     );
-    assert.deepEqual(recoveryActions, ["claim", "attempt", "sent", "complete"]);
+    assert.deepEqual(recoveryActions, ["claim", "attempt", "sent", "release"]);
 });
 
 test("Workspace task Resume uses an already resolved wait as its single model re-entry", BROWSER_TEST_OPTIONS, async (t) => {
@@ -827,7 +927,7 @@ test("Workspace task Resume uses an already resolved wait as its single model re
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
     assert.deepEqual(
         await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)"),
-        ["claim", "attempt", "sent", "complete"],
+        ["claim", "attempt", "sent", "release"],
     );
 });
 
@@ -896,7 +996,7 @@ test("Workspace Goal Resume uses an already resolved wait as its single model re
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
     assert.deepEqual(
         await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)"),
-        ["claim", "attempt", "sent", "complete"],
+        ["claim", "attempt", "sent", "release"],
     );
 });
 
@@ -1055,6 +1155,7 @@ window.__workspaceAgentBusy = false;
 window.__workspaceWaitInterrupted = false;
 window.__workspaceGoalStopped = false;
 window.__workspaceGoalBlocked = false;
+window.__workspaceGoalPaused = false;
 window.__workspaceGoalDueNow = false;
 window.__workspaceGoalRetryAfter = "";
 window.__workspaceGoalContinuationCount = 0;
@@ -1062,6 +1163,7 @@ window.__workspaceGoalLastAgentActivityAt = "2026-08-19T01:00:00.000Z";
 window.__workspaceReentryEpoch = 0;
 window.__workspaceReentryClaimId = "";
 window.__workspaceReentrySuppressedAt = "";
+window.__workspaceReentryMode = "automatic";
 window.__rejectNextModelMessage = false;
 window.__workspaceBackgroundDetached = false;
 window.__holdGoalContinuationContext = false;
@@ -1155,7 +1257,7 @@ function snapshot(withQuestion) {
             note: window.__workspaceGoalBlocked ? "Waiting for user decision" : undefined,
             objective: "Ship Workspace Goal mode",
             revision: 1,
-            status: window.__workspaceGoalStopped ? "stopped" : window.__workspaceGoalBlocked ? "blocked" : "active",
+            status: window.__workspaceGoalStopped ? "stopped" : window.__workspaceGoalPaused ? "paused" : window.__workspaceGoalBlocked ? "blocked" : "active",
             steps: window.__workspaceGoalStepsDone
                 ? [
                     { id: "implement", status: "completed", text: "Implement Goal runtime" },
@@ -1172,6 +1274,7 @@ function snapshot(withQuestion) {
         reentry: {
             claimId: window.__workspaceReentryClaimId || undefined,
             epoch: window.__workspaceReentryEpoch,
+            mode: window.__workspaceReentryMode,
             pending: !!window.__workspaceReentryClaimId,
             suppressedAt: window.__workspaceReentrySuppressedAt || undefined
         },
@@ -1314,6 +1417,13 @@ window.addEventListener("message", function (event) {
         } });
         return;
     }
+    if (call.name === "workspace_goal_pause") {
+        window.__workspaceGoalPaused = true;
+        window.__workspaceReentryMode = "paused";
+        window.__workspaceReentrySuppressedAt = new Date().toISOString();
+        reply({ structuredContent: { goal: snapshot(false).goal } });
+        return;
+    }
     if (call.name === "workspace_goal_stop") {
         window.__workspaceGoalStopped = true;
         reply({ structuredContent: { goal: snapshot(false).goal } });
@@ -1321,6 +1431,9 @@ window.addEventListener("message", function (event) {
     }
     if (call.name === "workspace_goal_resume") {
         window.__workspaceGoalBlocked = false;
+        window.__workspaceGoalPaused = false;
+        window.__workspaceReentryMode = "automatic";
+        window.__workspaceReentrySuppressedAt = "";
         reply({ structuredContent: { goal: snapshot(false).goal } });
         return;
     }
@@ -1374,6 +1487,7 @@ window.addEventListener("message", function (event) {
             window.__workspaceReentryEpoch += 1;
             window.__workspaceReentryClaimId = "";
             window.__workspaceReentrySuppressedAt = new Date().toISOString();
+            window.__workspaceReentryMode = "user_owned";
             reply({ structuredContent: snapshot(false).reentry });
             return;
         }
@@ -1381,6 +1495,7 @@ window.addEventListener("message", function (event) {
             window.__workspaceReentryEpoch += 1;
             window.__workspaceReentryClaimId = "";
             window.__workspaceReentrySuppressedAt = "";
+            window.__workspaceReentryMode = "automatic";
             reply({ structuredContent: snapshot(false).reentry });
             return;
         }
@@ -1623,10 +1738,14 @@ window.__workspaceCalls = [];
 window.__modelMessages = [];
 window.__bridgeEvents = [];
 window.__recovered = false;
+window.__recoverySent = false;
+window.__recoveryRetryDue = false;
 window.__goalRecovery = false;
 window.__unassociatedRecovery = false;
 window.__recoveryTimedOut = false;
 window.__recoveryReentryClaimId = "";
+window.__recoveryReentryMode = "automatic";
+window.__recoverySuppressedAt = "";
 
 function recoverySnapshot() {
     var goalMode = window.__goalRecovery;
@@ -1637,6 +1756,13 @@ function recoverySnapshot() {
         background: window.__recovered ? [] : [{
             detachedAt: "2026-08-19T01:00:01.000Z",
             goalId: goalMode ? "goal-recovery" : undefined,
+            recoveryMessageAttemptedAt: window.__recoverySent ? "2026-08-19T01:00:02.500Z" : undefined,
+            recoveryMessageId: window.__recoverySent ? "recovery-message-id" : undefined,
+            recoveryMessageSentAt: window.__recoverySent ? "2026-08-19T01:00:03.000Z" : undefined,
+            recoveryRetryAfter: window.__recoverySent
+                ? (window.__recoveryRetryDue ? "2000-01-01T00:00:00.000Z" : "2099-01-01T00:00:00.000Z")
+                : undefined,
+            recoveryRetryCount: window.__recoverySent ? 0 : undefined,
             status: "resolved",
             taskId: goalMode || unassociated ? undefined : "task-recovery",
             tmuxTaskId: "tmux-recovery",
@@ -1663,7 +1789,13 @@ function recoverySnapshot() {
         } : undefined,
         instance: "browser-instance",
         questions: [],
-        reentry: { claimId: window.__recoveryReentryClaimId || undefined, epoch: 0, pending: !!window.__recoveryReentryClaimId },
+        reentry: {
+            claimId: window.__recoveryReentryClaimId || undefined,
+            epoch: 0,
+            mode: window.__recoveryReentryMode,
+            pending: !!window.__recoveryReentryClaimId,
+            suppressedAt: window.__recoverySuppressedAt || undefined
+        },
         tasks: goalMode || unassociated ? [] : [{
             checkpoint: {
                 next: "Inspect the completed background result",
@@ -1742,7 +1874,7 @@ window.addEventListener("message", function (event) {
     if (call.name === "workspace_reentry_control") {
         var reentryAction = call.arguments.action;
         if (reentryAction === "claim") {
-            var claimed = !window.__recoveryReentryClaimId;
+            var claimed = window.__recoveryReentryMode === "automatic" && !window.__recoverySuppressedAt && !window.__recoveryReentryClaimId;
             if (claimed) window.__recoveryReentryClaimId = call.arguments.claimId;
             reply({ structuredContent: { claimId: call.arguments.claimId, claimed: claimed, epoch: 0, pending: !!window.__recoveryReentryClaimId } });
             return;
@@ -1758,7 +1890,9 @@ window.addEventListener("message", function (event) {
         }
         if (reentryAction === "resume") {
             window.__recoveryReentryClaimId = "";
-            reply({ structuredContent: { epoch: 1, pending: false, resumed: true } });
+            window.__recoveryReentryMode = "automatic";
+            window.__recoverySuppressedAt = "";
+            reply({ structuredContent: { epoch: 1, mode: "automatic", pending: false, resumed: true } });
             return;
         }
         reply({ structuredContent: { epoch: 0, pending: !!window.__recoveryReentryClaimId } });
@@ -1766,6 +1900,10 @@ window.addEventListener("message", function (event) {
     }
     if (call.name === "workspace_wait_recover") {
         if (call.arguments.action === "claim") {
+            if (window.__recoveryRetryDue) {
+                window.__recoverySent = false;
+                window.__recoveryRetryDue = false;
+            }
             reply({ structuredContent: {
                 claimId: "recovery-claim",
                 goalId: window.__goalRecovery ? "goal-recovery" : undefined,
@@ -1794,6 +1932,8 @@ window.addEventListener("message", function (event) {
             return;
         }
         if (call.arguments.action === "sent") {
+            window.__recoverySent = true;
+            window.__recoveryRetryDue = false;
             reply({ structuredContent: {
                 recoveryMessageId: "recovery-message-id",
                 recoveryMessageSentAt: "2026-08-19T01:00:03.000Z",
@@ -1816,6 +1956,7 @@ window.__taskStatus = "in_progress";
 window.__taskRevision = 1;
 window.__waitWindowInterrupted = false;
 window.__waitWindowRecovered = false;
+window.__waitRecoverySent = false;
 window.__waitRecoveryDisabled = false;
 window.__resumeReentryClaimId = "";
 window.__resumeGoalMode = false;
@@ -1828,6 +1969,9 @@ function resumeSnapshot() {
             detachedAt: new Date().toISOString(),
             goalId: window.__resumeGoalMode ? "goal-resume" : undefined,
             recoveryDisabledAt: window.__waitRecoveryDisabled ? new Date().toISOString() : undefined,
+            recoveryMessageAttemptedAt: window.__waitRecoverySent ? "2026-08-19T01:00:02.500Z" : undefined,
+            recoveryMessageId: window.__waitRecoverySent ? "resume-message" : undefined,
+            recoveryMessageSentAt: window.__waitRecoverySent ? "2026-08-19T01:00:03.000Z" : undefined,
             status: window.__waitWindowInterrupted ? "resolved" : "detached",
             taskId: window.__resumeGoalMode ? undefined : "task-resume",
             tmuxTaskId: "tmux-resume",
@@ -1993,6 +2137,7 @@ window.addEventListener("message", function (event) {
             return;
         }
         if (call.arguments.action === "sent") {
+            window.__waitRecoverySent = true;
             reply({ structuredContent: {
                 recoveryMessageId: "resume-message",
                 recoveryMessageSentAt: "2026-08-19T01:00:03.000Z",

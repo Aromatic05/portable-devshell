@@ -242,10 +242,11 @@ test("WaitState keeps resolved waits recoverable until model re-entry completes"
     const sent = state.markRecoverySent(attempted.document, created.record.waitId, "claim-1");
     const sentAgain = state.markRecoverySent(sent.document, created.record.waitId, "claim-1");
     assert.equal(sentAgain.record.recoveryMessageSentAt, sent.record.recoveryMessageSentAt);
-    const sentTakeover = state.claimRecovery(sent.document, created.record.waitId, "claim-after-send");
-    assert.equal(sentTakeover.record.recoveryClaimId, "claim-after-send");
-    assert.equal(sentTakeover.record.recoveryMessageId, sent.record.recoveryMessageId);
-    const sentCompleted = state.completeRecovery(sentTakeover.document, created.record.waitId, "claim-after-send");
+    assert.throws(
+        () => state.claimRecovery(sent.document, created.record.waitId, "claim-after-send"),
+        /retry lease/u,
+    );
+    const sentCompleted = state.completeRecovery(sent.document, created.record.waitId, "claim-1");
     assert.equal(sentCompleted.record.status, "consumed");
     assert.throws(
         () => state.claimRecovery(claimed.document, created.record.waitId, "claim-2"),
@@ -265,6 +266,40 @@ test("WaitState keeps resolved waits recoverable until model re-entry completes"
     const completed = state.completeRecovery(resent.document, created.record.waitId, "claim-2");
     assert.equal(completed.record.status, "consumed");
     assert.equal(completed.record.recoveryClaimId, undefined);
+});
+
+test("WaitState retries an unconsumed sent recovery only after its execution lease", () => {
+    let now = Date.parse("2026-08-18T00:00:00.000Z");
+    const state = new WaitState({
+        now: () => new Date(now).toISOString(),
+        waitId: () => "wait-retry",
+    });
+    let transition = state.create(state.emptyDocument(), {
+        createdByCtxId: "ctx-1",
+        kind: "tmux",
+        targetId: "tmux-task-retry",
+    });
+    transition = state.detach(transition.document, transition.record.waitId);
+    transition = state.resolve(transition.document, transition.record.waitId, { task: { status: "0" } });
+    transition = state.claimRecovery(transition.document, transition.record.waitId, "claim-1");
+    const firstMessageId = transition.record.recoveryMessageId;
+    transition = state.markRecoveryAttempted(transition.document, transition.record.waitId, "claim-1");
+    transition = state.markRecoverySent(transition.document, transition.record.waitId, "claim-1");
+    assert.equal(transition.record.recoveryRetryCount, 0);
+    assert.equal(transition.record.recoveryRetryAfter, "2026-08-18T00:01:00.000Z");
+    transition = state.releaseRecovery(transition.document, transition.record.waitId, "claim-1");
+
+    now += 59_000;
+    assert.throws(
+        () => state.claimRecovery(transition.document, transition.record.waitId, "claim-2"),
+        /retry lease/u,
+    );
+    now += 2_000;
+    transition = state.claimRecovery(transition.document, transition.record.waitId, "claim-2");
+    assert.equal(transition.record.recoveryRetryCount, 1);
+    assert.notEqual(transition.record.recoveryMessageId, firstMessageId);
+    assert.equal(transition.record.recoveryMessageAttemptedAt, undefined);
+    assert.equal(transition.record.recoveryMessageSentAt, undefined);
 });
 
 test("WaitState fences an ambiguous recovery delivery from automatic replay", () => {

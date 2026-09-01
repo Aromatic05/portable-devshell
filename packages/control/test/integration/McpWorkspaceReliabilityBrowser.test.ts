@@ -1395,10 +1395,10 @@ test("Workspace records a safe recovery rejection before resetting a timed-out H
     await app.getByRole("button", { name: "Continue", exact: true }).click();
     await page.waitForFunction("(window.__modelContextFailureActions || []).includes('reject')");
     await page.waitForFunction("(window.__modelContextFailureInitializeCount || 0) >= 2");
-    await page.waitForFunction("(window.__modelContextFailureActions || []).includes('complete')");
+    await page.waitForFunction("(window.__modelContextFailureActions || []).includes('release')");
     assert.deepEqual(
         await page.evaluate("window.__modelContextFailureActions || []"),
-        ["claim", "attempt", "reject", "claim", "attempt", "sent", "complete"],
+        ["claim", "attempt", "reject", "claim", "attempt", "sent", "release"],
     );
     assert.equal(await page.evaluate("(window.__modelContextFailureMessages || []).length"), 1);
     await page.waitForTimeout(250);

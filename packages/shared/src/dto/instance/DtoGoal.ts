@@ -1,6 +1,7 @@
 export type GoalStepStatus = "pending" | "active" | "completed" | "skipped";
-export type GoalStatus = "active" | "blocked" | "completed" | "stopped";
-export type GoalAction = "start" | "get" | "update" | "block" | "resume" | "finish" | "stop";
+export type GoalStatus = "active" | "blocked" | "paused" | "completed" | "stopped";
+export type GoalAction = "start" | "get" | "update" | "block" | "pause" | "resume" | "finish" | "stop";
+export type GoalActivityKind = "observation" | "execution" | "mutation" | "wait";
 export type GoalContinuationAction = "claim" | "validate" | "attempt" | "report" | "reset";
 
 export interface GoalStep {
@@ -29,6 +30,8 @@ export interface GoalManageInput {
     text?: string;
     /** Internal execution binding. Model-facing schemas do not expose this field. */
     workspace?: string;
+    /** Internal human-control marker. Model-facing schemas do not expose this field. */
+    userControl?: boolean;
 }
 
 export interface GoalContinuationInput {
@@ -52,8 +55,15 @@ export interface GoalRecord {
     createdByCtxId: string;
     goalId: string;
     lastAgentActivityAt: string;
+    lastControlAt?: string;
+    lastExecutionAt?: string;
+    lastReentryAt?: string;
+    /** Compatibility alias for lastReentryAt. */
     lastContinuationAt?: string;
     lastProgressAt: string;
+    lastStreakEvaluatedReentryAt?: string;
+    noActionStreak: number;
+    stagnationStreak: number;
     note?: string;
     objective: string;
     revision: number;
@@ -76,8 +86,15 @@ export interface GoalSnapshot {
     createdAt: string;
     goalId: string;
     lastAgentActivityAt: string;
+    lastExecutionAt?: string;
+    lastReentryAt?: string;
+    /** Compatibility alias for lastReentryAt. */
     lastContinuationAt?: string;
     lastProgressAt: string;
+    lastStreakEvaluatedReentryAt?: string;
+    noActionStreak?: number;
+    stagnationStreak?: number;
+    /** Compatibility field; 0 means automatic continuation is unbounded. */
     maxContinuations: number;
     note?: string;
     objective: string;

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type {
+    GoalActivityKind,
     JsonValue,
     ToolCallContext,
     ToolDefinition,
@@ -186,6 +187,7 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
     const harness = createWorker();
     const recoverableWaits: WaitRecord[] = [];
     const dismissedRecoveries: string[] = [];
+    const contextRegistry = new McpContextRegistry();
     const gateway = {
         assertReady() {},
         async callTool(): Promise<JsonValue> {
@@ -196,7 +198,13 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
         },
         async createWait(): Promise<WaitRecord> { throw new Error("unused"); },
         async detachWait(): Promise<WaitRecord> { throw new Error("unused"); },
-        async consumeWait(): Promise<WaitRecord> { throw new Error("unused"); },
+        async consumeWait(_instance: string, waitId: string): Promise<WaitRecord> {
+            const wait = recoverableWaits.find((entry) => entry.waitId === waitId);
+            if (wait === undefined) throw new Error(`wait ${waitId} missing`);
+            wait.status = "consumed";
+            wait.consumedAt = new Date().toISOString();
+            return { ...wait };
+        },
         async resolveWait(): Promise<WaitRecord> { throw new Error("unused"); },
         async waitForWait(): Promise<WaitRecord> { throw new Error("unused"); },
         async listWaits(): Promise<WaitRecord[]> { return recoverableWaits.map((wait) => ({ ...wait })); },
@@ -246,6 +254,7 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
     });
     const dispatch = new McpEndpointDispatch({
         catalog,
+        contextRegistry,
         gateway,
         instanceName: "demo-local",
         worker: harness.worker
@@ -258,6 +267,7 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
     ));
     assert.equal(environment.workspace, "/workspace");
     assert.equal(typeof environment.ctxId, "string");
+    await contextRegistry.suppressAutomaticReentry(environment.ctxId, "demo-local", "user interrupted", "user_owned");
 
     const listed = await dispatch.callTool(
         "instance_list",
@@ -265,6 +275,7 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
         { principal: "tester", requestId: "request-list" }
     );
     assert.deepEqual(listed, { instances: [{ name: "demo-local" }] });
+    assert.equal((await contextRegistry.readAutomaticReentry(environment.ctxId, "demo-local")).mode, "user_owned");
 
     recoverableWaits.push({
         createdAt: "2026-08-30T00:00:00.000Z",
@@ -273,6 +284,7 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
         kind: "tmux",
         recoveryMessageAttemptedAt: "2026-08-30T00:00:02.000Z",
         recoveryMessageId: "resume-message-1",
+        recoveryMessageSentAt: "2026-08-30T00:00:03.000Z",
         status: "resolved",
         targetId: "tmux-task-1",
         updatedAt: "2026-08-30T00:00:02.000Z",
@@ -297,6 +309,9 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
         { principal: "tester", requestId: "request-worker" }
     );
     assert.deepEqual(workerResult, { ok: true, toolName: "bash_run" });
+    assert.equal((await contextRegistry.readAutomaticReentry(environment.ctxId, "demo-local")).mode, "automatic");
+    assert.equal(recoverableWaits.find((entry) => entry.waitId === "wait-recovery-1")?.status, "consumed");
+    assert.equal(recoverableWaits.find((entry) => entry.waitId === "wait-recovery-raced")?.status, "resolved");
     assert.deepEqual(
         dismissedRecoveries,
         [],
@@ -802,6 +817,7 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
     let ready = false;
     let internalReadCalls = 0;
     let logicalReadCalls = 0;
+    const goalActivityKinds: GoalActivityKind[] = [];
     const harness = createWorker({ tools: [tmuxReadBlockTool()] });
     const worker = {
         ...harness.worker,
@@ -882,7 +898,7 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
         async readTodo() { return { items: [], revision: 0, tasks: [] }; },
         async reattachWait(_instance: string, waitId: string) { return update(waitId, "waiting"); },
         async resolveWait(_instance: string, waitId: string, result?: JsonValue) { return update(waitId, "resolved", result); },
-        async touchGoal() {},
+        async touchGoal(_instance: string, _ctxId: string, kind: GoalActivityKind = "execution") { goalActivityKinds.push(kind); },
         async waitForWait(_instance: string, waitId: string): Promise<Wait> {
             const wait = waits.find((entry) => entry.waitId === waitId);
             if (wait === undefined) throw new Error(`missing wait ${waitId}`);
@@ -931,6 +947,7 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
         { principal: "tester", requestId: "read-observed-wait" },
     );
     assert.equal(waits.find((entry) => entry.waitId === "wait-observed")?.status, "consumed");
+    assert.deepEqual(goalActivityKinds.slice(-2), ["observation", "observation"]);
 
     const pendingNow = new Date().toISOString();
     waits.push({
@@ -959,6 +976,7 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
         { principal: "tester", requestId: "wait-read-detached" },
     ) as { detached?: boolean };
     assert.equal(result.detached, true);
+    assert.deepEqual(goalActivityKinds.slice(-2), ["wait", "wait"]);
     assert.equal(waits.find((entry) => entry.waitId === "wait-older-detached")?.status, "cancelled");
     const replacement = waits.find((entry) => entry.waitId.startsWith("wait-read-"));
     assert.equal(replacement?.status, "detached");

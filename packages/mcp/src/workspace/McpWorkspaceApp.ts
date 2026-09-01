@@ -77,6 +77,9 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
 .badge { border-radius: var(--border-radius-full, 999px); padding: 2px 7px; font-size: 10px; background: var(--color-background-secondary, color-mix(in srgb, CanvasText 10%, transparent)); }
 .mono { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11px; }
 .choice-row, .action-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 10px; min-height: 34px; padding: 7px 9px; border: 0; border-top: 1px solid var(--color-border-secondary, color-mix(in srgb, CanvasText 14%, transparent)); border-radius: 0; background: transparent; cursor: pointer; font-size: 12px; text-align: left; }
+.goal-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--color-border-secondary, color-mix(in srgb, CanvasText 14%, transparent)); }
+.goal-actions .action-row { border-top: 0; min-width: 0; }
+.goal-actions .action-row:only-child { grid-column: 1 / -1; }
 .choice-row:hover, .action-row:hover { background: var(--color-background-secondary, color-mix(in srgb, CanvasText 6%, transparent)); }
 .answer-row { display: flex; align-items: center; border-top: 1px solid var(--color-border-secondary, color-mix(in srgb, CanvasText 14%, transparent)); }
 .answer-row input { flex: 1 1 auto; }
@@ -133,12 +136,14 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var DISPLAY_MODE_TIMEOUT_MS = 1000;
   var DISPLAY_MODE_RETRY_MS = 750;
   var DISPLAY_MODE_MAX_RETRIES = 2;
+  var WAIT_RECOVERY_RETRY_MS = 60000;
   var RECOVERY_NO_CHAT_SUFFIX = " Do not reply only with an acknowledgement, summary, plan, status update, apology, or statement that you will continue.";
   var bridgeReady = false;
   var pendingToolResult = null;
   var initialToolResultResolve = null;
   var liveAbortController = null;
   var goalTimer = null;
+  var waitRecoveryTimer = null;
   var goalContinuationClaimId = "";
   var automaticMessageInFlight = false;
   var heldReentryClaimId = "";
@@ -566,6 +571,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     if (!initialized || !bridgeReady || bridgeResetting || shuttingDown) return false;
     var reentry = snapshot && snapshot.reentry;
     if (!reentry) return true;
+    if (reentry.mode && reentry.mode !== "automatic") return false;
     if (reentry.suppressedAt) return false;
     if (reentry.pending && (!heldReentryClaimId || reentry.claimId !== heldReentryClaimId)) return false;
     return true;
@@ -667,9 +673,11 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     var readyToFinish = steps.length > 0 && steps.every(function (step) {
       return step && (step.status === "completed" || step.status === "skipped");
     });
-    var attempt = claim && Number.isFinite(claim.continuationCount)
-      ? Math.max(1, Math.floor(claim.continuationCount))
-      : Math.max(1, ((goal && goal.continuationCount) || 0) + 1);
+    var attempt = goal && Number.isFinite(goal.noActionStreak)
+      ? Math.max(1, Math.floor(goal.noActionStreak) + 1)
+      : claim && Number.isFinite(claim.continuationCount)
+        ? Math.max(1, Math.floor(claim.continuationCount))
+        : Math.max(1, ((goal && goal.continuationCount) || 0) + 1);
     if (readyToFinish) {
       return "Current Goal has no remaining task item: every step is completed or skipped. Call workspace_goal(action=\"finish\") now. Do not reply with an acknowledgement, explanation, summary, plan, status update, or statement that the Goal is already complete. Do not end the turn before finish succeeds.";
     }
@@ -679,6 +687,9 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       ? "[" + String(currentStep.id || "step") + "] " + String(currentStep.text || "Continue the current Goal step")
       : "the current active Goal step";
     var prefix = "Current task item: " + currentItem + ". ";
+    if (goal && Number.isFinite(goal.stagnationStreak) && goal.stagnationStreak >= 2) {
+      prefix += "Recent execution has repeatedly failed to advance this task item; stop cycling unrelated or reversible actions. ";
+    }
     if (attempt <= 1) {
       return prefix +
         "Continue executing this task item immediately from its current state. Take the next concrete action now. " +
@@ -706,6 +717,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   async function yieldAutomaticReentry(reason) {
     if (goalTimer) clearTimeout(goalTimer);
     goalTimer = null;
+    if (waitRecoveryTimer) clearTimeout(waitRecoveryTimer);
+    waitRecoveryTimer = null;
     try {
       var yielded = structured(await callTool("workspace_reentry_control", {
         action: "yield",
@@ -859,6 +872,45 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return !!task && task.status === "in_progress";
   }
 
+  function waitRecoveryReadyAt(item) {
+    if (!item || !item.recoveryMessageSentAt) return Number.NEGATIVE_INFINITY;
+    var retryAt = Date.parse(item.recoveryRetryAfter || "");
+    if (Number.isFinite(retryAt)) return retryAt;
+    var sentAt = Date.parse(item.recoveryMessageSentAt || "");
+    return Number.isFinite(sentAt) ? sentAt + WAIT_RECOVERY_RETRY_MS : Number.POSITIVE_INFINITY;
+  }
+
+  function waitRecoveryDispatchDue(item) {
+    return !item.recoveryMessageSentAt || Date.now() >= waitRecoveryReadyAt(item);
+  }
+
+  function scheduleWaitRecovery(minDelayMs) {
+    if (waitRecoveryTimer) clearTimeout(waitRecoveryTimer);
+    waitRecoveryTimer = null;
+    if (
+      recovering || automaticMessageInFlight || !appToken || !snapshot || !automaticReentryAvailable() ||
+      snapshot.agentBusy || visibleEvent() || busy.size > 0
+    ) return;
+    var background = Array.isArray(snapshot.background) ? snapshot.background : [];
+    var candidate = null;
+    var candidateAt = Number.POSITIVE_INFINITY;
+    background.forEach(function (item) {
+      if (
+        !item || item.status !== "resolved" || !item.detachedAt || !item.recoveryMessageSentAt ||
+        (item.recoveryMessageAttemptedAt && !item.recoveryMessageSentAt) || !hasRecoverableWork(item)
+      ) return;
+      var readyAt = waitRecoveryReadyAt(item);
+      if (readyAt < candidateAt) { candidate = item; candidateAt = readyAt; }
+    });
+    if (!candidate || !Number.isFinite(candidateAt)) return;
+    var delayMs = Math.max(minDelayMs || 0, candidateAt - Date.now(), 0);
+    var waitId = candidate.waitId;
+    waitRecoveryTimer = setTimeout(function () {
+      waitRecoveryTimer = null;
+      void recoverDetachedWait(waitId);
+    }, delayMs);
+  }
+
   async function dispatchRecovery(waitId, extra) {
     var claimed = structured(await callTool("workspace_wait_recover", { action: "claim", waitId: waitId }, true));
     var attempted = !!claimed.recoveryMessageAttemptedAt;
@@ -901,7 +953,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         }, true);
       }
       await callTool("workspace_wait_recover", {
-        action: "complete",
+        action: "release",
         claimId: claimed.claimId,
         waitId: waitId
       }, true);
@@ -931,7 +983,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       return (!preferredWaitId || entry.waitId === preferredWaitId) &&
         entry.status === "resolved" && !!entry.detachedAt &&
         !(entry.recoveryMessageAttemptedAt && !entry.recoveryMessageSentAt) &&
-        hasRecoverableWork(entry);
+        waitRecoveryDispatchDue(entry) && hasRecoverableWork(entry);
     });
     if (!item) return;
     recovering = true;
@@ -946,6 +998,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       console.error(error);
     } finally {
       recovering = false;
+      scheduleWaitRecovery(0);
       scheduleGoalContinuation(0);
     }
   }
@@ -963,12 +1016,12 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   async function resumeThroughExistingWait(goalId, taskId) {
     var item = backgroundWaitForResume(goalId, taskId);
     if (!item) return false;
-    if (
-      item.status === "resolved" && item.detachedAt &&
-      !(item.recoveryMessageAttemptedAt && !item.recoveryMessageSentAt) &&
-      hasRecoverableWork(item)
-    ) {
-      await recoverDetachedWait(item.waitId);
+    if (item.status === "resolved" && item.detachedAt && hasRecoverableWork(item)) {
+      if (waitRecoveryDispatchDue(item) && !(item.recoveryMessageAttemptedAt && !item.recoveryMessageSentAt)) {
+        await recoverDetachedWait(item.waitId);
+        return true;
+      }
+      if (item.recoveryMessageSentAt) return false;
     }
     return true;
   }
@@ -996,6 +1049,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     persistWorkspaceHint();
     render();
     await syncModelContext();
+    scheduleWaitRecovery(0);
     scheduleGoalContinuation(0);
     if (allowRecovery !== false) void recoverDetachedWait();
   }
@@ -1243,6 +1297,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     liveAbortController = null;
     if (goalTimer) clearTimeout(goalTimer);
     goalTimer = null;
+    if (waitRecoveryTimer) clearTimeout(waitRecoveryTimer);
+    waitRecoveryTimer = null;
     if (connectRetryTimer) clearTimeout(connectRetryTimer);
     connectRetryTimer = null;
     if (liveStartRetryTimer) clearTimeout(liveStartRetryTimer);
@@ -1483,6 +1539,13 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return outcome;
   }
 
+  async function pauseGoalFromUi(goalId, revision) {
+    await act("goal-pause", "workspace_goal_pause", {
+      goalId: goalId,
+      revision: revision
+    });
+  }
+
   async function resumeGoalFromUi(goalId, revision) {
     var result = await act("goal-resume", "workspace_goal_resume", {
       goalId: goalId,
@@ -1680,14 +1743,18 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     var uncertain = goal.continuationUncertain ? '<div class="goal-note"><div class="muted">Continuation delivery uncertain</div><div>Automatic retry stopped to avoid duplicate agent execution. Continue manually in chat or stop this Goal.</div></div>' : '';
     var exhausted = goal.autoContinueExhausted ? '<div class="goal-note"><div class="muted">Automatic resume paused</div><div>The automatic no-progress retry limit was reached. The Goal remains active.</div></div>' : '';
     var actions = "";
-    if (goal.status === "blocked") {
+    if (goal.status === "blocked" || goal.status === "paused") {
       actions += '<button type="button" class="action-row" aria-label="Resume Goal" data-goal-resume="' + escapeHtml(goal.goalId) + '" data-goal-revision="' + escapeHtml(goal.revision) + '"' + (busy.has("goal-resume") ? ' disabled' : '') + '><span>Resume Goal</span><span class="muted">continue agent work</span></button>';
+    }
+    if (goal.status === "active") {
+      actions += '<button type="button" class="action-row" aria-label="Pause Goal" data-goal-pause="' + escapeHtml(goal.goalId) + '" data-goal-revision="' + escapeHtml(goal.revision) + '"' + (busy.has("goal-pause") ? ' disabled' : '') + '><span>Pause Goal</span><span class="muted">keep processes running</span></button>';
     }
     if (goal.status === "active" && (goal.autoContinueExhausted || goal.continuationUncertain)) {
       actions += '<button type="button" class="action-row" aria-label="Retry Goal" data-goal-retry="' + escapeHtml(goal.goalId) + '"' + (busy.has("goal-retry") ? ' disabled' : '') + '><span>Retry Goal</span><span class="muted">explicitly resume model execution</span></button>';
     }
     actions += '<button type="button" class="action-row danger-row" aria-label="Stop Goal" data-goal-stop="' + escapeHtml(goal.goalId) + '" data-goal-revision="' + escapeHtml(goal.revision) + '"' + (busy.has("goal-stop") ? ' disabled' : '') + '><span>Stop Goal</span><span class="muted">keep processes running</span></button>';
-    var statusLabel = goal.continuationUncertain ? "Delivery uncertain" : goal.autoContinueExhausted ? "Resume paused" : goal.status === "blocked" ? "Blocked" : "Active";
+    if (actions) actions = '<div class="goal-actions">' + actions + '</div>';
+    var statusLabel = goal.continuationUncertain ? "Delivery uncertain" : goal.autoContinueExhausted ? "Resume paused" : goal.status === "blocked" ? "Blocked" : goal.status === "paused" ? "Paused" : "Active";
     return '<div class="card">' + eventHead("Goal", statusLabel) + '<div class="card-body"><div class="question">' + escapeHtml(goal.objective) + '</div>' + progress + currentStep + note + uncertain + exhausted + '</div>' + actions + '</div>';
   }
 
@@ -1703,6 +1770,14 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   }
 
   root.addEventListener("click", function (event) {
+    var goalPause = event.target.closest("[data-goal-pause]");
+    if (goalPause && !goalPause.hasAttribute("disabled")) {
+      void pauseGoalFromUi(
+        goalPause.getAttribute("data-goal-pause"),
+        Number(goalPause.getAttribute("data-goal-revision"))
+      );
+      return;
+    }
     var goalResume = event.target.closest("[data-goal-resume]");
     if (goalResume && !goalResume.hasAttribute("disabled")) {
       void resumeGoalFromUi(

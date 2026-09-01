@@ -27,6 +27,7 @@ export type McpToolCatalogInteractionName =
     | "workspace_task_control"
     | "workspace_wait_recover"
     | "workspace_goal_continue"
+    | "workspace_goal_pause"
     | "workspace_goal_resume"
     | "workspace_goal_stop"
     | "workspace_reentry_control"
@@ -284,7 +285,25 @@ export class McpToolCatalogInteraction {
         },
         {
             _meta: appOnlyMeta,
-            description: "Resume the current blocked Workspace Goal from the Workspace UI. App-only human action; models must not call it.",
+            description: "Pause the current active Workspace Goal from the Workspace UI without stopping shell or tmux processes. App-only human action; models must not call it.",
+            group: "workspace",
+            inputSchema: {
+                additionalProperties: false,
+                properties: {
+                    goalId: { minLength: 1, type: "string" },
+                    revision: { minimum: 1, type: "integer" },
+                    token: { minLength: 1, type: "string" },
+                },
+                required: ["goalId", "revision", "token"],
+                type: "object",
+            },
+            name: "workspace_goal_pause",
+            outputSchema: workspaceGoalResultOutputSchema,
+            requiredCapabilities: [],
+        },
+        {
+            _meta: appOnlyMeta,
+            description: "Resume the current blocked or paused Workspace Goal from the Workspace UI. App-only human action; models must not call it.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,

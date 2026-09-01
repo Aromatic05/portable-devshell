@@ -4,6 +4,7 @@ import {
     mergeComments,
     resolveResultHints,
     toControlErrorBody,
+    type GoalActivityKind,
     type JsonValue,
     type McpContextEnvironment,
     type McpContextRecord,
@@ -191,14 +192,19 @@ export class McpEndpointDispatch {
             !appOnlyInteraction,
             signal
         );
+        const goalActivity = !appOnlyInteraction && context.ctxId !== undefined && toolName !== "workspace_goal"
+            ? workspaceGoalActivity(toolName, routed.input, this.#tmuxBlockSyncMs)
+            : undefined;
         if (!appOnlyInteraction && context.ctxId !== undefined) {
             await this.#contextRegistry.clearAutomaticReentryClaim(context.ctxId, this.#instanceName).catch(() => undefined);
-            if (toolName !== "workspace_goal") {
-                await this.#gateway?.touchGoal?.(this.#instanceName, context.ctxId);
+            if (goalActivity !== undefined) {
+                await this.#contextRegistry.observeAutomaticReentryActivity(context.ctxId, this.#instanceName, goalActivity).catch(() => undefined);
+                await this.#gateway?.touchGoal?.(this.#instanceName, context.ctxId, goalActivity);
+                await this.#consumeRecoveredWaitsForActivity(context.ctxId, toolName, routed.input, goalActivity);
             }
         }
 
-        const touchGoalAfter = !appOnlyInteraction && context.ctxId !== undefined && toolName !== "workspace_goal";
+        const touchGoalAfter = goalActivity !== undefined && context.ctxId !== undefined;
         try {
             if (appOnlyInteraction) {
                 this.#catalog.assertAdaptable(selected.definition);
@@ -281,8 +287,32 @@ export class McpEndpointDispatch {
             );
         } finally {
             if (touchGoalAfter) {
-                await this.#gateway?.touchGoal?.(this.#instanceName, context.ctxId!).catch(() => undefined);
+                await this.#gateway?.touchGoal?.(this.#instanceName, context.ctxId!, goalActivity).catch(() => undefined);
             }
+        }
+    }
+
+    async #consumeRecoveredWaitsForActivity(
+        ctxId: string,
+        toolName: string,
+        input: JsonValue,
+        activity: GoalActivityKind,
+    ): Promise<void> {
+        const listWaits = this.#gateway?.listWaits;
+        const consumeWait = this.#gateway?.consumeWait;
+        if (listWaits === undefined || consumeWait === undefined) return;
+        const observedTmuxTask = activity === "observation" && toolName === "tmux_read"
+            ? readTmuxReadTask(input)
+            : undefined;
+        if (activity === "observation" && observedTmuxTask === undefined) return;
+        const waits = await listWaits.call(this.#gateway, this.#instanceName);
+        for (const wait of waits) {
+            if (
+                wait.createdByCtxId !== ctxId || wait.status !== "resolved" || wait.detachedAt === undefined ||
+                wait.recoveryMessageSentAt === undefined
+            ) continue;
+            if (observedTmuxTask !== undefined && (wait.kind !== "tmux" || wait.targetId !== observedTmuxTask)) continue;
+            await consumeWait.call(this.#gateway, this.#instanceName, wait.waitId).catch(() => undefined);
         }
     }
 
@@ -351,7 +381,7 @@ export class McpEndpointDispatch {
             automaticRecovery: taskAssociation.kind !== "ambiguous",
             createdByCtxId: context.ctxId,
             deadlineAt: new Date(startedAt + timeout).toISOString(),
-            ...(goal === undefined ? {} : { goalId: goal.goalId, goalRevision: goal.revision }),
+            ...(goal === undefined ? {} : { goalId: goal.goalId, goalProgressAt: goal.lastProgressAt, goalRevision: goal.revision }),
             ...(goalStep === undefined ? {} : { goalStepId: goalStep.id }),
             kind: "tmux",
             ownerCallId: callId,
@@ -506,7 +536,7 @@ export class McpEndpointDispatch {
             automaticRecovery: taskAssociation.kind !== "ambiguous",
             createdByCtxId: context.ctxId,
             ...(timeout === undefined ? {} : { deadlineAt: new Date(startedAt + timeout).toISOString() }),
-            ...(goal === undefined ? {} : { goalId: goal.goalId, goalRevision: goal.revision }),
+            ...(goal === undefined ? {} : { goalId: goal.goalId, goalProgressAt: goal.lastProgressAt, goalRevision: goal.revision }),
             ...(goalStep === undefined ? {} : { goalStepId: goalStep.id }),
             kind: "tmux",
             ownerCallId: callId,
@@ -1117,6 +1147,7 @@ function isAppOnlyInteractionTool(toolName: string): boolean {
         toolName === "workspace_watch" ||
         toolName === "workspace_goal_continue" ||
         toolName === "workspace_reentry_control" ||
+        toolName === "workspace_goal_pause" ||
         toolName === "workspace_goal_resume" ||
         toolName === "workspace_goal_stop" ||
         toolName === "workspace_question_answer" ||
@@ -1130,6 +1161,37 @@ function isPassiveWorkspaceRead(toolName: string): boolean {
     return toolName === "workspace_reconnect" ||
         toolName === "workspace_snapshot" ||
         toolName === "workspace_watch";
+}
+
+const OBSERVATION_TOOLS = new Set([
+    "artifact_read",
+    "artifact_share",
+    "artifact_viewImage",
+    "file_find",
+    "file_info",
+    "file_read",
+    "file_search",
+    "instance_list",
+    "instance_status",
+    "tmux_inspect",
+    "tmux_list",
+    "todo_read",
+    "workspace_open",
+]);
+
+const MUTATION_TOOLS = new Set([
+    "artifact_transfer",
+    "file_edit",
+    "todo_write",
+]);
+
+function workspaceGoalActivity(toolName: string, input: JsonValue, tmuxBlockSyncMs: number): GoalActivityKind {
+    if (toolName === "workspace_ask") return "wait";
+    if (toolName === "tmux_run") return readTmuxBlock(input) ? "wait" : "execution";
+    if (toolName === "tmux_read") return readTmuxReadTimeMs(input) >= tmuxBlockSyncMs ? "wait" : "observation";
+    if (OBSERVATION_TOOLS.has(toolName)) return "observation";
+    if (MUTATION_TOOLS.has(toolName)) return "mutation";
+    return "execution";
 }
 
 function readTmuxBlock(input: JsonValue): boolean {

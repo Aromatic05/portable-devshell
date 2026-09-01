@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 import {
     createError,
     errorCodes,
+    type GoalActivityKind,
     type McpContextEnvironment,
     type McpContextRecord,
 } from "@portable-devshell/shared";
@@ -36,10 +37,13 @@ export interface McpContextExternalBinding {
     value: string;
 }
 
+type McpContextAutomaticReentryMode = "automatic" | "user_owned" | "paused";
+
 interface McpContextStoredRecord extends McpContextRecord {
     automaticReentryClaimedAt?: string;
     automaticReentryClaimId?: string;
     automaticReentryEpoch?: number;
+    automaticReentryMode?: Exclude<McpContextAutomaticReentryMode, "automatic">;
     automaticReentrySuppressedAt?: string;
     automaticReentrySuppressionReason?: string;
     externalBindings?: McpContextExternalBinding[];
@@ -48,6 +52,7 @@ interface McpContextStoredRecord extends McpContextRecord {
 export interface McpContextAutomaticReentryState {
     claimId?: string;
     epoch: number;
+    mode: McpContextAutomaticReentryMode;
     pending: boolean;
     reason?: string;
     suppressedAt?: string;
@@ -396,6 +401,7 @@ export class McpContextRegistry {
         ctxId: string,
         instance: string,
         reason: string,
+        mode: Exclude<McpContextAutomaticReentryMode, "automatic"> = "user_owned",
     ): Promise<McpContextAutomaticReentryState> {
         await this.validateForInstance(ctxId, instance);
         return await this.#run(async () => {
@@ -404,6 +410,7 @@ export class McpContextRegistry {
             const at = new Date(this.#now()).toISOString();
             await this.#mutateAndPersist(() => {
                 record.automaticReentryEpoch = (record.automaticReentryEpoch ?? 0) + 1;
+                record.automaticReentryMode = mode;
                 record.automaticReentrySuppressedAt = at;
                 record.automaticReentrySuppressionReason = reason;
                 delete record.automaticReentryClaimedAt;
@@ -423,6 +430,31 @@ export class McpContextRegistry {
             if (record === undefined) throw invalidContext(ctxId);
             await this.#mutateAndPersist(() => {
                 record.automaticReentryEpoch = (record.automaticReentryEpoch ?? 0) + 1;
+                delete record.automaticReentryMode;
+                delete record.automaticReentrySuppressedAt;
+                delete record.automaticReentrySuppressionReason;
+                delete record.automaticReentryClaimedAt;
+                delete record.automaticReentryClaimId;
+            });
+            return automaticReentryState(record);
+        });
+    }
+
+    async observeAutomaticReentryActivity(
+        ctxId: string,
+        instance: string,
+        kind: GoalActivityKind,
+    ): Promise<McpContextAutomaticReentryState> {
+        await this.validateForInstance(ctxId, instance);
+        return await this.#run(async () => {
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined) throw invalidContext(ctxId);
+            if (kind === "observation" || record.automaticReentryMode !== "user_owned") {
+                return automaticReentryState(record);
+            }
+            await this.#mutateAndPersist(() => {
+                record.automaticReentryEpoch = (record.automaticReentryEpoch ?? 0) + 1;
+                delete record.automaticReentryMode;
                 delete record.automaticReentrySuppressedAt;
                 delete record.automaticReentrySuppressionReason;
                 delete record.automaticReentryClaimedAt;
@@ -1036,6 +1068,9 @@ function parseRecord(value: unknown): McpContextStoredRecord | undefined {
         ...(typeof raw.automaticReentryEpoch === "number" && Number.isSafeInteger(raw.automaticReentryEpoch) && raw.automaticReentryEpoch >= 0
             ? { automaticReentryEpoch: raw.automaticReentryEpoch }
             : {}),
+        ...(raw.automaticReentryMode === "user_owned" || raw.automaticReentryMode === "paused"
+            ? { automaticReentryMode: raw.automaticReentryMode }
+            : {}),
         ...(typeof raw.automaticReentrySuppressedAt === "string" && raw.automaticReentrySuppressedAt.length > 0
             ? { automaticReentrySuppressedAt: raw.automaticReentrySuppressedAt }
             : {}),
@@ -1061,6 +1096,7 @@ function automaticReentryState(record: McpContextStoredRecord, now = Date.now())
     return {
         ...(pending && record.automaticReentryClaimId !== undefined ? { claimId: record.automaticReentryClaimId } : {}),
         epoch: record.automaticReentryEpoch ?? 0,
+        mode: record.automaticReentryMode ?? "automatic",
         pending,
         ...(record.automaticReentrySuppressedAt === undefined ? {} : { suppressedAt: record.automaticReentrySuppressedAt }),
         ...(record.automaticReentrySuppressionReason === undefined ? {} : { reason: record.automaticReentrySuppressionReason }),
