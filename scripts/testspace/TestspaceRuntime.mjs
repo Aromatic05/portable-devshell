@@ -104,9 +104,10 @@ export function resolveTestspaceRuntimeDirectory(root, options = {}) {
 }
 
 export function createTestspaceProcessEnvironment(homeDirectory, runtimeDirectory, baseEnvironment = process.env) {
+    const environment = sanitizeWorkerEnvironment(baseEnvironment);
     const dataHome = join(homeDirectory, ".local", "share");
     return {
-        ...baseEnvironment,
+        ...environment,
         HOME: homeDirectory,
         LOCALAPPDATA: runtimeDirectory,
         USERPROFILE: homeDirectory,
@@ -115,6 +116,14 @@ export function createTestspaceProcessEnvironment(homeDirectory, runtimeDirector
         XDG_DATA_HOME: dataHome,
         XDG_RUNTIME_DIR: runtimeDirectory,
     };
+}
+
+export function sanitizeWorkerEnvironment(baseEnvironment = process.env) {
+    const environment = { ...baseEnvironment };
+    delete environment.DEVSHELL_WORKER_INTERNAL_INSTANCE;
+    delete environment.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE;
+    delete environment.DEVSHELL_WORKER_INTERNAL_WORKSPACE;
+    return environment;
 }
 
 export function resetTestspacePodmanStorage(

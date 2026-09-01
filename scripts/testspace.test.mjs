@@ -427,7 +427,12 @@ test("testspace process environment isolates runtime and container storage", () 
     const env = createTestspaceProcessEnvironment(
         "/tmp/testspace-home",
         "/tmp/testspace-runtime",
-        { PATH: "/usr/bin" },
+        {
+            DEVSHELL_WORKER_INTERNAL_INSTANCE: "host-instance",
+            DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "workspace",
+            DEVSHELL_WORKER_INTERNAL_WORKSPACE: "/host/workspace",
+            PATH: "/usr/bin",
+        },
     );
     assert.equal(env.HOME, "/tmp/testspace-home");
     assert.equal(env.USERPROFILE, "/tmp/testspace-home");
@@ -436,6 +441,9 @@ test("testspace process environment isolates runtime and container storage", () 
     assert.equal(env.XDG_CONFIG_HOME, join("/tmp/testspace-home", ".config"));
     assert.equal(env.XDG_CACHE_HOME, join("/tmp/testspace-home", ".cache"));
     assert.equal(env.PATH, "/usr/bin");
+    assert.equal("DEVSHELL_WORKER_INTERNAL_INSTANCE" in env, false);
+    assert.equal("DEVSHELL_WORKER_INTERNAL_SECURITY_MODE" in env, false);
+    assert.equal("DEVSHELL_WORKER_INTERNAL_WORKSPACE" in env, false);
 });
 
 test("testspace Podman cleanup resets the isolated store before directory removal", () => {

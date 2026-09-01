@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 
 import { TESTSPACE_REVERSE_INSTANCE } from "./TestspaceConfig.mjs";
+import { sanitizeWorkerEnvironment } from "./TestspaceRuntime.mjs";
 
 export { TESTSPACE_REVERSE_INSTANCE };
 
@@ -104,12 +105,8 @@ export async function readTestspaceReverseStatus(options) {
 }
 
 export function reverseWorkerEnvironment(environment, paths) {
-    const cleanEnvironment = { ...environment };
-    delete cleanEnvironment.DEVSHELL_WORKER_INTERNAL_INSTANCE;
-    delete cleanEnvironment.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE;
-    delete cleanEnvironment.DEVSHELL_WORKER_INTERNAL_WORKSPACE;
     return {
-        ...cleanEnvironment,
+        ...sanitizeWorkerEnvironment(environment),
         HOME: paths.reverseHome,
         PORTABLE_DEVSHELL_HOME: paths.reverseDevshellHome,
         XDG_RUNTIME_DIR: paths.reverseRuntime,
