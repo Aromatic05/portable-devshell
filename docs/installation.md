@@ -47,6 +47,8 @@ if ($actual -ne $expected) { throw "SHA-256 verification failed" }
 powershell -ExecutionPolicy Bypass -File .\install-release.ps1
 ```
 
+升级已有安装时，安装器会保留运行态：若安装前 Control 正在运行，则记录非 Reverse 且处于 `running`、`starting` 或 `stale` 的实例，在新版本激活后重新启动 Control 并恢复这些实例。安装前 Control 若已停止，则安装完成后仍保持停止。安装在切换版本后失败时，会在回滚旧版本后尝试恢复原运行态。
+
 安装指定版本：
 
 ```bash
@@ -87,6 +89,7 @@ pnpm install:local
 4. 只有某个 Release asset 找不到或下载失败时，才尝试在本地构建该 target；
 5. 在切换版本前后分别执行 CLI 启动验证；
 6. 安装应用，并在 Unix 创建 `~/.local/bin/devshell`，在 Windows 创建 `%USERPROFILE%\.local\bin\devshell.cmd`。
+7. 如果安装前 Control 正在运行，恢复 Control 以及当时由它管理的运行中实例。
 
 当前主机 worker 用于本地实例。其他远程目标由 control 在首次连接时根据探测结果按需取得，不应在每次安装时下载全部平台。
 

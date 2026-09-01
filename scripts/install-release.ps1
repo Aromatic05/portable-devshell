@@ -188,6 +188,63 @@ function Stop-InstalledControl([string]$CurrentCli, [string]$DevshellHome) {
     Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $pidFile
 }
 
+function Get-InstalledRuntimeState([string]$CurrentCli) {
+    $stopped = [PSCustomObject]@{ ControlRunning = $false; Instances = @() }
+    if ([string]::IsNullOrWhiteSpace($CurrentCli) -or -not (Test-Path -LiteralPath $CurrentCli -PathType Leaf)) {
+        return $stopped
+    }
+
+    $statusOutput = (& node $CurrentCli status 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) {
+        throw "无法读取安装前的 control 状态；为避免丢失运行实例，安装已取消。`n$statusOutput"
+    }
+    if ($statusOutput -notmatch '(?m)^control:\s+running\s*$') {
+        return $stopped
+    }
+
+    $overviewOutput = (& node $CurrentCli overview 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) {
+        throw "无法捕获安装前正在运行的实例；安装已取消。`n$overviewOutput"
+    }
+    try {
+        $overview = $overviewOutput | ConvertFrom-Json
+    } catch {
+        throw "安装前运行态格式无效；安装已取消。 $($_.Exception.Message)"
+    }
+    if ($null -eq $overview.PSObject.Properties["instances"] -or $null -eq $overview.instances) {
+        throw "安装前运行态格式无效；安装已取消。overview 缺少 instances。"
+    }
+
+    $restorableStates = @("running", "starting", "stale")
+    $instances = @(
+        $overview.instances | Where-Object {
+            $snapshot = $_.snapshot
+            if ($null -eq $snapshot) { return $false }
+            $hasReverse = $null -ne $snapshot.PSObject.Properties["reverse"]
+            -not $hasReverse -and $restorableStates -contains [string]$snapshot.daemonState
+        } | ForEach-Object { [string]$_.name }
+    )
+    return [PSCustomObject]@{ ControlRunning = $true; Instances = $instances }
+}
+
+function Restore-InstalledRuntimeState([string]$Cli, $RuntimeState) {
+    if (-not $RuntimeState.ControlRunning) { return }
+    & node $Cli start *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw "新版本已安装，但无法恢复安装前运行的 control。"
+    }
+    $failedInstances = @()
+    foreach ($instance in $RuntimeState.Instances) {
+        & node $Cli instance start $instance *> $null
+        if ($LASTEXITCODE -ne 0) {
+            $failedInstances += [string]$instance
+        }
+    }
+    if ($failedInstances.Count -gt 0) {
+        throw "无法恢复以下实例：$($failedInstances -join ', ')"
+    }
+}
+
 function Get-WorkerAssetName([string]$Target) {
     if ($Target.StartsWith("windows-")) { return "devshell-worker-$Target.exe" }
     return "devshell-worker-$Target"
@@ -365,7 +422,9 @@ try {
         $currentCliRelativePath = Get-ApplicationCliRelativePath $currentDirectory
         $currentCli = Join-Path $currentDirectory $currentCliRelativePath
     }
+    $runtimeState = Get-InstalledRuntimeState $currentCli
     Stop-InstalledControl $currentCli $devshellHome
+    $runtimeWasStopped = [bool]$runtimeState.ControlRunning
 
     $previousCommandContent = if (Test-Path -LiteralPath $commandPath -PathType Leaf) {
         Get-Content -Raw -LiteralPath $commandPath
@@ -415,10 +474,19 @@ try {
             } finally {
                 Restore-WorkerAliases $targets $devshellHome $workerBackupDirectory
             }
+            if ($runtimeWasStopped) {
+                Restore-InstalledRuntimeState $currentCli $runtimeState
+                $runtimeWasStopped = $false
+            }
         }
     }
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $backupDirectory, $currentBackupDirectory, $workerBackupDirectory
     Write-InstallDetail "已安装命令可以正常启动"
+    $runtimeWasStopped = $false
+    Restore-InstalledRuntimeState $cliPath $runtimeState
+    if ($runtimeState.ControlRunning) {
+        Write-InstallDetail "已恢复 Control 和 $($runtimeState.Instances.Count) 个安装前运行的实例"
+    }
 
     Write-Host ""
     Write-Host "已安装 portable-devshell $version。"
@@ -426,7 +494,9 @@ try {
     Write-Host "已预装 Worker：$($targets -join ', ')"
     Write-Host "其他 Worker：首次连接对应平台时按需下载并校验"
     Write-Host "下一步："
-    Write-Host "  $commandPath start"
+    if (-not $runtimeState.ControlRunning) {
+        Write-Host "  $commandPath start"
+    }
     Write-Host "  $commandPath tui"
     if (-not (($env:PATH -split ';') -contains $binDirectory)) {
         Write-Host "PATH 尚未包含 $binDirectory，请将它加入用户 PATH 后重新打开终端。"

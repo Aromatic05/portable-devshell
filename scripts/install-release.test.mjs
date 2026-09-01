@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmod, lstat, mkdir, readFile, readlink, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL, fileURLToPath } from "node:url";
@@ -85,6 +85,110 @@ test("Unix release installer activates the manifest-declared CLI and supports re
 
         runInstaller(environment);
         await assertInstalledLayout({ applicationVersion, binDirectory, devshellHome, installRoot });
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("Unix release installer restores the Control and managed instances that were running before replacement", {
+    skip: process.platform === "win32"
+}, async () => {
+    const root = await createTestTempDirectory("release-runtime-restore-test");
+    const release = resolve(root, "release");
+    const app = resolve(root, "app");
+    const home = resolve(root, "home");
+    const installRoot = resolve(root, "installed");
+    const binDirectory = resolve(root, "bin");
+    const devshellHome = resolve(root, "devshell-home");
+    const calls = resolve(root, "calls.log");
+    const applicationVersion = "9.8.7-runtime-restore";
+    const oldVersionDirectory = resolve(installRoot, "versions", "9.8.6-old");
+
+    try {
+        await mkdir(resolve(app, "custom"), { recursive: true });
+        await mkdir(resolve(oldVersionDirectory, "custom"), { recursive: true });
+        await mkdir(release, { recursive: true });
+        await mkdir(home, { recursive: true });
+
+        const packageManifest = (packageVersion) => `${JSON.stringify({
+            name: "portable-devshell",
+            version: packageVersion,
+            private: true,
+            type: "module",
+            bin: { devshell: "./custom/devshell-entry.js" },
+            engines: { node: ">=24" }
+        }, null, 2)}\n`;
+        await writeFile(resolve(oldVersionDirectory, "package.json"), packageManifest("9.8.6-old"), "utf8");
+        const oldCli = resolve(oldVersionDirectory, "custom", "devshell-entry.js");
+        await writeFile(oldCli, [
+            "#!/usr/bin/env node",
+            "import { appendFileSync } from 'node:fs';",
+            `const calls = ${JSON.stringify(calls)};`,
+            "const command = process.argv[2] ?? 'status';",
+            "if (command === 'status') process.stdout.write('control: running\\n');",
+            "else if (command === 'overview') process.stdout.write(JSON.stringify({ instances: [",
+            "  { name: 'ready-local', snapshot: { daemonState: 'running' } },",
+            "  { name: 'starting-ssh', snapshot: { daemonState: 'starting' } },",
+            "  { name: 'stale-local', snapshot: { daemonState: 'stale' } },",
+            "  { name: 'stopped-local', snapshot: { daemonState: 'stopped' } },",
+            "  { name: 'reverse-node', snapshot: { daemonState: 'running', reverse: { connected: true } } }",
+            "] }));",
+            "else if (command === 'stop') appendFileSync(calls, 'old:stop\\n');",
+            "else process.exit(2);",
+            ""
+        ].join("\n"), "utf8");
+        await chmod(oldCli, 0o755);
+        await symlink("versions/9.8.6-old", resolve(installRoot, "current"));
+
+        await writeFile(resolve(app, "package.json"), packageManifest(applicationVersion), "utf8");
+        await writeFile(resolve(app, "portable-devshell-install.json"), `${JSON.stringify({
+            minimumNodeMajor: 24,
+            version: applicationVersion
+        }, null, 2)}\n`, "utf8");
+        const cli = resolve(app, "custom", "devshell-entry.js");
+        await writeFile(cli, [
+            "#!/usr/bin/env node",
+            "import { appendFileSync } from 'node:fs';",
+            `const calls = ${JSON.stringify(calls)};`,
+            `const liveHome = ${JSON.stringify(devshellHome)};`,
+            "const command = process.argv[2] ?? 'status';",
+            "if (command === 'status') process.stdout.write(process.env.PORTABLE_DEVSHELL_HOME === liveHome ? 'control: running\\n' : 'control: stopped\\n');",
+            "else if (command === 'start') appendFileSync(calls, 'new:start\\n');",
+            "else if (command === 'instance' && process.argv[3] === 'start') appendFileSync(calls, `new:instance:${process.argv[4]}\\n`);",
+            "else process.exit(2);",
+            ""
+        ].join("\n"), "utf8");
+        await chmod(cli, 0o755);
+
+        const archive = resolve(release, applicationAssetName());
+        run("tar", ["-czf", archive, "-C", app, "."]);
+        await writeChecksum(archive);
+        for (const target of preinstalledTargets()) {
+            const worker = resolve(release, target.startsWith("windows-")
+                ? `devshell-worker-${target}.exe`
+                : `devshell-worker-${target}`);
+            await writeFile(worker, `fake worker ${target}\n`, "utf8");
+            await writeChecksum(worker);
+        }
+
+        const result = runInstaller({
+            ...process.env,
+            HOME: home,
+            XDG_DATA_HOME: resolve(root, "data"),
+            PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(release).href.replace(/\/$/u, ""),
+            PORTABLE_DEVSHELL_INSTALL_ROOT: installRoot,
+            PORTABLE_DEVSHELL_BIN_DIR: binDirectory,
+            PORTABLE_DEVSHELL_HOME: devshellHome
+        });
+
+        assert.deepEqual((await readFile(calls, "utf8")).trim().split("\n"), [
+            "old:stop",
+            "new:start",
+            "new:instance:ready-local",
+            "new:instance:starting-ssh",
+            "new:instance:stale-local",
+        ]);
+        assert.match(result.stdout, /恢复.*3.*实例/u);
     } finally {
         await rm(root, { force: true, recursive: true });
     }
@@ -326,6 +430,64 @@ test("Unix release installer rolls back application and worker aliases as one tr
     await verifyTransactionalRollback(false);
 });
 
+test("Unix release installer restores the previous running runtime after rollback", {
+    skip: process.platform === "win32"
+}, async () => {
+    const root = await createTestTempDirectory("release-runtime-rollback-test");
+    const release = resolve(root, "release");
+    const app = resolve(root, "app");
+    const home = resolve(root, "home");
+    const installRoot = resolve(root, "installed");
+    const binDirectory = resolve(root, "bin");
+    const devshellHome = resolve(root, "devshell-home");
+    const runtimeLog = resolve(root, "runtime.log");
+    const environment = {
+        ...process.env,
+        HOME: home,
+        XDG_DATA_HOME: resolve(root, "data"),
+        PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(release).href.replace(/\/$/u, ""),
+        PORTABLE_DEVSHELL_INSTALL_ROOT: installRoot,
+        PORTABLE_DEVSHELL_BIN_DIR: binDirectory,
+        PORTABLE_DEVSHELL_HOME: devshellHome,
+        PORTABLE_DEVSHELL_TEST_RUNTIME_LOG: runtimeLog,
+    };
+
+    try {
+        await writeTransactionalReleaseFixture({
+            app,
+            release,
+            version: "9.8.7-runtime-old",
+            workerContent: "old-worker\n"
+        });
+        const installed = runInstallerRaw(environment, false);
+        assert.equal(installed.status, 0, `${installed.stdout}${installed.stderr}`);
+
+        await writeTransactionalReleaseFixture({
+            app,
+            failAfterActivation: true,
+            release,
+            version: "9.8.8-runtime-broken",
+            workerContent: "new-worker\n"
+        });
+        const failed = runInstallerRaw({
+            ...environment,
+            PORTABLE_DEVSHELL_TEST_RUNNING: "1",
+        }, false);
+        assert.notEqual(failed.status, 0, `${failed.stdout}${failed.stderr}`);
+        assert.deepEqual((await readFile(runtimeLog, "utf8")).trim().split("\n"), [
+            "stop",
+            "start",
+            "instance:ready-local",
+            "instance:starting-ssh",
+            "instance:stale-local",
+        ]);
+        const restored = JSON.parse(await readFile(resolve(installRoot, "current", "package.json"), "utf8"));
+        assert.equal(restored.version, "9.8.7-runtime-old");
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
 test("Windows release installer rolls back application and worker aliases as one transaction", {
     skip: process.platform !== "win32"
 }, async () => {
@@ -413,14 +575,26 @@ async function writeTransactionalReleaseFixture({ app, failAfterActivation = fal
     const cli = resolve(app, "custom", "devshell-entry.js");
     await writeFile(cli, [
         "#!/usr/bin/env node",
-        "import { realpathSync } from 'node:fs';",
+        "import { appendFileSync, realpathSync } from 'node:fs';",
         "const command = process.argv[2] ?? 'status';",
+        "const staged = realpathSync(process.argv[1]).includes('.staging-');",
+        "const running = process.env.PORTABLE_DEVSHELL_TEST_RUNNING === '1' && !staged;",
+        "const runtimeLog = process.env.PORTABLE_DEVSHELL_TEST_RUNTIME_LOG || '';",
+        "const record = (line) => { if (runtimeLog) appendFileSync(runtimeLog, `${line}\\n`); };",
         ...(failAfterActivation ? [
-            "const staged = realpathSync(process.argv[1]).includes('.staging-');",
             "if (command === 'status' && !staged) { process.stderr.write('post-activation failure\\n'); process.exit(1); }"
         ] : []),
-        "if (command === 'status') process.stdout.write('control: stopped\\n');",
-        "else if (command === 'stop') process.exit(0);",
+        "if (command === 'status') process.stdout.write(running ? 'control: running\\n' : 'control: stopped\\n');",
+        "else if (command === 'overview' && running) process.stdout.write(JSON.stringify({ instances: [",
+        "  { name: 'ready-local', snapshot: { daemonState: 'running' } },",
+        "  { name: 'starting-ssh', snapshot: { daemonState: 'starting' } },",
+        "  { name: 'stale-local', snapshot: { daemonState: 'stale' } },",
+        "  { name: 'stopped-local', snapshot: { daemonState: 'stopped' } },",
+        "  { name: 'reverse-node', snapshot: { daemonState: 'running', reverse: { connected: true } } }",
+        "] }));",
+        "else if (command === 'stop') record('stop');",
+        "else if (command === 'start') record('start');",
+        "else if (command === 'instance' && process.argv[3] === 'start') record(`instance:${process.argv[4]}`);",
         "else { process.stderr.write(`unsupported test command: ${command}\\n`); process.exit(2); }",
         ""
     ].join("\n"), "utf8");

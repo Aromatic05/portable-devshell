@@ -42,6 +42,8 @@ if ($actual -ne $expected) { throw "SHA-256 verification failed" }
 powershell -ExecutionPolicy Bypass -File .\install-release.ps1
 ```
 
+升级时，如果 Control 在安装前处于运行状态，安装器会在切换版本前记录由 Control 管理且仍在运行/启动中的实例，并在新版本启动后恢复它们；原本停止的 Control 不会被安装器主动启动。Reverse 实例保持由远端自行重连，不会被本机安装器主动启动。
+
 从源码安装：
 
 ```bash

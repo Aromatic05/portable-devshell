@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { assertPackageBinFile, readPackageBinPath, writePortableApplicationManifest, tryReadPackageBinPath } from "./application-layout.mjs";
 import { resolveInstallHome } from "./install-home.mjs";
+import { captureInstalledRuntimeState, restoreInstalledRuntimeState } from "./install-runtime-state.mjs";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const installStepTotal = 5;
@@ -99,7 +100,11 @@ try {
     );
 
     beginStep("停止旧版本并切换安装");
-    await stopInstalledControl();
+    const currentCli = await tryReadPackageBinPath(currentLink, "devshell");
+    const runtimeState = currentCli !== undefined && await pathExists(currentCli.absolutePath)
+        ? captureInstalledRuntimeState((args) => runInstalledCli(currentCli.absolutePath, args))
+        : { controlRunning: false, instances: [] };
+    await stopInstalledControl(currentCli);
     await mkdir(versionsDirectory, { mode: 0o700, recursive: true });
 
     const previousActivation = await captureApplicationActivation();
@@ -118,11 +123,27 @@ try {
             await rename(backupDirectory, versionDirectory);
         }
         await restoreApplicationActivation(previousActivation);
+        try {
+            await restorePreviousRuntimeState(runtimeState);
+        } catch (restoreError) {
+            throw new AggregateError(
+                [error, restoreError],
+                "Installation failed and the previous Control/instance runtime state could not be restored.",
+            );
+        }
         throw error;
     }
 
     await rm(backupDirectory, { force: true, recursive: true });
+    const installedCli = await assertPackageBinFile(await readPackageBinPath(versionDirectory, "devshell"));
+    restoreInstalledRuntimeState(
+        (args) => runInstalledCli(installedCli.absolutePath, args),
+        runtimeState,
+    );
     writeDetail("已安装命令可以正常启动");
+    if (runtimeState.controlRunning) {
+        writeDetail(`已恢复 Control 和 ${runtimeState.instances.length} 个安装前运行的实例`);
+    }
     process.stdout.write(
         [
             "",
@@ -131,7 +152,7 @@ try {
             `已预装 Worker：${targets.map((target) => target.key).join(", ")}`,
             "其他 Worker：首次连接对应平台时按需下载并校验",
             "下一步：",
-            `  ${commandLink} start`,
+            ...(runtimeState.controlRunning ? [] : [`  ${commandLink} start`]),
             `  ${commandLink} tui`,
             process.env.PATH?.split(delimiter).includes(binDirectory)
                 ? ""
@@ -344,8 +365,7 @@ async function readFileIfExists(path) {
     }
 }
 
-async function stopInstalledControl() {
-    const currentCli = await tryReadPackageBinPath(currentLink, "devshell");
+async function stopInstalledControl(currentCli) {
     const pidFile = resolve(devshellHome, "control", "control.pid");
     if (currentCli !== undefined && await pathExists(currentCli.absolutePath)) {
         const result = spawnSync(process.execPath, [currentCli.absolutePath, "stop"], {
@@ -389,6 +409,27 @@ async function stopInstalledControl() {
         }
     }
     await cleanupControlRuntime(pidFile);
+}
+
+function runInstalledCli(cliPath, args) {
+    return spawnSync(process.execPath, [cliPath, ...args], {
+        cwd: home,
+        encoding: "utf8",
+        env: process.env,
+        windowsHide: true,
+    });
+}
+
+async function restorePreviousRuntimeState(runtimeState) {
+    if (!runtimeState.controlRunning) return;
+    const previousCli = await tryReadPackageBinPath(currentLink, "devshell");
+    if (previousCli === undefined || !(await pathExists(previousCli.absolutePath))) {
+        throw new Error("The previous CLI is unavailable after installation rollback.");
+    }
+    restoreInstalledRuntimeState(
+        (args) => runInstalledCli(previousCli.absolutePath, args),
+        runtimeState,
+    );
 }
 
 function readProcessCommandLine(pid) {

@@ -124,6 +124,70 @@ smoke_cli() {
     esac
 }
 
+capture_installed_runtime() {
+    current_cli=$1
+    runtime_restore_control=0
+    runtime_restore_instances="$temporary/runtime-restore-instances"
+    : > "$runtime_restore_instances"
+    if [ ! -f "$current_cli" ]; then
+        return 0
+    fi
+
+    if ! control_status=$(node "$current_cli" status 2>&1); then
+        echo "无法读取安装前的 control 状态；为避免丢失运行实例，安装已取消。" >&2
+        printf '%s\n' "$control_status" >&2
+        return 1
+    fi
+    case "$control_status" in
+        *"control: running"*) runtime_restore_control=1 ;;
+        *) return 0 ;;
+    esac
+
+    overview_json="$temporary/runtime-overview.json"
+    overview_error="$temporary/runtime-overview.err"
+    if ! node "$current_cli" overview > "$overview_json" 2> "$overview_error"; then
+        echo "无法捕获安装前正在运行的实例；安装已取消。" >&2
+        cat "$overview_error" >&2
+        return 1
+    fi
+    if ! node - "$overview_json" > "$runtime_restore_instances" <<'NODE'
+const fs = require("fs");
+const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!Array.isArray(payload.instances)) throw new Error("overview result is missing instances");
+const restorable = new Set(["running", "starting", "stale"]);
+for (const entry of payload.instances) {
+    if (typeof entry?.name !== "string" || !entry.name) continue;
+    if (entry.snapshot?.reverse !== undefined) continue;
+    if (!restorable.has(entry.snapshot?.daemonState)) continue;
+    process.stdout.write(`${entry.name}\n`);
+}
+NODE
+    then
+        echo "安装前运行态格式无效；安装已取消。" >&2
+        return 1
+    fi
+}
+
+restore_installed_runtime() {
+    cli=$1
+    if [ "${runtime_restore_control:-0}" -ne 1 ]; then
+        return 0
+    fi
+    if ! node "$cli" start >/dev/null; then
+        echo "新版本已安装，但无法恢复安装前运行的 control。" >&2
+        return 1
+    fi
+    restore_failed=0
+    while IFS= read -r instance; do
+        [ -n "$instance" ] || continue
+        if ! node "$cli" instance start "$instance" >/dev/null; then
+            echo "新版本已安装，但无法恢复实例：$instance" >&2
+            restore_failed=1
+        fi
+    done < "$runtime_restore_instances"
+    return "$restore_failed"
+}
+
 cleanup_control_runtime() {
     pid_file=$1
     rm -f "$pid_file"
@@ -426,6 +490,9 @@ worker_bin_directory="$devshell_home/bin"
 worker_backup_directory="$devshell_home/.install-worker-backup-$$"
 application_transaction_active=0
 worker_transaction_active=0
+runtime_restore_control=0
+runtime_restore_instances="$temporary/runtime-restore-instances"
+runtime_was_stopped=0
 previous_version_present=0
 if [ -e "$version_directory" ] || [ -L "$version_directory" ]; then
     previous_version_present=1
@@ -439,6 +506,13 @@ cleanup_installation() {
             echo "安装回滚未完整完成；备份目录已保留以便人工恢复。" >&2
             status=1
         fi
+    fi
+    if [ "$status" -ne 0 ] && [ "${runtime_was_stopped:-0}" -eq 1 ] && [ "${runtime_restore_control:-0}" -eq 1 ]; then
+        if ! restore_installed_runtime "$current_cli"; then
+            echo "安装失败后未能恢复原 control/instance 运行态。" >&2
+            status=1
+        fi
+        runtime_was_stopped=0
     fi
     rm -rf "$temporary"
     exit "$status"
@@ -470,9 +544,15 @@ if [ -f "$current_link/package.json" ]; then
     current_cli_relative_path=$(resolve_cli_relative_path "$current_link")
     current_cli="$current_link/$current_cli_relative_path"
 fi
+if ! capture_installed_runtime "$current_cli"; then
+    exit 1
+fi
 if ! stop_installed_control "$current_cli"; then
     echo "无法安全停止当前 control daemon，安装已取消。" >&2
     exit 1
+fi
+if [ "$runtime_restore_control" -eq 1 ]; then
+    runtime_was_stopped=1
 fi
 
 backup_worker_aliases
@@ -517,13 +597,23 @@ rm -rf "$backup_directory" "$worker_backup_directory"
 application_transaction_active=0
 worker_transaction_active=0
 detail "已安装命令可以正常启动"
+runtime_was_stopped=0
+if ! restore_installed_runtime "$command_link"; then
+    exit 1
+fi
+if [ "$runtime_restore_control" -eq 1 ]; then
+    restored_instance_count=$(grep -c . "$runtime_restore_instances" || true)
+    detail "已恢复 Control 和 ${restored_instance_count} 个安装前运行的实例"
+fi
 
 printf '\n已安装 portable-devshell %s。\n' "$version"
 echo "命令：$command_link"
 echo "已预装 Worker：$targets"
 echo "其他 Worker：首次连接对应平台时按需下载并校验"
 echo "下一步："
-echo "  $command_link start"
+if [ "$runtime_restore_control" -ne 1 ]; then
+    echo "  $command_link start"
+fi
 echo "  $command_link tui"
 case :${PATH:-}: in
     *:"$bin_directory":*) ;;
