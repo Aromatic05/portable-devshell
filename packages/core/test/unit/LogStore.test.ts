@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, rm, writeFile } from "node:fs/promises";
+import { access, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -39,6 +39,32 @@ test("AuditDatabase appends and reads records", async () => {
             { at: "2026-07-15T00:00:01.000Z", value: "two" }
         ]);
         assert.equal(database.stats().recordCount, 2);
+        database.close();
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("AuditDatabase uses WAL and accounts the WAL sidecar in fileBytes", async () => {
+    const root = await createTestTempDirectory("sqlite-wal");
+    const databaseFile = join(root, "audit.sqlite3");
+
+    try {
+        const database = new AuditDatabase(databaseFile, {
+            maxBytes: 16 * MIB,
+            now: () => Date.parse("2026-07-15T00:00:00.000Z"),
+            retentionDays: 30
+        });
+        const store = database.store<{ at: string; value: string }>("logs", {
+            timestamp: (record) => record.at
+        });
+        await store.append({ at: "2026-07-15T00:00:00.000Z", value: "wal-record" });
+
+        assert.equal((await stat(`${databaseFile}-wal`)).size > 0, true);
+        const stats = database.stats();
+        const mainBytes = (await stat(databaseFile)).size;
+        const walBytes = await stat(`${databaseFile}-wal`).then((value) => value.size).catch(() => 0);
+        assert.equal(stats.fileBytes, mainBytes + walBytes);
         database.close();
     } finally {
         await rm(root, { recursive: true, force: true });

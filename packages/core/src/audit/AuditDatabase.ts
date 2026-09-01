@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { mkdirSync, readFileSync, unlinkSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
@@ -40,9 +40,12 @@ export interface AuditToolCallRecordStore extends AuditRecordStore<ToolCallRecor
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SCHEMA_VERSION = 1;
+const WAL_AUTOCHECKPOINT_PAGES = 1_000;
+const WAL_JOURNAL_SIZE_LIMIT_BYTES = 1024 * 1024;
 
 export class AuditDatabase {
     readonly #database: DatabaseSync;
+    readonly #filePath: string;
     readonly #maxBytes: number;
     readonly #now: () => number;
     readonly #retentionMs: number;
@@ -54,6 +57,7 @@ export class AuditDatabase {
         mkdirSync(dirname(filePath), { recursive: true });
         const Database = loadDatabaseSync();
         this.#database = new Database(filePath, { timeout: 5_000 });
+        this.#filePath = filePath;
         this.#maxBytes = options.maxBytes;
         this.#now = options.now ?? Date.now;
         this.#retentionMs = options.retentionDays * DAY_MS;
@@ -78,6 +82,7 @@ export class AuditDatabase {
         if (this.#closed) {
             return;
         }
+        this.#checkpointWal(true);
         this.#closed = true;
         this.#database.close();
     }
@@ -101,7 +106,7 @@ export class AuditDatabase {
             .prepare("SELECT COUNT(*) AS recordCount FROM audit_records")
             .get() as { recordCount: number };
         return {
-            fileBytes: readPragmaNumber(this.#database, "page_count") * readPragmaNumber(this.#database, "page_size"),
+            fileBytes: this.#fileBytes(),
             payloadBytes: this.#payloadBytes,
             recordCount: row.recordCount
         };
@@ -269,8 +274,10 @@ export class AuditDatabase {
     }
 
     #initializeSchema(): void {
-        this.#database.exec("PRAGMA journal_mode = TRUNCATE");
+        this.#database.exec("PRAGMA journal_mode = WAL");
         this.#database.exec("PRAGMA synchronous = NORMAL");
+        this.#database.exec(`PRAGMA wal_autocheckpoint = ${WAL_AUTOCHECKPOINT_PAGES}`);
+        this.#database.exec(`PRAGMA journal_size_limit = ${WAL_JOURNAL_SIZE_LIMIT_BYTES}`);
         this.#database.exec("PRAGMA auto_vacuum = INCREMENTAL");
         this.#database.exec(`
             CREATE TABLE IF NOT EXISTS audit_records (
@@ -328,7 +335,7 @@ export class AuditDatabase {
     }
 
     #fileBytes(): number {
-        return readPragmaNumber(this.#database, "page_count") * readPragmaNumber(this.#database, "page_size");
+        return fileSize(this.#filePath) + fileSize(`${this.#filePath}-wal`);
     }
 
     #evictForPayloadLimit(): void {
@@ -354,24 +361,45 @@ export class AuditDatabase {
     }
 
     #evictForFileLimit(): void {
-        let previousFileBytes = Number.POSITIVE_INFINITY;
+        if (this.#fileBytes() <= this.#maxBytes) return;
+        this.#checkpointWal(true);
+        if (this.#fileBytes() <= this.#maxBytes) return;
+        this.#database.exec("VACUUM");
+        this.#checkpointWal(true);
+        if (this.#fileBytes() <= this.#maxBytes) return;
+
+        let previousFileBytes = this.#fileBytes();
         while (this.#fileBytes() > this.#maxBytes) {
             const rows = this.#database
                 .prepare("SELECT id, payload_bytes AS payloadBytes FROM audit_records ORDER BY id ASC LIMIT 256")
                 .all() as Array<{ id: number; payloadBytes: number }>;
             if (rows.length === 0) {
-                throw new Error(`audit database cannot fit within maxBytes=${this.#maxBytes}`);
+                this.#database.exec("VACUUM");
+                this.#checkpointWal(true);
+                if (this.#fileBytes() > this.#maxBytes) {
+                    throw new Error(`audit database cannot fit within maxBytes=${this.#maxBytes}`);
+                }
+                break;
             }
-            const cutoffId = rows[rows.length - 1]!.id;
+            const bytesToFree = Math.max(1, previousFileBytes - this.#maxBytes);
+            let evictedPayloadBytes = 0;
+            let cutoffId = rows[0]!.id;
+            for (const row of rows) {
+                cutoffId = row.id;
+                evictedPayloadBytes += row.payloadBytes;
+                if (evictedPayloadBytes >= bytesToFree) break;
+            }
             this.#database.prepare("DELETE FROM audit_records WHERE id <= ?").run(cutoffId);
             this.#payloadBytes = Math.max(
                 0,
-                this.#payloadBytes - rows.reduce((total, row) => total + row.payloadBytes, 0),
+                this.#payloadBytes - evictedPayloadBytes,
             );
             this.#compact();
+            this.#checkpointWal(true);
             const fileBytes = this.#fileBytes();
             if (fileBytes >= previousFileBytes) {
                 this.#database.exec("VACUUM");
+                this.#checkpointWal(true);
             }
             previousFileBytes = this.#fileBytes();
         }
@@ -382,6 +410,10 @@ export class AuditDatabase {
         if (freelist > 0) {
             this.#database.exec(`PRAGMA incremental_vacuum(${freelist})`);
         }
+    }
+
+    #checkpointWal(truncate: boolean): void {
+        this.#database.exec(`PRAGMA wal_checkpoint(${truncate ? "TRUNCATE" : "PASSIVE"})`);
     }
 
     #readMetadata(key: string): string | undefined {
@@ -510,6 +542,17 @@ function validateOptions(options: AuditDatabaseOptions): void {
     }
     if (!Number.isSafeInteger(options.retentionDays) || options.retentionDays < 1) {
         throw new TypeError("retentionDays must be a positive safe integer.");
+    }
+}
+
+function fileSize(path: string): number {
+    try {
+        return statSync(path).size;
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return 0;
+        }
+        throw error;
     }
 }
 
