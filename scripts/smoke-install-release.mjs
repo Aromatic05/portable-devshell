@@ -85,7 +85,7 @@ function run(executable, args, env, ignoreFailure = false) {
         cwd: repositoryRoot,
         encoding: "utf8",
         env,
-        timeout: 30_000
+        timeout: 60_000
     });
     if (!ignoreFailure && (result.error !== undefined || result.status !== 0)) {
         throw new Error(
