@@ -83,9 +83,11 @@ export interface McpInstanceGateway {
     waitForWait?(instance: string, waitId: string): Promise<WaitRecord>;
     listWaits?(instance: string): Promise<WaitRecord[]>;
     listApprovals?(instance: string): Promise<ApprovalRequest[]>;
+    listPendingApprovals?(instance: string, ctxId?: string): Promise<ApprovalRequest[]>;
     decideApproval?(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<ApprovalRequest>;
     cancelApproval?(instance: string, approvalId: string, reason?: string): Promise<ApprovalRequest>;
     readToolCalls?(instance: string, ctxId: string, limit: number): Promise<ToolCallRecord[]>;
+    hasActiveToolCalls?(instance: string, ctxId: string): boolean;
     readWorkspaceEvents?(instance: string, fromSeq: number): Promise<McpWorkspaceEventSlice>;
     controlTodo?(instance: string, taskId: string, action: TodoTaskControlAction, ctxId: string, expectedRevision?: number): Promise<JsonValue>;
     consumeContextMessages?(instance: string, ctxId: string, callId: string): Promise<ContextMessageReadResult>;

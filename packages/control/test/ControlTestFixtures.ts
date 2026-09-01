@@ -51,6 +51,15 @@ export function createTestInstanceDescriptor(
     worker: WorkerInstance,
     overrides: Partial<Omit<InstanceDescriptor, "worker">> = {}
 ): InstanceDescriptor {
+    const workerWithDefaults = worker as WorkerInstance & {
+        listPendingApprovals?: (ctxId?: string) => ReturnType<WorkerInstance["listApprovals"]>;
+        readToolCallFailureSummary?: (sinceMs: number, untilMs: number) => Promise<{ count: number }>;
+    };
+    workerWithDefaults.listPendingApprovals ??= async (ctxId) =>
+        (await workerWithDefaults.listApprovals()).filter((approval) =>
+            approval.status === "pending" && (ctxId === undefined || approval.ctxId === ctxId)
+        );
+    workerWithDefaults.readToolCallFailureSummary ??= async () => ({ count: 0 });
     return {
         enabled: true,
         goal: createTestGoalPort(),
@@ -61,7 +70,7 @@ export function createTestInstanceDescriptor(
         name: "alpha",
         provider: "local",
         todo: createTestTodoPort(),
-        worker,
+        worker: workerWithDefaults,
         ...overrides
     };
 }

@@ -16,7 +16,8 @@ import {
     asBashToolResult,
     asCommandResult,
     commandResultOutput,
-    readByteLength
+    readByteLength,
+    stripCommandStreams
 } from "../../src/worker/instance/tool/WorkerInstanceToolResult.ts";
 
 test("worker lifecycle status normalization maps ready to running and preserves terminal states", () => {
@@ -209,6 +210,19 @@ test("command and bash result serializers omit invalid optionals and calculate U
             stderr: "",
             stdout: "ok",
             timedOut: false
+        }
+    );
+
+    assert.deepEqual(
+        stripCommandStreams({
+            comment: ["keep me"],
+            exitCode: 0,
+            stderr: "diagnostic",
+            stdout: "large output"
+        }),
+        {
+            comment: ["keep me"],
+            exitCode: 0
         }
     );
 

@@ -17,6 +17,8 @@ import {
     selectOperationalActivity
 } from "./OperationalOverviewPolicy.js";
 
+const failureWindowMs = 24 * 60 * 60 * 1_000;
+
 export interface OperationalOverviewInstanceCollection {
     activity: OperationalOverviewActivity[];
     alerts: OperationalOverviewAlert[];
@@ -49,13 +51,15 @@ export class OperationalOverviewInstanceCollector {
         }
         alerts.push(...createTodoAlerts(snapshot.name, todos));
 
-        const [approvalsResult, callsResult] = await Promise.allSettled([
-            descriptor.worker.listApprovals(),
-            descriptor.worker.readToolCalls()
+        const [approvalsResult, callsResult, failureResult] = await Promise.allSettled([
+            descriptor.worker.listPendingApprovals(),
+            descriptor.worker.readToolCalls({ limit: Math.max(1, this.#activityLimit) }),
+            descriptor.worker.readToolCallFailureSummary(
+                now.getTime() - failureWindowMs,
+                now.getTime(),
+            ),
         ]);
-        const pendingApprovals = approvalsResult.status === "fulfilled"
-            ? approvalsResult.value.length
-            : 0;
+        const pendingApprovals = approvalsResult.status === "fulfilled" ? approvalsResult.value.length : 0;
         if (pendingApprovals > 0) {
             alerts.push({
                 detail: `${pendingApprovals} tool call approval${pendingApprovals === 1 ? "" : "s"} waiting.`,
@@ -75,14 +79,22 @@ export class OperationalOverviewInstanceCollector {
         }
 
         const calls = callsResult.status === "fulfilled" ? callsResult.value : [];
-        if (callsResult.status === "rejected") {
+        const toolCallFailure = callsResult.status === "rejected"
+            ? callsResult.reason
+            : failureResult.status === "rejected"
+              ? failureResult.reason
+              : undefined;
+        if (toolCallFailure !== undefined) {
             alerts.push(createCollectionFailure(
                 snapshot.name,
-                "recent activity",
-                callsResult.reason
+                "tool call history",
+                toolCallFailure
             ));
         }
-        const recentFailure = createRecentFailureAlert(snapshot.name, calls, now);
+        const recentFailure = createRecentFailureAlert(
+            snapshot.name,
+            failureResult.status === "fulfilled" ? failureResult.value : { count: 0 },
+        );
         if (recentFailure.alert !== undefined) {
             alerts.push(recentFailure.alert);
         }

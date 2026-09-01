@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { access, rm, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { access, rm, stat, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import test from "node:test";
 
-import { errorCodes, asInstanceName, type InstanceEvent } from "@portable-devshell/shared";
+import { errorCodes, asInstanceName, type InstanceEvent, type ToolCallRecord } from "@portable-devshell/shared";
 import {
     InstanceEventBuffer,
     LogStoreInstance,
@@ -45,6 +47,197 @@ test("AuditDatabase appends and reads records", async () => {
     }
 });
 
+test("AuditDatabase defers SQLite creation until the first durable access", async () => {
+    const root = await createTestTempDirectory("sqlite-lazy-open");
+    const databaseFile = join(root, "nested", "audit.sqlite3");
+
+    try {
+        const database = new AuditDatabase(databaseFile, {
+            maxBytes: 16 * MIB,
+            now: () => Date.parse("2026-07-15T00:00:00.000Z"),
+            retentionDays: 30
+        });
+        const store = database.store<{ at: string; value: string }>("logs", {
+            timestamp: (record) => record.at
+        });
+        await assert.rejects(access(databaseFile), (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT");
+        assert.deepEqual(await store.readAll(), []);
+        await access(databaseFile);
+        database.close();
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("AuditDatabase uses WAL and accounts the WAL sidecar in fileBytes", async () => {
+    const root = await createTestTempDirectory("sqlite-wal");
+    const databaseFile = join(root, "audit.sqlite3");
+
+    try {
+        const database = new AuditDatabase(databaseFile, {
+            maxBytes: 16 * MIB,
+            now: () => Date.parse("2026-07-15T00:00:00.000Z"),
+            retentionDays: 30
+        });
+        const store = database.store<{ at: string; value: string }>("logs", {
+            timestamp: (record) => record.at
+        });
+        await store.append({ at: "2026-07-15T00:00:00.000Z", value: "wal-record" });
+
+        assert.equal((await stat(`${databaseFile}-wal`)).size > 0, true);
+        const stats = database.stats();
+        const mainBytes = (await stat(databaseFile)).size;
+        const walBytes = await stat(`${databaseFile}-wal`).then((value) => value.size).catch(() => 0);
+        assert.equal(stats.fileBytes, mainBytes + walBytes);
+        database.close();
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("AuditDatabase compresses large log messages and restores them transparently", async () => {
+    const root = await createTestTempDirectory("sqlite-log-zstd");
+    const instanceName = asInstanceName("sqlite-log-zstd");
+    const message = "cargo: compiling portable-devshell dependency graph\n".repeat(2_048);
+
+    try {
+        const database = new AuditDatabase(join(root, "audit.sqlite3"), {
+            maxBytes: 16 * MIB,
+            now: () => Date.parse("2026-09-01T12:00:00.000Z"),
+            retentionDays: 30
+        });
+        const store = database.store<InstanceLogEntry>("logs", {
+            sequence: (record) => record.seq,
+            timestamp: (record) => record.at
+        });
+        const record: InstanceLogEntry = {
+            at: "2026-09-01T12:00:00.000Z",
+            callId: "call-zstd",
+            instanceName,
+            message,
+            seq: 1,
+            stream: "stdout",
+            toolName: "bash_run"
+        };
+
+        await store.append(record);
+
+        assert.deepEqual(await store.readAll(), [record]);
+        assert.deepEqual(await store.readFromSeq?.(1, 1), [record]);
+        assert.equal(database.stats().payloadBytes < Buffer.byteLength(message, "utf8") / 4, true);
+        database.close();
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("AuditDatabase stores large incompressible log messages as identity bodies", async () => {
+    const root = await createTestTempDirectory("sqlite-log-identity");
+    const databaseFile = join(root, "audit.sqlite3");
+    const instanceName = asInstanceName("sqlite-log-identity");
+    const message = randomBytes(64 * 1024).toString("base64");
+
+    try {
+        const database = new AuditDatabase(databaseFile, {
+            maxBytes: 16 * MIB,
+            now: () => Date.parse("2026-09-01T12:00:00.000Z"),
+            retentionDays: 30
+        });
+        const store = database.store<InstanceLogEntry>("logs", {
+            sequence: (record) => record.seq,
+            timestamp: (record) => record.at
+        });
+        const record: InstanceLogEntry = {
+            at: "2026-09-01T12:00:00.000Z",
+            instanceName,
+            message,
+            seq: 1,
+            stream: "stdout"
+        };
+
+        await store.append(record);
+        assert.deepEqual(await store.readAll(), [record]);
+        database.close();
+
+        const row = readStoredAuditRow(databaseFile);
+        assert.equal(row.bodyCodec, "identity");
+        assert.equal(row.payload.includes("\"message\""), false);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("AuditDatabase stops decoding sequenced logs after satisfying the decoded byte budget", async () => {
+    const root = await createTestTempDirectory("sqlite-log-budget");
+    const instanceName = asInstanceName("sqlite-log-budget");
+    const message = "x".repeat(700 * 1024);
+
+    try {
+        const database = new AuditDatabase(join(root, "audit.sqlite3"), {
+            maxBytes: 16 * MIB,
+            now: () => Date.parse("2026-09-01T12:00:00.000Z"),
+            retentionDays: 30
+        });
+        const store = database.store<InstanceLogEntry>("logs", {
+            sequence: (record) => record.seq,
+            timestamp: (record) => record.at
+        });
+        for (let seq = 1; seq <= 3; seq += 1) {
+            await store.append({
+                at: `2026-09-01T12:00:0${seq}.000Z`,
+                instanceName,
+                message,
+                seq,
+                stream: "stdout"
+            });
+        }
+
+        assert.equal((await store.readFromSeq?.(1, 100, MIB))?.length, 2);
+        database.close();
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("AuditDatabase upgrades v1 SQLite rows without rewriting historical log payloads", async () => {
+    const root = await createTestTempDirectory("sqlite-v1-upgrade");
+    const databaseFile = join(root, "audit.sqlite3");
+    const instanceName = asInstanceName("sqlite-v1-upgrade");
+    const legacy: InstanceLogEntry = {
+        at: "2026-09-01T11:00:00.000Z",
+        instanceName,
+        message: "historical inline stdout\n",
+        seq: 1,
+        stream: "stdout"
+    };
+
+    try {
+        createV1AuditDatabase(databaseFile, legacy);
+        const database = new AuditDatabase(databaseFile, {
+            maxBytes: 16 * MIB,
+            now: () => Date.parse("2026-09-01T12:00:00.000Z"),
+            retentionDays: 30
+        });
+        const store = database.store<InstanceLogEntry>("logs", {
+            sequence: (record) => record.seq,
+            timestamp: (record) => record.at
+        });
+        const compressed: InstanceLogEntry = {
+            ...legacy,
+            at: "2026-09-01T12:00:00.000Z",
+            message: "new compressed stdout\n".repeat(2_048),
+            seq: 2
+        };
+
+        assert.deepEqual(await store.readAll(), [legacy]);
+        await store.append(compressed);
+        assert.deepEqual(await store.readAll(), [legacy, compressed]);
+        database.close();
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test("AuditToolCallHistory uses bounded storage reads for unfiltered limited history", async () => {
     const instanceName = asInstanceName("bounded-history");
     const record = {
@@ -72,6 +265,155 @@ test("AuditToolCallHistory uses bounded storage reads for unfiltered limited his
     assert.equal(readTailLimit, 200);
 });
 
+test("AuditToolCallHistory pushes filtered limited history into storage", async () => {
+    const instanceName = asInstanceName("filtered-history");
+    const record: ToolCallRecord = {
+        callId: "call-filtered",
+        ctxId: "ctx-filtered",
+        inputSummary: "{}",
+        instance: instanceName,
+        source: "mcp",
+        startedAt: "2026-09-01T00:00:00.000Z",
+        status: "completed",
+        toolName: "bash_run",
+    };
+    let storageQuery: unknown;
+    const history = new AuditToolCallHistory(instanceName, {
+        async append() {},
+        async readAll() {
+            throw new Error("unbounded audit read should not run");
+        },
+        async readQuery(query) {
+            storageQuery = query;
+            return [record];
+        },
+    });
+
+    assert.deepEqual(await history.read({ ctxId: "ctx-filtered", limit: 64 }), [record]);
+    assert.deepEqual(storageQuery, { ctxId: "ctx-filtered", limit: 64 });
+});
+
+test("AuditToolCallHistory keeps cursor pagination bounded while merging active calls", async () => {
+    const instanceName = asInstanceName("cursor-history");
+    const persisted: ToolCallRecord = {
+        callId: "persisted-2",
+        ctxId: "ctx-cursor",
+        inputSummary: "{}",
+        instance: instanceName,
+        source: "mcp",
+        startedAt: "2026-09-01T00:00:02.000Z",
+        status: "completed",
+        toolName: "bash_run",
+    };
+    let readAllCalled = false;
+    const history = new AuditToolCallHistory(instanceName, {
+        async append() {},
+        async hasCall(callId) { return callId === "persisted-1"; },
+        async readAll() { readAllCalled = true; return []; },
+        async readQuery(query) {
+            assert.deepEqual(query, { after: "persisted-1", ctxId: "ctx-cursor", limit: 2 });
+            return [persisted];
+        },
+    });
+    await history.started(
+        "active-1",
+        "bash_run",
+        "{}",
+        { ctxId: "ctx-cursor", source: "mcp" },
+        "2026-09-01T00:00:03.000Z",
+    );
+
+    assert.deepEqual(
+        (await history.read({ after: "persisted-1", ctxId: "ctx-cursor", limit: 2 })).map((record) => record.callId),
+        ["persisted-2", "active-1"],
+    );
+    assert.equal(readAllCalled, false);
+});
+
+test("AuditDatabase queries bounded tool-call history and failure summaries without materializing all records", async () => {
+    const root = await createTestTempDirectory("sqlite-tool-query");
+    const instanceName = asInstanceName("sqlite-tool-query");
+    const now = Date.parse("2026-09-01T12:00:00.000Z");
+
+    try {
+        const database = new AuditDatabase(join(root, "audit.sqlite3"), {
+            maxBytes: 16 * MIB,
+            now: () => now,
+            retentionDays: 30
+        });
+        const store = database.toolCallStore({
+            timestamp: (record) => record.completedAt ?? record.startedAt
+        });
+        const records: ToolCallRecord[] = [
+            {
+                callId: "ctx-a-old",
+                completedAt: "2026-08-31T13:00:00.000Z",
+                ctxId: "ctx-a",
+                inputSummary: "{}",
+                instance: instanceName,
+                source: "mcp",
+                startedAt: "2026-08-31T12:59:00.000Z",
+                status: "failed",
+                toolName: "bash_run",
+            },
+            {
+                callId: "ctx-b",
+                completedAt: "2026-09-01T10:00:00.000Z",
+                ctxId: "ctx-b",
+                inputSummary: "{}",
+                instance: instanceName,
+                source: "mcp",
+                startedAt: "2026-09-01T09:59:00.000Z",
+                status: "completed",
+                toolName: "bash_run",
+            },
+            {
+                callId: "ctx-a-latest",
+                completedAt: "2026-09-01T11:00:00.000Z",
+                ctxId: "ctx-a",
+                inputSummary: "{}",
+                instance: instanceName,
+                source: "mcp",
+                startedAt: "2026-09-01T10:59:00.000Z",
+                status: "queueTimeout",
+                toolName: "tmux_run",
+            },
+        ];
+        for (const record of records) await store.append(record);
+
+        assert.deepEqual(
+            (await store.readQuery({ ctxId: "ctx-a", limit: 1 })).map((record) => record.callId),
+            ["ctx-a-latest"],
+        );
+        assert.deepEqual(
+            (await store.readQuery({ source: "mcp", status: "completed", toolName: "bash_run" }))
+                .map((record) => record.callId),
+            ["ctx-b"],
+        );
+        assert.deepEqual(
+            await store.readFailureSummary(now - 24 * 60 * 60 * 1_000, now),
+            { count: 2, latest: records[2] },
+        );
+        assert.deepEqual(
+            (await store.readQuery({ after: "ctx-a-old", limit: 1 })).map((record) => record.callId),
+            ["ctx-b"],
+        );
+        assert.deepEqual(
+            (await store.readQuery({ before: "ctx-a-latest", limit: 1 })).map((record) => record.callId),
+            ["ctx-b"],
+        );
+        assert.deepEqual(
+            (await store.readQuery({ after: "ctx-a-old", before: "ctx-a-latest", status: "completed" }))
+                .map((record) => record.callId),
+            ["ctx-b"],
+        );
+        assert.deepEqual(await store.readQuery({ after: "missing", limit: 1 }), []);
+        database.close();
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test("AuditDatabase migrates legacy JSONL exactly once", async () => {
     const root = await createTestTempDirectory("sqlite-migrate");
     const legacyFile = join(root, "logs.jsonl");
@@ -93,8 +435,9 @@ test("AuditDatabase migrates legacy JSONL exactly once", async () => {
             timestamp: (record) => record.at
         });
 
-        await assert.rejects(access(legacyFile), (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT");
+        await access(legacyFile);
         assert.deepEqual(await store.readAll(), [{ at: "2026-07-15T00:00:00.000Z", value: "legacy" }]);
+        await assert.rejects(access(legacyFile), (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT");
         database.close();
 
         const reopened = new AuditDatabase(databaseFile, {
@@ -218,6 +561,68 @@ test("InstanceEventBuffer does not advance memory state when durable append fail
     assert.deepEqual(persisted.map((event) => event.seq), [1]);
 });
 
+test("InstanceEventBuffer restores only its bounded tail from durable storage", async () => {
+    const instanceName = asInstanceName("event-tail-restore");
+    const persisted: InstanceEvent[] = Array.from({ length: 20 }, (_, index) => ({
+        at: `2026-08-13T00:00:${String(index).padStart(2, "0")}.000Z`,
+        instanceName,
+        seq: index + 1,
+        type: "instance.statusChanged",
+    }));
+    let tailLimit = 0;
+    const store = {
+        async append(record: InstanceEvent) { persisted.push(record); },
+        async readAll() { throw new Error("unbounded event read should not run"); },
+        async readHighWater() { return 20; },
+        async readTail(limit: number) {
+            tailLimit = limit;
+            return persisted.slice(-limit);
+        },
+    } as never;
+    const buffer = new InstanceEventBuffer(instanceName, 4, store);
+
+    const appended = await buffer.append({
+        at: "2026-08-13T00:01:00.000Z",
+        type: "instance.statusChanged",
+    });
+
+    assert.equal(tailLimit, 4);
+    assert.equal(appended.seq, 21);
+    const replay = buffer.readFrom(18);
+    assert.equal(replay.kind, "events");
+    if (replay.kind !== "events") assert.fail("expected event replay");
+    assert.deepEqual(replay.events.map((event) => event.seq), [18, 19, 20, 21]);
+});
+
+test("LogStoreInstance pushes fromSeq and limit into sequenced storage", async () => {
+    const instanceName = asInstanceName("log-range-read");
+    const entries: InstanceLogEntry[] = Array.from({ length: 5 }, (_, index) => ({
+        at: `2026-08-13T00:00:0${index}.000Z`,
+        instanceName,
+        message: `line-${index + 1}`,
+        seq: index + 1,
+        stream: "stdout",
+    }));
+    let range: [number, number | undefined] | undefined;
+    const store = {
+        async append() {},
+        async readAll() { throw new Error("unbounded log read should not run"); },
+        async readFromSeq(fromSeq: number, limit?: number) {
+            range = [fromSeq, limit];
+            return entries.filter((entry) => entry.seq >= fromSeq).slice(0, limit);
+        },
+        async readHighWater() { return 5; },
+        async readTail() { return entries.slice(-1); },
+    } as never;
+    const logs = new LogStoreInstance(instanceName, store);
+
+    assert.deepEqual(
+        (await logs.read({ fromSeq: 3, limit: 2 })).map((entry) => entry.seq),
+        [3, 4],
+    );
+    assert.deepEqual(range, [3, 2]);
+});
+
 test("LogStoreInstance and AuditToolCallHistory write and query per-instance records", async () => {
     const root = await createTestTempDirectory("storage");
     const instanceName = asInstanceName("task-5-storage");
@@ -239,7 +644,7 @@ test("LogStoreInstance and AuditToolCallHistory write and query per-instance rec
         );
         const history = new AuditToolCallHistory(
             instanceName,
-            database.store("toolCalls", {
+            database.toolCallStore({
                 legacyFile: paths.legacyToolCallsFile,
                 timestamp: (record) => record.completedAt ?? record.startedAt
             })
@@ -335,3 +740,52 @@ test("LogStoreInstance and AuditToolCallHistory write and query per-instance rec
         await rm(root, { recursive: true, force: true });
     }
 });
+
+function createV1AuditDatabase(filePath: string, record: InstanceLogEntry): void {
+    const require = createRequire(import.meta.url);
+    const originalEmitWarning = process.emitWarning;
+    process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
+        const message = warning instanceof Error ? warning.message : warning;
+        const type = typeof args[0] === "string"
+            ? args[0]
+            : typeof args[0] === "object" && args[0] !== null && "type" in args[0]
+              ? String((args[0] as { type?: unknown }).type)
+              : undefined;
+        if (type === "ExperimentalWarning" && message.includes("SQLite")) return;
+        Reflect.apply(originalEmitWarning, process, [warning, ...args]);
+    }) as typeof process.emitWarning;
+    try {
+        const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+        const database = new DatabaseSync(filePath);
+        const payload = JSON.stringify(record);
+        database.exec(`
+            CREATE TABLE audit_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection TEXT NOT NULL,
+                occurred_at_ms INTEGER NOT NULL,
+                payload_bytes INTEGER NOT NULL CHECK(payload_bytes >= 0),
+                payload TEXT NOT NULL
+            ) STRICT;
+            PRAGMA user_version = 1;
+        `);
+        database.prepare(
+            "INSERT INTO audit_records(collection, occurred_at_ms, payload_bytes, payload) VALUES (?, ?, ?, ?)"
+        ).run("logs", Date.parse(record.at), Buffer.byteLength(payload, "utf8"), payload);
+        database.close();
+    } finally {
+        process.emitWarning = originalEmitWarning;
+    }
+}
+
+function readStoredAuditRow(filePath: string): { bodyCodec: string | null; payload: string } {
+    const require = createRequire(import.meta.url);
+    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const database = new DatabaseSync(filePath);
+    try {
+        return database.prepare(
+            "SELECT payload, body_codec AS bodyCodec FROM audit_records WHERE collection = 'logs' ORDER BY id DESC LIMIT 1"
+        ).get() as { bodyCodec: string | null; payload: string };
+    } finally {
+        database.close();
+    }
+}

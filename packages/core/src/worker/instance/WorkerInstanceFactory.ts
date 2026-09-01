@@ -1,4 +1,4 @@
-import type { ApprovalRequest, InstanceEvent, ToolCallAssociation, ToolCallContext, ToolCallRecord } from "@portable-devshell/shared";
+import type { ApprovalRequest, InstanceEvent, ToolCallAssociation, ToolCallContext } from "@portable-devshell/shared";
 import type { InstanceLogEntry } from "../../log/store/LogStoreInstance.js";
 
 import { ApprovalManager, ApprovalStore } from "../../approval/ApprovalManager.js";
@@ -48,7 +48,7 @@ export class WorkerInstanceFactory {
             legacyFile: paths.legacyApprovalsFile,
             timestamp: (record) => record.decision?.decidedAt ?? record.createdAt
         });
-        const toolCallStore = auditDatabase.store<ToolCallRecord>("toolCalls", {
+        const toolCallStore = auditDatabase.toolCallStore({
             legacyFile: paths.legacyToolCallsFile,
             timestamp: (record) => record.completedAt ?? record.startedAt
         });

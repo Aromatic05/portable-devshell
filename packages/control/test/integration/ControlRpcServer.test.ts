@@ -104,7 +104,11 @@ test("ControlSocketServer routes canonical control and instance operations over 
     assert.deepEqual(goals.payload, { goals: [], lastSeq: 0 });
 
     await request(harness.socketPath, asInstanceName("alpha"), "runtime.readLogs", { limit: 1_000 });
-    assert.deepEqual(harness.worker.lastReadLogsQuery, { fromSeq: undefined, limit: 100 });
+    assert.deepEqual(harness.worker.lastReadLogsQuery, {
+        fromSeq: undefined,
+        limit: 100,
+        maxDecodedBytes: 1024 * 1024
+    });
 
     harness.worker.toolCalls = [1, 2, 3].map((index): ToolCallRecord => ({
         callId: `large-call-${index}`,

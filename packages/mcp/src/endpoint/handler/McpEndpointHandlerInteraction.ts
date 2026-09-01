@@ -236,14 +236,25 @@ export class McpEndpointHandlerInteraction {
         if (request.action !== "report" && request.action !== "reset") {
             const workspaceGateway = isMcpWorkspaceGateway(interactionGateway) ? interactionGateway : undefined;
             const instances = await this.#contextInstances(ctxId);
-            const [goal, waits, approvalSlices, toolCallSlices] = await Promise.all([
+            const [goal, waits, approvalSlices, activeCallSlices] = await Promise.all([
                 goalGateway.readGoal(this.options.instanceName, ctxId),
                 interactionGateway.listWaits(this.options.instanceName),
-                Promise.allSettled(instances.map(async (instance) => await interactionGateway.listApprovals(instance))),
-                Promise.allSettled(instances.map(async (instance) => await (workspaceGateway?.readToolCalls(instance, ctxId, 64) ?? []))),
+                Promise.allSettled(instances.map(async (instance) =>
+                    interactionGateway.listPendingApprovals === undefined
+                        ? (await interactionGateway.listApprovals(instance)).filter((approval) => approval.status === "pending")
+                        : await interactionGateway.listPendingApprovals(instance, ctxId)
+                )),
+                Promise.allSettled(instances.map(async (instance) => {
+                    if (workspaceGateway?.hasActiveToolCalls !== undefined) {
+                        return workspaceGateway.hasActiveToolCalls(instance, ctxId);
+                    }
+                    const calls = await (workspaceGateway?.readToolCalls(instance, ctxId, 64) ?? []);
+                    return calls.some((call) =>
+                        call.status === "queued" || call.status === "pendingApproval" || call.status === "running"
+                    );
+                })),
             ]);
             const approvals = approvalSlices.flatMap((result) => result.status === "fulfilled" ? result.value : []);
-            const toolCalls = toolCallSlices.flatMap((result) => result.status === "fulfilled" ? result.value : []);
             request.available = request.available !== false &&
                 !waits.some((wait) => (
                     wait.createdByCtxId === ctxId && wait.goalId === goal?.goalId &&
@@ -251,9 +262,7 @@ export class McpEndpointHandlerInteraction {
                     wait.status !== "consumed" && wait.status !== "cancelled"
                 )) &&
                 !approvals.some((approval) => approval.ctxId === ctxId && approval.status === "pending") &&
-                !toolCalls.some((call) => (
-                    call.status === "queued" || call.status === "pendingApproval" || call.status === "running"
-                ));
+                !activeCallSlices.some((result) => result.status === "fulfilled" && result.value);
         }
         return await goalGateway.goalContinuation(
             this.options.instanceName,

@@ -35,6 +35,10 @@ export class WorkerInstanceToolApproval {
         return await this.#approvalManager.listApprovals();
     }
 
+    async listPendingApprovals(ctxId?: string): Promise<ApprovalRequest[]> {
+        return await this.#approvalManager.listPendingApprovals(ctxId);
+    }
+
     async getApproval(approvalId: string): Promise<ApprovalRequest> {
         return await this.#approvalManager.getApproval(approvalId);
     }

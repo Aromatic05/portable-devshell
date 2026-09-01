@@ -15,7 +15,7 @@ import { getErrorCode } from "../WorkerInstanceError.js";
 import { toEventData } from "../WorkerInstanceEvent.js";
 import { createWorkerInstanceToolCallScope, type WorkerInstanceToolCallScope } from "./WorkerInstanceToolContext.js";
 import type { WorkerInstanceBashToolResult } from "./WorkerInstanceToolResult.js";
-import { commandResultOutput, readByteLength } from "./WorkerInstanceToolResult.js";
+import { commandResultOutput, readByteLength, stripCommandStreams } from "./WorkerInstanceToolResult.js";
 import { throwIfToolCallAborted } from "./WorkerInstanceToolError.js";
 
 interface WorkerInstanceToolAuditOptions {
@@ -107,7 +107,7 @@ export class WorkerInstanceToolAudit {
     ): Promise<void> {
         const completedAt = new Date().toISOString();
         await this.#toolCallHistory.completed(scope.callId, completedAt, {
-            output: result,
+            output: bashResult === undefined ? result : stripCommandStreams(result),
             ...(bashResult === undefined ? {} : {
                 exitCode: bashResult.exitCode,
                 stderrBytes: bashResult.stderrBytes,
@@ -178,7 +178,7 @@ export class WorkerInstanceToolAudit {
                 ? undefined
                 : {
                       exitCode: result.exitCode,
-                      output: commandResultOutput(result),
+                      output: stripCommandStreams(commandResultOutput(result)),
                       stderrBytes: readByteLength(result.stderr),
                       stdoutBytes: readByteLength(result.stdout)
                   }
@@ -291,5 +291,13 @@ export class WorkerInstanceToolAudit {
 
     async read(query: ToolCallQuery = {}): Promise<ToolCallRecord[]> {
         return await this.#toolCallHistory.read(query);
+    }
+
+    hasActiveForContext(ctxId: string): boolean {
+        return this.#toolCallHistory.hasActiveForContext(ctxId);
+    }
+
+    async readFailureSummary(sinceMs: number, untilMs: number) {
+        return await this.#toolCallHistory.readFailureSummary(sinceMs, untilMs);
     }
 }

@@ -81,7 +81,6 @@ export function resolveToolOutput(
     callId: string,
     logs: readonly Pick<InstanceLogEntry, "callId" | "message" | "stream">[],
 ): JsonValue | undefined {
-    if (output !== undefined) return output;
     const linked = logs.filter((entry) => entry.callId === callId);
     const stdout = linked
         .filter((entry) => entry.stream === "stdout")
@@ -91,11 +90,14 @@ export function resolveToolOutput(
         .filter((entry) => entry.stream === "stderr")
         .map((entry) => entry.message)
         .join("");
-    if (stdout.length === 0 && stderr.length === 0) return undefined;
-    return {
+    if (stdout.length === 0 && stderr.length === 0) return output;
+    const streams: Record<string, JsonValue> = {
         ...(stderr.length === 0 ? {} : { stderr }),
         ...(stdout.length === 0 ? {} : { stdout }),
     };
+    if (output === undefined) return streams;
+    if (typeof output !== "object" || output === null || Array.isArray(output)) return output;
+    return { ...streams, ...output };
 }
 
 export function toolCallOutcome(

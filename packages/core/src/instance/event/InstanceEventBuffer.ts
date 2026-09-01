@@ -93,7 +93,9 @@ export class InstanceEventBuffer {
             return;
         }
 
-        const records = await this.#store.readAll();
+        const records = this.#store.readTail === undefined
+            ? await this.#store.readAll()
+            : await this.#store.readTail(this.#capacity);
         this.#events = records.slice(-this.#capacity);
         this.#lastSeq = Math.max(records.at(-1)?.seq ?? 0, await this.#store.readHighWater?.() ?? 0);
         this.#initialized = true;

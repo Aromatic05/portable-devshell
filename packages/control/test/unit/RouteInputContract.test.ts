@@ -154,10 +154,10 @@ test("MCP and reverse route inputs accept only their closed decision and identit
 });
 
 test("runtime route inputs clamp log queries and strictly validate subscription cursors", () => {
-    assert.deepEqual(readRuntimeLogQuery(), { fromSeq: undefined, limit: 100 });
-    assert.deepEqual(readRuntimeLogQuery({ fromSeq: 10, limit: 0 }), { fromSeq: 10, limit: 1 });
-    assert.deepEqual(readRuntimeLogQuery({ fromSeq: 10, limit: 500 }), { fromSeq: 10, limit: 100 });
-    assert.deepEqual(readRuntimeLogQuery({ fromSeq: 10, limit: 1.5 }), { fromSeq: 10, limit: 100 });
+    assert.deepEqual(readRuntimeLogQuery(), { fromSeq: undefined, limit: 100, maxDecodedBytes: 1024 * 1024 });
+    assert.deepEqual(readRuntimeLogQuery({ fromSeq: 10, limit: 0 }), { fromSeq: 10, limit: 1, maxDecodedBytes: 1024 * 1024 });
+    assert.deepEqual(readRuntimeLogQuery({ fromSeq: 10, limit: 500 }), { fromSeq: 10, limit: 100, maxDecodedBytes: 1024 * 1024 });
+    assert.deepEqual(readRuntimeLogQuery({ fromSeq: 10, limit: 1.5 }), { fromSeq: 10, limit: 100, maxDecodedBytes: 1024 * 1024 });
 
     for (const cursor of [0, 1, Number.MAX_SAFE_INTEGER]) {
         assert.equal(readRuntimeSubscriptionFromSeq({ fromSeq: cursor }), cursor);

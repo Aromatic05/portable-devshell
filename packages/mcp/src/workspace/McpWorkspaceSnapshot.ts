@@ -28,15 +28,26 @@ export async function readWorkspaceSnapshot(
         gap: false,
         lastSeq: 0,
     }));
-    const [todo, waits, goal, approvalSlices, toolCallSlices] = await Promise.all([
+    const [todo, waits, goal, approvalSlices, activeCallSlices] = await Promise.all([
         gateway.readTodo(instanceName),
         gateway.listWaits(instanceName),
         goalGateway?.readGoal(instanceName, ctxId),
-        Promise.allSettled(instances.map(async (instance) => await gateway.listApprovals(instance))),
-        Promise.allSettled(instances.map(async (instance) => await (workspaceGateway?.readToolCalls(instance, ctxId, 64) ?? []))),
+        Promise.allSettled(instances.map(async (instance) =>
+            gateway.listPendingApprovals === undefined
+                ? (await gateway.listApprovals(instance)).filter((approval) => approval.status === "pending")
+                : await gateway.listPendingApprovals(instance, ctxId)
+        )),
+        Promise.allSettled(instances.map(async (instance) => {
+            if (workspaceGateway?.hasActiveToolCalls !== undefined) {
+                return workspaceGateway.hasActiveToolCalls(instance, ctxId);
+            }
+            const calls = await (workspaceGateway?.readToolCalls(instance, ctxId, 64) ?? []);
+            return calls.some((call) =>
+                call.status === "queued" || call.status === "pendingApproval" || call.status === "running"
+            );
+        })),
     ]);
     const approvals = approvalSlices.flatMap((result) => result.status === "fulfilled" ? result.value : []);
-    const toolCalls = toolCallSlices.flatMap((result) => result.status === "fulfilled" ? result.value : []);
     const todoRecord = asRecord(todo);
     const tasks = Array.isArray(todoRecord?.tasks)
         ? todoRecord.tasks.filter((task) => asRecord(task)?.ctxId === ctxId)
@@ -63,9 +74,7 @@ export async function readWorkspaceSnapshot(
         const { ctxId: _ctxId, ...visible } = approval;
         return visible;
     });
-    const agentBusy = toolCalls.some((call) =>
-        call.status === "queued" || call.status === "pendingApproval" || call.status === "running"
-    );
+    const agentBusy = activeCallSlices.some((result) => result.status === "fulfilled" && result.value);
     return {
         agentBusy,
         approvals: visibleApprovals,
