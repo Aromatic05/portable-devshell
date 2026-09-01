@@ -4,13 +4,14 @@ const MAX_LOG_READ_LIMIT = 100;
 const MAX_LOG_RESPONSE_BYTES = 1024 * 1024;
 const LOG_TRUNCATION_MARKER = "\n[log output truncated]\n";
 
-export function readRuntimeLogQuery(payload?: JsonValue): { fromSeq?: number; limit?: number } {
+export function readRuntimeLogQuery(payload?: JsonValue): { fromSeq?: number; limit?: number; maxDecodedBytes: number } {
     const limit = isRecord(payload) && typeof payload.limit === "number" && Number.isInteger(payload.limit)
         ? Math.min(Math.max(payload.limit, 1), MAX_LOG_READ_LIMIT)
         : MAX_LOG_READ_LIMIT;
     return {
         fromSeq: isRecord(payload) && typeof payload.fromSeq === "number" ? payload.fromSeq : undefined,
-        limit
+        limit,
+        maxDecodedBytes: MAX_LOG_RESPONSE_BYTES
     };
 }
 

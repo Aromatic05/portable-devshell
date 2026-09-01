@@ -35,12 +35,17 @@ export interface AuditToolCallFailureSummary {
 }
 
 export interface AuditToolCallRecordStore extends AuditRecordStore<ToolCallRecord> {
+    hasCall(callId: string): Promise<boolean>;
     readFailureSummary(sinceMs: number, untilMs: number): Promise<AuditToolCallFailureSummary>;
     readQuery(query: ToolCallQuery): Promise<ToolCallRecord[]>;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const IDENTITY_BODY_CODEC = "identity";
 const LOG_BODY_COMPRESSION_THRESHOLD_BYTES = 8 * 1024;
+const LOG_BODY_COMPRESSION_SAMPLE_BYTES = 32 * 1024;
+const LOG_BODY_SAMPLE_MAX_RATIO = 0.7;
+const ROUTINE_INCREMENTAL_VACUUM_PAGES = 64;
 const SCHEMA_VERSION = 2;
 const WAL_AUTOCHECKPOINT_PAGES = 1_000;
 const WAL_JOURNAL_SIZE_LIMIT_BYTES = 1024 * 1024;
@@ -54,7 +59,7 @@ interface AuditStoredRow {
 }
 
 export class AuditDatabase {
-    readonly #database: DatabaseSync;
+    #databaseHandle?: DatabaseSync;
     readonly #filePath: string;
     readonly #maxBytes: number;
     readonly #now: () => number;
@@ -64,27 +69,19 @@ export class AuditDatabase {
 
     constructor(filePath: string, options: AuditDatabaseOptions) {
         validateOptions(options);
-        mkdirSync(dirname(filePath), { recursive: true });
-        const Database = loadDatabaseSync();
-        this.#database = new Database(filePath, { timeout: 5_000 });
         this.#filePath = filePath;
         this.#maxBytes = options.maxBytes;
         this.#now = options.now ?? Date.now;
         this.#retentionMs = options.retentionDays * DAY_MS;
-        this.#initializeSchema();
-        this.#payloadBytes = this.#readPayloadBytes();
-        this.cleanup();
     }
 
     store<TRecord>(collection: AuditRecordCollection, options: AuditStoreOptions<TRecord>): AuditRecordStore<TRecord> {
         this.#assertOpen();
-        this.migrateLegacy(collection, options);
         return new AuditRecordStoreSqlite(this, collection, options);
     }
 
     toolCallStore(options: AuditStoreOptions<ToolCallRecord>): AuditToolCallRecordStore {
         this.#assertOpen();
-        this.migrateLegacy("toolCalls", options);
         return new AuditToolCallRecordStoreSqlite(this, options);
     }
 
@@ -92,9 +89,13 @@ export class AuditDatabase {
         if (this.#closed) {
             return;
         }
-        this.#checkpointWal(true);
         this.#closed = true;
-        this.#database.close();
+        const database = this.#databaseHandle;
+        if (database !== undefined) {
+            this.#checkpointWal(true, database);
+            database.close();
+            this.#databaseHandle = undefined;
+        }
     }
 
     cleanup(): void {
@@ -157,6 +158,7 @@ export class AuditDatabase {
         collection: AuditRecordCollection,
         fromSeq: number,
         limit?: number,
+        maxDecodedBytes?: number,
     ): TRecord[] {
         this.#assertOpen();
         if (!Number.isSafeInteger(fromSeq) || fromSeq < 0) {
@@ -165,20 +167,32 @@ export class AuditDatabase {
         if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) {
             throw new TypeError(`Invalid audit sequence limit: ${limit}.`);
         }
+        if (maxDecodedBytes !== undefined && (!Number.isSafeInteger(maxDecodedBytes) || maxDecodedBytes < 1)) {
+            throw new TypeError(`Invalid audit decoded byte limit: ${maxDecodedBytes}.`);
+        }
         this.cleanup();
-        const rows = this.#database.prepare(
+        const collectionSql = auditCollectionSql(collection);
+        const statement = this.#database.prepare(
             `SELECT payload, body, body_codec AS bodyCodec FROM audit_records
-             WHERE collection = ? AND json_extract(payload, '$.seq') >= ?
+             WHERE collection = ${collectionSql} AND json_extract(payload, '$.seq') >= ?
              ORDER BY id ASC${limit === undefined ? "" : " LIMIT ?"}`
-        ).all(...(limit === undefined ? [collection, fromSeq] : [collection, fromSeq, limit])) as unknown as AuditStoredRow[];
-        return rows.map((row) => decodeStoredRecord<TRecord>(collection, row));
+        );
+        const parameters = limit === undefined ? [fromSeq] : [fromSeq, limit];
+        const records: TRecord[] = [];
+        let decodedBytes = 0;
+        for (const value of statement.iterate(...parameters)) {
+            const record = decodeStoredRecord<TRecord>(collection, value as unknown as AuditStoredRow);
+            records.push(record);
+            if (collection === "logs" && maxDecodedBytes !== undefined) {
+                decodedBytes += decodedLogMessageBytes(record);
+                if (decodedBytes >= maxDecodedBytes) break;
+            }
+        }
+        return records;
     }
 
     readToolCallRecords(query: ToolCallQuery): ToolCallRecord[] {
         this.#assertOpen();
-        if (query.after !== undefined || query.before !== undefined) {
-            throw new TypeError("Bounded audit storage queries do not accept cursors.");
-        }
         if (query.limit !== undefined && (!Number.isSafeInteger(query.limit) || query.limit < 1)) {
             throw new TypeError(`Invalid audit tool-call limit: ${query.limit}.`);
         }
@@ -186,6 +200,18 @@ export class AuditDatabase {
 
         const predicates = ["collection = 'toolCalls'"];
         const parameters: Array<number | string> = [];
+        if (query.after !== undefined) {
+            const afterId = this.#readToolCallId(query.after);
+            if (afterId === undefined) return [];
+            predicates.push("id > ?");
+            parameters.push(afterId);
+        }
+        if (query.before !== undefined) {
+            const beforeId = this.#readToolCallId(query.before);
+            if (beforeId === undefined) return [];
+            predicates.push("id < ?");
+            parameters.push(beforeId);
+        }
         if (query.callIds !== undefined) {
             if (query.callIds.length === 0) return [];
             predicates.push(`json_extract(payload, '$.callId') IN (${query.callIds.map(() => "?").join(", ")})`);
@@ -209,11 +235,18 @@ export class AuditDatabase {
         }
 
         const limited = query.limit !== undefined;
+        const newestFirst = limited && query.after === undefined;
         const rows = this.#database.prepare(
-            `SELECT payload FROM audit_records WHERE ${predicates.join(" AND ")} ORDER BY id ${limited ? "DESC" : "ASC"}${limited ? " LIMIT ?" : ""}`
+            `SELECT payload FROM audit_records WHERE ${predicates.join(" AND ")} ORDER BY id ${newestFirst ? "DESC" : "ASC"}${limited ? " LIMIT ?" : ""}`
         ).all(...(limited ? [...parameters, query.limit!] : parameters)) as Array<{ payload: string }>;
-        if (limited) rows.reverse();
+        if (newestFirst) rows.reverse();
         return rows.map((row) => JSON.parse(row.payload) as ToolCallRecord);
+    }
+
+    hasToolCallRecord(callId: string): boolean {
+        this.#assertOpen();
+        this.cleanup();
+        return this.#readToolCallId(callId) !== undefined;
     }
 
     readToolCallFailureSummary(sinceMs: number, untilMs: number): AuditToolCallFailureSummary {
@@ -306,6 +339,19 @@ export class AuditDatabase {
             CREATE INDEX IF NOT EXISTS audit_records_tool_call_status_time
                 ON audit_records(json_extract(payload, '$.status'), occurred_at_ms DESC, id DESC)
                 WHERE collection = 'toolCalls';
+            CREATE INDEX IF NOT EXISTS audit_records_tool_call_call_id
+                ON audit_records(json_extract(payload, '$.callId'), id)
+                WHERE collection = 'toolCalls';
+            CREATE INDEX IF NOT EXISTS audit_records_tool_call_ctx_id
+                ON audit_records(json_extract(payload, '$.ctxId'), id)
+                WHERE collection = 'toolCalls';
+            DROP INDEX IF EXISTS audit_records_collection_sequence;
+            CREATE INDEX IF NOT EXISTS audit_records_log_sequence
+                ON audit_records(json_extract(payload, '$.seq'), id)
+                WHERE collection = 'logs';
+            CREATE INDEX IF NOT EXISTS audit_records_event_sequence
+                ON audit_records(json_extract(payload, '$.seq'), id)
+                WHERE collection = 'events';
             CREATE TABLE IF NOT EXISTS audit_metadata (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -370,6 +416,13 @@ export class AuditDatabase {
         return row.payloadBytes;
     }
 
+    #readToolCallId(callId: string): number | undefined {
+        const row = this.#database.prepare(
+            "SELECT id FROM audit_records WHERE collection = 'toolCalls' AND json_extract(payload, '$.callId') = ? ORDER BY id DESC LIMIT 1"
+        ).get(callId) as { id: number } | undefined;
+        return row?.id;
+    }
+
     #fileBytes(): number {
         return fileSize(this.#filePath) + fileSize(`${this.#filePath}-wal`);
     }
@@ -430,7 +483,7 @@ export class AuditDatabase {
                 0,
                 this.#payloadBytes - evictedPayloadBytes,
             );
-            this.#compact();
+            this.#compact(true);
             this.#checkpointWal(true);
             const fileBytes = this.#fileBytes();
             if (fileBytes >= previousFileBytes) {
@@ -441,15 +494,16 @@ export class AuditDatabase {
         }
     }
 
-    #compact(): void {
+    #compact(aggressive = false): void {
         const freelist = readPragmaNumber(this.#database, "freelist_count");
         if (freelist > 0) {
-            this.#database.exec(`PRAGMA incremental_vacuum(${freelist})`);
+            const pages = aggressive ? freelist : Math.min(freelist, ROUTINE_INCREMENTAL_VACUUM_PAGES);
+            this.#database.exec(`PRAGMA incremental_vacuum(${pages})`);
         }
     }
 
-    #checkpointWal(truncate: boolean): void {
-        this.#database.exec(`PRAGMA wal_checkpoint(${truncate ? "TRUNCATE" : "PASSIVE"})`);
+    #checkpointWal(truncate: boolean, database: DatabaseSync = this.#database): void {
+        database.exec(`PRAGMA wal_checkpoint(${truncate ? "TRUNCATE" : "PASSIVE"})`);
     }
 
     #readMetadata(key: string): string | undefined {
@@ -465,6 +519,30 @@ export class AuditDatabase {
             .run(key, value);
     }
 
+    get #database(): DatabaseSync {
+        return this.#openDatabase();
+    }
+
+    #openDatabase(): DatabaseSync {
+        this.#assertOpen();
+        if (this.#databaseHandle !== undefined) return this.#databaseHandle;
+
+        mkdirSync(dirname(this.#filePath), { recursive: true });
+        const Database = loadDatabaseSync();
+        const database = new Database(this.#filePath, { timeout: 5_000 });
+        this.#databaseHandle = database;
+        try {
+            this.#initializeSchema();
+            this.#payloadBytes = this.#readPayloadBytes();
+            this.cleanup();
+            return database;
+        } catch (error) {
+            this.#databaseHandle = undefined;
+            database.close();
+            throw error;
+        }
+    }
+
     #assertOpen(): void {
         if (this.#closed) {
             throw new Error("SQLite audit database is closed.");
@@ -476,7 +554,8 @@ class AuditRecordStoreSqlite<TRecord> implements AuditRecordStore<TRecord> {
     readonly #collection: AuditRecordCollection;
     readonly #database: AuditDatabase;
     readonly #options: AuditStoreOptions<TRecord>;
-    readonly readFromSeq?: (fromSeq: number, limit?: number) => Promise<TRecord[]>;
+    #migrated = false;
+    readonly readFromSeq?: (fromSeq: number, limit?: number, maxDecodedBytes?: number) => Promise<TRecord[]>;
 
     constructor(
         database: AuditDatabase,
@@ -487,31 +566,44 @@ class AuditRecordStoreSqlite<TRecord> implements AuditRecordStore<TRecord> {
         this.#database = database;
         this.#options = options;
         if (options.sequence !== undefined) {
-            this.readFromSeq = async (fromSeq, limit) =>
-                this.#database.readSequenceRecords<TRecord>(this.#collection, fromSeq, limit);
+            this.readFromSeq = async (fromSeq, limit, maxDecodedBytes) => {
+                this.#ensureMigrated();
+                return this.#database.readSequenceRecords<TRecord>(this.#collection, fromSeq, limit, maxDecodedBytes);
+            };
         }
     }
 
     async append(record: TRecord): Promise<void> {
+        this.#ensureMigrated();
         this.#database.appendRecord(this.#collection, record, this.#options);
     }
 
     async readAll(): Promise<TRecord[]> {
+        this.#ensureMigrated();
         return this.#database.readRecords<TRecord>(this.#collection);
     }
 
     async readHighWater(): Promise<number> {
+        this.#ensureMigrated();
         return this.#database.readHighWater(this.#collection);
     }
 
     async readTail(limit: number): Promise<TRecord[]> {
+        this.#ensureMigrated();
         return this.#database.readTailRecords<TRecord>(this.#collection, limit);
+    }
+
+    #ensureMigrated(): void {
+        if (this.#migrated) return;
+        this.#database.migrateLegacy(this.#collection, this.#options);
+        this.#migrated = true;
     }
 }
 
 class AuditToolCallRecordStoreSqlite implements AuditToolCallRecordStore {
     readonly #database: AuditDatabase;
     readonly #options: AuditStoreOptions<ToolCallRecord>;
+    #migrated = false;
 
     constructor(database: AuditDatabase, options: AuditStoreOptions<ToolCallRecord>) {
         this.#database = database;
@@ -519,27 +611,44 @@ class AuditToolCallRecordStoreSqlite implements AuditToolCallRecordStore {
     }
 
     async append(record: ToolCallRecord): Promise<void> {
+        this.#ensureMigrated();
         this.#database.appendRecord("toolCalls", record, this.#options);
     }
 
+    async hasCall(callId: string): Promise<boolean> {
+        this.#ensureMigrated();
+        return this.#database.hasToolCallRecord(callId);
+    }
+
     async readAll(): Promise<ToolCallRecord[]> {
+        this.#ensureMigrated();
         return this.#database.readRecords<ToolCallRecord>("toolCalls");
     }
 
     async readFailureSummary(sinceMs: number, untilMs: number): Promise<AuditToolCallFailureSummary> {
+        this.#ensureMigrated();
         return this.#database.readToolCallFailureSummary(sinceMs, untilMs);
     }
 
     async readHighWater(): Promise<number> {
+        this.#ensureMigrated();
         return this.#database.readHighWater("toolCalls");
     }
 
     async readQuery(query: ToolCallQuery): Promise<ToolCallRecord[]> {
+        this.#ensureMigrated();
         return this.#database.readToolCallRecords(query);
     }
 
     async readTail(limit: number): Promise<ToolCallRecord[]> {
+        this.#ensureMigrated();
         return this.#database.readTailRecords<ToolCallRecord>("toolCalls", limit);
+    }
+
+    #ensureMigrated(): void {
+        if (this.#migrated) return;
+        this.#database.migrateLegacy("toolCalls", this.#options);
+        this.#migrated = true;
     }
 }
 
@@ -584,21 +693,35 @@ function encodeStoredRecord<TRecord>(
         return inlineStoredRecord(JSON.stringify(record));
     }
 
-    const compressed = zstdCompressSync(Buffer.from(source.message, "utf8"), {
-        params: { [zlibConstants.ZSTD_c_compressionLevel]: ZSTD_COMPRESSION_LEVEL }
-    });
-    if (compressed.byteLength >= messageBytes) {
-        return inlineStoredRecord(JSON.stringify(record));
-    }
-
     const { message: _message, ...metadata } = source;
     const payload = JSON.stringify(metadata);
+    const message = Buffer.from(source.message, "utf8");
+    const sample = message.subarray(0, Math.min(message.byteLength, LOG_BODY_COMPRESSION_SAMPLE_BYTES));
+    const compressedSample = compressLogBody(sample);
+    if (compressedSample.byteLength / sample.byteLength > LOG_BODY_SAMPLE_MAX_RATIO) {
+        return bodyStoredRecord(payload, message, IDENTITY_BODY_CODEC);
+    }
+
+    const compressed = compressLogBody(message);
+    if (compressed.byteLength >= message.byteLength) {
+        return bodyStoredRecord(payload, message, IDENTITY_BODY_CODEC);
+    }
+    return bodyStoredRecord(payload, compressed, ZSTD_BODY_CODEC);
+}
+
+function bodyStoredRecord(payload: string, body: Uint8Array, bodyCodec: string): AuditStoredRow & { payloadBytes: number } {
     return {
-        body: compressed,
-        bodyCodec: ZSTD_BODY_CODEC,
+        body,
+        bodyCodec,
         payload,
-        payloadBytes: Buffer.byteLength(payload, "utf8") + compressed.byteLength,
+        payloadBytes: Buffer.byteLength(payload, "utf8") + body.byteLength,
     };
+}
+
+function compressLogBody(body: Uint8Array): Buffer {
+    return zstdCompressSync(body, {
+        params: { [zlibConstants.ZSTD_c_compressionLevel]: ZSTD_COMPRESSION_LEVEL }
+    });
 }
 
 function inlineStoredRecord(payload: string): AuditStoredRow & { payloadBytes: number } {
@@ -618,16 +741,39 @@ function decodeStoredRecord<TRecord>(collection: AuditRecordCollection, row: Aud
         }
         return payload as TRecord;
     }
-    if (collection !== "logs" || row.bodyCodec !== ZSTD_BODY_CODEC || row.body === null) {
+    if (collection !== "logs" || row.body === null) {
         throw new Error(`Unsupported audit record body codec: ${row.bodyCodec}.`);
     }
     if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-        throw new Error("Compressed audit log metadata must be an object.");
+        throw new Error("Externalized audit log metadata must be an object.");
+    }
+    const message = row.bodyCodec === ZSTD_BODY_CODEC
+        ? zstdDecompressSync(row.body).toString("utf8")
+        : row.bodyCodec === IDENTITY_BODY_CODEC
+          ? Buffer.from(row.body).toString("utf8")
+          : undefined;
+    if (message === undefined) {
+        throw new Error(`Unsupported audit record body codec: ${row.bodyCodec}.`);
     }
     return {
         ...(payload as Record<string, unknown>),
-        message: zstdDecompressSync(row.body).toString("utf8"),
+        message,
     } as TRecord;
+}
+
+function decodedLogMessageBytes(record: unknown): number {
+    if (typeof record !== "object" || record === null || Array.isArray(record)) return 0;
+    const message = (record as { message?: unknown }).message;
+    return typeof message === "string" ? Buffer.byteLength(message, "utf8") : 0;
+}
+
+function auditCollectionSql(collection: AuditRecordCollection): string {
+    switch (collection) {
+        case "approvals": return "'approvals'";
+        case "events": return "'events'";
+        case "logs": return "'logs'";
+        case "toolCalls": return "'toolCalls'";
+    }
 }
 
 function readPragmaNumber(

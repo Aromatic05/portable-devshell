@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { access, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
@@ -40,6 +41,28 @@ test("AuditDatabase appends and reads records", async () => {
             { at: "2026-07-15T00:00:01.000Z", value: "two" }
         ]);
         assert.equal(database.stats().recordCount, 2);
+        database.close();
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("AuditDatabase defers SQLite creation until the first durable access", async () => {
+    const root = await createTestTempDirectory("sqlite-lazy-open");
+    const databaseFile = join(root, "nested", "audit.sqlite3");
+
+    try {
+        const database = new AuditDatabase(databaseFile, {
+            maxBytes: 16 * MIB,
+            now: () => Date.parse("2026-07-15T00:00:00.000Z"),
+            retentionDays: 30
+        });
+        const store = database.store<{ at: string; value: string }>("logs", {
+            timestamp: (record) => record.at
+        });
+        await assert.rejects(access(databaseFile), (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT");
+        assert.deepEqual(await store.readAll(), []);
+        await access(databaseFile);
         database.close();
     } finally {
         await rm(root, { recursive: true, force: true });
@@ -102,6 +125,74 @@ test("AuditDatabase compresses large log messages and restores them transparentl
         assert.deepEqual(await store.readAll(), [record]);
         assert.deepEqual(await store.readFromSeq?.(1, 1), [record]);
         assert.equal(database.stats().payloadBytes < Buffer.byteLength(message, "utf8") / 4, true);
+        database.close();
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("AuditDatabase stores large incompressible log messages as identity bodies", async () => {
+    const root = await createTestTempDirectory("sqlite-log-identity");
+    const databaseFile = join(root, "audit.sqlite3");
+    const instanceName = asInstanceName("sqlite-log-identity");
+    const message = randomBytes(64 * 1024).toString("base64");
+
+    try {
+        const database = new AuditDatabase(databaseFile, {
+            maxBytes: 16 * MIB,
+            now: () => Date.parse("2026-09-01T12:00:00.000Z"),
+            retentionDays: 30
+        });
+        const store = database.store<InstanceLogEntry>("logs", {
+            sequence: (record) => record.seq,
+            timestamp: (record) => record.at
+        });
+        const record: InstanceLogEntry = {
+            at: "2026-09-01T12:00:00.000Z",
+            instanceName,
+            message,
+            seq: 1,
+            stream: "stdout"
+        };
+
+        await store.append(record);
+        assert.deepEqual(await store.readAll(), [record]);
+        database.close();
+
+        const row = readStoredAuditRow(databaseFile);
+        assert.equal(row.bodyCodec, "identity");
+        assert.equal(row.payload.includes("\"message\""), false);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("AuditDatabase stops decoding sequenced logs after satisfying the decoded byte budget", async () => {
+    const root = await createTestTempDirectory("sqlite-log-budget");
+    const instanceName = asInstanceName("sqlite-log-budget");
+    const message = "x".repeat(700 * 1024);
+
+    try {
+        const database = new AuditDatabase(join(root, "audit.sqlite3"), {
+            maxBytes: 16 * MIB,
+            now: () => Date.parse("2026-09-01T12:00:00.000Z"),
+            retentionDays: 30
+        });
+        const store = database.store<InstanceLogEntry>("logs", {
+            sequence: (record) => record.seq,
+            timestamp: (record) => record.at
+        });
+        for (let seq = 1; seq <= 3; seq += 1) {
+            await store.append({
+                at: `2026-09-01T12:00:0${seq}.000Z`,
+                instanceName,
+                message,
+                seq,
+                stream: "stdout"
+            });
+        }
+
+        assert.equal((await store.readFromSeq?.(1, 100, MIB))?.length, 2);
         database.close();
     } finally {
         await rm(root, { recursive: true, force: true });
@@ -202,6 +293,43 @@ test("AuditToolCallHistory pushes filtered limited history into storage", async 
     assert.deepEqual(storageQuery, { ctxId: "ctx-filtered", limit: 64 });
 });
 
+test("AuditToolCallHistory keeps cursor pagination bounded while merging active calls", async () => {
+    const instanceName = asInstanceName("cursor-history");
+    const persisted: ToolCallRecord = {
+        callId: "persisted-2",
+        ctxId: "ctx-cursor",
+        inputSummary: "{}",
+        instance: instanceName,
+        source: "mcp",
+        startedAt: "2026-09-01T00:00:02.000Z",
+        status: "completed",
+        toolName: "bash_run",
+    };
+    let readAllCalled = false;
+    const history = new AuditToolCallHistory(instanceName, {
+        async append() {},
+        async hasCall(callId) { return callId === "persisted-1"; },
+        async readAll() { readAllCalled = true; return []; },
+        async readQuery(query) {
+            assert.deepEqual(query, { after: "persisted-1", ctxId: "ctx-cursor", limit: 2 });
+            return [persisted];
+        },
+    });
+    await history.started(
+        "active-1",
+        "bash_run",
+        "{}",
+        { ctxId: "ctx-cursor", source: "mcp" },
+        "2026-09-01T00:00:03.000Z",
+    );
+
+    assert.deepEqual(
+        (await history.read({ after: "persisted-1", ctxId: "ctx-cursor", limit: 2 })).map((record) => record.callId),
+        ["persisted-2", "active-1"],
+    );
+    assert.equal(readAllCalled, false);
+});
+
 test("AuditDatabase queries bounded tool-call history and failure summaries without materializing all records", async () => {
     const root = await createTestTempDirectory("sqlite-tool-query");
     const instanceName = asInstanceName("sqlite-tool-query");
@@ -266,6 +394,20 @@ test("AuditDatabase queries bounded tool-call history and failure summaries with
             await store.readFailureSummary(now - 24 * 60 * 60 * 1_000, now),
             { count: 2, latest: records[2] },
         );
+        assert.deepEqual(
+            (await store.readQuery({ after: "ctx-a-old", limit: 1 })).map((record) => record.callId),
+            ["ctx-b"],
+        );
+        assert.deepEqual(
+            (await store.readQuery({ before: "ctx-a-latest", limit: 1 })).map((record) => record.callId),
+            ["ctx-b"],
+        );
+        assert.deepEqual(
+            (await store.readQuery({ after: "ctx-a-old", before: "ctx-a-latest", status: "completed" }))
+                .map((record) => record.callId),
+            ["ctx-b"],
+        );
+        assert.deepEqual(await store.readQuery({ after: "missing", limit: 1 }), []);
         database.close();
     } finally {
         await rm(root, { recursive: true, force: true });
@@ -293,8 +435,9 @@ test("AuditDatabase migrates legacy JSONL exactly once", async () => {
             timestamp: (record) => record.at
         });
 
-        await assert.rejects(access(legacyFile), (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT");
+        await access(legacyFile);
         assert.deepEqual(await store.readAll(), [{ at: "2026-07-15T00:00:00.000Z", value: "legacy" }]);
+        await assert.rejects(access(legacyFile), (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT");
         database.close();
 
         const reopened = new AuditDatabase(databaseFile, {
@@ -631,5 +774,18 @@ function createV1AuditDatabase(filePath: string, record: InstanceLogEntry): void
         database.close();
     } finally {
         process.emitWarning = originalEmitWarning;
+    }
+}
+
+function readStoredAuditRow(filePath: string): { bodyCodec: string | null; payload: string } {
+    const require = createRequire(import.meta.url);
+    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const database = new DatabaseSync(filePath);
+    try {
+        return database.prepare(
+            "SELECT payload, body_codec AS bodyCodec FROM audit_records WHERE collection = 'logs' ORDER BY id DESC LIMIT 1"
+        ).get() as { bodyCodec: string | null; payload: string };
+    } finally {
+        database.close();
     }
 }

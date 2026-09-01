@@ -52,7 +52,7 @@ export class LogStoreInstance {
     async read(query: LogQuery = {}): Promise<InstanceLogEntry[]> {
         const fromSeq = query.fromSeq ?? 1;
         if (this.#store.readFromSeq !== undefined) {
-            return await this.#store.readFromSeq(fromSeq, query.limit);
+            return await this.#store.readFromSeq(fromSeq, query.limit, query.maxDecodedBytes);
         }
         const records = await this.#store.readAll();
         const filtered = records.filter((record) => record.seq >= fromSeq);

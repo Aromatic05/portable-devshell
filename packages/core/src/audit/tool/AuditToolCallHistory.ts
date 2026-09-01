@@ -15,7 +15,7 @@ import type {
 } from "../AuditDatabase.js";
 
 type ToolCallHistoryStore = AuditRecordStore<ToolCallRecord> &
-    Partial<Pick<AuditToolCallRecordStore, "readFailureSummary" | "readQuery">>;
+    Partial<Pick<AuditToolCallRecordStore, "hasCall" | "readFailureSummary" | "readQuery">>;
 
 interface ActiveToolCall {
     approvalId?: string;
@@ -132,8 +132,18 @@ export class AuditToolCallHistory {
         return this.#activeCalls.has(callId);
     }
 
+    hasActiveForContext(ctxId: string): boolean {
+        for (const call of this.#activeCalls.values()) {
+            if (call.ctxId === ctxId) return true;
+        }
+        return false;
+    }
+
     async read(query: ToolCallQuery = {}): Promise<ToolCallRecord[]> {
         await this.#initialize();
+        if (hasCursor(query) && this.#store.readQuery !== undefined && this.#store.hasCall !== undefined) {
+            return await this.#readCursorQuery(query);
+        }
         const records = canReadQuery(query) && this.#store.readQuery !== undefined
             ? await this.#store.readQuery(query)
             : canReadTail(query) && this.#store.readTail !== undefined
@@ -142,6 +152,39 @@ export class AuditToolCallHistory {
         const activeRecords = this.#readActiveRecords();
         const filtered = sliceByFilters(sliceByCursor([...records, ...activeRecords], query), query);
         return applyLimit(filtered, query);
+    }
+
+    async #readCursorQuery(query: ToolCallQuery): Promise<ToolCallRecord[]> {
+        const activeRecords = this.#readActiveRecords();
+        const afterActiveIndex = query.after === undefined ? -1 : findCursorIndex(activeRecords, query.after);
+        const beforeActiveIndex = query.before === undefined ? -1 : findCursorIndex(activeRecords, query.before);
+        const afterPersisted = query.after === undefined || afterActiveIndex >= 0
+            ? false
+            : await this.#store.hasCall!(query.after);
+        const beforePersisted = query.before === undefined || beforeActiveIndex >= 0
+            ? false
+            : await this.#store.hasCall!(query.before);
+
+        if (query.after !== undefined && afterActiveIndex < 0 && !afterPersisted) return [];
+        if (query.before !== undefined && beforeActiveIndex < 0 && !beforePersisted) return [];
+
+        let persistedRecords: ToolCallRecord[] = [];
+        if (afterActiveIndex < 0) {
+            const persistedQuery = beforeActiveIndex < 0
+                ? query
+                : { ...query, before: undefined };
+            persistedRecords = await this.#store.readQuery!(persistedQuery);
+        }
+
+        let activeStart = 0;
+        let activeEnd = activeRecords.length;
+        if (afterActiveIndex >= 0) activeStart = afterActiveIndex + 1;
+        if (beforeActiveIndex >= 0) activeEnd = beforeActiveIndex;
+        else if (beforePersisted) activeEnd = 0;
+        if (activeStart > activeEnd) return [];
+
+        const activeSlice = sliceByFilters(activeRecords.slice(activeStart, activeEnd), query);
+        return applyLimit([...persistedRecords, ...activeSlice], query);
     }
 
     async readFailureSummary(sinceMs: number, untilMs: number): Promise<AuditToolCallFailureSummary> {
@@ -304,16 +347,18 @@ function canReadTail(query: ToolCallQuery): query is ToolCallQuery & { limit: nu
 }
 
 function canReadQuery(query: ToolCallQuery): boolean {
-    return query.after === undefined &&
-        query.before === undefined &&
-        (
-            query.limit !== undefined ||
-            query.callIds !== undefined ||
-            query.ctxId !== undefined ||
-            query.source !== undefined ||
-            query.status !== undefined ||
-            query.toolName !== undefined
-        );
+    return !hasCursor(query) && (
+        query.limit !== undefined ||
+        query.callIds !== undefined ||
+        query.ctxId !== undefined ||
+        query.source !== undefined ||
+        query.status !== undefined ||
+        query.toolName !== undefined
+    );
+}
+
+function hasCursor(query: ToolCallQuery): boolean {
+    return query.after !== undefined || query.before !== undefined;
 }
 
 function isFailureInWindow(record: ToolCallRecord, sinceMs: number, untilMs: number): boolean {
