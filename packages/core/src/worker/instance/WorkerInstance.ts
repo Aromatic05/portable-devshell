@@ -388,6 +388,10 @@ export class WorkerInstance {
         return await this.#tool.readToolCalls(query);
     }
 
+    async readToolCallFailureSummary(sinceMs: number, untilMs: number) {
+        return await this.#tool.readToolCallFailureSummary(sinceMs, untilMs);
+    }
+
     async reconfigure(input: {
         alerts?: ResolvedWorkerInstanceConfig["alerts"];
         approvalPolicy?: ResolvedWorkerInstanceConfig["approvalPolicy"];

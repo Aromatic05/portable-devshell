@@ -3,7 +3,7 @@ import { access, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-import { errorCodes, asInstanceName, type InstanceEvent } from "@portable-devshell/shared";
+import { errorCodes, asInstanceName, type InstanceEvent, type ToolCallRecord } from "@portable-devshell/shared";
 import {
     InstanceEventBuffer,
     LogStoreInstance,
@@ -70,6 +70,104 @@ test("AuditToolCallHistory uses bounded storage reads for unfiltered limited his
 
     assert.deepEqual(await history.read({ limit: 200 }), [record]);
     assert.equal(readTailLimit, 200);
+});
+
+test("AuditToolCallHistory pushes filtered limited history into storage", async () => {
+    const instanceName = asInstanceName("filtered-history");
+    const record: ToolCallRecord = {
+        callId: "call-filtered",
+        ctxId: "ctx-filtered",
+        inputSummary: "{}",
+        instance: instanceName,
+        source: "mcp",
+        startedAt: "2026-09-01T00:00:00.000Z",
+        status: "completed",
+        toolName: "bash_run",
+    };
+    let storageQuery: unknown;
+    const history = new AuditToolCallHistory(instanceName, {
+        async append() {},
+        async readAll() {
+            throw new Error("unbounded audit read should not run");
+        },
+        async readQuery(query) {
+            storageQuery = query;
+            return [record];
+        },
+    });
+
+    assert.deepEqual(await history.read({ ctxId: "ctx-filtered", limit: 64 }), [record]);
+    assert.deepEqual(storageQuery, { ctxId: "ctx-filtered", limit: 64 });
+});
+
+test("AuditDatabase queries bounded tool-call history and failure summaries without materializing all records", async () => {
+    const root = await createTestTempDirectory("sqlite-tool-query");
+    const instanceName = asInstanceName("sqlite-tool-query");
+    const now = Date.parse("2026-09-01T12:00:00.000Z");
+
+    try {
+        const database = new AuditDatabase(join(root, "audit.sqlite3"), {
+            maxBytes: 16 * MIB,
+            now: () => now,
+            retentionDays: 30
+        });
+        const store = database.toolCallStore({
+            timestamp: (record) => record.completedAt ?? record.startedAt
+        });
+        const records: ToolCallRecord[] = [
+            {
+                callId: "ctx-a-old",
+                completedAt: "2026-08-31T13:00:00.000Z",
+                ctxId: "ctx-a",
+                inputSummary: "{}",
+                instance: instanceName,
+                source: "mcp",
+                startedAt: "2026-08-31T12:59:00.000Z",
+                status: "failed",
+                toolName: "bash_run",
+            },
+            {
+                callId: "ctx-b",
+                completedAt: "2026-09-01T10:00:00.000Z",
+                ctxId: "ctx-b",
+                inputSummary: "{}",
+                instance: instanceName,
+                source: "mcp",
+                startedAt: "2026-09-01T09:59:00.000Z",
+                status: "completed",
+                toolName: "bash_run",
+            },
+            {
+                callId: "ctx-a-latest",
+                completedAt: "2026-09-01T11:00:00.000Z",
+                ctxId: "ctx-a",
+                inputSummary: "{}",
+                instance: instanceName,
+                source: "mcp",
+                startedAt: "2026-09-01T10:59:00.000Z",
+                status: "queueTimeout",
+                toolName: "tmux_run",
+            },
+        ];
+        for (const record of records) await store.append(record);
+
+        assert.deepEqual(
+            (await store.readQuery({ ctxId: "ctx-a", limit: 1 })).map((record) => record.callId),
+            ["ctx-a-latest"],
+        );
+        assert.deepEqual(
+            (await store.readQuery({ source: "mcp", status: "completed", toolName: "bash_run" }))
+                .map((record) => record.callId),
+            ["ctx-b"],
+        );
+        assert.deepEqual(
+            await store.readFailureSummary(now - 24 * 60 * 60 * 1_000, now),
+            { count: 2, latest: records[2] },
+        );
+        database.close();
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
 });
 
 test("AuditDatabase migrates legacy JSONL exactly once", async () => {
@@ -218,6 +316,68 @@ test("InstanceEventBuffer does not advance memory state when durable append fail
     assert.deepEqual(persisted.map((event) => event.seq), [1]);
 });
 
+test("InstanceEventBuffer restores only its bounded tail from durable storage", async () => {
+    const instanceName = asInstanceName("event-tail-restore");
+    const persisted: InstanceEvent[] = Array.from({ length: 20 }, (_, index) => ({
+        at: `2026-08-13T00:00:${String(index).padStart(2, "0")}.000Z`,
+        instanceName,
+        seq: index + 1,
+        type: "instance.statusChanged",
+    }));
+    let tailLimit = 0;
+    const store = {
+        async append(record: InstanceEvent) { persisted.push(record); },
+        async readAll() { throw new Error("unbounded event read should not run"); },
+        async readHighWater() { return 20; },
+        async readTail(limit: number) {
+            tailLimit = limit;
+            return persisted.slice(-limit);
+        },
+    } as never;
+    const buffer = new InstanceEventBuffer(instanceName, 4, store);
+
+    const appended = await buffer.append({
+        at: "2026-08-13T00:01:00.000Z",
+        type: "instance.statusChanged",
+    });
+
+    assert.equal(tailLimit, 4);
+    assert.equal(appended.seq, 21);
+    const replay = buffer.readFrom(18);
+    assert.equal(replay.kind, "events");
+    if (replay.kind !== "events") assert.fail("expected event replay");
+    assert.deepEqual(replay.events.map((event) => event.seq), [18, 19, 20, 21]);
+});
+
+test("LogStoreInstance pushes fromSeq and limit into sequenced storage", async () => {
+    const instanceName = asInstanceName("log-range-read");
+    const entries: InstanceLogEntry[] = Array.from({ length: 5 }, (_, index) => ({
+        at: `2026-08-13T00:00:0${index}.000Z`,
+        instanceName,
+        message: `line-${index + 1}`,
+        seq: index + 1,
+        stream: "stdout",
+    }));
+    let range: [number, number | undefined] | undefined;
+    const store = {
+        async append() {},
+        async readAll() { throw new Error("unbounded log read should not run"); },
+        async readFromSeq(fromSeq: number, limit?: number) {
+            range = [fromSeq, limit];
+            return entries.filter((entry) => entry.seq >= fromSeq).slice(0, limit);
+        },
+        async readHighWater() { return 5; },
+        async readTail() { return entries.slice(-1); },
+    } as never;
+    const logs = new LogStoreInstance(instanceName, store);
+
+    assert.deepEqual(
+        (await logs.read({ fromSeq: 3, limit: 2 })).map((entry) => entry.seq),
+        [3, 4],
+    );
+    assert.deepEqual(range, [3, 2]);
+});
+
 test("LogStoreInstance and AuditToolCallHistory write and query per-instance records", async () => {
     const root = await createTestTempDirectory("storage");
     const instanceName = asInstanceName("task-5-storage");
@@ -239,7 +399,7 @@ test("LogStoreInstance and AuditToolCallHistory write and query per-instance rec
         );
         const history = new AuditToolCallHistory(
             instanceName,
-            database.store("toolCalls", {
+            database.toolCallStore({
                 legacyFile: paths.legacyToolCallsFile,
                 timestamp: (record) => record.completedAt ?? record.startedAt
             })

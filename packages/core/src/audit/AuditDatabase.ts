@@ -3,6 +3,8 @@ import { mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
+import type { ToolCallQuery, ToolCallRecord } from "@portable-devshell/shared";
+
 import type { AuditRecordStore } from "./AuditRecordStore.js";
 import { minimumAuditStorageBytes } from "./AuditStorageLimits.js";
 
@@ -26,6 +28,16 @@ export interface AuditDatabaseStats {
     recordCount: number;
 }
 
+export interface AuditToolCallFailureSummary {
+    count: number;
+    latest?: ToolCallRecord;
+}
+
+export interface AuditToolCallRecordStore extends AuditRecordStore<ToolCallRecord> {
+    readFailureSummary(sinceMs: number, untilMs: number): Promise<AuditToolCallFailureSummary>;
+    readQuery(query: ToolCallQuery): Promise<ToolCallRecord[]>;
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SCHEMA_VERSION = 1;
 
@@ -35,6 +47,7 @@ export class AuditDatabase {
     readonly #now: () => number;
     readonly #retentionMs: number;
     #closed = false;
+    #payloadBytes = 0;
 
     constructor(filePath: string, options: AuditDatabaseOptions) {
         validateOptions(options);
@@ -45,6 +58,7 @@ export class AuditDatabase {
         this.#now = options.now ?? Date.now;
         this.#retentionMs = options.retentionDays * DAY_MS;
         this.#initializeSchema();
+        this.#payloadBytes = this.#readPayloadBytes();
         this.cleanup();
     }
 
@@ -52,6 +66,12 @@ export class AuditDatabase {
         this.#assertOpen();
         this.migrateLegacy(collection, options);
         return new AuditRecordStoreSqlite(this, collection, options);
+    }
+
+    toolCallStore(options: AuditStoreOptions<ToolCallRecord>): AuditToolCallRecordStore {
+        this.#assertOpen();
+        this.migrateLegacy("toolCalls", options);
+        return new AuditToolCallRecordStoreSqlite(this, options);
     }
 
     close(): void {
@@ -65,7 +85,10 @@ export class AuditDatabase {
     cleanup(): void {
         this.#assertOpen();
         const cutoff = this.#now() - this.#retentionMs;
-        this.#database.prepare("DELETE FROM audit_records WHERE occurred_at_ms < ?").run(cutoff);
+        const expired = this.#database.prepare("DELETE FROM audit_records WHERE occurred_at_ms < ?").run(cutoff);
+        if (expired.changes > 0) {
+            this.#payloadBytes = this.#readPayloadBytes();
+        }
         this.#evictForPayloadLimit();
         this.#compact();
         this.#evictForFileLimit();
@@ -75,11 +98,11 @@ export class AuditDatabase {
         this.#assertOpen();
         this.cleanup();
         const row = this.#database
-            .prepare("SELECT COUNT(*) AS recordCount, COALESCE(SUM(payload_bytes), 0) AS payloadBytes FROM audit_records")
-            .get() as { payloadBytes: number; recordCount: number };
+            .prepare("SELECT COUNT(*) AS recordCount FROM audit_records")
+            .get() as { recordCount: number };
         return {
             fileBytes: readPragmaNumber(this.#database, "page_count") * readPragmaNumber(this.#database, "page_size"),
-            payloadBytes: row.payloadBytes,
+            payloadBytes: this.#payloadBytes,
             recordCount: row.recordCount
         };
     }
@@ -115,6 +138,93 @@ export class AuditDatabase {
         return rows.map((row) => JSON.parse(row.payload) as TRecord);
     }
 
+    readSequenceRecords<TRecord>(
+        collection: AuditRecordCollection,
+        fromSeq: number,
+        limit?: number,
+    ): TRecord[] {
+        this.#assertOpen();
+        if (!Number.isSafeInteger(fromSeq) || fromSeq < 0) {
+            throw new TypeError(`Invalid audit sequence start: ${fromSeq}.`);
+        }
+        if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) {
+            throw new TypeError(`Invalid audit sequence limit: ${limit}.`);
+        }
+        this.cleanup();
+        const rows = this.#database.prepare(
+            `SELECT payload FROM audit_records
+             WHERE collection = ? AND json_extract(payload, '$.seq') >= ?
+             ORDER BY id ASC${limit === undefined ? "" : " LIMIT ?"}`
+        ).all(...(limit === undefined ? [collection, fromSeq] : [collection, fromSeq, limit])) as Array<{ payload: string }>;
+        return rows.map((row) => JSON.parse(row.payload) as TRecord);
+    }
+
+    readToolCallRecords(query: ToolCallQuery): ToolCallRecord[] {
+        this.#assertOpen();
+        if (query.after !== undefined || query.before !== undefined) {
+            throw new TypeError("Bounded audit storage queries do not accept cursors.");
+        }
+        if (query.limit !== undefined && (!Number.isSafeInteger(query.limit) || query.limit < 1)) {
+            throw new TypeError(`Invalid audit tool-call limit: ${query.limit}.`);
+        }
+        this.cleanup();
+
+        const predicates = ["collection = 'toolCalls'"];
+        const parameters: Array<number | string> = [];
+        if (query.callIds !== undefined) {
+            if (query.callIds.length === 0) return [];
+            predicates.push(`json_extract(payload, '$.callId') IN (${query.callIds.map(() => "?").join(", ")})`);
+            parameters.push(...query.callIds);
+        }
+        if (query.ctxId !== undefined) {
+            predicates.push("json_extract(payload, '$.ctxId') = ?");
+            parameters.push(query.ctxId);
+        }
+        if (query.source !== undefined) {
+            predicates.push("json_extract(payload, '$.source') = ?");
+            parameters.push(query.source);
+        }
+        if (query.status !== undefined) {
+            predicates.push("json_extract(payload, '$.status') = ?");
+            parameters.push(query.status);
+        }
+        if (query.toolName !== undefined) {
+            predicates.push("json_extract(payload, '$.toolName') = ?");
+            parameters.push(query.toolName);
+        }
+
+        const limited = query.limit !== undefined;
+        const rows = this.#database.prepare(
+            `SELECT payload FROM audit_records WHERE ${predicates.join(" AND ")} ORDER BY id ${limited ? "DESC" : "ASC"}${limited ? " LIMIT ?" : ""}`
+        ).all(...(limited ? [...parameters, query.limit!] : parameters)) as Array<{ payload: string }>;
+        if (limited) rows.reverse();
+        return rows.map((row) => JSON.parse(row.payload) as ToolCallRecord);
+    }
+
+    readToolCallFailureSummary(sinceMs: number, untilMs: number): AuditToolCallFailureSummary {
+        this.#assertOpen();
+        if (!Number.isSafeInteger(sinceMs) || !Number.isSafeInteger(untilMs) || sinceMs > untilMs) {
+            throw new TypeError("Invalid audit tool-call failure window.");
+        }
+        this.cleanup();
+        const where = `
+            collection = 'toolCalls' AND
+            occurred_at_ms >= ? AND occurred_at_ms <= ? AND
+            json_extract(payload, '$.status') IN ('failed', 'queueTimeout')
+        `;
+        const count = this.#database
+            .prepare(`SELECT COUNT(*) AS count FROM audit_records WHERE ${where}`)
+            .get(sinceMs, untilMs) as { count: number };
+        if (count.count === 0) return { count: 0 };
+        const latest = this.#database
+            .prepare(`SELECT payload FROM audit_records WHERE ${where} ORDER BY occurred_at_ms DESC, id DESC LIMIT 1`)
+            .get(sinceMs, untilMs) as { payload: string } | undefined;
+        return {
+            count: count.count,
+            ...(latest === undefined ? {} : { latest: JSON.parse(latest.payload) as ToolCallRecord }),
+        };
+    }
+
     readHighWater(collection: AuditRecordCollection): number {
         this.#assertOpen();
         const value = this.#readMetadata(`highWater:${collection}`);
@@ -132,6 +242,7 @@ export class AuditDatabase {
         }
 
         const records = readLegacyRecords<TRecord>(options.legacyFile);
+        const payloadBytesBefore = this.#payloadBytes;
         this.#database.exec("BEGIN IMMEDIATE");
         try {
             for (const record of records) {
@@ -141,6 +252,7 @@ export class AuditDatabase {
             this.#database.exec("COMMIT");
         } catch (error) {
             this.#database.exec("ROLLBACK");
+            this.#payloadBytes = payloadBytesBefore;
             throw error;
         }
 
@@ -172,6 +284,9 @@ export class AuditDatabase {
                 ON audit_records(collection, id);
             CREATE INDEX IF NOT EXISTS audit_records_occurred_at
                 ON audit_records(occurred_at_ms, id);
+            CREATE INDEX IF NOT EXISTS audit_records_tool_call_status_time
+                ON audit_records(json_extract(payload, '$.status'), occurred_at_ms DESC, id DESC)
+                WHERE collection = 'toolCalls';
             CREATE TABLE IF NOT EXISTS audit_metadata (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -186,10 +301,12 @@ export class AuditDatabase {
         options: AuditStoreOptions<TRecord>
     ): void {
         const payload = JSON.stringify(record);
+        const payloadBytes = Buffer.byteLength(payload, "utf8");
         const occurredAtMs = normalizeTimestamp(options.timestamp(record), this.#now());
         this.#database
             .prepare("INSERT INTO audit_records(collection, occurred_at_ms, payload_bytes, payload) VALUES (?, ?, ?, ?)")
-            .run(collection, occurredAtMs, Buffer.byteLength(payload, "utf8"), payload);
+            .run(collection, occurredAtMs, payloadBytes, payload);
+        this.#payloadBytes += payloadBytes;
 
         const sequence = options.sequence?.(record);
         if (sequence !== undefined) {
@@ -203,7 +320,7 @@ export class AuditDatabase {
         }
     }
 
-    #payloadBytes(): number {
+    #readPayloadBytes(): number {
         const row = this.#database
             .prepare("SELECT COALESCE(SUM(payload_bytes), 0) AS payloadBytes FROM audit_records")
             .get() as { payloadBytes: number };
@@ -215,7 +332,7 @@ export class AuditDatabase {
     }
 
     #evictForPayloadLimit(): void {
-        let payloadBytes = this.#payloadBytes();
+        let payloadBytes = this.#payloadBytes;
         if (payloadBytes <= this.#maxBytes) {
             return;
         }
@@ -232,6 +349,7 @@ export class AuditDatabase {
         }
         if (cutoffId !== undefined) {
             this.#database.prepare("DELETE FROM audit_records WHERE id <= ?").run(cutoffId);
+            this.#payloadBytes = payloadBytes;
         }
     }
 
@@ -239,13 +357,17 @@ export class AuditDatabase {
         let previousFileBytes = Number.POSITIVE_INFINITY;
         while (this.#fileBytes() > this.#maxBytes) {
             const rows = this.#database
-                .prepare("SELECT id FROM audit_records ORDER BY id ASC LIMIT 256")
-                .all() as Array<{ id: number }>;
+                .prepare("SELECT id, payload_bytes AS payloadBytes FROM audit_records ORDER BY id ASC LIMIT 256")
+                .all() as Array<{ id: number; payloadBytes: number }>;
             if (rows.length === 0) {
                 throw new Error(`audit database cannot fit within maxBytes=${this.#maxBytes}`);
             }
             const cutoffId = rows[rows.length - 1]!.id;
             this.#database.prepare("DELETE FROM audit_records WHERE id <= ?").run(cutoffId);
+            this.#payloadBytes = Math.max(
+                0,
+                this.#payloadBytes - rows.reduce((total, row) => total + row.payloadBytes, 0),
+            );
             this.#compact();
             const fileBytes = this.#fileBytes();
             if (fileBytes >= previousFileBytes) {
@@ -286,6 +408,7 @@ class AuditRecordStoreSqlite<TRecord> implements AuditRecordStore<TRecord> {
     readonly #collection: AuditRecordCollection;
     readonly #database: AuditDatabase;
     readonly #options: AuditStoreOptions<TRecord>;
+    readonly readFromSeq?: (fromSeq: number, limit?: number) => Promise<TRecord[]>;
 
     constructor(
         database: AuditDatabase,
@@ -295,6 +418,10 @@ class AuditRecordStoreSqlite<TRecord> implements AuditRecordStore<TRecord> {
         this.#collection = collection;
         this.#database = database;
         this.#options = options;
+        if (options.sequence !== undefined) {
+            this.readFromSeq = async (fromSeq, limit) =>
+                this.#database.readSequenceRecords<TRecord>(this.#collection, fromSeq, limit);
+        }
     }
 
     async append(record: TRecord): Promise<void> {
@@ -311,6 +438,40 @@ class AuditRecordStoreSqlite<TRecord> implements AuditRecordStore<TRecord> {
 
     async readTail(limit: number): Promise<TRecord[]> {
         return this.#database.readTailRecords<TRecord>(this.#collection, limit);
+    }
+}
+
+class AuditToolCallRecordStoreSqlite implements AuditToolCallRecordStore {
+    readonly #database: AuditDatabase;
+    readonly #options: AuditStoreOptions<ToolCallRecord>;
+
+    constructor(database: AuditDatabase, options: AuditStoreOptions<ToolCallRecord>) {
+        this.#database = database;
+        this.#options = options;
+    }
+
+    async append(record: ToolCallRecord): Promise<void> {
+        this.#database.appendRecord("toolCalls", record, this.#options);
+    }
+
+    async readAll(): Promise<ToolCallRecord[]> {
+        return this.#database.readRecords<ToolCallRecord>("toolCalls");
+    }
+
+    async readFailureSummary(sinceMs: number, untilMs: number): Promise<AuditToolCallFailureSummary> {
+        return this.#database.readToolCallFailureSummary(sinceMs, untilMs);
+    }
+
+    async readHighWater(): Promise<number> {
+        return this.#database.readHighWater("toolCalls");
+    }
+
+    async readQuery(query: ToolCallQuery): Promise<ToolCallRecord[]> {
+        return this.#database.readToolCallRecords(query);
+    }
+
+    async readTail(limit: number): Promise<ToolCallRecord[]> {
+        return this.#database.readTailRecords<ToolCallRecord>("toolCalls", limit);
     }
 }
 

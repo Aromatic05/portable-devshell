@@ -111,4 +111,8 @@ export class WorkerInstanceTool {
     async readToolCalls(query: ToolCallQuery = {}): Promise<ToolCallRecord[]> {
         return await this.#audit.read(query);
     }
+
+    async readToolCallFailureSummary(sinceMs: number, untilMs: number) {
+        return await this.#audit.readFailureSummary(sinceMs, untilMs);
+    }
 }

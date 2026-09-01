@@ -50,8 +50,11 @@ export class LogStoreInstance {
     }
 
     async read(query: LogQuery = {}): Promise<InstanceLogEntry[]> {
-        const records = await this.#store.readAll();
         const fromSeq = query.fromSeq ?? 1;
+        if (this.#store.readFromSeq !== undefined) {
+            return await this.#store.readFromSeq(fromSeq, query.limit);
+        }
+        const records = await this.#store.readAll();
         const filtered = records.filter((record) => record.seq >= fromSeq);
 
         if (query.limit === undefined) {
@@ -66,7 +69,9 @@ export class LogStoreInstance {
             return;
         }
 
-        const records = await this.#store.readAll();
+        const records = this.#store.readTail === undefined
+            ? await this.#store.readAll()
+            : await this.#store.readTail(1);
         this.#lastSeq = Math.max(records.at(-1)?.seq ?? 0, await this.#store.readHighWater?.() ?? 0);
         this.#initialized = true;
     }
