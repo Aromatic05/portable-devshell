@@ -112,6 +112,14 @@ export class ApprovalManager {
         return await this.#store.list();
     }
 
+    listPendingApprovals(ctxId?: string): Promise<ApprovalRequest[]> {
+        return Promise.resolve(
+            [...this.#pending.values()]
+                .map((pending) => pending.request)
+                .filter((request) => ctxId === undefined || request.ctxId === ctxId)
+        );
+    }
+
     async getApproval(approvalId: string): Promise<ApprovalRequest> {
         await this.#ensureReady();
         const request = await this.#store.get(approvalId);

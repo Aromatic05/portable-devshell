@@ -89,6 +89,10 @@ export class WorkerInstanceTool {
         return await this.#approval.listApprovals();
     }
 
+    async listPendingApprovals(ctxId?: string): Promise<ApprovalRequest[]> {
+        return await this.#approval.listPendingApprovals(ctxId);
+    }
+
     async getApproval(approvalId: string): Promise<ApprovalRequest> {
         return await this.#approval.getApproval(approvalId);
     }
@@ -110,6 +114,10 @@ export class WorkerInstanceTool {
 
     async readToolCalls(query: ToolCallQuery = {}): Promise<ToolCallRecord[]> {
         return await this.#audit.read(query);
+    }
+
+    hasActiveToolCalls(ctxId: string): boolean {
+        return this.#audit.hasActiveForContext(ctxId);
     }
 
     async readToolCallFailureSummary(sinceMs: number, untilMs: number) {

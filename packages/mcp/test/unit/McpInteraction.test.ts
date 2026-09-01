@@ -446,9 +446,9 @@ test("Workspace snapshot projects only compact task and background state", async
                 }]
             };
         },
-        async readToolCalls() {
-            return [{ callId: "call-running", inputSummary: "long command", instance: "demo", source: "mcp", startedAt: now, status: "running", toolName: "bash_run" }];
-        },
+        hasActiveToolCalls() { return true; },
+        async listPendingApprovals() { return []; },
+        async readToolCalls() { throw new Error("workspace snapshot should not read historical tool calls"); },
         async readWorkspaceEvents() {
             return { events: [], gap: false, lastSeq: 7 };
         },

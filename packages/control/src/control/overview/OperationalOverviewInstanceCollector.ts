@@ -52,16 +52,14 @@ export class OperationalOverviewInstanceCollector {
         alerts.push(...createTodoAlerts(snapshot.name, todos));
 
         const [approvalsResult, callsResult, failureResult] = await Promise.allSettled([
-            descriptor.worker.listApprovals(),
+            descriptor.worker.listPendingApprovals(),
             descriptor.worker.readToolCalls({ limit: Math.max(1, this.#activityLimit) }),
             descriptor.worker.readToolCallFailureSummary(
                 now.getTime() - failureWindowMs,
                 now.getTime(),
             ),
         ]);
-        const pendingApprovals = approvalsResult.status === "fulfilled"
-            ? approvalsResult.value.length
-            : 0;
+        const pendingApprovals = approvalsResult.status === "fulfilled" ? approvalsResult.value.length : 0;
         if (pendingApprovals > 0) {
             alerts.push({
                 detail: `${pendingApprovals} tool call approval${pendingApprovals === 1 ? "" : "s"} waiting.`,

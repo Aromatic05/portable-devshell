@@ -67,7 +67,8 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
             workerVersion: "0.4.10",
             homeDirectory: "/workspace"
         },
-        listApprovals: async () => [{ id: "approval-1" }],
+        listApprovals: async () => [],
+        listPendingApprovals: async () => [{ id: "approval-1" }],
         readToolCallFailureSummary: async () => ({ count: 1, latest: failedCall }),
         readToolCalls: async () => [failedCall],
         snapshot: () => ({

@@ -41,6 +41,40 @@ test("ApprovalManager retries a failed durable expiry instead of leaving a dead 
     assert.equal((await manager.getApproval(evaluation.request.approvalId)).status, "expired");
 });
 
+test("ApprovalManager serves live pending approvals from memory and drops settled history", async () => {
+    const records: ApprovalRequest[] = [];
+    const store = new ApprovalStore({
+        async append(request: ApprovalRequest) {
+            records.push(structuredClone(request));
+        },
+        async readAll() {
+            return records.map((request) => structuredClone(request));
+        },
+    } as never);
+    const manager = new ApprovalManager({
+        instanceName: asInstanceName("approval-live-state"),
+        policy: { mode: "ask" },
+        store,
+        timeout: { ms: 60_000 },
+    });
+    const evaluation = await manager.evaluate({
+        callId: "call-live",
+        context: { ctxId: "ctx-live", source: "mcp", workspace: "/workspace" },
+        inputSummary: "{}",
+        toolName: "bash_run",
+    });
+    assert.equal(evaluation.decision, "ask");
+    if (evaluation.decision !== "ask") throw new Error("approval was not requested");
+
+    assert.deepEqual(
+        (await manager.listPendingApprovals("ctx-live")).map((request) => request.approvalId),
+        [evaluation.request.approvalId],
+    );
+    await manager.decideApproval(evaluation.request.approvalId, { decision: "approve", decidedBy: "web" });
+    assert.deepEqual(await manager.listPendingApprovals("ctx-live"), []);
+    assert.equal((await manager.getApproval(evaluation.request.approvalId)).status, "approved");
+});
+
 test("ApprovalManager retries restart reconciliation after a transient store failure", async () => {
     const records: ApprovalRequest[] = [];
     let reads = 0;

@@ -207,8 +207,16 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return await this.#requireDescriptor(instance).worker.listApprovals();
     }
 
+    async listPendingApprovals(instance: string, ctxId?: string) {
+        return await this.#requireDescriptor(instance).worker.listPendingApprovals(ctxId);
+    }
+
     async readToolCalls(instance: string, ctxId: string, limit: number) {
         return await this.#requireDescriptor(instance).worker.readToolCalls({ ctxId, limit });
+    }
+
+    hasActiveToolCalls(instance: string, ctxId: string) {
+        return this.#requireDescriptor(instance).worker.hasActiveToolCalls(ctxId);
     }
 
     async readWorkspaceEvents(instance: string, fromSeq: number) {
