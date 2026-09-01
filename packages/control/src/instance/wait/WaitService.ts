@@ -166,9 +166,11 @@ export class WaitService {
     ): Promise<WaitRecord> {
         return await this.#runExclusive(async () => {
             const next = transition(this.#store.read());
-            await this.#store.write(next.document);
-            await this.#appendEvent(eventType, eventData(next.record)).catch(() => undefined);
-            return next.record;
+            const stored = await this.#store.write(next.document);
+            const record = stored.waits.find((entry) => entry.waitId === next.record.waitId);
+            if (record === undefined) throw new Error(`Wait ${next.record.waitId} disappeared during persistence.`);
+            await this.#appendEvent(eventType, eventData(record)).catch(() => undefined);
+            return record;
         });
     }
 

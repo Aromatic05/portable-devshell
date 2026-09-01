@@ -38,10 +38,20 @@ export class WaitState {
         if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.waits)) {
             throw new Error("wait document must be version 1");
         }
-        return { version: 1, waits: value.waits.map(normalizeRecord) };
+        return this.#reconcileTmuxWaits({ version: 1, waits: value.waits.map(normalizeRecord) });
     }
 
     create(document: WaitDocument, input: WaitCreateInput): WaitTransition {
+        if (input.kind === "tmux") {
+            const existing = document.waits.find((record) =>
+                blocksTmuxWaitCreation(record) && sameTmuxTarget(record, input)
+            );
+            if (existing !== undefined) {
+                throw new Error(
+                    `Tmux task ${input.targetId} already has recoverable wait ${existing.waitId} for Context ${input.createdByCtxId}.`,
+                );
+            }
+        }
         const now = this.#now();
         const record: WaitRecord = {
             ...(input.automaticRecovery === undefined ? {} : { automaticRecovery: input.automaticRecovery }),
@@ -284,6 +294,46 @@ export class WaitState {
         };
     }
 
+    #reconcileTmuxWaits(document: WaitDocument): WaitDocument {
+        const groups = new Map<string, WaitRecord[]>();
+        for (const record of document.waits) {
+            if (!blocksTmuxWaitCreation(record)) continue;
+            const key = tmuxTargetKey(record);
+            const group = groups.get(key);
+            if (group === undefined) groups.set(key, [record]);
+            else group.push(record);
+        }
+
+        const superseded = new Set<string>();
+        for (const group of groups.values()) {
+            if (group.length < 2) continue;
+            const winner = [...group].sort(compareTmuxWaitRecoveryPriority)[0]!;
+            for (const record of group) {
+                if (record.waitId !== winner.waitId) superseded.add(record.waitId);
+            }
+        }
+        if (superseded.size === 0) return document;
+
+        const now = this.#now();
+        return {
+            ...document,
+            waits: document.waits.map((record) => {
+                if (!superseded.has(record.waitId)) return record;
+                const {
+                    recoveryClaimedAt: _recoveryClaimedAt,
+                    recoveryClaimId: _recoveryClaimId,
+                    ...rest
+                } = record;
+                return {
+                    ...rest,
+                    cancelledAt: now,
+                    status: "cancelled",
+                    updatedAt: now,
+                };
+            }),
+        };
+    }
+
     #update(
         document: WaitDocument,
         waitId: string,
@@ -338,6 +388,40 @@ function normalizeRecord(value: unknown): WaitRecord {
 
 function isTerminal(status: WaitStatus): boolean {
     return status === "consumed" || status === "cancelled";
+}
+
+function blocksTmuxWaitCreation(record: WaitRecord): boolean {
+    if (record.kind !== "tmux") return false;
+    if (record.status === "waiting" || record.status === "detached") return true;
+    return record.status === "resolved" && record.recoveryMessageSentAt === undefined;
+}
+
+function sameTmuxTarget(record: WaitRecord, input: WaitCreateInput): boolean {
+    return record.kind === "tmux" &&
+        record.createdByCtxId === input.createdByCtxId &&
+        record.targetId === input.targetId &&
+        (record.targetInstance ?? "") === (input.targetInstance ?? "");
+}
+
+function tmuxTargetKey(record: WaitRecord): string {
+    return JSON.stringify([record.createdByCtxId, record.targetInstance ?? "", record.targetId]);
+}
+
+function compareTmuxWaitRecoveryPriority(left: WaitRecord, right: WaitRecord): number {
+    const priority = tmuxWaitRecoveryPriority(right) - tmuxWaitRecoveryPriority(left);
+    if (priority !== 0) return priority;
+    const updated = right.updatedAt.localeCompare(left.updatedAt);
+    if (updated !== 0) return updated;
+    const created = right.createdAt.localeCompare(left.createdAt);
+    if (created !== 0) return created;
+    return right.waitId.localeCompare(left.waitId);
+}
+
+function tmuxWaitRecoveryPriority(record: WaitRecord): number {
+    if (record.recoveryMessageAttemptedAt !== undefined && record.recoveryMessageSentAt === undefined) return 3;
+    if (record.status === "resolved") return 2;
+    if (record.status === "detached") return 1;
+    return 0;
 }
 
 function kind(value: unknown): WaitKind {
