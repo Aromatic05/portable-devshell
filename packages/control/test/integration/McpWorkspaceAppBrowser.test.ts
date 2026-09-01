@@ -263,6 +263,13 @@ test("Workspace Goal requests one model continuation after inactivity", BROWSER_
 
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
     await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue').length >= 4");
+    const continuationText = await page.evaluate(
+        "window.__modelMessages[0].content[0].text",
+    ) as string;
+    assert.equal(
+        continuationText,
+        "Current task item: [verify] Verify Workspace UI. Continue executing this task item immediately from its current state. Take the next concrete action now. Do not reply with an acknowledgement, plan, status update, apology, or statement that you will continue. Do not repeat completed work. Do not end the turn after only reading or describing the current state.",
+    );
     const continuationCalls = await page.evaluate(
         "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue')",
     ) as Array<{ arguments?: Record<string, unknown> }>;
@@ -273,6 +280,59 @@ test("Workspace Goal requests one model continuation after inactivity", BROWSER_
     assert.equal(continuationCalls[3]?.arguments?.accepted, true);
     assert.equal(await page.evaluate("(window.__goalContinuationReports || []).length"), 1);
     assert.deepEqual(browserFailures, []);
+});
+
+
+test("Workspace Goal continuation prompt adds exit guidance only after the first no-progress wake", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const cases = [
+        {
+            count: 1,
+            expected: "The previous wake did not produce verifiable execution progress.",
+            forbidden: "Wake attempt 3.",
+        },
+        {
+            count: 2,
+            expected: "Wake attempt 3. The previous wake attempts ended without verifiable execution progress while the Goal remained actionable.",
+            forbidden: "The previous wake did not produce verifiable execution progress. Continue executing this task now. If this task item is actually complete",
+        },
+    ];
+    for (const item of cases) {
+        const page = await browser.newPage();
+        await page.setContent('<iframe id="workspace" style="width:800px;height:500px"></iframe>');
+        await page.evaluate(BRIDGE_SCRIPT);
+        await page.evaluate((count) => {
+            const state = window as typeof window & {
+                __workspaceApprovalPending: boolean;
+                __workspaceGoalContinuationCount: number;
+                __workspaceGoalDueNow: boolean;
+                __workspaceQuestionAnswered: boolean;
+                __workspaceWaitInterrupted: boolean;
+            };
+            state.__workspaceGoalContinuationCount = count;
+            state.__workspaceGoalDueNow = true;
+            state.__workspaceQuestionAnswered = true;
+            state.__workspaceApprovalPending = false;
+            state.__workspaceWaitInterrupted = true;
+        }, item.count);
+        await page.evaluate((html) => {
+            const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null) throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
+        await page.waitForFunction("(window.__modelMessages || []).length === 1");
+        const text = await page.evaluate("window.__modelMessages[0].content[0].text") as string;
+        assert.match(text, /Current task item: \[verify\] Verify Workspace UI\./u);
+        assert.match(text, new RegExp(item.expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
+        assert.doesNotMatch(text, new RegExp(item.forbidden.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
+        if (item.count === 1) {
+            assert.match(text, /finish the Goal/u);
+            assert.match(text, /block the Goal/u);
+        }
+        await page.close();
+    }
 });
 
 test("Workspace user cancellation suppresses automatic Goal continuation until later agent activity", BROWSER_TEST_OPTIONS, async (t) => {
@@ -611,6 +671,11 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     await mount();
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
     await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
+    const recoveryText = await page.evaluate("window.__modelMessages[0].content[0].text") as string;
+    assert.match(recoveryText, /tmux task tmux-recovery finished while detached with status 0/u);
+    assert.match(recoveryText, /immediately continue the suspended work using that result/u);
+    assert.match(recoveryText, /Do not restart the completed task/u);
+    assert.doesNotMatch(recoveryText, /finish the Goal|block the Goal|workspace_goal/u);
 
     const firstEvents = await page.evaluate("window.__bridgeEvents || []") as string[];
     const firstMessage = firstEvents.indexOf("message");
@@ -657,7 +722,10 @@ test("Workspace re-enters after a detached tmux wait deadline", BROWSER_TEST_OPT
 
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
     await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
+    assert.equal(
+        await page.evaluate("window.__modelMessages[0].content[0].text"),
+        "The wait deadline for tmux task tmux-recovery elapsed and the task is still running. Inspect the task once now. If its result is still required and it is still running, immediately re-enter a blocking wait on the same task. If it has completed, consume the result and continue the suspended work. Do not restart the task or end the turn with a status-only response.",
+    );
 });
 
 test("Workspace Goal recovers a resolved detached wait without Todo", BROWSER_TEST_OPTIONS, async (t) => {
@@ -848,6 +916,10 @@ test("Workspace re-enters after a detached answer without surfacing detached tmu
     const app = page.frameLocator("#workspace");
     await app.locator('[data-question-choice="wait-question-detached"]').click();
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
+    const answerRecoveryText = await page.evaluate("window.__modelMessages[0].content[0].text") as string;
+    assert.match(answerRecoveryText, /The user answered the pending Workspace question with "Continue"/u);
+    assert.match(answerRecoveryText, /Use this answer immediately to resume the suspended work/u);
+    assert.doesNotMatch(answerRecoveryText, /finish the Goal|block the Goal|workspace_goal/u);
     await app.getByText("Background task", { exact: true }).waitFor({ state: "visible" });
     assert.equal(await app.getByText("No blocking event.", { exact: true }).count(), 0);
     assert.equal(await app.getByRole("button", { name: "Resume agent", exact: true }).count(), 0);
@@ -985,6 +1057,7 @@ window.__workspaceGoalStopped = false;
 window.__workspaceGoalBlocked = false;
 window.__workspaceGoalDueNow = false;
 window.__workspaceGoalRetryAfter = "";
+window.__workspaceGoalContinuationCount = 0;
 window.__workspaceGoalLastAgentActivityAt = "2026-08-19T01:00:00.000Z";
 window.__workspaceReentryEpoch = 0;
 window.__workspaceReentryClaimId = "";
@@ -1262,7 +1335,7 @@ window.addEventListener("message", function (event) {
             reply({ structuredContent: {
                 claimed: call.arguments.available === true,
                 claimId: call.arguments.claimId,
-                continuationCount: 1,
+                continuationCount: Number(window.__workspaceGoalContinuationCount || 0) + 1,
                 goal: Object.assign({}, snapshot(false).goal, { continuationDue: false, continuationPending: true })
             } });
             return;
