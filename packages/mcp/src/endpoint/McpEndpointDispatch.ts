@@ -235,24 +235,13 @@ export class McpEndpointDispatch {
             if (toolName === "tmux_run" && isMcpTmuxWaitGateway(this.#gateway) && readTmuxBlock(routed.input)) {
                 this.#catalog.assertAdaptable(selected.definition);
                 const ownerWorkspace = contextEnvironment(resolvedContext.record, this.#instanceName)?.workspace;
-                return await auditMcpEndpointTool({
+                return await this.#callTmuxRun(
+                    routed.input,
                     context,
-                    gateway: this.#gateway,
-                    input: routed.input,
-                    localInstance: this.#instanceName,
-                    operation: async (callId) => await this.#callTmuxRun(
-                        routed.input,
-                        context,
-                        callId,
-                        routed.instance,
-                        ownerWorkspace,
-                        signal,
-                    ),
+                    routed.instance,
+                    ownerWorkspace,
                     signal,
-                    targetInstance: routed.instance,
-                    toolName,
-                    worker: this.#worker,
-                });
+                );
             }
 
             if (
@@ -261,24 +250,13 @@ export class McpEndpointDispatch {
             ) {
                 this.#catalog.assertAdaptable(selected.definition);
                 const ownerWorkspace = contextEnvironment(resolvedContext.record, this.#instanceName)?.workspace;
-                return await auditMcpEndpointTool({
+                return await this.#callTmuxRead(
+                    routed.input,
                     context,
-                    gateway: this.#gateway,
-                    input: routed.input,
-                    localInstance: this.#instanceName,
-                    operation: async (callId) => await this.#callTmuxRead(
-                        routed.input,
-                        context,
-                        callId,
-                        routed.instance,
-                        ownerWorkspace,
-                        signal,
-                    ),
+                    routed.instance,
+                    ownerWorkspace,
                     signal,
-                    targetInstance: routed.instance,
-                    toolName,
-                    worker: this.#worker,
-                });
+                );
             }
 
             return await this.#workerHandler.call(
@@ -311,7 +289,6 @@ export class McpEndpointDispatch {
     async #callTmuxRead(
         input: JsonValue,
         context: ToolCallContext,
-        callId: string,
         instance: string,
         ownerWorkspace: string | undefined,
         signal?: AbortSignal,
@@ -321,16 +298,42 @@ export class McpEndpointDispatch {
             throw new Error("tmux_read durable wait state is unavailable.");
         }
         const task = readTmuxReadTask(input);
-        const timeout = readTmuxReadTimeMs(input);
-        const line = readTmuxLine(input);
         const startedAt = Date.now();
-        const observed = await this.#observeTmuxRead(
-            instance,
-            task,
+        const invocationInput = { consumeOutput: false, line: 0, task, timeMs: 0 } as JsonValue;
+        const transformResult = async (observed: JsonValue, callId: string) => await this.#finishTmuxRead(
+            input,
             context,
-            0,
+            callId,
+            instance,
+            ownerWorkspace,
+            observed,
+            startedAt,
             signal,
         );
+        return instance === this.#instanceName
+            ? await this.#worker.callTool("tmux_read", input, context, signal, transformResult, invocationInput)
+            : await gateway.callTool(instance, "tmux_read", input, context, signal, transformResult, invocationInput);
+    }
+
+    async #finishTmuxRead(
+        input: JsonValue,
+        context: ToolCallContext,
+        callId: string,
+        instance: string,
+        ownerWorkspace: string | undefined,
+        observedValue: JsonValue,
+        startedAt: number,
+        signal?: AbortSignal,
+    ): Promise<JsonValue> {
+        const gateway = this.#gateway;
+        if (!isMcpTmuxWaitGateway(gateway) || context.ctxId === undefined) {
+            throw new Error("tmux_read durable wait state is unavailable.");
+        }
+        const task = readTmuxReadTask(input);
+        const timeout = readTmuxReadTimeMs(input);
+        const line = readTmuxLine(input);
+        if (!isRecord(observedValue)) throw new Error(`tmux_read returned an invalid observation for task ${task}.`);
+        const observed = observedValue;
         if (tmuxReadReady(observed)) {
             const completed = await this.#consumeTmuxRead(instance, task, line, context, signal);
             await this.#supersedeObservedTmuxWaits(instance, task, context.ctxId, completed, false);
@@ -427,7 +430,6 @@ export class McpEndpointDispatch {
     async #callTmuxRun(
         input: JsonValue,
         context: ToolCallContext,
-        callId: string,
         instance: string,
         ownerWorkspace: string | undefined,
         signal?: AbortSignal,
@@ -436,17 +438,44 @@ export class McpEndpointDispatch {
         if (!isMcpTmuxWaitGateway(gateway) || context.ctxId === undefined) {
             throw new Error("tmux_run block wait state is unavailable.");
         }
-        const timeout = readTmuxTimeout(input);
-        const line = readTmuxLine(input);
         const startedAt = Date.now();
         const initialInput = {
             ...(isRecord(input) ? input : {}),
             consumeOutput: false,
             wait: "nonblock",
         } as JsonValue;
-        const started = instance === this.#instanceName
-            ? await this.#worker.callTool("tmux_run", initialInput, context, signal)
-            : await gateway.callTool(instance, "tmux_run", initialInput, context, signal);
+        const transformResult = async (started: JsonValue, callId: string) => await this.#finishTmuxRun(
+            input,
+            context,
+            callId,
+            instance,
+            ownerWorkspace,
+            started,
+            startedAt,
+            signal,
+        );
+        return instance === this.#instanceName
+            ? await this.#worker.callTool("tmux_run", input, context, signal, transformResult, initialInput)
+            : await gateway.callTool(instance, "tmux_run", input, context, signal, transformResult, initialInput);
+    }
+
+    async #finishTmuxRun(
+        input: JsonValue,
+        context: ToolCallContext,
+        callId: string,
+        instance: string,
+        ownerWorkspace: string | undefined,
+        startedValue: JsonValue,
+        startedAt: number,
+        signal?: AbortSignal,
+    ): Promise<JsonValue> {
+        const gateway = this.#gateway;
+        if (!isMcpTmuxWaitGateway(gateway) || context.ctxId === undefined) {
+            throw new Error("tmux_run block wait state is unavailable.");
+        }
+        const timeout = readTmuxTimeout(input);
+        const line = readTmuxLine(input);
+        const started = startedValue;
         if (!isRecord(started) || !isRecord(started.task) || typeof started.task.id !== "string") {
             throw new Error("tmux_run returned an invalid task result.");
         }
@@ -798,9 +827,7 @@ export class McpEndpointDispatch {
         signal?: AbortSignal,
     ): Promise<Record<string, JsonValue>> {
         const input = { consumeOutput: false, line: 0, task: taskId, timeMs };
-        const result = instance === this.#instanceName
-            ? await this.#worker.callTool("tmux_read", input, context, signal)
-            : await this.#gateway!.callTool(instance, "tmux_read", input, context, signal);
+        const result = await this.#invokeToolInternal(instance, "tmux_read", input, context, signal);
         if (!isRecord(result)) throw new Error(`tmux_read returned an invalid observation for task ${taskId}.`);
         return result;
     }
@@ -813,9 +840,7 @@ export class McpEndpointDispatch {
         signal?: AbortSignal,
     ): Promise<Record<string, JsonValue>> {
         const input = { line, task: taskId, timeMs: 0 };
-        const result = instance === this.#instanceName
-            ? await this.#worker.callTool("tmux_read", input, context, signal)
-            : await this.#gateway!.callTool(instance, "tmux_read", input, context, signal);
+        const result = await this.#invokeToolInternal(instance, "tmux_read", input, context, signal);
         if (!isRecord(result)) throw new Error(`tmux_read returned an invalid result for task ${taskId}.`);
         return result;
     }
@@ -860,13 +885,32 @@ export class McpEndpointDispatch {
         signal?: AbortSignal,
     ): Promise<Record<string, JsonValue>> {
         const input = { line, task: taskId };
-        const result = instance === this.#instanceName
-            ? await this.#worker.callTool("tmux_read", input, context, signal)
-            : await this.#gateway!.callTool(instance, "tmux_read", input, context, signal);
+        const result = await this.#invokeToolInternal(instance, "tmux_read", input, context, signal);
         if (!isRecord(result)) {
             throw new Error(`tmux_read returned an invalid result for task ${taskId}.`);
         }
         return result;
+    }
+
+    async #invokeToolInternal(
+        instance: string,
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        signal?: AbortSignal,
+    ): Promise<JsonValue> {
+        if (instance === this.#instanceName) {
+            if (this.#worker.invokeToolInternal === undefined) {
+                throw new Error(`Internal worker invocation is unavailable for ${instance}.`);
+            }
+            return await this.#worker.invokeToolInternal(toolName, input, context, signal);
+        }
+        const gateway = this.#gateway;
+        if (gateway === undefined) throw new Error(`Instance gateway is unavailable for ${instance}.`);
+        if (gateway.invokeToolInternal === undefined) {
+            throw new Error(`Internal worker invocation is unavailable for ${instance}.`);
+        }
+        return await gateway.invokeToolInternal(instance, toolName, input, context, signal);
     }
 
     #interruptTmuxWaitTracker(instance: string, waitId: string): void {

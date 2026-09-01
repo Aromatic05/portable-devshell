@@ -333,9 +333,20 @@ export class WorkerInstance {
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal,
-        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>
+        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
+        invocationInput?: JsonValue,
     ): Promise<JsonValue> {
-        return await this.#tool.call(toolName, input, context, signal, transformResult);
+        return await this.#tool.call(toolName, input, context, signal, transformResult, invocationInput);
+    }
+
+    async invokeToolInternal(
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        signal?: AbortSignal,
+    ): Promise<JsonValue> {
+        this.#assertReady();
+        return await this.#toolInvoker.invoke(toolName, input, context, signal);
     }
 
     async observeTmuxTask(taskId: string, context: ToolCallContext, signal?: AbortSignal): Promise<JsonValue> {

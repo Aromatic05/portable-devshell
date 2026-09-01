@@ -70,10 +70,21 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal,
-        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>
+        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
+        invocationInput?: JsonValue,
     ): Promise<JsonValue> {
         const descriptor = this.#requireDescriptor(instance);
-        return await descriptor.worker.callTool(toolName, input, context, signal, transformResult);
+        return await descriptor.worker.callTool(toolName, input, context, signal, transformResult, invocationInput);
+    }
+
+    async invokeToolInternal(
+        instance: string,
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        signal?: AbortSignal,
+    ): Promise<JsonValue> {
+        return await this.#requireDescriptor(instance).worker.invokeToolInternal(toolName, input, context, signal);
     }
 
     async closeToolSession(sessionId: string): Promise<void> {

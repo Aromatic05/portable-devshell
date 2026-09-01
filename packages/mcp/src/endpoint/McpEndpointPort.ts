@@ -21,7 +21,14 @@ export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal,
-        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>
+        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
+        invocationInput?: JsonValue,
+    ): Promise<JsonValue>;
+    invokeToolInternal?(
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        signal?: AbortSignal,
     ): Promise<JsonValue>;
     prepareWorkspace?(workspace: string): Promise<{
         projectMemoryAgentFile: string;

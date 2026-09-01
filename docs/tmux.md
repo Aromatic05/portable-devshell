@@ -247,9 +247,11 @@ Transcript 展示层会处理常见 terminal 控制：ANSI control sequence 不�
 
 `tmux_read` 的已读 offset 也会持久化。worker restart / running-task adoption 后继续读取时，不会把 restart 前已经消费或丢弃的 transcript 当成新输出重复返回。
 
+`tmux_read(timeMs > 0)` 若在 Host 同步窗口之后转成 detached Wait，新 output 或 terminal 状态使该 Wait resolved 时会恢复模型一次。这是一次明确的等待完成事件；仅仅存在 unread transcript、但当前没有对应的 detached `tmux_read` Wait 时，不会主动产生 Workspace 消息。
+
 ## `tmux_run` 的 Workspace block handoff
 
-MCP 调用 `tmux_run` 时传入 `wait: block`，会立即启动 managed task 并建立 durable Wait，再在当前 Host tool call 的安全窗口内固定挂起模型最多 3 分钟。任务在 3 分钟内结束则直接返回；仍运行时返回 `detached: true`，由 Workspace 接管后续恢复。用户在同步阶段选择 `Stop waiting` 会让原调用立即返回 `interrupted: true`；已经 detached 时选择同一动作则由 Workspace 立即恢复模型。两种情况都不停止 task。`timeout` 从任务启动开始计算，任务结束或绝对截止时间先到达时都会触发 Workspace resume；失败退出码也会触发恢复。`timeout` 可以长于 3 分钟，但不会延长单次 Host tool call 的同步阻塞时间。
+MCP 调用 `tmux_run` 时传入 `wait: block`，会立即启动 managed task 并建立 durable Wait，再在当前 Host tool call 的安全窗口内固定挂起模型最多 3 分钟。任务在 3 分钟内结束则直接返回；仍运行时返回 `detached: true`，由 Workspace 接管后续恢复。用户在同步阶段选择 `Stop waiting` 会让原调用立即返回 `interrupted: true`；已经 detached 时选择同一动作则由 Workspace 立即恢复模型。两种情况都不停止 task。`timeout` 从任务启动开始计算，任务结束或绝对截止时间先到达时都会触发 Workspace resume；失败退出码也会触发恢复。`timeout` 可以长于 3 分钟，但不会延长单次 Host tool call 的同步阻塞时间。对 audit 而言这一流程始终是一条逻辑 `tmux_run` ToolCall；内部实际启动会改写为 nonblock，后续 observation/read 也不会各自追加新的 ToolCall 记录。
 
 ## `tmux_inspect`: terminal history
 

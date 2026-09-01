@@ -83,6 +83,144 @@ test("WaitState cancels unresolved waits and rejects invalid transitions", () =>
     );
 });
 
+test("WaitState rejects a second recoverable tmux wait for the same Context and task", () => {
+    let nextWait = 0;
+    const state = new WaitState({ waitId: () => `wait-${++nextWait}` });
+    const first = state.create(state.emptyDocument(), {
+        createdByCtxId: "ctx-1",
+        kind: "tmux",
+        targetId: "tmux-task-1",
+        targetInstance: "worker-a",
+    });
+
+    assert.throws(
+        () => state.create(first.document, {
+            createdByCtxId: "ctx-1",
+            kind: "tmux",
+            targetId: "tmux-task-1",
+            targetInstance: "worker-a",
+        }),
+        /already has recoverable wait wait-1/u,
+    );
+
+    const otherContext = state.create(first.document, {
+        createdByCtxId: "ctx-2",
+        kind: "tmux",
+        targetId: "tmux-task-1",
+        targetInstance: "worker-a",
+    });
+    assert.equal(otherContext.record.waitId, "wait-2");
+
+    const otherInstance = state.create(otherContext.document, {
+        createdByCtxId: "ctx-1",
+        kind: "tmux",
+        targetId: "tmux-task-1",
+        targetInstance: "worker-b",
+    });
+    assert.equal(otherInstance.record.waitId, "wait-3");
+
+    const cancelled = state.cancel(otherInstance.document, first.record.waitId);
+    const replacement = state.create(cancelled.document, {
+        createdByCtxId: "ctx-1",
+        kind: "tmux",
+        targetId: "tmux-task-1",
+        targetInstance: "worker-a",
+    });
+    assert.equal(replacement.record.waitId, "wait-4");
+});
+
+test("WaitState reconciles duplicate recoverable tmux waits and preserves uncertain delivery", () => {
+    const state = new WaitState({ now: () => "2026-08-18T00:10:00.000Z" });
+    const normalized = state.normalizeDocument({
+        version: 1,
+        waits: [
+            {
+                createdAt: "2026-08-18T00:00:00.000Z",
+                createdByCtxId: "ctx-1",
+                detachedAt: "2026-08-18T00:00:01.000Z",
+                kind: "tmux",
+                status: "detached",
+                targetId: "tmux-task-1",
+                targetInstance: "worker-a",
+                updatedAt: "2026-08-18T00:00:01.000Z",
+                waitId: "wait-old",
+            },
+            {
+                createdAt: "2026-08-18T00:01:00.000Z",
+                createdByCtxId: "ctx-1",
+                detachedAt: "2026-08-18T00:01:01.000Z",
+                kind: "tmux",
+                recoveryMessageAttemptedAt: "2026-08-18T00:01:02.000Z",
+                recoveryMessageId: "recovery-uncertain",
+                resolvedAt: "2026-08-18T00:01:01.000Z",
+                result: { task: { id: "tmux-task-1", status: "0" } },
+                status: "resolved",
+                targetId: "tmux-task-1",
+                targetInstance: "worker-a",
+                updatedAt: "2026-08-18T00:01:02.000Z",
+                waitId: "wait-uncertain",
+            },
+            {
+                createdAt: "2026-08-18T00:02:00.000Z",
+                createdByCtxId: "ctx-1",
+                detachedAt: "2026-08-18T00:02:01.000Z",
+                kind: "tmux",
+                status: "detached",
+                targetId: "tmux-task-1",
+                targetInstance: "worker-a",
+                updatedAt: "2026-08-18T00:02:01.000Z",
+                waitId: "wait-new",
+            },
+            {
+                createdAt: "2026-08-18T00:03:00.000Z",
+                createdByCtxId: "ctx-2",
+                detachedAt: "2026-08-18T00:03:01.000Z",
+                kind: "tmux",
+                status: "detached",
+                targetId: "tmux-task-1",
+                targetInstance: "worker-a",
+                updatedAt: "2026-08-18T00:03:01.000Z",
+                waitId: "wait-other-context",
+            },
+        ],
+    });
+
+    const byId = new Map(normalized.waits.map((wait) => [wait.waitId, wait]));
+    assert.equal(byId.get("wait-uncertain")?.status, "resolved");
+    assert.equal(byId.get("wait-old")?.status, "cancelled");
+    assert.equal(byId.get("wait-new")?.status, "cancelled");
+    assert.equal(byId.get("wait-other-context")?.status, "detached");
+});
+
+test("WaitService serializes concurrent creation of the same tmux wait target", async () => {
+    const root = await createTestTempDirectory("wait-service-tmux-dedupe-");
+    const service = new WaitService({
+        appendEvent: async () => undefined,
+        filePath: join(root, "waits.json"),
+        instanceName: "aromatic-pc",
+    });
+    const input = {
+        createdByCtxId: "ctx-1",
+        kind: "tmux" as const,
+        targetId: "tmux-task-1",
+        targetInstance: "worker-a",
+    };
+
+    const results = await Promise.allSettled([
+        service.create(input),
+        service.create(input),
+    ]);
+    assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+    const rejected = results.find((result) => result.status === "rejected");
+    assert.equal(rejected?.status, "rejected");
+    if (rejected?.status === "rejected") {
+        assert.match(String(rejected.reason), /already has recoverable wait/u);
+    }
+    const waits = await service.list();
+    assert.equal(waits.length, 1);
+    assert.equal(waits[0]?.status, "waiting");
+});
+
 test("WaitState keeps resolved waits recoverable until model re-entry completes", () => {
     const state = new WaitState({ waitId: () => "wait-fixed" });
     const created = state.create(state.emptyDocument(), {

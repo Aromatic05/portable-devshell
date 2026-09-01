@@ -10,7 +10,7 @@ import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
 
 import { WorkerTransportDriverLocal, WorkerBinary, WorkerInstanceFactory } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
-import { asInstanceName } from "@portable-devshell/shared";
+import { asInstanceName, type ToolCallRecord } from "@portable-devshell/shared";
 import { resolveTestWorkerBinary, tmuxTestOptions } from "../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import { parseMcpHttpResponse } from "../TestMcpHttpResponse.ts";
@@ -85,7 +85,7 @@ test("MCP tmux supports a complete interactive lifecycle when JSON-RPC request i
 });
 
 test("MCP tmux block wait returns the full unread transcript instead of discarding it", tmuxTestOptions(workerBinaryPath), async () => {
-    await withTmuxHarness("aromatic-mcp-tmux-block-output", async ({ callTool, createContext }) => {
+    await withTmuxHarness("aromatic-mcp-tmux-block-output", async ({ callTool, createContext, readToolCalls }) => {
         const ctxId = await createContext();
         const result = await callTool("block-output", "tmux_run", {
             command: "printf 'EARLY\\n'; printf 'LATE\\n'",
@@ -99,6 +99,11 @@ test("MCP tmux block wait returns the full unread transcript instead of discardi
         const output = result.result?.structuredContent?.output ?? [];
         assert.equal(output.some((line) => line === "EARLY"), true, JSON.stringify(result));
         assert.equal(output.some((line) => line === "LATE"), true, JSON.stringify(result));
+        const toolCalls = await readToolCalls();
+        const tmuxRuns = toolCalls.filter((record) => record.toolName === "tmux_run");
+        assert.equal(tmuxRuns.length, 1, JSON.stringify(tmuxRuns));
+        assert.equal((tmuxRuns[0]?.input as Record<string, JsonValue> | undefined)?.wait, "block");
+        assert.equal(toolCalls.filter((record) => record.toolName === "tmux_read").length, 0, JSON.stringify(toolCalls));
     });
 });
 
@@ -214,6 +219,7 @@ interface TmuxHarness {
     callTool(requestId: string, name: string, args: Record<string, JsonValue>): Promise<ToolResponse>;
     createContext(): Promise<string>;
     listTools(): Promise<ToolSummary[]>;
+    readToolCalls(): Promise<ToolCallRecord[]>;
 }
 
 async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness) => Promise<void>): Promise<void> {
@@ -294,7 +300,8 @@ async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness
             return response.result?.tools ?? [];
         };
 
-        await body({ callTool, createContext, listTools });
+        const readToolCalls = async (): Promise<ToolCallRecord[]> => await instance.readToolCalls();
+        await body({ callTool, createContext, listTools, readToolCalls });
     } finally {
         await host.stop();
         const runtimeInstanceDirectory = join(runtimeDirectory, "devshell-worker", instanceName);
