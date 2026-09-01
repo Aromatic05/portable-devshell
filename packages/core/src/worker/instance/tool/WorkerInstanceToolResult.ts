@@ -60,6 +60,14 @@ export function commandResultOutput(result: CommandResult): JsonValue {
     });
 }
 
+export function stripCommandStreams(value: JsonValue): JsonValue {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return value;
+    }
+    const { stderr: _stderr, stdout: _stdout, ...rest } = value as Record<string, JsonValue>;
+    return rest;
+}
+
 export function asBashToolResult(value: JsonValue): WorkerInstanceBashToolResult | undefined {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
         return undefined;

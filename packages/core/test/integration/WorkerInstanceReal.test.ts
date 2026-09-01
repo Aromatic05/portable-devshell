@@ -7,6 +7,7 @@ import test from "node:test";
 import {
     asInstanceName,
     errorCodes,
+    toolCallOutput,
     type JsonValue
 } from "@portable-devshell/shared";
 import { encodeFrame, FrameBuffer } from "@portable-devshell/shared/transport/frame";
@@ -323,7 +324,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
         assert.deepEqual(records.map((record) => record.status), ["completed", "completed", "failed"]);
         assert.equal(records[0]?.source, "cli");
         assert.equal(records[0]?.inputSummary, "{\"command\":\"pwd\"}");
-        assert.deepEqual(records[0]?.output, { exitCode: 0, stderr: "", stdout });
+        assert.deepEqual(records[0]?.output, { exitCode: 0 });
         assert.equal(records[0]?.stdoutBytes, 240);
         assert.equal(records[0]?.stderrBytes, 0);
         assert.equal(records[0]?.termination, undefined);
@@ -341,6 +342,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
         assert.equal(logs[0]?.message, stdout);
         assert.equal(logs[1]?.stream, "stdout");
         assert.equal(logs[1]?.message, "ls output\n");
+        assert.deepEqual(toolCallOutput(records[0]!, logs), { exitCode: 0, stdout });
 
         const replay = instance.subscribe(1);
         assert.equal(replay.kind, "events");
@@ -410,7 +412,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
             toolName: "bash_run"
         });
         assert.equal(jsonRecord(completedEvent?.data)?.output, undefined);
-        assert.deepEqual(records[0]?.output, { exitCode: 0, stderr: "", stdout });
+        assert.deepEqual(records[0]?.output, { exitCode: 0 });
         assert.deepEqual(failedEvent?.data, {
             callId: records[2]?.callId,
             completedAt: jsonRecord(failedEvent?.data)?.completedAt,
