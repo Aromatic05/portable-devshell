@@ -208,9 +208,9 @@ export class McpEndpointHandlerInteraction {
         const ctxId = requireCtxId(context);
         request.workspace = context.workspace;
         if (request.action === "start") {
-            await this.#requireActiveWorkspace(
+            this.#requirePresentedWorkspace(
                 ctxId,
-                "workspace_goal start requires an active Live Workspace for this ctxId. environ_info normally bootstraps the Live Workspace; call workspace_open only to re-present or restore it when the App is no longer active.",
+                "workspace_goal start requires an initialized Workspace for this ctxId. Call environ_info with workspace to initialize it before starting a Goal.",
             );
         }
         const goal = await gateway.manageGoal(
@@ -502,7 +502,16 @@ export class McpEndpointHandlerInteraction {
             ctxId,
             this.options.workspaceLivenessMs ?? 60_000,
             graceMs,
-        )) throw new Error(message);
+        )) {
+            throw new Error(
+                "Workspace is already initialized for this Context, but the Live Workspace App is not active yet. This can happen during the transient startup or handoff race between Workspace presentation and the App snapshot/watch handshake. The current ctxId and workspace remain valid; do not call environ_info again, create a new Context, or switch ctxId. Retry the Workspace-dependent operation once the App becomes active. Call workspace_open with the same Context only if the Workspace App is no longer presented.",
+            );
+        }
+    }
+
+    #requirePresentedWorkspace(ctxId: string, message: string): void {
+        if (this.#appPresence.has(this.options.instanceName, ctxId)) return;
+        throw new Error(message);
     }
 
     async #answerQuestion(

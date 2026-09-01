@@ -1253,7 +1253,7 @@ test("workspace_ask refuses to hold a call before Workspace is open", async () =
             context,
             "call-agent-open-only",
         ),
-        /active Live Workspace/i,
+        /current ctxId and workspace remain valid/i,
     );
     assert.equal(fake.waits.length, 0);
 });
@@ -1341,11 +1341,11 @@ test("workspace_ask refuses to create a held call after the live Workspace watch
         askAbort.signal,
     );
     setTimeout(() => askAbort.abort(), 50);
-    await assert.rejects(held, /active Live Workspace/i);
+    await assert.rejects(held, /current ctxId and workspace remain valid/i);
     assert.equal(fake.waits.length, 0);
 });
 
-test("workspace_goal start requires an active Workspace", async () => {
+test("workspace_goal start requires a presented Workspace but not a live App handshake", async () => {
     const fake = createInteractionGateway();
     let starts = 0;
     Object.assign(fake.gateway, {
@@ -1373,22 +1373,13 @@ test("workspace_goal start requires an active Workspace", async () => {
 
     await assert.rejects(
         handler.call("workspace_goal", start, context, "call-goal-headless"),
-        /active Live Workspace/u,
+        /requires an initialized Workspace/u,
     );
     assert.equal(starts, 0);
 
     const opened = await handler.call("workspace_open", {}, context, "call-open");
     assert.ok(opened instanceof McpNativeToolResult);
-    const meta = opened._meta?.["portable-devshell/workspace"] as { token?: unknown } | undefined;
-    if (typeof meta?.token !== "string") throw new Error("workspace token missing");
-    await assert.rejects(
-        handler.call("workspace_goal", start, context, "call-goal-open-only"),
-        /active Live Workspace/u,
-    );
-    assert.equal(starts, 0);
-
-    await handler.call("workspace_snapshot", { token: meta.token }, context, "call-snapshot");
-    await handler.call("workspace_goal", start, context, "call-goal-start");
+    await handler.call("workspace_goal", start, context, "call-goal-open-only");
     assert.equal(starts, 1);
 });
 
