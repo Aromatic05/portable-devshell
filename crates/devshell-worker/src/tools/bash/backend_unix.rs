@@ -53,6 +53,10 @@ fn apply_environment(command: &mut Command, env: &BTreeMap<String, Option<String
             }
         }
     }
+    command
+        .env_remove(crate::daemon::process::INTERNAL_INSTANCE_ENV)
+        .env_remove(crate::daemon::process::INTERNAL_SECURITY_MODE_ENV)
+        .env_remove("DEVSHELL_WORKER_INTERNAL_WORKSPACE");
 }
 
 #[cfg(test)]
@@ -91,5 +95,40 @@ mod tests {
         .unwrap();
         assert!(output.status.success());
         assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), "inside");
+    }
+
+    #[test]
+    fn spawned_shell_cannot_inherit_worker_internal_environment() {
+        let root = crate::testing::temp_dir();
+        let workspace = root.path().join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let requested = parse_requested_path("./").unwrap();
+        let resolved = resolve_existing_target(&workspace, &requested).unwrap();
+        let mut env = BTreeMap::new();
+        env.insert(
+            crate::daemon::process::INTERNAL_INSTANCE_ENV.to_string(),
+            Some("aromatic-pc".to_string()),
+        );
+        env.insert(
+            crate::daemon::process::INTERNAL_SECURITY_MODE_ENV.to_string(),
+            Some("disabled".to_string()),
+        );
+        env.insert(
+            "DEVSHELL_WORKER_INTERNAL_WORKSPACE".to_string(),
+            Some("workspace".to_string()),
+        );
+
+        let output = spawn_shell(
+            &ShellRuntime::detect().unwrap(),
+            "printf '%s' \"${DEVSHELL_WORKER_INTERNAL_INSTANCE-}${DEVSHELL_WORKER_INTERNAL_SECURITY_MODE-}${DEVSHELL_WORKER_INTERNAL_WORKSPACE-}\"",
+            &resolved,
+            &env,
+        )
+        .unwrap()
+        .wait_with_output()
+        .unwrap();
+
+        assert!(output.status.success());
+        assert!(output.stdout.is_empty());
     }
 }

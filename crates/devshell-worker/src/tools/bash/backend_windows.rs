@@ -30,6 +30,10 @@ pub fn spawn_shell(
             }
         }
     }
+    command
+        .env_remove(crate::daemon::process::INTERNAL_INSTANCE_ENV)
+        .env_remove(crate::daemon::process::INTERNAL_SECURITY_MODE_ENV)
+        .env_remove("DEVSHELL_WORKER_INTERNAL_WORKSPACE");
     configure_child_process(&mut command);
     command.spawn().map_err(|error| {
         ToolError::new(
