@@ -31,6 +31,7 @@ import {
     waitForConnectorReady,
 } from "./testspace/TestspaceLifecycle.mjs";
 import {
+    createSafeAction,
     readTestspaceConnectorHealth,
     runConnectorLoop,
 } from "./testspace/TestspaceConnector.mjs";
@@ -304,6 +305,21 @@ test("connector activity publishes health that status can expose", async (t) => 
     );
     assert.equal(statuses[TESTSPACE_REVERSE_INSTANCE].running, true);
     assert.equal(statuses[TESTSPACE_REVERSE_INSTANCE].health?.status, "active");
+});
+
+test("testspace tmux activity uses the public tmux_run timeout contract", () => {
+    assert.deepEqual(
+        createSafeAction("tmux_run", { ctxId: "ctx-test", iteration: 7 }),
+        {
+            arguments: {
+                command: "printf '\\033[32mtestspace tmux tick 7\\033[0m\\n'",
+                ctxId: "ctx-test",
+                timeout: 2000,
+                wait: "block",
+            },
+            name: "tmux_run",
+        },
+    );
 });
 
 test("a connector tool error is exposed as degraded rather than active", async (t) => {

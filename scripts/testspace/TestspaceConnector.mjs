@@ -63,7 +63,7 @@ export function createSafeAction(name, { ctxId, iteration, revision = 0 }) {
                 arguments: {
                     command: `printf '\\033[32mtestspace tmux tick ${iteration}\\033[0m\\n'`,
                     ctxId,
-                    timeMs: 2000,
+                    timeout: 2000,
                     wait: "block",
                 },
                 name,
