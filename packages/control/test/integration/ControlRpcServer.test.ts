@@ -122,8 +122,12 @@ test("ControlSocketServer routes canonical control and instance operations over 
     }));
     const boundedToolCalls = await request(harness.socketPath, asInstanceName("alpha"), "tool.listCalls");
     assert.deepEqual(harness.worker.lastReadToolCallsQuery, { limit: 200 });
+    assert.equal(Array.isArray(boundedToolCalls.payload), true);
+    const boundedToolCallIds = Array.isArray(boundedToolCalls.payload)
+        ? boundedToolCalls.payload.map(readToolCallId)
+        : [];
     assert.deepEqual(
-        (boundedToolCalls.payload as ToolCallRecord[]).map((record) => record.callId),
+        boundedToolCallIds,
         ["large-call-2", "large-call-3"]
     );
     assert.equal(Buffer.byteLength(JSON.stringify(boundedToolCalls.payload), "utf8") <= 8 * 1024 * 1024, true);
@@ -586,6 +590,16 @@ async function negotiateClient(
         maxProtocolVersion: 1,
         minProtocolVersion: 1,
     });
+}
+
+function readToolCallId(value: JsonValue): string {
+    if (value === null || Array.isArray(value) || typeof value !== "object") {
+        throw new Error("tool.listCalls returned a non-object record");
+    }
+    if (typeof value.callId !== "string") {
+        throw new Error("tool.listCalls returned a record without callId");
+    }
+    return value.callId;
 }
 
 async function request(

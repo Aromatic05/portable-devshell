@@ -731,8 +731,23 @@ class FakeWorker {
         return query.limit === undefined ? filtered : filtered.slice(-query.limit);
     }
 
+    async readToolCallFailureSummary(sinceMs: number, untilMs: number) {
+        const failures = this.#toolCalls.filter((record) => {
+            if (record.status !== "failed" && record.status !== "queueTimeout") return false;
+            const occurredAtMs = Date.parse(record.completedAt ?? record.startedAt);
+            return occurredAtMs >= sinceMs && occurredAtMs <= untilMs;
+        });
+        return failures.length === 0
+            ? { count: 0 }
+            : { count: failures.length, latest: failures.at(-1)! };
+    }
+
     async listApprovals() {
         return this.#approvals;
+    }
+
+    async listPendingApprovals() {
+        return this.#approvals.filter((approval) => approval.status === "pending");
     }
 
     async refreshStatus() {
