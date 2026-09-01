@@ -62,7 +62,7 @@ fn prepare_bash(
     .map_err(io_error)?;
     Ok(ShellLaunch {
         command: format!(
-            "/usr/bin/env -u TMUX -u TMUX_PANE -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} {} --rcfile {} -i",
+            "/usr/bin/env -u DEVSHELL_WORKER_INTERNAL_INSTANCE -u DEVSHELL_WORKER_INTERNAL_SECURITY_MODE -u DEVSHELL_WORKER_INTERNAL_WORKSPACE -u TMUX -u TMUX_PANE -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} {} --rcfile {} -i",
             quote(status_dir.to_string_lossy().as_ref()),
             quote(pane_id),
             quote(shell.to_string_lossy().as_ref()),
@@ -81,7 +81,7 @@ fn prepare_fish(
     fs::write(&integration, FISH_INTEGRATION).map_err(io_error)?;
     Ok(ShellLaunch {
         command: format!(
-            "/usr/bin/env -u TMUX -u TMUX_PANE -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} DEVSHELL_TMUX_FISH_INTEGRATION={} {} -C {} -i",
+            "/usr/bin/env -u DEVSHELL_WORKER_INTERNAL_INSTANCE -u DEVSHELL_WORKER_INTERNAL_SECURITY_MODE -u DEVSHELL_WORKER_INTERNAL_WORKSPACE -u TMUX -u TMUX_PANE -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} DEVSHELL_TMUX_FISH_INTEGRATION={} {} -C {} -i",
             quote(status_dir.to_string_lossy().as_ref()),
             quote(pane_id),
             quote(integration.to_string_lossy().as_ref()),
@@ -113,7 +113,7 @@ fn prepare_zsh(
     .map_err(io_error)?;
     Ok(ShellLaunch {
         command: format!(
-            "/usr/bin/env -u TMUX -u TMUX_PANE -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} ZDOTDIR={} {} -d -i",
+            "/usr/bin/env -u DEVSHELL_WORKER_INTERNAL_INSTANCE -u DEVSHELL_WORKER_INTERNAL_SECURITY_MODE -u DEVSHELL_WORKER_INTERNAL_WORKSPACE -u TMUX -u TMUX_PANE -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} ZDOTDIR={} {} -d -i",
             quote(status_dir.to_string_lossy().as_ref()),
             quote(pane_id),
             quote(zdotdir.to_string_lossy().as_ref()),
@@ -128,4 +128,24 @@ fn quote(value: &str) -> String {
 
 fn io_error(error: std::io::Error) -> ToolError {
     ToolError::new("tmux.storageFailed", error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prepare_shell_launch;
+
+    #[test]
+    fn managed_shell_unsets_worker_internal_environment() {
+        let root = crate::testing::temp_dir();
+        let launch = prepare_shell_launch(
+            &root.path().join("shell"),
+            &root.path().join("status"),
+            "pane-1",
+        )
+        .unwrap();
+
+        assert!(launch.command.contains("-u DEVSHELL_WORKER_INTERNAL_INSTANCE"));
+        assert!(launch.command.contains("-u DEVSHELL_WORKER_INTERNAL_SECURITY_MODE"));
+        assert!(launch.command.contains("-u DEVSHELL_WORKER_INTERNAL_WORKSPACE"));
+    }
 }
