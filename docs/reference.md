@@ -267,7 +267,7 @@ maxBytes = 67108864
 eventBufferSize = 100
 ```
 
-`retentionDays` 默认 7 天，`maxBytes` 默认 64 MiB、最小 1 MiB。超过保留时间的记录会被删除；SQLite 数据库文件超过容量上限时，从最旧的审计记录开始淘汰并回收数据库页。`eventBufferSize` 只控制内存中的事件 replay 窗口，不控制 SQLite 持久化容量。
+`retentionDays` 默认 7 天，`maxBytes` 默认 64 MiB、最小 1 MiB。超过保留时间的记录会被删除；SQLite 数据库文件超过容量上限时，从最旧的审计记录开始淘汰并回收数据库页。`eventBufferSize` 只控制内存中的事件 replay 窗口，不控制 SQLite 持久化容量。大于等于 8 KiB 且可有效压缩的 stdout/stderr 日志正文会以 Zstd level 1 BLOB 存储在 SQLite 中；较小或不可压缩的日志继续内联为 TEXT，读取接口会透明恢复原始 `message`。
 
 升级时，旧的 `events.jsonl`、`logs.jsonl`、`tool-calls.jsonl` 和 `approvals.jsonl` 会在首次打开实例时事务导入 SQLite，导入成功后删除旧文件。
 

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { access, rm, stat, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -65,6 +66,81 @@ test("AuditDatabase uses WAL and accounts the WAL sidecar in fileBytes", async (
         const mainBytes = (await stat(databaseFile)).size;
         const walBytes = await stat(`${databaseFile}-wal`).then((value) => value.size).catch(() => 0);
         assert.equal(stats.fileBytes, mainBytes + walBytes);
+        database.close();
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("AuditDatabase compresses large log messages and restores them transparently", async () => {
+    const root = await createTestTempDirectory("sqlite-log-zstd");
+    const instanceName = asInstanceName("sqlite-log-zstd");
+    const message = "cargo: compiling portable-devshell dependency graph\n".repeat(2_048);
+
+    try {
+        const database = new AuditDatabase(join(root, "audit.sqlite3"), {
+            maxBytes: 16 * MIB,
+            now: () => Date.parse("2026-09-01T12:00:00.000Z"),
+            retentionDays: 30
+        });
+        const store = database.store<InstanceLogEntry>("logs", {
+            sequence: (record) => record.seq,
+            timestamp: (record) => record.at
+        });
+        const record: InstanceLogEntry = {
+            at: "2026-09-01T12:00:00.000Z",
+            callId: "call-zstd",
+            instanceName,
+            message,
+            seq: 1,
+            stream: "stdout",
+            toolName: "bash_run"
+        };
+
+        await store.append(record);
+
+        assert.deepEqual(await store.readAll(), [record]);
+        assert.deepEqual(await store.readFromSeq?.(1, 1), [record]);
+        assert.equal(database.stats().payloadBytes < Buffer.byteLength(message, "utf8") / 4, true);
+        database.close();
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("AuditDatabase upgrades v1 SQLite rows without rewriting historical log payloads", async () => {
+    const root = await createTestTempDirectory("sqlite-v1-upgrade");
+    const databaseFile = join(root, "audit.sqlite3");
+    const instanceName = asInstanceName("sqlite-v1-upgrade");
+    const legacy: InstanceLogEntry = {
+        at: "2026-09-01T11:00:00.000Z",
+        instanceName,
+        message: "historical inline stdout\n",
+        seq: 1,
+        stream: "stdout"
+    };
+
+    try {
+        createV1AuditDatabase(databaseFile, legacy);
+        const database = new AuditDatabase(databaseFile, {
+            maxBytes: 16 * MIB,
+            now: () => Date.parse("2026-09-01T12:00:00.000Z"),
+            retentionDays: 30
+        });
+        const store = database.store<InstanceLogEntry>("logs", {
+            sequence: (record) => record.seq,
+            timestamp: (record) => record.at
+        });
+        const compressed: InstanceLogEntry = {
+            ...legacy,
+            at: "2026-09-01T12:00:00.000Z",
+            message: "new compressed stdout\n".repeat(2_048),
+            seq: 2
+        };
+
+        assert.deepEqual(await store.readAll(), [legacy]);
+        await store.append(compressed);
+        assert.deepEqual(await store.readAll(), [legacy, compressed]);
         database.close();
     } finally {
         await rm(root, { recursive: true, force: true });
@@ -521,3 +597,39 @@ test("LogStoreInstance and AuditToolCallHistory write and query per-instance rec
         await rm(root, { recursive: true, force: true });
     }
 });
+
+function createV1AuditDatabase(filePath: string, record: InstanceLogEntry): void {
+    const require = createRequire(import.meta.url);
+    const originalEmitWarning = process.emitWarning;
+    process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
+        const message = warning instanceof Error ? warning.message : warning;
+        const type = typeof args[0] === "string"
+            ? args[0]
+            : typeof args[0] === "object" && args[0] !== null && "type" in args[0]
+              ? String((args[0] as { type?: unknown }).type)
+              : undefined;
+        if (type === "ExperimentalWarning" && message.includes("SQLite")) return;
+        Reflect.apply(originalEmitWarning, process, [warning, ...args]);
+    }) as typeof process.emitWarning;
+    try {
+        const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+        const database = new DatabaseSync(filePath);
+        const payload = JSON.stringify(record);
+        database.exec(`
+            CREATE TABLE audit_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection TEXT NOT NULL,
+                occurred_at_ms INTEGER NOT NULL,
+                payload_bytes INTEGER NOT NULL CHECK(payload_bytes >= 0),
+                payload TEXT NOT NULL
+            ) STRICT;
+            PRAGMA user_version = 1;
+        `);
+        database.prepare(
+            "INSERT INTO audit_records(collection, occurred_at_ms, payload_bytes, payload) VALUES (?, ?, ?, ?)"
+        ).run("logs", Date.parse(record.at), Buffer.byteLength(payload, "utf8"), payload);
+        database.close();
+    } finally {
+        process.emitWarning = originalEmitWarning;
+    }
+}

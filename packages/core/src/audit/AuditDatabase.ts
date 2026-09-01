@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import { mkdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { constants as zlibConstants, zstdCompressSync, zstdDecompressSync } from "node:zlib";
 
 import type { ToolCallQuery, ToolCallRecord } from "@portable-devshell/shared";
 
@@ -39,9 +40,18 @@ export interface AuditToolCallRecordStore extends AuditRecordStore<ToolCallRecor
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const SCHEMA_VERSION = 1;
+const LOG_BODY_COMPRESSION_THRESHOLD_BYTES = 8 * 1024;
+const SCHEMA_VERSION = 2;
 const WAL_AUTOCHECKPOINT_PAGES = 1_000;
 const WAL_JOURNAL_SIZE_LIMIT_BYTES = 1024 * 1024;
+const ZSTD_BODY_CODEC = "zstd";
+const ZSTD_COMPRESSION_LEVEL = 1;
+
+interface AuditStoredRow {
+    body: Uint8Array | null;
+    bodyCodec: string | null;
+    payload: string;
+}
 
 export class AuditDatabase {
     readonly #database: DatabaseSync;
@@ -126,8 +136,8 @@ export class AuditDatabase {
         this.#assertOpen();
         this.cleanup();
         return (this.#database
-            .prepare("SELECT payload FROM audit_records WHERE collection = ? ORDER BY id ASC")
-            .all(collection) as Array<{ payload: string }>).map((row) => JSON.parse(row.payload) as TRecord);
+            .prepare("SELECT payload, body, body_codec AS bodyCodec FROM audit_records WHERE collection = ? ORDER BY id ASC")
+            .all(collection) as unknown as AuditStoredRow[]).map((row) => decodeStoredRecord<TRecord>(collection, row));
     }
 
     readTailRecords<TRecord>(collection: AuditRecordCollection, limit: number): TRecord[] {
@@ -137,10 +147,10 @@ export class AuditDatabase {
         }
         this.cleanup();
         const rows = this.#database
-            .prepare("SELECT payload FROM audit_records WHERE collection = ? ORDER BY id DESC LIMIT ?")
-            .all(collection, limit) as Array<{ payload: string }>;
+            .prepare("SELECT payload, body, body_codec AS bodyCodec FROM audit_records WHERE collection = ? ORDER BY id DESC LIMIT ?")
+            .all(collection, limit) as unknown as AuditStoredRow[];
         rows.reverse();
-        return rows.map((row) => JSON.parse(row.payload) as TRecord);
+        return rows.map((row) => decodeStoredRecord<TRecord>(collection, row));
     }
 
     readSequenceRecords<TRecord>(
@@ -157,11 +167,11 @@ export class AuditDatabase {
         }
         this.cleanup();
         const rows = this.#database.prepare(
-            `SELECT payload FROM audit_records
+            `SELECT payload, body, body_codec AS bodyCodec FROM audit_records
              WHERE collection = ? AND json_extract(payload, '$.seq') >= ?
              ORDER BY id ASC${limit === undefined ? "" : " LIMIT ?"}`
-        ).all(...(limit === undefined ? [collection, fromSeq] : [collection, fromSeq, limit])) as Array<{ payload: string }>;
-        return rows.map((row) => JSON.parse(row.payload) as TRecord);
+        ).all(...(limit === undefined ? [collection, fromSeq] : [collection, fromSeq, limit])) as unknown as AuditStoredRow[];
+        return rows.map((row) => decodeStoredRecord<TRecord>(collection, row));
     }
 
     readToolCallRecords(query: ToolCallQuery): ToolCallRecord[] {
@@ -285,7 +295,9 @@ export class AuditDatabase {
                 collection TEXT NOT NULL,
                 occurred_at_ms INTEGER NOT NULL,
                 payload_bytes INTEGER NOT NULL CHECK(payload_bytes >= 0),
-                payload TEXT NOT NULL
+                payload TEXT NOT NULL,
+                body BLOB,
+                body_codec TEXT
             ) STRICT;
             CREATE INDEX IF NOT EXISTS audit_records_collection_id
                 ON audit_records(collection, id);
@@ -298,8 +310,8 @@ export class AuditDatabase {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             ) STRICT;
-            PRAGMA user_version = ${SCHEMA_VERSION};
         `);
+        this.#upgradeSchema();
     }
 
     #insertRecord<TRecord>(
@@ -307,13 +319,12 @@ export class AuditDatabase {
         record: TRecord,
         options: AuditStoreOptions<TRecord>
     ): void {
-        const payload = JSON.stringify(record);
-        const payloadBytes = Buffer.byteLength(payload, "utf8");
+        const stored = encodeStoredRecord(collection, record);
         const occurredAtMs = normalizeTimestamp(options.timestamp(record), this.#now());
         this.#database
-            .prepare("INSERT INTO audit_records(collection, occurred_at_ms, payload_bytes, payload) VALUES (?, ?, ?, ?)")
-            .run(collection, occurredAtMs, payloadBytes, payload);
-        this.#payloadBytes += payloadBytes;
+            .prepare("INSERT INTO audit_records(collection, occurred_at_ms, payload_bytes, payload, body, body_codec) VALUES (?, ?, ?, ?, ?, ?)")
+            .run(collection, occurredAtMs, stored.payloadBytes, stored.payload, stored.body, stored.bodyCodec);
+        this.#payloadBytes += stored.payloadBytes;
 
         const sequence = options.sequence?.(record);
         if (sequence !== undefined) {
@@ -324,6 +335,31 @@ export class AuditDatabase {
             if (sequence > current) {
                 this.#writeMetadata(`highWater:${collection}`, String(sequence));
             }
+        }
+    }
+
+    #upgradeSchema(): void {
+        const columns = new Set(
+            (this.#database.prepare("PRAGMA table_info(audit_records)").all() as Array<{ name: string }>)
+                .map((column) => column.name)
+        );
+        const userVersion = readPragmaNumber(this.#database, "user_version");
+        if (columns.has("body") && columns.has("body_codec") && userVersion >= SCHEMA_VERSION) {
+            return;
+        }
+        this.#database.exec("BEGIN IMMEDIATE");
+        try {
+            if (!columns.has("body")) {
+                this.#database.exec("ALTER TABLE audit_records ADD COLUMN body BLOB");
+            }
+            if (!columns.has("body_codec")) {
+                this.#database.exec("ALTER TABLE audit_records ADD COLUMN body_codec TEXT");
+            }
+            this.#database.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+            this.#database.exec("COMMIT");
+        } catch (error) {
+            this.#database.exec("ROLLBACK");
+            throw error;
         }
     }
 
@@ -531,7 +567,73 @@ function normalizeTimestamp(value: number | string, fallback: number): number {
     return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
 }
 
-function readPragmaNumber(database: DatabaseSync, name: "freelist_count" | "page_count" | "page_size"): number {
+function encodeStoredRecord<TRecord>(
+    collection: AuditRecordCollection,
+    record: TRecord,
+): AuditStoredRow & { payloadBytes: number } {
+    if (collection !== "logs" || typeof record !== "object" || record === null || Array.isArray(record)) {
+        return inlineStoredRecord(JSON.stringify(record));
+    }
+
+    const source = record as Record<string, unknown>;
+    if (typeof source.message !== "string") {
+        return inlineStoredRecord(JSON.stringify(record));
+    }
+    const messageBytes = Buffer.byteLength(source.message, "utf8");
+    if (messageBytes < LOG_BODY_COMPRESSION_THRESHOLD_BYTES) {
+        return inlineStoredRecord(JSON.stringify(record));
+    }
+
+    const compressed = zstdCompressSync(Buffer.from(source.message, "utf8"), {
+        params: { [zlibConstants.ZSTD_c_compressionLevel]: ZSTD_COMPRESSION_LEVEL }
+    });
+    if (compressed.byteLength >= messageBytes) {
+        return inlineStoredRecord(JSON.stringify(record));
+    }
+
+    const { message: _message, ...metadata } = source;
+    const payload = JSON.stringify(metadata);
+    return {
+        body: compressed,
+        bodyCodec: ZSTD_BODY_CODEC,
+        payload,
+        payloadBytes: Buffer.byteLength(payload, "utf8") + compressed.byteLength,
+    };
+}
+
+function inlineStoredRecord(payload: string): AuditStoredRow & { payloadBytes: number } {
+    return {
+        body: null,
+        bodyCodec: null,
+        payload,
+        payloadBytes: Buffer.byteLength(payload, "utf8"),
+    };
+}
+
+function decodeStoredRecord<TRecord>(collection: AuditRecordCollection, row: AuditStoredRow): TRecord {
+    const payload = JSON.parse(row.payload) as unknown;
+    if (row.bodyCodec === null) {
+        if (row.body !== null) {
+            throw new Error("Audit record has a body without a codec.");
+        }
+        return payload as TRecord;
+    }
+    if (collection !== "logs" || row.bodyCodec !== ZSTD_BODY_CODEC || row.body === null) {
+        throw new Error(`Unsupported audit record body codec: ${row.bodyCodec}.`);
+    }
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+        throw new Error("Compressed audit log metadata must be an object.");
+    }
+    return {
+        ...(payload as Record<string, unknown>),
+        message: zstdDecompressSync(row.body).toString("utf8"),
+    } as TRecord;
+}
+
+function readPragmaNumber(
+    database: DatabaseSync,
+    name: "freelist_count" | "page_count" | "page_size" | "user_version",
+): number {
     const row = database.prepare(`PRAGMA ${name}`).get() as Record<string, number>;
     return Number(Object.values(row)[0] ?? 0);
 }
