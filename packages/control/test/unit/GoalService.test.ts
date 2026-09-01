@@ -29,7 +29,6 @@ test("GoalService stopAll terminalizes every live Goal while preserving complete
         objective: "Completed goal",
         steps: [{ id: "done", status: "completed", text: "Done" }],
     });
-    await service.manage("ctx-completed", { action: "finish" });
 
     const stopped = await service.stopAll();
 

@@ -337,6 +337,7 @@ export class GoalState {
             throw new Error(`Workspace Goal ${existing.goalId} is still ${existing.status}; finish or stop it first.`);
         }
         const now = this.#now();
+        const steps = normalizeSteps(input.steps, true);
         const next: GoalRecord = {
             continuationCount: 0,
             continuationPending: false,
@@ -349,8 +350,8 @@ export class GoalState {
             objective: requiredText(input.objective, "objective", GOAL_OBJECTIVE_LIMIT),
             revision: 1,
             stagnationStreak: 0,
-            status: "active",
-            steps: normalizeSteps(input.steps, true),
+            status: allStepsTerminal(steps) ? "completed" : "active",
+            steps,
             updatedAt: now,
             ...(input.workspace === undefined ? {} : { workspace: requiredText(input.workspace, "workspace", 16_384) }),
         };
@@ -386,7 +387,8 @@ function updateGoal(current: GoalRecord, input: GoalManageInput, now: string): G
     const nextObjective = input.objective === undefined
         ? current.objective
         : requiredText(input.objective, "objective", GOAL_OBJECTIVE_LIMIT);
-    const progressed = nextObjective !== current.objective || goalStepsProgressed(current.steps, steps);
+    const autoCompleted = allStepsTerminal(steps);
+    const progressed = autoCompleted || nextObjective !== current.objective || goalStepsProgressed(current.steps, steps);
     const base = clearContinuation(current);
     return {
         ...base,
@@ -402,7 +404,7 @@ function updateGoal(current: GoalRecord, input: GoalManageInput, now: string): G
         ...(input.note === undefined ? {} : { note: requiredText(input.note, "note", GOAL_NOTE_LIMIT) }),
         objective: nextObjective,
         revision: current.revision + 1,
-        status: current.status,
+        status: autoCompleted ? "completed" : current.status,
         steps,
         updatedAt: now,
         ...(current.workspace === undefined && input.workspace !== undefined ? { workspace: input.workspace } : {}),
@@ -418,6 +420,14 @@ function goalStepsProgressed(previous: GoalStep[], next: GoalStep[]): boolean {
             candidate.status !== step.status ||
             candidate.text !== step.text;
     });
+}
+
+function hasActionableStep(steps: GoalStep[]): boolean {
+    return steps.some((step) => step.status === "active" || step.status === "pending");
+}
+
+function allStepsTerminal(steps: GoalStep[]): boolean {
+    return steps.length > 0 && !hasActionableStep(steps);
 }
 
 function normalizeSteps(value: GoalStepInput[] | undefined, requireNonEmpty: boolean): GoalStep[] {
@@ -454,6 +464,9 @@ function normalizeStepStatus(value: unknown): GoalStepStatus {
 
 function normalizeStoredGoal(value: unknown): GoalRecord {
     if (!isRecord(value)) throw new Error("goal state must be an object");
+    const steps = normalizeSteps(value.steps as GoalStepInput[], true);
+    const storedStatus = normalizeGoalStatus(value.status);
+    const legacyAutoCompleted = storedStatus === "active" && allStepsTerminal(steps);
     const record: GoalRecord = {
         continuationCount: nonNegativeInteger(value.continuationCount, "continuationCount"),
         continuationPending: value.continuationPending === true,
@@ -475,8 +488,8 @@ function normalizeStoredGoal(value: unknown): GoalRecord {
         objective: requiredText(value.objective, "objective", GOAL_OBJECTIVE_LIMIT),
         revision: positiveInteger(value.revision, "revision"),
         stagnationStreak: optionalNonNegativeInteger(value.stagnationStreak),
-        status: normalizeGoalStatus(value.status),
-        steps: normalizeSteps(value.steps as GoalStepInput[], true),
+        status: legacyAutoCompleted ? "completed" : storedStatus,
+        steps,
         updatedAt: requiredStoredString(value.updatedAt, "updatedAt"),
         ...(typeof value.workspace === "string" && value.workspace.length > 0 ? { workspace: value.workspace } : {}),
     };
@@ -484,7 +497,14 @@ function normalizeStoredGoal(value: unknown): GoalRecord {
         const field = value[key];
         if (typeof field === "string" && field.length > 0) record[key] = field;
     }
-    return record;
+    return legacyAutoCompleted
+        ? {
+            ...clearContinuation(record),
+            continuationCount: 0,
+            noActionStreak: 0,
+            stagnationStreak: 0,
+        }
+        : record;
 }
 
 function normalizeGoalStatus(value: unknown): GoalRecord["status"] {
@@ -507,7 +527,8 @@ function snapshot(record: GoalRecord, now: string): GoalSnapshot {
         ...(record.continuationAttemptedAt === undefined ? {} : { continuationAttemptedAt: record.continuationAttemptedAt }),
         continuationCount: record.continuationCount,
         ...(record.continuationMessageId === undefined ? {} : { continuationMessageId: record.continuationMessageId }),
-        continuationDue: record.status === "active" && !claimFresh && retryReady && nowMs >= dueAtMs,
+        continuationDue: record.status === "active" && hasActionableStep(record.steps) &&
+            !claimFresh && retryReady && nowMs >= dueAtMs,
         continuationDueAt: new Date(dueAtMs).toISOString(),
         continuationPending: claimFresh,
         ...(record.continuationRetryAfter === undefined ? {} : { continuationRetryAfter: record.continuationRetryAfter }),

@@ -91,7 +91,7 @@ export class McpToolCatalogInteraction {
             requiredCapabilities: [],
         },
         {
-            description: "Manage optional Workspace Goal mode for the current Context. environ_info normally bootstraps the Live Workspace, so action=start does not require a separate workspace_open call while the App remains active. start creates one durable Goal with an objective and ordered steps. update revises the objective, complete step list, or one step. block suspends automatic continuation with a reason; resume reactivates it. finish succeeds only after every step is completed or skipped. stop terminates Goal mode without stopping shell or tmux processes. get reads the current Goal. Use workspace_open only to re-present or restore an inactive App.",
+            description: "Manage optional Workspace Goal mode for the current Context. environ_info normally bootstraps the Live Workspace, so action=start does not require a separate workspace_open call while the App remains active. start creates one durable Goal with an objective and ordered steps. update revises the objective, complete step list, or one step. Completing or skipping the final remaining step completes the Goal automatically. block suspends automatic continuation with a reason; resume reactivates it. finish remains a compatibility action for an all-terminal live Goal. stop terminates Goal mode without stopping shell or tmux processes. get reads the current Goal. Use workspace_open only to re-present or restore an inactive App.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,

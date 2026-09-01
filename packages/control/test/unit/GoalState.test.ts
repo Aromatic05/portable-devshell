@@ -7,7 +7,7 @@ test("GoalState detects an abandoned active Goal after one minute", () => {
     assert.equal(GOAL_EXECUTION_LEASE_MS, 60_000);
 });
 
-test("GoalState manages start, step updates, finish, and stop", () => {
+test("GoalState completes atomically when the final step becomes terminal", () => {
     let now = Date.parse("2026-08-20T12:00:00.000Z");
     let ids = 0;
     const state = new GoalState({
@@ -40,15 +40,18 @@ test("GoalState manages start, step updates, finish, and stop", () => {
         stepId: "verify",
     }, "ctx-goal").document;
     now += 1_000;
-    document = state.manage(document, {
+    transition = state.manage(document, {
         action: "update",
         status: "completed",
         stepId: "verify",
-    }, "ctx-goal").document;
-    now += 1_000;
-    transition = state.manage(document, { action: "finish" }, "ctx-goal");
+    }, "ctx-goal");
     document = transition.document;
     assert.equal(transition.result?.status, "completed");
+    assert.equal(transition.result?.continuationDue, false);
+    assert.throws(
+        () => state.manage(document, { action: "finish" }, "ctx-goal"),
+        /already completed/u,
+    );
 
     now += 1_000;
     transition = state.manage(document, {
@@ -60,6 +63,34 @@ test("GoalState manages start, step updates, finish, and stop", () => {
     assert.equal(transition.result?.goalId, "goal-2");
     transition = state.manage(document, { action: "stop" }, "ctx-goal");
     assert.equal(transition.result?.status, "stopped");
+});
+
+test("GoalState normalizes legacy active Goals with only terminal steps as completed", () => {
+    const state = new GoalState({ now: () => "2026-08-20T12:00:00.000Z" });
+    const normalized = state.normalizeDocument({
+        goals: [{
+            continuationCount: 2,
+            continuationPending: false,
+            createdAt: "2026-08-20T11:00:00.000Z",
+            createdByCtxId: "ctx-legacy",
+            goalId: "goal-legacy",
+            lastAgentActivityAt: "2026-08-20T11:01:00.000Z",
+            lastProgressAt: "2026-08-20T11:01:00.000Z",
+            noActionStreak: 2,
+            objective: "Legacy terminal Goal",
+            revision: 7,
+            stagnationStreak: 1,
+            status: "active",
+            steps: [{ id: "done", status: "completed", text: "Done" }],
+            updatedAt: "2026-08-20T11:01:00.000Z",
+        }],
+        version: 1,
+    });
+
+    const goal = state.read(normalized, "ctx-legacy");
+    assert.equal(goal?.status, "completed");
+    assert.equal(goal?.continuationDue, false);
+    assert.equal(goal?.continuationCount, 0);
 });
 
 test("GoalState continuation claims are validated against agent activity and count only dispatched attempts", () => {

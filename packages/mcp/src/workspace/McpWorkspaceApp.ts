@@ -670,17 +670,11 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   function goalContinuationMessage(claim) {
     var goal = claim && claim.goal;
     var steps = goal && Array.isArray(goal.steps) ? goal.steps : [];
-    var readyToFinish = steps.length > 0 && steps.every(function (step) {
-      return step && (step.status === "completed" || step.status === "skipped");
-    });
     var attempt = goal && Number.isFinite(goal.noActionStreak)
       ? Math.max(1, Math.floor(goal.noActionStreak) + 1)
       : claim && Number.isFinite(claim.continuationCount)
         ? Math.max(1, Math.floor(claim.continuationCount))
         : Math.max(1, ((goal && goal.continuationCount) || 0) + 1);
-    if (readyToFinish) {
-      return "Current Goal has no remaining task item: every step is completed or skipped. Call workspace_goal(action=\"finish\") now. Do not reply with an acknowledgement, explanation, summary, plan, status update, or statement that the Goal is already complete. Do not end the turn before finish succeeds.";
-    }
     var currentStep = steps.find(function (step) { return step && step.status === "active"; }) ||
       steps.find(function (step) { return step && step.status === "pending"; });
     var currentItem = currentStep
@@ -699,7 +693,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     if (attempt === 2) {
       return prefix +
         "The previous wake did not produce verifiable execution progress. Continue executing this task now. " +
-        "If this task item is actually complete, update its state immediately; if all Goal items are complete, finish the Goal. " +
+        "If this task item is actually complete, update its state immediately; completing the final task item completes the Goal. " +
         "If execution genuinely cannot proceed without user input or an external condition, block the Goal with the concrete reason. " +
         "Otherwise, continue taking concrete actions now. Do not reply only with an acknowledgement, progress report, plan, apology, or promise to continue. " +
         "Reading state or describing what you intend to do is not sufficient.";
@@ -711,7 +705,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         : "The previous wake attempts ended without verifiable execution progress while the Goal remained actionable. ";
     return prefix + "Wake attempt " + attempt + ". " + enforcement +
       "Stop responding with acknowledgements, plans, status reports, apologies, promises, or other non-execution text. Execute the current task item now. " +
-      "You may end this turn only after the task has actually progressed, the Goal has been properly finished, a genuine blocker has been recorded, or required work is inside a real blocking wait. Otherwise, continue working.";
+      "You may end this turn only after the task has actually progressed, the Goal has completed, a genuine blocker has been recorded, or required work is inside a real blocking wait. Otherwise, continue working.";
   }
 
   async function yieldAutomaticReentry(reason) {
@@ -740,6 +734,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   function goalContinuationAvailable() {
     var goal = snapshot && snapshot.goal;
     if (!goal || goal.status !== "active" || !automaticReentryAvailable() || snapshot.agentBusy || visibleEvent() || busy.size > 0 || recovering) return false;
+    var steps = Array.isArray(goal.steps) ? goal.steps : [];
+    if (!steps.some(function (step) { return step && (step.status === "active" || step.status === "pending"); })) return false;
     var background = Array.isArray(snapshot.background) ? snapshot.background : [];
     return !background.some(function (item) {
       return item && item.goalId === goal.goalId && item.automaticRecovery !== false && !item.recoveryDisabledAt &&

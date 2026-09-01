@@ -362,7 +362,8 @@ test("Workspace Goal continuation prompt adds exit guidance only after the first
         assert.match(text, new RegExp(item.expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
         assert.doesNotMatch(text, new RegExp(item.forbidden.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
         if (item.count === 1) {
-            assert.match(text, /finish the Goal/u);
+            assert.match(text, /completing the final task item completes the Goal/u);
+            assert.doesNotMatch(text, /finish the Goal/u);
             assert.match(text, /block the Goal/u);
         }
         await page.close();
@@ -412,7 +413,7 @@ test("Workspace user cancellation suppresses automatic Goal continuation until l
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
 });
 
-test("Workspace Goal still re-enters while every step is terminal but the Goal remains active", BROWSER_TEST_OPTIONS, async (t) => {
+test("Workspace Goal does not re-enter for a legacy active Goal with no actionable step", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
 
@@ -439,7 +440,9 @@ test("Workspace Goal still re-enters while every step is terminal but the Goal r
         iframe.srcdoc = html;
     }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__modelMessages || []).length === 1");
+    await page.waitForFunction("(window.__workspaceWatchCount || 0) >= 2");
+    await page.waitForTimeout(250);
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
 });
 
 test("Workspace Goal does not auto-continue while an Agent tool call is still running", BROWSER_TEST_OPTIONS, async (t) => {
