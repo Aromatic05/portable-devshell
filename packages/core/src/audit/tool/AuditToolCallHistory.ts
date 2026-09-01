@@ -127,7 +127,9 @@ export class AuditToolCallHistory {
 
     async read(query: ToolCallQuery = {}): Promise<ToolCallRecord[]> {
         await this.#initialize();
-        const records = await this.#store.readAll();
+        const records = canReadTail(query) && this.#store.readTail !== undefined
+            ? await this.#store.readTail(query.limit!)
+            : await this.#store.readAll();
         const activeRecords = this.#readActiveRecords();
         const filtered = sliceByFilters(sliceByCursor([...records, ...activeRecords], query), query);
         return applyLimit(filtered, query);
@@ -265,6 +267,17 @@ function applyLimit(records: ToolCallRecord[], query: ToolCallQuery): ToolCallRe
     }
 
     return records.slice(-query.limit);
+}
+
+function canReadTail(query: ToolCallQuery): query is ToolCallQuery & { limit: number } {
+    return query.limit !== undefined &&
+        query.after === undefined &&
+        query.before === undefined &&
+        query.callIds === undefined &&
+        query.ctxId === undefined &&
+        query.source === undefined &&
+        query.status === undefined &&
+        query.toolName === undefined;
 }
 
 function findCursorIndex(records: ToolCallRecord[], callId: string): number {

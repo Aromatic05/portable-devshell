@@ -18,7 +18,7 @@ export type CliParsedCommand =
     | { kind: "approval.list"; instance: string }
     | { approvalId: string; decision: "approve" | "deny"; instance: string; kind: "approval.decide"; policyPatch?: JsonValue; reason?: string; remember?: boolean }
     | { approvalId: string; instance: string; kind: "approval.show" }
-    | { callId?: string; instance: string; kind: "tool.calls" }
+    | { after?: string; before?: string; callId?: string; instance: string; kind: "tool.calls"; limit?: number }
     | { kind: "oauth.status" }
     | { kind: "oauth.list" }
     | { approvalId: string; decision: "approve" | "deny"; kind: "oauth.decide" }
@@ -343,13 +343,50 @@ export class CliParser {
         if (argv[0] === "help" || argv[0] === "--help" || argv[0] === "-h") {
             return this.#expectNoExtra(argv, { kind: "help", topic: "tool" });
         }
-        if (argv[0] !== "calls" || (argv.length !== 2 && argv.length !== 3)) {
-            throw CliRenderError.usage(`tool calls requires <instance> [callId]\n\n${renderCliTopicUsage("tool")}`);
+        if (argv[0] !== "calls" || argv.length < 2) {
+            throw CliRenderError.usage(`tool calls requires <instance> [callId] [--limit <n>] [--before <callId>] [--after <callId>]\n\n${renderCliTopicUsage("tool")}`);
+        }
+        let optionOffset = 2;
+        const callId = argv[2] !== undefined && !argv[2].startsWith("--")
+            ? this.#required(argv[2], "callId is required")
+            : undefined;
+        if (callId !== undefined) optionOffset += 1;
+        const options = this.#parseToolCallOptions(argv.slice(optionOffset));
+        if (callId !== undefined && (options.after !== undefined || options.before !== undefined || options.limit !== undefined)) {
+            throw CliRenderError.usage("tool calls does not accept pagination options with an exact callId");
         }
         return {
-            ...(argv[2] === undefined ? {} : { callId: this.#required(argv[2], "callId is required") }),
+            ...(callId === undefined ? {} : { callId }),
             instance: this.#required(argv[1], "instance name is required"),
             kind: "tool.calls",
+            ...options,
+        };
+    }
+
+    #parseToolCallOptions(argv: readonly string[]): { after?: string; before?: string; limit?: number } {
+        let after: string | undefined;
+        let before: string | undefined;
+        let limit: number | undefined;
+        for (let index = 0; index < argv.length; index += 2) {
+            const option = argv[index];
+            const value = argv[index + 1];
+            if (value === undefined || (option !== "--after" && option !== "--before" && option !== "--limit")) {
+                throw CliRenderError.usage("tool calls options are --limit <n>, --before <callId>, or --after <callId>");
+            }
+            if (option === "--after") after = this.#required(value, "after callId is required");
+            else if (option === "--before") before = this.#required(value, "before callId is required");
+            else {
+                const parsed = Number(value);
+                if (!Number.isSafeInteger(parsed) || parsed < 1) {
+                    throw CliRenderError.usage("tool calls --limit requires a positive integer");
+                }
+                limit = parsed;
+            }
+        }
+        return {
+            ...(after === undefined ? {} : { after }),
+            ...(before === undefined ? {} : { before }),
+            ...(limit === undefined ? {} : { limit }),
         };
     }
 

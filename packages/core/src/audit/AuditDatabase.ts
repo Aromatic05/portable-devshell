@@ -102,6 +102,19 @@ export class AuditDatabase {
             .all(collection) as Array<{ payload: string }>).map((row) => JSON.parse(row.payload) as TRecord);
     }
 
+    readTailRecords<TRecord>(collection: AuditRecordCollection, limit: number): TRecord[] {
+        this.#assertOpen();
+        if (!Number.isSafeInteger(limit) || limit < 1) {
+            throw new TypeError(`Invalid audit tail limit: ${limit}`);
+        }
+        this.cleanup();
+        const rows = this.#database
+            .prepare("SELECT payload FROM audit_records WHERE collection = ? ORDER BY id DESC LIMIT ?")
+            .all(collection, limit) as Array<{ payload: string }>;
+        rows.reverse();
+        return rows.map((row) => JSON.parse(row.payload) as TRecord);
+    }
+
     readHighWater(collection: AuditRecordCollection): number {
         this.#assertOpen();
         const value = this.#readMetadata(`highWater:${collection}`);
@@ -294,6 +307,10 @@ class AuditRecordStoreSqlite<TRecord> implements AuditRecordStore<TRecord> {
 
     async readHighWater(): Promise<number> {
         return this.#database.readHighWater(this.#collection);
+    }
+
+    async readTail(limit: number): Promise<TRecord[]> {
+        return this.#database.readTailRecords<TRecord>(this.#collection, limit);
     }
 }
 

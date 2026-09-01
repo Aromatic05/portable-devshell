@@ -4,9 +4,14 @@ import {
     type ApprovalDecision,
     type JsonValue,
     type ToolCallQuery,
+    type ToolCallRecord,
     type ToolCallSource,
     type ToolCallStatus
 } from "@portable-devshell/shared";
+
+const DEFAULT_TOOL_CALL_READ_LIMIT = 200;
+const MAX_TOOL_CALL_READ_LIMIT = 1_000;
+const MAX_TOOL_CALL_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 export function readToolCall(payload?: JsonValue): { input: JsonValue; toolName: string; workspace: string } {
     if (!isRecord(payload) || typeof payload.toolName !== "string" || payload.toolName.length === 0) {
@@ -20,7 +25,7 @@ export function readToolCall(payload?: JsonValue): { input: JsonValue; toolName:
 
 export function readToolCallQuery(payload?: JsonValue): ToolCallQuery {
     if (!isRecord(payload)) {
-        return {};
+        return { limit: DEFAULT_TOOL_CALL_READ_LIMIT };
     }
     if (payload.after !== undefined && typeof payload.after !== "string") {
         throw invalid("tool.listCalls requires string after.");
@@ -28,8 +33,8 @@ export function readToolCallQuery(payload?: JsonValue): ToolCallQuery {
     if (payload.before !== undefined && typeof payload.before !== "string") {
         throw invalid("tool.listCalls requires string before.");
     }
-    if (payload.limit !== undefined && typeof payload.limit !== "number") {
-        throw invalid("tool.listCalls requires numeric limit.");
+    if (payload.limit !== undefined && (typeof payload.limit !== "number" || !Number.isSafeInteger(payload.limit))) {
+        throw invalid("tool.listCalls requires integer limit.");
     }
     if (payload.ctxId !== undefined && typeof payload.ctxId !== "string") {
         throw invalid("tool.listCalls requires string ctxId.");
@@ -45,11 +50,32 @@ export function readToolCallQuery(payload?: JsonValue): ToolCallQuery {
         ...(payload.before === undefined ? {} : { before: payload.before }),
         ...(callIds === undefined ? {} : { callIds }),
         ...(payload.ctxId === undefined ? {} : { ctxId: payload.ctxId }),
-        ...(payload.limit === undefined ? {} : { limit: payload.limit }),
+        limit: readToolCallLimit(payload.limit),
         ...(payload.source === undefined ? {} : { source: readSource(payload.source) }),
         ...(payload.status === undefined ? {} : { status: readStatus(payload.status) }),
         ...(payload.toolName === undefined ? {} : { toolName: payload.toolName })
     };
+}
+
+export function limitToolCallResponse(records: ToolCallRecord[], query: ToolCallQuery): ToolCallRecord[] {
+    const newestFirst = query.after === undefined;
+    const candidates = newestFirst ? [...records].reverse() : records;
+    const accepted: ToolCallRecord[] = [];
+    let responseBytes = 2;
+    for (const record of candidates) {
+        const separatorBytes = accepted.length === 0 ? 0 : 1;
+        const recordBytes = Buffer.byteLength(JSON.stringify(record), "utf8");
+        if (responseBytes + separatorBytes + recordBytes > MAX_TOOL_CALL_RESPONSE_BYTES) {
+            if (accepted.length === 0) {
+                throw invalid(`tool.listCalls record ${record.callId} exceeds the safe response size.`);
+            }
+            break;
+        }
+        if (newestFirst) accepted.unshift(record);
+        else accepted.push(record);
+        responseBytes += separatorBytes + recordBytes;
+    }
+    return accepted;
 }
 
 export function readToolApprovalId(payload: JsonValue | undefined, operation: string): string {
@@ -112,6 +138,11 @@ function readCallIds(value: JsonValue): string[] {
         callIds.push(callId);
     }
     return callIds;
+}
+
+function readToolCallLimit(value: JsonValue | undefined): number {
+    if (value === undefined) return DEFAULT_TOOL_CALL_READ_LIMIT;
+    return Math.min(Math.max(value as number, 1), MAX_TOOL_CALL_READ_LIMIT);
 }
 
 function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {

@@ -1082,8 +1082,8 @@ test("CliMain routes control-plane commands to their matching RPC clients", asyn
                 calls.push(`approval.show:${instance}:${approvalId}`);
                 return { approvalId };
             },
-            async listToolCalls(instance: string, query?: { callIds?: string[] }) {
-                calls.push(`tool.calls:${instance}:${query?.callIds?.join(",") ?? ""}`);
+            async listToolCalls(instance: string, query?: { after?: string; before?: string; callIds?: string[]; limit?: number }) {
+                calls.push(`tool.calls:${instance}:${JSON.stringify(query ?? {})}`);
                 return [];
             },
             async deleteTodo(instance: string, taskId: string) {
@@ -1123,6 +1123,7 @@ test("CliMain routes control-plane commands to their matching RPC clients", asyn
         ["context", "disable", "ctx-1"],
         ["context", "renew", "ctx-1"],
         ["tool", "calls", "demo", "call-1"],
+        ["tool", "calls", "demo", "--limit", "50", "--before", "call-200"],
         ["todo", "delete", "demo", "task-1"],
     ];
     for (const command of commands) assert.equal(await cli.run(command), 0);
@@ -1146,7 +1147,8 @@ test("CliMain routes control-plane commands to their matching RPC clients", asyn
         "context.send:demo:ctx-1:continue",
         "context.disable:ctx-1",
         "context.renew:ctx-1",
-        "tool.calls:demo:call-1",
+        'tool.calls:demo:{"callIds":["call-1"],"limit":1}',
+        'tool.calls:demo:{"before":"call-200","limit":50}',
         "todo.delete:demo:task-1",
     ]);
     assert.equal(stderr.flush(), "");

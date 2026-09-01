@@ -35,11 +35,41 @@ test("AuditDatabase appends and reads records", async () => {
             { at: "2026-07-15T00:00:00.000Z", value: "one" },
             { at: "2026-07-15T00:00:01.000Z", value: "two" }
         ]);
+        assert.deepEqual(await store.readTail?.(1), [
+            { at: "2026-07-15T00:00:01.000Z", value: "two" }
+        ]);
         assert.equal(database.stats().recordCount, 2);
         database.close();
     } finally {
         await rm(root, { recursive: true, force: true });
     }
+});
+
+test("AuditToolCallHistory uses bounded storage reads for unfiltered limited history", async () => {
+    const instanceName = asInstanceName("bounded-history");
+    const record = {
+        callId: "call-tail",
+        inputSummary: "{}",
+        instance: instanceName,
+        source: "cli" as const,
+        startedAt: "2026-09-01T00:00:00.000Z",
+        status: "completed" as const,
+        toolName: "bash_run",
+    };
+    let readTailLimit = 0;
+    const history = new AuditToolCallHistory(instanceName, {
+        async append() {},
+        async readAll() {
+            throw new Error("unbounded audit read should not run");
+        },
+        async readTail(limit: number) {
+            readTailLimit = limit;
+            return [record];
+        },
+    });
+
+    assert.deepEqual(await history.read({ limit: 200 }), [record]);
+    assert.equal(readTailLimit, 200);
 });
 
 test("AuditDatabase migrates legacy JSONL exactly once", async () => {

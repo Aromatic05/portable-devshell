@@ -13,6 +13,7 @@ import {
 
 import { routeModule } from "../../route/ControlRouteFactory.js";
 import {
+    limitToolCallResponse,
     readToolApprovalDecision,
     readToolApprovalId,
     readToolCall,
@@ -53,9 +54,13 @@ export function createToolRouteModule(instance: ToolRouteInstancePort): PrefixRo
                 } as unknown as JsonValue;
             }
         },
-        listCalls: async (request) => await instance.worker.readToolCalls(
-            readToolCallQuery(request.payload)
-        ) as unknown as JsonValue,
+        listCalls: async (request) => {
+            const query = readToolCallQuery(request.payload);
+            return limitToolCallResponse(
+                await instance.worker.readToolCalls(query),
+                query
+            ) as unknown as JsonValue;
+        },
         listApprovals: async () => await instance.worker.listApprovals() as unknown as JsonValue,
         getApproval: async (request) => await instance.worker.getApproval(
             readToolApprovalId(request.payload, "tool.getApproval")

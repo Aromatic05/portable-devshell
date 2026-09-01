@@ -217,7 +217,13 @@ export class CliMain {
                 this.#writeJson(
                     await this.#clients.tool.listCalls(
                         command.instance,
-                        command.callId === undefined ? undefined : { callIds: [command.callId] },
+                        command.callId === undefined
+                            ? {
+                                ...(command.after === undefined ? {} : { after: command.after }),
+                                ...(command.before === undefined ? {} : { before: command.before }),
+                                limit: command.limit ?? 200,
+                            }
+                            : { callIds: [command.callId], limit: 1 },
                     ),
                 );
                 return;

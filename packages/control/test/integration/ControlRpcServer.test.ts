@@ -12,12 +12,15 @@ import {
     MASKED_CONFIG_TOKEN,
     createDefaultControlConfig,
     createError,
+    errorCodes,
     SocketChannel,
     type ClientEvent,
     type ClientStream,
     type Destination,
     type JsonValue,
-    type Peer
+    type Peer,
+    type ToolCallQuery,
+    type ToolCallRecord
 } from "@portable-devshell/shared";
 
 import { ControlRouteComposition } from "../../src/composition/ControlRouteComposition.ts";
@@ -102,6 +105,38 @@ test("ControlSocketServer routes canonical control and instance operations over 
 
     await request(harness.socketPath, asInstanceName("alpha"), "runtime.readLogs", { limit: 1_000 });
     assert.deepEqual(harness.worker.lastReadLogsQuery, { fromSeq: undefined, limit: 100 });
+
+    harness.worker.toolCalls = [1, 2, 3].map((index): ToolCallRecord => ({
+        callId: `large-call-${index}`,
+        inputSummary: `large-call-${index}`,
+        instance: asInstanceName("alpha"),
+        output: { text: "x".repeat(3 * 1024 * 1024) },
+        source: "cli",
+        startedAt: `2026-09-01T00:00:0${index}.000Z`,
+        status: "completed",
+        toolName: "bash_run"
+    }));
+    const boundedToolCalls = await request(harness.socketPath, asInstanceName("alpha"), "tool.listCalls");
+    assert.deepEqual(harness.worker.lastReadToolCallsQuery, { limit: 200 });
+    assert.deepEqual(
+        (boundedToolCalls.payload as ToolCallRecord[]).map((record) => record.callId),
+        ["large-call-2", "large-call-3"]
+    );
+    assert.equal(Buffer.byteLength(JSON.stringify(boundedToolCalls.payload), "utf8") <= 8 * 1024 * 1024, true);
+
+    harness.worker.toolCalls = [{
+        ...harness.worker.toolCalls[0]!,
+        callId: "oversized-call",
+        output: { text: "x".repeat(9 * 1024 * 1024) }
+    }];
+    const oversizedToolCall = await request(
+        harness.socketPath,
+        asInstanceName("alpha"),
+        "tool.listCalls",
+        { callIds: ["oversized-call"], limit: 1 }
+    );
+    assert.equal(oversizedToolCall.error?.code, errorCodes.targetInvalid);
+    assert.match(oversizedToolCall.error?.message ?? "", /safe response size/u);
 
     const toolReply = await request(
         harness.socketPath,
@@ -637,7 +672,9 @@ class FakeWorker {
     #lastSeq = 0;
     #ready = false;
     lastReadLogsQuery?: { fromSeq?: number; limit?: number };
+    lastReadToolCallsQuery?: ToolCallQuery;
     lastToolCall?: { ctxId?: string; requestId?: string; source?: string };
+    toolCalls: ToolCallRecord[] = [];
 
     constructor(name: string) {
         this.#name = name;
@@ -688,8 +725,9 @@ class FakeWorker {
         return { exitCode: 0 };
     }
 
-    readToolCalls() {
-        return [];
+    readToolCalls(query: ToolCallQuery = {}) {
+        this.lastReadToolCallsQuery = query;
+        return this.toolCalls;
     }
 
     listApprovals() {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { errorCodes } from "@portable-devshell/shared";
+import { asInstanceName, errorCodes, type ToolCallRecord } from "@portable-devshell/shared";
 
 import {
     readArtifactShareInput,
@@ -22,6 +22,7 @@ import {
 } from "../../src/instance/runtime/RuntimeRouteInput.ts";
 import { readTodoSubscriptionFromSeq } from "../../src/instance/todo/TodoRouteInput.ts";
 import {
+    limitToolCallResponse,
     readToolApprovalDecision,
     readToolApprovalId,
     readToolCall,
@@ -194,6 +195,9 @@ test("tool route inputs preserve call defaults, filters, and approval metadata",
         toolName: "bash_run",
         workspace: "/workspace"
     });
+    assert.deepEqual(readToolCallQuery(), { limit: 200 });
+    assert.deepEqual(readToolCallQuery({ limit: 0 }), { limit: 1 });
+    assert.deepEqual(readToolCallQuery({ limit: 50_000 }), { limit: 1_000 });
     assert.deepEqual(
         readToolCallQuery({
             after: "2026-01-01",
@@ -242,6 +246,7 @@ test("tool route inputs reject malformed filters and approval decisions", () => 
         () => readToolCallQuery({ callIds: [""] }),
         () => readToolCallQuery({ ctxId: 1 } as never),
         () => readToolCallQuery({ limit: "10" } as never),
+        () => readToolCallQuery({ limit: 1.5 }),
         () => readToolCallQuery({ source: "web" }),
         () => readToolCallQuery({ status: "queued" }),
         () => readToolCallQuery({ toolName: 1 } as never),
@@ -252,6 +257,31 @@ test("tool route inputs reject malformed filters and approval decisions", () => 
     ]) {
         assertTargetInvalid(action);
     }
+});
+
+test("tool call responses stay bounded while preserving pagination direction", () => {
+    const records = [1, 2, 3].map((index): ToolCallRecord => ({
+        callId: `call-${index}`,
+        inputSummary: `call-${index}`,
+        instance: asInstanceName("demo-local"),
+        output: { text: "x".repeat(3 * 1024 * 1024) },
+        source: "cli",
+        startedAt: `2026-09-01T00:00:0${index}.000Z`,
+        status: "completed",
+        toolName: "bash_run",
+    }));
+
+    const newest = limitToolCallResponse(records, { limit: 200 });
+    assert.deepEqual(newest.map((record) => record.callId), ["call-2", "call-3"]);
+    assert.equal(Buffer.byteLength(JSON.stringify(newest), "utf8") <= 8 * 1024 * 1024, true);
+
+    const forward = limitToolCallResponse(records, { after: "call-0", limit: 200 });
+    assert.deepEqual(forward.map((record) => record.callId), ["call-1", "call-2"]);
+    assert.equal(Buffer.byteLength(JSON.stringify(forward), "utf8") <= 8 * 1024 * 1024, true);
+
+    assertTargetInvalid(() => limitToolCallResponse([
+        { ...records[0]!, output: { text: "x".repeat(9 * 1024 * 1024) } }
+    ], { callIds: ["call-1"], limit: 1 }));
 });
 
 function assertTargetInvalid(action: () => unknown): void {

@@ -71,6 +71,7 @@ export function renderCliTopicUsage(topic: CliHelpTopic): string {
             return [
                 "Usage:",
                 "  devshell tool calls <instance> [callId]",
+                "  devshell tool calls <instance> [--limit <n>] [--before <callId>] [--after <callId>]",
             ].join("\n");
         case "todo":
             return [
