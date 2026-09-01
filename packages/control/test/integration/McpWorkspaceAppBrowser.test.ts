@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { chromium, type Browser } from "playwright";
 
-import { workspaceAppHtml } from "@portable-devshell/mcp/testing";
+import { workspaceAppHtml, workspaceAppVersion } from "@portable-devshell/mcp/testing";
 import { chromiumTestOptions } from "../../../../test/TestPlatformSupport.ts";
 
 const CHROMIUM_EXECUTABLE = resolveChromiumExecutable();
@@ -32,6 +32,10 @@ test("Workspace App watches live state and keeps human-action authorization hidd
 
     const app = page.frameLocator("#workspace");
     await app.getByText("Continue the task?", { exact: true }).waitFor({ state: "visible" });
+    assert.deepEqual(await page.evaluate("window.__workspaceAppInfo"), {
+        name: "portable-devshell-workspace",
+        version: workspaceAppVersion,
+    });
     assert.equal(await app.locator("html").getAttribute("data-theme"), "dark");
     assert.equal(
         await app.locator("html").evaluate((element) => element.style.getPropertyValue("--color-text-primary")),
@@ -1000,6 +1004,7 @@ window.__modelMessages = [];
 window.__bridgeEvents = [];
 window.__taskStatus = "in_progress";
 window.__taskRevision = 1;
+window.__workspaceAppInfo = null;
 
 function snapshot(withQuestion) {
     var question = {
@@ -1125,6 +1130,7 @@ window.addEventListener("message", function (event) {
     }
 
     if (message.method === "ui/initialize") {
+        window.__workspaceAppInfo = message.params.appInfo;
         source.postMessage({
             jsonrpc: "2.0",
             method: "ui/notifications/tool-input",

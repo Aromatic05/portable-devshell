@@ -1,8 +1,8 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
-import { McpHost, type McpInstanceGateway } from "@portable-devshell/mcp";
+import {
+    McpHost,
+    resolvePortableDevshellApplicationVersion,
+    type McpInstanceGateway
+} from "@portable-devshell/mcp";
 import type { ControlConfig } from "@portable-devshell/shared";
 
 import type { InstanceRegistry } from "../control/instance/registry/InstanceRegistry.js";
@@ -43,36 +43,9 @@ export class McpRuntimeFactory {
             listenHost: config.mcp.listenHost,
             listenPort: config.mcp.listenPort,
             publicBaseUrl: config.mcp.publicBaseUrl,
-            serverVersion: this.#serverVersion ?? resolveApplicationVersion(),
+            serverVersion: this.#serverVersion ?? resolvePortableDevshellApplicationVersion(),
             storageDir: options?.storageDir,
             workspaceAppLeaseFile: options?.workspaceAppLeaseFile
         });
     }
-}
-
-function resolveApplicationVersion(): string {
-    let directory = dirname(fileURLToPath(import.meta.url));
-    while (true) {
-        const manifestPath = join(directory, "package.json");
-        try {
-            const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
-                name?: unknown;
-                version?: unknown;
-            };
-            if (manifest.name === "portable-devshell") {
-                if (typeof manifest.version !== "string" || manifest.version.length === 0) {
-                    throw new Error(`Application package version is invalid: ${manifestPath}`);
-                }
-                return manifest.version;
-            }
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-                throw error;
-            }
-        }
-        const parent = dirname(directory);
-        if (parent === directory) break;
-        directory = parent;
-    }
-    throw new Error("Cannot locate portable-devshell application package manifest.");
 }

@@ -14,5 +14,6 @@ export type {
     McpInstanceGateway,
     McpSshInstanceCreateInput
 } from "./instance/McpInstanceGateway.js";
+export { resolvePortableDevshellApplicationVersion } from "./version/McpApplicationVersion.js";
 
 export * from "./workspace/WorkspaceAppLeaseStore.js";

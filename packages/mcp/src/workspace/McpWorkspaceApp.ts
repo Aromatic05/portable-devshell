@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { resolvePortableDevshellApplicationVersion } from "../version/McpApplicationVersion.js";
+
 export const workspaceAppStableResourceUri =
     "ui://portable-devshell/workspace/v1.html";
 export const workspaceAppLegacyResourceUris: readonly string[] = [
@@ -44,6 +46,7 @@ export function workspaceAppResourceMetaForPublicBaseUrl(
 }
 
 const workspaceSdkScript = loadWorkspaceSdkScript();
+export const workspaceAppVersion = resolvePortableDevshellApplicationVersion();
 
 export const workspaceAppHtml = String.raw`<!doctype html>
 <html>
@@ -98,7 +101,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var McpApps = globalThis.__portableDevshellMcpApps;
   var App = McpApps.App;
   var app = new App(
-    { name: "portable-devshell-workspace", version: "0.6.8" },
+    { name: "portable-devshell-workspace", version: ${JSON.stringify(workspaceAppVersion)} },
     { availableDisplayModes: ["inline", "pip", "fullscreen"] },
     { autoResize: false }
   );
