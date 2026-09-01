@@ -573,16 +573,29 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     const harness = createWorker({ tools: [tmuxRunBlockTool()] });
     const worker = {
         ...harness.worker,
-        async callTool(toolName: string, input: JsonValue): Promise<JsonValue> {
+        async callTool(
+            toolName: string,
+            input: JsonValue,
+            _context?: ToolCallContext,
+            _signal?: AbortSignal,
+            transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
+            invocationInput?: JsonValue,
+        ): Promise<JsonValue> {
             assert.equal(toolName, "tmux_run");
             assert.deepEqual(input, {
+                command: "sleep 10",
+                timeout: 660_000,
+                wait: "block",
+            });
+            assert.deepEqual(invocationInput, {
                 command: "sleep 10",
                 consumeOutput: false,
                 timeout: 660_000,
                 wait: "nonblock",
             });
             runCalls += 1;
-            return { task: { id: `task-${runCalls}`, status: "running" } };
+            const result = { task: { id: `task-${runCalls}`, status: "running" } } as JsonValue;
+            return transformResult === undefined ? result : await transformResult(result, `call-tmux-run-${runCalls}`);
         },
     };
     type Wait = {
@@ -749,8 +762,9 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     await waitUntil(() => waits[1]?.status === "resolved");
     assert.equal(waits[1]?.status, "resolved");
     assert.equal(waits[1]?.result, terminalResults.get("task-2"));
-    assert.equal(harness.audited.filter((entry) => entry.toolName === "tmux_run").length, 2);
-    assert.equal(harness.auditResults.filter((entry) => entry.toolName === "tmux_run").length, 2);
+    assert.equal(runCalls, 2);
+    assert.equal(harness.audited.filter((entry) => entry.toolName === "tmux_run").length, 0);
+    assert.equal(harness.auditResults.filter((entry) => entry.toolName === "tmux_run").length, 0);
 
     const restoredNow = new Date().toISOString();
     waits.push({
@@ -786,17 +800,31 @@ test("tmux_run block waits are interruptible before handoff and detach after the
 
 test("tmux_read long waits detach into durable Workspace state", async () => {
     let ready = false;
+    let internalReadCalls = 0;
+    let logicalReadCalls = 0;
     const harness = createWorker({ tools: [tmuxReadBlockTool()] });
     const worker = {
         ...harness.worker,
+        async invokeToolInternal(toolName: string, input: JsonValue): Promise<JsonValue> {
+            assert.equal(toolName, "tmux_read");
+            internalReadCalls += 1;
+            return await readTmux(input);
+        },
         async callTool(
             toolName: string,
             input: JsonValue,
             _context?: ToolCallContext,
             _signal?: AbortSignal,
             transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
+            invocationInput?: JsonValue,
         ): Promise<JsonValue> {
             assert.equal(toolName, "tmux_read");
+            logicalReadCalls += 1;
+            const result = await readTmux(invocationInput ?? input);
+            return transformResult === undefined ? result : await transformResult(result, "call-tmux-read");
+        },
+    };
+    const readTmux = async (input: JsonValue): Promise<JsonValue> => {
             const record = input as Record<string, JsonValue>;
             assert.equal(record.task, "task-existing");
             let result: JsonValue;
@@ -813,8 +841,7 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
                     waitReason: "output",
                 };
             }
-            return transformResult === undefined ? result : await transformResult(result, "call-tmux-read");
-        },
+            return result;
     };
     type Wait = WaitRecord;
     const waits: Wait[] = [];
@@ -924,6 +951,8 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
     );
     assert.equal(waits.find((entry) => entry.waitId === "wait-older-detached")?.status, "detached");
 
+    const logicalReadsBeforeWait = logicalReadCalls;
+    const internalReadsBeforeWait = internalReadCalls;
     const result = await dispatch.callTool(
         "tmux_read",
         { ctxId: environment.ctxId, line: 17, task: "task-existing", timeMs: 1_000 },
@@ -936,6 +965,8 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
     assert.equal(replacement?.targetId, "task-existing");
     assert.equal(replacement?.targetInstance, "demo-local");
     assert.deepEqual(replacement?.payload, { line: 17, operation: "read" });
+    assert.equal(logicalReadCalls - logicalReadsBeforeWait, 1);
+    assert.equal(internalReadCalls > internalReadsBeforeWait, true);
 
     ready = true;
     await waitUntil(() => replacement?.status === "resolved");
