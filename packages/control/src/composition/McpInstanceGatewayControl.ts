@@ -137,12 +137,8 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return await this.#requireWait(instance).dismissRecovery(waitId, recoveryMessageId);
     }
 
-    async markWaitRecoveryAttempted(instance: string, waitId: string, claimId: string) {
-        return await this.#requireWait(instance).markRecoveryAttempted(waitId, claimId);
-    }
-
-    async markWaitRecoverySent(instance: string, waitId: string, claimId: string) {
-        return await this.#requireWait(instance).markRecoverySent(waitId, claimId);
+    async markWaitRecoveryAttempted(instance: string, waitId: string, claimId: string, goalProgressEpoch?: number) {
+        return await this.#requireWait(instance).markRecoveryAttempted(waitId, claimId, goalProgressEpoch);
     }
 
     async detachWait(instance: string, waitId: string) {
@@ -210,8 +206,8 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return await this.#requireDescriptor(instance).goal.read(ctxId);
     }
 
-    async recordGoalReentry(instance: string, ctxId: string): Promise<void> {
-        await this.#requireDescriptor(instance).goal.recordReentry(ctxId);
+    async recordGoalReentry(instance: string, ctxId: string, progressEpoch?: number): Promise<void> {
+        await this.#requireDescriptor(instance).goal.recordReentry(ctxId, progressEpoch);
     }
 
     async touchGoal(instance: string, ctxId: string, kind: import("@portable-devshell/shared").GoalActivityKind = "execution"): Promise<void> {

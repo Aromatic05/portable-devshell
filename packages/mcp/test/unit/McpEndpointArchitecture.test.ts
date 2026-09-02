@@ -213,7 +213,6 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
         async claimWaitRecovery(): Promise<WaitRecord> { throw new Error("unused"); },
         async completeWaitRecovery(): Promise<WaitRecord> { throw new Error("unused"); },
         async markWaitRecoveryAttempted(): Promise<WaitRecord> { throw new Error("unused"); },
-        async markWaitRecoverySent(): Promise<WaitRecord> { throw new Error("unused"); },
         async releaseWaitRecovery(): Promise<WaitRecord> { throw new Error("unused"); },
         async dismissWaitRecovery(_instance: string, waitId: string): Promise<WaitRecord> {
             dismissedRecoveries.push(waitId);
@@ -284,7 +283,6 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
         kind: "tmux",
         recoveryMessageAttemptedAt: "2026-08-30T00:00:02.000Z",
         recoveryMessageId: "resume-message-1",
-        recoveryMessageSentAt: "2026-08-30T00:00:03.000Z",
         status: "resolved",
         targetId: "tmux-task-1",
         updatedAt: "2026-08-30T00:00:02.000Z",
@@ -310,7 +308,7 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
     );
     assert.deepEqual(workerResult, { ok: true, toolName: "bash_run" });
     assert.equal((await contextRegistry.readAutomaticReentry(environment.ctxId, "demo-local")).mode, "automatic");
-    assert.equal(recoverableWaits.find((entry) => entry.waitId === "wait-recovery-1")?.status, "consumed");
+    assert.equal(recoverableWaits.find((entry) => entry.waitId === "wait-recovery-1")?.status, "resolved");
     assert.equal(recoverableWaits.find((entry) => entry.waitId === "wait-recovery-raced")?.status, "resolved");
     assert.deepEqual(
         dismissedRecoveries,
@@ -795,21 +793,29 @@ test("tmux_run block waits are interruptible before handoff and detach after the
         waitId: "wait-restored",
     });
     terminalResults.set("task-2", { task: { id: "task-2", status: "1" } });
+    let restoreListCalls = 0;
+    const restartedGateway = {
+        ...(gateway as unknown as Record<string, unknown>),
+        async listWaits() {
+            restoreListCalls += 1;
+            if (restoreListCalls === 1) throw new Error("temporary wait-store read failure");
+            return waits;
+        },
+    } as never;
     const restartedDispatch = new McpEndpointDispatch({
         catalog,
         contextRegistry: new McpContextRegistry(),
-        gateway,
+        gateway: restartedGateway,
         instanceName: "demo-local",
         tmuxBlockSyncMs: 250,
         tmuxWaitPollMs: 1,
         worker,
     });
-    await restartedDispatch.callTool(
-        "environ_info",
-        { workspace: "/workspace/restarted" },
-        { principal: "tester", requestId: "restore-observer" },
-    );
+    await restartedDispatch.restoreTmuxWaits();
+    assert.equal(waits.find((entry) => entry.waitId === "wait-restored")?.status, "detached");
+    await restartedDispatch.restoreTmuxWaits();
     await waitUntil(() => waits.find((entry) => entry.waitId === "wait-restored")?.status === "resolved");
+    assert.equal(restoreListCalls, 2);
     assert.equal(waits.find((entry) => entry.waitId === "wait-restored")?.result, terminalResults.get("task-2"));
 });
 
@@ -933,6 +939,8 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
         createdByCtxId: environment.ctxId,
         detachedAt: observedNow,
         kind: "tmux",
+        recoveryMessageAttemptedAt: observedNow,
+        recoveryMessageId: "recovery-observed",
         resolvedAt: observedNow,
         result: { task: { id: "task-existing", status: "running" }, timedOut: true },
         status: "resolved",
@@ -947,6 +955,11 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
         { principal: "tester", requestId: "read-observed-wait" },
     );
     assert.equal(waits.find((entry) => entry.waitId === "wait-observed")?.status, "consumed");
+    assert.equal(
+        waits.find((entry) => entry.waitId === "wait-observed")?.recoveryMessageAttemptedAt,
+        observedNow,
+        "a precise same-task observation settles an uncertain wake without replaying it",
+    );
     assert.deepEqual(goalActivityKinds.slice(-2), ["observation", "observation"]);
 
     const pendingNow = new Date().toISOString();

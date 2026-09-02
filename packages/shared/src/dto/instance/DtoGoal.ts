@@ -40,6 +40,8 @@ export interface GoalContinuationInput {
     available?: boolean;
     claimId?: string;
     error?: string;
+    goalId?: string;
+    userInitiated?: boolean;
 }
 
 export interface GoalRecord {
@@ -47,6 +49,7 @@ export interface GoalRecord {
     continuationClaimActivityAt?: string;
     continuationClaimedAt?: string;
     continuationClaimId?: string;
+    continuationClaimProgressEpoch?: number;
     continuationCount: number;
     continuationMessageId?: string;
     continuationPending: boolean;
@@ -63,6 +66,8 @@ export interface GoalRecord {
     lastProgressAt: string;
     lastStreakEvaluatedReentryAt?: string;
     noActionStreak: number;
+    progressEpoch?: number;
+    reentryProgressEpoch?: number;
     stagnationStreak: number;
     note?: string;
     objective: string;
@@ -93,6 +98,7 @@ export interface GoalSnapshot {
     lastProgressAt: string;
     lastStreakEvaluatedReentryAt?: string;
     noActionStreak?: number;
+    progressEpoch?: number;
     stagnationStreak?: number;
     /** Compatibility field; 0 means automatic continuation is unbounded. */
     maxContinuations: number;

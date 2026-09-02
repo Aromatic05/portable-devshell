@@ -74,14 +74,13 @@ export interface McpInstanceGateway {
     goalContinuation?(instance: string, input: GoalContinuationInput, ctxId: string): Promise<JsonValue>;
     manageGoal?(instance: string, input: GoalManageInput, ctxId: string): Promise<GoalSnapshot | undefined>;
     readGoal?(instance: string, ctxId: string): Promise<GoalSnapshot | undefined>;
-    recordGoalReentry?(instance: string, ctxId: string): Promise<void>;
+    recordGoalReentry?(instance: string, ctxId: string, progressEpoch?: number): Promise<void>;
     touchGoal?(instance: string, ctxId: string, kind?: GoalActivityKind): Promise<void>;
     createWait?(instance: string, input: WaitCreateInput): Promise<WaitRecord>;
     cancelWait?(instance: string, waitId: string): Promise<WaitRecord>;
     claimWaitRecovery?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
     completeWaitRecovery?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
-    markWaitRecoveryAttempted?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
-    markWaitRecoverySent?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
+    markWaitRecoveryAttempted?(instance: string, waitId: string, claimId: string, goalProgressEpoch?: number): Promise<WaitRecord>;
     detachWait?(instance: string, waitId: string): Promise<WaitRecord>;
     dismissWaitRecovery?(instance: string, waitId: string, recoveryMessageId: string): Promise<WaitRecord>;
     reattachWait?(instance: string, waitId: string, ownerCallId?: string): Promise<WaitRecord>;
@@ -167,7 +166,7 @@ export function isMcpInteractionGateway(
 
 export type McpWaitRecoveryGateway = McpInteractionGateway & Required<Pick<
     McpInstanceGateway,
-    "claimWaitRecovery" | "completeWaitRecovery" | "disableWaitRecovery" | "dismissWaitRecovery" | "markWaitRecoveryAttempted" | "markWaitRecoverySent" | "rejectWaitRecovery" | "releaseWaitRecovery"
+    "claimWaitRecovery" | "completeWaitRecovery" | "disableWaitRecovery" | "dismissWaitRecovery" | "markWaitRecoveryAttempted" | "rejectWaitRecovery" | "releaseWaitRecovery"
 >>;
 
 export function isMcpWaitRecoveryGateway(
@@ -178,7 +177,6 @@ export function isMcpWaitRecoveryGateway(
         gateway.completeWaitRecovery !== undefined &&
         gateway.dismissWaitRecovery !== undefined &&
         gateway.markWaitRecoveryAttempted !== undefined &&
-        gateway.markWaitRecoverySent !== undefined &&
         gateway.rejectWaitRecovery !== undefined &&
         gateway.disableWaitRecovery !== undefined &&
         gateway.releaseWaitRecovery !== undefined;

@@ -262,30 +262,63 @@ test("WaitState atomically completes an accepted recovery delivery", () => {
     assert.equal(completedAfterRetry.record.recoveryClaimId, undefined);
 });
 
-test("WaitState never replays a recovery after the Host accepted it", () => {
-    const state = new WaitState({ waitId: () => "wait-delivered" });
-    let transition = state.create(state.emptyDocument(), {
-        createdByCtxId: "ctx-1",
-        kind: "tmux",
-        targetId: "tmux-task-delivered",
+test("WaitState migrates legacy delivered recovery only when loading persisted state", () => {
+    const state = new WaitState();
+    const legacy = state.normalizeDocument({
+        version: 1,
+        waits: [{
+            createdAt: "2026-08-18T00:00:00.000Z",
+            createdByCtxId: "ctx-1",
+            detachedAt: "2026-08-18T00:00:01.000Z",
+            kind: "tmux",
+            recoveryMessageAttemptedAt: "2026-08-18T00:00:02.000Z",
+            recoveryMessageId: "legacy-delivery",
+            recoveryMessageSentAt: "2026-08-18T00:00:03.000Z",
+            resolvedAt: "2026-08-18T00:00:01.500Z",
+            result: { task: { id: "tmux-task-delivered", status: "0" } },
+            status: "resolved",
+            targetId: "tmux-task-delivered",
+            updatedAt: "2026-08-18T00:00:03.000Z",
+            waitId: "wait-delivered",
+        }],
     });
-    transition = state.detach(transition.document, transition.record.waitId);
-    transition = state.resolve(transition.document, transition.record.waitId, { task: { status: "0" } });
-    transition = state.claimRecovery(transition.document, transition.record.waitId, "claim-1");
-    transition = state.markRecoveryAttempted(transition.document, transition.record.waitId, "claim-1");
-    transition = state.markRecoverySent(transition.document, transition.record.waitId, "claim-1");
-    transition = state.releaseRecovery(transition.document, transition.record.waitId, "claim-1");
 
-    assert.throws(
-        () => state.claimRecovery(transition.document, transition.record.waitId, "claim-2"),
-        /already been delivered/u,
-    );
+    assert.equal(legacy.waits[0]?.status, "resolved");
+    const migrated = state.migrateLoadedDocument(legacy);
+    assert.equal(migrated.waits[0]?.status, "consumed");
+    assert.equal(migrated.waits[0]?.consumedAt, "2026-08-18T00:00:03.000Z");
+    assert.equal(migrated.waits[0]?.recoveryClaimId, undefined);
+});
 
-    const normalized = state.normalizeDocument(transition.document);
-    const delivered = normalized.waits.find((wait) => wait.waitId === transition.record.waitId);
-    assert.equal(delivered?.status, "consumed");
-    assert.equal(delivered?.consumedAt, transition.record.recoveryMessageSentAt);
-    assert.equal(delivered?.recoveryClaimId, undefined);
+test("WaitStore applies delivered-recovery migration on reload but not on ordinary writes", async () => {
+    const root = await createTestTempDirectory("wait-store-delivery-migration-");
+    const filePath = join(root, "waits.json");
+    const state = new WaitState();
+    const store = new WaitStore({ filePath, instanceName: "aromatic-pc", state });
+    const legacy = state.normalizeDocument({
+        version: 1,
+        waits: [{
+            createdAt: "2026-08-18T00:00:00.000Z",
+            createdByCtxId: "ctx-1",
+            detachedAt: "2026-08-18T00:00:01.000Z",
+            kind: "tmux",
+            recoveryMessageAttemptedAt: "2026-08-18T00:00:02.000Z",
+            recoveryMessageId: "legacy-delivery",
+            recoveryMessageSentAt: "2026-08-18T00:00:03.000Z",
+            resolvedAt: "2026-08-18T00:00:01.500Z",
+            status: "resolved",
+            targetId: "tmux-task-delivered",
+            updatedAt: "2026-08-18T00:00:03.000Z",
+            waitId: "wait-delivered",
+        }],
+    });
+
+    await store.write(legacy);
+    assert.equal(store.read().waits[0]?.status, "resolved");
+
+    const reloaded = new WaitStore({ filePath, instanceName: "aromatic-pc", state });
+    assert.equal(reloaded.read().waits[0]?.status, "consumed");
+    assert.equal(reloaded.read().waits[0]?.consumedAt, "2026-08-18T00:00:03.000Z");
 });
 
 test("WaitState fences an ambiguous recovery delivery from automatic replay", () => {
@@ -320,15 +353,11 @@ test("WaitState fences an ambiguous recovery delivery from automatic replay", ()
         /dismiss uncertain recovery/u,
     );
 
-    const claimedAgain = state.claimRecovery(resolved.document, created.record.waitId, "claim-sent");
-    const attemptedAgain = state.markRecoveryAttempted(claimedAgain.document, created.record.waitId, "claim-sent");
-    const sent = state.markRecoverySent(attemptedAgain.document, created.record.waitId, "claim-sent");
-    const settledAfterActivity = state.dismissRecovery(
-        sent.document,
-        created.record.waitId,
-        sent.record.recoveryMessageId!,
-    );
-    assert.equal(settledAfterActivity.record.status, "consumed");
+    const claimedAgain = state.claimRecovery(resolved.document, created.record.waitId, "claim-complete");
+    const attemptedAgain = state.markRecoveryAttempted(claimedAgain.document, created.record.waitId, "claim-complete");
+    const completed = state.completeRecovery(attemptedAgain.document, created.record.waitId, "claim-complete");
+    assert.equal(completed.record.status, "consumed");
+    assert.equal(completed.record.recoveryMessageSentAt, completed.record.consumedAt);
 });
 
 test("WaitState can safely retry a delivery that the Host definitively rejected", () => {

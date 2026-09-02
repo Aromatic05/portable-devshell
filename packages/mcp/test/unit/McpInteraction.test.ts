@@ -852,46 +852,9 @@ test("Workspace task control and detached-wait recovery use durable server state
     assert.equal(attempted.waitId, "wait-recover");
     assert.equal(claimed?.recoveryMessageAttemptedAt, attempted.recoveryMessageAttemptedAt);
 
-    const sent = await handler.call(
-        "workspace_wait_recover",
-        { action: "sent", claimId: recovered.claimId, token, waitId: "wait-recover" },
-        context,
-        "call-recover-sent",
-    ) as { recoveryMessageId: string; recoveryMessageSentAt: string; sent: true; waitId: string };
-    assert.equal(sent.sent, true);
-    assert.equal(sent.waitId, "wait-recover");
-    assert.equal(claimed?.recoveryMessageSentAt, sent.recoveryMessageSentAt);
     assert.deepEqual(await handler.call(
         "workspace_wait_recover",
-        { action: "sent", claimId: recovered.claimId, token, waitId: "wait-recover" },
-        context,
-        "call-recover-sent-again",
-    ), sent);
-
-    await assert.rejects(handler.call(
-        "workspace_wait_recover",
-        { action: "claim", token, waitId: "wait-recover" },
-        context,
-        "call-recover-duplicate",
-    ), /already claimed/u);
-
-    assert.deepEqual(await handler.call(
-        "workspace_wait_recover",
-        { action: "release", claimId: recovered.claimId, token, waitId: "wait-recover" },
-        context,
-        "call-recover-release",
-    ), { released: true, waitId: "wait-recover" });
-    assert.equal(claimed?.recoveryClaimId, undefined);
-
-    const reclaimed = await handler.call(
-        "workspace_wait_recover",
-        { action: "claim", token, waitId: "wait-recover" },
-        context,
-        "call-recover-again",
-    ) as { claimId: string };
-    assert.deepEqual(await handler.call(
-        "workspace_wait_recover",
-        { action: "complete", claimId: reclaimed.claimId, token, waitId: "wait-recover" },
+        { action: "complete", claimId: recovered.claimId, token, waitId: "wait-recover" },
         context,
         "call-recover-complete",
     ), {
@@ -1017,6 +980,9 @@ test("Workspace detached-wait recovery accepts an active Goal without Todo", asy
         createdByCtxId: context.ctxId!,
         detachedAt: now,
         goalId: "goal-recover",
+        goalProgressAt: now,
+        goalProgressEpoch: 0,
+        goalStepId: "work",
         kind: "tmux",
         resolvedAt: now,
         result: { task: { status: "0" } },
@@ -1025,6 +991,9 @@ test("Workspace detached-wait recovery accepts an active Goal without Todo", asy
         updatedAt: now,
         waitId: "wait-goal-recover",
     });
+    let goalProgressAt = now;
+    let goalProgressEpoch = 0;
+    const goalReentryEpochs: Array<number | undefined> = [];
     let goalStatus = "stopped";
     Object.assign(fake.gateway, {
         async goalContinuation() {
@@ -1043,13 +1012,18 @@ test("Workspace detached-wait recovery accepts an active Goal without Todo", asy
                 createdAt: now,
                 goalId: "goal-recover",
                 lastAgentActivityAt: now,
+                lastProgressAt: goalProgressAt,
                 maxContinuations: 10,
                 objective: "Recover Goal work",
+                progressEpoch: goalProgressEpoch,
                 revision: 1,
                 status: goalStatus,
                 steps: [{ id: "work", status: "active", text: "Wait for background work" }],
                 updatedAt: now,
             };
+        },
+        async recordGoalReentry(_instance: string, _ctxId: string, progressEpoch?: number) {
+            goalReentryEpochs.push(progressEpoch);
         },
     });
     const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
@@ -1072,6 +1046,166 @@ test("Workspace detached-wait recovery accepts an active Goal without Todo", asy
     assert.equal(recovered.goalId, "goal-recover");
     assert.equal(recovered.waitId, "wait-goal-recover");
     assert.match(recovered.claimId, /^recovery-/u);
+    goalProgressAt = new Date(Date.parse(now) + 1_000).toISOString();
+    goalProgressEpoch = 1;
+    const attempted = await handler.call(
+        "workspace_wait_recover",
+        { action: "attempt", claimId: recovered.claimId, token, waitId: "wait-goal-recover" },
+        context,
+        "call-goal-recover-attempt",
+    ) as { recoveryGoalProgressEpoch?: number };
+    assert.equal(attempted.recoveryGoalProgressEpoch, 1);
+    await handler.call(
+        "workspace_wait_recover",
+        { action: "complete", claimId: recovered.claimId, token, waitId: "wait-goal-recover" },
+        context,
+        "call-goal-recover-complete",
+    );
+    assert.deepEqual(goalReentryEpochs, [1]);
+    assert.equal(fake.waits.find((entry) => entry.waitId === "wait-goal-recover")?.status, "consumed");
+});
+
+test("Workspace wait recovery completion never attributes an old delivery to a replacement Goal", async () => {
+    const fake = createInteractionGateway();
+    const now = new Date().toISOString();
+    fake.waits.push({
+        createdAt: now,
+        createdByCtxId: context.ctxId!,
+        detachedAt: now,
+        goalId: "goal-old",
+        kind: "tmux",
+        resolvedAt: now,
+        result: { task: { status: "0" } },
+        status: "resolved",
+        targetId: "tmux-old-goal",
+        updatedAt: now,
+        waitId: "wait-old-goal",
+    });
+    let currentGoalId = "goal-old";
+    let reentries = 0;
+    Object.assign(fake.gateway, {
+        async goalContinuation() {
+            return { goal: null };
+        },
+        async manageGoal() {
+            return undefined;
+        },
+        async readGoal() {
+            return {
+                autoContinueExhausted: false,
+                continuationCount: 0,
+                continuationDue: false,
+                continuationDueAt: "2099-01-01T00:00:00.000Z",
+                continuationPending: false,
+                createdAt: now,
+                goalId: currentGoalId,
+                lastAgentActivityAt: now,
+                lastProgressAt: now,
+                maxContinuations: 0,
+                objective: currentGoalId,
+                revision: 1,
+                status: "active",
+                steps: [{ id: "work", status: "active", text: "Work" }],
+                updatedAt: now,
+            };
+        },
+        async recordGoalReentry() {
+            reentries += 1;
+        },
+    });
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
+    const claimed = await handler.call(
+        "workspace_wait_recover",
+        { action: "claim", token, waitId: "wait-old-goal" },
+        context,
+        "call-old-goal-claim",
+    ) as { claimId: string };
+    await handler.call(
+        "workspace_wait_recover",
+        { action: "attempt", claimId: claimed.claimId, token, waitId: "wait-old-goal" },
+        context,
+        "call-old-goal-attempt",
+    );
+
+    currentGoalId = "goal-new";
+    await handler.call(
+        "workspace_wait_recover",
+        { action: "complete", claimId: claimed.claimId, token, waitId: "wait-old-goal" },
+        context,
+        "call-old-goal-complete",
+    );
+
+    assert.equal(reentries, 0);
+    assert.equal(fake.waits.find((entry) => entry.waitId === "wait-old-goal")?.status, "consumed");
+});
+
+test("Workspace legacy wait receipt never covers Goal progress that happened after the wait", async () => {
+    const fake = createInteractionGateway();
+    const waitProgressAt = "2026-08-20T00:00:00.000Z";
+    const currentProgressAt = "2026-08-20T00:01:00.000Z";
+    fake.waits.push({
+        createdAt: waitProgressAt,
+        createdByCtxId: context.ctxId!,
+        detachedAt: waitProgressAt,
+        goalId: "goal-legacy",
+        goalProgressAt: waitProgressAt,
+        goalStepId: "work",
+        kind: "tmux",
+        recoveryClaimId: "legacy-claim",
+        recoveryClaimedAt: currentProgressAt,
+        recoveryMessageAttemptedAt: currentProgressAt,
+        recoveryMessageId: "legacy-message",
+        resolvedAt: currentProgressAt,
+        result: { task: { status: "0" } },
+        status: "resolved",
+        targetId: "tmux-legacy-goal",
+        updatedAt: currentProgressAt,
+        waitId: "wait-legacy-goal",
+    });
+    const recordedEpochs: Array<number | undefined> = [];
+    Object.assign(fake.gateway, {
+        async goalContinuation() {
+            return { goal: null };
+        },
+        async manageGoal() {
+            return undefined;
+        },
+        async readGoal() {
+            return {
+                autoContinueExhausted: false,
+                continuationCount: 0,
+                continuationDue: false,
+                continuationDueAt: "2099-01-01T00:00:00.000Z",
+                continuationPending: false,
+                createdAt: waitProgressAt,
+                goalId: "goal-legacy",
+                lastAgentActivityAt: currentProgressAt,
+                lastProgressAt: currentProgressAt,
+                maxContinuations: 0,
+                objective: "Legacy Goal",
+                progressEpoch: 1,
+                revision: 2,
+                status: "active",
+                steps: [{ id: "work", status: "active", text: "Work" }],
+                updatedAt: currentProgressAt,
+            };
+        },
+        async recordGoalReentry(_instance: string, _ctxId: string, progressEpoch?: number) {
+            recordedEpochs.push(progressEpoch);
+        },
+    });
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
+    await handler.call(
+        "workspace_wait_recover",
+        { action: "complete", claimId: "legacy-claim", token, waitId: "wait-legacy-goal" },
+        context,
+        "call-legacy-goal-complete",
+    );
+
+    assert.deepEqual(recordedEpochs, []);
+    assert.equal(fake.waits.find((entry) => entry.waitId === "wait-legacy-goal")?.status, "consumed");
 });
 
 test("Workspace detached-wait recovery revalidates an associated task before dispatch attempt", async () => {
@@ -1524,6 +1658,44 @@ test("Workspace Goal continuation is unavailable while the current Context still
     assert.equal(continuationInputs[0]?.available, false);
 });
 
+test("Workspace Goal explicit resume uses the durable continuation claim path", async () => {
+    const fake = createInteractionGateway();
+    const continuationInputs: GoalContinuationInput[] = [];
+    Object.assign(fake.gateway, {
+        async goalContinuation(_instance: string, input: GoalContinuationInput) {
+            continuationInputs.push({ ...input });
+            return { claimed: true, claimId: input.claimId, goal: null };
+        },
+        async manageGoal() {
+            return undefined;
+        },
+        async readGoal() {
+            return undefined;
+        },
+    });
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
+
+    await handler.call(
+        "workspace_goal_continue",
+        {
+            action: "claim",
+            available: true,
+            claimId: "explicit-claim",
+            goalId: "goal-explicit-resume",
+            token,
+            userInitiated: true,
+        },
+        context,
+        "call-goal-explicit-claim",
+    );
+
+    assert.equal(continuationInputs.length, 1);
+    assert.equal(continuationInputs[0]?.action, "claim");
+    assert.equal(continuationInputs[0]?.goalId, "goal-explicit-resume");
+    assert.equal(continuationInputs[0]?.userInitiated, true);
+});
+
 test("Workspace Goal continuation rechecks live tool activity before every dispatch phase", async () => {
     const fake = createInteractionGateway();
     const continuationInputs: GoalContinuationInput[] = [];
@@ -1585,6 +1757,7 @@ test("Workspace tool metadata keeps the explicit reopen compatibility tool and a
     const reconnect = definitions.find((definition) => definition.name === "workspace_reconnect");
     const ask = definitions.find((definition) => definition.name === "workspace_ask");
     const goal = definitions.find((definition) => definition.name === "workspace_goal");
+    const goalContinue = definitions.find((definition) => definition.name === "workspace_goal_continue");
     const goalResume = definitions.find((definition) => definition.name === "workspace_goal_resume");
     const goalStop = definitions.find((definition) => definition.name === "workspace_goal_stop");
 
@@ -1597,6 +1770,7 @@ test("Workspace tool metadata keeps the explicit reopen compatibility tool and a
     assert.ok(reconnect);
     assert.ok(ask);
     assert.ok(goal);
+    assert.ok(goalContinue);
     assert.ok(goalResume);
     assert.ok(goalStop);
     assert.deepEqual((reconnect.inputSchema as { required?: string[] }).required, ["token"]);
@@ -1615,7 +1789,13 @@ test("Workspace tool metadata keeps the explicit reopen compatibility tool and a
     const recoveryInputSchema = recover.inputSchema as {
         properties?: { action?: { enum?: string[] } };
     };
-    assert.deepEqual(recoveryInputSchema.properties?.action?.enum, ["claim", "attempt", "sent", "complete", "release", "reject", "dismiss"]);
+    assert.deepEqual(recoveryInputSchema.properties?.action?.enum, ["claim", "attempt", "complete", "release", "reject", "dismiss"]);
+    const goalContinuationInputSchema = goalContinue.inputSchema as {
+        properties?: { action?: { enum?: string[] }; goalId?: unknown; userInitiated?: unknown };
+    };
+    assert.deepEqual(goalContinuationInputSchema.properties?.action?.enum, ["claim", "validate", "attempt", "report", "reset"]);
+    assert.notEqual(goalContinuationInputSchema.properties?.goalId, undefined);
+    assert.notEqual(goalContinuationInputSchema.properties?.userInitiated, undefined);
     const askInputSchema = ask.inputSchema as {
         properties?: Record<string, unknown>;
         required?: string[];
@@ -1776,19 +1956,12 @@ function createInteractionGateway(): {
             record.updatedAt = record.recoveryDismissedAt;
             return structuredClone(record);
         },
-        async markWaitRecoveryAttempted(_instance: string, waitId: string, claimId: string) {
+        async markWaitRecoveryAttempted(_instance: string, waitId: string, claimId: string, goalProgressEpoch?: number) {
             const record = requireWait(waits, waitId);
             if (record.recoveryClaimId !== claimId) throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            if (goalProgressEpoch !== undefined) record.recoveryGoalProgressEpoch = goalProgressEpoch;
             record.recoveryMessageAttemptedAt ??= new Date().toISOString();
             record.updatedAt = record.recoveryMessageAttemptedAt;
-            return structuredClone(record);
-        },
-        async markWaitRecoverySent(_instance: string, waitId: string, claimId: string) {
-            const record = requireWait(waits, waitId);
-            if (record.recoveryClaimId !== claimId) throw new Error(`Wait ${waitId} recovery claim does not match.`);
-            if (record.recoveryMessageAttemptedAt === undefined) throw new Error(`Wait ${waitId} recovery was not marked attempted.`);
-            record.recoveryMessageSentAt ??= new Date().toISOString();
-            record.updatedAt = record.recoveryMessageSentAt;
             return structuredClone(record);
         },
         async releaseWaitRecovery(_instance: string, waitId: string, claimId: string) {
@@ -1819,10 +1992,11 @@ function createInteractionGateway(): {
         async completeWaitRecovery(_instance: string, waitId: string, claimId: string) {
             const record = requireWait(waits, waitId);
             if (record.recoveryClaimId !== claimId) throw new Error(`Wait ${waitId} recovery claim does not match.`);
-            if (record.recoveryMessageSentAt === undefined) throw new Error(`Wait ${waitId} recovery has not been durably marked sent.`);
+            if (record.recoveryMessageAttemptedAt === undefined) throw new Error(`Wait ${waitId} recovery was not marked attempted.`);
             delete record.recoveryClaimId;
             delete record.recoveryClaimedAt;
             record.consumedAt = new Date().toISOString();
+            record.recoveryMessageSentAt = record.consumedAt;
             record.status = "consumed";
             record.updatedAt = record.consumedAt;
             return structuredClone(record);

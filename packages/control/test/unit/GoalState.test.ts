@@ -161,11 +161,21 @@ test("GoalState continuation claims are validated against agent activity and cou
     assert.equal(state.read(document, "ctx-goal")?.continuationCount, 1);
     assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
 
-    now += 1_000;
+    now += GOAL_EXECUTION_LEASE_MS * 10;
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
+
     document = state.touch(document, "ctx-goal").document;
     assert.equal(state.read(document, "ctx-goal")?.continuationCount, 1);
+    now += GOAL_EXECUTION_LEASE_MS * 10;
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
 
+    document = state.manage(document, {
+        action: "update",
+        stepId: "work",
+        text: "Keep working after durable progress",
+    }, "ctx-goal").document;
     now += GOAL_EXECUTION_LEASE_MS + 1;
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, true);
     continuation = state.continuation(document, {
         action: "claim",
         available: true,
@@ -178,7 +188,7 @@ test("GoalState continuation claims are validated against agent activity and cou
         claimId: "claim-rejected",
     }, "ctx-goal");
     document = continuation.document;
-    assert.equal(state.read(document, "ctx-goal")?.continuationCount, 1);
+    assert.equal(state.read(document, "ctx-goal")?.continuationCount, 0);
 
     document = state.manage(document, { action: "block", note: "Need user input" }, "ctx-goal").document;
     assert.equal(state.read(document, "ctx-goal")?.continuationCount, 0);
@@ -186,6 +196,70 @@ test("GoalState continuation claims are validated against agent activity and cou
     assert.equal(state.read(document, "ctx-goal")?.status, "blocked");
     now += GOAL_EXECUTION_LEASE_MS * 2;
     assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
+});
+
+test("GoalState user-initiated resume uses the durable continuation fence without waiting for inactivity", () => {
+    let now = Date.parse("2026-08-20T12:00:00.000Z");
+    const state = new GoalState({ goalId: () => "goal-user-resume", now: () => new Date(now).toISOString() });
+    let document = state.manage(state.emptyDocument(), {
+        action: "start",
+        objective: "Resume immediately",
+        steps: [{ id: "work", status: "active", text: "Continue" }],
+    }, "ctx-goal").document;
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
+
+    let transition = state.continuation(document, {
+        action: "claim",
+        available: true,
+        claimId: "claim-user",
+        goalId: "goal-user-resume",
+        userInitiated: true,
+    }, "ctx-goal");
+    document = transition.document;
+    assert.equal(transition.result.claimed, true);
+
+    transition = state.continuation(document, {
+        action: "attempt",
+        claimId: "claim-user",
+        goalId: "goal-user-resume",
+        userInitiated: true,
+    }, "ctx-goal");
+    document = transition.document;
+    assert.equal(state.read(document, "ctx-goal")?.continuationUncertain, true);
+
+    now += GOAL_EXECUTION_LEASE_MS * 10;
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
+
+    transition = state.continuation(document, {
+        accepted: true,
+        action: "report",
+        claimId: "claim-user",
+        goalId: "goal-user-resume",
+        userInitiated: true,
+    }, "ctx-goal");
+    document = transition.document;
+    assert.equal(state.read(document, "ctx-goal")?.continuationPending, false);
+    assert.equal(state.read(document, "ctx-goal")?.continuationCount, 1);
+});
+
+test("GoalState continuation claim is fenced by stable goal identity", () => {
+    const state = new GoalState({ goalId: () => "goal-current" });
+    const started = state.manage(state.emptyDocument(), {
+        action: "start",
+        objective: "Current Goal",
+        steps: [{ id: "work", status: "active", text: "Work" }],
+    }, "ctx-goal");
+
+    const stale = state.continuation(started.document, {
+        action: "claim",
+        available: true,
+        claimId: "claim-stale",
+        goalId: "goal-old",
+        userInitiated: true,
+    }, "ctx-goal");
+    assert.equal(stale.result.claimed, false);
+    assert.equal((stale.result.goal as { goalId?: string } | undefined)?.goalId, "goal-current");
+    assert.equal(state.read(stale.document, "ctx-goal")?.continuationPending, false);
 });
 
 test("GoalState separates agent activity from durable Goal progress", () => {
@@ -214,6 +288,8 @@ test("GoalState separates agent activity from durable Goal progress", () => {
     document = state.touch(document, "ctx-goal").document;
     assert.equal(state.read(document, "ctx-goal")?.continuationCount, 1);
     assert.equal(state.read(document, "ctx-goal")?.lastProgressAt, progressAt);
+    now += GOAL_EXECUTION_LEASE_MS * 10;
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
 
     now += 1_000;
     document = state.manage(document, { action: "update", note: "Status only" }, "ctx-goal").document;
@@ -279,11 +355,8 @@ test("GoalState distinguishes observation, execution, re-entry, and durable prog
     transition = state.continuation(document, { action: "claim", available: true, claimId: "claim-2" }, "ctx-goal");
     document = transition.document;
     snapshot = state.read(document, "ctx-goal")!;
-    assert.equal(snapshot.noActionStreak, 1);
-    transition = state.continuation(document, { action: "attempt", claimId: "claim-2" }, "ctx-goal");
-    document = transition.document;
-    transition = state.continuation(document, { accepted: true, action: "report", claimId: "claim-2" }, "ctx-goal");
-    document = transition.document;
+    assert.equal(transition.result.claimed, false);
+    assert.equal(snapshot.noActionStreak, 0);
 
     now += 1_000;
     document = state.touch(document, "ctx-goal", "mutation").document;
@@ -295,8 +368,9 @@ test("GoalState distinguishes observation, execution, re-entry, and durable prog
     transition = state.continuation(document, { action: "claim", available: true, claimId: "claim-3" }, "ctx-goal");
     document = transition.document;
     snapshot = state.read(document, "ctx-goal")!;
+    assert.equal(transition.result.claimed, false);
     assert.equal(snapshot.noActionStreak, 0);
-    assert.equal(snapshot.stagnationStreak, 1);
+    assert.equal(snapshot.stagnationStreak, 0);
 
     now += 1_000;
     document = state.manage(document, { action: "update", status: "completed", stepId: "work" }, "ctx-goal").document;
@@ -325,9 +399,40 @@ test("GoalState records an external wait wake as re-entry without faking Agent a
     assert.equal(snapshot.continuationDue, false);
 
     now += GOAL_EXECUTION_LEASE_MS + 1;
-    document = state.continuation(document, { action: "claim", available: true, claimId: "claim-after-wait" }, "ctx-goal").document;
+    const claim = state.continuation(document, { action: "claim", available: true, claimId: "claim-after-wait" }, "ctx-goal");
+    document = claim.document;
     snapshot = state.read(document, "ctx-goal")!;
-    assert.equal(snapshot.noActionStreak, 1);
+    assert.equal(claim.result.claimed, false);
+    assert.equal(snapshot.noActionStreak, 0);
+});
+
+test("GoalState re-arms from progress epoch even when progress and re-entry share a timestamp", () => {
+    let now = Date.parse("2026-08-20T12:00:00.000Z");
+    const state = new GoalState({ goalId: () => "goal-progress-epoch", now: () => new Date(now).toISOString() });
+    let document = state.manage(state.emptyDocument(), {
+        action: "start",
+        objective: "Track causal progress",
+        steps: [{ id: "work", status: "active", text: "Do work" }],
+    }, "ctx-goal").document;
+
+    now += GOAL_EXECUTION_LEASE_MS + 1;
+    let continuation = state.continuation(document, { action: "claim", available: true, claimId: "claim-epoch" }, "ctx-goal");
+    document = continuation.document;
+    continuation = state.continuation(document, { action: "attempt", claimId: "claim-epoch" }, "ctx-goal");
+    document = continuation.document;
+    continuation = state.continuation(document, { accepted: true, action: "report", claimId: "claim-epoch" }, "ctx-goal");
+    document = continuation.document;
+
+    document = state.manage(document, {
+        action: "update",
+        stepId: "work",
+        text: "Do work with real progress",
+    }, "ctx-goal").document;
+    const sameTimestamp = state.read(document, "ctx-goal")!;
+    assert.equal(sameTimestamp.lastProgressAt, sameTimestamp.lastReentryAt);
+
+    now += GOAL_EXECUTION_LEASE_MS + 1;
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, true);
 });
 
 test("GoalState user pause fences continuation until an explicit user resume", () => {
@@ -419,6 +524,56 @@ test("GoalState clears ambiguous delivery after definitive Host rejection or obs
     assert.equal(observed.result?.continuationUncertain, false);
     assert.equal(observed.result?.continuationPending, false);
     assert.equal(observed.result?.continuationDue, false);
+});
+
+test("GoalState treats Agent activity after dispatch attempt as accepted delivery evidence", () => {
+    let now = Date.parse("2026-08-20T12:00:00.000Z");
+    const state = new GoalState({ goalId: () => "goal-fast-activity", now: () => new Date(now).toISOString() });
+    let document = state.manage(state.emptyDocument(), {
+        action: "start",
+        objective: "Settle a fast accepted wake",
+        steps: [{ id: "work", status: "active", text: "Work" }],
+    }, "ctx-goal").document;
+    now += GOAL_EXECUTION_LEASE_MS + 1;
+    let transition = state.continuation(document, { action: "claim", available: true, claimId: "claim-fast" }, "ctx-goal");
+    document = transition.document;
+    transition = state.continuation(document, { action: "attempt", claimId: "claim-fast" }, "ctx-goal");
+    document = transition.document;
+
+    now += 1;
+    const observed = state.touch(document, "ctx-goal", "execution");
+    document = observed.document;
+    assert.equal(observed.result?.continuationUncertain, false);
+    assert.equal(observed.result?.continuationPending, false);
+    assert.equal(observed.result?.continuationCount, 1);
+    assert.equal(observed.result?.lastReentryAt, new Date(now).toISOString());
+
+    now += GOAL_EXECUTION_LEASE_MS * 10;
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
+});
+
+test("GoalState accepted receipt covers only the progress epoch visible to that delivery", () => {
+    let now = Date.parse("2026-08-20T12:00:00.000Z");
+    const state = new GoalState({ goalId: () => "goal-causal-receipt", now: () => new Date(now).toISOString() });
+    let document = state.manage(state.emptyDocument(), {
+        action: "start",
+        objective: "Keep later progress visible",
+        steps: [{ id: "work", status: "active", text: "Initial work" }],
+    }, "ctx-goal").document;
+    document = state.manage(document, {
+        action: "update",
+        stepId: "work",
+        text: "New progress after the old delivery was prepared",
+    }, "ctx-goal").document;
+    assert.equal(state.read(document, "ctx-goal")?.progressEpoch, 1);
+
+    document = state.reentry(document, "ctx-goal", 0).document;
+    now += GOAL_EXECUTION_LEASE_MS + 1;
+    assert.equal(state.read(document, "ctx-goal")?.continuationDue, true);
+    assert.throws(
+        () => state.reentry(document, "ctx-goal", 2),
+        /progress epoch 2 is invalid for current epoch 1/u,
+    );
 });
 
 test("GoalState never exhausts an actionable Goal solely because wake attempts accumulated", () => {

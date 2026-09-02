@@ -84,9 +84,7 @@ export async function readWorkspaceSnapshot(
             ) || (
                 (wait.kind === "tmux" || wait.kind === "question") &&
                 wait.status === "resolved" && wait.detachedAt !== undefined &&
-                wait.recoveryMessageSentAt === undefined &&
-                (wait.recoveryDisabledAt === undefined ||
-                    (wait.recoveryMessageAttemptedAt !== undefined && wait.recoveryMessageSentAt === undefined))
+                (wait.recoveryDisabledAt === undefined || wait.recoveryMessageAttemptedAt !== undefined)
             ))
             .map((wait) => ({
                 ...(wait.automaticRecovery === undefined ? {} : { automaticRecovery: wait.automaticRecovery }),
@@ -99,9 +97,6 @@ export async function readWorkspaceSnapshot(
                 ...(wait.recoveryDisabledAt === undefined ? {} : { recoveryDisabledAt: wait.recoveryDisabledAt }),
                 ...(wait.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: wait.recoveryMessageAttemptedAt }),
                 ...(wait.recoveryMessageId === undefined ? {} : { recoveryMessageId: wait.recoveryMessageId }),
-                ...(wait.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: wait.recoveryMessageSentAt }),
-                ...(wait.recoveryRetryAfter === undefined ? {} : { recoveryRetryAfter: wait.recoveryRetryAfter }),
-                ...(wait.recoveryRetryCount === undefined ? {} : { recoveryRetryCount: wait.recoveryRetryCount }),
                 ...(wait.result === undefined ? {} : { result: wait.result }),
                 status: wait.status,
                 ...(wait.targetInstance === undefined ? {} : { targetInstance: wait.targetInstance }),

@@ -34,7 +34,9 @@ export class WaitStore {
     #load(): WaitDocument {
         if (!existsSync(this.#filePath)) return this.#state.emptyDocument();
         try {
-            const document = this.#state.normalizeDocument(JSON.parse(readFileSync(this.#filePath, "utf8")) as unknown);
+            const document = this.#state.migrateLoadedDocument(
+                this.#state.normalizeDocument(JSON.parse(readFileSync(this.#filePath, "utf8")) as unknown),
+            );
             const detachedAt = new Date().toISOString();
             return {
                 ...document,
