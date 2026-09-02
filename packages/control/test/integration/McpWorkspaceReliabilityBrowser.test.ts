@@ -1538,10 +1538,6 @@ window.addEventListener("message", function (event) {
             reply({ structuredContent: { rejected: true, waitId: "wait-model-context" } });
             return;
         }
-        if (call.arguments.action === "sent") {
-            reply({ structuredContent: { recoveryMessageSentAt: "2026-08-30T00:00:03.000Z", sent: true, waitId: "wait-model-context" } });
-            return;
-        }
         if (call.arguments.action === "complete") {
             reply({ structuredContent: { completed: true, kind: "question", targetId: "question-model-context", waitId: "wait-model-context" } });
         }

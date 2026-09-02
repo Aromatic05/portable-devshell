@@ -200,7 +200,6 @@ export class McpEndpointDispatch {
             if (goalActivity !== undefined) {
                 await this.#contextRegistry.observeAutomaticReentryActivity(context.ctxId, this.#instanceName, goalActivity).catch(() => undefined);
                 await this.#gateway?.touchGoal?.(this.#instanceName, context.ctxId, goalActivity);
-                await this.#consumeRecoveredWaitsForActivity(context.ctxId, toolName, routed.input, goalActivity);
             }
         }
 
@@ -292,30 +291,6 @@ export class McpEndpointDispatch {
         }
     }
 
-    async #consumeRecoveredWaitsForActivity(
-        ctxId: string,
-        toolName: string,
-        input: JsonValue,
-        activity: GoalActivityKind,
-    ): Promise<void> {
-        const listWaits = this.#gateway?.listWaits;
-        const consumeWait = this.#gateway?.consumeWait;
-        if (listWaits === undefined || consumeWait === undefined) return;
-        const observedTmuxTask = activity === "observation" && toolName === "tmux_read"
-            ? readTmuxReadTask(input)
-            : undefined;
-        if (activity === "observation" && observedTmuxTask === undefined) return;
-        const waits = await listWaits.call(this.#gateway, this.#instanceName);
-        for (const wait of waits) {
-            if (
-                wait.createdByCtxId !== ctxId || wait.status !== "resolved" || wait.detachedAt === undefined ||
-                wait.recoveryMessageSentAt === undefined
-            ) continue;
-            if (observedTmuxTask !== undefined && (wait.kind !== "tmux" || wait.targetId !== observedTmuxTask)) continue;
-            await consumeWait.call(this.#gateway, this.#instanceName, wait.waitId).catch(() => undefined);
-        }
-    }
-
     async #callTmuxRead(
         input: JsonValue,
         context: ToolCallContext,
@@ -381,7 +356,12 @@ export class McpEndpointDispatch {
             automaticRecovery: taskAssociation.kind !== "ambiguous",
             createdByCtxId: context.ctxId,
             deadlineAt: new Date(startedAt + timeout).toISOString(),
-            ...(goal === undefined ? {} : { goalId: goal.goalId, goalProgressAt: goal.lastProgressAt, goalRevision: goal.revision }),
+            ...(goal === undefined ? {} : {
+                goalId: goal.goalId,
+                goalProgressAt: goal.lastProgressAt,
+                ...(goal.progressEpoch === undefined ? {} : { goalProgressEpoch: goal.progressEpoch }),
+                goalRevision: goal.revision,
+            }),
             ...(goalStep === undefined ? {} : { goalStepId: goalStep.id }),
             kind: "tmux",
             ownerCallId: callId,
@@ -536,7 +516,12 @@ export class McpEndpointDispatch {
             automaticRecovery: taskAssociation.kind !== "ambiguous",
             createdByCtxId: context.ctxId,
             ...(timeout === undefined ? {} : { deadlineAt: new Date(startedAt + timeout).toISOString() }),
-            ...(goal === undefined ? {} : { goalId: goal.goalId, goalProgressAt: goal.lastProgressAt, goalRevision: goal.revision }),
+            ...(goal === undefined ? {} : {
+                goalId: goal.goalId,
+                goalProgressAt: goal.lastProgressAt,
+                ...(goal.progressEpoch === undefined ? {} : { goalProgressEpoch: goal.progressEpoch }),
+                goalRevision: goal.revision,
+            }),
             ...(goalStep === undefined ? {} : { goalStepId: goalStep.id }),
             kind: "tmux",
             ownerCallId: callId,
@@ -781,9 +766,17 @@ export class McpEndpointDispatch {
                     );
                 }
             }
-        })().catch(() => undefined);
+        })();
         this.#tmuxWaitRestores.set(instance, restore);
-        await restore;
+        try {
+            await restore;
+        } catch {
+            // Restoration is opportunistic and must not fail unrelated tool calls.
+        } finally {
+            if (this.#tmuxWaitRestores.get(instance) === restore) {
+                this.#tmuxWaitRestores.delete(instance);
+            }
+        }
     }
 
     async #trackTmuxTask(
@@ -893,9 +886,7 @@ export class McpEndpointDispatch {
                 (wait.targetInstance ?? this.#instanceName) !== targetInstance
             ) continue;
             if (wait.status === "resolved" && wait.detachedAt !== undefined) {
-                if (wait.recoveryMessageAttemptedAt === undefined) {
-                    await gateway.consumeWait(this.#instanceName, wait.waitId).catch(() => undefined);
-                }
+                await gateway.consumeWait(this.#instanceName, wait.waitId).catch(() => undefined);
                 continue;
             }
             if (wait.status !== "detached") continue;

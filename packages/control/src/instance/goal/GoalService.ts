@@ -65,10 +65,10 @@ export class GoalService {
         });
     }
 
-    async recordReentry(ctxId: string): Promise<void> {
+    async recordReentry(ctxId: string, progressEpoch?: number): Promise<void> {
         await this.#runExclusive(async () => {
             const before = this.#store.read();
-            const transition = this.#state.reentry(before, ctxId);
+            const transition = this.#state.reentry(before, ctxId, progressEpoch);
             await this.#persist(before, transition, ctxId);
         });
     }

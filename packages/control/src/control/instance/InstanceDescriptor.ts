@@ -43,7 +43,7 @@ export interface InstanceGoalPort {
     stopAll(): Promise<GoalSnapshot[]>;
     manage(ctxId: string, input: GoalManageInput): Promise<GoalSnapshot | undefined>;
     read(ctxId: string): Promise<GoalSnapshot | undefined>;
-    recordReentry(ctxId: string): Promise<void>;
+    recordReentry(ctxId: string, progressEpoch?: number): Promise<void>;
     touch(ctxId: string, kind?: GoalActivityKind): Promise<void>;
 }
 
@@ -58,8 +58,7 @@ export interface InstanceWaitPort {
     dismissRecovery(waitId: string, recoveryMessageId: string): Promise<WaitRecord>;
     get(waitId: string): Promise<WaitRecord | undefined>;
     list(taskId?: string): Promise<WaitRecord[]>;
-    markRecoveryAttempted(waitId: string, claimId: string): Promise<WaitRecord>;
-    markRecoverySent(waitId: string, claimId: string): Promise<WaitRecord>;
+    markRecoveryAttempted(waitId: string, claimId: string, goalProgressEpoch?: number): Promise<WaitRecord>;
     reattach(waitId: string, ownerCallId?: string): Promise<WaitRecord>;
     rejectRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
     releaseRecovery(waitId: string, claimId: string): Promise<WaitRecord>;

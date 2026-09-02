@@ -225,12 +225,12 @@ export class McpToolCatalogInteraction {
         },
         {
             _meta: appOnlyMeta,
-            description: "Manage one detached-wait model re-entry with durable delivery fencing: claim, mark the outbound attempt before host dispatch, mark a confirmed send, complete, safely release before dispatch, or explicitly dismiss an uncertain delivery after human reconciliation. App-only recovery helper; models must not call it.",
+            description: "Manage one detached-wait model re-entry with durable delivery fencing: claim, mark the outbound attempt before host dispatch, atomically complete an accepted send, safely release before dispatch, reject a definitively rejected send, or explicitly dismiss an uncertain delivery after human reconciliation. App-only recovery helper; models must not call it.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
-                    action: { enum: ["claim", "attempt", "sent", "complete", "release", "reject", "dismiss"], type: "string" },
+                    action: { enum: ["claim", "attempt", "complete", "release", "reject", "dismiss"], type: "string" },
                     claimId: { minLength: 1, type: "string" },
                     recoveryMessageId: { minLength: 1, type: "string" },
                     token: { minLength: 1, type: "string" },
@@ -245,7 +245,7 @@ export class McpToolCatalogInteraction {
         },
         {
             _meta: appOnlyMeta,
-            description: "Manage automatic Workspace Goal continuation with durable delivery fencing. App-only helper; models must not call it.",
+            description: "Manage automatic and user-initiated Workspace Goal continuation with one durable delivery fence. App-only helper; models must not call it.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
@@ -255,7 +255,9 @@ export class McpToolCatalogInteraction {
                     available: { type: "boolean" },
                     claimId: { maxLength: 128, minLength: 1, type: "string" },
                     error: { maxLength: 2000, minLength: 1, type: "string" },
+                    goalId: { minLength: 1, type: "string" },
                     token: { minLength: 1, type: "string" },
+                    userInitiated: { type: "boolean" },
                 },
                 required: ["action", "token"],
                 type: "object",

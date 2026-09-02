@@ -670,27 +670,26 @@ export class McpEndpointHandlerInteraction {
         }
         if (recovery.action === "attempt") {
             await this.#assertWaitRecoveryAssociationAvailable(gateway, wait, context);
-            const attempted = await gateway.markWaitRecoveryAttempted(this.options.instanceName, waitId, recovery.claimId);
+            let goalProgressEpoch: number | undefined;
+            if (wait.goalId !== undefined) {
+                const goalGateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
+                const current = await goalGateway.readGoal(this.options.instanceName, requireCtxId(context));
+                if (current?.goalId === wait.goalId && Number.isSafeInteger(current.progressEpoch)) {
+                    goalProgressEpoch = current.progressEpoch;
+                }
+            }
+            const attempted = await gateway.markWaitRecoveryAttempted(
+                this.options.instanceName,
+                waitId,
+                recovery.claimId,
+                goalProgressEpoch,
+            );
             return {
                 attempted: true,
+                ...(attempted.recoveryGoalProgressEpoch === undefined ? {} : { recoveryGoalProgressEpoch: attempted.recoveryGoalProgressEpoch }),
                 ...(attempted.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: attempted.recoveryMessageAttemptedAt }),
                 ...(attempted.recoveryMessageId === undefined ? {} : { recoveryMessageId: attempted.recoveryMessageId }),
                 waitId: attempted.waitId,
-            };
-        }
-        if (recovery.action === "sent") {
-            const sent = await gateway.markWaitRecoverySent(this.options.instanceName, waitId, recovery.claimId);
-            if (sent.goalId !== undefined && this.options.gateway?.recordGoalReentry !== undefined) {
-                await this.options.gateway.recordGoalReentry(this.options.instanceName, requireCtxId(context));
-            }
-            return {
-                ...(sent.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: sent.recoveryMessageAttemptedAt }),
-                ...(sent.recoveryMessageId === undefined ? {} : { recoveryMessageId: sent.recoveryMessageId }),
-                ...(sent.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: sent.recoveryMessageSentAt }),
-                ...(sent.recoveryRetryAfter === undefined ? {} : { recoveryRetryAfter: sent.recoveryRetryAfter }),
-                ...(sent.recoveryRetryCount === undefined ? {} : { recoveryRetryCount: sent.recoveryRetryCount }),
-                sent: true,
-                waitId: sent.waitId,
             };
         }
         if (recovery.action === "release") {
@@ -702,6 +701,24 @@ export class McpEndpointHandlerInteraction {
             return { rejected: true, waitId };
         }
         if (recovery.action === "complete") {
+            if (wait.goalId !== undefined && this.options.gateway?.recordGoalReentry !== undefined) {
+                const goalGateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
+                const current = await goalGateway.readGoal(this.options.instanceName, requireCtxId(context));
+                if (current?.goalId === wait.goalId) {
+                    const progressEpoch = wait.recoveryGoalProgressEpoch ?? (
+                        wait.goalProgressAt !== undefined && current.lastProgressAt === wait.goalProgressAt
+                            ? current.progressEpoch
+                            : undefined
+                    );
+                    if (progressEpoch !== undefined) {
+                        await this.options.gateway.recordGoalReentry(
+                            this.options.instanceName,
+                            requireCtxId(context),
+                            progressEpoch,
+                        );
+                    }
+                }
+            }
             const consumed = await gateway.completeWaitRecovery(this.options.instanceName, waitId, recovery.claimId);
             return {
                 completed: true,
@@ -720,9 +737,6 @@ export class McpEndpointHandlerInteraction {
             ...(claimed.result === undefined ? {} : { result: claimed.result }),
             ...(claimed.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: claimed.recoveryMessageAttemptedAt }),
             ...(claimed.recoveryMessageId === undefined ? {} : { recoveryMessageId: claimed.recoveryMessageId }),
-            ...(claimed.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: claimed.recoveryMessageSentAt }),
-            ...(claimed.recoveryRetryAfter === undefined ? {} : { recoveryRetryAfter: claimed.recoveryRetryAfter }),
-            ...(claimed.recoveryRetryCount === undefined ? {} : { recoveryRetryCount: claimed.recoveryRetryCount }),
             ...(claimed.taskId === undefined ? {} : { taskId: claimed.taskId }),
             targetId: claimed.targetId,
             waitId: claimed.waitId,
@@ -873,6 +887,8 @@ function readGoalContinuationInput(input: JsonValue): GoalContinuationInput {
         ...(typeof record.available === "boolean" ? { available: record.available } : {}),
         ...(typeof record.claimId === "string" ? { claimId: record.claimId } : {}),
         ...(typeof record.error === "string" ? { error: record.error } : {}),
+        ...(typeof record.goalId === "string" ? { goalId: record.goalId } : {}),
+        ...(typeof record.userInitiated === "boolean" ? { userInitiated: record.userInitiated } : {}),
     };
 }
 
@@ -959,7 +975,7 @@ function readWaitId(input: JsonValue, toolName: string): string {
 function readWaitRecovery(input: JsonValue):
     | { action: "claim"; waitId: string }
     | { action: "dismiss"; recoveryMessageId: string; waitId: string }
-    | { action: "attempt" | "complete" | "release" | "reject" | "sent"; claimId: string; waitId: string } {
+    | { action: "attempt" | "complete" | "release" | "reject"; claimId: string; waitId: string } {
     const record = asRecord(input);
     if (record === undefined) throw new Error("workspace_wait_recover requires an object input.");
     const action = record.action;
@@ -968,7 +984,7 @@ function readWaitRecovery(input: JsonValue):
     if (action === "dismiss") {
         return { action, recoveryMessageId: text(record.recoveryMessageId, "recoveryMessageId"), waitId };
     }
-    if (action === "attempt" || action === "complete" || action === "release" || action === "reject" || action === "sent") {
+    if (action === "attempt" || action === "complete" || action === "release" || action === "reject") {
         return { action, claimId: text(record.claimId, "claimId"), waitId };
     }
     throw new Error("action must be claim, attempt, sent, complete, release, reject, or dismiss.");

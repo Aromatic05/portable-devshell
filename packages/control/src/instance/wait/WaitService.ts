@@ -82,17 +82,10 @@ export class WaitService {
         );
     }
 
-    async markRecoveryAttempted(waitId: string, claimId: string): Promise<WaitRecord> {
+    async markRecoveryAttempted(waitId: string, claimId: string, goalProgressEpoch?: number): Promise<WaitRecord> {
         return await this.#commit(
             "wait.recoveryMessageAttempted",
-            (document) => this.#state.markRecoveryAttempted(document, waitId, claimId),
-        );
-    }
-
-    async markRecoverySent(waitId: string, claimId: string): Promise<WaitRecord> {
-        return await this.#commit(
-            "wait.recoveryMessageSent",
-            (document) => this.#state.markRecoverySent(document, waitId, claimId),
+            (document) => this.#state.markRecoveryAttempted(document, waitId, claimId, goalProgressEpoch),
         );
     }
 

@@ -196,8 +196,9 @@ export class GoalState {
         if (current.status !== "active") return { document, result: snapshot(current, this.#now()) };
         const now = this.#now();
         const executionEvidence = kind !== "observation";
+        const settled = settleAttemptedReentry(current, now);
         const next = {
-            ...clearContinuation(current),
+            ...settled,
             lastAgentActivityAt: now,
             ...(executionEvidence ? { lastExecutionAt: now, noActionStreak: 0 } : {}),
         };
@@ -206,14 +207,22 @@ export class GoalState {
         return { document: { goals, version: 1 }, result: snapshot(next, now) };
     }
 
-    reentry(document: GoalDocument, ctxId: string): GoalTransition {
+    reentry(document: GoalDocument, ctxId: string, progressEpoch?: number): GoalTransition {
         const index = document.goals.findIndex((goal) => goal.createdByCtxId === ctxId);
         if (index === -1) return { document, result: undefined };
         const current = document.goals[index]!;
         if (current.status !== "active") return { document, result: snapshot(current, this.#now()) };
         const now = this.#now();
+        const coveredProgressEpoch = validateReentryProgressEpoch(current, progressEpoch);
+        if (current.reentryProgressEpoch !== undefined && coveredProgressEpoch <= current.reentryProgressEpoch) {
+            return { document, result: snapshot(current, now) };
+        }
         const evaluated = evaluatePreviousReentry(current);
-        const next = { ...evaluated, lastReentryAt: now };
+        const next = {
+            ...evaluated,
+            lastReentryAt: now,
+            reentryProgressEpoch: coveredProgressEpoch,
+        };
         const goals = [...document.goals];
         goals[index] = next;
         return { document: { goals, version: 1 }, result: snapshot(next, now) };
@@ -232,6 +241,12 @@ export class GoalState {
         }
         const now = this.#now();
         const current = expireStaleClaim(document.goals[index]!, now);
+        if (input.goalId !== undefined && input.goalId !== current.goalId) {
+            const goal = snapshot(current, now);
+            if (input.action === "claim") return { document, result: { claimed: false, goal } };
+            if (input.action === "validate") return { document, result: { goal, valid: false } };
+            throw new Error(`Workspace Goal changed from ${input.goalId} to ${current.goalId}; refresh before retrying.`);
+        }
         let next = current;
         let result: Record<string, unknown>;
 
@@ -248,7 +263,10 @@ export class GoalState {
         } else if (input.action === "claim") {
             const claimId = requiredText(input.claimId, "claimId", 128);
             const state = snapshot(current, now);
-            if (input.available === false || !state.continuationDue) {
+            const eligible = input.userInitiated === true
+                ? current.status === "active" && hasActionableStep(current.steps) && !state.continuationPending
+                : state.continuationDue;
+            if (input.available === false || !eligible) {
                 result = { claimed: false, goal: state };
             } else {
                 const evaluated = evaluatePreviousReentry(current);
@@ -257,6 +275,7 @@ export class GoalState {
                     continuationClaimActivityAt: evaluated.lastAgentActivityAt,
                     continuationClaimedAt: now,
                     continuationClaimId: claimId,
+                    continuationClaimProgressEpoch: goalProgressEpoch(evaluated),
                     continuationMessageId: `goal-message-${randomUUID()}`,
                     continuationPending: true,
                 };
@@ -304,7 +323,11 @@ export class GoalState {
                 ...clearContinuation(current),
                 continuationCount: current.continuationCount + (input.accepted ? 1 : 0),
                 ...(input.accepted
-                    ? { continuationRetryAfter: undefined, lastReentryAt: now }
+                    ? {
+                        continuationRetryAfter: undefined,
+                        lastReentryAt: now,
+                        reentryProgressEpoch: current.continuationClaimProgressEpoch ?? goalProgressEpoch(current),
+                    }
                     : { continuationRetryAfter: new Date(Date.parse(now) + GOAL_CONTINUATION_RETRY_MS).toISOString() }),
             };
             result = { goal: snapshot(next, now) };
@@ -348,6 +371,7 @@ export class GoalState {
             lastProgressAt: now,
             noActionStreak: 0,
             objective: requiredText(input.objective, "objective", GOAL_OBJECTIVE_LIMIT),
+            progressEpoch: 0,
             revision: 1,
             stagnationStreak: 0,
             status: allStepsTerminal(steps) ? "completed" : "active",
@@ -366,6 +390,7 @@ function isTerminalGoal(goal: GoalRecord): boolean {
 }
 
 function updateGoal(current: GoalRecord, input: GoalManageInput, now: string): GoalRecord {
+    const settled = settleAttemptedReentry(current, now);
     let steps = current.steps.map((step) => ({ ...step }));
     if (input.steps !== undefined) steps = normalizeSteps(input.steps, true);
     if (input.stepId !== undefined) {
@@ -389,7 +414,7 @@ function updateGoal(current: GoalRecord, input: GoalManageInput, now: string): G
         : requiredText(input.objective, "objective", GOAL_OBJECTIVE_LIMIT);
     const autoCompleted = allStepsTerminal(steps);
     const progressed = autoCompleted || nextObjective !== current.objective || goalStepsProgressed(current.steps, steps);
-    const base = clearContinuation(current);
+    const base = clearContinuation(settled);
     return {
         ...base,
         ...(progressed ? {
@@ -398,6 +423,7 @@ function updateGoal(current: GoalRecord, input: GoalManageInput, now: string): G
             lastExecutionAt: now,
             lastProgressAt: now,
             noActionStreak: 0,
+            progressEpoch: goalProgressEpoch(current) + 1,
             stagnationStreak: 0,
         } : {}),
         lastAgentActivityAt: now,
@@ -486,6 +512,7 @@ function normalizeStoredGoal(value: unknown): GoalRecord {
             : requiredStoredString(value.lastAgentActivityAt, "lastAgentActivityAt"),
         noActionStreak: optionalNonNegativeInteger(value.noActionStreak),
         objective: requiredText(value.objective, "objective", GOAL_OBJECTIVE_LIMIT),
+        progressEpoch: optionalNonNegativeInteger(value.progressEpoch),
         revision: positiveInteger(value.revision, "revision"),
         stagnationStreak: optionalNonNegativeInteger(value.stagnationStreak),
         status: legacyAutoCompleted ? "completed" : storedStatus,
@@ -496,6 +523,14 @@ function normalizeStoredGoal(value: unknown): GoalRecord {
     for (const key of ["continuationAttemptedAt", "continuationClaimActivityAt", "continuationClaimedAt", "continuationClaimId", "continuationMessageId", "continuationRetryAfter", "lastStreakEvaluatedReentryAt", "note"] as const) {
         const field = value[key];
         if (typeof field === "string" && field.length > 0) record[key] = field;
+    }
+    if (typeof value.reentryProgressEpoch === "number") {
+        record.reentryProgressEpoch = nonNegativeInteger(value.reentryProgressEpoch, "reentryProgressEpoch");
+    } else if (record.lastReentryAt !== undefined) {
+        record.reentryProgressEpoch = goalProgressEpoch(record);
+    }
+    if (typeof value.continuationClaimProgressEpoch === "number") {
+        record.continuationClaimProgressEpoch = nonNegativeInteger(value.continuationClaimProgressEpoch, "continuationClaimProgressEpoch");
     }
     return legacyAutoCompleted
         ? {
@@ -522,12 +557,16 @@ function snapshot(record: GoalRecord, now: string): GoalSnapshot {
     const claimFresh = uncertain || (record.continuationPending && record.continuationClaimedAt !== undefined &&
         nowMs - Date.parse(record.continuationClaimedAt) < GOAL_CONTINUATION_CLAIM_TTL_MS);
     const retryReady = record.continuationRetryAfter === undefined || nowMs >= Date.parse(record.continuationRetryAfter);
+    const progressEpoch = goalProgressEpoch(record);
+    const reentryProgressEpoch = record.reentryProgressEpoch ??
+        (record.lastReentryAt === undefined ? undefined : progressEpoch);
+    const progressedSinceReentry = reentryProgressEpoch === undefined || progressEpoch > reentryProgressEpoch;
     return {
         autoContinueExhausted: false,
         ...(record.continuationAttemptedAt === undefined ? {} : { continuationAttemptedAt: record.continuationAttemptedAt }),
         continuationCount: record.continuationCount,
         ...(record.continuationMessageId === undefined ? {} : { continuationMessageId: record.continuationMessageId }),
-        continuationDue: record.status === "active" && hasActionableStep(record.steps) &&
+        continuationDue: record.status === "active" && hasActionableStep(record.steps) && progressedSinceReentry &&
             !claimFresh && retryReady && nowMs >= dueAtMs,
         continuationDueAt: new Date(dueAtMs).toISOString(),
         continuationPending: claimFresh,
@@ -541,6 +580,7 @@ function snapshot(record: GoalRecord, now: string): GoalSnapshot {
         lastProgressAt: record.lastProgressAt,
         maxContinuations: GOAL_MAX_CONTINUATIONS,
         noActionStreak: record.noActionStreak,
+        progressEpoch,
         stagnationStreak: record.stagnationStreak,
         ...(record.note === undefined ? {} : { note: record.note }),
         objective: record.objective,
@@ -557,8 +597,8 @@ function evaluatePreviousReentry(record: GoalRecord): GoalRecord {
     if (reentryAt === undefined || record.lastStreakEvaluatedReentryAt === reentryAt) return record;
     const reentryMs = Date.parse(reentryAt);
     const executionMs = record.lastExecutionAt === undefined ? Number.NEGATIVE_INFINITY : Date.parse(record.lastExecutionAt);
-    const progressMs = Date.parse(record.lastProgressAt);
-    if (progressMs > reentryMs) {
+    const reentryProgressEpoch = record.reentryProgressEpoch ?? goalProgressEpoch(record);
+    if (goalProgressEpoch(record) > reentryProgressEpoch) {
         return {
             ...record,
             lastStreakEvaluatedReentryAt: reentryAt,
@@ -594,6 +634,7 @@ function clearContinuation(record: GoalRecord): GoalRecord {
         continuationClaimActivityAt: _activity,
         continuationClaimedAt: _claimedAt,
         continuationClaimId: _claimId,
+        continuationClaimProgressEpoch: _progressEpoch,
         continuationMessageId: _messageId,
         ...rest
     } = record;
@@ -602,6 +643,35 @@ function clearContinuation(record: GoalRecord): GoalRecord {
 
 function claimMatches(record: GoalRecord, claimId: string): boolean {
     return record.continuationPending && record.continuationClaimId === claimId;
+}
+
+function goalProgressEpoch(record: GoalRecord): number {
+    return record.progressEpoch ?? 0;
+}
+
+function validateReentryProgressEpoch(record: GoalRecord, value: number | undefined): number {
+    const current = goalProgressEpoch(record);
+    if (value === undefined) return current;
+    if (!Number.isSafeInteger(value) || value < 0 || value > current) {
+        throw new Error(`Workspace Goal re-entry progress epoch ${value} is invalid for current epoch ${current}.`);
+    }
+    return value;
+}
+
+function settleAttemptedReentry(record: GoalRecord, now: string): GoalRecord {
+    if (!record.continuationPending || record.continuationAttemptedAt === undefined) {
+        return clearContinuation(record);
+    }
+    const coveredProgressEpoch = record.continuationClaimProgressEpoch ?? goalProgressEpoch(record);
+    const previousCovered = record.reentryProgressEpoch;
+    return {
+        ...clearContinuation(record),
+        continuationCount: record.continuationCount + 1,
+        ...(previousCovered !== undefined && previousCovered >= coveredProgressEpoch ? {} : {
+            lastReentryAt: now,
+            reentryProgressEpoch: coveredProgressEpoch,
+        }),
+    };
 }
 
 function requiredText(value: unknown, field: string, limit: number): string {

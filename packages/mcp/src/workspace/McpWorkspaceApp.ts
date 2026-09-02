@@ -768,7 +768,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       var claim = structured(await callTool("workspace_goal_continue", {
         action: "claim",
         available: goalContinuationAvailable(),
-        claimId: claimId
+        claimId: claimId,
+        goalId: goal.goalId
       }, true));
       if (claim && claim.goal) snapshot.goal = claim.goal;
       if (!claim || !claim.claimed) {
@@ -781,7 +782,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       var validation = structured(await callTool("workspace_goal_continue", {
         action: "validate",
         available: goalContinuationAvailable(),
-        claimId: claimId
+        claimId: claimId,
+        goalId: goal.goalId
       }, true));
       if (validation && validation.goal) snapshot.goal = validation.goal;
       if (!validation || !validation.valid) {
@@ -798,7 +800,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
           var marked = structured(await callTool("workspace_goal_continue", {
             action: "attempt",
             available: goalContinuationAvailable(),
-            claimId: claimId
+            claimId: claimId,
+            goalId: goal.goalId
           }, true));
           if (marked && marked.goal) snapshot.goal = marked.goal;
           if (!marked || marked.attempted === false) return false;
@@ -815,7 +818,12 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       var uncertain = outcome && outcome.status === "uncertain";
       if (claimed && !uncertain) {
         try {
-          var reportArgs = { accepted: outcome && outcome.status === "accepted", action: "report", claimId: claimId };
+          var reportArgs = {
+            accepted: outcome && outcome.status === "accepted",
+            action: "report",
+            claimId: claimId,
+            goalId: goal.goalId
+          };
           if (errorText) reportArgs.error = errorText;
           var report = structured(await callTool("workspace_goal_continue", reportArgs, true));
           if (report && report.goal) snapshot.goal = report.goal;
@@ -926,7 +934,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     var item = background.find(function (entry) {
       return (!preferredWaitId || entry.waitId === preferredWaitId) &&
         entry.status === "resolved" && !!entry.detachedAt &&
-        !entry.recoveryMessageAttemptedAt && !entry.recoveryMessageSentAt &&
+        !entry.recoveryMessageAttemptedAt &&
         hasRecoverableWork(entry);
     });
     if (!item) return;
@@ -960,11 +968,10 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     var item = backgroundWaitForResume(goalId, taskId);
     if (!item) return false;
     if (item.status === "resolved" && item.detachedAt && hasRecoverableWork(item)) {
-      if (!item.recoveryMessageAttemptedAt && !item.recoveryMessageSentAt) {
+      if (!item.recoveryMessageAttemptedAt) {
         await recoverDetachedWait(item.waitId);
         return true;
       }
-      if (item.recoveryMessageSentAt) return false;
     }
     return true;
   }
@@ -1479,6 +1486,82 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return outcome;
   }
 
+  async function sendExplicitGoalResume(goalId, text, extra, canSend) {
+    var claimId = newGoalContinuationClaimId();
+    var claimed = false;
+    var errorText = "";
+    var outcome = { status: "blocked" };
+    try {
+      var claim = structured(await callTool("workspace_goal_continue", {
+        action: "claim",
+        available: canSend ? canSend() : true,
+        claimId: claimId,
+        goalId: goalId,
+        userInitiated: true
+      }, true));
+      if (claim && claim.goal) snapshot.goal = claim.goal;
+      if (!claim || !claim.claimed) return outcome;
+      claimed = true;
+
+      var validation = structured(await callTool("workspace_goal_continue", {
+        action: "validate",
+        available: canSend ? canSend() : true,
+        claimId: claimId,
+        goalId: goalId,
+        userInitiated: true
+      }, true));
+      if (validation && validation.goal) snapshot.goal = validation.goal;
+      if (!validation || !validation.valid) return outcome;
+
+      outcome = await sendModelMessage(
+        text,
+        extra,
+        canSend,
+        async function () {
+          var marked = structured(await callTool("workspace_goal_continue", {
+            action: "attempt",
+            available: canSend ? canSend() : true,
+            claimId: claimId,
+            goalId: goalId,
+            userInitiated: true
+          }, true));
+          if (marked && marked.goal) snapshot.goal = marked.goal;
+          return !!marked && marked.attempted !== false;
+        }
+      );
+      if (outcome.status === "rejected") errorText = "Host rejected the explicit Workspace Goal resume message.";
+      if (outcome.error) errorText = outcome.error;
+      return outcome;
+    } catch (error) {
+      errorText = error instanceof Error ? error.message : String(error);
+      console.error(error);
+      return outcome;
+    } finally {
+      var uncertain = outcome && outcome.status === "uncertain";
+      if (claimed && !uncertain) {
+        try {
+          var reportArgs = {
+            accepted: outcome && outcome.status === "accepted",
+            action: "report",
+            claimId: claimId,
+            goalId: goalId,
+            userInitiated: true
+          };
+          if (errorText) reportArgs.error = errorText;
+          var report = structured(await callTool("workspace_goal_continue", reportArgs, true));
+          if (report && report.goal) snapshot.goal = report.goal;
+        } catch (reportError) {
+          console.error(reportError);
+        }
+      }
+      await settleAutomaticMessageClaim(outcome);
+      render();
+      if (outcome && outcome.status === "rejected") status.textContent = "Host rejected model resume";
+      if (outcome && outcome.status === "uncertain") status.textContent = "Resume delivery uncertain";
+      if (outcome && outcome.bridgeFailure) await resetHostBridge();
+    }
+  }
+
   async function pauseGoalFromUi(goalId, revision) {
     await act("goal-pause", "workspace_goal_pause", {
       goalId: goalId,
@@ -1493,7 +1576,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     });
     if (!result || !result.goal || result.goal.status !== "active") return;
     if (await resumeThroughExistingWait(goalId, "")) return;
-    await sendExplicitResume(
+    await sendExplicitGoalResume(
+      goalId,
       "The user resumed the active Workspace Goal. Continue the Goal immediately from its current durable state; do not restart completed work.",
       { resumedGoal: result.goal },
       function () {
@@ -1532,7 +1616,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     var goal = snapshot && snapshot.goal;
     if (!goal || goal.goalId !== goalId || goal.status !== "active") return;
     if (await resumeThroughExistingWait(goalId, "")) return;
-    await sendExplicitResume(
+    await sendExplicitGoalResume(
+      goalId,
       "The user explicitly retried automatic execution for this Workspace Goal. Continue immediately from the current durable Goal state.",
       { retriedGoal: goal },
       function () {
@@ -1642,7 +1727,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     var background = Array.isArray(snapshot && snapshot.background) ? snapshot.background : [];
     var waiting = background.filter(function (item) { return (item.kind === "tmux" || item.tmuxTaskId) && (item.status === "waiting" || item.status === "detached"); });
     var uncertain = background.filter(function (item) {
-      return item.status === "resolved" && item.recoveryMessageAttemptedAt && !item.recoveryMessageSentAt;
+      return item.status === "resolved" && item.recoveryMessageAttemptedAt;
     });
     return waiting.map(tmuxWaitCard).join("") + uncertain.map(uncertainWaitCard).join("");
   }

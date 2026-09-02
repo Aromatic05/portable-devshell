@@ -50,7 +50,6 @@ export type InstanceEventType = ArtifactEventType
     | "wait.recoveryClaimed"
     | "wait.recoveryDismissed"
     | "wait.recoveryMessageAttempted"
-    | "wait.recoveryMessageSent"
     | "wait.recoveryReleased"
     | "wait.consumed"
     | "wait.cancelled";
