@@ -8,6 +8,15 @@ export type {
     AgentWorkerToolCallOptions
 } from "./provider/AgentProvider.js";
 export {
+    AgentHost,
+    type AgentHostOptions,
+    type AgentHostRecord,
+    type AgentHostStartOptions,
+    type AgentHostState,
+    type AgentHostWorkerFactory
+} from "./host/AgentHost.js";
+export { AgentProviderRegistry } from "./host/AgentProviderRegistry.js";
+export {
     AgentProviderRuntimePaths,
     type AgentProviderRuntimePathsOptions
 } from "./runtime/AgentProviderRuntimePaths.js";

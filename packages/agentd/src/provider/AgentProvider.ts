@@ -41,6 +41,10 @@ export interface AgentProviderWebEndpoint {
 
 export interface AgentProviderHandle {
     readonly web?: AgentProviderWebEndpoint;
+    abort?(): Promise<void>;
+    followUp?(message: string): Promise<void>;
+    prompt(message: string): Promise<void>;
+    steer?(message: string): Promise<void>;
     stop(): Promise<void>;
 }
 
@@ -50,5 +54,6 @@ export interface AgentProviderHandle {
  */
 export interface AgentProvider {
     readonly id: string;
+    readonly version: string;
     start(context: AgentProviderStartContext): Promise<AgentProviderHandle>;
 }
