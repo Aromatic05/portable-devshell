@@ -136,14 +136,12 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var DISPLAY_MODE_TIMEOUT_MS = 1000;
   var DISPLAY_MODE_RETRY_MS = 750;
   var DISPLAY_MODE_MAX_RETRIES = 2;
-  var WAIT_RECOVERY_RETRY_MS = 60000;
   var RECOVERY_NO_CHAT_SUFFIX = " Do not reply only with an acknowledgement, summary, plan, status update, apology, or statement that you will continue.";
   var bridgeReady = false;
   var pendingToolResult = null;
   var initialToolResultResolve = null;
   var liveAbortController = null;
   var goalTimer = null;
-  var waitRecoveryTimer = null;
   var goalContinuationClaimId = "";
   var automaticMessageInFlight = false;
   var heldReentryClaimId = "";
@@ -711,8 +709,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   async function yieldAutomaticReentry(reason) {
     if (goalTimer) clearTimeout(goalTimer);
     goalTimer = null;
-    if (waitRecoveryTimer) clearTimeout(waitRecoveryTimer);
-    waitRecoveryTimer = null;
     try {
       var yielded = structured(await callTool("workspace_reentry_control", {
         action: "yield",
@@ -868,69 +864,28 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return !!task && task.status === "in_progress";
   }
 
-  function waitRecoveryReadyAt(item) {
-    if (!item || !item.recoveryMessageSentAt) return Number.NEGATIVE_INFINITY;
-    var retryAt = Date.parse(item.recoveryRetryAfter || "");
-    if (Number.isFinite(retryAt)) return retryAt;
-    var sentAt = Date.parse(item.recoveryMessageSentAt || "");
-    return Number.isFinite(sentAt) ? sentAt + WAIT_RECOVERY_RETRY_MS : Number.POSITIVE_INFINITY;
-  }
-
-  function waitRecoveryDispatchDue(item) {
-    return !item.recoveryMessageSentAt || Date.now() >= waitRecoveryReadyAt(item);
-  }
-
-  function scheduleWaitRecovery(minDelayMs) {
-    if (waitRecoveryTimer) clearTimeout(waitRecoveryTimer);
-    waitRecoveryTimer = null;
-    if (
-      recovering || automaticMessageInFlight || !appToken || !snapshot || !automaticReentryAvailable() ||
-      snapshot.agentBusy || visibleEvent() || busy.size > 0
-    ) return;
-    var background = Array.isArray(snapshot.background) ? snapshot.background : [];
-    var candidate = null;
-    var candidateAt = Number.POSITIVE_INFINITY;
-    background.forEach(function (item) {
-      if (
-        !item || item.status !== "resolved" || !item.detachedAt || !item.recoveryMessageSentAt ||
-        (item.recoveryMessageAttemptedAt && !item.recoveryMessageSentAt) || !hasRecoverableWork(item)
-      ) return;
-      var readyAt = waitRecoveryReadyAt(item);
-      if (readyAt < candidateAt) { candidate = item; candidateAt = readyAt; }
-    });
-    if (!candidate || !Number.isFinite(candidateAt)) return;
-    var delayMs = Math.max(minDelayMs || 0, candidateAt - Date.now(), 0);
-    var waitId = candidate.waitId;
-    waitRecoveryTimer = setTimeout(function () {
-      waitRecoveryTimer = null;
-      void recoverDetachedWait(waitId);
-    }, delayMs);
-  }
-
   async function dispatchRecovery(waitId, extra) {
     var claimed = structured(await callTool("workspace_wait_recover", { action: "claim", waitId: waitId }, true));
     var attempted = !!claimed.recoveryMessageAttemptedAt;
-    var outcome = { status: claimed.recoveryMessageSentAt ? "accepted" : "blocked" };
+    var outcome = { status: "blocked" };
     try {
-      if (!claimed.recoveryMessageSentAt) {
-        outcome = await sendModelMessage(
-          recoveryMessage(claimed),
-          Object.assign({}, extra || {}, {
-            recoveredWait: claimed,
-            recoveryMessageId: claimed.recoveryMessageId
-          }),
-          function () { return hasRecoverableWork(claimed); },
-          async function () {
-            await callTool("workspace_wait_recover", {
-              action: "attempt",
-              claimId: claimed.claimId,
-              waitId: waitId
-            }, true);
-            attempted = true;
-            return true;
-          }
-        );
-      }
+      outcome = await sendModelMessage(
+        recoveryMessage(claimed),
+        Object.assign({}, extra || {}, {
+          recoveredWait: claimed,
+          recoveryMessageId: claimed.recoveryMessageId
+        }),
+        function () { return hasRecoverableWork(claimed); },
+        async function () {
+          await callTool("workspace_wait_recover", {
+            action: "attempt",
+            claimId: claimed.claimId,
+            waitId: waitId
+          }, true);
+          attempted = true;
+          return true;
+        }
+      );
       if (outcome.status === "uncertain") return;
       if (outcome.status === "rejected" || outcome.status === "blocked") {
         await callTool("workspace_wait_recover", {
@@ -941,15 +896,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         await settleAutomaticMessageClaim(outcome);
         return;
       }
-      if (!claimed.recoveryMessageSentAt) {
-        await callTool("workspace_wait_recover", {
-          action: "sent",
-          claimId: claimed.claimId,
-          waitId: waitId
-        }, true);
-      }
       await callTool("workspace_wait_recover", {
-        action: "release",
+        action: "complete",
         claimId: claimed.claimId,
         waitId: waitId
       }, true);
@@ -978,8 +926,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     var item = background.find(function (entry) {
       return (!preferredWaitId || entry.waitId === preferredWaitId) &&
         entry.status === "resolved" && !!entry.detachedAt &&
-        !(entry.recoveryMessageAttemptedAt && !entry.recoveryMessageSentAt) &&
-        waitRecoveryDispatchDue(entry) && hasRecoverableWork(entry);
+        !entry.recoveryMessageAttemptedAt && !entry.recoveryMessageSentAt &&
+        hasRecoverableWork(entry);
     });
     if (!item) return;
     recovering = true;
@@ -994,7 +942,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       console.error(error);
     } finally {
       recovering = false;
-      scheduleWaitRecovery(0);
       scheduleGoalContinuation(0);
     }
   }
@@ -1013,7 +960,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     var item = backgroundWaitForResume(goalId, taskId);
     if (!item) return false;
     if (item.status === "resolved" && item.detachedAt && hasRecoverableWork(item)) {
-      if (waitRecoveryDispatchDue(item) && !(item.recoveryMessageAttemptedAt && !item.recoveryMessageSentAt)) {
+      if (!item.recoveryMessageAttemptedAt && !item.recoveryMessageSentAt) {
         await recoverDetachedWait(item.waitId);
         return true;
       }
@@ -1045,7 +992,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     persistWorkspaceHint();
     render();
     await syncModelContext();
-    scheduleWaitRecovery(0);
     scheduleGoalContinuation(0);
     if (allowRecovery !== false) void recoverDetachedWait();
   }
@@ -1293,8 +1239,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     liveAbortController = null;
     if (goalTimer) clearTimeout(goalTimer);
     goalTimer = null;
-    if (waitRecoveryTimer) clearTimeout(waitRecoveryTimer);
-    waitRecoveryTimer = null;
     if (connectRetryTimer) clearTimeout(connectRetryTimer);
     connectRetryTimer = null;
     if (liveStartRetryTimer) clearTimeout(liveStartRetryTimer);

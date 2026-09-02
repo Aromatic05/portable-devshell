@@ -707,7 +707,7 @@ test("Workspace App claims a resolved detached wait before one automatic model r
 
     await mount();
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 3");
     const recoveryText = await page.evaluate("window.__modelMessages[0].content[0].text") as string;
     assert.match(recoveryText, /tmux task tmux-recovery finished while detached with status 0/u);
     assert.match(recoveryText, /immediately continue the suspended work using that result/u);
@@ -721,7 +721,7 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     await mount();
     await page.waitForTimeout(100);
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
-    assert.equal(await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"), 4);
+    assert.equal(await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"), 3);
 
     const recoverCalls = await page.evaluate(
         "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover')",
@@ -731,17 +731,15 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     assert.equal(recoverCalls[0]?.arguments?.waitId, "wait-recovery");
     assert.equal(recoverCalls[1]?.arguments?.action, "attempt");
     assert.equal(recoverCalls[1]?.arguments?.claimId, "recovery-claim");
-    assert.equal(recoverCalls[2]?.arguments?.action, "sent");
+    assert.equal(recoverCalls[2]?.arguments?.action, "complete");
     assert.equal(recoverCalls[2]?.arguments?.claimId, "recovery-claim");
-    assert.equal(recoverCalls[3]?.arguments?.action, "release");
-    assert.equal(recoverCalls[3]?.arguments?.claimId, "recovery-claim");
     assert.deepEqual(
         await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_reentry_control').map(call => call.arguments.action)"),
         ["claim", "validate"],
     );
 });
 
-test("Workspace retries a sent detached wait after its execution lease expires", BROWSER_TEST_OPTIONS, async (t) => {
+test("Workspace never replays a detached wait that was already delivered", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
 
@@ -759,16 +757,17 @@ test("Workspace retries a sent detached wait after its execution lease expires",
         iframe.srcdoc = html;
     }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
-    assert.deepEqual(
-        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)"),
-        ["claim", "attempt", "sent", "release"],
+    await page.waitForFunction(
+        "(window.__workspaceCalls || []).some(call => call.name === 'workspace_snapshot' || call.name === 'workspace_reconnect')",
     );
-    await page.waitForTimeout(100);
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
+    await page.waitForTimeout(250);
+    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
+    assert.equal(
+        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"),
+        0,
+    );
     assert.equal(await page.evaluate("window.__recoverySent"), true);
-    assert.equal(await page.evaluate("window.__recoveryRetryDue"), false);
+    assert.equal(await page.evaluate("window.__recoveryRetryDue"), true);
 });
 
 test("Workspace user ownership fences an overdue sent wait recovery", BROWSER_TEST_OPTIONS, async (t) => {
@@ -824,7 +823,7 @@ test("Workspace re-enters after a detached tmux wait deadline", BROWSER_TEST_OPT
     }, workspaceAppHtml);
 
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 3");
     assert.equal(
         await page.evaluate("window.__modelMessages[0].content[0].text"),
         "The wait deadline for tmux task tmux-recovery elapsed and the task is still running. Inspect the task once now. If its result is still required and it is still running, immediately re-enter a blocking wait on the same task. If it has completed, consume the result and continue the suspended work. Do not restart the task or end the turn with a status-only response.",
@@ -848,7 +847,7 @@ test("Workspace Goal recovers a resolved detached wait without Todo", BROWSER_TE
     }, workspaceAppHtml);
 
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 3");
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
 });
 
@@ -869,7 +868,7 @@ test("Workspace recovers an unassociated resolved wait by Context", BROWSER_TEST
     }, workspaceAppHtml);
 
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 3");
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
 });
 
@@ -893,11 +892,11 @@ test("Workspace Stop waiting resumes the agent after a detached tmux wait", BROW
     await app.getByText("Stop waiting", { exact: true }).click();
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_wait_interrupt')");
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 3");
     const recoveryActions = await page.evaluate(
         "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)",
     );
-    assert.deepEqual(recoveryActions, ["claim", "attempt", "sent", "release"]);
+    assert.deepEqual(recoveryActions, ["claim", "attempt", "complete"]);
 });
 
 test("Workspace task Resume uses an already resolved wait as its single model re-entry", BROWSER_TEST_OPTIONS, async (t) => {
@@ -924,13 +923,13 @@ test("Workspace task Resume uses an already resolved wait as its single model re
     const app = page.frameLocator("#workspace");
     await app.getByRole("button", { name: "Resume task", exact: true }).click();
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task_control' && call.arguments.action === 'resume')");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 3");
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
     await new Promise((resolve) => setTimeout(resolve, 100));
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
     assert.deepEqual(
         await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)"),
-        ["claim", "attempt", "sent", "release"],
+        ["claim", "attempt", "complete"],
     );
 });
 
@@ -993,13 +992,13 @@ test("Workspace Goal Resume uses an already resolved wait as its single model re
     const app = page.frameLocator("#workspace");
     await app.getByRole("button", { name: "Resume Goal", exact: true }).click();
     await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_goal_resume')");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 4");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 3");
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
     await new Promise((resolve) => setTimeout(resolve, 100));
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
     assert.deepEqual(
         await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)"),
-        ["claim", "attempt", "sent", "release"],
+        ["claim", "attempt", "complete"],
     );
 });
 
