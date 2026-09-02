@@ -12,9 +12,13 @@ export {
     PI_PROVIDER_VERSION,
     PiAgentProvider,
     type PiAgentProviderOptions,
-    type PiProviderInstallerLike,
-    type PiSdkLoaderLike
+    type PiProviderInstallerLike
 } from "./provider/pi/PiAgentProvider.js";
+export {
+    PiAgentProcessFactory,
+    type PiAgentProcessStartOptions,
+    type PiAgentRuntimeFactory
+} from "./provider/pi/PiAgentProcess.js";
 export {
     PI_PACKAGE_NAME,
     PiProviderInstaller,
@@ -42,7 +46,7 @@ export {
     type AgentWorkerTarget
 } from "./target/AgentWorkerTarget.js";
 export {
-    AgentWorkerDirectClient,
-    type AgentWorkerDirectClientOptions,
-    type AgentWorkerDirectTransport
-} from "./worker/AgentWorkerDirectClient.js";
+    AgentWorkerClientBinding,
+    type AgentWorkerClientBindingOptions,
+    type AgentWorkerHandle
+} from "./worker/AgentWorkerClientBinding.js";

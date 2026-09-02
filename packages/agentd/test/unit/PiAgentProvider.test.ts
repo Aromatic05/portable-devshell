@@ -7,6 +7,7 @@ import test from "node:test";
 import type { ToolDefinition } from "@portable-devshell/shared";
 
 import type {
+    AgentProviderHandle,
     AgentProviderStartContext,
     AgentWorkerClient
 } from "../../src/provider/AgentProvider.ts";
@@ -14,15 +15,15 @@ import {
     PI_PROVIDER_VERSION,
     PiAgentProvider
 } from "../../src/provider/pi/PiAgentProvider.ts";
+import type {
+    PiAgentProcessStartOptions,
+    PiAgentRuntimeFactory
+} from "../../src/provider/pi/PiAgentProcess.ts";
 import {
     PI_PACKAGE_NAME,
     PiProviderInstaller,
     type PiProviderInstallCommand
 } from "../../src/provider/pi/PiProviderInstaller.ts";
-import type {
-    PiSdkModule,
-    PiSessionLike
-} from "../../src/provider/pi/PiSdkLoader.ts";
 import { createPiWorkerTools } from "../../src/provider/pi/PiWorkerTools.ts";
 import { AgentProviderRuntimePaths } from "../../src/runtime/AgentProviderRuntimePaths.ts";
 import { parseAgentWorkerTarget } from "../../src/target/AgentWorkerTarget.ts";
@@ -39,12 +40,7 @@ test("Pi installer owns a private versioned prefix and reuses a valid install", 
         const installer = new PiProviderInstaller({
             runner: async (command) => {
                 commands.push(command);
-                const packageRoot = join(
-                    command.cwd,
-                    "node_modules",
-                    "@earendil-works",
-                    "pi-coding-agent"
-                );
+                const packageRoot = join(command.cwd, "node_modules", "@earendil-works", "pi-coding-agent");
                 await mkdir(join(packageRoot, "dist"), { recursive: true });
                 await writeFile(
                     join(packageRoot, "package.json"),
@@ -102,7 +98,7 @@ test("Pi Worker tools preserve Worker schema and Pi tool-call identity", async (
     assert.match(result.content[0]!.text, /hello/u);
 });
 
-test("Pi provider creates one isolated session backed only by Worker custom tools", async () => {
+test("Pi provider launches one isolated runtime process per Agent and passes only Worker tool capability", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "devshell-agentd-pi-session-"));
     try {
         const runtime = new AgentProviderRuntimePaths({
@@ -111,16 +107,15 @@ test("Pi provider creates one isolated session backed only by Worker custom tool
             version: PI_PROVIDER_VERSION
         });
         const target = parseAgentWorkerTarget("worker-a:/remote/project");
-        const worker = createWorker([
-            {
-                description: "Run a command remotely.",
-                group: "bash",
-                inputSchema: { type: "object" },
-                name: "bash_run",
-                outputSchema: { type: "object" },
-                requiredCapabilities: ["execute"]
-            }
-        ]);
+        const definition: ToolDefinition = {
+            description: "Run a command remotely.",
+            group: "bash",
+            inputSchema: { type: "object" },
+            name: "bash_run",
+            outputSchema: { type: "object" },
+            requiredCapabilities: ["execute"]
+        };
+        const worker = createWorker([definition]);
         const context: AgentProviderStartContext = {
             agentId: "ag-pi-test",
             runtime,
@@ -128,40 +123,12 @@ test("Pi provider creates one isolated session backed only by Worker custom tool
             web: { basePath: "/agent/pi-test/" },
             worker
         };
-        const prompts: Array<{ options?: { streamingBehavior?: "steer" | "followUp" }; text: string }> = [];
-        let aborts = 0;
-        let disposals = 0;
-        const session: PiSessionLike = {
-            async abort() {
-                aborts += 1;
-            },
-            dispose() {
-                disposals += 1;
-            },
-            async prompt(text, options) {
-                prompts.push({ options, text });
-            }
-        };
-        const sessionManagers: Array<{ cwd: string; sessionDir?: string }> = [];
-        const sessionOptions: Array<Record<string, unknown>> = [];
-        const loaderOptions: Array<Record<string, unknown>> = [];
-        class FakeResourceLoader {
-            constructor(options: Record<string, unknown> = {}) {
-                loaderOptions.push(options);
-            }
-            async reload(): Promise<void> {}
-        }
-        const sdk: PiSdkModule = {
-            DefaultResourceLoader: FakeResourceLoader,
-            SessionManager: {
-                create(cwd, sessionDir) {
-                    sessionManagers.push({ cwd, sessionDir });
-                    return { cwd, sessionDir };
-                }
-            },
-            async createAgentSession(options = {}) {
-                sessionOptions.push(options);
-                return { session };
+        const starts: PiAgentProcessStartOptions[] = [];
+        const handle = createProviderHandle();
+        const runtimeFactory: PiAgentRuntimeFactory = {
+            async start(options) {
+                starts.push(options);
+                return handle;
             }
         };
         const provider = new PiAgentProvider({
@@ -174,49 +141,34 @@ test("Pi provider creates one isolated session backed only by Worker custom tool
                     };
                 }
             },
-            loader: {
-                async load(entrypoint) {
-                    assert.equal(entrypoint, "/managed/pi/dist/index.js");
-                    return sdk;
-                }
-            }
+            runtimeFactory
         });
 
-        const handle = await provider.start(context);
-        assert.equal(provider.id, "pi");
-        assert.equal(provider.version, PI_PROVIDER_VERSION);
-        assert.equal(sessionManagers.length, 1);
-        assert.match(sessionManagers[0]!.cwd, /agents\/ag-pi-test\/cwd$/u);
-        assert.match(sessionManagers[0]!.sessionDir!, /agents\/ag-pi-test\/sessions$/u);
-        assert.equal(sessionOptions[0]?.noTools, "builtin");
-        assert.deepEqual(sessionOptions[0]?.tools, ["bash_run"]);
-        assert.equal(Array.isArray(sessionOptions[0]?.customTools), true);
+        const returned = await provider.start(context);
 
-        const systemPromptOverride = loaderOptions[0]?.systemPromptOverride as
-            | ((basePrompt?: string) => string)
-            | undefined;
-        assert.equal(typeof systemPromptOverride, "function");
-        const prompt = systemPromptOverride!("Pi base prompt");
-        assert.match(prompt, /worker-a:\/remote\/project/u);
-        assert.match(prompt, /local process cwd is only Pi runtime state/u);
+        assert.equal(returned, handle);
+        assert.equal(starts.length, 1);
+        assert.equal(starts[0]?.entrypoint, "/managed/pi/dist/index.js");
+        assert.equal(starts[0]?.remoteWorkspace, "worker-a:/remote/project");
+        assert.match(starts[0]!.localCwd, /agents\/ag-pi-test\/cwd$/u);
+        assert.match(starts[0]!.sessionDir, /agents\/ag-pi-test\/sessions$/u);
+        assert.deepEqual(starts[0]?.tools, [definition]);
 
-        await handle.prompt("start");
-        await handle.steer!("steer");
-        await handle.followUp!("later");
-        await handle.abort!();
-        await handle.stop();
-
-        assert.deepEqual(prompts, [
-            { text: "start", options: undefined },
-            { text: "steer", options: { streamingBehavior: "steer" } },
-            { text: "later", options: { streamingBehavior: "followUp" } }
-        ]);
-        assert.equal(aborts, 2);
-        assert.equal(disposals, 1);
+        await starts[0]!.callTool("bash_run", { command: "true" }, { operationId: "pi-call" });
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });
+
+function createProviderHandle(): AgentProviderHandle {
+    return {
+        async abort() {},
+        async followUp() {},
+        async prompt() {},
+        async steer() {},
+        async stop() {}
+    };
+}
 
 function createWorker(
     tools: readonly ToolDefinition[],

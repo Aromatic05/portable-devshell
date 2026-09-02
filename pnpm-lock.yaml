@@ -67,6 +67,9 @@ importers:
 
   packages/control:
     dependencies:
+      '@portable-devshell/agentd':
+        specifier: workspace:*
+        version: link:../agentd
       '@portable-devshell/core':
         specifier: workspace:*
         version: link:../core
@@ -558,6 +561,9 @@ packages:
 
   '@oxc-project/types@0.142.0':
     resolution: {integrity: sha512-7W+2q5AKQVU36fkaryontrHn3YDt1RyUYXatw9i5H8ocYe2sPKSFB6eS8WNPeRKiN1qAWWZUPm7gwFzJGrccqQ==}
+
+  '@portable-devshell/agentd@file:packages/agentd':
+    resolution: {directory: packages/agentd, type: directory}
 
   '@portable-devshell/control@file:packages/control':
     resolution: {directory: packages/control, type: directory}
@@ -2596,8 +2602,18 @@ snapshots:
 
   '@oxc-project/types@0.142.0': {}
 
+  '@portable-devshell/agentd@file:packages/agentd':
+    dependencies:
+      '@portable-devshell/core': file:packages/core
+      '@portable-devshell/shared': file:packages/shared
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - react-native-b4a
+
   '@portable-devshell/control@file:packages/control(react@18.3.1)(zod@3.25.76)':
     dependencies:
+      '@portable-devshell/agentd': file:packages/agentd
       '@portable-devshell/core': file:packages/core
       '@portable-devshell/mcp': file:packages/mcp(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(zod@3.25.76)
       '@portable-devshell/shared': file:packages/shared

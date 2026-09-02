@@ -47,3 +47,27 @@ test("CliParser routes artifact arguments through the normal command pipeline", 
         kind: "artifact"
     });
 });
+
+test("CliParser treats agent as a top-level command surface", () => {
+    const parser = new CliParser();
+
+    assert.deepEqual(parser.parse(["agent", "worker-a:/repo"]), {
+        kind: "agent.start",
+        target: "worker-a:/repo"
+    });
+    assert.deepEqual(parser.parse(["agent", "--provider", "pi", "--slug", "review", "worker-a:/repo"]), {
+        kind: "agent.start",
+        provider: "pi",
+        slug: "review",
+        target: "worker-a:/repo"
+    });
+    assert.deepEqual(parser.parse(["agent", "list"]), { kind: "agent.list" });
+    assert.deepEqual(parser.parse(["agent", "show", "ag-1"]), { agentId: "ag-1", kind: "agent.show" });
+    assert.deepEqual(parser.parse(["agent", "send", "ag-1", "continue", "review"]), {
+        agentId: "ag-1",
+        kind: "agent.send",
+        message: "continue review"
+    });
+    assert.deepEqual(parser.parse(["agent", "stop", "ag-1"]), { agentId: "ag-1", kind: "agent.stop" });
+    assert.deepEqual(parser.parse(["agent", "--help"]), { kind: "agent.help" });
+});

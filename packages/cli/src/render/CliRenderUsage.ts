@@ -24,6 +24,7 @@ export function renderCliUsage(): string {
         "  instance <command>             Manage instances",
         "  watch <command>                Follow instance state or logs",
         "  artifact <command>             Manage artifact shares and transfers",
+        "  agent <target|command>          Run and manage Agent providers",
         "  help                           Show this help",
         "",
         "Run `devshell <command> --help` for related usage.",
@@ -79,6 +80,20 @@ export function renderCliTopicUsage(topic: CliHelpTopic): string {
                 "  devshell todo delete <instance> <taskId>",
             ].join("\n");
     }
+}
+
+export function renderAgentUsage(): string {
+    return [
+        "Usage:",
+        "  devshell agent [--provider <id>] [--slug <slug>] <instance:/workspace>",
+        "  devshell agent list",
+        "  devshell agent show <agentId>",
+        "  devshell agent send <agentId> <message>",
+        "  devshell agent steer <agentId> <message>",
+        "  devshell agent follow-up <agentId> <message>",
+        "  devshell agent abort <agentId>",
+        "  devshell agent stop <agentId>",
+    ].join("\n");
 }
 
 export function renderInstanceUsage(): string {

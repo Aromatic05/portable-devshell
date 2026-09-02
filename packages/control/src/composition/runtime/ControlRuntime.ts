@@ -16,8 +16,10 @@ import { ControlRouteComposition } from "../ControlRouteComposition.js";
 import type { ControlRuntimeArtifact } from "./ControlRuntimeArtifact.js";
 import type { ControlRuntimeMcp } from "./ControlRuntimeMcp.js";
 import type { ControlRuntimeReverse } from "./ControlRuntimeReverse.js";
+import type { ControlRuntimeAgent } from "./ControlRuntimeAgent.js";
 
 export interface ControlRuntimeOptions {
+    agent?: ControlRuntimeAgent;
     artifact: ControlRuntimeArtifact;
     instances: InstanceRegistry;
     mcp: ControlRuntimeMcp;
@@ -34,6 +36,7 @@ interface ControlWebRuntime {
 }
 
 export class ControlRuntime {
+    readonly #agent?: ControlRuntimeAgent;
     readonly #artifact: ControlRuntimeArtifact;
     readonly #channels: ControlChannelServer;
     readonly #instances: InstanceRegistry;
@@ -46,11 +49,13 @@ export class ControlRuntime {
     #webFlowUninstall?: () => void;
 
     constructor(options: ControlRuntimeOptions) {
+        this.#agent = options.agent;
         this.#artifact = options.artifact;
         this.#instances = options.instances;
         this.#mcp = options.mcp;
         this.#reverse = options.reverse;
         this.#routes = new ControlRouteComposition({
+            ...(options.agent === undefined ? {} : { agent: options.agent }),
             artifact: options.artifact.service,
             config: options.mcp.configEditor,
             contextAdmin: () => options.mcp.host?.contextAdmin,
@@ -123,6 +128,7 @@ export class ControlRuntime {
     async stop(): Promise<void> {
         const failures: unknown[] = [];
         await this.#channels.close().catch((error) => failures.push(error));
+        await this.#agent?.stopAll().catch((error) => failures.push(error));
         this.#webFlowUninstall?.();
         this.#webFlow = undefined;
         this.#webFlowUninstall = undefined;

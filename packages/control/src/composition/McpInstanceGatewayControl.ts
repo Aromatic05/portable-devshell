@@ -13,22 +13,26 @@ import {
 import type { InstanceCreateCoordinator } from "../control/instance/create/InstanceCreateCoordinator.js";
 import type { ControlConfig } from "@portable-devshell/shared";
 import type { InstanceRegistry } from "../control/instance/registry/InstanceRegistry.js";
+import { InstanceConnectionService } from "../control/instance/connection/InstanceConnectionService.js";
 
 export interface McpInstanceGatewayControlOptions {
     createService: InstanceCreateCoordinator;
     getConfig: () => ControlConfig;
     instanceRegistry: InstanceRegistry;
+    instanceConnections?: InstanceConnectionService;
 }
 
 export class McpInstanceGatewayControl implements McpInstanceGateway {
     readonly #createService: InstanceCreateCoordinator;
     readonly #getConfig: () => ControlConfig;
     readonly #instanceRegistry: InstanceRegistry;
+    readonly #instanceConnections: InstanceConnectionService;
 
     constructor(options: McpInstanceGatewayControlOptions) {
         this.#createService = options.createService;
         this.#getConfig = options.getConfig;
         this.#instanceRegistry = options.instanceRegistry;
+        this.#instanceConnections = options.instanceConnections ?? new InstanceConnectionService(options.instanceRegistry);
     }
 
     async appendMcpToolCalled(instance: string, toolName: string, context: { requestId?: string; ctxId?: string }): Promise<void> {
@@ -304,46 +308,13 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     }
 
     async connectInstance(instance: string, reference: string): Promise<JsonValue> {
+        const { snapshot } = await this.#instanceConnections.acquire(instance, reference);
         const descriptor = this.#requireDescriptor(instance);
-        if (!descriptor.enabled) {
-            throw createError({
-                code: errorCodes.instanceConflict,
-                details: { instance, operation: "connect" },
-                message: `Instance ${instance} is disabled.`,
-                retryable: false
-            });
-        }
-
-        let snapshot = descriptor.worker.snapshot();
-        let ownsLifecycle = false;
-        if (!snapshot.ready) {
-            if (descriptor.worker.managementMode === "selfManaged") {
-                snapshot = await descriptor.worker.refreshStatus();
-                if (!snapshot.ready) {
-                    throw createError({
-                        code: errorCodes.reverseSelfManagedOffline,
-                        details: { instance },
-                        message: `Instance ${instance} is self-managed and is not connected.`,
-                        retryable: true
-                    });
-                }
-            } else {
-                snapshot = await descriptor.worker.start();
-                ownsLifecycle = true;
-            }
-        }
-        if (descriptor.worker.managementMode !== "selfManaged") {
-            this.#instanceRegistry.retainConnectionReference(instance, reference, ownsLifecycle);
-        }
         return withTodoSummaries(snapshot, descriptor.todo.summaries()) as unknown as JsonValue;
     }
 
     async releaseInstanceReference(instance: string, reference: string): Promise<void> {
-        const descriptor = this.#requireDescriptor(instance);
-        if (descriptor.worker.managementMode === "selfManaged") return;
-        if (!this.#instanceRegistry.releaseConnectionReference(instance, reference)) return;
-        await descriptor.worker.stop();
-        this.#instanceRegistry.clearConnectionOwnership(instance);
+        await this.#instanceConnections.release(instance, reference);
     }
 
     async statusInstance(instance: string): Promise<JsonValue> {

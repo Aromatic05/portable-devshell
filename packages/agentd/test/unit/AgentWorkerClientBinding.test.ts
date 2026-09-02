@@ -4,19 +4,19 @@ import test from "node:test";
 import type { JsonValue, ToolCallContext, ToolDefinition } from "@portable-devshell/shared";
 
 import {
-    AgentWorkerDirectClient,
-    type AgentWorkerDirectTransport
-} from "../../src/worker/AgentWorkerDirectClient.ts";
+    AgentWorkerClientBinding,
+    type AgentWorkerHandle
+} from "../../src/worker/AgentWorkerClientBinding.ts";
 import { parseAgentWorkerTarget } from "../../src/target/AgentWorkerTarget.ts";
 
-test("Agent Worker adapter prepares once and binds Agent identity to every tool call", async () => {
+test("Agent Worker binding reuses one handle, prepares once, and releases only its session", async () => {
     const calls: Array<{
         context: ToolCallContext;
         input: JsonValue;
         toolName: string;
     }> = [];
     const prepared: string[] = [];
-    let closed = false;
+    const released: string[] = [];
     const tools: ToolDefinition[] = [{
         description: "Read a file.",
         group: "file",
@@ -25,15 +25,12 @@ test("Agent Worker adapter prepares once and binds Agent identity to every tool 
         outputSchema: { type: "object" },
         requiredCapabilities: ["read"]
     }];
-    const directClient: AgentWorkerDirectTransport = {
+    const handle: AgentWorkerHandle = {
         async callTool(toolName, input, context) {
             calls.push({ context, input, toolName });
             return { ok: true };
         },
-        close() {
-            closed = true;
-        },
-        async listTools() {
+        listTools() {
             return tools;
         },
         async prepareWorkspace(workspace) {
@@ -41,15 +38,19 @@ test("Agent Worker adapter prepares once and binds Agent identity to every tool 
             return {
                 projectMemoryAgentFile: "/repo/AGENTS.md",
                 projectMemoryDirectory: "/repo",
+                projectMemoryPresent: false,
                 temporaryDirectory: "/tmp/agent",
                 workspace
             };
+        },
+        async releaseToolSession(sessionId) {
+            released.push(sessionId);
         }
     };
     const target = parseAgentWorkerTarget("worker-a:/repo");
-    const client = new AgentWorkerDirectClient({
+    const client = new AgentWorkerClientBinding({
         agentId: "ag-123",
-        directClient,
+        handle,
         target
     });
 
@@ -75,5 +76,5 @@ test("Agent Worker adapter prepares once and binds Agent identity to every tool 
     ]);
 
     await client.close();
-    assert.equal(closed, true);
+    assert.deepEqual(released, ["agent:ag-123"]);
 });

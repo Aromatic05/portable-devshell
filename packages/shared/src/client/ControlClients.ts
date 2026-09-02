@@ -8,6 +8,7 @@ import type {
     ArtifactViewImageInput,
     ArtifactViewImageResult,
 } from "../dto/artifact/DtoArtifact.js";
+import type { AgentMessageInput, AgentRecord, AgentStartInput } from "../dto/agent/DtoAgent.js";
 import type {
     ConfigBatchUpdateRequest,
     ConfigDraft,
@@ -91,6 +92,16 @@ export interface RuntimeStartOptions {
 }
 
 export interface ControlClients {
+    agent: {
+        abort(agentId: string): Promise<void>;
+        followUp(input: AgentMessageInput): Promise<void>;
+        get(agentId: string): Promise<AgentRecord | undefined>;
+        list(): Promise<AgentRecord[]>;
+        prompt(input: AgentMessageInput): Promise<void>;
+        start(input: AgentStartInput): Promise<AgentRecord>;
+        steer(input: AgentMessageInput): Promise<void>;
+        stop(agentId: string): Promise<AgentRecord>;
+    };
     artifact: {
         cancelTransfer(transferId: string): Promise<ArtifactTransferResult>;
         createShare(defaultInstance: string, input: ArtifactShareInput): Promise<ArtifactShareResult>;
@@ -204,6 +215,7 @@ export function createControlClients(
     connection: ClientConnection,
     options: { clientKind: ControlClientKind },
 ): ControlClients {
+    const agent = controlClientModule(connection, "agent");
     const artifact = controlClientModule(connection, "artifact");
     const config = controlClientModule(connection, "config");
     const context = controlClientModule(connection, "context");
@@ -222,6 +234,24 @@ export function createControlClients(
         runtime.openStream(name, "start");
 
     return {
+        agent: {
+            abort: async (agentId) => {
+                await agent.request("abort", { agentId });
+            },
+            followUp: async (input) => {
+                await agent.request("followUp", input);
+            },
+            get: (agentId) => agent.request("get", { agentId }),
+            list: () => agent.request("list"),
+            prompt: async (input) => {
+                await agent.request("prompt", input);
+            },
+            start: (input) => agent.request("start", input),
+            steer: async (input) => {
+                await agent.request("steer", input);
+            },
+            stop: (agentId) => agent.request("stop", { agentId })
+        },
         artifact: {
             cancelTransfer: (transferId) =>
                 artifact.request("cancelTransfer", { transferId }),

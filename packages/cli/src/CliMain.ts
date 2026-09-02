@@ -17,7 +17,7 @@ import { CliCommandWatchStatus } from "./command/watch/CliCommandWatchStatus.js"
 import { cliExitCodes } from "./exit/CliExitCode.js";
 import { CliExitMapper } from "./exit/CliExitMapper.js";
 import { renderCliError } from "./render/CliRenderError.js";
-import { renderCliTopicUsage, renderCliUsage, renderInstanceUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
+import { renderAgentUsage, renderCliTopicUsage, renderCliUsage, renderInstanceUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
 import { renderControlLogs } from "./render/control/CliRenderControlLogs.js";
 import { renderControlStatus } from "./render/control/CliRenderControlStatus.js";
 import { renderInstanceList } from "./render/instance/CliRenderInstanceList.js";
@@ -233,6 +233,41 @@ export class CliMain {
             case "artifact":
                 await executeArtifactCommand(command.args, this.#clients.artifact, this.#stdout);
                 return;
+            case "agent.help":
+                this.#stdout.write(`${renderAgentUsage()}\n`);
+                return;
+            case "agent.list":
+                this.#writeJson(await this.#clients.agent.list());
+                return;
+            case "agent.show":
+                this.#writeJson(await this.#clients.agent.get(command.agentId));
+                return;
+            case "agent.start":
+                this.#writeJson(await this.#clients.agent.start({
+                    target: command.target,
+                    ...(command.provider === undefined ? {} : { provider: command.provider }),
+                    ...(command.slug === undefined ? {} : { slug: command.slug })
+                }));
+                return;
+            case "agent.send":
+                await this.#clients.agent.prompt({ agentId: command.agentId, message: command.message });
+                this.#writeJson({ accepted: true });
+                return;
+            case "agent.steer":
+                await this.#clients.agent.steer({ agentId: command.agentId, message: command.message });
+                this.#writeJson({ accepted: true });
+                return;
+            case "agent.followUp":
+                await this.#clients.agent.followUp({ agentId: command.agentId, message: command.message });
+                this.#writeJson({ accepted: true });
+                return;
+            case "agent.abort":
+                await this.#clients.agent.abort(command.agentId);
+                this.#writeJson({ accepted: true });
+                return;
+            case "agent.stop":
+                this.#writeJson(await this.#clients.agent.stop(command.agentId));
+                return;
             case "tui":
                 await this.#startTui();
                 return;
@@ -435,6 +470,7 @@ function commandUsesControlClient(command: CliParsedCommand): boolean {
         command.kind.startsWith("approval.") ||
         command.kind.startsWith("oauth.") ||
         command.kind.startsWith("context.") ||
+        command.kind.startsWith("agent.") ||
         command.kind.startsWith("tool.") ||
         command.kind.startsWith("todo.")
     ) {

@@ -17,19 +17,37 @@ export interface PiWorkerTool {
     parameters: JsonValue;
 }
 
+export type PiWorkerToolExecutor = (
+    toolCallId: string,
+    definition: ToolDefinition,
+    input: JsonValue,
+    signal?: AbortSignal
+) => Promise<JsonValue>;
+
 export async function createPiWorkerTools(worker: AgentWorkerClient): Promise<PiWorkerTool[]> {
     const definitions = await worker.listTools();
-    return definitions.map((definition) => toPiWorkerTool(worker, definition));
+    return createPiWorkerToolsFromDefinitions(
+        definitions,
+        async (toolCallId, definition, input, signal) => await worker.callTool(
+            definition.name,
+            input,
+            { operationId: toolCallId, signal }
+        )
+    );
 }
 
-function toPiWorkerTool(worker: AgentWorkerClient, definition: ToolDefinition): PiWorkerTool {
+export function createPiWorkerToolsFromDefinitions(
+    definitions: readonly ToolDefinition[],
+    execute: PiWorkerToolExecutor
+): PiWorkerTool[] {
+    return definitions.map((definition) => toPiWorkerTool(definition, execute));
+}
+
+function toPiWorkerTool(definition: ToolDefinition, execute: PiWorkerToolExecutor): PiWorkerTool {
     return {
         description: definition.description,
         async execute(toolCallId, params, signal) {
-            const result = await worker.callTool(definition.name, asJsonValue(params), {
-                operationId: toolCallId,
-                signal
-            });
+            const result = await execute(toolCallId, definition, asJsonValue(params), signal);
             return {
                 content: [{ text: renderToolResult(result), type: "text" }],
                 details: result
