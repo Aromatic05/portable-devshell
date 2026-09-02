@@ -8,6 +8,22 @@ export type {
     AgentWorkerToolCallOptions
 } from "./provider/AgentProvider.js";
 export {
+    PI_PROVIDER_ID,
+    PI_PROVIDER_VERSION,
+    PiAgentProvider,
+    type PiAgentProviderOptions,
+    type PiProviderInstallerLike,
+    type PiSdkLoaderLike
+} from "./provider/pi/PiAgentProvider.js";
+export {
+    PI_PACKAGE_NAME,
+    PiProviderInstaller,
+    type PiProviderInstallation,
+    type PiProviderInstallCommand,
+    type PiProviderInstallerOptions,
+    type PiProviderInstallRunner
+} from "./provider/pi/PiProviderInstaller.js";
+export {
     AgentHost,
     type AgentHostOptions,
     type AgentHostRecord,
