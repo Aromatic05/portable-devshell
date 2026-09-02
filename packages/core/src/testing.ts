@@ -15,6 +15,7 @@ export * from "./audit/tool/AuditToolCallHistory.js";
 export * from "./log/store/LogStoreInstance.js";
 export * from "./worker/WorkerBinary.js";
 export * from "./worker/WorkerAssetResolver.js";
+export * from "./worker/client/WorkerDirectClient.js";
 export * from "./worker/rpc/WorkerRpcProcess.js";
 export * from "./worker/command/WorkerCommandClient.js";
 export * from "./worker/command/WorkerCommandOptions.js";

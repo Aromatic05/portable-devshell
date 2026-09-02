@@ -16,3 +16,8 @@ export {
     renderAgentWorkerTarget,
     type AgentWorkerTarget
 } from "./target/AgentWorkerTarget.js";
+export {
+    AgentWorkerDirectClient,
+    type AgentWorkerDirectClientOptions,
+    type AgentWorkerDirectTransport
+} from "./worker/AgentWorkerDirectClient.js";

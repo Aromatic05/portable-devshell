@@ -15,6 +15,7 @@
         "dist"
     ],
     "dependencies": {
+        "@portable-devshell/core": "workspace:*",
         "@portable-devshell/shared": "workspace:*"
     },
     "scripts": {

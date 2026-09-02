@@ -4,11 +4,12 @@ import { rm } from "node:fs/promises";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
-import { errorCodes, type JsonValue } from "@portable-devshell/shared";
+import { asInstanceName, errorCodes, type JsonValue } from "@portable-devshell/shared";
 import { encodeFrame, FrameBuffer } from "@portable-devshell/shared/transport/frame";
 import {
     WorkerTransportDriverLocal,
     WorkerBinary,
+    WorkerDirectClient,
     WORKER_PROTOCOL_VERSION,
     WorkerProtocolClient,
     WorkerRpcBridge,
@@ -51,6 +52,43 @@ test("WorkerRpcBridge reuses one spawned rpc process across multiple calls", asy
     assert.equal(harness.spawnCount, 1);
     assert.deepEqual(harness.requestMethods, ["worker.ping", "worker.handshake", "tools.list"]);
     bridge.close();
+});
+
+test("WorkerDirectClient speaks Worker RPC without WorkerInstance persistence layers", async () => {
+    const harness = createRpcHarness();
+    const client = new WorkerDirectClient({
+        clientName: "portable-devshell-agentd",
+        clientVersion: "0.0.0-test",
+        instanceName: asInstanceName("agent-worker"),
+        transport: harness.transport
+    });
+
+    await client.prepareWorkspace("/workspace/project");
+    const tools = await client.listTools();
+    await client.callTool(
+        "bash_run",
+        { command: "printf ok" },
+        {
+            ctxId: "agent:agent-1",
+            requestId: "pi-tool-7",
+            source: "agent",
+            workspace: "/workspace/project"
+        }
+    );
+
+    assert.equal(tools[0]?.name, "bash_run");
+    assert.deepEqual(harness.requestMethods.slice(0, 5), [
+        "worker.ping",
+        "worker.handshake",
+        "tools.list",
+        "workspace.prepare",
+        "bash_run"
+    ]);
+    const call = harness.requests.find((request) => request.method === "bash_run");
+    assert.equal(call?.context?.ctxId, "agent:agent-1");
+    assert.equal(call?.context?.requestId, "pi-tool-7");
+    assert.equal(call?.context?.source, "agent");
+    client.close();
 });
 
 test("WorkerProtocolClient routes artifact payload and receive lifecycle through internal RPC methods", async () => {
@@ -124,6 +162,7 @@ test("WorkerRpcClient keeps context identity while assigning each call a distinc
     await client.request("tools.list", {});
     await client.request("worker.status", {}, { ctxId: "ctx-mcp", requestId: "shared-mcp-request", source: "mcp" });
     await client.request("worker.ping", {}, { ctxId: "ctx-mcp", requestId: "shared-mcp-request", source: "mcp" });
+    await client.request("worker.ping", {}, { ctxId: "ctx-agent", operationId: "pi-operation", source: "agent" });
 
     const implicit = harness.requestContexts.slice(0, 2).map((context) => context?.ctxId);
     assert.equal(typeof implicit[0], "string");
@@ -132,9 +171,10 @@ test("WorkerRpcClient keeps context identity while assigning each call a distinc
     assert.equal(harness.requestContexts[2]?.source, "mcp");
     assert.equal(harness.requestContexts[2]?.requestId, "shared-mcp-request");
     assert.equal(harness.requestContexts[3]?.requestId, "shared-mcp-request");
-    const operationIds = harness.requestContexts.map((context) => context?.operationId);
-    assert.equal(operationIds.every((operationId) => typeof operationId === "string"), true);
-    assert.equal(new Set(operationIds).size, operationIds.length);
+    assert.equal(harness.requestContexts[4]?.operationId, "pi-operation");
+    const generatedOperationIds = harness.requestContexts.slice(0, 4).map((context) => context?.operationId);
+    assert.equal(generatedOperationIds.every((operationId) => typeof operationId === "string"), true);
+    assert.equal(new Set(generatedOperationIds).size, generatedOperationIds.length);
     bridge.close();
 });
 

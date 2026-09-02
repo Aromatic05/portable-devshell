@@ -46,6 +46,9 @@ importers:
 
   packages/agentd:
     dependencies:
+      '@portable-devshell/core':
+        specifier: workspace:*
+        version: link:../core
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
