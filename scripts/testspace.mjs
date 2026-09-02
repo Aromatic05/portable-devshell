@@ -45,6 +45,11 @@ import {
     resolveTestspaceRuntimeDirectory,
     stopTestspaceTmux,
 } from "./testspace/TestspaceRuntime.mjs";
+import {
+    assertTestspaceExecutionContext,
+    assertTestspaceLifecycleEnvironment,
+    TESTSPACE_TOKEN_ENV,
+} from "./testspace/TestspaceNamespace.mjs";
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 const root = resolveTestspaceRoot(repoRoot, process.env.DEVSHELL_TESTSPACE_ROOT);
@@ -74,6 +79,7 @@ const paths = {
     workspace: join(root, "workspace"),
 };
 
+assertTestspaceExecutionContext(root);
 await assertTestspaceRootOwned(repoRoot, root);
 
 const { args, command } = resolveTestspaceInvocation(process.argv.slice(2));
@@ -93,6 +99,9 @@ switch (command) {
         break;
     case "comment-smoke":
         await commentSmoke();
+        break;
+    case "exec":
+        await execInTestspace(args);
         break;
     case "status":
         await status();
@@ -278,6 +287,7 @@ async function start(argv) {
         createdAt: new Date().toISOString(),
         intervalMs,
         mcpPort,
+        namespaceToken: process.env[TESTSPACE_TOKEN_ENV],
         root,
         reverse,
         runtimeDirectory: paths.runtime,
@@ -357,6 +367,23 @@ async function commentSmoke() {
         workspace: paths.workspace,
     });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+}
+
+async function execInTestspace(argv) {
+    const state = await requireRunningState();
+    const command = argv[0] === "--" ? argv.slice(1) : argv;
+    if (command.length === 0) usage("testspace exec requires a command");
+    const env = testspaceEnvironment(stateRuntimeDirectory(state));
+    assertTestspaceLifecycleEnvironment(root, env);
+    const result = spawnSync(command[0], command.slice(1), {
+        cwd: paths.workspace,
+        env,
+        stdio: "inherit",
+    });
+    if (result.error !== undefined) throw result.error;
+    if (result.status !== 0) {
+        throw new Error(`testspace exec exited with ${String(result.status)}`);
+    }
 }
 
 async function status() {
@@ -534,6 +561,7 @@ async function connectorLoop(argv) {
 }
 
 function runCli(cliArgs, env, options = {}) {
+    assertTestspaceLifecycleEnvironment(root, env);
     const result = spawnSync(process.execPath, [
         "--import",
         "tsx",
@@ -637,6 +665,7 @@ function stopTestspaceWorkerProcesses(runtimeDirectory) {
 }
 
 function stopTestspaceLocalWorker(environment) {
+    assertTestspaceLifecycleEnvironment(root, environment);
     const result = spawnSync(workerPath(), ["stop", "--instance", TESTSPACE_INSTANCE], {
         encoding: "utf8",
         env: environment,
@@ -752,12 +781,16 @@ async function readOptionalConnectorPid(target) {
 }
 
 async function writeState(state) {
-    await writeFile(paths.state, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    await writeFile(paths.state, `${JSON.stringify({
+        ...state,
+        namespaceToken: process.env[TESTSPACE_TOKEN_ENV],
+    }, null, 2)}\n`, "utf8");
 }
 
 async function readState() {
     try {
-        return JSON.parse(await readFile(paths.state, "utf8"));
+        const state = JSON.parse(await readFile(paths.state, "utf8"));
+        return state?.namespaceToken === process.env[TESTSPACE_TOKEN_ENV] ? state : undefined;
     } catch {
         return undefined;
     }
@@ -826,6 +859,6 @@ function printUrls(state) {
 
 function usage(message) {
     process.stderr.write(`${message}\n`);
-    process.stderr.write("Usage: pnpm testspace [start|comment-smoke|status|smoke|tui|web|web-smoke|stop] [options]\n");
+    process.stderr.write("Usage: pnpm testspace [start|comment-smoke|exec|status|smoke|tui|web|web-smoke|stop] [options]\n");
     process.exit(2);
 }
