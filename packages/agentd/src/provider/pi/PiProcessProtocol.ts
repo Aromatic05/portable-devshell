@@ -1,11 +1,9 @@
 import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
 
 export interface PiChildInitMessage {
-    agentDir: string;
     entrypoint: string;
     localCwd: string;
     remoteWorkspace: string;
-    sessionDir: string;
     tools: readonly ToolDefinition[];
     type: "init";
 }

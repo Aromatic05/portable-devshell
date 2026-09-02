@@ -79,6 +79,7 @@ export interface PiSdkModule {
     SettingsManager: {
         create(cwd: string, agentDir?: string): PiSettingsManagerLike;
     };
+    getAgentDir(): string;
     createAgentSession(options?: Record<string, unknown>): Promise<{
         session: PiSessionLike;
     }>;
@@ -110,6 +111,7 @@ function isPiSdkModule(value: unknown): value is PiSdkModule {
     if (typeof value !== "object" || value === null) return false;
     const candidate = value as Record<string, unknown>;
     if (typeof candidate.createAgentSession !== "function") return false;
+    if (typeof candidate.getAgentDir !== "function") return false;
     if (typeof candidate.DefaultResourceLoader !== "function") return false;
     if (typeof candidate.ModelRuntime !== "function" && (typeof candidate.ModelRuntime !== "object" || candidate.ModelRuntime === null)) {
         return false;

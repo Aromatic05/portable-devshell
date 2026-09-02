@@ -13,7 +13,6 @@ import type {
 } from "./PiProcessProtocol.js";
 
 export interface PiAgentProcessStartOptions {
-    agentDir: string;
     callTool(
         toolName: string,
         input: JsonValue,
@@ -22,7 +21,6 @@ export interface PiAgentProcessStartOptions {
     entrypoint: string;
     localCwd: string;
     remoteWorkspace: string;
-    sessionDir: string;
     tools: readonly ToolDefinition[];
 }
 
@@ -93,11 +91,9 @@ class PiAgentProcessHandle implements AgentProviderHandle {
             this.#readyReject = reject;
         });
         await this.#send({
-            agentDir: this.#options.agentDir,
             entrypoint: this.#options.entrypoint,
             localCwd: this.#options.localCwd,
             remoteWorkspace: this.#options.remoteWorkspace,
-            sessionDir: this.#options.sessionDir,
             tools: this.#options.tools,
             type: "init"
         });

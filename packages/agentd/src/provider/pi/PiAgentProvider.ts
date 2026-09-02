@@ -44,26 +44,18 @@ export class PiAgentProvider implements AgentProvider {
         const paths = resolvePiAgentPaths(context);
         const tools = await context.worker.listTools();
         return await this.#runtimeFactory.start({
-            agentDir: paths.agentDir,
             callTool: async (toolName, input, options) => await context.worker.callTool(toolName, input, options),
             entrypoint: installation.entrypoint,
             localCwd: paths.localCwd,
             remoteWorkspace: `${context.target.instance}:${context.target.workspace}`,
-            sessionDir: paths.sessionDir,
             tools
         });
     }
 }
 
-function resolvePiAgentPaths(context: AgentProviderStartContext): {
-    agentDir: string;
-    localCwd: string;
-    sessionDir: string;
-} {
+function resolvePiAgentPaths(context: AgentProviderStartContext): { localCwd: string } {
     const agentRoot = join(context.runtime.stateDirectory, "agents", context.agentId);
     return {
-        agentDir: context.runtime.stateDirectory,
-        localCwd: join(agentRoot, "cwd"),
-        sessionDir: join(agentRoot, "sessions")
+        localCwd: join(agentRoot, "cwd")
     };
 }

@@ -24,7 +24,7 @@ import {
     PI_PACKAGE_NAME,
     PiProviderInstaller
 } from "../../src/provider/pi/PiProviderInstaller.ts";
-import { createPiWorkerTools } from "../../src/provider/pi/PiWorkerTools.ts";
+import { createPiWorkerExtensionFromDefinitions } from "../../src/provider/pi/PiWorkerExtension.ts";
 import { AgentProviderRuntimePaths } from "../../src/runtime/AgentProviderRuntimePaths.ts";
 import { parseAgentWorkerTarget } from "../../src/target/AgentWorkerTarget.ts";
 
@@ -67,7 +67,7 @@ test("Pi runtime resolves from portable-devshell's bundled dependency without ho
     }
 });
 
-test("Pi Worker tools preserve Worker schema and Pi tool-call identity", async () => {
+test("Pi Worker extension preserves Worker schema and Pi tool-call identity", async () => {
     const calls: Array<{ operationId: string; toolName: string }> = [];
     const definition: ToolDefinition = {
         description: "Read a file from the remote workspace.",
@@ -85,10 +85,23 @@ test("Pi Worker tools preserve Worker schema and Pi tool-call identity", async (
         calls.push({ operationId: options.operationId, toolName });
         return { content: "hello" };
     });
-
-    const [tool] = await createPiWorkerTools(worker);
+    const registered: Array<ReturnType<typeof createPiWorkerExtensionFromDefinitions> extends { factory(api: infer T): void }
+        ? T extends { registerTool(tool: infer U): void } ? U : never
+        : never> = [];
+    const extension = createPiWorkerExtensionFromDefinitions(
+        [definition],
+        async (toolCallId, toolDefinition, input, signal) => await worker.callTool(
+            toolDefinition.name,
+            input,
+            { operationId: toolCallId, signal }
+        )
+    );
+    extension.factory({ registerTool: (tool) => registered.push(tool) });
+    const [tool] = registered;
     const result = await tool!.execute("pi-tool-42", { path: "README.md" });
 
+    assert.equal(extension.hidden, true);
+    assert.equal(extension.name, "devshell-worker");
     assert.equal(tool?.name, "file_read");
     assert.deepEqual(tool?.parameters, definition.inputSchema);
     assert.deepEqual(calls, [{ operationId: "pi-tool-42", toolName: "file_read" }]);
@@ -149,7 +162,8 @@ test("Pi provider launches one isolated runtime process per Agent and passes onl
         assert.equal(starts[0]?.entrypoint, "/managed/pi/dist/index.js");
         assert.equal(starts[0]?.remoteWorkspace, "worker-a:/remote/project");
         assert.match(starts[0]!.localCwd, /agents\/ag-pi-test\/cwd$/u);
-        assert.match(starts[0]!.sessionDir, /agents\/ag-pi-test\/sessions$/u);
+        assert.equal("agentDir" in starts[0]!, false);
+        assert.equal("sessionDir" in starts[0]!, false);
         assert.deepEqual(starts[0]?.tools, [definition]);
 
         await starts[0]!.callTool("bash_run", { command: "true" }, { operationId: "pi-call" });

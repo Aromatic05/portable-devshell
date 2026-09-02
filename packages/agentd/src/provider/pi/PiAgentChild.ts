@@ -6,7 +6,7 @@ import type { JsonValue } from "@portable-devshell/shared";
 
 import { PiSdkLoader, type PiSessionLike } from "./PiSdkLoader.js";
 import { PiAgentWebServer } from "./PiAgentWebServer.js";
-import { createPiWorkerToolsFromDefinitions } from "./PiWorkerTools.js";
+import { createPiWorkerExtensionFromDefinitions } from "./PiWorkerExtension.js";
 import type {
     PiChildCommandMessage,
     PiChildInitMessage,
@@ -47,20 +47,21 @@ async function handleMessage(message: PiParentMessage): Promise<void> {
 
 async function initialize(input: PiChildInitMessage): Promise<URL> {
     if (session !== undefined) throw new Error("Pi Agent child is already initialized.");
-    await Promise.all([
-        mkdir(input.agentDir, { recursive: true }),
-        mkdir(input.localCwd, { recursive: true }),
-        mkdir(input.sessionDir, { recursive: true })
-    ]);
+    await mkdir(input.localCwd, { recursive: true });
     const sdk = await new PiSdkLoader().load(input.entrypoint);
+    const agentDir = sdk.getAgentDir();
+    await mkdir(agentDir, { recursive: true });
     const modelRuntime = await sdk.ModelRuntime.create({
-        authPath: join(input.agentDir, "auth.json"),
-        modelsPath: join(input.agentDir, "models.json")
+        authPath: join(agentDir, "auth.json"),
+        modelsPath: join(agentDir, "models.json")
     });
-    const settingsManager = sdk.SettingsManager.create(input.localCwd, input.agentDir);
+    const settingsManager = sdk.SettingsManager.create(input.localCwd, agentDir);
+    const workerExtension = createPiWorkerExtensionFromDefinitions(input.tools, executeTool);
     const resourceLoader = new sdk.DefaultResourceLoader({
-        agentDir: input.agentDir,
+        agentDir,
         cwd: input.localCwd,
+        extensionFactories: [workerExtension],
+        noExtensions: true,
         settingsManager,
         systemPromptOverride: (basePrompt: string | undefined) => appendRemoteWorkspacePrompt(
             basePrompt,
@@ -68,18 +69,16 @@ async function initialize(input: PiChildInitMessage): Promise<URL> {
         )
     });
     await resourceLoader.reload();
-    const customTools = createPiWorkerToolsFromDefinitions(input.tools, executeTool);
-    const sessionManager = sdk.SessionManager.create(input.localCwd, input.sessionDir);
+    const sessionManager = sdk.SessionManager.create(input.localCwd);
     const created = await sdk.createAgentSession({
-        agentDir: input.agentDir,
-        customTools,
+        agentDir,
         cwd: input.localCwd,
         modelRuntime,
         noTools: "builtin",
         resourceLoader,
         sessionManager,
         settingsManager,
-        tools: customTools.map((tool) => tool.name)
+        tools: input.tools.map((tool) => tool.name)
     });
     session = created.session;
     webServer = new PiAgentWebServer({ modelRuntime, session, settingsManager });
