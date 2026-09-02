@@ -3,6 +3,7 @@ export const TESTSPACE_REVERSE_INSTANCE = "testspace-reverse";
 export const DEFAULT_TESTSPACE_COMMAND = "start";
 const USER_TESTSPACE_COMMANDS = new Set([
     "comment-smoke",
+    "exec",
     "smoke",
     "status",
     "stop",

@@ -24,6 +24,14 @@ import {
     stopTestspaceTmux,
 } from "./testspace/TestspaceRuntime.mjs";
 import {
+    assertTestspaceExecutionContext,
+    assertTestspaceLifecycleEnvironment,
+    buildTestspaceExecutionEnvironment,
+    LINUX_TESTSPACE_ISOLATION,
+    PROCESS_TESTSPACE_ISOLATION,
+    resolveTestspaceNamespaceDirectory,
+} from "./testspace/TestspaceNamespace.mjs";
+import {
     ensureConnectorProcesses,
     ensureInstanceReady,
     readConnectorStatuses,
@@ -700,4 +708,54 @@ test("testspace reverse lifecycle enrolls with a one-time code and stops by pers
         "--instance",
         "testspace-reverse",
     ]);
+});
+
+test("testspace exposes exec only through the guarded command surface", () => {
+    assert.equal(resolveTestspaceCommand("exec"), "exec");
+    assert.deepEqual(resolveTestspaceInvocation(["exec", "--", "printf", "ok"]), {
+        args: ["--", "printf", "ok"],
+        command: "exec",
+    });
+});
+
+test("testspace lifecycle rejects direct or host-home execution", () => {
+    const root = "/tmp/testspace-guard";
+    assert.throws(
+        () => assertTestspaceExecutionContext(root, {}, { platform: "linux" }),
+        /guarded Testspace launcher/u,
+    );
+    const guarded = buildTestspaceExecutionEnvironment(root, "a".repeat(48), {
+        baseEnvironment: { PATH: "/usr/bin" },
+        isolation: LINUX_TESTSPACE_ISOLATION,
+        platform: "linux",
+    });
+    assert.doesNotThrow(() => assertTestspaceLifecycleEnvironment(root, guarded, { platform: "linux" }));
+    assert.throws(
+        () => assertTestspaceLifecycleEnvironment(root, { ...guarded, HOME: "/home/real-user" }, { platform: "linux" }),
+        /non-isolated HOME/u,
+    );
+    const portable = buildTestspaceExecutionEnvironment(root, "b".repeat(48), {
+        isolation: PROCESS_TESTSPACE_ISOLATION,
+        platform: "darwin",
+        runtimeOptions: { platform: "darwin", temporaryDirectory: "/tmp" },
+    });
+    assert.doesNotThrow(() => assertTestspaceExecutionContext(root, portable, { platform: "darwin" }));
+});
+
+test("testspace namespace state path is deterministic per user and root", () => {
+    const first = resolveTestspaceNamespaceDirectory("/workspace/one", {
+        temporaryDirectory: "/tmp",
+        userIdentity: "1000",
+    });
+    const repeated = resolveTestspaceNamespaceDirectory("/workspace/one", {
+        temporaryDirectory: "/tmp",
+        userIdentity: "1000",
+    });
+    const other = resolveTestspaceNamespaceDirectory("/workspace/two", {
+        temporaryDirectory: "/tmp",
+        userIdentity: "1000",
+    });
+    assert.equal(first, repeated);
+    assert.notEqual(first, other);
+    assert.match(first, /^\/tmp\/pds-testspace-ns-1000-[0-9a-f]{16}$/u);
 });
