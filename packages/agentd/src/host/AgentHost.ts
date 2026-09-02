@@ -166,19 +166,25 @@ export class AgentHost {
             throw new Error(`Unknown Agent: ${agentId}`);
         }
         runtime.record.state = "stopping";
-        let stopError: unknown;
+        const failures: unknown[] = [];
         try {
             await runtime.handle.stop();
         } catch (error) {
-            stopError = error;
-        } finally {
+            failures.push(error);
+        }
+        try {
             await runtime.worker.close();
+        } catch (error) {
+            failures.push(error);
         }
         runtime.record.state = "stopped";
         const stopped = cloneRecord(runtime.record);
         this.#runtimes.delete(agentId);
-        if (stopError !== undefined) {
-            throw stopError;
+        if (failures.length === 1) {
+            throw failures[0];
+        }
+        if (failures.length > 1) {
+            throw new AggregateError(failures, `Agent ${agentId} failed to stop cleanly.`);
         }
         return stopped;
     }

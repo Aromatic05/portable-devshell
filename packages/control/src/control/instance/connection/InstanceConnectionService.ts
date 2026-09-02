@@ -66,7 +66,9 @@ export class InstanceConnectionService {
         const descriptor = this.#requireDescriptor(instance);
         if (descriptor.worker.managementMode === "selfManaged") return;
         if (!this.#registry.releaseConnectionReference(instance, reference)) return;
-        await descriptor.worker.stop();
+        if (descriptor.worker.snapshot().daemonState !== "stopped") {
+            await descriptor.worker.stop();
+        }
         this.#registry.clearConnectionOwnership(instance);
     }
 

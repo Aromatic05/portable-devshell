@@ -74,6 +74,19 @@ export class ControlRuntimeAgent {
         await this.#host.stopAll();
     }
 
+    async retireInstance(instance: string): Promise<void> {
+        const agentIds = this.#host.list()
+            .filter((record) => record.target.instance === instance)
+            .map((record) => record.agentId);
+        const failures: unknown[] = [];
+        for (const agentId of agentIds) {
+            await this.#host.stop(agentId).catch((error) => failures.push(error));
+        }
+        if (failures.length > 0) {
+            throw new AggregateError(failures, `Agents bound to instance ${instance} failed to retire cleanly.`);
+        }
+    }
+
     async #createWorkerBinding(
         target: ReturnType<typeof parseAgentWorkerTarget>,
         agentId: string

@@ -72,6 +72,7 @@ export class ConfigEditorCoordinator {
     readonly #homeDirectory?: string;
     readonly #instanceConfigMapper: InstanceFactory;
     readonly #instanceRegistry: InstanceRegistry;
+    readonly #instanceDisableRetirements = new Set<(instance: ControlConfig["instances"][number]) => Promise<void>>();
     readonly #instanceDeleteRetirements = new Set<(instance: ControlConfig["instances"][number]) => Promise<void>>();
     readonly #markRestartControlRequired: () => void;
     readonly #mcpEndpointConfigMapper: McpEndpointFactory;
@@ -104,6 +105,13 @@ export class ConfigEditorCoordinator {
     ): () => void {
         this.#instanceDeleteRetirements.add(retire);
         return () => this.#instanceDeleteRetirements.delete(retire);
+    }
+
+    registerInstanceDisableRetirement(
+        retire: (instance: ControlConfig["instances"][number]) => Promise<void>,
+    ): () => void {
+        this.#instanceDisableRetirements.add(retire);
+        return () => this.#instanceDisableRetirements.delete(retire);
     }
 
     getConfigView(): JsonValue {
@@ -460,6 +468,10 @@ export class ConfigEditorCoordinator {
             existing === undefined || next === undefined || descriptor === undefined ||
             !existing.enabled || next.enabled
         ) return;
+
+        for (const retire of [...this.#instanceDisableRetirements]) {
+            await retire(existing);
+        }
 
         for (const approval of await descriptor.worker.listApprovals()) {
             if (approval.status === "pending") {

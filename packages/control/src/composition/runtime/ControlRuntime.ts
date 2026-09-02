@@ -73,6 +73,12 @@ export class ControlRuntime {
             shutdown: options.shutdown
         });
         this.#mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
+            await this.#agent?.retireInstance(instance.name);
+        });
+        this.#mcp.configEditor.registerInstanceDisableRetirement?.(async (instance) => {
+            await this.#agent?.retireInstance(instance.name);
+        });
+        this.#mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
             await this.#routes.retireInstance(instance.name);
         });
         this.#socketListener = new ControlSocketListener({ socketPath: options.socketPath });

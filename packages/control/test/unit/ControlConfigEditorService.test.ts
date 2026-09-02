@@ -560,6 +560,41 @@ test("every disable entrypoint restores a managed worker when interaction retire
     }
 });
 
+test("disable runs registered instance interaction retirement after stopping the Worker", async () => {
+    let config = createConfig();
+    const actions: string[] = [];
+    const registry = new InstanceRegistry([descriptor({
+        snapshot: runningSnapshot,
+        async stop() {
+            actions.push("worker.stop");
+            return { ...runningSnapshot(), daemonState: "stopped", ready: false, status: "stopped" };
+        }
+    })]);
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                actions.push("config.write");
+                config = nextConfig;
+            }
+        },
+        getConfig: () => config,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => { config = nextConfig; }
+    });
+    service.registerInstanceDisableRetirement(async (instance) => {
+        actions.push(`interaction.retire:${instance.name}`);
+    });
+
+    await service.disableInstance({ instanceName: "demo-local" });
+
+    assert.deepEqual(actions.slice(0, 3), [
+        "worker.stop",
+        "interaction.retire:demo-local",
+        "config.write"
+    ]);
+    assert.equal(config.instances[0]?.enabled, false);
+});
+
 test("disable restarts a managed worker when persistence fails after stop", async () => {
     let config = createConfig();
     let stopCalls = 0;

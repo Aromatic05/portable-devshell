@@ -143,3 +143,38 @@ function createWorker(
         }
     };
 }
+
+test("AgentHost removes a stopped runtime even when provider and Worker cleanup both fail", async () => {
+    const provider: AgentProvider = {
+        id: "pi",
+        version: "1",
+        async start() {
+            return {
+                async prompt() {},
+                async stop() {
+                    throw new Error("provider stop failed");
+                }
+            };
+        }
+    };
+    const target = parseAgentWorkerTarget("worker-a:/repo");
+    const host = new AgentHost({
+        idFactory: () => "ag-failing-cleanup",
+        providers: [provider],
+        workerFactory: () => ({
+            target,
+            async callTool() { return {}; },
+            async close() { throw new Error("worker close failed"); },
+            async listTools() { return []; }
+        })
+    });
+    const record = await host.start({ provider: "pi", target });
+
+    await assert.rejects(
+        () => host.stop(record.agentId),
+        (error: unknown) => error instanceof AggregateError
+            && error.errors.some((failure) => String(failure).includes("provider stop failed"))
+            && error.errors.some((failure) => String(failure).includes("worker close failed"))
+    );
+    assert.deepEqual(host.list(), []);
+});

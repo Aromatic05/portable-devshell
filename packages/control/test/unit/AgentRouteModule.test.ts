@@ -43,7 +43,7 @@ test("agent routes expose lifecycle control without transcript or tool history",
     await invoke("steer", { agentId: "ag-1", message: "focus" });
     await invoke("followUp", { agentId: "ag-1", message: "continue" });
     await invoke("abort", { agentId: "ag-1" });
-    assert.equal((await invoke("stop", { agentId: "ag-1" }) as AgentRecord).state, "stopped");
+    assert.equal((await invoke("stop", { agentId: "ag-1" }) as unknown as AgentRecord).state, "stopped");
 
     assert.deepEqual(calls, [
         "list",
