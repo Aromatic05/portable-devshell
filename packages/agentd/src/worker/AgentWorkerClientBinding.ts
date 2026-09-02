@@ -23,14 +23,12 @@ export type AgentWorkerHandle = Pick<
  * The underlying instance connection is shared and remains owned by Control.
  */
 export class AgentWorkerClientBinding implements AgentWorkerClient {
-    readonly #agentId: string;
     readonly #handle: AgentWorkerHandle;
     readonly #sessionId: string;
     readonly target: AgentWorkerTarget;
     #prepared = false;
 
     constructor(options: AgentWorkerClientBindingOptions) {
-        this.#agentId = options.agentId;
         this.#handle = options.handle;
         this.#sessionId = `agent:${options.agentId}`;
         this.target = options.target;

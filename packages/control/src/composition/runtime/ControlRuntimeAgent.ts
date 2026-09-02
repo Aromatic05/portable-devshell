@@ -17,6 +17,7 @@ import type { InstanceRegistry } from "../../control/instance/registry/InstanceR
 export interface ControlRuntimeAgentOptions {
     homeDirectory?: string;
     instances: InstanceRegistry;
+    webBasePath?: string;
 }
 
 export class ControlRuntimeAgent {
@@ -28,6 +29,7 @@ export class ControlRuntimeAgent {
         this.#host = new AgentHost({
             homeDirectory: options.homeDirectory,
             providers: [new PiAgentProvider()],
+            ...(options.webBasePath === undefined ? {} : { webBasePath: options.webBasePath }),
             workerFactory: async (target, agentId) => await this.#createWorkerBinding(target, agentId)
         });
     }

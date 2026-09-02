@@ -30,7 +30,10 @@ export interface PiChildToolResultMessage {
 export type PiParentMessage = PiChildInitMessage | PiChildCommandMessage | PiChildToolResultMessage;
 
 export interface PiChildReadyMessage {
+    error?: string;
+    ok: boolean;
     type: "ready";
+    webUpstream?: string;
 }
 
 export interface PiChildCommandResultMessage {

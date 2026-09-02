@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 
-import { ControlPathHome } from "@portable-devshell/shared";
+import { ControlPathHome, controlWebBasePath } from "@portable-devshell/shared";
 import { McpRuntimeFactory } from "../McpRuntimeFactory.js";
 import { ControlRuntimeArtifact } from "./ControlRuntimeArtifact.js";
 import { ControlRuntime } from "./ControlRuntime.js";
@@ -35,9 +35,11 @@ export class ControlRuntimeFactory {
         });
         await artifact.start();
         try {
+            const config = options.state.requireConfig();
             const agent = new ControlRuntimeAgent({
                 homeDirectory: options.state.homeDirectory,
-                instances: options.state.instances
+                instances: options.state.instances,
+                webBasePath: `${controlWebBasePath(config.web.publicBaseUrl)}/agent`
             });
             const mcp = new ControlRuntimeMcp({
                 artifact,

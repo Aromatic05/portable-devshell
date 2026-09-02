@@ -12,6 +12,7 @@ import { ControlWebOAuthFlow } from "../../server/web/ControlWebOAuthFlow.js";
 import { ControlWebSessionService } from "../../server/web/ControlWebSessionService.js";
 import { ControlWebSocketAccessService } from "../../server/web/ControlWebSocketAccessService.js";
 import { ControlWebSocketListener } from "../../server/web/ControlWebSocketListener.js";
+import { AgentWebProxy } from "../../server/web/agent/AgentWebProxy.js";
 import { ControlRouteComposition } from "../ControlRouteComposition.js";
 import type { ControlRuntimeArtifact } from "./ControlRuntimeArtifact.js";
 import type { ControlRuntimeMcp } from "./ControlRuntimeMcp.js";
@@ -171,6 +172,9 @@ export class ControlRuntime {
                       verifyBearer: async (token: string) => await flow.verifyAccessToken(token)
                   })
         });
+        const agentWebProxy = this.#agent === undefined
+            ? undefined
+            : new AgentWebProxy({ agent: this.#agent, basePath: `${basePath}/agent` });
         return {
             ...(flow === undefined ? {} : { flow }),
             host: http,
@@ -180,6 +184,9 @@ export class ControlRuntime {
                 basePath,
                 http,
                 remotePath: controlRemoteRpcPath(this.#mcp.webPublicBaseUrl),
+                ...(agentWebProxy === undefined
+                    ? {}
+                    : { routeInstaller: (host, webSessions) => agentWebProxy.install(host, webSessions) }),
                 sessions
             })
         };

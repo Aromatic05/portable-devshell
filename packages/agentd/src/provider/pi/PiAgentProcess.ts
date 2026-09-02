@@ -44,8 +44,13 @@ export class PiAgentProcessFactory implements PiAgentRuntimeFactory {
             stdio: ["ignore", "ignore", "pipe", "ipc"]
         });
         const runtime = new PiAgentProcessHandle(child, options);
-        await runtime.initialize();
-        return runtime;
+        try {
+            await runtime.initialize();
+            return runtime;
+        } catch (error) {
+            runtime.terminate();
+            throw error;
+        }
     }
 }
 
@@ -61,6 +66,7 @@ class PiAgentProcessHandle implements AgentProviderHandle {
     #readyReject?: (error: Error) => void;
     #readyResolve?: () => void;
     #stopped = false;
+    #web?: { upstream: URL };
 
     constructor(child: ChildProcess, options: PiAgentProcessStartOptions) {
         this.#child = child;
@@ -98,6 +104,10 @@ class PiAgentProcessHandle implements AgentProviderHandle {
         await ready;
     }
 
+    get web(): { upstream: URL } | undefined {
+        return this.#web;
+    }
+
     async prompt(message: string): Promise<void> {
         await this.#command("prompt", message);
     }
@@ -119,11 +129,17 @@ class PiAgentProcessHandle implements AgentProviderHandle {
         try {
             await this.#command("stop");
         } finally {
-            this.#stopped = true;
-            if (this.#child.connected) this.#child.disconnect();
-            if (this.#child.exitCode === null && this.#child.signalCode === null) {
-                this.#child.kill("SIGTERM");
-            }
+            this.terminate();
+        }
+    }
+
+    terminate(): void {
+        this.#stopped = true;
+        for (const controller of this.#toolCalls.values()) controller.abort();
+        this.#toolCalls.clear();
+        if (this.#child.connected) this.#child.disconnect();
+        if (this.#child.exitCode === null && this.#child.signalCode === null) {
+            this.#child.kill("SIGTERM");
         }
     }
 
@@ -150,6 +166,15 @@ class PiAgentProcessHandle implements AgentProviderHandle {
     #onMessage(value: unknown): void {
         const message = value as PiChildMessage;
         if (message?.type === "ready") {
+            if (!message.ok) {
+                this.#readyReject?.(new Error(message.error ?? "Pi Agent child initialization failed."));
+                this.#readyResolve = undefined;
+                this.#readyReject = undefined;
+                return;
+            }
+            if (message.webUpstream !== undefined) {
+                this.#web = { upstream: new URL(message.webUpstream) };
+            }
             this.#readyResolve?.();
             this.#readyResolve = undefined;
             this.#readyReject = undefined;

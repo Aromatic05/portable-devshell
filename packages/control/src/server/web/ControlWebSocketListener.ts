@@ -30,6 +30,7 @@ export interface ControlWebSocketListenerOptions {
     http: HttpHost;
     path?: string;
     remotePath?: string | false;
+    routeInstaller?: (http: HttpHost, sessions: ControlWebSessionService) => () => void;
     sessions: ControlWebSessionService;
 }
 
@@ -43,6 +44,7 @@ export class ControlWebSocketListener implements ControlChannelListener {
         accessKind: ControlWebSocketAccess["kind"];
         path: string;
     }>;
+    readonly #routeInstaller?: ControlWebSocketListenerOptions["routeInstaller"];
     readonly #sessions: ControlWebSessionService;
     #unsubscribeRevocation?: () => void;
     #accept?: (connection: ControlAcceptedChannel) => void;
@@ -55,6 +57,7 @@ export class ControlWebSocketListener implements ControlChannelListener {
         this.#assetDirectory = options.assetDirectory;
         this.#basePath = normalizeBasePath(options.basePath ?? CONTROL_WEB_BASE_PATH);
         this.#http = options.http;
+        this.#routeInstaller = options.routeInstaller;
         this.#sessions = options.sessions;
         this.#access = options.access ?? new ControlWebSocketSessionAccess(options.sessions);
         const browserPath = normalizeAbsolutePath(
@@ -87,6 +90,9 @@ export class ControlWebSocketListener implements ControlChannelListener {
         });
         if (!this.#routesInstalled) {
             const removeRoutes = [this.#sessions.install(this.#http)];
+            if (this.#routeInstaller !== undefined) {
+                removeRoutes.push(this.#routeInstaller(this.#http, this.#sessions));
+            }
             if (this.#assetDirectory !== undefined) {
                 removeRoutes.push(
                     this.#http.registerStaticDirectory(this.#basePath, this.#assetDirectory)

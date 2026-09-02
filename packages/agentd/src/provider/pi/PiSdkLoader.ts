@@ -1,9 +1,18 @@
 import { pathToFileURL } from "node:url";
 
 export interface PiSessionLike {
+    agent?: {
+        state?: {
+            isStreaming?: boolean;
+            messages?: unknown[];
+            model?: unknown;
+            thinkingLevel?: unknown;
+        };
+    };
     abort(): Promise<void>;
     dispose(): void;
     prompt(text: string, options?: { streamingBehavior?: "steer" | "followUp" }): Promise<void>;
+    subscribe?(listener: (event: unknown) => void): () => void;
 }
 
 export interface PiSdkModule {

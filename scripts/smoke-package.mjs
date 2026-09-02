@@ -55,6 +55,11 @@ try {
         "running packaged status"
     );
     assertCommandOutput(
+        runInstalled(command, ["agent", "list"], environment),
+        "[]",
+        "packaged agent runtime"
+    );
+    assertCommandOutput(
         runInstalled(command, ["logs"], environment),
         "control server started",
         "packaged control logs"

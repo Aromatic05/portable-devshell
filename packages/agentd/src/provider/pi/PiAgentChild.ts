@@ -4,6 +4,7 @@ import { mkdir } from "node:fs/promises";
 import type { JsonValue } from "@portable-devshell/shared";
 
 import { PiSdkLoader, type PiSessionLike } from "./PiSdkLoader.js";
+import { PiAgentWebServer } from "./PiAgentWebServer.js";
 import { createPiWorkerToolsFromDefinitions } from "./PiWorkerTools.js";
 import type {
     PiChildCommandMessage,
@@ -13,6 +14,7 @@ import type {
 } from "./PiProcessProtocol.js";
 
 let session: PiSessionLike | undefined;
+let webServer: PiAgentWebServer | undefined;
 const toolResults = new Map<string, {
     reject(error: Error): void;
     resolve(value: JsonValue): void;
@@ -22,9 +24,8 @@ process.on("message", (value: unknown) => {
     void handleMessage(value as PiParentMessage).catch((error) => {
         send({
             error: error instanceof Error ? error.message : String(error),
-            id: "init",
             ok: false,
-            type: "command.result"
+            type: "ready"
         });
     });
 });
@@ -32,8 +33,7 @@ process.on("message", (value: unknown) => {
 async function handleMessage(message: PiParentMessage): Promise<void> {
     switch (message.type) {
         case "init":
-            await initialize(message);
-            send({ type: "ready" });
+            send({ ok: true, type: "ready", webUpstream: (await initialize(message)).toString() });
             return;
         case "command":
             await handleCommand(message);
@@ -44,7 +44,7 @@ async function handleMessage(message: PiParentMessage): Promise<void> {
     }
 }
 
-async function initialize(input: PiChildInitMessage): Promise<void> {
+async function initialize(input: PiChildInitMessage): Promise<URL> {
     if (session !== undefined) throw new Error("Pi Agent child is already initialized.");
     await Promise.all([
         mkdir(input.agentDir, { recursive: true }),
@@ -73,6 +73,8 @@ async function initialize(input: PiChildInitMessage): Promise<void> {
         tools: customTools.map((tool) => tool.name)
     });
     session = created.session;
+    webServer = new PiAgentWebServer(session);
+    return await webServer.start();
 }
 
 async function handleCommand(message: PiChildCommandMessage): Promise<void> {
@@ -93,6 +95,8 @@ async function handleCommand(message: PiChildCommandMessage): Promise<void> {
                 break;
             case "stop":
                 await active.abort().catch(() => undefined);
+                await webServer?.stop().catch(() => undefined);
+                webServer = undefined;
                 active.dispose();
                 session = undefined;
                 break;
