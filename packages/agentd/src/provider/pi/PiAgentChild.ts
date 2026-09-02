@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 
 import type { JsonValue } from "@portable-devshell/shared";
 
@@ -52,9 +53,15 @@ async function initialize(input: PiChildInitMessage): Promise<URL> {
         mkdir(input.sessionDir, { recursive: true })
     ]);
     const sdk = await new PiSdkLoader().load(input.entrypoint);
+    const modelRuntime = await sdk.ModelRuntime.create({
+        authPath: join(input.agentDir, "auth.json"),
+        modelsPath: join(input.agentDir, "models.json")
+    });
+    const settingsManager = sdk.SettingsManager.create(input.localCwd, input.agentDir);
     const resourceLoader = new sdk.DefaultResourceLoader({
         agentDir: input.agentDir,
         cwd: input.localCwd,
+        settingsManager,
         systemPromptOverride: (basePrompt: string | undefined) => appendRemoteWorkspacePrompt(
             basePrompt,
             input.remoteWorkspace
@@ -67,13 +74,15 @@ async function initialize(input: PiChildInitMessage): Promise<URL> {
         agentDir: input.agentDir,
         customTools,
         cwd: input.localCwd,
+        modelRuntime,
         noTools: "builtin",
         resourceLoader,
         sessionManager,
+        settingsManager,
         tools: customTools.map((tool) => tool.name)
     });
     session = created.session;
-    webServer = new PiAgentWebServer(session);
+    webServer = new PiAgentWebServer({ modelRuntime, session, settingsManager });
     return await webServer.start();
 }
 

@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { dirname, parse, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { AgentProviderRuntimePaths } from "../../runtime/AgentProviderRuntimePaths.js";
 
@@ -12,140 +12,87 @@ export interface PiProviderInstallation {
     version: string;
 }
 
-export interface PiProviderInstallCommand {
-    args: readonly string[];
-    command: string;
-    cwd: string;
-}
-
-export type PiProviderInstallRunner = (input: PiProviderInstallCommand) => Promise<void>;
+export type PiProviderPackageResolver = (packageName: string) => string | Promise<string>;
 
 export interface PiProviderInstallerOptions {
-    npmCommand?: string;
     packageName?: string;
-    runner?: PiProviderInstallRunner;
+    resolver?: PiProviderPackageResolver;
     version: string;
 }
 
+/**
+ * Resolves the Pi runtime bundled in portable-devshell's own dependency graph.
+ *
+ * Pi is shipped as an exact agentd production dependency, so runtime startup
+ * never depends on a host npm/pnpm installation or the user's global Pi setup.
+ * Provider state remains under AgentProviderRuntimePaths; executable code is
+ * immutable application content managed by portable-devshell releases.
+ */
 export class PiProviderInstaller {
-    readonly #npmCommand: string;
     readonly #packageName: string;
-    readonly #runner: PiProviderInstallRunner;
+    readonly #resolver: PiProviderPackageResolver;
     readonly #version: string;
-    #installing?: Promise<PiProviderInstallation>;
+    #resolved?: Promise<PiProviderInstallation>;
 
     constructor(options: PiProviderInstallerOptions) {
-        this.#npmCommand = options.npmCommand ?? "npm";
         this.#packageName = options.packageName ?? PI_PACKAGE_NAME;
-        this.#runner = options.runner ?? runInstallCommand;
+        this.#resolver = options.resolver ?? resolveBundledPackage;
         this.#version = options.version;
     }
 
-    async ensureInstalled(runtime: AgentProviderRuntimePaths): Promise<PiProviderInstallation> {
-        const existing = await this.#readInstallation(runtime);
-        if (existing !== undefined) {
-            return existing;
-        }
-        if (this.#installing !== undefined) {
-            return await this.#installing;
-        }
-        const installing = this.#install(runtime).finally(() => {
-            if (this.#installing === installing) {
-                this.#installing = undefined;
-            }
+    async ensureInstalled(_runtime: AgentProviderRuntimePaths): Promise<PiProviderInstallation> {
+        if (this.#resolved !== undefined) return await this.#resolved;
+        const resolving = this.#resolveInstallation().finally(() => {
+            if (this.#resolved === resolving) this.#resolved = undefined;
         });
-        this.#installing = installing;
-        return await installing;
+        this.#resolved = resolving;
+        const installation = await resolving;
+        this.#resolved = Promise.resolve(installation);
+        return installation;
     }
 
-    async #install(runtime: AgentProviderRuntimePaths): Promise<PiProviderInstallation> {
-        await rm(runtime.prefixDirectory, { force: true, recursive: true });
-        await mkdir(runtime.prefixDirectory, { recursive: true });
-        await writeFile(
-            join(runtime.prefixDirectory, "package.json"),
-            `${JSON.stringify({ name: "portable-devshell-agent-provider", private: true }, null, 2)}\n`,
-            "utf8"
-        );
-
-        try {
-            await this.#runner({
-                args: [
-                    "install",
-                    "--ignore-scripts",
-                    "--no-audit",
-                    "--no-fund",
-                    "--package-lock=false",
-                    "--save-exact",
-                    `${this.#packageName}@${this.#version}`
-                ],
-                command: this.#npmCommand,
-                cwd: runtime.prefixDirectory
-            });
-            const installed = await this.#readInstallation(runtime);
-            if (installed === undefined) {
-                throw new Error(`Pi provider installation did not produce ${this.#packageName}@${this.#version}.`);
-            }
-            return installed;
-        } catch (error) {
-            await rm(runtime.prefixDirectory, { force: true, recursive: true });
-            throw error;
+    async #resolveInstallation(): Promise<PiProviderInstallation> {
+        const resolved = await this.#resolver(this.#packageName);
+        const entrypoint = toFilesystemPath(resolved);
+        const packageRoot = await findPackageRoot(entrypoint, this.#packageName);
+        const manifest = JSON.parse(await readFile(resolve(packageRoot, "package.json"), "utf8")) as {
+            version?: unknown;
+        };
+        if (manifest.version !== this.#version) {
+            throw new Error(
+                `Bundled Pi provider version mismatch: expected ${this.#packageName}@${this.#version}, `
+                + `found ${String(manifest.version)}.`
+            );
         }
-    }
-
-    async #readInstallation(runtime: AgentProviderRuntimePaths): Promise<PiProviderInstallation | undefined> {
-        const packageRoot = join(
-            runtime.prefixDirectory,
-            "node_modules",
-            ...this.#packageName.split("/")
-        );
-        try {
-            const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")) as {
-                version?: unknown;
-            };
-            if (manifest.version !== this.#version) {
-                return undefined;
-            }
-            return {
-                entrypoint: join(packageRoot, "dist", "index.js"),
-                packageRoot,
-                version: this.#version
-            };
-        } catch (error) {
-            if (isMissingFile(error)) {
-                return undefined;
-            }
-            throw error;
-        }
+        return { entrypoint, packageRoot, version: this.#version };
     }
 }
 
-async function runInstallCommand(input: PiProviderInstallCommand): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-        const child = spawn(input.command, input.args, {
-            cwd: input.cwd,
-            env: {
-                ...process.env,
-                npm_config_update_notifier: "false"
-            },
-            stdio: ["ignore", "pipe", "pipe"]
-        });
-        const stdout: Buffer[] = [];
-        const stderr: Buffer[] = [];
-        child.stdout?.on("data", (chunk: Buffer) => stdout.push(chunk));
-        child.stderr?.on("data", (chunk: Buffer) => stderr.push(chunk));
-        child.once("error", reject);
-        child.once("exit", (code, signal) => {
-            if (code === 0) {
-                resolve();
-                return;
-            }
-            const diagnostic = Buffer.concat(stderr).toString("utf8").trim()
-                || Buffer.concat(stdout).toString("utf8").trim();
-            reject(new Error(
-                `Pi provider install failed (${signal ?? `exit ${code ?? "unknown"}`}): ${diagnostic || "npm failed without output"}`
-            ));
-        });
-    });
+async function resolveBundledPackage(packageName: string): Promise<string> {
+    return import.meta.resolve(packageName);
+}
+
+function toFilesystemPath(value: string): string {
+    return value.startsWith("file:") ? fileURLToPath(value) : resolve(value);
+}
+
+async function findPackageRoot(entrypoint: string, packageName: string): Promise<string> {
+    const filesystemRoot = parse(entrypoint).root;
+    let directory = dirname(entrypoint);
+    while (directory !== filesystemRoot) {
+        try {
+            const manifest = JSON.parse(await readFile(resolve(directory, "package.json"), "utf8")) as {
+                name?: unknown;
+            };
+            if (manifest.name === packageName) return directory;
+        } catch (error) {
+            if (!isMissingFile(error)) throw error;
+        }
+        const parent = dirname(directory);
+        if (parent === directory) break;
+        directory = parent;
+    }
+    throw new Error(`Unable to locate bundled ${packageName} package root from ${entrypoint}.`);
 }
 
 function isMissingFile(error: unknown): boolean {

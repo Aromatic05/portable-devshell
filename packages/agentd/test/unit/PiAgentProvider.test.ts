@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 
 import type { ToolDefinition } from "@portable-devshell/shared";
@@ -21,14 +22,13 @@ import type {
 } from "../../src/provider/pi/PiAgentProcess.ts";
 import {
     PI_PACKAGE_NAME,
-    PiProviderInstaller,
-    type PiProviderInstallCommand
+    PiProviderInstaller
 } from "../../src/provider/pi/PiProviderInstaller.ts";
 import { createPiWorkerTools } from "../../src/provider/pi/PiWorkerTools.ts";
 import { AgentProviderRuntimePaths } from "../../src/runtime/AgentProviderRuntimePaths.ts";
 import { parseAgentWorkerTarget } from "../../src/target/AgentWorkerTarget.ts";
 
-test("Pi installer owns a private versioned prefix and reuses a valid install", async () => {
+test("Pi runtime resolves from portable-devshell's bundled dependency without host npm", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "devshell-agentd-pi-"));
     try {
         const runtime = new AgentProviderRuntimePaths({
@@ -36,18 +36,20 @@ test("Pi installer owns a private versioned prefix and reuses a valid install", 
             provider: "pi",
             version: PI_PROVIDER_VERSION
         });
-        const commands: PiProviderInstallCommand[] = [];
+        const packageRoot = join(homeDirectory, "application", "node_modules", "@earendil-works", "pi-coding-agent");
+        const entrypoint = join(packageRoot, "dist", "index.js");
+        await mkdir(join(packageRoot, "dist"), { recursive: true });
+        await writeFile(
+            join(packageRoot, "package.json"),
+            JSON.stringify({ name: PI_PACKAGE_NAME, version: PI_PROVIDER_VERSION }),
+            "utf8"
+        );
+        await writeFile(entrypoint, "export {};\n", "utf8");
+        let resolves = 0;
         const installer = new PiProviderInstaller({
-            runner: async (command) => {
-                commands.push(command);
-                const packageRoot = join(command.cwd, "node_modules", "@earendil-works", "pi-coding-agent");
-                await mkdir(join(packageRoot, "dist"), { recursive: true });
-                await writeFile(
-                    join(packageRoot, "package.json"),
-                    JSON.stringify({ name: PI_PACKAGE_NAME, version: PI_PROVIDER_VERSION }),
-                    "utf8"
-                );
-                await writeFile(join(packageRoot, "dist", "index.js"), "export {};\n", "utf8");
+            resolver: async () => {
+                resolves += 1;
+                return pathToFileURL(entrypoint).href;
             },
             version: PI_PROVIDER_VERSION
         });
@@ -56,14 +58,10 @@ test("Pi installer owns a private versioned prefix and reuses a valid install", 
         const second = await installer.ensureInstalled(runtime);
 
         assert.equal(first.entrypoint, second.entrypoint);
-        assert.equal(commands.length, 1);
-        assert.equal(commands[0]?.cwd, runtime.prefixDirectory);
-        assert.equal(commands[0]?.args.includes("--ignore-scripts"), true);
-        assert.equal(commands[0]?.args.at(-1), `${PI_PACKAGE_NAME}@${PI_PROVIDER_VERSION}`);
-        assert.equal(
-            JSON.parse(await readFile(join(runtime.prefixDirectory, "package.json"), "utf8")).private,
-            true
-        );
+        assert.equal(first.entrypoint, entrypoint);
+        assert.equal(first.packageRoot, packageRoot);
+        assert.equal(first.version, PI_PROVIDER_VERSION);
+        assert.equal(resolves, 1);
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
     }

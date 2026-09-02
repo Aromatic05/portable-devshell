@@ -23,9 +23,8 @@ export {
     PI_PACKAGE_NAME,
     PiProviderInstaller,
     type PiProviderInstallation,
-    type PiProviderInstallCommand,
     type PiProviderInstallerOptions,
-    type PiProviderInstallRunner
+    type PiProviderPackageResolver
 } from "./provider/pi/PiProviderInstaller.js";
 export {
     AgentHost,
