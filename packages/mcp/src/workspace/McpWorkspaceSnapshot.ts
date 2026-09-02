@@ -84,6 +84,7 @@ export async function readWorkspaceSnapshot(
             ) || (
                 (wait.kind === "tmux" || wait.kind === "question") &&
                 wait.status === "resolved" && wait.detachedAt !== undefined &&
+                wait.recoveryMessageSentAt === undefined &&
                 (wait.recoveryDisabledAt === undefined ||
                     (wait.recoveryMessageAttemptedAt !== undefined && wait.recoveryMessageSentAt === undefined))
             ))

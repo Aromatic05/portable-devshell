@@ -10,7 +10,6 @@ import type {
 
 const MAX_TERMINAL_WAITS = 1_000;
 const RECOVERY_CLAIM_TTL_MS = 5 * 60_000;
-export const WAIT_RECOVERY_EXECUTION_LEASE_MS = 60_000;
 
 export interface WaitDocument {
     version: 1;
@@ -39,7 +38,10 @@ export class WaitState {
         if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.waits)) {
             throw new Error("wait document must be version 1");
         }
-        return this.#reconcileTmuxWaits({ version: 1, waits: value.waits.map(normalizeRecord) });
+        return this.#reconcileTmuxWaits({
+            version: 1,
+            waits: value.waits.map(normalizeRecord).map(consumeDeliveredRecovery),
+        });
     }
 
     create(document: WaitDocument, input: WaitCreateInput): WaitTransition {
@@ -136,6 +138,9 @@ export class WaitState {
             if (record.recoveryMessageAttemptedAt !== undefined && record.recoveryMessageSentAt === undefined) {
                 throw new Error(`Wait ${waitId} recovery delivery is uncertain; automatic replay is disabled.`);
             }
+            if (record.recoveryMessageSentAt !== undefined) {
+                throw new Error(`Wait ${waitId} recovery has already been delivered.`);
+            }
             if (record.recoveryDisabledAt !== undefined) {
                 throw new Error(`Wait ${waitId} is not available for automatic recovery.`);
             }
@@ -143,33 +148,6 @@ export class WaitState {
             if (record.recoveryClaimId === normalizedClaimId) return record;
             const now = this.#now();
             const nowMs = Date.parse(now);
-
-            if (record.recoveryMessageSentAt !== undefined) {
-                const sentAtMs = Date.parse(record.recoveryMessageSentAt);
-                const retryAtMs = record.recoveryRetryAfter === undefined
-                    ? sentAtMs + WAIT_RECOVERY_EXECUTION_LEASE_MS
-                    : Date.parse(record.recoveryRetryAfter);
-                if (!Number.isFinite(retryAtMs) || nowMs < retryAtMs) {
-                    throw new Error(`Wait ${waitId} recovery retry lease has not elapsed.`);
-                }
-                const {
-                    recoveryClaimedAt: _claimedAt,
-                    recoveryClaimId: _claimId,
-                    recoveryMessageAttemptedAt: _attemptedAt,
-                    recoveryMessageId: _messageId,
-                    recoveryMessageSentAt: _sentAt,
-                    recoveryRetryAfter: _retryAfter,
-                    ...rest
-                } = record;
-                return {
-                    ...rest,
-                    recoveryClaimedAt: now,
-                    recoveryClaimId: normalizedClaimId,
-                    recoveryMessageId: `recovery-message-${randomUUID()}`,
-                    recoveryRetryCount: (record.recoveryRetryCount ?? 0) + 1,
-                    updatedAt: now,
-                };
-            }
 
             const claimedAt = record.recoveryClaimedAt === undefined ? Number.NaN : Date.parse(record.recoveryClaimedAt);
             if (
@@ -215,8 +193,6 @@ export class WaitState {
             return {
                 ...record,
                 recoveryMessageSentAt: now,
-                recoveryRetryAfter: new Date(Date.parse(now) + WAIT_RECOVERY_EXECUTION_LEASE_MS).toISOString(),
-                recoveryRetryCount: record.recoveryRetryCount ?? 0,
                 updatedAt: now,
             };
         });
@@ -291,12 +267,23 @@ export class WaitState {
             if (record.status !== "resolved" || record.recoveryClaimId !== claimId) {
                 throw new Error(`Wait ${waitId} recovery claim does not match.`);
             }
-            if (record.recoveryMessageSentAt === undefined) {
-                throw new Error(`Wait ${waitId} recovery has not been durably marked sent.`);
+            if (record.recoveryMessageAttemptedAt === undefined) {
+                throw new Error(`Wait ${waitId} recovery was not marked attempted.`);
             }
-            const { recoveryClaimedAt: _claimedAt, recoveryClaimId: _claimId, ...rest } = record;
             const now = this.#now();
-            return { ...rest, consumedAt: now, status: "consumed", updatedAt: now };
+            const {
+                recoveryClaimedAt: _claimedAt,
+                recoveryClaimId: _claimId,
+                recoveryRetryAfter: _retryAfter,
+                ...rest
+            } = record;
+            return {
+                ...rest,
+                consumedAt: now,
+                recoveryMessageSentAt: record.recoveryMessageSentAt ?? now,
+                status: "consumed",
+                updatedAt: now,
+            };
         });
     }
 
@@ -428,6 +415,21 @@ function normalizeRecord(value: unknown): WaitRecord {
 
 function isTerminal(status: WaitStatus): boolean {
     return status === "consumed" || status === "cancelled";
+}
+
+function consumeDeliveredRecovery(record: WaitRecord): WaitRecord {
+    if (record.status !== "resolved" || record.recoveryMessageSentAt === undefined) return record;
+    const {
+        recoveryClaimedAt: _claimedAt,
+        recoveryClaimId: _claimId,
+        recoveryRetryAfter: _retryAfter,
+        ...rest
+    } = record;
+    return {
+        ...rest,
+        consumedAt: record.consumedAt ?? record.recoveryMessageSentAt,
+        status: "consumed",
+    };
 }
 
 function blocksTmuxWaitCreation(record: WaitRecord): boolean {
