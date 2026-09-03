@@ -41,6 +41,8 @@ export interface PiToolLike {
     label: string;
     name: string;
     parameters: JsonValue;
+    promptGuidelines?: string[];
+    promptSnippet?: string;
     renderShell?: "default" | "self";
     renderCall?(args: unknown, theme: PiThemeLike, context: PiToolRenderContextLike): unknown;
     renderResult?(
@@ -171,6 +173,7 @@ export function parseDevshellAgentTarget(value: string): AgentTarget {
 }
 
 function toPiTool(definition: ToolDefinition, session: AgentControlSession): PiToolLike {
+    const prompt = piPromptMetadata(definition.name);
     return {
         description: definition.description,
         async execute(toolCallId, params, signal) {
@@ -194,6 +197,7 @@ function toPiTool(definition: ToolDefinition, session: AgentControlSession): PiT
         label: definition.name,
         name: definition.name,
         parameters: definition.inputSchema,
+        ...prompt,
         ...(definition.name === "file_edit" ? { renderShell: "self" as const } : {}),
         renderCall(args, theme, context) {
             return renderPiToolCall(definition.name, args, theme, context);
@@ -202,6 +206,29 @@ function toPiTool(definition: ToolDefinition, session: AgentControlSession): PiT
             return renderPiToolResult(definition.name, result, options, theme, context);
         }
     };
+}
+
+export function piPromptMetadata(toolName: string): Pick<PiToolLike, "promptGuidelines" | "promptSnippet"> {
+    switch (toolName) {
+        case "file_read":
+            return {
+                promptSnippet: "Read file contents from the devshell workspace"
+            };
+        case "file_search":
+            return {
+                promptSnippet: "Search file contents in the devshell workspace"
+            };
+        case "file_edit":
+            return {
+                promptSnippet: "Edit workspace files with devshell Write/Patch/Rewrite/Delete/Move edit blocks",
+                promptGuidelines: [
+                    "Before file_edit modifies an existing file, use file_read or file_search on that file in the current context; file_edit rejects unseen existing files.",
+                    "file_edit changes must use devshell edit blocks: start with '*** Begin Edit', use '*** Patch File:', '*** Write File:', '*** Rewrite File:', '*** Delete File:', or '*** Move File:', and finish with '*** End Edit'. Never use '*** Update File:'."
+                ]
+            };
+        default:
+            return {};
+    }
 }
 
 export function prepareToolInput(toolName: string, params: unknown): JsonValue {

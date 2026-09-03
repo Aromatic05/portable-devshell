@@ -1,6 +1,6 @@
 import { diffWords } from "diff";
 import { getLanguageFromPath, highlightCode } from "@earendil-works/pi-coding-agent";
-import { Box, Container, Spacer, Text, type Component } from "@earendil-works/pi-tui";
+import { Container, Spacer, Text, type Component } from "@earendil-works/pi-tui";
 
 import type { JsonValue } from "@portable-devshell/shared";
 
@@ -22,14 +22,6 @@ export interface ParsedEditOperation {
     source?: string;
 }
 
-interface FileEditRenderState {
-    argsKey?: string;
-    callComponent?: Box;
-    details?: JsonValue;
-    operations?: ParsedEditOperation[];
-    settledError?: boolean;
-}
-
 type DiffEntry =
     | { kind: "ellipsis" }
     | { content: string; kind: "row"; line: number; prefix: "+" | "-" | " " };
@@ -39,45 +31,42 @@ export function renderFileEditCallComponent(
     theme: PiThemeLike,
     context: PiToolRenderContextLike
 ): Component {
-    const state = context.state as FileEditRenderState;
     const changes = stringField(asRecord(args) ?? {}, "changes") ?? "";
-    if (state.argsKey !== changes) {
-        state.argsKey = changes;
-        state.operations = parseEditChangeSet(changes);
-        state.details = undefined;
-        state.settledError = false;
-    }
-    const component = getCallComponent(state, context.lastComponent, theme);
-    buildCallComponent(component, state.operations ?? [], state.details, theme, context.expanded, state.settledError === true);
+    const component = context.lastComponent instanceof Container ? context.lastComponent : new Container();
+    component.clear();
+    buildCallComponent(component, parseEditChangeSet(changes), theme, context.expanded);
     return component;
 }
 
 export function renderFileEditResultComponent(
     result: PiToolRenderResultLike,
-    options: PiToolRenderResultOptionsLike,
+    _options: PiToolRenderResultOptionsLike,
     theme: PiThemeLike,
     context: PiToolRenderContextLike
 ): Component {
-    const state = context.state as FileEditRenderState;
-    state.details = result.details;
-    state.settledError = context.isError || detailsHaveFailure(result.details);
-    if (state.callComponent !== undefined) {
-        buildCallComponent(
-            state.callComponent,
-            state.operations ?? parseEditChangeSet(stringField(asRecord(context.args) ?? {}, "changes")),
-            result.details,
-            theme,
-            options.expanded,
-            state.settledError
-        );
-        context.invalidate();
-    }
-    if (!context.isError) {
-        const component = context.lastComponent instanceof Container ? context.lastComponent : new Container();
-        component.clear();
+    const component = context.lastComponent instanceof Container ? context.lastComponent : new Container();
+    component.clear();
+    if (context.isError || detailsHaveFailure(result.details)) {
+        const lines = textContentLines(result);
+        if (lines.length > 0) {
+            component.addChild(new Text(lines.map((line) => theme.fg("error", line)).join("\n"), 0, 0));
+        }
         return component;
     }
-    return setText(context.lastComponent, textContentLines(result).map((line) => theme.fg("error", line)).join("\n"));
+
+    const operations = parseEditChangeSet(stringField(asRecord(context.args) ?? {}, "changes"));
+    const results = operationRecords(result.details);
+    let rendered = false;
+    for (const [index, operation] of operations.entries()) {
+        if (operation.kind === "write" || operation.kind === "rewrite") continue;
+        const operationResult = results[index];
+        const diff = operationResult === undefined ? undefined : stringField(operationResult, "diff");
+        if (diff === undefined) continue;
+        if (rendered) component.addChild(new Spacer(1));
+        component.addChild(new Text(renderWorkerUnifiedDiff(diff, theme), 0, 0));
+        rendered = true;
+    }
+    return component;
 }
 
 export function formatFileEditStaticCall(changes: string | undefined, theme?: PiThemeLike): string {
@@ -179,52 +168,19 @@ export function renderWorkerUnifiedDiff(diff: string, theme: PiThemeLike): strin
     return output.join("\n");
 }
 
-function getCallComponent(
-    state: FileEditRenderState,
-    lastComponent: Component | undefined,
-    theme: PiThemeLike
-): Box {
-    if (lastComponent instanceof Box) {
-        state.callComponent = lastComponent;
-        return lastComponent;
-    }
-    if (state.callComponent !== undefined) return state.callComponent;
-    const component = new Box(1, 1, (text) => theme.bg("toolPendingBg", text));
-    state.callComponent = component;
-    return component;
-}
-
 function buildCallComponent(
-    component: Box,
+    component: Container,
     operations: ParsedEditOperation[],
-    details: JsonValue | undefined,
     theme: PiThemeLike,
-    expanded: boolean,
-    settledError: boolean
+    expanded: boolean
 ): void {
-    component.setBgFn((text) => theme.bg(
-        settledError ? "toolErrorBg" : details === undefined ? "toolPendingBg" : "toolSuccessBg",
-        text
-    ));
-    component.clear();
-    const resultOperations = operationRecords(details);
     for (const [index, operation] of operations.entries()) {
         if (index > 0) component.addChild(new Spacer(1));
-        const result = resultOperations[index];
         component.addChild(new Text(renderHeader(operation, theme), 0, 0));
-        const body = renderOperationBody(operation, result, expanded, theme);
+        const body = renderOperationBody(operation, expanded, theme);
         if (body.length > 0) {
             component.addChild(new Spacer(1));
             component.addChild(new Text(body, 0, 0));
-        }
-        const error = result === undefined ? undefined : asRecord(result.error);
-        const errorMessage = error === undefined ? undefined : stringField(error, "message");
-        if (errorMessage !== undefined) {
-            component.addChild(new Spacer(1));
-            component.addChild(new Text(theme.fg("error", errorMessage), 0, 0));
-        }
-        if (result?.truncated === true) {
-            component.addChild(new Text(theme.fg("muted", "... diff truncated by Worker"), 0, 0));
         }
     }
 }
@@ -253,15 +209,13 @@ function displayIdentity(operation: ParsedEditOperation): { label: string; path:
 
 function renderOperationBody(
     operation: ParsedEditOperation,
-    result: Record<string, unknown> | undefined,
     expanded: boolean,
     theme: PiThemeLike
 ): string {
     if (operation.kind === "write" || operation.kind === "rewrite") {
         return renderWritePreview(operation.path, operation.body, expanded, theme);
     }
-    const diff = result === undefined ? undefined : stringField(result, "diff");
-    return diff === undefined ? "" : renderWorkerUnifiedDiff(diff, theme);
+    return "";
 }
 
 function renderWritePreview(path: string, content: string, expanded: boolean, theme: PiThemeLike): string {
@@ -366,14 +320,6 @@ function textContentLines(result: PiToolRenderResultLike): string[] {
     return result.content
         .filter((entry) => entry.type === "text" && typeof entry.text === "string")
         .flatMap((entry) => entry.text!.split("\n"));
-}
-
-function setText(component: Component | undefined, text: string): Component {
-    if (component instanceof Text) {
-        component.setText(text);
-        return component;
-    }
-    return new Text(text, 0, 0);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

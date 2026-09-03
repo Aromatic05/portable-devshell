@@ -5,6 +5,7 @@ import type { Component } from "@earendil-works/pi-tui";
 
 import {
     parseDevshellAgentTarget,
+    piPromptMetadata,
     prepareToolInput,
     resolveToolSessionOpenInput
 } from "../../src/index.ts";
@@ -48,6 +49,12 @@ function visibleLines(component: Component): string[] {
         .filter((line, index, lines) => line.length > 0 || (index > 0 && index < lines.length - 1));
 }
 
+function visibleSelfLines(component: Component): string[] {
+    return component.render(120)
+        .map((line) => line.trimEnd())
+        .filter((line, index, lines) => line.length > 0 || (index > 0 && index < lines.length - 1));
+}
+
 test("Pi devshell target parser preserves remote workspace syntax", () => {
     assert.deepEqual(
         parseDevshellAgentTarget("worker-a:/srv/project"),
@@ -74,6 +81,15 @@ test("Pi devshell extension leaves unique instance selection to Control", () => 
         resolveToolSessionOpenInput({ cwd: "/ignored", environment: {}, target: "worker-a:/srv/project" }),
         { instance: "worker-a", workspace: "/srv/project" }
     );
+});
+
+test("Pi devshell edit tool contributes its Worker preconditions and grammar to the Pi system prompt", () => {
+    const metadata = piPromptMetadata("file_edit");
+    assert.match(metadata.promptSnippet ?? "", /Edit workspace files/u);
+    assert.equal(metadata.promptGuidelines?.length, 2);
+    assert.match(metadata.promptGuidelines?.[0] ?? "", /file_read or file_search/u);
+    assert.match(metadata.promptGuidelines?.[1] ?? "", /\*\*\* Patch File:/u);
+    assert.match(metadata.promptGuidelines?.[1] ?? "", /Never use '\*\*\* Update File:'/u);
 });
 
 test("Pi devshell renderer formats common calls without JSON fallback", () => {
@@ -153,7 +169,7 @@ test("Pi devshell Write File renders like native Pi write and has no success res
     };
     const callContext = context(args);
     const call = renderPiToolCall("file_edit", args, identityTheme, callContext);
-    assert.deepEqual(visibleLines(call), [
+    assert.deepEqual(visibleSelfLines(call), [
         "write ./tool-demo3.txt",
         "",
         "alpha",
@@ -174,13 +190,13 @@ test("Pi devshell Write File renders like native Pi write and has no success res
     }, { expanded: false, isPartial: false }, identityTheme, { ...callContext, lastComponent: undefined });
 
     assert.deepEqual(result.render(120), []);
-    const after = visibleLines(call);
+    const after = visibleSelfLines(call);
     assert.deepEqual(after, ["write ./tool-demo3.txt", "", "alpha", "", "beta"]);
     assert.equal(after.join("\n").includes("***"), false);
     assert.equal(after.join("\n").includes("--- original"), false);
 });
 
-test("Pi devshell Patch File updates the call card with native Pi numbered diff", () => {
+test("Pi devshell Patch File renders a separate stable native-style numbered diff result", () => {
     const args = {
         changes: [
             "*** Begin Edit",
@@ -193,7 +209,6 @@ test("Pi devshell Patch File updates the call card with native Pi numbered diff"
     };
     const callContext = context(args);
     const call = renderPiToolCall("file_edit", args, identityTheme, callContext);
-    assert.deepEqual(visibleLines(call), ["edit ./a.txt"]);
 
     const resultSlot = renderPiToolResult("file_edit", {
         content: [{ type: "text", text: "patch ./a.txt applied +1 -1" }],
@@ -207,17 +222,67 @@ test("Pi devshell Patch File updates the call card with native Pi numbered diff"
         }
     }, { expanded: false, isPartial: false }, identityTheme, { ...callContext, lastComponent: undefined });
 
-    assert.deepEqual(resultSlot.render(120), []);
-    assert.deepEqual(visibleLines(call), [
-        "edit ./a.txt",
-        "",
+    assert.deepEqual(visibleSelfLines(call), ["edit ./a.txt"]);
+    assert.deepEqual(visibleSelfLines(resultSlot), [
         " 10 keep",
         "-11 [old] value",
         "+11 [new] value",
         " 12 tail"
     ]);
-    const rendered = visibleLines(call).join("\n");
+    const rendered = [...visibleSelfLines(call), ...visibleSelfLines(resultSlot)].join("\n");
     for (const marker of ["***", "--- original", "+++ modified", "@@"]) assert.equal(rendered.includes(marker), false);
+});
+
+test("Pi devshell file edit result rendering never invalidates or mutates its call slot", () => {
+    const args = {
+        changes: [
+            "*** Begin Edit",
+            "*** Patch File: ./a.txt",
+            "@@",
+            "-old value",
+            "+new value",
+            "*** End Edit"
+        ].join("\n")
+    };
+    let invalidations = 0;
+    const callContext = {
+        ...context(args),
+        invalidate() {
+            invalidations += 1;
+        }
+    };
+    const call = renderPiToolCall("file_edit", args, identityTheme, callContext);
+    const before = visibleSelfLines(call);
+    const result = {
+        content: [{ type: "text", text: "patch ./a.txt applied +1 -1" }],
+        details: {
+            operations: [{
+                action: "patch",
+                path: "./a.txt",
+                status: "applied",
+                diff: "--- original\n+++ modified\n@@ -1 +1 @@\n-old value\n+new value\n"
+            }]
+        }
+    };
+
+    const first = renderPiToolResult(
+        "file_edit",
+        result,
+        { expanded: false, isPartial: false },
+        identityTheme,
+        { ...callContext, lastComponent: undefined }
+    );
+    const second = renderPiToolResult(
+        "file_edit",
+        result,
+        { expanded: false, isPartial: false },
+        identityTheme,
+        { ...callContext, lastComponent: first }
+    );
+
+    assert.deepEqual(visibleSelfLines(call), before);
+    assert.deepEqual(visibleSelfLines(second), visibleSelfLines(first));
+    assert.equal(invalidations, 0);
 });
 
 test("Pi devshell Worker unified diff adapter matches Pi numbered diff semantics", () => {
