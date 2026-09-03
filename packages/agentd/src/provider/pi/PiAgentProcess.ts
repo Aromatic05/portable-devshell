@@ -13,10 +13,10 @@ import type {
 } from "./PiProcessProtocol.js";
 
 export interface PiAgentProcessStartOptions {
-    agentDir: string;
     agentId: string;
     entrypoint: string;
     localCwd: string;
+    runtimeDirectory: string;
     target: AgentTarget;
     webBasePath: string;
 }
@@ -38,7 +38,7 @@ export class PiAgentProcessFactory implements PiAgentRuntimeFactory {
         return await this.#exclusive(async () => {
             let runtime = this.#runtime;
             if (runtime === undefined) {
-                await mkdir(options.agentDir, { recursive: true });
+                await mkdir(options.runtimeDirectory, { recursive: true });
                 runtime = new PiSharedProcess(this.#childModulePath, options);
                 try {
                     await runtime.initialize();
@@ -154,7 +154,7 @@ class PiSharedProcess {
         reject(error: Error): void;
         resolve(): void;
     }>();
-    readonly #identity: Pick<PiAgentProcessStartOptions, "agentDir" | "entrypoint" | "webBasePath">;
+    readonly #identity: Pick<PiAgentProcessStartOptions, "entrypoint" | "runtimeDirectory" | "webBasePath">;
     readonly #agents = new Set<string>();
     #stderr = "";
     #readyReject?: (error: Error) => void;
@@ -164,16 +164,13 @@ class PiSharedProcess {
 
     constructor(childModulePath: string, options: PiAgentProcessStartOptions) {
         this.#identity = {
-            agentDir: options.agentDir,
             entrypoint: options.entrypoint,
+            runtimeDirectory: options.runtimeDirectory,
             webBasePath: options.webBasePath
         };
         this.#child = fork(childModulePath, [], {
-            cwd: options.agentDir,
-            env: {
-                ...process.env,
-                PI_CODING_AGENT_DIR: options.agentDir
-            },
+            cwd: options.runtimeDirectory,
+            env: process.env,
             execArgv: childExecArgv(childModulePath),
             serialization: "json",
             stdio: ["ignore", "ignore", "pipe", "ipc"]
@@ -204,7 +201,7 @@ class PiSharedProcess {
     }
 
     assertCompatible(options: PiAgentProcessStartOptions): void {
-        for (const field of ["agentDir", "entrypoint", "webBasePath"] as const) {
+        for (const field of ["runtimeDirectory", "entrypoint", "webBasePath"] as const) {
             if (options[field] !== this.#identity[field]) {
                 throw new Error(`Pi provider shared process cannot change ${field} while Agents are running.`);
             }
@@ -217,7 +214,6 @@ class PiSharedProcess {
             this.#readyReject = reject;
         });
         await this.#send({
-            agentDir: this.#identity.agentDir,
             entrypoint: this.#identity.entrypoint,
             type: "init",
             webBasePath: this.#identity.webBasePath

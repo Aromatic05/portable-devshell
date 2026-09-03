@@ -8,12 +8,15 @@ import test from "node:test";
 import { PiAgentProcessFactory } from "../../src/provider/pi/PiAgentProcess.ts";
 
 test("Pi process factory shares one child across live Agents and stops it only after the last Agent", async () => {
-    const agentDir = await mkdtemp(join(tmpdir(), "devshell-pi-shared-"));
+    const runtimeDirectory = await mkdtemp(join(tmpdir(), "devshell-pi-shared-"));
+    const piAgentDir = join(runtimeDirectory, "user-pi-state");
+    const previousPiAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = piAgentDir;
     const childModulePath = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/FakePiAgentChild.mjs");
     const factory = new PiAgentProcessFactory({ childModulePath });
     const base = {
-        agentDir,
         entrypoint: "/managed/pi/dist/index.js",
+        runtimeDirectory,
         webBasePath: "/web/agent/"
     };
 
@@ -21,13 +24,13 @@ test("Pi process factory shares one child across live Agents and stops it only a
         const first = await factory.start({
             ...base,
             agentId: "ag-one",
-            localCwd: join(agentDir, "agents", "ag-one", "cwd"),
+            localCwd: join(runtimeDirectory, "agents", "ag-one", "cwd"),
             target: { instance: "worker-a", workspace: "/repo/a" }
         });
         const second = await factory.start({
             ...base,
             agentId: "ag-two",
-            localCwd: join(agentDir, "agents", "ag-two", "cwd"),
+            localCwd: join(runtimeDirectory, "agents", "ag-two", "cwd"),
             target: { instance: "worker-a", workspace: "/repo/b" }
         });
 
@@ -37,29 +40,31 @@ test("Pi process factory shares one child across live Agents and stops it only a
         await second.steer?.("second");
         await first.stop();
 
-        let entries = await readEntries(agentDir);
+        let entries = await readEntries(runtimeDirectory);
         assert.equal(new Set(entries.map((entry) => entry.pid)).size, 1);
         assert.equal(entries.filter((entry) => entry.type === "init").length, 1);
         assert.equal(entries.filter((entry) => entry.type === "agent.start").length, 2);
         assert.equal(entries.some((entry) => entry.type === "shutdown"), false);
-        assert.ok(entries.every((entry) => entry.agentDir === agentDir));
+        assert.ok(entries.every((entry) => entry.agentDir === piAgentDir));
 
         await second.stop();
-        entries = await readEntries(agentDir);
+        entries = await readEntries(runtimeDirectory);
         assert.equal(entries.filter((entry) => entry.type === "shutdown").length, 1);
         assert.equal(new Set(entries.map((entry) => entry.pid)).size, 1);
     } finally {
-        await rm(agentDir, { force: true, recursive: true });
+        if (previousPiAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousPiAgentDir;
+        await rm(runtimeDirectory, { force: true, recursive: true });
     }
 });
 
-async function readEntries(agentDir: string): Promise<Array<{
+async function readEntries(runtimeDirectory: string): Promise<Array<{
     agentDir: string;
     agentId: string;
     pid: string;
     type: string;
 }>> {
-    const text = await readFile(join(agentDir, "fake-pi-child.log"), "utf8");
+    const text = await readFile(join(runtimeDirectory, "fake-pi-child.log"), "utf8");
     return text.trim().split("\n").filter(Boolean).map((line) => {
         const [pid, stateDir, type, agentId] = line.split("\t");
         return {

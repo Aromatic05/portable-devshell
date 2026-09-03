@@ -63,7 +63,7 @@ test("Pi runtime resolves from portable-devshell's bundled dependency without ho
     }
 });
 
-test("Pi provider maps each Agent into the shared managed Pi state/runtime", async () => {
+test("Pi provider maps each Agent into the shared managed runtime without owning Pi user state", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "devshell-agentd-pi-session-"));
     try {
         const runtime = new AgentProviderRuntimePaths({
@@ -103,7 +103,7 @@ test("Pi provider maps each Agent into the shared managed Pi state/runtime", asy
 
         assert.equal(returned, handle);
         assert.equal(starts.length, 1);
-        assert.equal(starts[0]?.agentDir, runtime.stateDirectory);
+        assert.equal(starts[0]?.runtimeDirectory, runtime.stateDirectory);
         assert.equal(starts[0]?.agentId, "ag-pi-test");
         assert.equal(starts[0]?.entrypoint, "/managed/pi/dist/index.js");
         assert.deepEqual(starts[0]?.target, target);

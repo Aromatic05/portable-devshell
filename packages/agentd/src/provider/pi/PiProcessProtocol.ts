@@ -1,7 +1,6 @@
 import type { AgentTarget } from "@portable-devshell/shared";
 
 export interface PiChildInitMessage {
-    agentDir: string;
     entrypoint: string;
     type: "init";
     webBasePath: string;

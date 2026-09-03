@@ -43,10 +43,10 @@ export class PiAgentProvider implements AgentProvider {
         const installation = await this.#installer.ensureInstalled(context.runtime);
         const paths = resolvePiAgentPaths(context);
         return await this.#runtimeFactory.start({
-            agentDir: context.runtime.stateDirectory,
             agentId: context.agentId,
             entrypoint: installation.entrypoint,
             localCwd: paths.localCwd,
+            runtimeDirectory: context.runtime.stateDirectory,
             target: context.target,
             webBasePath: context.web?.basePath ?? "/agent/"
         });

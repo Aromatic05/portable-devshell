@@ -55,13 +55,12 @@ async function handleMessage(message: PiParentMessage): Promise<void> {
 
 async function initialize(input: PiChildInitMessage): Promise<URL> {
     if (sdk !== undefined) throw new Error("Pi provider child is already initialized.");
-    process.env.PI_CODING_AGENT_DIR = input.agentDir;
-    agentDir = input.agentDir;
-    await mkdir(input.agentDir, { recursive: true });
     sdk = await new PiSdkLoader().load(input.entrypoint);
+    agentDir = sdk.getAgentDir();
+    await mkdir(agentDir, { recursive: true });
     modelRuntime = await sdk.ModelRuntime.create({
-        authPath: join(input.agentDir, "auth.json"),
-        modelsPath: join(input.agentDir, "models.json")
+        authPath: join(agentDir, "auth.json"),
+        modelsPath: join(agentDir, "models.json")
     });
     gui = await PiGuiWeb.start(input.webBasePath);
     return gui.upstream;
