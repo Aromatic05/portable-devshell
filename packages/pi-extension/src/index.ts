@@ -61,30 +61,156 @@ export interface DevshellPiExtensionOptions {
     target?: AgentTarget | string;
 }
 
+export interface DevshellPiContextFile {
+    content: string;
+    path: string;
+}
+
+export interface DevshellPiWorkspaceBridge {
+    close(): Promise<void>;
+    extension: (pi: PiExtensionApiLike) => Promise<void>;
+    loadContextFiles(): Promise<DevshellPiContextFile[]>;
+}
+
 interface AgentControlSession {
     clients: ControlClients;
     close(): void;
     record: AgentToolSessionRecord;
 }
 
+const PI_CONTEXT_FILE_NAMES = [
+    "AGENTS.override.md",
+    "AGENTS.md",
+    "AGENTS.MD",
+    "CLAUDE.md",
+    "CLAUDE.MD"
+] as const;
+
+type DevshellPiToolCall = (
+    toolName: string,
+    input: JsonValue,
+    operationId: string
+) => Promise<JsonValue>;
+
 export function createDevshellPiExtension(
     options: DevshellPiExtensionOptions = {}
 ): (pi: PiExtensionApiLike) => Promise<void> {
     return async (pi) => {
-        const session = await openAgentControlSession(options);
+        const bridge = await openDevshellPiWorkspaceBridge(options);
         try {
-            const catalog = await session.clients.agent.listToolSessionTools(session.record.sessionId);
+            await bridge.extension(pi);
+            pi.on("session_shutdown", bridge.close);
+        } catch (error) {
+            await bridge.close();
+            throw error;
+        }
+    };
+}
+
+export async function openDevshellPiWorkspaceBridge(
+    options: DevshellPiExtensionOptions = {}
+): Promise<DevshellPiWorkspaceBridge> {
+    const session = await openAgentControlSession(options);
+    let closed = false;
+    let catalog;
+    try {
+        catalog = await session.clients.agent.listToolSessionTools(session.record.sessionId);
+    } catch (error) {
+        await closeAgentControlSession(session);
+        throw error;
+    }
+    const toolNames = new Set(catalog.tools.map((tool) => tool.name));
+    const close = async () => {
+        if (closed) return;
+        closed = true;
+        await closeAgentControlSession(session);
+    };
+    return {
+        close,
+        extension: async (pi) => {
             for (const definition of catalog.tools) {
                 pi.registerTool(toPiTool(definition, session));
             }
-        } catch (error) {
-            await closeAgentControlSession(session);
-            throw error;
-        }
-        pi.on("session_shutdown", async () => {
-            await closeAgentControlSession(session);
-        });
+        },
+        loadContextFiles: async () => await loadDevshellPiWorkspaceContext(
+            session.record.target,
+            toolNames,
+            async (toolName, input, operationId) => await session.clients.agent.callToolSession({
+                input,
+                operationId,
+                sessionId: session.record.sessionId,
+                toolName
+            })
+        )
     };
+}
+
+export async function loadDevshellPiWorkspaceContext(
+    target: AgentTarget,
+    toolNames: ReadonlySet<string>,
+    callTool: DevshellPiToolCall
+): Promise<DevshellPiContextFile[]> {
+    if (!toolNames.has("file_find") || !toolNames.has("file_read")) return [];
+    const found = asRecord(await callTool("file_find", {
+        gitignore: false,
+        hidden: true,
+        paths: ["./AGENTS*", "./CLAUDE*"],
+        type: "file"
+    }, "pi-context-find"));
+    const entries = Array.isArray(found?.entries) ? found.entries : [];
+    const existing = new Map<string, string>();
+    for (const value of entries) {
+        const entry = asRecord(value);
+        if (entry === undefined || typeof entry.path !== "string" || entry.type !== "file") continue;
+        const name = contextFileName(entry.path);
+        if (name !== undefined && !existing.has(name)) existing.set(name, entry.path);
+    }
+    const name = PI_CONTEXT_FILE_NAMES.find((candidate) => existing.has(candidate));
+    if (name === undefined) return [];
+    const path = existing.get(name)!;
+    return [{
+        content: await readCompleteTextFile(path, callTool),
+        path: remoteContextPath(target, name)
+    }];
+}
+
+async function readCompleteTextFile(path: string, callTool: DevshellPiToolCall): Promise<string> {
+    const lines = new Map<number, string>();
+    let selector: string | undefined;
+    let page = 0;
+    do {
+        const result = asRecord(await callTool(
+            "file_read",
+            { path, view: "content", ...(selector === undefined ? {} : { selector }) },
+            `pi-context-read-${++page}`
+        ));
+        const content = typeof result?.content === "string" ? result.content : "";
+        for (const line of content.split("\n")) {
+            if (line.length === 0) continue;
+            const match = /^(\d+):(.*)$/u.exec(line);
+            if (match === null) throw new Error(`file_read returned malformed context content for ${path}.`);
+            lines.set(Number(match[1]), match[2] ?? "");
+        }
+        const next = typeof result?.nextSelector === "string" ? result.nextSelector : undefined;
+        selector = next !== undefined && /^\d+$/u.test(next) ? `${next}:raw` : next;
+    } while (selector !== undefined);
+    return [...lines.entries()]
+        .sort(([left], [right]) => left - right)
+        .map(([, line]) => line)
+        .join("\n")
+        .replace(/^\uFEFF/u, "");
+}
+
+function contextFileName(path: string): typeof PI_CONTEXT_FILE_NAMES[number] | undefined {
+    const normalized = path.replaceAll("\\", "/");
+    const basename = normalized.slice(normalized.lastIndexOf("/") + 1);
+    return PI_CONTEXT_FILE_NAMES.find((candidate) => candidate === basename);
+}
+
+function remoteContextPath(target: AgentTarget, name: string): string {
+    const separator = target.workspace.includes("\\") && !target.workspace.includes("/") ? "\\" : "/";
+    const workspace = target.workspace.replace(/[\\/]+$/u, "");
+    return `${target.instance}:${workspace}${separator}${name}`;
 }
 
 export default createDevshellPiExtension();
@@ -314,6 +440,12 @@ function isControlUnavailable(error: unknown): boolean {
 function asJsonValue(value: unknown): JsonValue {
     if (!isJsonValue(value)) throw new TypeError("Pi tool arguments are not JSON serializable.");
     return value;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : undefined;
 }
 
 function isJsonValue(value: unknown): value is JsonValue {

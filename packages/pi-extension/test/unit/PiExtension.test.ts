@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { Component } from "@earendil-works/pi-tui";
+import type { JsonValue } from "@portable-devshell/shared";
 
 import {
+    loadDevshellPiWorkspaceContext,
     parseDevshellAgentTarget,
     piPromptMetadata,
     prepareToolInput,
@@ -81,6 +83,66 @@ test("Pi devshell extension leaves unique instance selection to Control", () => 
         resolveToolSessionOpenInput({ cwd: "/ignored", environment: {}, target: "worker-a:/srv/project" }),
         { instance: "worker-a", workspace: "/srv/project" }
     );
+});
+
+test("Pi devshell workspace context follows native Pi file priority and reconstructs paged text", async () => {
+    const calls: Array<{ input: unknown; operationId: string; toolName: string }> = [];
+    const contextFiles = await loadDevshellPiWorkspaceContext(
+        { instance: "worker-a", workspace: "/repo" },
+        new Set(["file_find", "file_read"]),
+        async (toolName, input, operationId): Promise<JsonValue> => {
+            calls.push({ input, operationId, toolName });
+            if (toolName === "file_find") {
+                return {
+                    entries: [
+                        { path: "./CLAUDE.md", type: "file" },
+                        { path: "./AGENTS.md", type: "file" },
+                        { path: "./AGENTS.override.md", type: "file" }
+                    ]
+                };
+            }
+            if (operationId === "pi-context-read-1") {
+                return {
+                    content: "1:# Override rules\n2:alpha",
+                    nextSelector: "3"
+                };
+            }
+            assert.equal(operationId, "pi-context-read-2");
+            return { content: "3:\n4:omega" };
+        }
+    );
+
+    assert.deepEqual(contextFiles, [{
+        content: "# Override rules\nalpha\n\nomega",
+        path: "worker-a:/repo/AGENTS.override.md"
+    }]);
+    assert.equal(calls[0]?.toolName, "file_find");
+    assert.deepEqual(calls[0]?.input, {
+        gitignore: false,
+        hidden: true,
+        paths: ["./AGENTS*", "./CLAUDE*"],
+        type: "file"
+    });
+    assert.deepEqual(calls[1]?.input, { path: "./AGENTS.override.md", view: "content" });
+    assert.deepEqual(calls[2]?.input, {
+        path: "./AGENTS.override.md",
+        selector: "3:raw",
+        view: "content"
+    });
+});
+
+test("Pi devshell workspace context respects tool capability restrictions", async () => {
+    let calls = 0;
+    const contextFiles = await loadDevshellPiWorkspaceContext(
+        { instance: "worker-a", workspace: "/repo" },
+        new Set(["file_read"]),
+        async () => {
+            calls += 1;
+            return {};
+        }
+    );
+    assert.deepEqual(contextFiles, []);
+    assert.equal(calls, 0);
 });
 
 test("Pi devshell edit tool contributes its Worker preconditions and grammar to the Pi system prompt", () => {

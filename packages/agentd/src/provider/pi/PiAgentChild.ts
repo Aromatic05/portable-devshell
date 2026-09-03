@@ -1,7 +1,10 @@
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
-import { createDevshellPiExtension } from "@portable-devshell/pi-extension";
+import {
+    openDevshellPiWorkspaceBridge,
+    type DevshellPiWorkspaceBridge
+} from "@portable-devshell/pi-extension";
 import type { AgentTarget } from "@portable-devshell/shared";
 
 import { PiGuiWeb } from "./PiGuiWeb.js";
@@ -12,8 +15,10 @@ import type {
     PiChildInitMessage,
     PiParentMessage
 } from "./PiProcessProtocol.js";
+import { disposeManagedPiAgent } from "./PiAgentLifecycle.js";
 
 interface ManagedPiAgent {
+    devshell: DevshellPiWorkspaceBridge;
     localCwd: string;
     session: PiSessionLike;
     target: AgentTarget;
@@ -75,46 +80,67 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
     await mkdir(input.localCwd, { recursive: true });
 
     const settingsManager = activeSdk.SettingsManager.create(input.localCwd, activeAgentDir);
-    const devshellExtension = createDevshellPiExtension({
+    const devshell = await openDevshellPiWorkspaceBridge({
         autoStartControl: false,
         cwd: input.localCwd,
         target: input.target
     });
-    const resourceLoader = new activeSdk.DefaultResourceLoader({
-        agentDir: activeAgentDir,
-        cwd: input.localCwd,
-        extensionFactories: [devshellExtension],
-        noExtensions: true,
-        settingsManager,
-        systemPromptOverride: (basePrompt: string | undefined) => appendRemoteWorkspacePrompt(
-            basePrompt,
-            `${input.target.instance}:${input.target.workspace}`
-        )
-    });
-    await resourceLoader.reload();
-    const sessionManager = activeSdk.SessionManager.create(input.localCwd);
-    const created = await activeSdk.createAgentSession({
-        agentDir: activeAgentDir,
-        cwd: input.localCwd,
-        modelRuntime: activeModelRuntime,
-        noTools: "builtin",
-        resourceLoader,
-        sessionManager,
-        settingsManager
-    });
-    const session = created.session;
     try {
-        session.setSessionName?.(`${input.agentId} · ${input.target.instance}:${input.target.workspace}`);
-        activeGui.attach(session, input.localCwd);
-        agents.set(input.agentId, {
-            localCwd: input.localCwd,
-            session,
-            target: { ...input.target }
+        const remoteContextFiles = await devshell.loadContextFiles();
+        const resourceLoader = new activeSdk.DefaultResourceLoader({
+            agentDir: activeAgentDir,
+            agentsFilesOverride: (current: { agentsFiles: Array<{ content: string; path: string }> }) => ({
+                agentsFiles: [
+                    ...piUserContextFiles(current.agentsFiles, activeAgentDir),
+                    ...remoteContextFiles
+                ]
+            }),
+            cwd: input.localCwd,
+            extensionFactories: [devshell.extension],
+            noExtensions: true,
+            settingsManager,
+            systemPromptOverride: (basePrompt: string | undefined) => appendRemoteWorkspacePrompt(
+                basePrompt,
+                `${input.target.instance}:${input.target.workspace}`
+            )
         });
+        await resourceLoader.reload();
+        const sessionManager = activeSdk.SessionManager.create(input.localCwd);
+        const created = await activeSdk.createAgentSession({
+            agentDir: activeAgentDir,
+            cwd: input.localCwd,
+            modelRuntime: activeModelRuntime,
+            noTools: "builtin",
+            resourceLoader,
+            sessionManager,
+            settingsManager
+        });
+        const session = created.session;
+        try {
+            session.setSessionName?.(`${input.agentId} · ${input.target.instance}:${input.target.workspace}`);
+            activeGui.attach(session, input.localCwd);
+            agents.set(input.agentId, {
+                devshell,
+                localCwd: input.localCwd,
+                session,
+                target: { ...input.target }
+            });
+        } catch (error) {
+            session.dispose();
+            throw error;
+        }
     } catch (error) {
-        session.dispose();
+        await devshell.close().catch(() => undefined);
         throw error;
     }
+}
+
+function piUserContextFiles(
+    files: Array<{ content: string; path: string }>,
+    activeAgentDir: string
+): Array<{ content: string; path: string }> {
+    const root = resolve(activeAgentDir);
+    return files.filter((file) => dirname(resolve(file.path)) === root);
 }
 
 async function commandAgent(message: PiChildAgentCommandMessage): Promise<void> {
@@ -143,9 +169,7 @@ async function stopAgent(agentId: string): Promise<void> {
     const active = agents.get(agentId);
     if (active === undefined) return;
     agents.delete(agentId);
-    await active.session.abort().catch(() => undefined);
-    requireGui().detach(active.session);
-    active.session.dispose();
+    await disposeManagedPiAgent(active, requireGui());
 }
 
 async function shutdown(): Promise<void> {
