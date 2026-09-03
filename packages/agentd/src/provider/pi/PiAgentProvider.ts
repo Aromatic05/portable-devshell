@@ -42,13 +42,13 @@ export class PiAgentProvider implements AgentProvider {
     async start(context: AgentProviderStartContext): Promise<AgentProviderHandle> {
         const installation = await this.#installer.ensureInstalled(context.runtime);
         const paths = resolvePiAgentPaths(context);
-        const tools = await context.worker.listTools();
         return await this.#runtimeFactory.start({
-            callTool: async (toolName, input, options) => await context.worker.callTool(toolName, input, options),
+            agentDir: context.runtime.stateDirectory,
+            agentId: context.agentId,
             entrypoint: installation.entrypoint,
             localCwd: paths.localCwd,
-            remoteWorkspace: `${context.target.instance}:${context.target.workspace}`,
-            tools
+            target: context.target,
+            webBasePath: context.web?.basePath ?? "/agent/"
         });
     }
 }

@@ -1,19 +1,34 @@
 import {
     createError,
     errorCodes,
+    toControlErrorBody,
     type AgentMessageInput,
     type AgentRecord,
     type AgentStartInput,
+    type AgentToolSessionCallInput,
+    type AgentToolSessionOpenInput,
+    type AgentToolSessionRecord,
+    type AgentToolSessionToolsResult,
     type JsonValue
 } from "@portable-devshell/shared";
+import type { PrefixRouteContext } from "@portable-devshell/shared";
 
 import { routeModule } from "../../route/ControlRouteFactory.js";
 
 export interface AgentControlPort {
     abort(agentId: string): Promise<void>;
+    callToolSession(
+        input: AgentToolSessionCallInput,
+        connectionId: string,
+        signal?: AbortSignal
+    ): Promise<JsonValue>;
+    closeToolSession(sessionId: string, connectionId: string): Promise<void>;
+    connectionClosed?(connectionId: string): Promise<void> | void;
     followUp(input: AgentMessageInput): Promise<void>;
     get(agentId: string): AgentRecord | undefined;
+    listToolSessionTools(sessionId: string, connectionId: string): Promise<AgentToolSessionToolsResult>;
     list(): AgentRecord[];
+    openToolSession(input: AgentToolSessionOpenInput, connectionId: string): Promise<AgentToolSessionRecord>;
     prompt(input: AgentMessageInput): Promise<void>;
     start(input: AgentStartInput): Promise<AgentRecord>;
     steer(input: AgentMessageInput): Promise<void>;
@@ -41,20 +56,96 @@ export function createAgentRouteModule(agent: AgentControlPort) {
             await agent.abort(readAgentId(request.payload));
             return {};
         },
+        toolSessionOpen: async (request, context) => {
+            assertAgentPeer(context);
+            return await agent.openToolSession(
+                readToolSessionOpenInput(request.payload),
+                context.connectionId
+            ) as unknown as JsonValue;
+        },
+        toolSessionList: async (request, context) => {
+            assertAgentPeer(context);
+            return await agent.listToolSessionTools(
+                readToolSessionId(request.payload),
+                context.connectionId
+            ) as unknown as JsonValue;
+        },
+        toolSessionCall: async (request, context) => {
+            assertAgentPeer(context);
+            const controller = new AbortController();
+            const stream = await context.openStream(
+                { accepted: true },
+                { onClose: () => controller.abort() }
+            );
+            try {
+                const result = await agent.callToolSession(
+                    readToolSessionCallInput(request.payload),
+                    context.connectionId,
+                    controller.signal
+                );
+                await stream.complete(result);
+            } catch (error) {
+                await stream.cancel(toControlErrorBody(error) ?? {
+                    code: errorCodes.targetInvalid,
+                    message: error instanceof Error ? error.message : String(error),
+                    retryable: false
+                });
+            }
+            return undefined;
+        },
+        toolSessionClose: async (request, context) => {
+            assertAgentPeer(context);
+            await agent.closeToolSession(readToolSessionId(request.payload), context.connectionId);
+            return {};
+        },
         stop: async (request) => await agent.stop(readAgentId(request.payload)) as unknown as JsonValue
     });
+}
+
+function assertAgentPeer(context: PrefixRouteContext): void {
+    if (context.peer === "agent") return;
+    throw createError({
+        code: errorCodes.controlClientIdentityInvalid,
+        message: "Agent tool sessions require an agent Control peer.",
+        retryable: false
+    });
+}
+
+function readToolSessionOpenInput(value: JsonValue | undefined): AgentToolSessionOpenInput {
+    const input = readRecord(value, "agent.toolSessionOpen requires an object payload.");
+    assertOnlyKeys(input, ["instance", "workspace"]);
+    return {
+        instance: readString(input.instance, "instance"),
+        workspace: readString(input.workspace, "workspace")
+    };
+}
+
+function readToolSessionCallInput(value: JsonValue | undefined): AgentToolSessionCallInput {
+    const input = readRecord(value, "agent.toolSessionCall requires an object payload.");
+    assertOnlyKeys(input, ["input", "operationId", "sessionId", "toolName"]);
+    if (input.input === undefined) throw invalid("input is required.");
+    return {
+        input: input.input,
+        operationId: readString(input.operationId, "operationId"),
+        sessionId: readString(input.sessionId, "sessionId"),
+        toolName: readString(input.toolName, "toolName")
+    };
+}
+
+function readToolSessionId(value: JsonValue | undefined): string {
+    const input = readRecord(value, "Agent tool session request requires an object payload.");
+    assertOnlyKeys(input, ["sessionId"]);
+    return readString(input.sessionId, "sessionId");
 }
 
 function readStartInput(value: JsonValue | undefined): AgentStartInput {
     const input = readRecord(value, "agent.start requires an object payload.");
     const target = readString(input.target, "target");
     const provider = readOptionalString(input.provider, "provider");
-    const slug = readOptionalString(input.slug, "slug");
-    assertOnlyKeys(input, ["provider", "slug", "target"]);
+    assertOnlyKeys(input, ["provider", "target"]);
     return {
         target,
-        ...(provider === undefined ? {} : { provider }),
-        ...(slug === undefined ? {} : { slug })
+        ...(provider === undefined ? {} : { provider })
     };
 }
 

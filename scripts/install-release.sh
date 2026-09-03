@@ -366,6 +366,13 @@ rollback_application() {
 
 rollback_installation() {
     rollback_install_failed=0
+    if [ "${pi_transaction_active:-0}" -eq 1 ]; then
+        if node "$pi_helper" restore "$pi_snapshot"; then
+            pi_transaction_active=0
+        else
+            rollback_install_failed=1
+        fi
+    fi
     if [ "$application_transaction_active" -eq 1 ]; then
         if rollback_application; then
             application_transaction_active=0
@@ -472,6 +479,11 @@ if [ ! -f "$manifest" ]; then
     echo "发布包缺少 portable-devshell-install.json。" >&2
     exit 1
 fi
+pi_helper="$temporary/app/portable-devshell-pi-integration.mjs"
+if [ ! -f "$pi_helper" ]; then
+    echo "发布包缺少 portable-devshell-pi-integration.mjs。" >&2
+    exit 1
+fi
 
 version=$(node -e 'const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(typeof value.version!=="string"||!value.version) process.exit(1); process.stdout.write(value.version)' "$manifest")
 if [ -n "$explicit_release_base" ]; then
@@ -486,10 +498,13 @@ staging_directory="$install_root/.staging-$version-$$"
 backup_directory="$install_root/.backup-$version-$$"
 current_link="$install_root/current"
 command_link="$bin_directory/devshell"
+pi_command="$bin_directory/pi"
+pi_snapshot="$temporary/pi-integration-snapshot.json"
 worker_bin_directory="$devshell_home/bin"
 worker_backup_directory="$devshell_home/.install-worker-backup-$$"
 application_transaction_active=0
 worker_transaction_active=0
+pi_transaction_active=0
 runtime_restore_control=0
 runtime_restore_instances="$temporary/runtime-restore-instances"
 runtime_was_stopped=0
@@ -501,7 +516,7 @@ fi
 cleanup_installation() {
     status=$?
     trap - EXIT HUP INT TERM
-    if [ "$application_transaction_active" -eq 1 ] || [ "$worker_transaction_active" -eq 1 ]; then
+    if [ "$application_transaction_active" -eq 1 ] || [ "$worker_transaction_active" -eq 1 ] || [ "$pi_transaction_active" -eq 1 ]; then
         if ! rollback_installation; then
             echo "安装回滚未完整完成；备份目录已保留以便人工恢复。" >&2
             status=1
@@ -537,6 +552,10 @@ if ! smoke_cli "$staging_cli" "安装前验证失败"; then
     exit 1
 fi
 detail "CLI 入口和运行时依赖验证通过"
+if ! node "$pi_helper" snapshot "$pi_snapshot" "$bin_directory" "$home"; then
+    echo "无法捕获安装前 Pi 集成状态，安装已取消。" >&2
+    exit 1
+fi
 
 step "停止旧版本并切换安装"
 current_cli=
@@ -586,6 +605,12 @@ if ! ln -sfn "versions/$version" "$current_link" || ! ln -sfn "$current_link/$cl
     rollback_installation
     exit 1
 fi
+pi_transaction_active=1
+if ! node "$pi_helper" activate "$bin_directory" "$current_link" "$home"; then
+    echo "无法激活 Pi devshell extension，正在恢复原安装。" >&2
+    rollback_installation
+    exit 1
+fi
 
 step "验证安装结果"
 if ! smoke_cli "$command_link" "安装结果验证失败"; then
@@ -596,6 +621,7 @@ fi
 rm -rf "$backup_directory" "$worker_backup_directory"
 application_transaction_active=0
 worker_transaction_active=0
+pi_transaction_active=0
 detail "已安装命令可以正常启动"
 runtime_was_stopped=0
 if ! restore_installed_runtime "$command_link"; then
@@ -608,6 +634,7 @@ fi
 
 printf '\n已安装 portable-devshell %s。\n' "$version"
 echo "命令：$command_link"
+echo "Pi：$pi_command（默认仅使用 devshell 工具）"
 echo "已预装 Worker：$targets"
 echo "其他 Worker：首次连接对应平台时按需下载并校验"
 echo "下一步："

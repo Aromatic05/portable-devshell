@@ -2,8 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type {
     AgentProvider,
-    AgentProviderHandle,
-    AgentWorkerClient
+    AgentProviderHandle
 } from "../provider/AgentProvider.js";
 import { AgentProviderRuntimePaths } from "../runtime/AgentProviderRuntimePaths.js";
 import type { AgentWorkerTarget } from "../target/AgentWorkerTarget.js";
@@ -15,40 +14,31 @@ export interface AgentHostRecord {
     agentId: string;
     provider: string;
     providerVersion: string;
-    slug: string;
     state: AgentHostState;
     target: AgentWorkerTarget;
-    web?: {
-        basePath: string;
-        upstream: string;
-    };
+}
+
+export interface AgentHostWebEndpoint {
+    basePath: string;
+    upstream: string;
 }
 
 export interface AgentHostStartOptions {
     provider: string;
-    slug?: string;
     target: AgentWorkerTarget;
 }
-
-export type AgentHostWorkerFactory = (
-    target: AgentWorkerTarget,
-    agentId: string
-) => AgentWorkerClient | Promise<AgentWorkerClient>;
 
 export interface AgentHostOptions {
     homeDirectory?: string;
     idFactory?: () => string;
     providers?: readonly AgentProvider[];
     registry?: AgentProviderRegistry;
-    slugFactory?: (agentId: string) => string;
     webBasePath?: string;
-    workerFactory: AgentHostWorkerFactory;
 }
 
 interface AgentHostRuntime {
     handle: AgentProviderHandle;
     record: AgentHostRecord;
-    worker: AgentWorkerClient;
 }
 
 export class AgentHost {
@@ -56,17 +46,13 @@ export class AgentHost {
     readonly #idFactory: () => string;
     readonly #registry: AgentProviderRegistry;
     readonly #runtimes = new Map<string, AgentHostRuntime>();
-    readonly #slugFactory: (agentId: string) => string;
     readonly #webBasePath: string;
-    readonly #workerFactory: AgentHostWorkerFactory;
 
     constructor(options: AgentHostOptions) {
         this.#homeDirectory = options.homeDirectory;
         this.#idFactory = options.idFactory ?? (() => `ag-${randomUUID()}`);
         this.#registry = options.registry ?? new AgentProviderRegistry(options.providers);
-        this.#slugFactory = options.slugFactory ?? defaultSlug;
         this.#webBasePath = normalizeBasePath(options.webBasePath ?? "/agent");
-        this.#workerFactory = options.workerFactory;
     }
 
     get registry(): AgentProviderRegistry {
@@ -80,6 +66,21 @@ export class AgentHost {
     get(agentId: string): AgentHostRecord | undefined {
         const runtime = this.#runtimes.get(agentId);
         return runtime === undefined ? undefined : cloneRecord(runtime.record);
+    }
+
+    webEndpoint(): AgentHostWebEndpoint | undefined {
+        const endpoints = [...this.#runtimes.values()]
+            .map((runtime) => runtime.handle.web?.upstream.toString())
+            .filter((upstream): upstream is string => upstream !== undefined);
+        if (endpoints.length === 0) return undefined;
+        const upstream = endpoints[0]!;
+        if (endpoints.some((candidate) => candidate !== upstream)) {
+            throw new Error("Running Agent providers expose multiple Web endpoints; one /agent hub is required.");
+        }
+        return {
+            basePath: `${this.#webBasePath}/`,
+            upstream
+        };
     }
 
     async prompt(agentId: string, message: string): Promise<void> {
@@ -116,48 +117,26 @@ export class AgentHost {
         if (this.#runtimes.has(agentId)) {
             throw new Error(`Agent id already exists: ${agentId}`);
         }
-        const slug = options.slug ?? this.#slugFactory(agentId);
-        assertSlug(slug);
-        if ([...this.#runtimes.values()].some((runtime) => runtime.record.slug === slug)) {
-            throw new Error(`Agent slug already exists: ${slug}`);
-        }
 
-        const basePath = `${this.#webBasePath}/${slug}/`;
-        const worker = await this.#workerFactory(options.target, agentId);
-        try {
-            const handle = await provider.start({
-                agentId,
-                runtime: new AgentProviderRuntimePaths({
-                    homeDirectory: this.#homeDirectory,
-                    provider: provider.id,
-                    version: provider.version
-                }),
-                target: options.target,
-                web: { basePath },
-                worker
-            });
-            const record: AgentHostRecord = {
-                agentId,
+        const handle = await provider.start({
+            agentId,
+            runtime: new AgentProviderRuntimePaths({
+                homeDirectory: this.#homeDirectory,
                 provider: provider.id,
-                providerVersion: provider.version,
-                slug,
-                state: "running",
-                target: { ...options.target },
-                ...(handle.web === undefined
-                    ? {}
-                    : {
-                        web: {
-                            basePath,
-                            upstream: handle.web.upstream.toString()
-                        }
-                    })
-            };
-            this.#runtimes.set(agentId, { handle, record, worker });
-            return cloneRecord(record);
-        } catch (error) {
-            await worker.close().catch(() => undefined);
-            throw error;
-        }
+                version: provider.version
+            }),
+            target: options.target,
+            web: { basePath: `${this.#webBasePath}/` }
+        });
+        const record: AgentHostRecord = {
+            agentId,
+            provider: provider.id,
+            providerVersion: provider.version,
+            state: "running",
+            target: { ...options.target }
+        };
+        this.#runtimes.set(agentId, { handle, record });
+        return cloneRecord(record);
     }
 
     async stop(agentId: string): Promise<AgentHostRecord> {
@@ -166,26 +145,16 @@ export class AgentHost {
             throw new Error(`Unknown Agent: ${agentId}`);
         }
         runtime.record.state = "stopping";
-        const failures: unknown[] = [];
+        let failure: unknown;
         try {
             await runtime.handle.stop();
         } catch (error) {
-            failures.push(error);
-        }
-        try {
-            await runtime.worker.close();
-        } catch (error) {
-            failures.push(error);
+            failure = error;
         }
         runtime.record.state = "stopped";
         const stopped = cloneRecord(runtime.record);
         this.#runtimes.delete(agentId);
-        if (failures.length === 1) {
-            throw failures[0];
-        }
-        if (failures.length > 1) {
-            throw new AggregateError(failures, `Agent ${agentId} failed to stop cleanly.`);
-        }
+        if (failure !== undefined) throw failure;
         return stopped;
     }
 
@@ -216,20 +185,9 @@ function normalizeBasePath(value: string): string {
     return trimmed === "/" ? "" : trimmed.replace(/\/+$/u, "");
 }
 
-function defaultSlug(agentId: string): string {
-    return `agent-${agentId.replace(/^ag-/u, "").slice(0, 12).toLowerCase()}`;
-}
-
-function assertSlug(slug: string): void {
-    if (!/^[a-z0-9][a-z0-9-]{0,62}$/u.test(slug)) {
-        throw new TypeError(`Invalid Agent slug: ${slug}`);
-    }
-}
-
 function cloneRecord(record: AgentHostRecord): AgentHostRecord {
     return {
         ...record,
-        target: { ...record.target },
-        ...(record.web === undefined ? {} : { web: { ...record.web } })
+        target: { ...record.target }
     };
 }

@@ -1,31 +1,39 @@
-import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
+import type { AgentTarget } from "@portable-devshell/shared";
 
 export interface PiChildInitMessage {
+    agentDir: string;
     entrypoint: string;
-    localCwd: string;
-    remoteWorkspace: string;
-    tools: readonly ToolDefinition[];
     type: "init";
+    webBasePath: string;
+}
+
+export interface PiChildAgentStartMessage {
+    agentId: string;
+    id: string;
+    localCwd: string;
+    target: AgentTarget;
+    type: "agent.start";
 }
 
 export type PiChildCommandName = "abort" | "followUp" | "prompt" | "steer" | "stop";
 
-export interface PiChildCommandMessage {
+export interface PiChildAgentCommandMessage {
+    agentId: string;
     command: PiChildCommandName;
     id: string;
     message?: string;
-    type: "command";
+    type: "agent.command";
 }
 
-export interface PiChildToolResultMessage {
-    error?: string;
-    ok: boolean;
-    requestId: string;
-    result?: JsonValue;
-    type: "tool.result";
+export interface PiChildShutdownMessage {
+    id: string;
+    type: "shutdown";
 }
 
-export type PiParentMessage = PiChildInitMessage | PiChildCommandMessage | PiChildToolResultMessage;
+export type PiParentMessage = PiChildInitMessage
+    | PiChildAgentStartMessage
+    | PiChildAgentCommandMessage
+    | PiChildShutdownMessage;
 
 export interface PiChildReadyMessage {
     error?: string;
@@ -34,28 +42,11 @@ export interface PiChildReadyMessage {
     webUpstream?: string;
 }
 
-export interface PiChildCommandResultMessage {
+export interface PiChildResultMessage {
     error?: string;
     id: string;
     ok: boolean;
-    type: "command.result";
+    type: "result";
 }
 
-export interface PiChildToolCallMessage {
-    input: JsonValue;
-    requestId: string;
-    toolCallId: string;
-    toolName: string;
-    type: "tool.call";
-}
-
-export interface PiChildToolCancelMessage {
-    requestId: string;
-    type: "tool.cancel";
-}
-
-export type PiChildMessage =
-    | PiChildReadyMessage
-    | PiChildCommandResultMessage
-    | PiChildToolCallMessage
-    | PiChildToolCancelMessage;
+export type PiChildMessage = PiChildReadyMessage | PiChildResultMessage;

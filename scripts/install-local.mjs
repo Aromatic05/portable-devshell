@@ -8,6 +8,11 @@ import { fileURLToPath } from "node:url";
 import { assertPackageBinFile, readPackageBinPath, writePortableApplicationManifest, tryReadPackageBinPath } from "./application-layout.mjs";
 import { resolveInstallHome } from "./install-home.mjs";
 import { captureInstalledRuntimeState, restoreInstalledRuntimeState } from "./install-runtime-state.mjs";
+import {
+    activatePiIntegration,
+    capturePiIntegration,
+    restorePiIntegration
+} from "./pi-integration.mjs";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const installStepTotal = 5;
@@ -49,6 +54,7 @@ const stagingDirectory = resolve(installRoot, `.staging-${version}-${process.pid
 const backupDirectory = resolve(installRoot, `.backup-${version}-${process.pid}`);
 const currentLink = resolve(installRoot, "current");
 const commandLink = resolve(binDirectory, process.platform === "win32" ? "devshell.cmd" : "devshell");
+const piCommand = resolve(binDirectory, process.platform === "win32" ? "pi.cmd" : "pi");
 const allTargets = [
     { key: "linux-x64", rustTarget: "x86_64-unknown-linux-musl" },
     { key: "linux-arm64", rustTarget: "aarch64-unknown-linux-musl" },
@@ -108,6 +114,12 @@ try {
     await mkdir(versionsDirectory, { mode: 0o700, recursive: true });
 
     const previousActivation = await captureApplicationActivation();
+    const previousPiIntegration = await capturePiIntegration({
+        binDirectory,
+        currentLink,
+        home,
+        platform: process.platform
+    });
     if (await pathExists(versionDirectory)) {
         await rename(versionDirectory, backupDirectory);
     }
@@ -115,6 +127,12 @@ try {
     try {
         await rename(stagingDirectory, versionDirectory);
         await activateApplication(versionDirectory);
+        await activatePiIntegration({
+            binDirectory,
+            currentLink,
+            home,
+            platform: process.platform
+        });
         beginStep("验证安装结果");
         await assertInstalledCommandStarts();
     } catch (error) {
@@ -123,6 +141,7 @@ try {
             await rename(backupDirectory, versionDirectory);
         }
         await restoreApplicationActivation(previousActivation);
+        await restorePiIntegration(previousPiIntegration);
         try {
             await restorePreviousRuntimeState(runtimeState);
         } catch (restoreError) {
@@ -149,6 +168,7 @@ try {
             "",
             `已安装 portable-devshell ${version}。`,
             `命令：${commandLink}`,
+            `Pi：${piCommand}（默认仅使用 devshell 工具）`,
             `已预装 Worker：${targets.map((target) => target.key).join(", ")}`,
             "其他 Worker：首次连接对应平台时按需下载并校验",
             "下一步：",

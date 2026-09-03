@@ -1,4 +1,5 @@
 export const errorCodes = {
+    agentToolSessionMissing: "agent.toolSessionNotFound",
     artifactContentUnavailable: "artifact.contentUnavailable",
     artifactDirectoryUnsafe: "artifact.directoryUnsafe",
     artifactHostPathDenied: "artifact.hostPathDenied",

@@ -76,6 +76,7 @@ export class ControlRouteComposition {
 
     connectionClosed(connectionId: string): void {
         this.#subscriptions.unsubscribeConnection(connectionId);
+        void Promise.resolve(this.#options.agent?.connectionClosed?.(connectionId)).catch(() => undefined);
     }
 
     async retireInstance(instance: string): Promise<void> {

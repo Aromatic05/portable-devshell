@@ -85,7 +85,7 @@ export function renderCliTopicUsage(topic: CliHelpTopic): string {
 export function renderAgentUsage(): string {
     return [
         "Usage:",
-        "  devshell agent [--provider <id>] [--slug <slug>] <instance:/workspace>",
+        "  devshell agent [--provider <id>] <instance:/workspace>",
         "  devshell agent list",
         "  devshell agent show <agentId>",
         "  devshell agent send <agentId> <message>",

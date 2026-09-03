@@ -245,8 +245,7 @@ export class CliMain {
             case "agent.start":
                 this.#writeJson(await this.#clients.agent.start({
                     target: command.target,
-                    ...(command.provider === undefined ? {} : { provider: command.provider }),
-                    ...(command.slug === undefined ? {} : { slug: command.slug })
+                    ...(command.provider === undefined ? {} : { provider: command.provider })
                 }));
                 return;
             case "agent.send":

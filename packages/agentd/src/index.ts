@@ -3,9 +3,7 @@ export type {
     AgentProviderHandle,
     AgentProviderStartContext,
     AgentProviderWebContext,
-    AgentProviderWebEndpoint,
-    AgentWorkerClient,
-    AgentWorkerToolCallOptions
+    AgentProviderWebEndpoint
 } from "./provider/AgentProvider.js";
 export {
     PI_PROVIDER_ID,
@@ -32,7 +30,7 @@ export {
     type AgentHostRecord,
     type AgentHostStartOptions,
     type AgentHostState,
-    type AgentHostWorkerFactory
+    type AgentHostWebEndpoint
 } from "./host/AgentHost.js";
 export { AgentProviderRegistry } from "./host/AgentProviderRegistry.js";
 export {
@@ -44,8 +42,3 @@ export {
     renderAgentWorkerTarget,
     type AgentWorkerTarget
 } from "./target/AgentWorkerTarget.js";
-export {
-    AgentWorkerClientBinding,
-    type AgentWorkerClientBindingOptions,
-    type AgentWorkerHandle
-} from "./worker/AgentWorkerClientBinding.js";

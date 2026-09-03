@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
-import { createServer, type IncomingMessage } from "node:http";
+import { createServer } from "node:http";
 import test from "node:test";
 
 import { HttpHost } from "@portable-devshell/mcp/testing";
-import type { AgentRecord } from "@portable-devshell/shared";
 import { WebSocket, WebSocketServer } from "ws";
 
 import { AgentWebProxy } from "../../src/server/web/agent/AgentWebProxy.ts";
 import { ControlWebSessionService } from "../../src/server/web/ControlWebSessionService.ts";
 
-test("Agent Web proxy authenticates by devshell session and strips credentials before loopback upstream", async () => {
+test("Agent Web proxy authenticates one shared /agent hub and strips credentials", async () => {
     const observed: Array<{
         authorization?: string;
         cookie?: string;
@@ -54,23 +53,12 @@ test("Agent Web proxy authenticates by devshell session and strips credentials b
     });
     const upstreamAddress = upstreamServer.address();
     assert.ok(typeof upstreamAddress === "object" && upstreamAddress !== null);
-    const record: AgentRecord = {
-        agentId: "ag-1",
-        provider: "pi",
-        providerVersion: "0.84.4",
-        slug: "review",
-        state: "running",
-        target: { instance: "worker-a", workspace: "/repo" },
-        web: {
-            basePath: "/web/agent/review/",
-            upstream: `http://127.0.0.1:${upstreamAddress.port}/`
-        }
-    };
+    const endpoint = { upstream: `http://127.0.0.1:${upstreamAddress.port}/` };
     const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: 0 });
     const sessions = new ControlWebSessionService({ auth: { mode: "none" }, basePath: "/web" });
     const removeSessionRoutes = sessions.install(http);
     const removeProxy = new AgentWebProxy({
-        agent: { list: () => [record] },
+        agent: { webEndpoint: () => endpoint },
         basePath: "/web/agent"
     }).install(http, sessions);
 
@@ -80,7 +68,7 @@ test("Agent Web proxy authenticates by devshell session and strips credentials b
         assert.ok(typeof address === "object" && address !== null);
         const baseUrl = `http://127.0.0.1:${address.port}`;
 
-        const unauthorized = await fetch(`${baseUrl}/web/agent/review/api/state`);
+        const unauthorized = await fetch(`${baseUrl}/web/agent/api/sessions`);
         assert.equal(unauthorized.status, 401);
         assert.equal(observed.length, 0);
 
@@ -88,14 +76,13 @@ test("Agent Web proxy authenticates by devshell session and strips credentials b
         assert.equal(sessionResponse.status, 200);
         const cookie = sessionCookie(sessionResponse.headers.get("set-cookie"));
 
-        const redirect = await fetch(`${baseUrl}/web/agent/review`, {
+        const root = await fetch(`${baseUrl}/web/agent`, {
             headers: { cookie },
             redirect: "manual"
         });
-        assert.equal(redirect.status, 308);
-        assert.equal(redirect.headers.get("location"), "/web/agent/review/");
+        assert.equal(root.status, 200);
 
-        const proxied = await fetch(`${baseUrl}/web/agent/review/api/state?view=full`, {
+        const proxied = await fetch(`${baseUrl}/web/agent/api/sessions?view=full`, {
             headers: {
                 authorization: "Bearer must-not-reach-provider",
                 cookie
@@ -103,20 +90,20 @@ test("Agent Web proxy authenticates by devshell session and strips credentials b
         });
         assert.equal(proxied.status, 200);
         assert.equal(proxied.headers.get("set-cookie"), null);
-        assert.deepEqual(await proxied.json(), { ok: true, path: "/api/state?view=full" });
+        assert.deepEqual(await proxied.json(), { ok: true, path: "/api/sessions?view=full" });
         assert.deepEqual(observed.at(-1), {
-            path: "/api/state?view=full",
-            prefix: "/web/agent/review"
+            path: "/api/sessions?view=full",
+            prefix: "/web/agent"
         });
 
         const echoed = await websocketRoundTrip(
-            `ws://127.0.0.1:${address.port}/web/agent/review/socket?mode=live`,
+            `ws://127.0.0.1:${address.port}/web/agent/socket?mode=live`,
             cookie
         );
         assert.equal(echoed, "echo:hello");
         assert.deepEqual(observedUpgrade, {
             path: "/socket?mode=live",
-            prefix: "/web/agent/review"
+            prefix: "/web/agent"
         });
     } finally {
         removeProxy();

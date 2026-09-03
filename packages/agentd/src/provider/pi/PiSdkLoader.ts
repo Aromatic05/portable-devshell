@@ -50,6 +50,8 @@ export interface PiSettingsManagerLike {
 }
 
 export interface PiSessionLike {
+    readonly sessionFile?: string;
+    readonly sessionId: string;
     agent?: {
         state?: {
             isStreaming?: boolean;
@@ -62,6 +64,7 @@ export interface PiSessionLike {
     dispose(): void;
     prompt(text: string, options?: { streamingBehavior?: "steer" | "followUp" }): Promise<void>;
     setModel?(model: PiModelLike): Promise<void>;
+    setSessionName?(name: string): void;
     setThinkingLevel?(level: string): void;
     subscribe?(listener: (event: unknown) => void): () => void;
 }

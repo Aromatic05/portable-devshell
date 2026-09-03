@@ -1,3 +1,6 @@
+import type { JsonValue } from "../../type/TypeJsonValue.js";
+import type { ToolDefinition } from "../tool/DtoToolDefinition.js";
+
 export type AgentRuntimeState = "starting" | "running" | "stopping" | "stopped";
 
 export interface AgentTarget {
@@ -5,28 +8,41 @@ export interface AgentTarget {
     workspace: string;
 }
 
-export interface AgentWebEndpoint {
-    basePath: string;
-    upstream: string;
-}
-
 export interface AgentRecord {
     agentId: string;
     provider: string;
     providerVersion: string;
-    slug: string;
     state: AgentRuntimeState;
     target: AgentTarget;
-    web?: AgentWebEndpoint;
 }
 
 export interface AgentStartInput {
     provider?: string;
-    slug?: string;
     target: string;
 }
 
 export interface AgentMessageInput {
     agentId: string;
     message: string;
+}
+
+export interface AgentToolSessionOpenInput {
+    instance: string;
+    workspace: string;
+}
+
+export interface AgentToolSessionRecord {
+    sessionId: string;
+    target: AgentTarget;
+}
+
+export interface AgentToolSessionCallInput {
+    input: JsonValue;
+    operationId: string;
+    sessionId: string;
+    toolName: string;
+}
+
+export interface AgentToolSessionToolsResult {
+    tools: ToolDefinition[];
 }

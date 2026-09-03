@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmod, lstat, mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL, fileURLToPath } from "node:url";
@@ -56,6 +56,9 @@ test("Unix release installer activates the manifest-declared CLI and supports re
             ""
         ].join("\n"), "utf8");
         await chmod(cli, 0o755);
+
+        await writeFakePiDeployment(app);
+
 
         const archive = resolve(release, applicationAssetName());
         run("tar", ["-czf", archive, "-C", app, "."]);
@@ -160,6 +163,9 @@ test("Unix release installer restores the Control and managed instances that wer
         ].join("\n"), "utf8");
         await chmod(cli, 0o755);
 
+        await writeFakePiDeployment(app);
+
+
         const archive = resolve(release, applicationAssetName());
         run("tar", ["-czf", archive, "-C", app, "."]);
         await writeChecksum(archive);
@@ -228,6 +234,9 @@ test("Unix release installer rejects an application that cannot start before act
             ""
         ].join("\n"), "utf8");
         await chmod(cli, 0o755);
+
+        await writeFakePiDeployment(app);
+
 
         const archive = resolve(release, applicationAssetName());
         run("tar", ["-czf", archive, "-C", app, "."]);
@@ -299,6 +308,9 @@ test("Windows release installer activates a fresh application with the host work
             "else { process.stderr.write(`unsupported test command: ${command}\\n`); process.exit(2); }",
             ""
         ].join("\n"), "utf8");
+
+        await writeFakePiDeployment(app);
+
 
         const archive = resolve(release, applicationAssetName());
         run("tar.exe", ["-czf", archive, "-C", app, "."]);
@@ -600,12 +612,38 @@ async function writeTransactionalReleaseFixture({ app, failAfterActivation = fal
     ].join("\n"), "utf8");
     if (process.platform !== "win32") await chmod(cli, 0o755);
 
+    await writeFakePiDeployment(app);
+
+
     const archive = resolve(release, applicationAssetName());
     run(process.platform === "win32" ? "tar.exe" : "tar", ["-czf", archive, "-C", app, "."]);
     await writeChecksum(archive);
     const worker = resolve(release, workerAssetName());
     await writeFile(worker, workerContent, "utf8");
     await writeChecksum(worker);
+}
+
+
+async function writeFakePiDeployment(app) {
+    await copyFile(
+        resolve(repositoryRoot, "scripts", "pi-integration.mjs"),
+        resolve(app, "portable-devshell-pi-integration.mjs")
+    );
+    const controlRoot = resolve(app, "node_modules", "@portable-devshell", "control");
+    const agentdRoot = resolve(controlRoot, "node_modules", "@portable-devshell", "agentd");
+    const extensionRoot = resolve(agentdRoot, "node_modules", "@portable-devshell", "pi-extension");
+    const piRoot = resolve(agentdRoot, "node_modules", "@earendil-works", "pi-coding-agent");
+    await mkdir(resolve(controlRoot, "dist"), { recursive: true });
+    await mkdir(resolve(agentdRoot, "dist"), { recursive: true });
+    await mkdir(resolve(extensionRoot, "dist"), { recursive: true });
+    await mkdir(resolve(piRoot, "dist", "bundle"), { recursive: true });
+    await writeFile(resolve(controlRoot, "dist", "index.js"), "export {};\n", "utf8");
+    await writeFile(resolve(agentdRoot, "package.json"), JSON.stringify({ main: "dist/index.js" }), "utf8");
+    await writeFile(resolve(agentdRoot, "dist", "index.js"), "export {};\n", "utf8");
+    await writeFile(resolve(extensionRoot, "package.json"), JSON.stringify({ main: "dist/index.js" }), "utf8");
+    await writeFile(resolve(extensionRoot, "dist", "index.js"), "export default () => {};\n", "utf8");
+    await writeFile(resolve(piRoot, "package.json"), JSON.stringify({ bin: { pi: "dist/bundle/cli.js" } }), "utf8");
+    await writeFile(resolve(piRoot, "dist", "bundle", "cli.js"), "process.stdout.write('fake pi\\n');\n", "utf8");
 }
 
 function runInstallerRaw(environment, windows) {

@@ -383,6 +383,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "无法解压 portable-devshell 应用包。" }
     $manifestPath = Join-Path $appDirectory "portable-devshell-install.json"
     if (-not (Test-Path -LiteralPath $manifestPath)) { throw "发布包缺少 portable-devshell-install.json。" }
+    $piHelper = Join-Path $appDirectory "portable-devshell-pi-integration.mjs"
+    if (-not (Test-Path -LiteralPath $piHelper -PathType Leaf)) { throw "发布包缺少 portable-devshell-pi-integration.mjs。" }
     $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
     $version = [string]$manifest.version
     if ([string]::IsNullOrWhiteSpace($version)) { throw "应用包版本无效。" }
@@ -403,6 +405,8 @@ try {
     $currentBackupDirectory = Join-Path $installRoot ".current-backup-$PID"
     $workerBackupDirectory = Join-Path $devshellHome ".install-worker-backup-$PID"
     $commandPath = Join-Path $binDirectory "devshell.cmd"
+    $piCommandPath = Join-Path $binDirectory "pi.cmd"
+    $piSnapshot = Join-Path $temporary "pi-integration-snapshot.json"
     $previousVersionPresent = Test-Path -LiteralPath $versionDirectory
     $previousCurrentPresent = Test-Path -LiteralPath $currentDirectory
     New-Item -ItemType Directory -Force -Path $installRoot, $versionsDirectory, $binDirectory, $devshellHome | Out-Null
@@ -415,6 +419,8 @@ try {
     }
     Assert-CliStarts $stagingCli "安装前验证失败"
     Write-InstallDetail "CLI 入口和运行时依赖验证通过"
+    & node $piHelper snapshot $piSnapshot $binDirectory $homeDirectory win32
+    if ($LASTEXITCODE -ne 0) { throw "无法捕获安装前 Pi 集成状态，安装已取消。" }
 
     Write-InstallStep "停止旧版本并切换安装"
     $currentCli = ""
@@ -447,6 +453,8 @@ try {
         Copy-Item -Recurse -Force -LiteralPath $versionDirectory -Destination $currentDirectory
         $cliPath = Join-Path $currentDirectory $cliRelativePath
         Set-Content -Encoding ASCII -LiteralPath $commandPath -Value "@echo off`r`nnode `"$cliPath`" %*`r`n"
+        & node $piHelper activate $binDirectory $currentDirectory $homeDirectory win32
+        if ($LASTEXITCODE -ne 0) { throw "无法激活 Pi devshell extension。" }
 
         Write-InstallStep "验证安装结果"
         Assert-CliStarts $commandPath "安装结果验证失败" $true
@@ -454,6 +462,10 @@ try {
     } finally {
         if (-not $activated) {
             try {
+                & node $piHelper restore $piSnapshot
+                if ($LASTEXITCODE -ne 0) { throw "无法恢复安装前 Pi 集成状态。" }
+            } finally {
+                try {
                 if (Test-Path -LiteralPath $currentBackupDirectory) {
                     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $currentDirectory
                     Move-Item -Force $currentBackupDirectory $currentDirectory
@@ -471,8 +483,9 @@ try {
                 } else {
                     Set-Content -Encoding ASCII -LiteralPath $commandPath -Value $previousCommandContent
                 }
-            } finally {
-                Restore-WorkerAliases $targets $devshellHome $workerBackupDirectory
+                } finally {
+                    Restore-WorkerAliases $targets $devshellHome $workerBackupDirectory
+                }
             }
             if ($runtimeWasStopped) {
                 Restore-InstalledRuntimeState $currentCli $runtimeState
@@ -491,6 +504,7 @@ try {
     Write-Host ""
     Write-Host "已安装 portable-devshell $version。"
     Write-Host "命令：$commandPath"
+    Write-Host "Pi：$piCommandPath（默认仅使用 devshell 工具）"
     Write-Host "已预装 Worker：$($targets -join ', ')"
     Write-Host "其他 Worker：首次连接对应平台时按需下载并校验"
     Write-Host "下一步："

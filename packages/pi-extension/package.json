@@ -1,5 +1,5 @@
 {
-    "name": "@portable-devshell/agentd",
+    "name": "@portable-devshell/pi-extension",
     "version": "0.0.0",
     "private": true,
     "type": "module",
@@ -15,11 +15,7 @@
         "dist"
     ],
     "dependencies": {
-        "@earendil-works/pi-coding-agent": "0.84.4",
-        "@portable-devshell/core": "workspace:*",
-        "@portable-devshell/pi-extension": "workspace:*",
-        "@portable-devshell/shared": "workspace:*",
-        "pi-gui-extension": "0.4.1"
+        "@portable-devshell/shared": "workspace:*"
     },
     "scripts": {
         "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b --force",

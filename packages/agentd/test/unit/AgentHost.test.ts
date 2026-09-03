@@ -3,17 +3,15 @@ import test from "node:test";
 
 import type {
     AgentProvider,
-    AgentProviderStartContext,
-    AgentWorkerClient
+    AgentProviderStartContext
 } from "../../src/provider/AgentProvider.ts";
 import { AgentHost } from "../../src/host/AgentHost.ts";
 import { AgentProviderRegistry } from "../../src/host/AgentProviderRegistry.ts";
 import { parseAgentWorkerTarget } from "../../src/target/AgentWorkerTarget.ts";
 
-test("AgentHost binds provider lifecycle, Worker target, runtime prefix, and Web slug", async () => {
+test("AgentHost binds provider lifecycle, target, runtime prefix, and one shared Web endpoint", async () => {
     const starts: AgentProviderStartContext[] = [];
     const stopped: string[] = [];
-    const closed: string[] = [];
     const prompts: string[] = [];
     const steers: string[] = [];
     const followUps: string[] = [];
@@ -24,21 +22,11 @@ test("AgentHost binds provider lifecycle, Worker target, runtime prefix, and Web
         async start(context) {
             starts.push(context);
             return {
-                async abort() {
-                    aborts += 1;
-                },
-                async followUp(message) {
-                    followUps.push(message);
-                },
-                async prompt(message) {
-                    prompts.push(message);
-                },
-                async steer(message) {
-                    steers.push(message);
-                },
-                async stop() {
-                    stopped.push(context.agentId);
-                },
+                async abort() { aborts += 1; },
+                async followUp(message) { followUps.push(message); },
+                async prompt(message) { prompts.push(message); },
+                async steer(message) { steers.push(message); },
+                async stop() { stopped.push(context.agentId); },
                 web: { upstream: new URL("http://127.0.0.1:43123/") }
             };
         }
@@ -47,9 +35,7 @@ test("AgentHost binds provider lifecycle, Worker target, runtime prefix, and Web
     const host = new AgentHost({
         homeDirectory: "/home/tester",
         idFactory: () => "ag-1234567890abcdef",
-        providers: [provider],
-        slugFactory: () => "resolve-agent",
-        workerFactory: (workerTarget, agentId) => createWorker(workerTarget, agentId, closed)
+        providers: [provider]
     });
 
     const record = await host.start({ provider: "pi", target });
@@ -58,23 +44,23 @@ test("AgentHost binds provider lifecycle, Worker target, runtime prefix, and Web
         agentId: "ag-1234567890abcdef",
         provider: "pi",
         providerVersion: "0.84.4",
-        slug: "resolve-agent",
         state: "running",
-        target,
-        web: {
-            basePath: "/agent/resolve-agent/",
-            upstream: "http://127.0.0.1:43123/"
-        }
+        target
     });
     assert.equal(starts.length, 1);
     assert.equal(starts[0]?.agentId, record.agentId);
-    assert.equal(starts[0]?.web?.basePath, "/agent/resolve-agent/");
+    assert.deepEqual(starts[0]?.target, target);
+    assert.equal(starts[0]?.web?.basePath, "/agent/");
     assert.equal(
         starts[0]?.runtime.prefixDirectory,
         "/home/tester/.devshell/agentd/providers/pi/prefix/0.84.4"
     );
-    assert.equal(starts[0]?.worker.target.workspace, "/repo");
+    assert.equal("worker" in starts[0]!, false);
     assert.deepEqual(host.list(), [record]);
+    assert.deepEqual(host.webEndpoint(), {
+        basePath: "/agent/",
+        upstream: "http://127.0.0.1:43123/"
+    });
 
     await host.prompt(record.agentId, "implement");
     await host.steer(record.agentId, "focus tests");
@@ -88,29 +74,33 @@ test("AgentHost binds provider lifecycle, Worker target, runtime prefix, and Web
     const stoppedRecord = await host.stop(record.agentId);
     assert.equal(stoppedRecord.state, "stopped");
     assert.deepEqual(stopped, [record.agentId]);
-    assert.deepEqual(closed, [record.agentId]);
     assert.deepEqual(host.list(), []);
+    assert.equal(host.webEndpoint(), undefined);
 });
 
-test("AgentHost rejects unknown providers and duplicate Web slugs", async () => {
+test("AgentHost requires one shared provider Web endpoint", async () => {
+    let nextId = 0;
     const provider: AgentProvider = {
         id: "pi",
         version: "1",
-        async start() {
-            return { async prompt() {}, async stop() {} };
+        async start(context) {
+            return {
+                async prompt() {},
+                async stop() {},
+                web: { upstream: new URL(`http://127.0.0.1:${43000 + Number(context.agentId.slice(3))}/`) }
+            };
         }
     };
-    let nextId = 0;
     const host = new AgentHost({
         idFactory: () => `ag-${++nextId}`,
-        providers: [provider],
-        workerFactory: (target, agentId) => createWorker(target, agentId, [])
+        providers: [provider]
     });
     const target = parseAgentWorkerTarget("worker-a:/repo");
 
     await assert.rejects(() => host.start({ provider: "missing", target }), /Unknown Agent provider/u);
-    await host.start({ provider: "pi", slug: "same", target });
-    await assert.rejects(() => host.start({ provider: "pi", slug: "same", target }), /slug already exists/u);
+    await host.start({ provider: "pi", target });
+    await host.start({ provider: "pi", target });
+    assert.throws(() => host.webEndpoint(), /one \/agent hub/u);
     await host.stopAll();
 });
 
@@ -125,26 +115,7 @@ test("AgentProviderRegistry rejects duplicate provider ids", () => {
     assert.throws(() => new AgentProviderRegistry([provider, provider]), /already registered/u);
 });
 
-function createWorker(
-    target: ReturnType<typeof parseAgentWorkerTarget>,
-    agentId: string,
-    closed: string[]
-): AgentWorkerClient {
-    return {
-        target,
-        async callTool() {
-            return {};
-        },
-        async close() {
-            closed.push(agentId);
-        },
-        async listTools() {
-            return [];
-        }
-    };
-}
-
-test("AgentHost removes a stopped runtime even when provider and Worker cleanup both fail", async () => {
+test("AgentHost removes a stopped runtime when provider cleanup fails", async () => {
     const provider: AgentProvider = {
         id: "pi",
         version: "1",
@@ -160,21 +131,10 @@ test("AgentHost removes a stopped runtime even when provider and Worker cleanup 
     const target = parseAgentWorkerTarget("worker-a:/repo");
     const host = new AgentHost({
         idFactory: () => "ag-failing-cleanup",
-        providers: [provider],
-        workerFactory: () => ({
-            target,
-            async callTool() { return {}; },
-            async close() { throw new Error("worker close failed"); },
-            async listTools() { return []; }
-        })
+        providers: [provider]
     });
     const record = await host.start({ provider: "pi", target });
 
-    await assert.rejects(
-        () => host.stop(record.agentId),
-        (error: unknown) => error instanceof AggregateError
-            && error.errors.some((failure) => String(failure).includes("provider stop failed"))
-            && error.errors.some((failure) => String(failure).includes("worker close failed"))
-    );
+    await assert.rejects(() => host.stop(record.agentId), /provider stop failed/u);
     assert.deepEqual(host.list(), []);
 });

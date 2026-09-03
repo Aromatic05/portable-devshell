@@ -78,8 +78,8 @@ function readHelloRequest(payload: JsonValue | undefined): ControlProtocolHelloR
     const clientKind = payload.clientKind;
     const minProtocolVersion = payload.minProtocolVersion;
     const maxProtocolVersion = payload.maxProtocolVersion;
-    if (clientKind !== "cli" && clientKind !== "tui" && clientKind !== "web") {
-        throw invalidHello("service.hello clientKind must be cli, tui, or web.");
+    if (clientKind !== "agent" && clientKind !== "cli" && clientKind !== "tui" && clientKind !== "web") {
+        throw invalidHello("service.hello clientKind must be agent, cli, tui, or web.");
     }
     if (!isProtocolVersion(minProtocolVersion) || !isProtocolVersion(maxProtocolVersion)) {
         throw invalidHello("service.hello protocol versions must be positive safe integers.");

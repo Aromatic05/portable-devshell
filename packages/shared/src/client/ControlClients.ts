@@ -8,7 +8,15 @@ import type {
     ArtifactViewImageInput,
     ArtifactViewImageResult,
 } from "../dto/artifact/DtoArtifact.js";
-import type { AgentMessageInput, AgentRecord, AgentStartInput } from "../dto/agent/DtoAgent.js";
+import type {
+    AgentMessageInput,
+    AgentRecord,
+    AgentStartInput,
+    AgentToolSessionCallInput,
+    AgentToolSessionOpenInput,
+    AgentToolSessionRecord,
+    AgentToolSessionToolsResult,
+} from "../dto/agent/DtoAgent.js";
 import type {
     ConfigBatchUpdateRequest,
     ConfigDraft,
@@ -94,9 +102,13 @@ export interface RuntimeStartOptions {
 export interface ControlClients {
     agent: {
         abort(agentId: string): Promise<void>;
+        callToolSession(input: AgentToolSessionCallInput, signal?: AbortSignal): Promise<JsonValue>;
+        closeToolSession(sessionId: string): Promise<void>;
         followUp(input: AgentMessageInput): Promise<void>;
         get(agentId: string): Promise<AgentRecord | undefined>;
+        listToolSessionTools(sessionId: string): Promise<AgentToolSessionToolsResult>;
         list(): Promise<AgentRecord[]>;
+        openToolSession(input: AgentToolSessionOpenInput): Promise<AgentToolSessionRecord>;
         prompt(input: AgentMessageInput): Promise<void>;
         start(input: AgentStartInput): Promise<AgentRecord>;
         steer(input: AgentMessageInput): Promise<void>;
@@ -232,17 +244,30 @@ export function createControlClients(
     const tool = instanceClientModule(connection, "tool");
     const openRuntimeStart = (name: string): Promise<OpenedClientStream> =>
         runtime.openStream(name, "start");
+    const openAgentToolCall = (input: AgentToolSessionCallInput): Promise<OpenedClientStream> =>
+        agent.openStream("toolSessionCall", input);
 
     return {
         agent: {
             abort: async (agentId) => {
                 await agent.request("abort", { agentId });
             },
+            callToolSession: async (input, signal) => await callAgentToolSession(
+                connection,
+                openAgentToolCall,
+                input,
+                signal
+            ),
+            closeToolSession: async (sessionId) => {
+                await agent.request("toolSessionClose", { sessionId });
+            },
             followUp: async (input) => {
                 await agent.request("followUp", input);
             },
             get: (agentId) => agent.request("get", { agentId }),
+            listToolSessionTools: (sessionId) => agent.request("toolSessionList", { sessionId }),
             list: () => agent.request("list"),
+            openToolSession: (input) => agent.request("toolSessionOpen", input),
             prompt: async (input) => {
                 await agent.request("prompt", input);
             },
@@ -421,6 +446,43 @@ async function startRuntime(
     }
 }
 
+async function callAgentToolSession(
+    connection: ClientConnection,
+    openCall: (input: AgentToolSessionCallInput) => Promise<OpenedClientStream>,
+    input: AgentToolSessionCallInput,
+    signal?: AbortSignal
+): Promise<JsonValue> {
+    let stream: import("../transport/ClientConnection.js").ClientStream | undefined;
+    try {
+        const opened = await openCall(input);
+        stream = opened.stream;
+        const aborted = () => stream?.close();
+        signal?.addEventListener("abort", aborted, { once: true });
+        try {
+            if (signal?.aborted === true) {
+                stream.close();
+                throw abortError(signal);
+            }
+            while (true) {
+                const event = await stream.nextEvent();
+                if (event.name === "stream.completed") {
+                    return (event.payload ?? {}) as JsonValue;
+                }
+                if (event.name === "stream.cancelled") {
+                    connection.throwRemoteError(event.error);
+                    throw new Error("Agent tool call was cancelled.");
+                }
+            }
+        } finally {
+            signal?.removeEventListener("abort", aborted);
+        }
+    } catch (error) {
+        throw connection.mapError(error);
+    } finally {
+        stream?.close();
+    }
+}
+
 export function readInstanceSnapshot(value: JsonValue | undefined): InstanceSnapshot {
     const snapshot = record(value);
     if (
@@ -472,5 +534,5 @@ function isOneOf<T extends string>(
 function abortError(signal: AbortSignal): Error {
     return signal.reason instanceof Error
         ? signal.reason
-        : new Error("Runtime start was aborted.");
+        : new Error("Control operation was aborted.");
 }

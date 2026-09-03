@@ -6,9 +6,5 @@
         "tsBuildInfoFile": "./dist/.tsbuildinfo"
     },
     "include": ["src/**/*.ts"],
-    "references": [
-        { "path": "../shared" },
-        { "path": "../core" },
-        { "path": "../pi-extension" }
-    ]
+    "references": [{ "path": "../shared" }]
 }

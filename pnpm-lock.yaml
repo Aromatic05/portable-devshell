@@ -52,15 +52,21 @@ importers:
       '@portable-devshell/core':
         specifier: workspace:*
         version: link:../core
+      '@portable-devshell/pi-extension':
+        specifier: workspace:*
+        version: link:../pi-extension
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
+      pi-gui-extension:
+        specifier: 0.4.1
+        version: 0.4.1(@earendil-works/pi-coding-agent@0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(ws@8.21.0)(zod@3.25.76))
 
   packages/cli:
     dependencies:
       '@portable-devshell/control':
         specifier: workspace:*
-        version: file:packages/control(react@18.3.1)(zod@3.25.76)
+        version: file:packages/control(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(react@18.3.1)(zod@3.25.76)
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
@@ -157,6 +163,12 @@ importers:
       '@types/express':
         specifier: ^5.0.5
         version: 5.0.6
+
+  packages/pi-extension:
+    dependencies:
+      '@portable-devshell/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/shared: {}
 
@@ -784,6 +796,9 @@ packages:
 
   '@portable-devshell/mcp@file:packages/mcp':
     resolution: {directory: packages/mcp, type: directory}
+
+  '@portable-devshell/pi-extension@file:packages/pi-extension':
+    resolution: {directory: packages/pi-extension, type: directory}
 
   '@portable-devshell/shared@file:packages/shared':
     resolution: {directory: packages/shared, type: directory}
@@ -2243,6 +2258,12 @@ packages:
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
 
+  pi-gui-extension@0.4.1:
+    resolution: {integrity: sha512-I9AEUaaJrNZzSoixZG1D/4cuD6b72iS/6W4xmMuuSoqt25UujuJG9Z/k97cZWY1qnOLSlj2GkUOD834ugNVJQQ==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@earendil-works/pi-coding-agent': '*'
+
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
@@ -3412,18 +3433,26 @@ snapshots:
 
   '@oxc-project/types@0.142.0': {}
 
-  '@portable-devshell/agentd@file:packages/agentd':
+  '@portable-devshell/agentd@file:packages/agentd(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(ws@8.21.0)(zod@3.25.76)':
     dependencies:
+      '@earendil-works/pi-coding-agent': 0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(ws@8.21.0)(zod@3.25.76)
       '@portable-devshell/core': file:packages/core
+      '@portable-devshell/pi-extension': file:packages/pi-extension
       '@portable-devshell/shared': file:packages/shared
     transitivePeerDependencies:
+      - '@modelcontextprotocol/sdk'
       - bare-abort-controller
       - bare-buffer
+      - bufferutil
       - react-native-b4a
+      - supports-color
+      - utf-8-validate
+      - ws
+      - zod
 
-  '@portable-devshell/control@file:packages/control(react@18.3.1)(zod@3.25.76)':
+  '@portable-devshell/control@file:packages/control(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(react@18.3.1)(zod@3.25.76)':
     dependencies:
-      '@portable-devshell/agentd': file:packages/agentd
+      '@portable-devshell/agentd': file:packages/agentd(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(ws@8.21.0)(zod@3.25.76)
       '@portable-devshell/core': file:packages/core
       '@portable-devshell/mcp': file:packages/mcp(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(zod@3.25.76)
       '@portable-devshell/shared': file:packages/shared
@@ -3434,6 +3463,7 @@ snapshots:
       ws: 8.21.0
     transitivePeerDependencies:
       - '@cfworker/json-schema'
+      - '@modelcontextprotocol/sdk'
       - bare-abort-controller
       - bare-buffer
       - bufferutil
@@ -3470,6 +3500,10 @@ snapshots:
       - react-dom
       - supports-color
       - zod
+
+  '@portable-devshell/pi-extension@file:packages/pi-extension':
+    dependencies:
+      '@portable-devshell/shared': file:packages/shared
 
   '@portable-devshell/shared@file:packages/shared': {}
 
@@ -4925,6 +4959,10 @@ snapshots:
   path-to-regexp@8.4.2: {}
 
   pathe@2.0.3: {}
+
+  pi-gui-extension@0.4.1(@earendil-works/pi-coding-agent@0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(ws@8.21.0)(zod@3.25.76)):
+    dependencies:
+      '@earendil-works/pi-coding-agent': 0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(ws@8.21.0)(zod@3.25.76)
 
   picocolors@1.1.1: {}
 

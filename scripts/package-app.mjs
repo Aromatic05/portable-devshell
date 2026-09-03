@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
     chmod,
+    copyFile,
     mkdir,
     mkdtemp,
     readFile,
@@ -51,6 +52,10 @@ try {
         resolve(appDirectory, "portable-devshell-install.json"),
         `${JSON.stringify({ minimumNodeMajor: 24, version }, null, 2)}\n`,
         "utf8",
+    );
+    await copyFile(
+        resolve(repoRoot, "scripts", "pi-integration.mjs"),
+        resolve(appDirectory, "portable-devshell-pi-integration.mjs"),
     );
 
     run("tar", ["--dereference", "-czf", assetPath, "-C", appDirectory, "."]);

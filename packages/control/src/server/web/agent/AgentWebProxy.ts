@@ -9,12 +9,11 @@ import { request as httpsRequest } from "node:https";
 import type { Duplex } from "node:stream";
 
 import type { HttpHost } from "@portable-devshell/mcp";
-import type { AgentRecord } from "@portable-devshell/shared";
 
 import type { ControlWebSessionService } from "../ControlWebSessionService.js";
 
 export interface AgentWebRegistry {
-    list(): AgentRecord[];
+    webEndpoint(): { upstream: string } | undefined;
 }
 
 export interface AgentWebProxyOptions {
@@ -23,7 +22,6 @@ export interface AgentWebProxyOptions {
 }
 
 interface ResolvedAgentWebTarget {
-    record: AgentRecord & { web: NonNullable<AgentRecord["web"]> };
     upstream: URL;
     upstreamPath: string;
 }
@@ -48,13 +46,7 @@ export class AgentWebProxy {
                 writeError(response, 404, "Agent WebUI not found");
                 return;
             }
-            if (target.upstreamPath === "/" && !requestPathname(request).endsWith("/")) {
-                response.statusCode = 308;
-                response.setHeader("Location", target.record.web.basePath);
-                response.end();
-                return;
-            }
-            await proxyHttp(request, response, target);
+            await proxyHttp(request, response, target, this.#basePath);
         });
         const removeUpgrade = http.registerUpgradePrefix(this.#basePath, async (request, socket, head) => {
             if (!sessions.authorize(request)) {
@@ -66,7 +58,7 @@ export class AgentWebProxy {
                 rejectUpgrade(socket, 404, "Agent WebUI not found");
                 return;
             }
-            await proxyUpgrade(request, socket, head, target);
+            await proxyUpgrade(request, socket, head, target, this.#basePath);
         });
         return () => {
             removeUpgrade();
@@ -87,20 +79,13 @@ export class AgentWebProxy {
 
     #resolveSuffix(value: string): ResolvedAgentWebTarget | undefined {
         const url = new URL(value, "http://localhost");
-        const match = /^\/([a-z0-9][a-z0-9-]{0,62})(\/.*)?$/u.exec(url.pathname);
-        if (match === null) return undefined;
-        const slug = match[1]!;
-        const record = this.#agent.list().find(
-            (candidate): candidate is AgentRecord & { web: NonNullable<AgentRecord["web"]> } =>
-                candidate.slug === slug && candidate.web !== undefined
-        );
-        if (record === undefined) return undefined;
-        const upstream = requireLoopbackUpstream(record.web.upstream);
-        const path = match[2] ?? "/";
+        const endpoint = this.#agent.webEndpoint();
+        if (endpoint === undefined) return undefined;
+        const upstream = requireLoopbackUpstream(endpoint.upstream);
+        const path = url.pathname || "/";
         return {
-            record,
             upstream,
-            upstreamPath: `${path}${url.search}`
+            upstreamPath: `${path.startsWith("/") ? path : `/${path}`}${url.search}`
         };
     }
 }
@@ -108,12 +93,13 @@ export class AgentWebProxy {
 async function proxyHttp(
     request: IncomingMessage,
     response: ServerResponse,
-    target: ResolvedAgentWebTarget
+    target: ResolvedAgentWebTarget,
+    basePath: string
 ): Promise<void> {
     const upstreamUrl = resolveUpstreamUrl(target.upstream, target.upstreamPath);
     await new Promise<void>((resolve, reject) => {
         const proxyRequest = requestFor(upstreamUrl, {
-            headers: proxyHeaders(request.headers, upstreamUrl, target.record.web.basePath),
+            headers: proxyHeaders(request.headers, upstreamUrl, basePath),
             method: request.method ?? "GET"
         }, (proxyResponse) => {
             response.statusCode = proxyResponse.statusCode ?? 502;
@@ -139,13 +125,14 @@ async function proxyUpgrade(
     request: IncomingMessage,
     socket: Duplex,
     head: Buffer,
-    target: ResolvedAgentWebTarget
+    target: ResolvedAgentWebTarget,
+    basePath: string
 ): Promise<void> {
     const upstreamUrl = resolveUpstreamUrl(target.upstream, target.upstreamPath);
     await new Promise<void>((resolve, reject) => {
         const proxyRequest = requestFor(upstreamUrl, {
             headers: {
-                ...proxyHeaders(request.headers, upstreamUrl, target.record.web.basePath),
+                ...proxyHeaders(request.headers, upstreamUrl, basePath),
                 connection: "Upgrade",
                 upgrade: request.headers.upgrade ?? "websocket"
             },
@@ -199,7 +186,7 @@ function proxyHeaders(headers: IncomingHttpHeaders, upstream: URL, basePath: str
         delete next[name];
     }
     next.host = upstream.host;
-    next["x-forwarded-prefix"] = basePath.replace(/\/+$/u, "");
+    next["x-forwarded-prefix"] = basePath;
     return next;
 }
 
@@ -273,12 +260,4 @@ function normalizeBasePath(value: string): string {
 
 function pathMatchesPrefix(pathname: string, prefix: string): boolean {
     return prefix === "/" || pathname === prefix || pathname.startsWith(`${prefix}/`);
-}
-
-function requestPathname(request: IncomingMessage): string {
-    try {
-        return new URL(request.url ?? "/", "http://localhost").pathname;
-    } catch {
-        return "/";
-    }
 }

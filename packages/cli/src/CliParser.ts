@@ -40,7 +40,7 @@ export type CliParsedCommand =
     | { agentId: string; kind: "agent.show" }
     | { agentId: string; kind: "agent.send" | "agent.steer" | "agent.followUp"; message: string }
     | { agentId: string; kind: "agent.abort" | "agent.stop" }
-    | { kind: "agent.start"; provider?: string; slug?: string; target: string }
+    | { kind: "agent.start"; provider?: string; target: string }
     | { input: JsonValue; instance: string; kind: "instance.call"; toolName: string; workspace: string }
     | { kind: "instance.create" }
     | { instance: string; kind: "instance.delete" }
@@ -171,16 +171,11 @@ export class CliParser {
         }
 
         let provider: string | undefined;
-        let slug: string | undefined;
         let target: string | undefined;
         for (let index = 0; index < argv.length; index += 1) {
             const value = argv[index];
             if (value === "--provider") {
                 provider = this.#required(argv[++index], "--provider requires a value");
-                continue;
-            }
-            if (value === "--slug") {
-                slug = this.#required(argv[++index], "--slug requires a value");
                 continue;
             }
             if (value?.startsWith("-")) {
@@ -194,7 +189,6 @@ export class CliParser {
         return {
             kind: "agent.start",
             ...(provider === undefined ? {} : { provider }),
-            ...(slug === undefined ? {} : { slug }),
             target: this.#required(target, "agent requires <instance:/workspace>")
         };
     }
