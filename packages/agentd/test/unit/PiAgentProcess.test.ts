@@ -58,6 +58,51 @@ test("Pi process factory shares one child across live Agents and stops it only a
     }
 });
 
+test("Pi process factory retires a crashed shared child and starts a replacement", async () => {
+    const runtimeDirectory = await mkdtemp(join(tmpdir(), "devshell-pi-crash-"));
+    const piAgentDir = join(runtimeDirectory, "user-pi-state");
+    const previousPiAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = piAgentDir;
+    const childModulePath = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/FakePiAgentChild.mjs");
+    const factory = new PiAgentProcessFactory({ childModulePath });
+    const base = {
+        entrypoint: "/managed/pi/dist/index.js",
+        runtimeDirectory,
+        webBasePath: "/web/agent/"
+    };
+
+    try {
+        const first = await factory.start({
+            ...base,
+            agentId: "ag-crash",
+            localCwd: join(runtimeDirectory, "agents", "ag-crash", "cwd"),
+            target: { instance: "worker-a", workspace: "/repo/a" }
+        });
+
+        await assert.rejects(() => first.prompt("__crash__"), /exited unexpectedly/u);
+        await first.closed;
+
+        const second = await factory.start({
+            ...base,
+            agentId: "ag-replacement",
+            localCwd: join(runtimeDirectory, "agents", "ag-replacement", "cwd"),
+            target: { instance: "worker-a", workspace: "/repo/b" }
+        });
+        await second.prompt("replacement works");
+
+        const entries = await readEntries(runtimeDirectory);
+        const initPids = entries.filter((entry) => entry.type === "init").map((entry) => entry.pid);
+        assert.equal(initPids.length, 2);
+        assert.equal(new Set(initPids).size, 2);
+
+        await second.stop();
+    } finally {
+        if (previousPiAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousPiAgentDir;
+        await rm(runtimeDirectory, { force: true, recursive: true });
+    }
+});
+
 async function readEntries(runtimeDirectory: string): Promise<Array<{
     agentDir: string;
     agentId: string;

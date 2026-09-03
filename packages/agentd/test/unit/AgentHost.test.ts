@@ -9,6 +9,8 @@ import { AgentHost } from "../../src/host/AgentHost.ts";
 import { AgentProviderRegistry } from "../../src/host/AgentProviderRegistry.ts";
 import { parseAgentWorkerTarget } from "../../src/target/AgentWorkerTarget.ts";
 
+const neverClosed = new Promise<void>(() => undefined);
+
 test("AgentHost binds provider lifecycle, target, runtime prefix, and one shared Web endpoint", async () => {
     const starts: AgentProviderStartContext[] = [];
     const stopped: string[] = [];
@@ -22,6 +24,7 @@ test("AgentHost binds provider lifecycle, target, runtime prefix, and one shared
         async start(context) {
             starts.push(context);
             return {
+                closed: neverClosed,
                 async abort() { aborts += 1; },
                 async followUp(message) { followUps.push(message); },
                 async prompt(message) { prompts.push(message); },
@@ -85,6 +88,7 @@ test("AgentHost requires one shared provider Web endpoint", async () => {
         version: "1",
         async start(context) {
             return {
+                closed: neverClosed,
                 async prompt() {},
                 async stop() {},
                 web: { upstream: new URL(`http://127.0.0.1:${43000 + Number(context.agentId.slice(3))}/`) }
@@ -109,7 +113,7 @@ test("AgentProviderRegistry rejects duplicate provider ids", () => {
         id: "pi",
         version: "1",
         async start() {
-            return { async prompt() {}, async stop() {} };
+            return { closed: neverClosed, async prompt() {}, async stop() {} };
         }
     };
     assert.throws(() => new AgentProviderRegistry([provider, provider]), /already registered/u);
@@ -121,6 +125,7 @@ test("AgentHost removes a stopped runtime when provider cleanup fails", async ()
         version: "1",
         async start() {
             return {
+                closed: neverClosed,
                 async prompt() {},
                 async stop() {
                     throw new Error("provider stop failed");
@@ -137,4 +142,39 @@ test("AgentHost removes a stopped runtime when provider cleanup fails", async ()
 
     await assert.rejects(() => host.stop(record.agentId), /provider stop failed/u);
     assert.deepEqual(host.list(), []);
+});
+
+test("AgentHost removes a runtime when its provider terminates independently", async () => {
+    let close!: () => void;
+    const closed = new Promise<void>((resolve) => {
+        close = resolve;
+    });
+    const provider: AgentProvider = {
+        id: "pi",
+        version: "1",
+        async start() {
+            return {
+                closed,
+                async prompt() {},
+                async stop() {}
+            };
+        }
+    };
+    const host = new AgentHost({
+        idFactory: () => "ag-provider-exit",
+        providers: [provider]
+    });
+    const record = await host.start({
+        provider: "pi",
+        target: parseAgentWorkerTarget("worker-a:/repo")
+    });
+
+    assert.equal(host.get(record.agentId)?.state, "running");
+    close();
+    await closed;
+    await Promise.resolve();
+
+    assert.equal(host.get(record.agentId), undefined);
+    assert.deepEqual(host.list(), []);
+    await assert.rejects(() => host.prompt(record.agentId, "after exit"), /Unknown Agent/u);
 });

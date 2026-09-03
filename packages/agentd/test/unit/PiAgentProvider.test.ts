@@ -118,6 +118,7 @@ test("Pi provider maps each Agent into the shared managed runtime without owning
 
 function createProviderHandle(): AgentProviderHandle {
     return {
+        closed: new Promise<void>(() => undefined),
         async abort() {},
         async followUp() {},
         async prompt() {},

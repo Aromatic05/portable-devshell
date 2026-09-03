@@ -47,6 +47,9 @@ export class PiAgentProcessFactory implements PiAgentRuntimeFactory {
                     throw error;
                 }
                 this.#runtime = runtime;
+                void runtime.closed.then(() => {
+                    if (this.#runtime === runtime) this.#runtime = undefined;
+                });
             } else {
                 runtime.assertCompatible(options);
             }
@@ -106,14 +109,22 @@ export class PiAgentProcessFactory implements PiAgentRuntimeFactory {
 
 class PiAgentSessionHandle implements AgentProviderHandle {
     readonly #agentId: string;
+    readonly #close: () => void;
     readonly #runtime: PiSharedProcess;
     readonly #stopAgent: () => Promise<void>;
+    readonly closed: Promise<void>;
     #stopped = false;
 
     constructor(runtime: PiSharedProcess, agentId: string, stopAgent: () => Promise<void>) {
         this.#runtime = runtime;
         this.#agentId = agentId;
         this.#stopAgent = stopAgent;
+        let close!: () => void;
+        const localClosed = new Promise<void>((resolve) => {
+            close = resolve;
+        });
+        this.#close = close;
+        this.closed = Promise.race([localClosed, runtime.closed]);
     }
 
     get web(): { upstream: URL } {
@@ -139,7 +150,11 @@ class PiAgentSessionHandle implements AgentProviderHandle {
     async stop(): Promise<void> {
         if (this.#stopped) return;
         this.#stopped = true;
-        await this.#stopAgent();
+        try {
+            await this.#stopAgent();
+        } finally {
+            this.#close();
+        }
     }
 
     async #command(command: PiChildAgentCommandMessage["command"], message?: string): Promise<void> {
@@ -150,6 +165,7 @@ class PiAgentSessionHandle implements AgentProviderHandle {
 
 class PiSharedProcess {
     readonly #child: ChildProcess;
+    readonly #close: () => void;
     readonly #commands = new Map<string, {
         reject(error: Error): void;
         resolve(): void;
@@ -161,8 +177,14 @@ class PiSharedProcess {
     #readyResolve?: () => void;
     #stopped = false;
     #web?: { upstream: URL };
+    readonly closed: Promise<void>;
 
     constructor(childModulePath: string, options: PiAgentProcessStartOptions) {
+        let close!: () => void;
+        this.closed = new Promise<void>((resolve) => {
+            close = resolve;
+        });
+        this.#close = close;
         this.#identity = {
             entrypoint: options.entrypoint,
             runtimeDirectory: options.runtimeDirectory,
@@ -270,6 +292,8 @@ class PiSharedProcess {
 
     terminate(): void {
         this.#stopped = true;
+        this.#agents.clear();
+        this.#close();
         if (this.#child.connected) this.#child.disconnect();
         if (this.#child.exitCode === null && this.#child.signalCode === null) {
             this.#child.kill("SIGTERM");
@@ -328,11 +352,14 @@ class PiSharedProcess {
     }
 
     #fail(error: Error): void {
+        this.#stopped = true;
         this.#readyReject?.(error);
         this.#readyReject = undefined;
         this.#readyResolve = undefined;
         for (const pending of this.#commands.values()) pending.reject(error);
         this.#commands.clear();
+        this.#agents.clear();
+        this.#close();
     }
 }
 

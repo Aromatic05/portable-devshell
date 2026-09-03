@@ -19,6 +19,7 @@ export interface AgentProviderWebEndpoint {
 }
 
 export interface AgentProviderHandle {
+    readonly closed: Promise<void>;
     readonly web?: AgentProviderWebEndpoint;
     abort?(): Promise<void>;
     followUp?(message: string): Promise<void>;

@@ -135,7 +135,13 @@ export class AgentHost {
             state: "running",
             target: { ...options.target }
         };
-        this.#runtimes.set(agentId, { handle, record });
+        const runtime = { handle, record };
+        this.#runtimes.set(agentId, runtime);
+        void handle.closed.then(() => {
+            if (this.#runtimes.get(agentId) !== runtime) return;
+            runtime.record.state = "stopped";
+            this.#runtimes.delete(agentId);
+        });
         return cloneRecord(record);
     }
 
