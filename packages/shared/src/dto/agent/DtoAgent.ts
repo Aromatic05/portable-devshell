@@ -27,7 +27,7 @@ export interface AgentMessageInput {
 }
 
 export interface AgentToolSessionOpenInput {
-    instance: string;
+    instance?: string;
     workspace: string;
 }
 

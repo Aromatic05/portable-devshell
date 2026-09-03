@@ -20,7 +20,29 @@ import {
 } from "@portable-devshell/shared";
 
 import { InstanceConnectionService } from "../../control/instance/connection/InstanceConnectionService.js";
+import type { InstanceDescriptor } from "../../control/instance/InstanceDescriptor.js";
 import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
+
+type AgentToolSessionInstanceDescriptor = Pick<InstanceDescriptor, "enabled" | "name" | "provider">;
+
+export function resolveAgentToolSessionInstance(
+    descriptors: readonly AgentToolSessionInstanceDescriptor[],
+    instance?: string
+): string {
+    if (instance !== undefined) return instance;
+    const enabled = descriptors.filter((descriptor) => descriptor.enabled);
+    const local = enabled.filter((descriptor) => descriptor.provider === "local");
+    if (local.length === 1) return local[0]!.name;
+    if (enabled.length === 1) return enabled[0]!.name;
+    throw createError({
+        code: errorCodes.targetInvalid,
+        details: { instanceCount: enabled.length, localInstanceCount: local.length },
+        message: enabled.length === 0
+            ? "No devshell instances are configured. Set DEVSHELL_AGENT_TARGET=<instance>:<workspace>."
+            : "Multiple devshell instances are configured without one unique local instance. Set DEVSHELL_AGENT_TARGET=<instance>:<workspace>.",
+        retryable: false
+    });
+}
 
 export interface ControlRuntimeAgentOptions {
     homeDirectory?: string;
@@ -42,9 +64,11 @@ interface ControlAgentToolSession {
 export class ControlRuntimeAgent {
     readonly #connections: InstanceConnectionService;
     readonly #host: AgentHost;
+    readonly #instances: InstanceRegistry;
     readonly #toolSessions = new Map<string, ControlAgentToolSession>();
 
     constructor(options: ControlRuntimeAgentOptions) {
+        this.#instances = options.instances;
         this.#connections = new InstanceConnectionService(options.instances);
         this.#host = new AgentHost({
             homeDirectory: options.homeDirectory,
@@ -94,7 +118,8 @@ export class ControlRuntimeAgent {
     ): Promise<AgentToolSessionRecord> {
         const sessionId = `ats-${randomUUID()}`;
         const reference = `agent-tool:${sessionId}`;
-        const lease = await this.#connections.acquire(input.instance, reference);
+        const instance = resolveAgentToolSessionInstance(this.#instances.list(), input.instance);
+        const lease = await this.#connections.acquire(instance, reference);
         try {
             const prepared = await lease.handle.prepareWorkspace(input.workspace);
             const session: ControlAgentToolSession = {
@@ -103,14 +128,14 @@ export class ControlRuntimeAgent {
                 reference,
                 sessionId,
                 target: {
-                    instance: input.instance,
+                    instance,
                     workspace: prepared.workspace
                 }
             };
             this.#toolSessions.set(sessionId, session);
             return { sessionId, target: { ...session.target } };
         } catch (error) {
-            await this.#connections.release(input.instance, reference).catch(() => undefined);
+            await this.#connections.release(instance, reference).catch(() => undefined);
             throw error;
         }
     }

@@ -7,6 +7,7 @@ import {
     createControlClients,
     createError,
     type AgentTarget,
+    type AgentToolSessionOpenInput,
     type AgentToolSessionRecord,
     type ControlClients,
     type JsonValue,
@@ -89,7 +90,7 @@ async function openAgentControlSession(
     }
 
     try {
-        const target = await resolveTarget(clients, options);
+        const target = resolveToolSessionOpenInput(options);
         const record = await clients.agent.openToolSession(target);
         return { clients, close: clients.close, record };
     } catch (error) {
@@ -124,24 +125,14 @@ async function negotiateAgentControl(clients: ControlClients): Promise<void> {
     }
 }
 
-async function resolveTarget(
-    clients: ControlClients,
+export function resolveToolSessionOpenInput(
     options: DevshellPiExtensionOptions
-): Promise<AgentTarget> {
+): AgentToolSessionOpenInput {
     const configured = options.target ?? options.environment?.DEVSHELL_AGENT_TARGET ?? process.env.DEVSHELL_AGENT_TARGET;
     if (configured !== undefined) {
         return typeof configured === "string" ? parseDevshellAgentTarget(configured) : { ...configured };
     }
-    const instances = await clients.instance.list();
-    if (instances.length !== 1) {
-        throw new Error(
-            instances.length === 0
-                ? "No devshell instances are configured. Set DEVSHELL_AGENT_TARGET=<instance>:<workspace>."
-                : "Multiple devshell instances are configured. Set DEVSHELL_AGENT_TARGET=<instance>:<workspace>."
-        );
-    }
     return {
-        instance: instances[0]!.name,
         workspace: options.cwd ?? process.cwd()
     };
 }

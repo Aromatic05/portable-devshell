@@ -88,6 +88,10 @@ test("agent tool sessions require the agent Control peer and preserve operation 
         { sessionId: "ats-1", target: { instance: "worker-a", workspace: "/repo" } }
     );
     assert.deepEqual(
+        await invoke("agent", "toolSessionOpen", { workspace: "/auto" }),
+        { sessionId: "ats-1", target: { instance: "worker-auto", workspace: "/auto" } }
+    );
+    assert.deepEqual(
         await invoke("agent", "toolSessionList", { sessionId: "ats-1" }),
         { tools: [] }
     );
@@ -104,6 +108,7 @@ test("agent tool sessions require the agent Control peer and preserve operation 
 
     assert.deepEqual(calls, [
         "toolSession.open:agent-conn:worker-a:/repo",
+        "toolSession.open:agent-conn:<auto>:/auto",
         "toolSession.list:agent-conn:ats-1",
         "toolSession.call:agent-conn:ats-1:pi-call-1:file_read",
         "toolSession.close:agent-conn:ats-1"
@@ -128,10 +133,10 @@ function createPort(calls: string[]): AgentControlPort {
         },
         list() { calls.push("list"); return [record]; },
         async openToolSession(input, connectionId) {
-            calls.push(`toolSession.open:${connectionId}:${input.instance}:${input.workspace}`);
+            calls.push(`toolSession.open:${connectionId}:${input.instance ?? "<auto>"}:${input.workspace}`);
             return {
                 sessionId: "ats-1",
-                target: { instance: input.instance, workspace: input.workspace }
+                target: { instance: input.instance ?? "worker-auto", workspace: input.workspace }
             };
         },
         async prompt(input) { calls.push(`prompt:${input.agentId}:${input.message}`); },

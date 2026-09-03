@@ -114,9 +114,10 @@ function assertAgentPeer(context: PrefixRouteContext): void {
 function readToolSessionOpenInput(value: JsonValue | undefined): AgentToolSessionOpenInput {
     const input = readRecord(value, "agent.toolSessionOpen requires an object payload.");
     assertOnlyKeys(input, ["instance", "workspace"]);
+    const instance = readOptionalString(input.instance, "instance");
     return {
-        instance: readString(input.instance, "instance"),
-        workspace: readString(input.workspace, "workspace")
+        workspace: readString(input.workspace, "workspace"),
+        ...(instance === undefined ? {} : { instance })
     };
 }
 
