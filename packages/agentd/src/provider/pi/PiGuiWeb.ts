@@ -122,6 +122,7 @@ async function proxyPiGuiRequest(
     options: { basePath: string; rawPort: number }
 ): Promise<void> {
     const url = new URL(request.url ?? "/", "http://localhost");
+    const rewriteBasePath = forwardedBasePath(request.headers["x-forwarded-prefix"], options.basePath);
     if (!isManagedPiGuiRequest(request.method ?? "GET", url.pathname)) {
         response.statusCode = 403;
         response.setHeader("content-type", "application/json; charset=utf-8");
@@ -140,7 +141,7 @@ async function proxyPiGuiRequest(
         }, (upstreamResponse) => {
             const contentType = String(upstreamResponse.headers["content-type"] ?? "");
             if (shouldRewrite(contentType)) {
-                void rewriteResponse(upstreamResponse, response, options.basePath).then(resolve, reject);
+                void rewriteResponse(upstreamResponse, response, rewriteBasePath).then(resolve, reject);
                 return;
             }
             response.statusCode = upstreamResponse.statusCode ?? 502;
@@ -251,6 +252,11 @@ function normalizeBasePath(value: string): string {
     const trimmed = value.trim();
     if (!trimmed.startsWith("/")) throw new TypeError("Pi GUI base path must be absolute.");
     return `${trimmed.replace(/\/+$/u, "")}/`;
+}
+
+function forwardedBasePath(value: string | string[] | undefined, fallback: string): string {
+    const forwarded = Array.isArray(value) ? value[0] : value;
+    return normalizeBasePath(forwarded ?? fallback);
 }
 
 function proxyRequestHeaders(headers: IncomingHttpHeaders, port: number): IncomingHttpHeaders {

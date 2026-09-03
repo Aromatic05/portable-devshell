@@ -2,9 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+    PiGuiWeb,
     isManagedPiGuiRequest,
     rewritePiGuiAsset
 } from "../../src/provider/pi/PiGuiWeb.ts";
+
+test("Pi GUI asset rebasing follows the current forwarded Agent mount path", async (t) => {
+    const gui = await PiGuiWeb.start("/old/web/agent/");
+    t.after(async () => await gui.stop());
+
+    const response = await fetch(gui.upstream, {
+        headers: { "x-forwarded-prefix": "/new/web/agent" }
+    });
+    const body = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.doesNotMatch(body, /\/old\/web\/agent\/assets\//u);
+    assert.match(body, /\/new\/web\/agent\/assets\//u);
+});
 
 test("Pi GUI assets are rebased under the single Agent path", () => {
     const source = [
