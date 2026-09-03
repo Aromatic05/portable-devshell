@@ -63,7 +63,11 @@ export interface PiSessionLike {
     };
     abort(): Promise<void>;
     dispose(): void;
-    prompt(text: string, options?: { streamingBehavior?: "steer" | "followUp" }): Promise<void>;
+    followUp(text: string): Promise<void>;
+    prompt(text: string, options?: {
+        preflightResult?: (success: boolean) => void;
+        streamingBehavior?: "steer" | "followUp";
+    }): Promise<void>;
     setModel?(model: PiModelLike): Promise<void>;
     setSessionName?(name: string): void;
     setThinkingLevel?(level: string): void;

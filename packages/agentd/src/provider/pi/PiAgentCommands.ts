@@ -8,11 +8,34 @@ export async function deliverPiAgentMessage(
     message: string
 ): Promise<void> {
     if (command === "followUp") {
-        await session.prompt(message, { streamingBehavior: "followUp" });
+        await session.followUp(message);
         return;
     }
-    await session.prompt(
-        message,
-        session.isStreaming ? { streamingBehavior: "steer" } : undefined
-    );
+    await acceptPiPrompt(session, message, session.isStreaming ? "steer" : undefined);
+}
+
+async function acceptPiPrompt(
+    session: PiSessionLike,
+    message: string,
+    streamingBehavior?: "steer"
+): Promise<void> {
+    let accepted = false;
+    let resolveAccepted = () => {};
+    let rejectAccepted = (_error: unknown) => {};
+    const acceptance = new Promise<void>((resolve, reject) => {
+        resolveAccepted = resolve;
+        rejectAccepted = reject;
+    });
+    const run = session.prompt(message, {
+        ...(streamingBehavior === undefined ? {} : { streamingBehavior }),
+        preflightResult(success) {
+            if (!success) return;
+            accepted = true;
+            resolveAccepted();
+        }
+    });
+    void run.catch((error: unknown) => {
+        if (!accepted) rejectAccepted(error);
+    });
+    await acceptance;
 }

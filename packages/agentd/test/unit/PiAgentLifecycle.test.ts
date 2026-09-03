@@ -16,6 +16,7 @@ function fakeSession(events: string[], abortError?: Error): PiSessionLike {
         dispose() {
             events.push("dispose");
         },
+        async followUp() {},
         async prompt() {}
     };
 }
