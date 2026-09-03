@@ -34,6 +34,9 @@ process.on("message", (value: unknown) => {
     const message = value as PiParentMessage;
     void handleMessage(message).catch((error) => sendFailure(message, error));
 });
+process.once("disconnect", () => {
+    void shutdown().finally(() => process.exit(0));
+});
 
 async function handleMessage(message: PiParentMessage): Promise<void> {
     switch (message.type) {
