@@ -87,6 +87,7 @@ export function renderAgentUsage(): string {
         "Usage:",
         "  devshell agent [--provider <id>] <instance:/workspace>",
         "  devshell agent list",
+        "  devshell agent web",
         "  devshell agent show <agentId>",
         "  devshell agent send <agentId> <message>",
         "  devshell agent steer <agentId> <message>",

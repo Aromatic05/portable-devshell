@@ -4,6 +4,7 @@ import type { ConfigBatchUpdateRequest, ConfigDraft } from "@portable-devshell/s
 
 import { isCliEntrypoint } from "./CliEntrypoint.js";
 import { CliParser, type CliParsedCommand } from "./CliParser.js";
+import { agentWebView } from "./command/agent/CliCommandAgentWeb.js";
 import { executeArtifactCommand } from "./command/artifact/CliCommandArtifact.js";
 import {
     createCliClients as createControlClients,
@@ -239,31 +240,46 @@ export class CliMain {
             case "agent.list":
                 this.#writeJson(await this.#clients.agent.list());
                 return;
-            case "agent.show":
-                this.#writeJson(await this.#clients.agent.get(command.agentId));
+            case "agent.web":
+                this.#writeJson(agentWebView(await this.#clients.config.get()));
                 return;
-            case "agent.start":
-                this.#writeJson(await this.#clients.agent.start({
+            case "agent.show": {
+                const web = agentWebView(await this.#clients.config.get());
+                this.#writeJson({ ...await this.#clients.agent.get(command.agentId), ...web });
+                return;
+            }
+            case "agent.start": {
+                const web = agentWebView(await this.#clients.config.get());
+                this.#writeJson({ ...await this.#clients.agent.start({
                     target: command.target,
                     ...(command.provider === undefined ? {} : { provider: command.provider })
-                }));
+                }), ...web });
                 return;
-            case "agent.send":
+            }
+            case "agent.send": {
+                const web = agentWebView(await this.#clients.config.get());
                 await this.#clients.agent.prompt({ agentId: command.agentId, message: command.message });
-                this.#writeJson({ accepted: true });
+                this.#writeJson({ accepted: true, ...web });
                 return;
-            case "agent.steer":
+            }
+            case "agent.steer": {
+                const web = agentWebView(await this.#clients.config.get());
                 await this.#clients.agent.steer({ agentId: command.agentId, message: command.message });
-                this.#writeJson({ accepted: true });
+                this.#writeJson({ accepted: true, ...web });
                 return;
-            case "agent.followUp":
+            }
+            case "agent.followUp": {
+                const web = agentWebView(await this.#clients.config.get());
                 await this.#clients.agent.followUp({ agentId: command.agentId, message: command.message });
-                this.#writeJson({ accepted: true });
+                this.#writeJson({ accepted: true, ...web });
                 return;
-            case "agent.abort":
+            }
+            case "agent.abort": {
+                const web = agentWebView(await this.#clients.config.get());
                 await this.#clients.agent.abort(command.agentId);
-                this.#writeJson({ accepted: true });
+                this.#writeJson({ accepted: true, ...web });
                 return;
+            }
             case "agent.stop":
                 this.#writeJson(await this.#clients.agent.stop(command.agentId));
                 return;

@@ -37,6 +37,7 @@ export type CliParsedCommand =
     | { kind: "tui" }
     | { kind: "agent.help" }
     | { kind: "agent.list" }
+    | { kind: "agent.web" }
     | { agentId: string; kind: "agent.show" }
     | { agentId: string; kind: "agent.send" | "agent.steer" | "agent.followUp"; message: string }
     | { agentId: string; kind: "agent.abort" | "agent.stop" }
@@ -143,6 +144,8 @@ export class CliParser {
         switch (argv[0]) {
             case "list":
                 return this.#expectNoExtra(argv, { kind: "agent.list" });
+            case "web":
+                return this.#expectNoExtra(argv, { kind: "agent.web" });
             case "show":
                 return this.#expectAgentIdCommand(argv, "agent.show");
             case "abort":
