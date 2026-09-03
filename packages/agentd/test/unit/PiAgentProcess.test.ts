@@ -79,7 +79,7 @@ test("Pi process factory retires a crashed shared child and starts a replacement
             target: { instance: "worker-a", workspace: "/repo/a" }
         });
 
-        await assert.rejects(() => first.prompt("__crash__"), /exited unexpectedly/u);
+        await assert.rejects(() => first.prompt("__crash__"), /(exited unexpectedly|IPC disconnected unexpectedly)/u);
         await first.closed;
 
         const second = await factory.start({
@@ -102,6 +102,59 @@ test("Pi process factory retires a crashed shared child and starts a replacement
         await rm(runtimeDirectory, { force: true, recursive: true });
     }
 });
+
+test("Pi process factory retires a child whose IPC disconnects without process exit", async () => {
+    const runtimeDirectory = await mkdtemp(join(tmpdir(), "devshell-pi-disconnect-"));
+    const piAgentDir = join(runtimeDirectory, "user-pi-state");
+    const previousPiAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = piAgentDir;
+    const childModulePath = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/FakePiAgentChild.mjs");
+    const factory = new PiAgentProcessFactory({ childModulePath });
+    const base = {
+        entrypoint: "/managed/pi/dist/index.js",
+        runtimeDirectory,
+        webBasePath: "/web/agent/"
+    };
+    let first;
+
+    try {
+        first = await factory.start({
+            ...base,
+            agentId: "ag-disconnect",
+            localCwd: join(runtimeDirectory, "agents", "ag-disconnect", "cwd"),
+            target: { instance: "worker-a", workspace: "/repo/a" }
+        });
+
+        await assert.rejects(
+            Promise.race([first.prompt("__disconnect__"), rejectAfter(200, "IPC disconnect was not observed")]),
+            /IPC.*disconnect/u
+        );
+        await first.closed;
+
+        const replacement = await factory.start({
+            ...base,
+            agentId: "ag-after-disconnect",
+            localCwd: join(runtimeDirectory, "agents", "ag-after-disconnect", "cwd"),
+            target: { instance: "worker-a", workspace: "/repo/b" }
+        });
+        await replacement.prompt("replacement works");
+        await replacement.stop();
+
+        const entries = await readEntries(runtimeDirectory);
+        assert.equal(new Set(entries.filter((entry) => entry.type === "init").map((entry) => entry.pid)).size, 2);
+    } finally {
+        await first?.stop().catch(() => undefined);
+        if (previousPiAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousPiAgentDir;
+        await rm(runtimeDirectory, { force: true, recursive: true });
+    }
+});
+
+function rejectAfter(milliseconds: number, message: string): Promise<never> {
+    return new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(message)), milliseconds);
+    });
+}
 
 async function readEntries(runtimeDirectory: string): Promise<Array<{
     agentDir: string;

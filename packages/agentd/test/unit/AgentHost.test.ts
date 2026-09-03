@@ -178,3 +178,42 @@ test("AgentHost removes a runtime when its provider terminates independently", a
     assert.deepEqual(host.list(), []);
     await assert.rejects(() => host.prompt(record.agentId, "after exit"), /Unknown Agent/u);
 });
+
+test("AgentHost stopAll ignores runtimes that terminate while another Agent is stopping", async () => {
+    let closeSecond!: () => void;
+    const secondClosed = new Promise<void>((resolve) => {
+        closeSecond = resolve;
+    });
+    let nextId = 0;
+    const provider: AgentProvider = {
+        id: "pi",
+        version: "1",
+        async start(context) {
+            return context.agentId === "ag-2"
+                ? {
+                    closed: secondClosed,
+                    async prompt() {},
+                    async stop() {}
+                }
+                : {
+                    closed: neverClosed,
+                    async prompt() {},
+                    async stop() {
+                        closeSecond();
+                        await secondClosed;
+                    }
+                };
+        }
+    };
+    const host = new AgentHost({
+        idFactory: () => `ag-${++nextId}`,
+        providers: [provider]
+    });
+    const target = parseAgentWorkerTarget("worker-a:/repo");
+    await host.start({ provider: "pi", target });
+    await host.start({ provider: "pi", target });
+
+    await host.stopAll();
+
+    assert.deepEqual(host.list(), []);
+});

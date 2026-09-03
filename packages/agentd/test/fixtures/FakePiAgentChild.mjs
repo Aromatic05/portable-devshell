@@ -34,6 +34,11 @@ async function handle(message) {
         if (message.command === "prompt" && message.message === "__crash__") {
             process.exit(23);
         }
+        if (message.command === "prompt" && message.message === "__disconnect__") {
+            setInterval(() => undefined, 1000);
+            process.disconnect();
+            return;
+        }
         if (message.command === "stop") agents.delete(message.agentId);
         process.send?.({ id: message.id, ok: true, type: "result" });
         return;

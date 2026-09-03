@@ -167,6 +167,7 @@ export class AgentHost {
     async stopAll(): Promise<void> {
         const failures: unknown[] = [];
         for (const agentId of [...this.#runtimes.keys()]) {
+            if (!this.#runtimes.has(agentId)) continue;
             await this.stop(agentId).catch((error) => failures.push(error));
         }
         if (failures.length > 0) {

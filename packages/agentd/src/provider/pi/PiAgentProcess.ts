@@ -202,6 +202,11 @@ class PiSharedProcess {
             this.#stderr = `${this.#stderr}${chunk}`.slice(-16_384);
         });
         this.#child.on("message", (message) => this.#onMessage(message));
+        this.#child.once("disconnect", () => {
+            if (!this.#stopped) {
+                this.#fail(new Error("Pi provider child IPC disconnected unexpectedly."));
+            }
+        });
         this.#child.once("error", (error) => this.#fail(error));
         this.#child.once("exit", (code, signal) => {
             if (!this.#stopped) {
@@ -292,6 +297,7 @@ class PiSharedProcess {
 
     terminate(): void {
         this.#stopped = true;
+        this.#rejectPending(new Error("Pi provider child was terminated."));
         this.#agents.clear();
         this.#close();
         if (this.#child.connected) this.#child.disconnect();
@@ -353,13 +359,20 @@ class PiSharedProcess {
 
     #fail(error: Error): void {
         this.#stopped = true;
+        this.#rejectPending(error);
+        this.#agents.clear();
+        this.#close();
+        if (this.#child.exitCode === null && this.#child.signalCode === null) {
+            this.#child.kill("SIGTERM");
+        }
+    }
+
+    #rejectPending(error: Error): void {
         this.#readyReject?.(error);
         this.#readyReject = undefined;
         this.#readyResolve = undefined;
         for (const pending of this.#commands.values()) pending.reject(error);
         this.#commands.clear();
-        this.#agents.clear();
-        this.#close();
     }
 }
 
