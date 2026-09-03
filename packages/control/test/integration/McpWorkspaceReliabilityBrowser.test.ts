@@ -112,15 +112,103 @@ test("Live Workspace reclaims PiP presentation after its iframe is refreshed", B
     await page.evaluate((html) => {
         const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
         if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
+        (window as unknown as Record<string, unknown>).__presentationWidgetState = {
+            modelContent: null,
+            privateContent: {},
+            imageIds: [],
+        };
+        iframe.srcdoc = html
+            .replace("var DISPLAY_MODE_TRANSITION_LEASE_MS = 2000;", "var DISPLAY_MODE_TRANSITION_LEASE_MS = 20;")
+            .replace("<script>", `<script>
+                window.openai = {
+                    get widgetState() { return window.parent.__presentationWidgetState; },
+                    setWidgetState: function (state) { window.parent.__presentationWidgetState = state; }
+                };
+            <\/script><script>`);
     }, workspaceAppHtml);
 
     await page.waitForFunction("(window.__liveDisplayModeRequests || []).length === 1");
+    await page.waitForTimeout(40);
     const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
     if (frame === undefined) throw new Error("Workspace frame is missing.");
     await frame.evaluate(() => window.location.reload());
 
     await page.waitForFunction("(window.__liveDisplayModeRequests || []).length === 2");
+    assert.equal(await page.evaluate("window.__liveHostDisplayMode"), "pip");
+});
+
+test("Live Workspace consumes its own PiP remount once and only reclaims if Host settles inline", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
+    const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT
+        .replace(
+            "window.__liveDisplayModeRequests = [];",
+            'window.__liveDisplayModeRequests = []; window.__liveHostDisplayMode = "inline"; window.__liveInitializeCount = 0;',
+        )
+        .replace('displayMode: "inline"', "displayMode: window.__liveHostDisplayMode")
+        .replace(
+            'if (message.method === "ui/initialize") {',
+            'if (message.method === "ui/initialize") { window.__liveInitializeCount += 1;',
+        )
+        .replace(
+            `source.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-result",`,
+            `if (false) source.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-result",`,
+        )
+        .replace(
+            `window.__liveDisplayModeRequests.push(message.params);
+        reply({ mode: "pip" });
+        return;`,
+            `window.__liveDisplayModeRequests.push(message.params);
+        window.__liveHostDisplayMode = "pip";
+        if (window.__liveDisplayModeRequests.length === 1) {
+            source.location.reload();
+            return;
+        }
+        reply({ mode: "pip" });
+        return;`,
+        );
+    await page.evaluate(bridge);
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        (window as unknown as Record<string, unknown>).__presentationWidgetState = {
+            modelContent: null,
+            privateContent: {},
+            imageIds: [],
+        };
+        iframe.srcdoc = html.replace("<script>", `<script>
+            window.openai = {
+                get widgetState() { return window.parent.__presentationWidgetState; },
+                setWidgetState: function (state) { window.parent.__presentationWidgetState = state; }
+            };
+        <\/script><script>`);
+    }, workspaceAppHtml);
+
+    await page.waitForFunction("window.__liveInitializeCount >= 2");
+    await page.frameLocator("#workspace").getByText("Waiting for Workspace authorization", { exact: true }).waitFor({ state: "visible" });
+    await page.waitForTimeout(150);
+    assert.equal(await page.evaluate("window.__liveDisplayModeRequests.length"), 1);
+    assert.equal(await page.evaluate("window.__liveInitializeCount"), 2);
+    assert.equal(await page.evaluate("window.__liveHostDisplayMode"), "pip");
+
+    await page.evaluate(() => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe?.contentWindow === null || iframe?.contentWindow === undefined) throw new Error("Workspace frame is missing.");
+        iframe.contentWindow.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/host-context-changed",
+            params: { displayMode: "inline" },
+        }, "*");
+    });
+    await page.waitForFunction("window.__liveDisplayModeRequests.length === 2");
+    assert.equal(await page.evaluate("window.__liveInitializeCount"), 2);
     assert.equal(await page.evaluate("window.__liveHostDisplayMode"), "pip");
 });
 

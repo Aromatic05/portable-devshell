@@ -126,6 +126,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var confirmingTaskCancel = new Map();
   var expandedQuestions = new Set();
   var WIDGET_STATE_KEY = "portableDevshellWorkspace";
+  var PRESENTATION_STATE_KEY = "portableDevshellPresentation";
   var HOST_CONNECT_TIMEOUT_MS = 3000;
   var HOST_REQUEST_TIMEOUT_MS = 5000;
   var APP_TOOL_TIMEOUT_MS = 30000;
@@ -136,6 +137,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var DISPLAY_MODE_TIMEOUT_MS = 1000;
   var DISPLAY_MODE_RETRY_MS = 750;
   var DISPLAY_MODE_MAX_RETRIES = 2;
+  var DISPLAY_MODE_TRANSITION_LEASE_MS = 2000;
   var RECOVERY_NO_CHAT_SUFFIX = " Do not reply only with an acknowledgement, summary, plan, status update, apology, or statement that you will continue.";
   var bridgeReady = false;
   var pendingToolResult = null;
@@ -153,10 +155,12 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var connectRetryTimer = null;
   var liveStartRetryTimer = null;
   var displayModeRetryTimer = null;
+  var presentationSettleTimer = null;
   var displayModeRetryCount = 0;
   var presentationGeneration = 0;
   var displayModeRequestGeneration = 0;
   var presentationClaimPending = false;
+  var presentationTransitionSettling = false;
   var bridgeConnecting = false;
   var bridgeResetting = false;
   var shuttingDown = false;
@@ -394,6 +398,68 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     var privateContent = asRecord(widgetState.privateContent);
     return asRecord(privateContent && privateContent[WIDGET_STATE_KEY]) ||
       asRecord(widgetState[WIDGET_STATE_KEY]);
+  }
+
+  function presentationTransitionFromOpenAiGlobals(globals) {
+    var openai = asRecord(globals);
+    var widgetState = asRecord(openai && openai.widgetState);
+    if (!widgetState) return null;
+    var privateContent = asRecord(widgetState.privateContent);
+    return asRecord(privateContent && privateContent[PRESENTATION_STATE_KEY]);
+  }
+
+  function updatePresentationTransition(mode) {
+    var openai = asRecord(window.openai);
+    if (!openai || typeof openai.setWidgetState !== "function") return;
+    var current = asRecord(openai.widgetState) || {};
+    var privateContent = Object.assign({}, asRecord(current.privateContent) || {});
+    if (mode) {
+      privateContent[PRESENTATION_STATE_KEY] = {
+        mode: mode,
+        expiresAt: Date.now() + DISPLAY_MODE_TRANSITION_LEASE_MS
+      };
+    } else {
+      delete privateContent[PRESENTATION_STATE_KEY];
+    }
+    var state = {
+      modelContent: current.modelContent === undefined ? null : current.modelContent,
+      privateContent: privateContent,
+      imageIds: Array.isArray(current.imageIds) ? current.imageIds : []
+    };
+    try { openai.setWidgetState(state); } catch (_) {}
+  }
+
+  function consumePresentationTransition(mode) {
+    var transition = presentationTransitionFromOpenAiGlobals(window.openai);
+    if (!transition || transition.mode !== mode) return 0;
+    var remaining = Number.isFinite(transition.expiresAt)
+      ? Math.max(0, transition.expiresAt - Date.now())
+      : 0;
+    updatePresentationTransition("");
+    return remaining;
+  }
+
+  function completePresentationClaim() {
+    presentationClaimPending = false;
+    presentationTransitionSettling = false;
+    if (presentationSettleTimer) clearTimeout(presentationSettleTimer);
+    presentationSettleTimer = null;
+    displayModeRetryCount = 0;
+    if (displayModeRetryTimer) clearTimeout(displayModeRetryTimer);
+    displayModeRetryTimer = null;
+  }
+
+  function settlePresentationTransition(remainingMs) {
+    presentationTransitionSettling = true;
+    if (displayModeRetryTimer) clearTimeout(displayModeRetryTimer);
+    displayModeRetryTimer = null;
+    displayModeRetryCount = 0;
+    if (presentationSettleTimer) clearTimeout(presentationSettleTimer);
+    presentationSettleTimer = setTimeout(function () {
+      presentationSettleTimer = null;
+      presentationTransitionSettling = false;
+      presentationClaimPending = false;
+    }, Math.max(1, remainingMs));
   }
 
   function persistWorkspaceHint() {
@@ -1252,9 +1318,12 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     liveStartRetryTimer = null;
     if (displayModeRetryTimer) clearTimeout(displayModeRetryTimer);
     displayModeRetryTimer = null;
+    if (presentationSettleTimer) clearTimeout(presentationSettleTimer);
+    presentationSettleTimer = null;
     displayModeRetryCount = 0;
     displayModeRequestGeneration = 0;
     presentationClaimPending = false;
+    presentationTransitionSettling = false;
     watchStarted = false;
     initialized = false;
   }
@@ -1339,7 +1408,9 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   };
   app.onhostcontextchanged = function (context) {
     applyHostContext(context);
-    if (initialized && presentationClaimPending) void requestPreferredDisplayMode(true, presentationGeneration);
+    if (initialized && presentationClaimPending) {
+      void requestPreferredDisplayMode(!presentationTransitionSettling, presentationGeneration);
+    }
   };
   app.onclose = function () {
     if (shuttingDown || bridgeResetting) return;
@@ -1369,28 +1440,30 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         : [];
       if (!hasModes) return;
       if (modes.indexOf("pip") < 0) {
-        presentationClaimPending = false;
+        completePresentationClaim();
+        return;
+      }
+      var transitionRemaining = hostContext.displayMode === "pip"
+        ? consumePresentationTransition("pip")
+        : 0;
+      if (transitionRemaining > 0) {
+        settlePresentationTransition(transitionRemaining);
         return;
       }
       if (hostContext.displayMode === "pip" && force !== true) {
-        presentationClaimPending = false;
-        displayModeRetryCount = 0;
-        if (displayModeRetryTimer) clearTimeout(displayModeRetryTimer);
-        displayModeRetryTimer = null;
+        completePresentationClaim();
         return;
       }
       if (modes.indexOf("pip") >= 0 && (force === true || hostContext.displayMode !== "pip")) {
         displayModeRequestGeneration = requestGeneration;
+        updatePresentationTransition("pip");
         var result = await app.requestDisplayMode(
           { mode: "pip" },
           { timeout: DISPLAY_MODE_TIMEOUT_MS }
         );
         if (result && result.mode === "pip") {
           if (requestGeneration !== presentationGeneration) return;
-          presentationClaimPending = false;
-          displayModeRetryCount = 0;
-          if (displayModeRetryTimer) clearTimeout(displayModeRetryTimer);
-          displayModeRetryTimer = null;
+          completePresentationClaim();
         } else {
           scheduleDisplayModeRetry(requestGeneration);
         }
@@ -1405,13 +1478,13 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   function scheduleDisplayModeRetry(generation) {
     if (generation !== presentationGeneration || shuttingDown || !bridgeReady || !initialized || !presentationClaimPending || displayModeRetryTimer) return;
     if (displayModeRetryCount >= DISPLAY_MODE_MAX_RETRIES) {
-      presentationClaimPending = false;
+      completePresentationClaim();
       return;
     }
     displayModeRetryCount += 1;
     displayModeRetryTimer = setTimeout(function () {
       displayModeRetryTimer = null;
-      void requestPreferredDisplayMode(true, generation);
+      void requestPreferredDisplayMode(!presentationTransitionSettling, generation);
     }, DISPLAY_MODE_RETRY_MS * displayModeRetryCount);
   }
 
