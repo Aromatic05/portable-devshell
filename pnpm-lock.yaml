@@ -166,9 +166,18 @@ importers:
 
   packages/pi-extension:
     dependencies:
+      '@earendil-works/pi-coding-agent':
+        specifier: 0.84.4
+        version: 0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(ws@8.21.0)(zod@3.25.76)
+      '@earendil-works/pi-tui':
+        specifier: 0.84.4
+        version: 0.84.4
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
+      diff:
+        specifier: 8.0.4
+        version: 8.0.4
 
   packages/shared: {}
 
@@ -2862,7 +2871,7 @@ snapshots:
       '@aws-sdk/types': 3.974.5
       '@smithy/core': 3.33.3
       '@smithy/fetch-http-handler': 5.7.2
-      '@smithy/node-http-handler': 4.7.3
+      '@smithy/node-http-handler': 4.12.0
       '@smithy/types': 4.17.2
       tslib: 2.8.1
 
@@ -3437,8 +3446,9 @@ snapshots:
     dependencies:
       '@earendil-works/pi-coding-agent': 0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(ws@8.21.0)(zod@3.25.76)
       '@portable-devshell/core': file:packages/core
-      '@portable-devshell/pi-extension': file:packages/pi-extension
+      '@portable-devshell/pi-extension': file:packages/pi-extension(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(ws@8.21.0)(zod@3.25.76)
       '@portable-devshell/shared': file:packages/shared
+      pi-gui-extension: 0.4.1(@earendil-works/pi-coding-agent@0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(ws@8.21.0)(zod@3.25.76))
     transitivePeerDependencies:
       - '@modelcontextprotocol/sdk'
       - bare-abort-controller
@@ -3501,9 +3511,19 @@ snapshots:
       - supports-color
       - zod
 
-  '@portable-devshell/pi-extension@file:packages/pi-extension':
+  '@portable-devshell/pi-extension@file:packages/pi-extension(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(ws@8.21.0)(zod@3.25.76)':
     dependencies:
+      '@earendil-works/pi-coding-agent': 0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(ws@8.21.0)(zod@3.25.76)
+      '@earendil-works/pi-tui': 0.84.4
       '@portable-devshell/shared': file:packages/shared
+      diff: 8.0.4
+    transitivePeerDependencies:
+      - '@modelcontextprotocol/sdk'
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+      - ws
+      - zod
 
   '@portable-devshell/shared@file:packages/shared': {}
 

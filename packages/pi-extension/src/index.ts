@@ -14,6 +14,15 @@ import {
     type ToolDefinition
 } from "@portable-devshell/shared";
 
+import {
+    renderPiToolCall,
+    renderPiToolResult,
+    type PiThemeLike,
+    type PiToolRenderContextLike,
+    type PiToolRenderResultLike,
+    type PiToolRenderResultOptionsLike
+} from "./renderer.js";
+
 export interface PiExtensionApiLike {
     on(event: "session_shutdown", handler: () => Promise<void> | void): void;
     registerTool(tool: PiToolLike): void;
@@ -32,6 +41,14 @@ export interface PiToolLike {
     label: string;
     name: string;
     parameters: JsonValue;
+    renderShell?: "default" | "self";
+    renderCall?(args: unknown, theme: PiThemeLike, context: PiToolRenderContextLike): unknown;
+    renderResult?(
+        result: PiToolRenderResultLike,
+        options: PiToolRenderResultOptionsLike,
+        theme: PiThemeLike,
+        context: PiToolRenderContextLike
+    ): unknown;
 }
 
 export interface DevshellPiExtensionOptions {
@@ -158,9 +175,10 @@ function toPiTool(definition: ToolDefinition, session: AgentControlSession): PiT
         description: definition.description,
         async execute(toolCallId, params, signal) {
             signal?.throwIfAborted();
+            const input = prepareToolInput(definition.name, params);
             const result = await session.clients.agent.callToolSession(
                 {
-                    input: asJsonValue(params),
+                    input,
                     operationId: toolCallId,
                     sessionId: session.record.sessionId,
                     toolName: definition.name
@@ -169,14 +187,48 @@ function toPiTool(definition: ToolDefinition, session: AgentControlSession): PiT
             );
             signal?.throwIfAborted();
             return {
-                content: [{ text: renderToolResult(result), type: "text" }],
+                content: [{ text: renderModelToolResult(definition.name, result), type: "text" }],
                 details: result
             };
         },
         label: definition.name,
         name: definition.name,
-        parameters: definition.inputSchema
+        parameters: definition.inputSchema,
+        ...(definition.name === "file_edit" ? { renderShell: "self" as const } : {}),
+        renderCall(args, theme, context) {
+            return renderPiToolCall(definition.name, args, theme, context);
+        },
+        renderResult(result, options, theme, context) {
+            return renderPiToolResult(definition.name, result, options, theme, context);
+        }
     };
+}
+
+export function prepareToolInput(toolName: string, params: unknown): JsonValue {
+    const input = asJsonValue(params);
+    if (toolName !== "file_edit" || input === null || Array.isArray(input) || typeof input !== "object") {
+        return input;
+    }
+    return { ...input, resultDetail: "diff" };
+}
+
+function renderModelToolResult(toolName: string, value: JsonValue): string {
+    if (toolName !== "file_edit" || value === null || Array.isArray(value) || typeof value !== "object") {
+        return renderToolResult(value);
+    }
+    const operations = value.operations;
+    if (!Array.isArray(operations)) return renderToolResult(value);
+    return operations.map((operation) => {
+        if (operation === null || Array.isArray(operation) || typeof operation !== "object") {
+            return renderToolResult(operation);
+        }
+        const action = typeof operation.action === "string" ? operation.action : "edit";
+        const path = typeof operation.path === "string" ? operation.path : "<unknown>";
+        const status = typeof operation.status === "string" ? operation.status : "unknown";
+        const added = typeof operation.addedLines === "number" ? `+${operation.addedLines}` : undefined;
+        const removed = typeof operation.removedLines === "number" ? `-${operation.removedLines}` : undefined;
+        return [action, path, status, added, removed].filter(Boolean).join(" ");
+    }).join("\n");
 }
 
 async function closeAgentControlSession(session: AgentControlSession): Promise<void> {

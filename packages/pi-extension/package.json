@@ -15,7 +15,10 @@
         "dist"
     ],
     "dependencies": {
-        "@portable-devshell/shared": "workspace:*"
+        "@earendil-works/pi-coding-agent": "0.84.4",
+        "@earendil-works/pi-tui": "0.84.4",
+        "@portable-devshell/shared": "workspace:*",
+        "diff": "8.0.4"
     },
     "scripts": {
         "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b --force",
