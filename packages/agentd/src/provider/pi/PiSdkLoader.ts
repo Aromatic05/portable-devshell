@@ -50,6 +50,7 @@ export interface PiSettingsManagerLike {
 }
 
 export interface PiSessionLike {
+    readonly isStreaming?: boolean;
     readonly sessionFile?: string;
     readonly sessionId: string;
     agent?: {

@@ -15,6 +15,7 @@ import type {
     PiChildInitMessage,
     PiParentMessage
 } from "./PiProcessProtocol.js";
+import { deliverPiAgentMessage } from "./PiAgentCommands.js";
 import { disposeManagedPiAgent } from "./PiAgentLifecycle.js";
 
 interface ManagedPiAgent {
@@ -154,13 +155,13 @@ async function commandAgent(message: PiChildAgentCommandMessage): Promise<void> 
     const active = requireAgent(message.agentId).session;
     switch (message.command) {
         case "prompt":
-            await active.prompt(requireMessage(message));
+            await deliverPiAgentMessage(active, "prompt", requireMessage(message));
             return;
         case "steer":
-            await active.prompt(requireMessage(message), { streamingBehavior: "steer" });
+            await deliverPiAgentMessage(active, "steer", requireMessage(message));
             return;
         case "followUp":
-            await active.prompt(requireMessage(message), { streamingBehavior: "followUp" });
+            await deliverPiAgentMessage(active, "followUp", requireMessage(message));
             return;
         case "abort":
             await active.abort();
