@@ -155,32 +155,24 @@ export class McpOAuthApprovalService {
 
     async list(): Promise<OAuthApprovalRequest[]> {
         return await this.#mutex.runExclusive(async () => {
-            const previous = this.#snapshotLocked();
-            if (this.#expirePendingLocked()) {
-                await this.#persistLockedWithRollback(previous);
-            }
-            return [...this.#requests.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+            return [...this.#requests.values()]
+                .map((request) => this.#readRequestLocked(request))
+                .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
         });
     }
 
     async get(approvalId: string): Promise<OAuthApprovalRequest | undefined> {
         return await this.#mutex.runExclusive(async () => {
-            const previous = this.#snapshotLocked();
-            if (this.#expirePendingLocked()) {
-                await this.#persistLockedWithRollback(previous);
-            }
-            return this.#requests.get(approvalId);
+            const request = this.#requests.get(approvalId);
+            return request === undefined ? undefined : this.#readRequestLocked(request);
         });
     }
 
     async getAuthorization(interactionId: string): Promise<OAuthApprovalRequest | undefined> {
         return await this.#mutex.runExclusive(async () => {
-            const previous = this.#snapshotLocked();
-            if (this.#expirePendingLocked()) {
-                await this.#persistLockedWithRollback(previous);
-            }
             const approvalId = this.#authorizationByInteraction.get(interactionId);
-            return approvalId === undefined ? undefined : this.#requests.get(approvalId);
+            const request = approvalId === undefined ? undefined : this.#requests.get(approvalId);
+            return request === undefined ? undefined : this.#readRequestLocked(request);
         });
     }
 
@@ -245,6 +237,12 @@ export class McpOAuthApprovalService {
         return [...this.#requests.values()].find(
             (request) => request.kind === "registration" && request.clientId === clientId && request.status !== "expired"
         );
+    }
+
+    #readRequestLocked(request: OAuthApprovalRequest): OAuthApprovalRequest {
+        return request.status === "pending" && Date.parse(request.expiresAt) <= this.#now()
+            ? { ...request, status: "expired" }
+            : request;
     }
 
     #expirePendingLocked(): boolean {

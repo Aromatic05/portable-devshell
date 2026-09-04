@@ -151,7 +151,7 @@ export class AuditToolCallHistory {
               : await this.#store.readAll();
         const activeRecords = this.#readActiveRecords();
         const filtered = sliceByFilters(sliceByCursor([...records, ...activeRecords], query), query);
-        return applyLimit(filtered, query);
+        return finalizeRecords(filtered, query);
     }
 
     async #readCursorQuery(query: ToolCallQuery): Promise<ToolCallRecord[]> {
@@ -184,7 +184,7 @@ export class AuditToolCallHistory {
         if (activeStart > activeEnd) return [];
 
         const activeSlice = sliceByFilters(activeRecords.slice(activeStart, activeEnd), query);
-        return applyLimit([...persistedRecords, ...activeSlice], query);
+        return finalizeRecords([...persistedRecords, ...activeSlice], query);
     }
 
     async readFailureSummary(sinceMs: number, untilMs: number): Promise<AuditToolCallFailureSummary> {
@@ -335,12 +335,44 @@ function applyLimit(records: ToolCallRecord[], query: ToolCallQuery): ToolCallRe
     return records.slice(-query.limit);
 }
 
+function finalizeRecords(records: ToolCallRecord[], query: ToolCallQuery): ToolCallRecord[] {
+    const projected = records.map((record) => projectRecord(record, query));
+    return applyByteLimit(applyLimit(projected, query), query);
+}
+
+function projectRecord(record: ToolCallRecord, query: ToolCallQuery): ToolCallRecord {
+    if (query.includeInput !== false && query.includeOutput !== false) return record;
+    const projected = { ...record };
+    if (query.includeInput === false) delete projected.input;
+    if (query.includeOutput === false) delete projected.output;
+    return projected;
+}
+
+function applyByteLimit(records: ToolCallRecord[], query: ToolCallQuery): ToolCallRecord[] {
+    if (query.maxBytes === undefined) return records;
+    const newestFirst = query.after === undefined;
+    const candidates = newestFirst ? [...records].reverse() : records;
+    const accepted: ToolCallRecord[] = [];
+    let bytes = 2;
+    for (const record of candidates) {
+        const recordBytes = Buffer.byteLength(JSON.stringify(record), "utf8") + (accepted.length === 0 ? 0 : 1);
+        if (bytes + recordBytes > query.maxBytes) break;
+        if (newestFirst) accepted.unshift(record);
+        else accepted.push(record);
+        bytes += recordBytes;
+    }
+    return accepted;
+}
+
 function canReadTail(query: ToolCallQuery): query is ToolCallQuery & { limit: number } {
     return query.limit !== undefined &&
         query.after === undefined &&
         query.before === undefined &&
         query.callIds === undefined &&
         query.ctxId === undefined &&
+        query.includeInput === undefined &&
+        query.includeOutput === undefined &&
+        query.maxBytes === undefined &&
         query.source === undefined &&
         query.status === undefined &&
         query.toolName === undefined;

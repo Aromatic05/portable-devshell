@@ -17,18 +17,37 @@ export function ToolCallEntry({
     call,
     disabled = false,
     logs,
+    onLoadDetail,
     onRefresh,
 }: {
     call: ToolCallRecord;
     disabled?: boolean;
     logs: readonly InstanceLogEntry[];
+    onLoadDetail(): Promise<ToolCallRecord | undefined>;
     onRefresh(): Promise<void>;
 }) {
     const [open, setOpen] = useState(false);
+    const [detail, setDetail] = useState<ToolCallRecord | undefined>();
+    const [loading, setLoading] = useState(false);
+    const load = async (): Promise<void> => {
+        if (detail !== undefined || loading || call.input !== undefined || call.output !== undefined) return;
+        setLoading(true);
+        try {
+            setDetail(await onLoadDetail());
+        } finally {
+            setLoading(false);
+        }
+    };
+    const visibleCall = call.input !== undefined || call.output !== undefined ? call : (detail ?? call);
     return <li className="activity-record tool-call-record">
-        <details onToggle={(event) => setOpen(event.currentTarget.open)}>
+        <details onToggle={(event) => {
+            const next = event.currentTarget.open;
+            setOpen(next);
+            if (next) void load();
+        }}>
             <summary><time dateTime={call.startedAt} title={call.startedAt}>{formatRelativeTime(call.startedAt)}</time><strong>{call.toolName}</strong><span>{workspaceFolderName(call.workspace)} · {call.instance}</span><span>ctx {call.ctxId ?? "unscoped"}</span><span className={`result ${toolCallResult(call)}`}>{call.status}</span></summary>
-            {open ? <ToolCallDetails call={call} disabled={disabled} logs={logs} onRefresh={onRefresh} /> : null}
+            {open && loading ? <p>Loading details…</p> : null}
+            {open && !loading ? <ToolCallDetails call={visibleCall} disabled={disabled} logs={logs} onRefresh={onRefresh} /> : null}
         </details>
     </li>;
 }

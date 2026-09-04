@@ -65,6 +65,16 @@ test("ContextMessageService merges pending Comments into one call-bound delivery
             [second.id, "sent", undefined],
         ],
     );
+    assert.deepEqual(
+        (await service.list({ limit: 2 })).map((message) => message.id),
+        [followUp.id, second.id],
+    );
+    assert.deepEqual(
+        (await service.list({ before: second.id, limit: 1 })).map((message) => message.id),
+        [followUp.id],
+    );
+    const byteBounded = await service.list({ maxBytes: 220 });
+    assert.equal(Buffer.byteLength(JSON.stringify(byteBounded), "utf8") <= 220, true);
 
     const reloaded = new ContextMessageService(options);
     assert.deepEqual(

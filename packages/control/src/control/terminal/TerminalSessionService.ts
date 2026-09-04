@@ -17,6 +17,7 @@ import type {
 } from "./TerminalProcess.js";
 
 const DEFAULT_MAX_REPLAY_BYTES = 4 * 1024 * 1024;
+const DEFAULT_MAX_TERMINAL_HISTORY = 64;
 
 interface TerminalSessionRecord {
     attachments: Set<TerminalAttachmentRecord>;
@@ -49,6 +50,7 @@ interface TerminalAttachmentRecord {
 export interface TerminalSessionServiceOptions {
     idFactory?: () => string;
     maxReplayBytes?: number;
+    maxTerminalHistory?: number;
     now?: () => Date;
 }
 
@@ -83,6 +85,7 @@ export class TerminalSessionService {
     readonly #idFactory: () => string;
     readonly #instanceEpochs = new Map<string, number>();
     readonly #maxReplayBytes: number;
+    readonly #maxTerminalHistory: number;
     readonly #now: () => Date;
     readonly #sessions = new Map<string, TerminalSessionRecord>();
     #closed = false;
@@ -93,6 +96,10 @@ export class TerminalSessionService {
         this.#maxReplayBytes = options.maxReplayBytes ?? DEFAULT_MAX_REPLAY_BYTES;
         if (!Number.isSafeInteger(this.#maxReplayBytes) || this.#maxReplayBytes < 1) {
             throw new TypeError("Terminal maxReplayBytes must be a positive safe integer.");
+        }
+        this.#maxTerminalHistory = options.maxTerminalHistory ?? DEFAULT_MAX_TERMINAL_HISTORY;
+        if (!Number.isSafeInteger(this.#maxTerminalHistory) || this.#maxTerminalHistory < 0) {
+            throw new TypeError("Terminal maxTerminalHistory must be a non-negative safe integer.");
         }
         this.#now = options.now ?? (() => new Date());
     }
@@ -208,6 +215,11 @@ export class TerminalSessionService {
     list(instance?: string): TerminalSessionDescriptor[] {
         return [...this.#sessions.values()]
             .filter((session) => instance === undefined || session.instance === instance)
+            .sort((left, right) => {
+                const leftActive = left.state === "running" ? 1 : 0;
+                const rightActive = right.state === "running" ? 1 : 0;
+                return rightActive - leftActive || right.createdAt.localeCompare(left.createdAt) || right.generation - left.generation;
+            })
             .map(descriptor);
     }
 
@@ -389,6 +401,7 @@ export class TerminalSessionService {
         }
         this.#unsubscribeProcess(session);
         this.#disposeProcess(session);
+        this.#pruneTerminalHistory(session.instance);
     }
 
     #finishProcess(session: TerminalSessionRecord, exit: TerminalProcessExit): void {
@@ -405,6 +418,7 @@ export class TerminalSessionService {
         }
         this.#unsubscribeProcess(session);
         this.#disposeProcess(session);
+        this.#pruneTerminalHistory(session.instance);
     }
 
     async #killProcess(session: TerminalSessionRecord): Promise<void> {
@@ -434,6 +448,19 @@ export class TerminalSessionService {
         }
         this.#unsubscribeProcess(session);
         this.#disposeProcess(session);
+        this.#pruneTerminalHistory(session.instance);
+    }
+
+    #pruneTerminalHistory(instance: string): void {
+        const terminal = [...this.#sessions.values()]
+            .filter((session) => session.instance === instance && session.state !== "running")
+            .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.generation - left.generation);
+        for (const session of terminal.slice(this.#maxTerminalHistory)) {
+            session.attachments.clear();
+            this.#unsubscribeProcess(session);
+            this.#disposeProcess(session);
+            this.#sessions.delete(session.terminalId);
+        }
     }
 
     #assertOpen(): void {

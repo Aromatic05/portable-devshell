@@ -196,6 +196,9 @@ export class AuditDatabase {
         if (query.limit !== undefined && (!Number.isSafeInteger(query.limit) || query.limit < 1)) {
             throw new TypeError(`Invalid audit tool-call limit: ${query.limit}.`);
         }
+        if (query.maxBytes !== undefined && (!Number.isSafeInteger(query.maxBytes) || query.maxBytes < 1)) {
+            throw new TypeError(`Invalid audit tool-call maxBytes: ${query.maxBytes}.`);
+        }
         const predicates = ["collection = 'toolCalls'", "occurred_at_ms >= ?"];
         const parameters: Array<number | string> = [this.#retentionCutoff()];
         if (query.after !== undefined) {
@@ -234,11 +237,24 @@ export class AuditDatabase {
 
         const limited = query.limit !== undefined;
         const newestFirst = limited && query.after === undefined;
-        const rows = this.#database.prepare(
-            `SELECT payload FROM audit_records WHERE ${predicates.join(" AND ")} ORDER BY id ${newestFirst ? "DESC" : "ASC"}${limited ? " LIMIT ?" : ""}`
-        ).all(...(limited ? [...parameters, query.limit!] : parameters)) as Array<{ payload: string }>;
-        if (newestFirst) rows.reverse();
-        return rows.map((row) => JSON.parse(row.payload) as ToolCallRecord);
+        const payload = toolCallPayloadProjection(query);
+        const statement = this.#database.prepare(
+            `SELECT ${payload} AS payload FROM audit_records WHERE ${predicates.join(" AND ")} ORDER BY id ${newestFirst ? "DESC" : "ASC"}${limited ? " LIMIT ?" : ""}`
+        );
+        const values = limited ? [...parameters, query.limit!] : parameters;
+        const records: ToolCallRecord[] = [];
+        let bytes = 2;
+        for (const value of statement.iterate(...values)) {
+            const row = value as { payload: string };
+            if (query.maxBytes !== undefined) {
+                const rowBytes = Buffer.byteLength(row.payload, "utf8") + (records.length === 0 ? 0 : 1);
+                if (bytes + rowBytes > query.maxBytes) break;
+                bytes += rowBytes;
+            }
+            records.push(JSON.parse(row.payload) as ToolCallRecord);
+        }
+        if (newestFirst) records.reverse();
+        return records;
     }
 
     hasToolCallRecord(callId: string): boolean {
@@ -803,6 +819,19 @@ function fileSize(path: string): number {
         }
         throw error;
     }
+}
+
+function toolCallPayloadProjection(query: ToolCallQuery): string {
+    if (query.includeInput === false && query.includeOutput === false) {
+        return "json_remove(payload, '$.input', '$.output')";
+    }
+    if (query.includeInput === false) {
+        return "json_remove(payload, '$.input')";
+    }
+    if (query.includeOutput === false) {
+        return "json_remove(payload, '$.output')";
+    }
+    return "payload";
 }
 
 function loadDatabaseSync(): typeof import("node:sqlite").DatabaseSync {

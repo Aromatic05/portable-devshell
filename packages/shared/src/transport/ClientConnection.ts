@@ -1,6 +1,7 @@
 import type { ControlErrorBody } from "../error/ErrorBodyControl.js";
 import type { JsonValue } from "../type/TypeJsonValue.js";
 import { asInstanceName } from "../type/identity/TypeIdentityInstanceName.js";
+import { attachRequestCanceller, getRequestCanceller } from "../client/RequestTimeout.js";
 import type { Channel } from "./protocol/Channel.js";
 import {
     Codec,
@@ -57,6 +58,11 @@ interface PendingRequest {
     module: string;
     reject(error: Error): void;
     resolve(event: ClientEvent): void;
+}
+
+interface AbandonedRequest {
+    destination: Destination;
+    module: string;
 }
 
 interface ClientStreamState {
@@ -132,34 +138,53 @@ export class ClientConnection {
         this.#peer = options.peer;
     }
 
-    async request<TResult>(
+    request<TResult>(
         destination: Destination,
         module: string,
         operation: string,
         payload?: unknown
     ): Promise<TResult> {
-        const reply = await this.requestEvent(destination, module, operation, payload);
-        this.throwRemoteError(reply.error);
-        return reply.payload as unknown as TResult;
+        const event = this.requestEvent(destination, module, operation, payload);
+        const result = event.then((reply) => {
+            this.throwRemoteError(reply.error);
+            return reply.payload as unknown as TResult;
+        });
+        const cancel = getRequestCanceller(event);
+        return cancel === undefined ? result : attachRequestCanceller(result, cancel);
     }
 
-    async requestEvent(
+    requestEvent(
         destination: Destination,
         module: string,
         operation: string,
         payload?: unknown
     ): Promise<ClientEvent> {
         let session: ClientSession | undefined;
-        try {
-            session = await this.#acquireSession();
-            return await session.request(destination, module, operation, payload as JsonValue | undefined, false);
-        } catch (error) {
-            throw this.mapError(error);
-        } finally {
-            if (this.#mode === "short") {
-                session?.close();
-            }
-        }
+        let inner: Promise<ClientEvent> | undefined;
+        let cancelled: Error | undefined;
+        let rejectOuter!: (error: Error) => void;
+        const result = new Promise<ClientEvent>((resolve, reject) => {
+            rejectOuter = reject;
+            void (async () => {
+                try {
+                    session = await this.#acquireSession();
+                    if (cancelled !== undefined) return;
+                    inner = session.request(destination, module, operation, payload as JsonValue | undefined, false);
+                    resolve(await inner);
+                } catch (error) {
+                    reject(this.mapError(error));
+                } finally {
+                    if (this.#mode === "short") session?.close();
+                }
+            })();
+        });
+        return attachRequestCanceller(result, (reason) => {
+            if (cancelled !== undefined) return;
+            cancelled = reason;
+            rejectOuter(reason);
+            const cancel = inner === undefined ? undefined : getRequestCanceller(inner);
+            cancel?.(reason);
+        });
     }
 
     async openStream(
@@ -373,6 +398,8 @@ export class ClientConnection {
 }
 
 class ClientSession {
+    static readonly MAX_ABANDONED_REQUESTS = 4_096;
+    readonly #abandoned = new Map<string, AbandonedRequest>();
     readonly #route: PrefixRoute;
     readonly #peer: Exclude<Peer, "server">;
     readonly #onClose?: (session: ClientSession, error?: Error) => void;
@@ -397,7 +424,7 @@ class ClientSession {
         return this.#closed;
     }
 
-    async request(
+    request(
         destination: Destination,
         module: string,
         operation: string,
@@ -410,18 +437,29 @@ class ClientSession {
             this.#pending.set(id, { destination, expectsStream, id, module, reject, resolve });
         });
         void response.catch(() => undefined);
-        try {
-            await this.#route.send(destination, module, {
+        void this.#route.send(destination, module, {
                 id,
                 name: operation,
                 ...(payload === undefined ? {} : { payload })
-            });
-        } catch (error) {
+            }).catch((error) => {
             const pending = this.#pending.get(id);
             this.#pending.delete(id);
             pending?.reject(error instanceof Error ? error : new Error(String(error)));
-        }
-        return await response;
+        });
+        return attachRequestCanceller(response, (reason) => {
+            const pending = this.#pending.get(id);
+            if (pending === undefined) return;
+            this.#pending.delete(id);
+            this.#rememberAbandoned(id, pending.destination, pending.module);
+            pending.reject(reason);
+            const cancelId = `${this.#peer}-${createTransportId()}`;
+            this.#rememberAbandoned(cancelId, destination, "request");
+            void this.#route.send(destination, "request", {
+                id: cancelId,
+                name: "cancel",
+                payload: { requestId: id },
+            }).catch(() => undefined);
+        });
     }
 
     async nextStreamEvent(streamId: string): Promise<ClientEvent> {
@@ -499,6 +537,15 @@ class ClientSession {
     #acceptReply(event: ClientEvent, incoming: PrefixRouteIncoming): void {
         const pending = this.#pending.get(event.replyTo!);
         if (pending === undefined) {
+            const abandoned = this.#abandoned.get(event.replyTo!);
+            if (abandoned !== undefined) {
+                if (abandoned.destination !== incoming.destination || abandoned.module !== incoming.module) {
+                    this.close(new Error(`Reply ${event.replyTo} was addressed to the wrong abandoned route.`));
+                    return;
+                }
+                this.#abandoned.delete(event.replyTo!);
+                return;
+            }
             this.close(new Error(`Unexpected replyTo ${event.replyTo}.`));
             return;
         }
@@ -533,6 +580,15 @@ class ClientSession {
         }
         this.#pending.delete(pending.id);
         pending.resolve(event);
+    }
+
+    #rememberAbandoned(id: string, destination: Destination, module: string): void {
+        this.#abandoned.set(id, { destination, module });
+        while (this.#abandoned.size > ClientSession.MAX_ABANDONED_REQUESTS) {
+            const oldest = this.#abandoned.keys().next().value as string | undefined;
+            if (oldest === undefined) break;
+            this.#abandoned.delete(oldest);
+        }
     }
 
     #acceptStream(event: ClientEvent): void {

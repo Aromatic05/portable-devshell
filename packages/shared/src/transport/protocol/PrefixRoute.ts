@@ -117,6 +117,11 @@ interface ActiveServerStream {
     options: PrefixRouteStreamOptions;
 }
 
+interface ActiveServerRequest {
+    controller: AbortController;
+    destination: Destination;
+}
+
 export class PrefixRoute {
     readonly #codec: Codec;
     readonly #connectionId: string;
@@ -128,6 +133,7 @@ export class PrefixRoute {
     readonly #abortController = new AbortController();
     readonly #eventListeners = new Set<(incoming: PrefixRouteIncoming) => void>();
     readonly #closeListeners = new Set<(error?: Error) => void>();
+    readonly #serverRequests = new Map<string, ActiveServerRequest>();
     readonly #serverStreams = new Map<string, ActiveServerStream>();
     #closed = false;
     #closeError?: Error;
@@ -235,6 +241,16 @@ export class PrefixRoute {
             await this.#acceptStream(incoming);
             return;
         }
+        if (incoming.module === "request" && incoming.event.name === "cancel") {
+            await this.#authorizeRequest?.(incoming);
+            this.#cancelServerRequest(incoming);
+            await this.send(incoming.destination, incoming.module, {
+                id: this.#nextId(),
+                replyTo: incoming.event.id,
+                name: incoming.event.name,
+            });
+            return;
+        }
         await this.#route(incoming);
     }
 
@@ -307,6 +323,13 @@ export class PrefixRoute {
 
         const afterReply: Array<() => Promise<void> | void> = [];
         let openedStream: PrefixRouteStream | undefined;
+        const requestController = new AbortController();
+        const abortRequest = () => requestController.abort(this.#abortController.signal.reason);
+        this.#abortController.signal.addEventListener("abort", abortRequest, { once: true });
+        this.#serverRequests.set(incoming.event.id, {
+            controller: requestController,
+            destination: incoming.destination,
+        });
         const connectionContext = this.#getConnectionContext?.() ?? {};
         const context: PrefixRouteContext = {
             afterReply: (action) => afterReply.push(action),
@@ -340,7 +363,7 @@ export class PrefixRoute {
                 ? {}
                 : { protocolVersion: connectionContext.protocolVersion }),
             requestId: incoming.event.id,
-            signal: this.#abortController.signal,
+            signal: requestController.signal,
             ...(connectionContext.subject === undefined
                 ? {}
                 : { subject: connectionContext.subject })
@@ -377,7 +400,23 @@ export class PrefixRoute {
                 await this.#sendErrorReply(incoming, body);
             }
             await this.#onRequestResult?.(incoming, { ok: false });
+        } finally {
+            this.#serverRequests.delete(incoming.event.id);
+            this.#abortController.signal.removeEventListener("abort", abortRequest);
         }
+    }
+
+    #cancelServerRequest(incoming: PrefixRouteIncoming): void {
+        const payload = incoming.event.payload;
+        if (typeof payload !== "object" || payload === null || Array.isArray(payload) || typeof payload.requestId !== "string") {
+            throw protocolFailure("request.cancel requires requestId.");
+        }
+        const active = this.#serverRequests.get(payload.requestId);
+        if (active === undefined) return;
+        if (active.destination !== incoming.destination) {
+            throw protocolFailure(`Request ${payload.requestId} was addressed to the wrong destination.`);
+        }
+        active.controller.abort(new Error("Request cancelled by client."));
     }
 
     #createServerStream(active: ActiveServerStream): PrefixRouteStream {
@@ -436,6 +475,7 @@ export class PrefixRoute {
         }
         this.#closed = true;
         this.#abortController.abort(this.#closeError);
+        this.#serverRequests.clear();
         for (const active of this.#serverStreams.values()) {
             void this.#closeServerStream(active);
         }

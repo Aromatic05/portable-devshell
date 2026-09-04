@@ -10,7 +10,8 @@ import {
     createError,
     type Event,
     type JsonValue,
-    SocketChannel
+    SocketChannel,
+    withRequestTimeout
 } from "@portable-devshell/shared";
 import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
@@ -400,6 +401,30 @@ test("disconnect rejects every pending request and active stream waiter until ex
     await peer.reply(recovered, { pong: true });
     assert.deepEqual((await recoveredPromise).payload, { pong: true });
     assert.equal(peer.connectionCount, 2);
+});
+
+test("timed out persistent requests are cancelled without poisoning late replies", async (t) => {
+    const peer = await ControlPeer.create();
+    const connection = client(peer.socketPath);
+    t.after(async () => {
+        connection.close();
+        await peer.close();
+    });
+
+    const slow = connection.requestEvent("@control", "service", "slow");
+    const slowRequest = await peer.nextEvent();
+    await assert.rejects(withRequestTimeout(slow, 5, "service.slow"), /timed out/u);
+
+    const cancel = await peer.nextEvent();
+    assert.equal(cancel.event.name, "request.cancel");
+    assert.deepEqual(cancel.event.payload, { requestId: slowRequest.event.id });
+
+    await peer.reply(slowRequest, { late: true });
+    const recovered = connection.requestEvent("@control", "service", "ping");
+    const ping = await peer.nextEvent();
+    await peer.reply(ping, { pong: true });
+    assert.deepEqual((await recovered).payload, { pong: true });
+    assert.equal(peer.connectionCount, 1);
 });
 
 test("persistent ClientConnection coalesces concurrent reconnect calls", async (t) => {

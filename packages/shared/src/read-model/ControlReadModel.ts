@@ -324,6 +324,20 @@ export class ControlReadModel {
             : undefined;
     }
 
+    async readToolCallDetail(instance: string, callId: string): Promise<ToolCallRecord | undefined> {
+        const records = await this.#request(
+            this.#clients.tool.listCalls(instance, {
+                callIds: [callId],
+                includeInput: true,
+                includeOutput: true,
+                limit: 1,
+                maxBytes: 8 * 1024 * 1024,
+            }),
+            `toolCallDetail:${instance}:${callId}`,
+        );
+        return records[0];
+    }
+
     async refreshAllInstanceLogs(): Promise<void> {
         await Promise.all(this.#state.instances.map(async ({ name }) => {
             await this.refreshInstance(name, ["logs"]);
@@ -482,9 +496,17 @@ export class ControlReadModel {
             case "todo":
                 return (await this.#clients.todo.get(instance, todoInput)).todo;
             case "toolCalls":
-                return await this.#clients.tool.listCalls(instance, { limit: 200 });
+                return await this.#clients.tool.listCalls(instance, {
+                    includeInput: false,
+                    includeOutput: false,
+                    limit: 200,
+                    maxBytes: 512 * 1024,
+                });
             case "comments": {
-                const contextMessages = await this.#clients.contextMessage.list(instance);
+                const contextMessages = await this.#clients.contextMessage.list(instance, {
+                    limit: 200,
+                    maxBytes: 256 * 1024,
+                });
                 const callIds = [...new Set(contextMessages.flatMap((message) =>
                     message.status === "delivered" && message.callId !== undefined
                         ? [message.callId]
@@ -493,7 +515,13 @@ export class ControlReadModel {
                 return {
                     commentCalls: callIds.length === 0
                         ? []
-                        : await this.#clients.tool.listCalls(instance, { callIds, limit: 1_000 }),
+                        : await this.#clients.tool.listCalls(instance, {
+                            callIds,
+                            includeInput: false,
+                            includeOutput: true,
+                            limit: 1_000,
+                            maxBytes: 512 * 1024,
+                        }),
                     contextMessages,
                 };
             }

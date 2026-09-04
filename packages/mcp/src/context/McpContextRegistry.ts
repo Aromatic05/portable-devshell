@@ -859,19 +859,9 @@ export class McpContextRegistry {
     async list(): Promise<McpContextRecord[]> {
         return await this.#run(async () => {
             this.#assertInitialized();
-            const previous = cloneContextMap(this.#contexts);
-            const expired = this.#expireOverdue(this.#now());
-            const compacted = this.#compactTerminalContexts();
-            if (expired || compacted) {
-                try {
-                    await this.#persist();
-                } catch (error) {
-                    restoreContextMap(this.#contexts, previous);
-                    throw error;
-                }
-            }
+            const now = this.#now();
             return [...this.#contexts.values()]
-                .map(cloneRecord)
+                .map((record) => cloneRecordForRead(record, now))
                 .sort((left, right) =>
                     left.createdAt.localeCompare(right.createdAt),
                 );
@@ -1011,6 +1001,7 @@ export class McpContextRegistry {
     async #mutateAndPersist(mutate: () => void): Promise<void> {
         const previous = cloneContextMap(this.#contexts);
         mutate();
+        this.#expireOverdue(this.#now());
         this.#compactTerminalContexts();
         try {
             await this.#persist();
@@ -1183,6 +1174,13 @@ function cloneRecord(record: McpContextStoredRecord): McpContextRecord {
             ...environment,
         })),
     };
+}
+
+function cloneRecordForRead(record: McpContextStoredRecord, now: number): McpContextRecord {
+    const cloned = cloneRecord(record);
+    return cloned.status === "active" && Date.parse(cloned.expiresAt) <= now
+        ? { ...cloned, status: "expired" }
+        : cloned;
 }
 
 function cloneStoredRecord(

@@ -13,6 +13,18 @@ export class RequestTimeoutError extends Error {
     }
 }
 
+type RequestCanceller = (reason: Error) => void;
+const requestCancellers = new WeakMap<Promise<unknown>, RequestCanceller>();
+
+export function attachRequestCanceller<T>(request: Promise<T>, cancel: RequestCanceller): Promise<T> {
+    requestCancellers.set(request, cancel);
+    return request;
+}
+
+export function getRequestCanceller(request: Promise<unknown>): RequestCanceller | undefined {
+    return requestCancellers.get(request);
+}
+
 export async function withRequestTimeout<T>(
     request: Promise<T>,
     timeoutMs: number,
@@ -25,10 +37,11 @@ export async function withRequestTimeout<T>(
         return await Promise.race([
             request,
             new Promise<never>((_resolve, reject) => {
-                timer = setTimeout(
-                    () => reject(new RequestTimeoutError(label, timeoutMs, outcome)),
-                    timeoutMs,
-                );
+                timer = setTimeout(() => {
+                    const error = new RequestTimeoutError(label, timeoutMs, outcome);
+                    getRequestCanceller(request)?.(error);
+                    reject(error);
+                }, timeoutMs);
             }),
         ]);
     } finally {
