@@ -3,8 +3,15 @@ const restorableDaemonStates = new Set(["running", "starting", "stale"]);
 export function captureInstalledRuntimeState(runCli) {
     const status = runCli(["status"]);
     assertCliSuccess(status, "inspect current Control state");
-    if (!/^control:\s+running\s*$/mu.test(String(status.stdout ?? ""))) {
-        return { controlRunning: false, instances: [] };
+    const statusOutput = String(status.stdout ?? "");
+    const pidMatch = statusOutput.match(/^pid:\s+([1-9][0-9]*)\s*$/mu);
+    const pid = pidMatch === null ? undefined : Number.parseInt(pidMatch[1], 10);
+    if (!/^control:\s+running\s*$/mu.test(statusOutput)) {
+        return {
+            controlRunning: false,
+            ...(pid === undefined ? {} : { pid }),
+            instances: [],
+        };
     }
 
     const overview = runCli(["overview"]);
@@ -28,7 +35,11 @@ export function captureInstalledRuntimeState(runCli) {
         )
         .map((entry) => entry.name);
 
-    return { controlRunning: true, instances: [...new Set(instances)] };
+    return {
+        controlRunning: true,
+        ...(pid === undefined ? {} : { pid }),
+        instances: [...new Set(instances)],
+    };
 }
 
 export function restoreInstalledRuntimeState(runCli, state) {

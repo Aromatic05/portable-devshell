@@ -47,6 +47,7 @@ test("install runtime state preserves restart-compatible managed instances", () 
 
     assert.deepEqual(state, {
         controlRunning: true,
+        pid: 123,
         instances: ["ready-local", "starting-ssh", "stale-local"],
     });
 
