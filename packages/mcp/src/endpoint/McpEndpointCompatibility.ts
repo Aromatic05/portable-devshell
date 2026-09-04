@@ -5,6 +5,11 @@ interface McpLegacyToolAlias {
     replacement: string;
 }
 
+interface McpLegacyWorkspaceAppV0615 {
+    kind: "workspace-app-v0615";
+    replacement: string;
+}
+
 interface McpLegacyToolTombstone {
     help: string;
     kind: "tombstone";
@@ -12,7 +17,10 @@ interface McpLegacyToolTombstone {
     replacement?: string;
 }
 
-export type McpLegacyToolCompatibility = McpLegacyToolAlias | McpLegacyToolTombstone;
+export type McpLegacyToolCompatibility =
+    | McpLegacyToolAlias
+    | McpLegacyToolTombstone
+    | McpLegacyWorkspaceAppV0615;
 
 const legacyTools: Readonly<Record<string, McpLegacyToolCompatibility>> = {
     ask_question: {
@@ -33,6 +41,46 @@ const legacyTools: Readonly<Record<string, McpLegacyToolCompatibility>> = {
     instance_start: {
         kind: "alias",
         replacement: "instance_connect",
+    },
+    workspace_approval_decide: {
+        kind: "alias",
+        replacement: "workspace_approval",
+    },
+    workspace_goal_continue: {
+        kind: "workspace-app-v0615",
+        replacement: "workspace_reentry",
+    },
+    workspace_goal_pause: {
+        kind: "alias",
+        replacement: "workspace_pause",
+    },
+    workspace_goal_resume: {
+        kind: "alias",
+        replacement: "workspace_resume",
+    },
+    workspace_goal_stop: {
+        kind: "alias",
+        replacement: "workspace_stop",
+    },
+    workspace_question_answer: {
+        kind: "alias",
+        replacement: "workspace_answer",
+    },
+    workspace_reentry_control: {
+        kind: "workspace-app-v0615",
+        replacement: "workspace_reentry",
+    },
+    workspace_task_control: {
+        kind: "alias",
+        replacement: "workspace_task",
+    },
+    workspace_wait_interrupt: {
+        kind: "alias",
+        replacement: "workspace_interrupt",
+    },
+    workspace_wait_recover: {
+        kind: "workspace-app-v0615",
+        replacement: "workspace_recover",
     },
     tmux_capture: {
         help: "Use tmux_inspect for pane history. If you already have a durable task id, tmux_read reads that task instead. The old pane-scoped capture call is not translated automatically.",

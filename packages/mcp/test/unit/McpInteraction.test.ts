@@ -1260,6 +1260,125 @@ test("server re-entry arbiter gives each resolved Wait at most one notification 
     }
 });
 
+test("v0.6.15 Workspace iframe keeps Context arbitration separate from Goal continuation claims", async () => {
+    const root = await createTestTempDirectory("legacy-workspace-goal-reentry");
+    try {
+        const registry = new McpContextRegistry({
+            filePath: join(root, "contexts.json"),
+            idFactory: () => context.ctxId!,
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo", principal: "local", workspace: "/workspace" });
+        const fake = createInteractionGateway();
+        const now = new Date().toISOString();
+        const goal = {
+            autoContinueExhausted: false,
+            continuationCount: 0,
+            continuationDue: true,
+            continuationDueAt: now,
+            continuationPending: false,
+            createdAt: now,
+            goalId: "goal-legacy",
+            lastAgentActivityAt: now,
+            lastProgressAt: now,
+            maxContinuations: 8,
+            objective: "Continue legacy iframe",
+            revision: 1,
+            status: "active" as const,
+            steps: [{ id: "work", status: "active" as const, text: "Work" }],
+            updatedAt: now,
+        };
+        const continuationClaims: string[] = [];
+        Object.assign(fake.gateway, {
+            async goalContinuation(_instance: string, input: GoalContinuationInput) {
+                if (input.action === "claim" && input.claimId !== undefined) continuationClaims.push(input.claimId);
+                return {
+                    claimed: input.action === "claim",
+                    claimId: input.claimId,
+                    continuationCount: 0,
+                    goal,
+                };
+            },
+            async manageGoal() { return goal; },
+            async readGoal() { return goal; },
+        });
+        const handler = new McpEndpointHandlerInteraction({
+            contextRegistry: registry,
+            gateway: fake.gateway,
+            instanceName: "demo",
+        });
+        const token = await openWorkspace(handler);
+
+        const contextClaim = await handler.callLegacyV0615(
+            "workspace_reentry_control",
+            { action: "claim", claimId: "context-claim", token },
+            context,
+        ) as { claimed?: boolean; claimId?: string };
+        assert.equal(contextClaim.claimed, true);
+        assert.equal(contextClaim.claimId, "context-claim");
+
+        const goalClaim = await handler.callLegacyV0615(
+            "workspace_goal_continue",
+            { action: "claim", available: true, claimId: "goal-claim", token },
+            context,
+        ) as { claimed?: boolean; claimId?: string };
+        assert.equal(goalClaim.claimed, true);
+        assert.equal(goalClaim.claimId, "goal-claim");
+        assert.deepEqual(continuationClaims, ["goal-claim"]);
+        assert.equal((await registry.readAutomaticReentry(context.ctxId!, "demo")).claimId, "context-claim");
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("v0.6.15 Workspace wait sent then release stays idempotent on the current Wait model", async () => {
+    const fake = createInteractionGateway();
+    const now = new Date().toISOString();
+    fake.waits.push({
+        automaticRecovery: true,
+        createdAt: now,
+        createdByCtxId: context.ctxId!,
+        detachedAt: now,
+        kind: "tmux",
+        resolvedAt: now,
+        result: { task: { id: "task-legacy", status: "0" } },
+        status: "resolved",
+        targetId: "task-legacy",
+        updatedAt: now,
+        waitId: "wait-legacy",
+    });
+    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
+    const token = await openWorkspace(handler);
+
+    const claimed = await handler.callLegacyV0615(
+        "workspace_wait_recover",
+        { action: "claim", token, waitId: "wait-legacy" },
+        context,
+    ) as { claimId?: string };
+    assert.equal(typeof claimed.claimId, "string");
+    const claimId = claimed.claimId!;
+    await handler.callLegacyV0615(
+        "workspace_wait_recover",
+        { action: "attempt", claimId, token, waitId: "wait-legacy" },
+        context,
+    );
+    const sent = await handler.callLegacyV0615(
+        "workspace_wait_recover",
+        { action: "sent", claimId, token, waitId: "wait-legacy" },
+        context,
+    ) as { sent?: boolean };
+    assert.equal(sent.sent, true);
+    assert.equal(fake.waits.find((wait) => wait.waitId === "wait-legacy")?.status, "consumed");
+    assert.deepEqual(
+        await handler.callLegacyV0615(
+            "workspace_wait_recover",
+            { action: "release", claimId, token, waitId: "wait-legacy" },
+            context,
+        ),
+        { released: true, waitId: "wait-legacy" },
+    );
+});
+
 test("server re-entry arbiter consumes a resolved Wait without notification while Context execution is active", async () => {
     const root = await createTestTempDirectory("reentry-wait-busy");
     try {
