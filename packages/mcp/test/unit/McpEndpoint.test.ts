@@ -169,8 +169,27 @@ test("tmux_run does not render a Workspace App", () => {
     assert.equal(meta?.["openai/toolInvocation/invoking"], undefined);
 });
 
+test("MCP endpoint without Workspace policy does not expose HTML resources", async () => {
+    const server = await createBindingServer(createBinding());
+
+    try {
+        const session = await initialize(server.url);
+        const listed = await postJson(server.url, {
+            id: "req-resources-disabled",
+            jsonrpc: "2.0",
+            method: "resources/list",
+            params: {}
+        }, session.headers);
+        assert.equal(listed.status, 200);
+        assert.equal(listed.body.result, undefined);
+        assert.notEqual(listed.body.error, undefined);
+    } finally {
+        await server.close();
+    }
+});
+
 test("Workspace MCP App renders from a versioned URI while keeping the stable reader alias", async () => {
-    const binding = createBinding();
+    const binding = createBinding(createWorkerHarness(), { workspaceApp: true });
     const server = await createBindingServer(binding);
 
     try {
@@ -228,6 +247,7 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
 test("Workspace MCP App uses the configured public origin as its ChatGPT component domain", async () => {
     const binding = createBinding(createWorkerHarness(), {
         publicBaseUrl: "https://devshell.example.com/prefix",
+        workspaceApp: true,
     });
     const server = await createBindingServer(binding);
 
@@ -263,7 +283,7 @@ test("Workspace MCP App uses the configured public origin as its ChatGPT compone
 
 test("Workspace MCP App does not advertise a wildcard listener as its component domain", async () => {
     for (const publicBaseUrl of ["http://0.0.0.0:17890", "http://[::]:17890"]) {
-        const binding = createBinding(createWorkerHarness(), { publicBaseUrl });
+        const binding = createBinding(createWorkerHarness(), { publicBaseUrl, workspaceApp: true });
         const server = await createBindingServer(binding);
         try {
             const session = await initialize(server.url);
@@ -1203,12 +1223,27 @@ test("tools/call waits for a transiently not-ready instance before executing", a
 
 function createBinding(
     harness = createWorkerHarness(),
-    options?: { contextMode?: "explicit" | "openai-session"; publicBaseUrl?: string; readyWaitMs?: number; serverVersion?: string }
+    options?: { contextMode?: "explicit" | "openai-session"; publicBaseUrl?: string; readyWaitMs?: number; serverVersion?: string; workspaceApp?: boolean }
 ): McpEndpointBinding {
+    const unused = async () => { throw new Error("unused"); };
+    const gateway = options?.workspaceApp === true
+        ? ({
+            consumeWait: unused,
+            createWait: unused,
+            decideApproval: unused,
+            detachWait: unused,
+            listApprovals: async () => [],
+            listTools: () => [],
+            listWaits: async () => [],
+            resolveWait: unused,
+            waitForWait: unused,
+        } as unknown as McpInstanceGateway)
+        : undefined;
     return new McpEndpointBinding(
         new McpEndpointWorker({
             contextMode: options?.contextMode,
-            policy: { capabilities: ["execute"], groups: ["bash"] },
+            ...(gateway === undefined ? {} : { gateway }),
+            policy: { capabilities: ["execute"], groups: options?.workspaceApp === true ? ["bash", "workspace"] : ["bash"] },
             instanceName: "demo",
             readyWaitMs: options?.readyWaitMs,
             worker: harness.worker

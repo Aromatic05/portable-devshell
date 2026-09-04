@@ -60,6 +60,7 @@ export class McpEndpointBinding {
     }
 
     #createServer(disconnectSignal: AbortSignal): Server {
+        const workspaceApp = this.#worker.hasWorkspaceApp();
         const server = new Server(
             {
                 name: "portable-devshell-mcp",
@@ -67,33 +68,35 @@ export class McpEndpointBinding {
             },
             {
                 capabilities: {
-                    resources: {},
+                    ...(workspaceApp ? { resources: {} } : {}),
                     tools: {}
                 }
             }
         );
 
-        server.setRequestHandler(ListResourcesRequestSchema, async () => ({
-            resources: [{
-                mimeType: RESOURCE_MIME_TYPE,
-                name: "portable-devshell Workspace",
-                uri: workspaceAppResourceUri
-            }]
-        }));
-
-        server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-            if (!workspaceAppResourceUris.includes(request.params.uri as typeof workspaceAppResourceUris[number])) {
-                throw new McpError(ErrorCode.InvalidParams, `Unknown resource: ${request.params.uri}`);
-            }
-            return {
-                contents: [{
-                    _meta: this.#workspaceResourceMeta,
+        if (workspaceApp) {
+            server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+                resources: [{
                     mimeType: RESOURCE_MIME_TYPE,
-                    text: workspaceAppHtml,
-                    uri: request.params.uri
+                    name: "portable-devshell Workspace",
+                    uri: workspaceAppResourceUri
                 }]
-            };
-        });
+            }));
+
+            server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+                if (!workspaceAppResourceUris.includes(request.params.uri as typeof workspaceAppResourceUris[number])) {
+                    throw new McpError(ErrorCode.InvalidParams, `Unknown resource: ${request.params.uri}`);
+                }
+                return {
+                    contents: [{
+                        _meta: this.#workspaceResourceMeta,
+                        mimeType: RESOURCE_MIME_TYPE,
+                        text: workspaceAppHtml,
+                        uri: request.params.uri
+                    }]
+                };
+            });
+        }
 
         server.setRequestHandler(ListToolsRequestSchema, async () => {
             try {

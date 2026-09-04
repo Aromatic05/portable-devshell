@@ -95,6 +95,10 @@ export class McpEndpointWorker {
         return this.#catalog.snapshot().hasWorkerSchema;
     }
 
+    hasWorkspaceApp(): boolean {
+        return this.#catalog.getExposed("workspace_open") !== undefined;
+    }
+
     async callTool(
         toolName: string,
         input: JsonValue,
