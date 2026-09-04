@@ -356,8 +356,27 @@ test("Workspace Goal requests one model continuation after inactivity", BROWSER_
     ) as string;
     assert.equal(
         continuationText,
-        "Current task item: [verify] Verify Workspace UI. Continue executing this task item immediately from its current state. Take the next concrete action now. Do not reply with an acknowledgement, plan, status update, apology, or statement that you will continue. Do not repeat completed work. Do not end the turn after only reading or describing the current state.",
+        "Finish the current Goal item shown in the Workspace context.\n\nThen immediately continue with the next Goal item.\n\nDo not stop after completing or reporting the current item.",
     );
+    assert.doesNotMatch(continuationText, /Verify Workspace UI|Current task item/u);
+    const goalContinuationContext = await page.evaluate(`
+        (window.__modelContextUpdates || [])
+            .map(update => update.structuredContent && update.structuredContent.portableDevshellWorkspace)
+            .filter(state => state && state.continuation && state.continuation.kind === "goal")
+            .at(-1).continuation
+    `) as {
+        attempt: number;
+        currentItem: { id: string; text: string };
+        nextItem: { id: string; kind: string; text: string };
+        orderedItems: Array<{ id: string }>;
+    };
+    assert.equal(goalContinuationContext.attempt, 1);
+    assert.equal(goalContinuationContext.currentItem.id, "verify");
+    assert.equal(goalContinuationContext.currentItem.text, "Verify Workspace UI");
+    assert.equal(goalContinuationContext.nextItem.id, "finish-goal");
+    assert.equal(goalContinuationContext.nextItem.kind, "goal-terminal");
+    assert.equal(goalContinuationContext.nextItem.text, "Complete the Goal.");
+    assert.deepEqual(goalContinuationContext.orderedItems.map((item) => item.id), ["implement", "verify", "finish-goal"]);
     const continuationCalls = await page.evaluate(
         "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue')",
     ) as Array<{ arguments?: Record<string, unknown> }>;
@@ -371,21 +390,16 @@ test("Workspace Goal requests one model continuation after inactivity", BROWSER_
 });
 
 
-test("Workspace Goal continuation prompt adds exit guidance only after the first no-progress wake", BROWSER_TEST_OPTIONS, async (t) => {
+test("Workspace Goal continuation prompt preserves escalating enforcement around one boundary-crossing contract", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
 
     const cases = [
-        {
-            count: 1,
-            expected: "The previous wake did not produce verifiable execution progress.",
-            forbidden: "Wake attempt 3.",
-        },
-        {
-            count: 2,
-            expected: "Wake attempt 3. The previous wake attempts ended without verifiable execution progress while the Goal remained actionable.",
-            forbidden: "The previous wake did not produce verifiable execution progress. Continue executing this task now. If this task item is actually complete",
-        },
+        { count: 0, expected: "Finish the current Goal item shown in the Workspace context.", forbidden: "Wake attempt" },
+        { count: 1, expected: "Wake attempt 2. The previous continuation produced no verifiable execution progress.", forbidden: "Wake attempt 3." },
+        { count: 2, expected: "Wake attempt 3. Repeated continuation attempts have not produced verifiable execution progress.", forbidden: "Wake attempt 4." },
+        { count: 3, expected: "Wake attempt 4. You have repeatedly failed to advance an actionable Goal.", forbidden: "Critical execution failure" },
+        { count: 4, expected: "Wake attempt 5. Critical execution failure: the Goal remains actionable after repeated continuation attempts without verifiable progress.", forbidden: "Wake attempt 4." },
     ];
     for (const item of cases) {
         const page = await browser.newPage();
@@ -412,14 +426,12 @@ test("Workspace Goal continuation prompt adds exit guidance only after the first
         }, workspaceAppHtml);
         await page.waitForFunction("(window.__modelMessages || []).length === 1");
         const text = await page.evaluate("window.__modelMessages[0].content[0].text") as string;
-        assert.match(text, /Current task item: \[verify\] Verify Workspace UI\./u);
         assert.match(text, new RegExp(item.expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
         assert.doesNotMatch(text, new RegExp(item.forbidden.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
-        if (item.count === 1) {
-            assert.match(text, /completing the final task item completes the Goal/u);
-            assert.doesNotMatch(text, /finish the Goal/u);
-            assert.match(text, /block the Goal/u);
-        }
+        assert.match(text, /Finish the current Goal item shown in the Workspace context\./u);
+        assert.match(text, /Then immediately continue with the next Goal item\./u);
+        assert.match(text, /Do not stop after completing or reporting the current item\./u);
+        assert.doesNotMatch(text, /Verify Workspace UI|Current task item|completing the final task item completes the Goal/u);
         await page.close();
     }
 });
@@ -763,10 +775,30 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
     await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 3");
     const recoveryText = await page.evaluate("window.__modelMessages[0].content[0].text") as string;
-    assert.match(recoveryText, /tmux task tmux-recovery finished while detached with status 0/u);
-    assert.match(recoveryText, /immediately continue the suspended work using that result/u);
-    assert.match(recoveryText, /Do not restart the completed task/u);
-    assert.doesNotMatch(recoveryText, /finish the Goal|block the Goal|workspace_goal/u);
+    assert.equal(
+        recoveryText,
+        "Resume the existing execution from the Workspace continuation context.\n\nPerform the continuation operation, then continue the suspended work from its result.",
+    );
+    assert.doesNotMatch(recoveryText, /tmux-recovery|status 0|finish the Goal|block the Goal|workspace_goal/u);
+    const waitContinuationContext = await page.evaluate(`
+        (window.__recoveryModelContextUpdates || [])
+            .map(update => update.structuredContent && update.structuredContent.portableDevshellWorkspace)
+            .filter(state => state && state.continuation && state.continuation.kind === "wait")
+            .at(-1).continuation
+    `) as {
+        constraints: { restartTask: boolean };
+        nextOperation: { taskId: string; tool: string };
+        reason: string;
+        result: { task: { status: string } };
+        suspendedOperation: { kind: string; taskId: string };
+    };
+    assert.equal(waitContinuationContext.reason, "tmux-finished");
+    assert.equal(waitContinuationContext.result.task.status, "0");
+    assert.equal(waitContinuationContext.suspendedOperation.kind, "tmux-wait");
+    assert.equal(waitContinuationContext.suspendedOperation.taskId, "tmux-recovery");
+    assert.equal(waitContinuationContext.nextOperation.tool, "tmux_read");
+    assert.equal(waitContinuationContext.nextOperation.taskId, "tmux-recovery");
+    assert.equal(waitContinuationContext.constraints.restartTask, false);
 
     const firstEvents = await page.evaluate("window.__bridgeEvents || []") as string[];
     const firstMessage = firstEvents.indexOf("message");
@@ -872,8 +904,19 @@ test("Workspace re-enters after a detached tmux wait deadline", BROWSER_TEST_OPT
     await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length === 3");
     assert.equal(
         await page.evaluate("window.__modelMessages[0].content[0].text"),
-        "The wait deadline for tmux task tmux-recovery elapsed and the task is still running. Inspect the task once now. If its result is still required and it is still running, immediately re-enter a blocking wait on the same task. If it has completed, consume the result and continue the suspended work. Do not restart the task or end the turn with a status-only response.",
+        "Resume the existing execution from the Workspace continuation context.\n\nPerform the continuation operation, then continue the suspended work from its result.",
     );
+    const timeoutContinuationContext = await page.evaluate(`
+        (window.__recoveryModelContextUpdates || [])
+            .map(update => update.structuredContent && update.structuredContent.portableDevshellWorkspace)
+            .filter(state => state && state.continuation && state.continuation.kind === "wait")
+            .at(-1).continuation
+    `) as { afterResult: { operation: { kind: string; taskId: string; tool: string }; when: string }; reason: string };
+    assert.equal(timeoutContinuationContext.reason, "tmux-wait-deadline-elapsed");
+    assert.equal(timeoutContinuationContext.afterResult.when, "task-still-running-and-result-required");
+    assert.equal(timeoutContinuationContext.afterResult.operation.kind, "blocking-wait");
+    assert.equal(timeoutContinuationContext.afterResult.operation.tool, "tmux_read");
+    assert.equal(timeoutContinuationContext.afterResult.operation.taskId, "tmux-recovery");
 });
 
 test("Workspace Goal recovers a resolved detached wait without Todo", BROWSER_TEST_OPTIONS, async (t) => {
@@ -1065,9 +1108,20 @@ test("Workspace re-enters after a detached answer without surfacing detached tmu
     await app.locator('[data-question-choice="wait-question-detached"]').click();
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
     const answerRecoveryText = await page.evaluate("window.__modelMessages[0].content[0].text") as string;
-    assert.match(answerRecoveryText, /The user answered the pending Workspace question with "Continue"/u);
-    assert.match(answerRecoveryText, /Use this answer immediately to resume the suspended work/u);
-    assert.doesNotMatch(answerRecoveryText, /finish the Goal|block the Goal|workspace_goal/u);
+    assert.equal(
+        answerRecoveryText,
+        "Resume the existing execution from the Workspace continuation context.\n\nPerform the continuation operation, then continue the suspended work from its result.",
+    );
+    assert.doesNotMatch(answerRecoveryText, /Continue|question|finish the Goal|block the Goal|workspace_goal/u);
+    const answerContinuationContext = await page.evaluate(`
+        (window.__detachedModelContextUpdates || [])
+            .map(update => update.structuredContent && update.structuredContent.portableDevshellWorkspace)
+            .filter(state => state && state.continuation && state.continuation.kind === "wait")
+            .at(-1).continuation
+    `) as { nextOperation: { kind: string }; reason: string; result: { answer: string } };
+    assert.equal(answerContinuationContext.reason, "question-answered");
+    assert.equal(answerContinuationContext.result.answer, "Continue");
+    assert.equal(answerContinuationContext.nextOperation.kind, "resume-with-answer");
     await app.getByText("Background task", { exact: true }).waitFor({ state: "visible" });
     assert.equal(await app.getByText("No blocking event.", { exact: true }).count(), 0);
     assert.equal(await app.getByRole("button", { name: "Resume agent", exact: true }).count(), 0);
@@ -1389,7 +1443,7 @@ window.addEventListener("message", function (event) {
     if (message.method === "ui/update-model-context") {
         window.__modelContextUpdates.push(message.params || {});
         window.__bridgeEvents.push("context");
-        if (window.__holdGoalContinuationContext && JSON.stringify(message.params || {}).includes("goalContinuation")) {
+        if (window.__holdGoalContinuationContext && JSON.stringify(message.params || {}).includes('"continuation"') && JSON.stringify(message.params || {}).includes('"kind":"goal"')) {
             window.__pendingGoalContinuationContext = { id: message.id, source: source };
             return;
         }
@@ -1795,6 +1849,7 @@ window.addEventListener("message", function (event) {
 const RECOVERY_BRIDGE_SCRIPT = String.raw`
 window.__workspaceCalls = [];
 window.__modelMessages = [];
+window.__recoveryModelContextUpdates = [];
 window.__bridgeEvents = [];
 window.__recovered = false;
 window.__recoveryAttempted = false;
@@ -1899,6 +1954,7 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (message.method === "ui/update-model-context") {
+        window.__recoveryModelContextUpdates.push(message.params || {});
         window.__bridgeEvents.push("context");
         reply({});
         return;
@@ -2183,6 +2239,7 @@ window.addEventListener("message", function (event) {
 `;
 const DETACHED_INTERACTION_BRIDGE_SCRIPT = String.raw`
 window.__modelMessages = [];
+window.__detachedModelContextUpdates = [];
 window.__questionAnswered = false;
 window.__detachedReentryClaimId = "";
 
@@ -2256,6 +2313,7 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (message.method === "ui/update-model-context") {
+        window.__detachedModelContextUpdates.push(message.params || {});
         reply({});
         return;
     }
