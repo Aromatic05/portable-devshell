@@ -335,10 +335,89 @@ test("Live Workspace capability survives MCP host restart and drives the direct 
     }
 });
 
+test("disabling Workspace policy removes live transport and revokes existing App capability", async () => {
+    const root = await createTestTempDirectory("mcp-workspace-policy-disabled");
+    const contextFile = join(root, "contexts.json");
+    const workspaceAppLeaseFile = join(root, "workspace-app-leases.json");
+    let enabled: McpHost | undefined;
+    let disabled: McpHost | undefined;
+    const goalRecovery = { ctxId: "", pending: true, retired: 0 };
+    try {
+        enabled = createWorkspaceHost(contextFile, workspaceAppLeaseFile, undefined, ["workspace"], goalRecovery);
+        await enabled.start();
+        const created = await enabled.contextRegistry.create({
+            instance: "demo",
+            principal: "local",
+            workspace: "/workspace",
+        });
+        goalRecovery.ctxId = created.ctxId;
+        const claimed = await enabled.contextRegistry.claimAutomaticReentry(created.ctxId, "demo", "claim-retired");
+        assert.equal(claimed.claimed, true);
+        await enabled.contextRegistry.bindAutomaticReentrySource(
+            created.ctxId,
+            "demo",
+            "claim-retired",
+            "task-resume",
+            "task-retired",
+        );
+        await enabled.contextRegistry.markAutomaticReentryAttempted(created.ctxId, "demo", "claim-retired");
+        const endpoint = `http://127.0.0.1:${requireTcpPort(enabled.server.address)}/demo/mcp`;
+        const opened = await callMcpTool(endpoint, "workspace_open", { ctxId: created.ctxId });
+        const token = (opened.result?._meta?.["portable-devshell/workspace"] as { token?: unknown } | undefined)?.token;
+        assert.equal(typeof token, "string");
+        if (typeof token !== "string") throw new Error("Workspace capability was not returned.");
+
+        await enabled.retireWorkspaceApp("demo");
+        const retiredReentry = await enabled.contextRegistry.readAutomaticReentry(created.ctxId, "demo");
+        assert.equal(retiredReentry.pending, false);
+        assert.equal(retiredReentry.attempted, false);
+        assert.equal(goalRecovery.pending, false);
+        assert.equal(goalRecovery.retired, 1);
+        const retiredLive = await fetch(
+            `http://127.0.0.1:${requireTcpPort(enabled.server.address)}/devshell/api/live/demo/workspace/snapshot?ctxId=${encodeURIComponent(created.ctxId)}`,
+            { headers: { authorization: `Bearer ${token}` } },
+        );
+        assert.equal(retiredLive.status, 404);
+        const retiredEndpoint = await fetch(endpoint, {
+            body: JSON.stringify({
+                id: "retired-workspace-reconnect",
+                jsonrpc: "2.0",
+                method: "tools/call",
+                params: { arguments: { ctxId: created.ctxId, token }, name: "workspace_reconnect" },
+            }),
+            headers: { "content-type": "application/json" },
+            method: "POST",
+        });
+        assert.equal(retiredEndpoint.status, 404);
+        await enabled.stop();
+        enabled = undefined;
+
+        goalRecovery.pending = true;
+        disabled = createWorkspaceHost(contextFile, workspaceAppLeaseFile, undefined, [], goalRecovery);
+        await disabled.start();
+        assert.equal(goalRecovery.pending, false);
+        assert.equal(goalRecovery.retired, 2);
+        const disabledEndpoint = `http://127.0.0.1:${requireTcpPort(disabled.server.address)}/demo/mcp`;
+        const disabledOpen = await callMcpTool(disabledEndpoint, "workspace_open", { ctxId: created.ctxId });
+        assert.match(disabledOpen.error?.message ?? "", /not exposed/i);
+        const disabledLive = await fetch(
+            `http://127.0.0.1:${requireTcpPort(disabled.server.address)}/devshell/api/live/demo/workspace/snapshot?ctxId=${encodeURIComponent(created.ctxId)}`,
+            { headers: { authorization: `Bearer ${token}` } },
+        );
+        assert.equal(disabledLive.status, 404);
+    } finally {
+        await enabled?.stop().catch(() => undefined);
+        await disabled?.stop().catch(() => undefined);
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
 function createWorkspaceHost(
     contextFile: string,
     workspaceAppLeaseFile: string,
     recovery?: { ctxId: string; detached: boolean; observed: number; resolved: number },
+    groups: string[] = ["workspace"],
+    goalRecovery?: { ctxId: string; pending: boolean; retired: number },
 ): McpHost {
     return new McpHost({
         contextFile,
@@ -364,12 +443,32 @@ function createWorkspaceHost(
                         waitId: "wait-restored",
                     }];
                 },
+                async goalContinuation(_instance: string, input: { action?: string; goalId?: string }, ctxId: string) {
+                    if (
+                        goalRecovery !== undefined &&
+                        ctxId === goalRecovery.ctxId &&
+                        input.action === "retire" &&
+                        input.goalId === "goal-legacy"
+                    ) {
+                        goalRecovery.pending = false;
+                        goalRecovery.retired += 1;
+                    }
+                    return {};
+                },
                 async observeTmuxTask() {
                     if (recovery === undefined) throw new Error("unused");
                     recovery.observed += 1;
                     return { task: { id: "tmux-restored", status: "0" } };
                 },
                 async readToolCalls() { return []; },
+                async readGoal(_instance: string, ctxId: string) {
+                    if (goalRecovery === undefined || ctxId !== goalRecovery.ctxId) return undefined;
+                    return {
+                        continuationPending: goalRecovery.pending,
+                        continuationUncertain: goalRecovery.pending,
+                        goalId: "goal-legacy",
+                    };
+                },
                 async readTodo() {
                     return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks: [] };
                 },
@@ -384,7 +483,7 @@ function createWorkspaceHost(
                 async waitForWait() { throw new Error("unused"); },
             } as never,
             name: "demo",
-            policy: { capabilities: [], groups: ["workspace"] },
+            policy: { capabilities: [], groups },
             worker: {
                 async auditToolCall(_toolName: string, _input: unknown, _context: unknown, operation: () => Promise<unknown>) {
                     return await operation();

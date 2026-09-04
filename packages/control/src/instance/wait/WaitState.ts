@@ -237,9 +237,21 @@ export class WaitState {
     disableRecovery(document: WaitDocument, waitId: string): WaitTransition {
         return this.#update(document, waitId, (record) => {
             if (record.status === "consumed" || record.status === "cancelled") return record;
-            if (record.recoveryDisabledAt !== undefined) return record;
             const now = this.#now();
-            return { ...record, automaticRecovery: false, recoveryDisabledAt: now, updatedAt: now };
+            const {
+                recoveryClaimedAt: _claimedAt,
+                recoveryClaimId: _claimId,
+                recoveryGoalProgressEpoch: _goalProgressEpoch,
+                recoveryMessageAttemptedAt: _attemptedAt,
+                recoveryMessageId: _messageId,
+                ...rest
+            } = record;
+            return {
+                ...rest,
+                automaticRecovery: false,
+                recoveryDisabledAt: record.recoveryDisabledAt ?? now,
+                updatedAt: now,
+            };
         });
     }
 

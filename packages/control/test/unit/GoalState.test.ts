@@ -198,6 +198,48 @@ test("GoalState continuation claims are validated against agent activity and cou
     assert.equal(state.read(document, "ctx-goal")?.continuationDue, false);
 });
 
+test("GoalState retires an attempted continuation without stopping or progressing the Goal", () => {
+    let now = Date.parse("2026-08-20T12:00:00.000Z");
+    const state = new GoalState({
+        goalId: () => "goal-fixed",
+        now: () => new Date(now).toISOString(),
+    });
+    let document = state.manage(state.emptyDocument(), {
+        action: "start",
+        objective: "Keep Goal durable",
+        steps: [{ id: "work", status: "active", text: "Keep working" }],
+    }, "ctx-goal").document;
+    now += GOAL_EXECUTION_LEASE_MS + 1;
+    document = state.continuation(document, {
+        action: "claim",
+        available: true,
+        claimId: "claim-retire",
+    }, "ctx-goal").document;
+    document = state.continuation(document, {
+        action: "attempt",
+        claimId: "claim-retire",
+    }, "ctx-goal").document;
+    assert.equal(state.read(document, "ctx-goal")?.continuationUncertain, true);
+
+    const retired = state.continuation(document, {
+        action: "retire",
+        goalId: "goal-fixed",
+    }, "ctx-goal");
+    const goal = state.read(retired.document, "ctx-goal");
+    assert.equal(retired.result.retired, true);
+    assert.equal(goal?.status, "active");
+    assert.equal(goal?.continuationPending, false);
+    assert.equal(goal?.continuationUncertain, false);
+    assert.equal(goal?.continuationCount, 0);
+
+    const repeated = state.continuation(retired.document, {
+        action: "retire",
+        goalId: "goal-fixed",
+    }, "ctx-goal");
+    assert.equal(repeated.result.retired, true);
+    assert.equal(state.read(repeated.document, "ctx-goal")?.status, "active");
+});
+
 test("GoalState user-initiated resume uses the durable continuation fence without waiting for inactivity", () => {
     let now = Date.parse("2026-08-20T12:00:00.000Z");
     const state = new GoalState({ goalId: () => "goal-user-resume", now: () => new Date(now).toISOString() });

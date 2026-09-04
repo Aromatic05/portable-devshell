@@ -112,6 +112,11 @@ export class McpHost {
         }
         await this.#contextRegistry.initialize();
         await this.#workspaceAppLeases.initialize();
+        for (const instance of this.#config.instances) {
+            if (!workspaceAppEnabled(instance.policy)) {
+                await this.retireWorkspaceApp(instance.name);
+            }
+        }
         await this.#oauth?.warmup();
         for (const binding of this.#registry.list()) {
             this.#httpServer.registerBinding(binding.path, binding.binding, binding.auth);
@@ -130,7 +135,11 @@ export class McpHost {
         this.#liveRouteCleanups.delete(instance.name);
         this.#gateways.set(instance.name, instance.gateway);
         this.#workers.set(instance.name, instance.worker);
-        const liveBaseUrl = workspaceLiveBaseUrl(this.#config.publicBaseUrl, instance.name);
+        const workspaceApp = workspaceAppEnabled(instance.policy);
+        if (!workspaceApp) this.#workspaceAppPresence.revokeInstance(instance.name);
+        const liveBaseUrl = workspaceApp
+            ? workspaceLiveBaseUrl(this.#config.publicBaseUrl, instance.name)
+            : undefined;
         const binding = new McpEndpointBinding(
             new McpEndpointWorker({
                 auth: instance.auth,
@@ -140,8 +149,10 @@ export class McpHost {
                 policy: instance.policy,
                 instanceName: instance.name,
                 worker: instance.worker,
-                workspaceAppLeases: this.#workspaceAppLeases,
-                workspaceAppPresence: this.#workspaceAppPresence,
+                ...(workspaceApp ? {
+                    workspaceAppLeases: this.#workspaceAppLeases,
+                    workspaceAppPresence: this.#workspaceAppPresence,
+                } : {}),
                 ...(liveBaseUrl === undefined ? {} : { workspaceLiveBaseUrl: liveBaseUrl })
             }),
             this.#config.serverVersion,
@@ -154,16 +165,18 @@ export class McpHost {
             binding,
             path
         });
-        this.#liveRouteCleanups.set(instance.name, installMcpWorkspaceLiveRoute({
-            contextRegistry: this.#contextRegistry,
-            gateway: instance.gateway,
-            host: this.#httpServer,
-            instanceName: instance.name,
-            leases: this.#workspaceAppLeases,
-            presence: this.#workspaceAppPresence,
-            publicBaseUrl: this.#config.publicBaseUrl,
-            restoreTmuxWaits: async () => await binding.restoreTmuxWaits(),
-        }));
+        if (workspaceApp) {
+            this.#liveRouteCleanups.set(instance.name, installMcpWorkspaceLiveRoute({
+                contextRegistry: this.#contextRegistry,
+                gateway: instance.gateway,
+                host: this.#httpServer,
+                instanceName: instance.name,
+                leases: this.#workspaceAppLeases,
+                presence: this.#workspaceAppPresence,
+                publicBaseUrl: this.#config.publicBaseUrl,
+                restoreTmuxWaits: async () => await binding.restoreTmuxWaits(),
+            }));
+        }
 
         if (this.#started) {
             if (previous !== undefined && previous.path !== path) {
@@ -185,6 +198,77 @@ export class McpHost {
         }
         if (this.#started) {
             this.#httpServer.unregisterBinding(previous.path);
+        }
+    }
+
+    async retireWorkspaceApp(instanceName: string): Promise<void> {
+        if (this.#started) {
+            const route = this.#registry.list().find((entry) => entry.binding.instanceName === instanceName);
+            if (route !== undefined) this.#httpServer.unregisterBinding(route.path);
+        }
+        this.#liveRouteCleanups.get(instanceName)?.();
+        this.#liveRouteCleanups.delete(instanceName);
+        this.#workspaceAppPresence.revokeInstance(instanceName);
+        await this.#workspaceAppLeases.revokeInstance(instanceName);
+        const gateway = this.#gateways.get(instanceName);
+        if (gateway === undefined) return;
+        while (true) {
+            const claims = await this.#contextRegistry.listAutomaticReentryClaimsForInstance(instanceName);
+            if (claims.length === 0) break;
+            for (const claim of claims) {
+                if (claim.sourceKind === "wait" && claim.sourceId !== undefined) {
+                    if (gateway.disableWaitRecovery === undefined) {
+                        throw new Error(`Cannot retire Workspace wait claim ${claim.claimId}.`);
+                    }
+                    const wait = gateway.listWaits === undefined
+                        ? undefined
+                        : (await gateway.listWaits(instanceName)).find((entry) => entry.waitId === claim.sourceId);
+                    if (wait !== undefined && wait.status !== "consumed" && wait.status !== "cancelled") {
+                        await gateway.disableWaitRecovery(instanceName, claim.sourceId);
+                    }
+                } else if (claim.sourceKind === "goal") {
+                    if (gateway.goalContinuation === undefined) {
+                        throw new Error(`Cannot retire Workspace Goal claim ${claim.claimId}.`);
+                    }
+                    await gateway.goalContinuation(
+                        instanceName,
+                        { action: "retire", ...(claim.sourceId === undefined ? {} : { goalId: claim.sourceId }) },
+                        claim.ctxId,
+                    );
+                }
+                await this.#contextRegistry.markAutomaticReentryRejected(
+                    claim.ctxId,
+                    instanceName,
+                    claim.claimId,
+                );
+            }
+        }
+        if (gateway.readGoal !== undefined && gateway.goalContinuation !== undefined) {
+            for (const context of await this.#contextRegistry.list()) {
+                if (!context.environments.some((environment) => environment.instance === instanceName)) continue;
+                const goal = await gateway.readGoal(instanceName, context.ctxId);
+                if (goal?.continuationPending !== true && goal?.continuationUncertain !== true) continue;
+                await gateway.goalContinuation(
+                    instanceName,
+                    { action: "retire", goalId: goal.goalId },
+                    context.ctxId,
+                );
+            }
+        }
+        const waits = gateway.listWaits === undefined ? [] : await gateway.listWaits(instanceName);
+        for (const wait of waits) {
+            if (wait.status === "consumed" || wait.status === "cancelled") continue;
+            if (
+                wait.kind === "question" &&
+                (wait.status === "waiting" || wait.status === "detached") &&
+                gateway.cancelWait !== undefined
+            ) {
+                await gateway.cancelWait(instanceName, wait.waitId);
+                continue;
+            }
+            if (gateway.disableWaitRecovery !== undefined) {
+                await gateway.disableWaitRecovery(instanceName, wait.waitId);
+            }
         }
     }
 
@@ -334,6 +418,10 @@ export class McpHost {
             running
         };
     }
+}
+
+function workspaceAppEnabled(policy: ToolPolicy): boolean {
+    return policy.groups.includes("workspace");
 }
 
 function oauthConfig(instances: readonly McpHostInstanceConfig[]) {

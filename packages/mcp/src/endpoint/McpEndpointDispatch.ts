@@ -370,7 +370,7 @@ export class McpEndpointDispatch {
             : { kind: "none" as const };
         const goalStep = goal?.steps.find((step) => step.status === "active");
         const wait = await gateway.createWait(this.#instanceName, {
-            automaticRecovery: taskAssociation.kind !== "ambiguous",
+            automaticRecovery: this.#catalog.getExposed("workspace_open") !== undefined && taskAssociation.kind !== "ambiguous",
             createdByCtxId: context.ctxId,
             deadlineAt: new Date(startedAt + timeout).toISOString(),
             ...(goal === undefined ? {} : {
@@ -536,7 +536,7 @@ export class McpEndpointDispatch {
             : { kind: "none" as const };
         const goalStep = goal?.steps.find((step) => step.status === "active");
         const wait = await gateway.createWait(this.#instanceName, {
-            automaticRecovery: taskAssociation.kind !== "ambiguous",
+            automaticRecovery: this.#catalog.getExposed("workspace_open") !== undefined && taskAssociation.kind !== "ambiguous",
             createdByCtxId: context.ctxId,
             ...(timeout === undefined ? {} : { deadlineAt: new Date(startedAt + timeout).toISOString() }),
             ...(goal === undefined ? {} : {

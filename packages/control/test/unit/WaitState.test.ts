@@ -468,6 +468,28 @@ test("WaitState disables automatic recovery without stopping the underlying wait
     );
 });
 
+test("WaitState disabling recovery retires an uncertain delivery fence idempotently", () => {
+    const state = new WaitState({ waitId: () => "wait-fixed" });
+    const created = state.create(state.emptyDocument(), {
+        createdByCtxId: "ctx-1",
+        kind: "tmux",
+        targetId: "tmux-task-1",
+    });
+    const detached = state.detach(created.document, created.record.waitId);
+    const resolved = state.resolve(detached.document, created.record.waitId, { task: { status: "0" } });
+    const claimed = state.claimRecovery(resolved.document, created.record.waitId, "claim-1");
+    const attempted = state.markRecoveryAttempted(claimed.document, created.record.waitId, "claim-1");
+    const disabled = state.disableRecovery(attempted.document, created.record.waitId);
+    const repeated = state.disableRecovery(disabled.document, created.record.waitId);
+
+    assert.equal(repeated.record.status, "resolved");
+    assert.equal(repeated.record.automaticRecovery, false);
+    assert.equal(repeated.record.recoveryClaimId, undefined);
+    assert.equal(repeated.record.recoveryMessageAttemptedAt, undefined);
+    assert.equal(repeated.record.recoveryMessageId, undefined);
+    assert.equal(typeof repeated.record.recoveryDisabledAt, "string");
+});
+
 test("WaitStore persists wait state atomically and detaches orphaned calls after restart", async () => {
     const root = await createTestTempDirectory("wait-store-");
     const filePath = join(root, "waits.json");

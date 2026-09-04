@@ -540,7 +540,7 @@ export class ConfigEditorCoordinator {
                     input.rebuildRequired,
                     input.preparedDescriptor
                 );
-                this.#syncMcpEndpoint(input.instance.name);
+                await this.#syncMcpEndpoint(input.instance.name);
             }
             return hotApplied;
         } catch (error) {
@@ -559,7 +559,7 @@ export class ConfigEditorCoordinator {
                     input.preparedDescriptor
                 ).catch((rollbackError) => failures.push(rollbackError));
                 try {
-                    this.#syncMcpEndpoint(input.existing.name);
+                    await this.#syncMcpEndpoint(input.existing.name);
                 } catch (rollbackError) {
                     failures.push(rollbackError);
                 }
@@ -635,12 +635,15 @@ export class ConfigEditorCoordinator {
         descriptor.mcpPath = instance.mcp.path;
     }
 
-    #syncMcpEndpoint(instanceName: string): void {
+    async #syncMcpEndpoint(instanceName: string): Promise<void> {
         const host = this.#getMcpHost();
         if (host === undefined) return;
         const config = this.#getConfig();
         const instance = config.instances.find((entry) => entry.name === instanceName);
         const descriptor = this.#instanceRegistry.get(instanceName);
+        if (instance?.mcp.tools.groups.includes("workspace") !== true) {
+            await host.retireWorkspaceApp(instanceName);
+        }
         if (
             !config.mcp.enabled ||
             instance === undefined ||

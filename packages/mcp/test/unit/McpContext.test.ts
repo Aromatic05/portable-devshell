@@ -173,6 +173,79 @@ test("McpContextRegistry arbitrates one automatic re-entry and preserves explici
     }
 });
 
+test("McpContextRegistry binds re-entry ownership to one instance and exposes only that owner's claim", async () => {
+    const root = await createTestTempDirectory("context-reentry-instance-owner");
+    const filePath = join(root, "contexts.json");
+    try {
+        const registry = new McpContextRegistry({
+            filePath,
+            idFactory: () => "ctx-reentry-owner",
+        });
+        await registry.initialize();
+        await registry.create({ instance: "alpha", principal: "local", workspace: "/alpha" });
+        await registry.attachEnvironment("ctx-reentry-owner", { instance: "beta", workspace: "/beta" });
+
+        const claimed = await registry.claimAutomaticReentry("ctx-reentry-owner", "alpha", "claim-alpha");
+        assert.equal(claimed.claimed, true);
+        await registry.bindAutomaticReentrySource("ctx-reentry-owner", "alpha", "claim-alpha", "wait", "wait-alpha");
+        assert.equal((await registry.validateAutomaticReentry("ctx-reentry-owner", "beta", "claim-alpha")).valid, false);
+        assert.equal((await registry.listAutomaticReentryClaimsForInstance("beta")).length, 0);
+        assert.equal((await registry.readAutomaticReentry("ctx-reentry-owner", "alpha")).pending, true);
+
+        const owned = await registry.listAutomaticReentryClaimsForInstance("alpha");
+        assert.deepEqual(owned, [{
+            attempted: false,
+            claimId: "claim-alpha",
+            ctxId: "ctx-reentry-owner",
+            sourceId: "wait-alpha",
+            sourceKind: "wait",
+        }]);
+        await registry.markAutomaticReentryRejected("ctx-reentry-owner", "alpha", "claim-alpha");
+        const after = await registry.readAutomaticReentry("ctx-reentry-owner", "alpha");
+        assert.equal(after.pending, false);
+        assert.equal(after.attempted, false);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("McpContextRegistry drops legacy re-entry claims that have no instance owner", async () => {
+    const root = await createTestTempDirectory("context-reentry-legacy-owner");
+    const filePath = join(root, "contexts.json");
+    try {
+        const registry = new McpContextRegistry({
+            filePath,
+            idFactory: () => "ctx-reentry-legacy-owner",
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo-local", principal: "local", workspace: "/workspace" });
+        await registry.claimAutomaticReentry("ctx-reentry-legacy-owner", "demo-local", "claim-legacy");
+        await registry.bindAutomaticReentrySource(
+            "ctx-reentry-legacy-owner",
+            "demo-local",
+            "claim-legacy",
+            "wait",
+            "wait-legacy",
+        );
+        await registry.markAutomaticReentryAttempted("ctx-reentry-legacy-owner", "demo-local", "claim-legacy");
+
+        const document = JSON.parse(await readFile(filePath, "utf8")) as { contexts?: Array<Record<string, unknown>> };
+        assert.equal(document.contexts?.length, 1);
+        delete document.contexts?.[0]?.automaticReentryInstance;
+        await writeFile(filePath, `${JSON.stringify(document)}\n`);
+
+        const reloaded = new McpContextRegistry({ filePath });
+        await reloaded.initialize();
+        const state = await reloaded.readAutomaticReentry("ctx-reentry-legacy-owner", "demo-local");
+        assert.equal(state.pending, false);
+        assert.equal(state.attempted, false);
+        assert.equal(state.sourceId, undefined);
+        assert.equal(state.sourceKind, undefined);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
 test("McpContextRegistry execution lease fences automatic re-entry across tool activity and accepted delivery", async () => {
     const root = await createTestTempDirectory("context-execution-lease");
     const filePath = join(root, "contexts.json");

@@ -78,7 +78,9 @@ export class ControlInstanceTomlDocument {
         }
         const { version: _version, workspace: _legacyWorkspace, ...config } = record;
         const draft = parseConfigInstanceDraft(config);
-        return version === 2 ? Object.assign(draft, { migratedFromVersion: 2 as const }) : draft;
+        return version === 2
+            ? Object.assign(migrateVersion2McpGroups(draft), { migratedFromVersion: 2 as const })
+            : draft;
     }
 
     encode(instance: ControlInstanceConfig): ConfigTomlDocument {
@@ -124,6 +126,28 @@ function rejectLegacyField(record: Record<string, unknown>, key: string, message
     if (record[key] !== undefined) {
         throw configInputError("parse", [key], "config.document.legacyField", message);
     }
+}
+
+function migrateVersion2McpGroups(draft: ConfigInstanceDraft): ConfigInstanceDraft {
+    const groups = draft.mcp?.tools?.groups;
+    if (groups === undefined || groups.includes("workspace") || groups.includes("interaction")) return draft;
+    const legacyDefaultGroups = ["file", "bash", "artifact", "tmux", "todo"];
+    if (
+        !legacyDefaultGroups.every((group) => groups.includes(group)) ||
+        !groups.every((group) => legacyDefaultGroups.includes(group) || group === "instance")
+    ) {
+        return draft;
+    }
+    return {
+        ...draft,
+        mcp: {
+            ...draft.mcp,
+            tools: {
+                ...draft.mcp?.tools,
+                groups: [...groups, "workspace"]
+            }
+        }
+    };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

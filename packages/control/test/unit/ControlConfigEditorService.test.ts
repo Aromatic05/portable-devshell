@@ -984,6 +984,7 @@ test("config editor reconciles instance MCP bindings from patches without restar
         },
     })]);
     const registered: Array<Record<string, unknown>> = [];
+    const retiredWorkspaceApps: string[] = [];
     const unregistered: string[] = [];
     const gateway = {} as never;
     const host = {
@@ -992,6 +993,9 @@ test("config editor reconciles instance MCP bindings from patches without restar
         },
         registerInstance(instance: Record<string, unknown>) {
             registered.push(instance);
+        },
+        async retireWorkspaceApp(instanceName: string) {
+            retiredWorkspaceApps.push(instanceName);
         },
         unregisterInstance(instanceName: string) {
             unregistered.push(instanceName);
@@ -1025,6 +1029,7 @@ test("config editor reconciles instance MCP bindings from patches without restar
     });
 
     assert.equal(registered.length, 1);
+    assert.deepEqual(retiredWorkspaceApps, ["demo-local"]);
     assert.equal(registered[0]?.gateway, gateway);
     assert.deepEqual(registered[0]?.policy, {
         capabilities: ["read", "write", "execute", "manage"],

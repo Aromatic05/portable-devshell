@@ -620,6 +620,7 @@ test("tmux_run block waits are interruptible before handoff and detach after the
         },
     };
     type Wait = {
+        automaticRecovery?: boolean;
         createdAt: string;
         createdByCtxId: string;
         detachedAt?: string;
@@ -658,7 +659,7 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     const gateway = {
         async cancelWait(_instance: string, waitId: string) { return update(waitId, "cancelled"); },
         async consumeWait(_instance: string, waitId: string) { return update(waitId, "consumed"); },
-        async createWait(_instance: string, input: { createdByCtxId: string; kind: "tmux"; ownerCallId?: string; payload?: JsonValue; taskId?: string; targetId: string }) {
+        async createWait(_instance: string, input: { automaticRecovery?: boolean; createdByCtxId: string; kind: "tmux"; ownerCallId?: string; payload?: JsonValue; taskId?: string; targetId: string }) {
             const now = new Date().toISOString();
             const wait: Wait = {
                 ...input,
@@ -770,6 +771,7 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     ) as Promise<{ interrupted?: boolean; task?: { id?: string; status?: string } }>;
     await waitUntil(() => waits.length === 1 && observeCalls > 0);
     assert.equal(waits[0]?.taskId, "todo-task-1");
+    assert.equal(waits[0]?.automaticRecovery, true);
     assert.deepEqual(waits[0]?.payload, { line: 80 });
     assert.equal(waits[0]?.status, "waiting");
     const interrupt = await dispatch.callTool(
@@ -916,6 +918,39 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     assert.equal(waits[5]?.status, "resolved");
     assert.equal(typeof waits[5]?.detachedAt, "string");
     assert.deepEqual(waits[5]?.result, terminalResults.get("task-5"));
+
+    const disabledCatalog = new McpEndpointCatalog({
+        gateway,
+        instanceName: "demo-local",
+        policy: { capabilities: ["read"], groups: ["tmux"] },
+        worker,
+    });
+    const disabledDispatch = new McpEndpointDispatch({
+        catalog: disabledCatalog,
+        contextRegistry: new McpContextRegistry(),
+        gateway,
+        instanceName: "demo-local",
+        tmuxBlockSyncMs: 250,
+        tmuxWaitPollMs: 1,
+        worker,
+    });
+    const disabledEnvironment = structuredResult<{ ctxId: string }>(await disabledDispatch.callTool(
+        "environ_info",
+        { workspace: "/workspace-disabled" },
+        { principal: "tester", requestId: "request-environment-disabled" },
+    ));
+    const disabledAbort = new AbortController();
+    const disabledCall = disabledDispatch.callTool(
+        "tmux_run",
+        { command: "sleep 10", ctxId: disabledEnvironment.ctxId, timeout: 660_000, wait: "block" },
+        { principal: "tester", requestId: "wait-disabled-workspace" },
+        disabledAbort.signal,
+    ) as Promise<{ detached?: boolean }>;
+    await waitUntil(() => runCalls === 6 && waits.length === 7);
+    disabledAbort.abort("transport closed");
+    const disabledResult = await disabledCall;
+    assert.equal(disabledResult.detached, true);
+    assert.equal(waits.at(-1)?.automaticRecovery, false);
 });
 
 test("tmux_read long waits detach into durable Workspace state", async () => {

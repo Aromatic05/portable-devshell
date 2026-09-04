@@ -237,6 +237,7 @@ export class GoalState {
         if (index === -1) {
             if (input.action === "claim") return { document, result: { claimed: false, goal: null } };
             if (input.action === "validate") return { document, result: { goal: null, valid: false } };
+            if (input.action === "retire") return { document, result: { goal: null, retired: false } };
             throw new Error("No Workspace Goal is attached to the current Context.");
         }
         const now = this.#now();
@@ -245,12 +246,16 @@ export class GoalState {
             const goal = snapshot(current, now);
             if (input.action === "claim") return { document, result: { claimed: false, goal } };
             if (input.action === "validate") return { document, result: { goal, valid: false } };
+            if (input.action === "retire") return { document, result: { goal, retired: false } };
             throw new Error(`Workspace Goal changed from ${input.goalId} to ${current.goalId}; refresh before retrying.`);
         }
         let next = current;
         let result: Record<string, unknown>;
 
-        if (input.action === "reset") {
+        if (input.action === "retire") {
+            next = clearContinuation(current);
+            result = { goal: snapshot(next, now), retired: true };
+        } else if (input.action === "reset") {
             next = {
                 ...clearContinuation(current),
                 continuationCount: 0,
