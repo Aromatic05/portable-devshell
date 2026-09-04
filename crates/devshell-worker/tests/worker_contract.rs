@@ -298,7 +298,10 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             .is_some_and(|value| value.contains("Prefer wait=block for unattended tasks on the current critical path")));
         assert!(tmux_run["description"]
             .as_str()
-            .is_some_and(|value| value.contains("environ_info bootstraps the Live Workspace")));
+            .is_some_and(|value| value.contains("use tmux_read unless the client explicitly provides automatic recovery")));
+        assert!(!tmux_run["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("Live Workspace")));
         assert!(tmux_run["inputSchema"]["properties"]["wait"]["description"]
             .as_str()
             .is_some_and(|value| value.contains("Use block when completion is required before continuing and there is no useful parallel work")));

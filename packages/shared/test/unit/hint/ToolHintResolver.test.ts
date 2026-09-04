@@ -210,15 +210,25 @@ test("tmux_run running task without block timeout yields a task-running diagnost
     assert.match(hints[0]?.text ?? "", /tmux_read/u);
 });
 
-test("tmux_run detached handoff tells the model not to poll", () => {
+test("tmux_run detached handoff stays valid without Workspace recovery", () => {
     const hints = resolveResultHints("tmux_run", {
         detached: true,
         task: { id: "t1", status: "running" },
     });
     assert.deepEqual(codes(hints), ["tmux.runDetached"]);
-    assert.match(hints[0]?.text ?? "", /do not poll/iu);
-    assert.match(hints[0]?.text ?? "", /end this turn/iu);
-    assert.match(hints[0]?.text ?? "", /wait deadline/iu);
+    assert.match(hints[0]?.text ?? "", /returned task id/iu);
+    assert.match(hints[0]?.text ?? "", /tmux_read/iu);
+    assert.doesNotMatch(hints[0]?.text ?? "", /Workspace/iu);
+});
+
+test("tmux_read detached handoff stays valid without Workspace recovery", () => {
+    const hints = resolveResultHints("tmux_read", {
+        detached: true,
+        task: { id: "t1", status: "running" },
+    });
+    assert.deepEqual(codes(hints), ["tmux.readDetached"]);
+    assert.match(hints[0]?.text ?? "", /tmux_read/iu);
+    assert.doesNotMatch(hints[0]?.text ?? "", /Workspace/iu);
 });
 
 test("tmux_run interrupted wait tells the model the task is still running", () => {

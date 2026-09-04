@@ -71,7 +71,14 @@ export function tmuxTaskResultHints(toolName: string, result: JsonValue): ToolDi
         asBoolean(record.detached) === true) {
         hints.push(diagnosticHint(
             "tmux.runDetached",
-            "The task has been detached and is still running. You may end this turn now; do not poll. Workspace will resume you when the task finishes or the wait deadline is reached."
+            "The task has been detached and is still running. Continue with the returned task id; use tmux_read when you need the result unless the client explicitly provides automatic recovery."
+        ));
+    }
+
+    if (toolName === "tmux_read" && asBoolean(record.detached) === true) {
+        hints.push(diagnosticHint(
+            "tmux.readDetached",
+            "The read wait has been detached while the task keeps running. Reuse tmux_read when you need more output unless the client explicitly provides automatic recovery."
         ));
     }
 
