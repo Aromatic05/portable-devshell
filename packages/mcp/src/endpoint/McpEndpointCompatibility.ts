@@ -41,27 +41,27 @@ const legacyTools: Readonly<Record<string, McpLegacyToolCompatibility>> = {
     artifact_share: {
         help: "Use devshell artifact share, shares, or revoke.",
         kind: "tombstone",
-        removedIn: "0.6.18",
+        removedIn: "0.6.17",
     },
     instance_create: {
         help: "Use devshell instance create.",
         kind: "tombstone",
-        removedIn: "0.6.18",
+        removedIn: "0.6.17",
     },
     instance_list: {
         help: "Use devshell instance list.",
         kind: "tombstone",
-        removedIn: "0.6.18",
+        removedIn: "0.6.17",
     },
     instance_status: {
         help: "Use devshell instance status <instance>.",
         kind: "tombstone",
-        removedIn: "0.6.18",
+        removedIn: "0.6.17",
     },
     instance_stop: {
         help: "Use devshell instance stop <instance>.",
         kind: "tombstone",
-        removedIn: "0.6.18",
+        removedIn: "0.6.17",
     },
     instance_start: {
         kind: "alias",
