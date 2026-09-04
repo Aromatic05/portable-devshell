@@ -265,6 +265,39 @@ test("AuditToolCallHistory uses bounded storage reads for unfiltered limited his
     assert.equal(readTailLimit, 200);
 });
 
+test("AuditToolCallHistory keeps active calls when bounded history is already full", async () => {
+    const instanceName = asInstanceName("active-first-history");
+    const persisted = ["old", "new"].map((callId, index): ToolCallRecord => ({
+        callId,
+        inputSummary: "{}",
+        instance: instanceName,
+        source: "mcp",
+        startedAt: `2026-09-01T00:00:0${index}.000Z`,
+        status: "completed",
+        toolName: "bash_run",
+    }));
+    const history = new AuditToolCallHistory(instanceName, {
+        async append() {},
+        async readAll() { throw new Error("unbounded audit read should not run"); },
+        async readTail(limit) {
+            assert.equal(limit, 2);
+            return persisted;
+        },
+    });
+    await history.started(
+        "active",
+        "bash_run",
+        "{}",
+        { source: "mcp" },
+        "2026-09-01T00:00:02.000Z",
+    );
+
+    assert.deepEqual(
+        (await history.read({ limit: 2 })).map((record) => record.callId),
+        ["new", "active"],
+    );
+});
+
 test("AuditToolCallHistory pushes filtered limited history into storage", async () => {
     const instanceName = asInstanceName("filtered-history");
     const record: ToolCallRecord = {
