@@ -269,6 +269,8 @@ eventBufferSize = 100
 
 `retentionDays` 默认 7 天，`maxBytes` 默认 64 MiB、最小 1 MiB。超过保留时间的记录会被删除；SQLite 数据库文件超过容量上限时，从最旧的审计记录开始淘汰并回收数据库页。`eventBufferSize` 只控制内存中的事件 replay 窗口，不控制 SQLite 持久化容量。小于 8 KiB 的 stdout/stderr 日志正文继续内联为 TEXT；更大的正文与 JSON 元数据分离存入 BLOB，高压缩收益内容使用 Zstd level 1，低收益内容使用 identity BLOB，读取接口会透明恢复原始 `message`。
 
+模型提供的 tool-call `purpose` / `explanation` 属于 Control provenance，不下传 Worker。它使用独立的 hot/cold 生命周期：hot journal 位于 `~/.devshell/control/tool-call-provenance.jsonl`，默认达到 8 MiB 后压缩为 Zstd level 1 的 `tool-call-provenance.jsonl.archive/*.jsonl.zst`；cold 总量默认限制为 64 MiB，默认保留 7 天。运行时只常驻 hot provenance，查询历史 tool call 时通过 `instance + callId` 索引按需读取 cold archive。容量淘汰从最旧 cold archive 开始，不改变 Worker `audit.sqlite3` 的生命周期或权限边界。
+
 升级时，旧的 `events.jsonl`、`logs.jsonl`、`tool-calls.jsonl` 和 `approvals.jsonl` 会在首次打开实例时事务导入 SQLite，导入成功后删除旧文件。
 
 ## 实例状态与数据
