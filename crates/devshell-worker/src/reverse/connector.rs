@@ -198,21 +198,33 @@ impl ReverseConnector {
         let bulk_connector = self.clone();
         let bulk_active = Arc::clone(&active);
         let bulk = thread::spawn(move || {
-            match bulk_connector.connect_wss(generation, "bulk") {
-                Ok(socket) => bulk_connector.run_wss(socket, false, bulk_active),
-                Err(error) => {
+            let mut backoff = Duration::from_secs(1);
+            while bulk_active.load(Ordering::SeqCst) && !bulk_connector.router.shutdown_requested() {
+                let result = match bulk_connector.connect_wss(generation, "bulk") {
+                    Ok(socket) => {
+                        backoff = Duration::from_secs(1);
+                        bulk_connector.run_wss(socket, false, Arc::clone(&bulk_active))
+                    }
+                    Err(error) => Err(error),
+                };
+                if !bulk_active.load(Ordering::SeqCst) || bulk_connector.router.shutdown_requested() {
+                    break;
+                }
+                if let Err(error) = result {
                     let _ = append_log(
                         &bulk_connector.paths,
                         &format!(
-                            "reverse bulk lane unavailable; using control lane fallback: {error}"
+                            "reverse bulk lane unavailable; using control lane fallback and retrying: {error}"
                         ),
                     );
-                    Ok(())
                 }
+                thread::park_timeout(backoff);
+                backoff = (backoff * 2).min(MAX_RECONNECT_BACKOFF);
             }
         });
         let result = self.run_wss(control_socket, true, Arc::clone(&active));
         active.store(false, Ordering::SeqCst);
+        bulk.thread().unpark();
         let _ = bulk.join();
         result
     }
