@@ -37,7 +37,7 @@ export class McpToolCatalogEnvironment {
     readonly #definition: ToolDefinition = {
         description:
             "Prepare and inspect the workspace environment for the current portable-devshell Context. This is the single Context bootstrap tool: with workspace it creates or attaches a Context when needed, stable external session bindings are reused automatically, and an expired Context lease is renewed without changing ctxId. Call it once before using other portable-devshell tools. Pass ctxId only when explicitly selecting an existing Context.",
-        group: "environment",
+        group: "environ",
         inputSchema: {
             additionalProperties: false,
             properties: {

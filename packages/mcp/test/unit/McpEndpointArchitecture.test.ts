@@ -775,7 +775,7 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     assert.deepEqual(waits[0]?.payload, { line: 80 });
     assert.equal(waits[0]?.status, "waiting");
     const interrupt = await dispatch.callTool(
-        "workspace_wait_interrupt",
+        "workspace_interrupt",
         { ctxId: environment.ctxId, token, waitId: waits[0]!.waitId },
         { principal: "tester", requestId: "interrupt-wait" },
     ) as { detached?: boolean; interrupted?: boolean; tmuxTaskId?: string };

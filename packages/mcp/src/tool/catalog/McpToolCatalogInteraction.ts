@@ -21,15 +21,15 @@ export type McpToolCatalogInteractionName =
     | "workspace_reconnect"
     | "workspace_snapshot"
     | "workspace_watch"
-    | "workspace_question_answer"
-    | "workspace_wait_interrupt"
-    | "workspace_task_control"
-    | "workspace_wait_recover"
-    | "workspace_goal_pause"
-    | "workspace_goal_resume"
-    | "workspace_goal_stop"
-    | "workspace_reentry_control"
-    | "workspace_approval_decide";
+    | "workspace_answer"
+    | "workspace_interrupt"
+    | "workspace_task"
+    | "workspace_recover"
+    | "workspace_pause"
+    | "workspace_resume"
+    | "workspace_stop"
+    | "workspace_reentry"
+    | "workspace_approval";
 
 const appOnlyMeta: JsonValue = {
     ui: { visibility: ["app"] },
@@ -181,7 +181,7 @@ export class McpToolCatalogInteraction {
                 required: ["waitId", "answer", "token"],
                 type: "object",
             },
-            name: "workspace_question_answer",
+            name: "workspace_answer",
             outputSchema: workspaceQuestionAnswerOutputSchema,
             requiredCapabilities: [],
         },
@@ -198,7 +198,7 @@ export class McpToolCatalogInteraction {
                 required: ["waitId", "token"],
                 type: "object",
             },
-            name: "workspace_wait_interrupt",
+            name: "workspace_interrupt",
             outputSchema: workspaceWaitInterruptOutputSchema,
             requiredCapabilities: [],
         },
@@ -217,13 +217,13 @@ export class McpToolCatalogInteraction {
                 required: ["taskId", "revision", "action", "token"],
                 type: "object",
             },
-            name: "workspace_task_control",
+            name: "workspace_task",
             outputSchema: todoReadOutputSchema,
             requiredCapabilities: [],
         },
         {
             _meta: appOnlyMeta,
-            description: "Dismiss one previously attempted detached-wait automatic resume after human reconciliation. Automatic delivery ownership is managed only by workspace_reentry_control. App-only helper; models must not call it.",
+            description: "Dismiss one previously attempted detached-wait automatic resume after human reconciliation. Automatic delivery ownership is managed only by workspace_reentry. App-only helper; models must not call it.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
@@ -236,7 +236,7 @@ export class McpToolCatalogInteraction {
                 required: ["action", "recoveryMessageId", "waitId", "token"],
                 type: "object",
             },
-            name: "workspace_wait_recover",
+            name: "workspace_recover",
             outputSchema: workspaceWaitRecoveryOutputSchema,
             requiredCapabilities: [],
         },
@@ -258,7 +258,7 @@ export class McpToolCatalogInteraction {
                 required: ["action", "token"],
                 type: "object",
             },
-            name: "workspace_reentry_control",
+            name: "workspace_reentry",
             outputSchema: workspaceReentryOutputSchema,
             requiredCapabilities: [],
         },
@@ -276,7 +276,7 @@ export class McpToolCatalogInteraction {
                 required: ["goalId", "revision", "token"],
                 type: "object",
             },
-            name: "workspace_goal_pause",
+            name: "workspace_pause",
             outputSchema: workspaceGoalResultOutputSchema,
             requiredCapabilities: [],
         },
@@ -294,7 +294,7 @@ export class McpToolCatalogInteraction {
                 required: ["goalId", "revision", "token"],
                 type: "object",
             },
-            name: "workspace_goal_resume",
+            name: "workspace_resume",
             outputSchema: workspaceGoalResultOutputSchema,
             requiredCapabilities: [],
         },
@@ -312,7 +312,7 @@ export class McpToolCatalogInteraction {
                 required: ["goalId", "revision", "token"],
                 type: "object",
             },
-            name: "workspace_goal_stop",
+            name: "workspace_stop",
             outputSchema: workspaceGoalResultOutputSchema,
             requiredCapabilities: [],
         },
@@ -330,7 +330,7 @@ export class McpToolCatalogInteraction {
                 required: ["approvalId", "decision", "token"],
                 type: "object",
             },
-            name: "workspace_approval_decide",
+            name: "workspace_approval",
             outputSchema: workspaceApprovalRequestOutputSchema,
             requiredCapabilities: [],
         },

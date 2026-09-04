@@ -93,7 +93,7 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
 
     await choice.first().click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_question_answer')");
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_answer')");
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
 
     await app.getByText("Approval", { exact: true }).waitFor({ state: "visible" });
@@ -103,7 +103,7 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     await app.getByText("Publishing a release changes the remote repository.", { exact: true }).waitFor({ state: "visible" });
     assert.equal(await app.getByText("approval.decision", { exact: false }).count(), 0);
     await app.getByRole("button", { name: "Approve", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_approval_decide')");
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_approval')");
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
 
     await app.getByText("Background task", { exact: true }).waitFor({ state: "visible" });
@@ -111,11 +111,11 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     assert.equal(await app.getByText("tmux_run", { exact: true }).count(), 0);
     assert.equal(await app.getByText("task-browser", { exact: true }).count(), 0);
     await app.getByText("Stop waiting", { exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_wait_interrupt')");
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_interrupt')");
     assert.equal(await app.getByText("No blocking event.", { exact: true }).count(), 0);
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
     await app.getByRole("button", { name: "Stop Goal", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_goal_stop')");
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_stop')");
     await page.waitForFunction(() => {
         const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
         return !iframe?.contentDocument?.body.textContent?.includes("Ship Workspace Goal mode");
@@ -123,20 +123,20 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
     await app.getByText("Task · v0.6 feature train", { exact: true }).waitFor({ state: "visible" });
     await app.getByRole("button", { name: "Pause task", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task_control' && call.arguments.action === 'pause')");
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task' && call.arguments.action === 'pause')");
     await app.getByText("Paused", { exact: true }).waitFor({ state: "visible" });
     await app.getByRole("button", { name: "Resume task", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task_control' && call.arguments.action === 'resume')");
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task' && call.arguments.action === 'resume')");
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
     await app.getByText("Running", { exact: true }).waitFor({ state: "visible" });
     await app.getByRole("button", { name: "Cancel task", exact: true }).click();
     await app.getByRole("button", { name: "Confirm cancel", exact: true }).waitFor({ state: "visible" });
     assert.equal(
-        await page.evaluate("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task_control' && call.arguments.action === 'cancel')"),
+        await page.evaluate("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task' && call.arguments.action === 'cancel')"),
         false,
     );
     await app.getByRole("button", { name: "Confirm cancel", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task_control' && call.arguments.action === 'cancel')");
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task' && call.arguments.action === 'cancel')");
     await app.getByText("Task · v0.6 feature train", { exact: true }).waitFor({ state: "detached" });
     await page.waitForFunction("(window.__workspaceWatchCount || 0) >= 2");
 
@@ -158,13 +158,13 @@ test("Workspace App watches live state and keeps human-action authorization hidd
     }>;
     const snapshotCall = calls.find((call) => call.name === "workspace_snapshot");
     const watchCall = calls.find((call) => call.name === "workspace_watch");
-    const answerCall = calls.find((call) => call.name === "workspace_question_answer");
-    const approvalCall = calls.find((call) => call.name === "workspace_approval_decide");
-    const goalStopCall = calls.find((call) => call.name === "workspace_goal_stop");
-    const interruptCall = calls.find((call) => call.name === "workspace_wait_interrupt");
-    const taskPauseCall = calls.find((call) => call.name === "workspace_task_control" && call.arguments?.action === "pause");
-    const taskResumeCall = calls.find((call) => call.name === "workspace_task_control" && call.arguments?.action === "resume");
-    const taskCancelCall = calls.find((call) => call.name === "workspace_task_control" && call.arguments?.action === "cancel");
+    const answerCall = calls.find((call) => call.name === "workspace_answer");
+    const approvalCall = calls.find((call) => call.name === "workspace_approval");
+    const goalStopCall = calls.find((call) => call.name === "workspace_stop");
+    const interruptCall = calls.find((call) => call.name === "workspace_interrupt");
+    const taskPauseCall = calls.find((call) => call.name === "workspace_task" && call.arguments?.action === "pause");
+    const taskResumeCall = calls.find((call) => call.name === "workspace_task" && call.arguments?.action === "resume");
+    const taskCancelCall = calls.find((call) => call.name === "workspace_task" && call.arguments?.action === "cancel");
 
     assert.equal(snapshotCall?.arguments?.token, "browser-secret-token");
     assert.equal(watchCall?.arguments?.token, "browser-secret-token");
@@ -219,20 +219,20 @@ test("Workspace blocked Goal shows its reason and can be resumed by the user", B
     await app.getByText("Blocked", { exact: true }).waitFor({ state: "visible" });
     await app.getByText("Waiting for user decision", { exact: true }).waitFor({ state: "visible" });
     await app.getByRole("button", { name: "Resume Goal", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_goal_resume')");
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_resume')");
     const resumeCall = await page.evaluate(
-        "(window.__workspaceCalls || []).find(call => call.name === 'workspace_goal_resume')",
+        "(window.__workspaceCalls || []).find(call => call.name === 'workspace_resume')",
     ) as { arguments?: Record<string, unknown> } | undefined;
     assert.equal(resumeCall?.arguments?.goalId, "goal-browser");
     assert.equal(resumeCall?.arguments?.revision, 1);
     assert.equal(resumeCall?.arguments?.token, "browser-secret-token");
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_reentry_control' && ['claim','validate','attempt','report'].includes(call.arguments.action)).length >= 3");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_reentry' && ['claim','validate','attempt','report'].includes(call.arguments.action)).length >= 3");
     await page.waitForTimeout(100);
-    const explicitClaimId = await page.evaluate("(window.__workspaceCalls || []).find(call => call.name === 'workspace_reentry_control' && call.arguments.action === 'claim' && call.arguments.intent === 'goal-resume')?.arguments.claimId") as string;
+    const explicitClaimId = await page.evaluate("(window.__workspaceCalls || []).find(call => call.name === 'workspace_reentry' && call.arguments.action === 'claim' && call.arguments.intent === 'goal-resume')?.arguments.claimId") as string;
     const continuationCalls = await page.evaluate((claimId) =>
         ((window as typeof window & { __workspaceCalls?: Array<{ arguments?: Record<string, unknown>; name?: string }> }).__workspaceCalls || [])
-            .filter((call) => call.name === "workspace_reentry_control" && call.arguments?.claimId === claimId),
+            .filter((call) => call.name === "workspace_reentry" && call.arguments?.claimId === claimId),
         explicitClaimId,
     ) as Array<{ arguments?: Record<string, unknown> }>;
     assert.deepEqual(continuationCalls.map((call) => call.arguments?.action), ["claim", "validate", "attempt", "report"]);
@@ -273,13 +273,13 @@ test("Workspace fences an ambiguous user-initiated Goal resume before Host dispa
     const app = page.frameLocator("#workspace");
     await app.getByRole("button", { name: "Resume Goal", exact: true }).click();
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_reentry_control' && ['claim','validate','attempt','report'].includes(call.arguments.action)).length >= 3");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_reentry' && ['claim','validate','attempt','report'].includes(call.arguments.action)).length >= 3");
     await page.waitForTimeout(100);
-    const ambiguousClaimId = await page.evaluate("(window.__workspaceCalls || []).find(call => call.name === 'workspace_reentry_control' && call.arguments.action === 'claim' && call.arguments.intent === 'goal-resume')?.arguments.claimId") as string;
+    const ambiguousClaimId = await page.evaluate("(window.__workspaceCalls || []).find(call => call.name === 'workspace_reentry' && call.arguments.action === 'claim' && call.arguments.intent === 'goal-resume')?.arguments.claimId") as string;
     assert.deepEqual(
         await page.evaluate((claimId) =>
             ((window as typeof window & { __workspaceCalls?: Array<{ arguments?: Record<string, unknown>; name?: string }> }).__workspaceCalls || [])
-                .filter((call) => call.name === "workspace_reentry_control" && call.arguments?.claimId === claimId)
+                .filter((call) => call.name === "workspace_reentry" && call.arguments?.claimId === claimId)
                 .map((call) => call.arguments?.action),
             ambiguousClaimId,
         ),
@@ -295,7 +295,7 @@ test("Workspace fences an ambiguous user-initiated Goal resume before Host dispa
     assert.equal(
         await page.evaluate((claimId) =>
             ((window as typeof window & { __workspaceCalls?: Array<{ arguments?: Record<string, unknown>; name?: string }> }).__workspaceCalls || [])
-                .filter((call) => call.name === "workspace_reentry_control" && call.arguments?.action === "attempt" && call.arguments?.claimId === claimId).length,
+                .filter((call) => call.name === "workspace_reentry" && call.arguments?.action === "attempt" && call.arguments?.claimId === claimId).length,
             ambiguousClaimId,
         ),
         1,
@@ -329,7 +329,7 @@ test("Workspace user can pause an active Goal without triggering model re-entry"
 
     const app = page.frameLocator("#workspace");
     await app.getByRole("button", { name: "Pause Goal", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_goal_pause')");
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_pause')");
     await app.getByText("Paused", { exact: true }).waitFor({ state: "visible" });
     assert.equal(await app.getByRole("button", { name: "Resume Goal", exact: true }).count(), 1);
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
@@ -367,7 +367,7 @@ test("Workspace Goal requests one model continuation after inactivity", BROWSER_
     }, workspaceAppHtml);
 
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_reentry_control' && ['claim','validate','attempt','report'].includes(call.arguments.action)).length >= 4");
+    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_reentry' && ['claim','validate','attempt','report'].includes(call.arguments.action)).length >= 4");
     const continuationText = await page.evaluate(
         "window.__modelMessages[0].content[0].text",
     ) as string;
@@ -397,7 +397,7 @@ test("Workspace Goal requests one model continuation after inactivity", BROWSER_
     const automaticClaimId = await page.evaluate("window.__workspaceReentryReports.at(-1).claimId") as string;
     const continuationCalls = await page.evaluate((claimId) =>
         ((window as typeof window & { __workspaceCalls?: Array<{ arguments?: Record<string, unknown>; name?: string }> }).__workspaceCalls || [])
-            .filter((call) => call.name === "workspace_reentry_control" && call.arguments?.claimId === claimId),
+            .filter((call) => call.name === "workspace_reentry" && call.arguments?.claimId === claimId),
         automaticClaimId,
     ) as Array<{ arguments?: Record<string, unknown> }>;
     assert.equal(continuationCalls[0]?.arguments?.action, "claim");
@@ -493,7 +493,7 @@ test("Workspace user cancellation suppresses automatic Goal continuation until l
             params: { reason: "user action" }
         }, "*");
     });
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_reentry_control' && call.arguments.action === 'yield')");
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_reentry' && call.arguments.action === 'yield')");
 
     assert.equal(await page.evaluate("window.__emitWorkspaceSnapshotAfterCancellation()"), true);
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -639,7 +639,7 @@ test("Workspace Stop fences an in-flight Goal continuation before model re-entry
         return !iframe?.contentDocument?.body.textContent?.includes("Ship Workspace Goal mode");
     });
     assert.equal(await page.evaluate("window.__releaseGoalContinuationContext()"), true);
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_reentry_control' && call.arguments.action === 'release')");
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_reentry' && call.arguments.action === 'release')");
     await page.waitForTimeout(100);
 
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
@@ -703,7 +703,7 @@ test("Workspace App keeps the internal ctxId even when Context selection came fr
     const app = page.frameLocator("#workspace");
     await app.getByText("Session mode question?", { exact: true }).waitFor({ state: "visible" });
     await app.locator('[data-question-choice="wait-session-question"]').click();
-    await page.waitForFunction("(window.__sessionModeCalls || []).some(call => call.name === 'workspace_question_answer')");
+    await page.waitForFunction("(window.__sessionModeCalls || []).some(call => call.name === 'workspace_answer')");
 
     const calls = await page.evaluate("window.__sessionModeCalls || []") as Array<{
         arguments?: Record<string, unknown>;
@@ -711,7 +711,7 @@ test("Workspace App keeps the internal ctxId even when Context selection came fr
     }>;
     assert.equal(calls.length > 0, true);
     assert.equal(calls.every((call) => call.arguments?.ctxId === "ctx-session-mode"), true);
-    const answer = calls.find((call) => call.name === "workspace_question_answer");
+    const answer = calls.find((call) => call.name === "workspace_answer");
     assert.equal(answer?.arguments?.token, "session-mode-token");
     assert.equal(answer?.arguments?.waitId, "wait-session-question");
 
@@ -831,7 +831,7 @@ test("Workspace App claims a resolved detached wait before one automatic model r
     const recoveryClaimId = await page.evaluate("window.__recoveryReentryReports[0].claimId") as string;
     const recoverCalls = await page.evaluate((claimId) =>
         ((window as typeof window & { __workspaceCalls?: Array<{ arguments?: Record<string, unknown>; name?: string }> }).__workspaceCalls || [])
-            .filter((call) => call.name === "workspace_reentry_control" && call.arguments?.claimId === claimId),
+            .filter((call) => call.name === "workspace_reentry" && call.arguments?.claimId === claimId),
         recoveryClaimId,
     ) as Array<{ arguments?: Record<string, unknown> }>;
     assert.deepEqual(recoverCalls.map((call) => call.arguments?.action), ["claim", "validate", "attempt", "report"]);
@@ -862,7 +862,7 @@ test("Workspace never automatically replays an uncertain detached wait", BROWSER
     await page.waitForTimeout(250);
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
     assert.equal(
-        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"),
+        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_recover').length"),
         0,
     );
 });
@@ -894,7 +894,7 @@ test("Workspace user ownership fences a ready detached wait recovery", BROWSER_T
     await page.waitForTimeout(250);
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
     assert.equal(
-        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_wait_recover').length"),
+        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_recover').length"),
         0,
     );
 });
@@ -994,13 +994,13 @@ test("Workspace Stop waiting resumes the agent after a detached tmux wait", BROW
     assert.equal(await app.getByText("No blocking event.", { exact: true }).count(), 0);
     await app.getByText("Stop waiting", { exact: true }).waitFor({ state: "visible" });
     await app.getByText("Stop waiting", { exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_wait_interrupt')");
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_interrupt')");
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
     await page.waitForFunction("(window.__resumeReports || []).length === 1");
     const recoveryClaimId = await page.evaluate("window.__resumeReports[0].claimId") as string;
     const recoveryActions = await page.evaluate((claimId) =>
         ((window as typeof window & { __workspaceCalls?: Array<{ arguments?: Record<string, unknown>; name?: string }> }).__workspaceCalls || [])
-            .filter((call) => call.name === "workspace_reentry_control" && call.arguments?.claimId === claimId)
+            .filter((call) => call.name === "workspace_reentry" && call.arguments?.claimId === claimId)
             .map((call) => call.arguments?.action),
         recoveryClaimId,
     );
@@ -1030,7 +1030,7 @@ test("Workspace task Resume uses an already resolved wait as its single model re
 
     const app = page.frameLocator("#workspace");
     await app.getByRole("button", { name: "Resume task", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task_control' && call.arguments.action === 'resume')");
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task' && call.arguments.action === 'resume')");
     await page.waitForFunction("(window.__resumeReports || []).length === 1");
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -1061,13 +1061,13 @@ test("Workspace task Resume ignores a background wait whose recovery ownership i
 
     const app = page.frameLocator("#workspace");
     await app.getByRole("button", { name: "Resume task", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task_control' && call.arguments.action === 'resume')");
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task' && call.arguments.action === 'resume')");
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
     await new Promise((resolve) => setTimeout(resolve, 100));
     assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
     assert.equal(await page.evaluate("window.__resumeReports.length"), 1);
     assert.equal(
-        await page.evaluate("(window.__workspaceCalls || []).find(call => call.name === 'workspace_reentry_control' && call.arguments.action === 'claim' && call.arguments.intent === 'task-resume')?.arguments.sourceId"),
+        await page.evaluate("(window.__workspaceCalls || []).find(call => call.name === 'workspace_reentry' && call.arguments.action === 'claim' && call.arguments.intent === 'task-resume')?.arguments.sourceId"),
         "task-resume",
     );
 });
@@ -1097,7 +1097,7 @@ test("Workspace Goal Resume uses an already resolved wait as its single model re
 
     const app = page.frameLocator("#workspace");
     await app.getByRole("button", { name: "Resume Goal", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_goal_resume')");
+    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_resume')");
     await page.waitForFunction("(window.__resumeReports || []).length === 1");
     await page.waitForFunction("(window.__modelMessages || []).length === 1");
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -1601,22 +1601,22 @@ window.addEventListener("message", function (event) {
         }
         return;
     }
-    if (call.name === "workspace_question_answer") {
+    if (call.name === "workspace_answer") {
         window.__workspaceQuestionAnswered = true;
         reply({ structuredContent: { answer: "Continue", detached: false, taskId: "task-plan", waitId: "wait-question" } });
         return;
     }
-    if (call.name === "workspace_approval_decide") {
+    if (call.name === "workspace_approval") {
         window.__workspaceApprovalPending = false;
         reply({ structuredContent: { approvalId: call.arguments.approvalId, status: "approved" } });
         return;
     }
-    if (call.name === "workspace_wait_interrupt") {
+    if (call.name === "workspace_interrupt") {
         window.__workspaceWaitInterrupted = true;
         reply({ structuredContent: { detached: false, interrupted: true, status: "resolved", taskId: "task-plan", tmuxTaskId: "task-browser", waitId: "wait-background" } });
         return;
     }
-    if (call.name === "workspace_task_control") {
+    if (call.name === "workspace_task") {
         if (call.arguments.action === "pause") window.__taskStatus = "paused";
         if (call.arguments.action === "resume") window.__taskStatus = "in_progress";
         if (call.arguments.action === "cancel") window.__taskStatus = "cancelled";
@@ -1630,19 +1630,19 @@ window.addEventListener("message", function (event) {
         } });
         return;
     }
-    if (call.name === "workspace_goal_pause") {
+    if (call.name === "workspace_pause") {
         window.__workspaceGoalPaused = true;
         window.__workspaceReentryMode = "paused";
         window.__workspaceReentrySuppressedAt = new Date().toISOString();
         reply({ structuredContent: { goal: snapshot(false).goal } });
         return;
     }
-    if (call.name === "workspace_goal_stop") {
+    if (call.name === "workspace_stop") {
         window.__workspaceGoalStopped = true;
         reply({ structuredContent: { goal: snapshot(false).goal } });
         return;
     }
-    if (call.name === "workspace_goal_resume") {
+    if (call.name === "workspace_resume") {
         window.__workspaceGoalBlocked = false;
         window.__workspaceGoalPaused = false;
         window.__workspaceReentryMode = "automatic";
@@ -1696,7 +1696,7 @@ window.addEventListener("message", function (event) {
             return;
         }
     }
-    if (call.name === "workspace_reentry_control") {
+    if (call.name === "workspace_reentry") {
         var reentryAction = call.arguments && call.arguments.action;
         if (reentryAction === "yield") {
             window.__workspaceReentryEpoch += 1;
@@ -1927,7 +1927,7 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (call.name === "workspace_watch") return;
-    if (call.name === "workspace_question_answer") {
+    if (call.name === "workspace_answer") {
         window.__sessionModeAnswered = true;
         reply({ structuredContent: { answer: "Continue", detached: false, taskId: "task-session", waitId: "wait-session-question" } });
         return;
@@ -2190,7 +2190,7 @@ window.addEventListener("message", function (event) {
         reply({ structuredContent: { changed: false, cursor: 1 } });
         return;
     }
-    if (call.name === "workspace_reentry_control") {
+    if (call.name === "workspace_reentry") {
         var reentryAction = call.arguments.action;
         if (reentryAction === "claim") {
             var delivery = recoveryDelivery();
@@ -2447,7 +2447,7 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (call.name === "workspace_watch") return;
-    if (call.name === "workspace_reentry_control") {
+    if (call.name === "workspace_reentry") {
         var action = call.arguments.action;
         if (action === "claim") {
             var delivery = resumeDelivery(call.arguments || {});
@@ -2491,7 +2491,7 @@ window.addEventListener("message", function (event) {
         reply({ structuredContent: { attempted: window.__resumeAttempted, epoch: 0, executionActive: false, executionEpoch: 0, pending: !!window.__resumeReentryClaimId } });
         return;
     }
-    if (call.name === "workspace_wait_interrupt") {
+    if (call.name === "workspace_interrupt") {
         window.__waitWindowInterrupted = true;
         reply({ structuredContent: {
             detached: true,
@@ -2503,7 +2503,7 @@ window.addEventListener("message", function (event) {
         } });
         return;
     }
-    if (call.name === "workspace_task_control") {
+    if (call.name === "workspace_task") {
         if (call.arguments.action === "resume") window.__taskStatus = "in_progress";
         window.__taskRevision += 1;
         reply({ structuredContent: {
@@ -2515,7 +2515,7 @@ window.addEventListener("message", function (event) {
         } });
         return;
     }
-    if (call.name === "workspace_goal_resume") {
+    if (call.name === "workspace_resume") {
         window.__resumeGoalBlocked = false;
         reply({ structuredContent: { goal: resumeSnapshot().goal } });
         return;
@@ -2646,7 +2646,7 @@ window.addEventListener("message", function (event) {
         reply({ structuredContent: { changed: false, cursor: 1 } });
         return;
     }
-    if (call.name === "workspace_reentry_control") {
+    if (call.name === "workspace_reentry") {
         var action = call.arguments.action;
         if (action === "claim") {
             var delivery = detachedDelivery();
@@ -2680,7 +2680,7 @@ window.addEventListener("message", function (event) {
         reply({ structuredContent: { attempted: window.__detachedAttempted, epoch: 0, executionActive: false, executionEpoch: 0, pending: !!window.__detachedReentryClaimId } });
         return;
     }
-    if (call.name === "workspace_question_answer") {
+    if (call.name === "workspace_answer") {
         window.__questionAnswered = true;
         reply({ structuredContent: {
             answer: call.arguments.answer,

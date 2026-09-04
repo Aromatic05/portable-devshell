@@ -116,7 +116,7 @@ export class McpWorkspaceReentryArbiter {
         if (request.action === "validate") return await this.#validate(gateway, context, claimId);
         if (request.action === "attempt") return await this.#attempt(gateway, context, claimId);
         if (request.action === "report") {
-            if (request.outcome === undefined) throw new Error("workspace_reentry_control report requires outcome.");
+            if (request.outcome === undefined) throw new Error("workspace_reentry report requires outcome.");
             return await this.#report(gateway, context, claimId, request.outcome);
         }
         await this.#releaseSource(gateway, ctxId, claimId);
@@ -713,24 +713,24 @@ function readReentryControl(input: JsonValue): {
     sourceId?: string;
 } {
     const record = asRecord(input);
-    if (record === undefined) throw new Error("workspace_reentry_control requires an object input.");
+    if (record === undefined) throw new Error("workspace_reentry requires an object input.");
     const action = record.action;
     if (
         action !== "get" && action !== "yield" && action !== "resume" && action !== "claim" && action !== "validate" &&
         action !== "attempt" && action !== "report" && action !== "release"
     ) {
-        throw new Error("workspace_reentry_control action must be get, yield, resume, claim, validate, attempt, report, or release.");
+        throw new Error("workspace_reentry action must be get, yield, resume, claim, validate, attempt, report, or release.");
     }
     const intent = record.intent;
     if (
         intent !== undefined && intent !== "automatic" && intent !== "goal-resume" &&
         intent !== "goal-retry" && intent !== "task-resume"
     ) {
-        throw new Error("workspace_reentry_control intent must be automatic, goal-resume, goal-retry, or task-resume.");
+        throw new Error("workspace_reentry intent must be automatic, goal-resume, goal-retry, or task-resume.");
     }
     const outcome = record.outcome;
     if (outcome !== undefined && outcome !== "accepted" && outcome !== "rejected" && outcome !== "uncertain") {
-        throw new Error("workspace_reentry_control outcome must be accepted, rejected, or uncertain.");
+        throw new Error("workspace_reentry outcome must be accepted, rejected, or uncertain.");
     }
     return {
         action,

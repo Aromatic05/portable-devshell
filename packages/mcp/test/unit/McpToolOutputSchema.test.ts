@@ -73,16 +73,16 @@ test("Control-owned MCP tools describe their structured output instead of generi
     assertProperties(definition(definitions, "workspace_watch").outputSchema, ["changed", "cursor", "snapshot"]);
     assertProperties(definition(definitions, "workspace_goal").outputSchema, ["goal"]);
     assert.equal(definitions.some((entry) => entry.name === "workspace_goal_continue"), false);
-    assert.deepEqual(required(definition(definitions, "workspace_question_answer").outputSchema), [
+    assert.deepEqual(required(definition(definitions, "workspace_answer").outputSchema), [
         "answer", "detached", "questionId", "waitId"
     ]);
-    assertProperties(definition(definitions, "workspace_task_control").outputSchema, [
+    assertProperties(definition(definitions, "workspace_task").outputSchema, [
         "items", "revision", "summary", "taskId", "tasks", "title"
     ]);
-    assertProperties(definition(definitions, "workspace_wait_recover").outputSchema, [
+    assertProperties(definition(definitions, "workspace_recover").outputSchema, [
         "dismissed", "kind", "targetId", "waitId"
     ]);
-    assertProperties(definition(definitions, "workspace_approval_decide").outputSchema, [
+    assertProperties(definition(definitions, "workspace_approval").outputSchema, [
         "approvalId", "callId", "createdAt", "decision", "expiresAt", "inputSummary", "instance", "reason", "riskLevel", "source", "status", "toolName"
     ]);
 

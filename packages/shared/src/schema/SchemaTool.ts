@@ -1,4 +1,4 @@
-import type { ToolCapability, ToolDefinition } from "../dto/tool/DtoToolDefinition.js";
+import { toolNamespace, type ToolCapability, type ToolDefinition } from "../dto/tool/DtoToolDefinition.js";
 import type { JsonValue } from "../type/TypeJsonValue.js";
 
 type ParseSuccess<T> = {
@@ -52,6 +52,10 @@ export const toolSchema = {
         if (typeof value.name !== "string" || value.name.length === 0) {
             throw new Error("tool.name must be a non-empty string");
         }
+        const namespace = toolNamespace(value.name);
+        if (namespace === undefined) {
+            throw new Error("tool.name must use namespace_operation form");
+        }
 
         if (typeof value.description !== "string") {
             throw new Error("tool.description must be a string");
@@ -59,6 +63,9 @@ export const toolSchema = {
 
         if (typeof value.group !== "string" || value.group.length === 0) {
             throw new Error("tool.group must be a non-empty string");
+        }
+        if (value.group !== namespace) {
+            throw new Error(`tool.group ${value.group} must match namespace ${namespace} from tool.name ${value.name}`);
         }
 
         if (!isRecord(value.inputSchema) || !isRecord(value.outputSchema)) {

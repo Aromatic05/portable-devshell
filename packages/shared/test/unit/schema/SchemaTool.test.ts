@@ -32,8 +32,10 @@ test("tool schema rejects malformed fields and capability lists", () => {
     const cases: unknown[] = [
         null,
         { ...validTool, name: "" },
+        { ...validTool, name: "bash" },
         { ...validTool, description: 1 },
         { ...validTool, group: "" },
+        { ...validTool, group: "file" },
         { ...validTool, inputSchema: [] },
         { ...validTool, requiredCapabilities: "execute" },
         { ...validTool, requiredCapabilities: ["admin"] },
@@ -43,6 +45,22 @@ test("tool schema rejects malformed fields and capability lists", () => {
     for (const value of cases) {
         assert.throws(() => toolSchema.parse(value));
     }
+});
+
+test("tool schema requires group to equal the namespace before the first underscore", () => {
+    assert.equal(toolSchema.parse(validTool).group, "bash");
+    assert.throws(
+        () => toolSchema.parse({ ...validTool, name: "bash_run_detached" }),
+        /namespace_operation/iu,
+    );
+    assert.throws(
+        () => toolSchema.parse({ ...validTool, name: "bash_run-x" }),
+        /namespace_operation/iu,
+    );
+    assert.throws(
+        () => toolSchema.parse({ ...validTool, group: "shell", name: "bash_run" }),
+        /tool\.group.*namespace bash/iu,
+    );
 });
 
 test("tool schema safeParse returns the parsing error without throwing", () => {

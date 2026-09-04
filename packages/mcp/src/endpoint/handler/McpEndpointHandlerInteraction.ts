@@ -78,32 +78,32 @@ export class McpEndpointHandlerInteraction {
                 return await this.#readWorkspace(gateway, input, context);
             case "workspace_watch":
                 return await this.#watchWorkspace(gateway, input, context, signal);
-            case "workspace_question_answer":
+            case "workspace_answer":
                 await this.#assertAppToken(input, context);
                 return await this.#answerQuestion(gateway, input, context);
-            case "workspace_wait_interrupt":
+            case "workspace_interrupt":
                 await this.#assertAppToken(input, context);
                 return await this.#interruptWait(gateway, input, context);
-            case "workspace_task_control":
+            case "workspace_task":
                 await this.#assertAppToken(input, context);
                 return await this.#controlTask(gateway, input, context);
-            case "workspace_wait_recover":
+            case "workspace_recover":
                 await this.#assertAppToken(input, context);
                 return await this.#recoverWait(gateway, input, context);
-            case "workspace_reentry_control":
+            case "workspace_reentry":
                 await this.#assertAppToken(input, context);
                 if (this.#reentry === undefined) throw new Error("Workspace re-entry arbitration is unavailable.");
                 return await this.#reentry.control(input, context);
-            case "workspace_goal_pause":
+            case "workspace_pause":
                 await this.#assertAppToken(input, context);
                 return await this.#pauseGoal(input, context);
-            case "workspace_goal_resume":
+            case "workspace_resume":
                 await this.#assertAppToken(input, context);
                 return await this.#resumeGoal(input, context);
-            case "workspace_goal_stop":
+            case "workspace_stop":
                 await this.#assertAppToken(input, context);
                 return await this.#stopGoal(input, context);
-            case "workspace_approval_decide":
+            case "workspace_approval":
                 await this.#assertAppToken(input, context);
                 return await this.#decideApproval(gateway, input, context);
         }
@@ -245,7 +245,7 @@ export class McpEndpointHandlerInteraction {
 
     async #pauseGoal(input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
         const gateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
-        const fence = readGoalFence(input, "workspace_goal_pause");
+        const fence = readGoalFence(input, "workspace_pause");
         const ctxId = requireCtxId(context);
         const goal = await gateway.manageGoal(
             this.options.instanceName,
@@ -263,7 +263,7 @@ export class McpEndpointHandlerInteraction {
 
     async #stopGoal(input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
         const gateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
-        const fence = readGoalFence(input, "workspace_goal_stop");
+        const fence = readGoalFence(input, "workspace_stop");
         const ctxId = requireCtxId(context);
         const goal = await gateway.manageGoal(
             this.options.instanceName,
@@ -277,7 +277,7 @@ export class McpEndpointHandlerInteraction {
 
     async #resumeGoal(input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
         const gateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
-        const fence = readGoalFence(input, "workspace_goal_resume");
+        const fence = readGoalFence(input, "workspace_resume");
         const ctxId = requireCtxId(context);
         const goal = await gateway.manageGoal(
             this.options.instanceName,
@@ -512,7 +512,7 @@ export class McpEndpointHandlerInteraction {
         if (!isMcpWaitTrackingGateway(gateway)) {
             throw new Error(`Workspace wait interruption is unavailable for ${this.options.instanceName}.`);
         }
-        const waitId = readWaitId(input, "workspace_wait_interrupt");
+        const waitId = readWaitId(input, "workspace_interrupt");
         const wait = (await gateway.listWaits(this.options.instanceName)).find((entry) => entry.waitId === waitId);
         if (
             wait === undefined || wait.createdByCtxId !== requireCtxId(context) ||
@@ -685,13 +685,13 @@ function readQuestion(input: JsonValue): {
 
 function readQuestionAnswer(input: JsonValue): { answer: string; waitId: string } {
     const record = asRecord(input);
-    if (record === undefined) throw new Error("workspace_question_answer requires an object input.");
+    if (record === undefined) throw new Error("workspace_answer requires an object input.");
     return { answer: text(record.answer, "answer"), waitId: text(record.waitId, "waitId") };
 }
 
 function readApprovalDecision(input: JsonValue): { approvalId: string; decision: "approve" | "deny" } {
     const record = asRecord(input);
-    if (record === undefined) throw new Error("workspace_approval_decide requires an object input.");
+    if (record === undefined) throw new Error("workspace_approval requires an object input.");
     const decision = record.decision;
     if (decision !== "approve" && decision !== "deny") throw new Error("decision must be approve or deny.");
     return { approvalId: text(record.approvalId, "approvalId"), decision };
@@ -709,14 +709,14 @@ function readGoalFence(input: JsonValue, toolName: string): { goalId: string; re
 
 function readTaskControl(input: JsonValue): { action: TodoTaskControlAction; revision: number; taskId: string } {
     const record = asRecord(input);
-    if (record === undefined) throw new Error("workspace_task_control requires an object input.");
+    if (record === undefined) throw new Error("workspace_task requires an object input.");
     const action = record.action;
     if (action !== "pause" && action !== "resume" && action !== "cancel") {
         throw new Error("action must be pause, resume, or cancel.");
     }
     const revision = record.revision;
     if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1) {
-        throw new Error("workspace_task_control revision must be a positive integer.");
+        throw new Error("workspace_task revision must be a positive integer.");
     }
     return { action, revision, taskId: text(record.taskId, "taskId") };
 }
@@ -729,8 +729,8 @@ function readWaitId(input: JsonValue, toolName: string): string {
 
 function readWaitRecovery(input: JsonValue): { action: "dismiss"; recoveryMessageId: string; waitId: string } {
     const record = asRecord(input);
-    if (record === undefined) throw new Error("workspace_wait_recover requires an object input.");
-    if (record.action !== "dismiss") throw new Error("workspace_wait_recover action must be dismiss.");
+    if (record === undefined) throw new Error("workspace_recover requires an object input.");
+    if (record.action !== "dismiss") throw new Error("workspace_recover action must be dismiss.");
     return {
         action: "dismiss",
         recoveryMessageId: text(record.recoveryMessageId, "recoveryMessageId"),

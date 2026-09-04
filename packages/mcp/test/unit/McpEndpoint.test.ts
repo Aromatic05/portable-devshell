@@ -123,7 +123,7 @@ test("HTTP tools/list keeps Workspace actions app-only while advertising host au
             name?: string;
             securitySchemes?: JsonValue;
         }> | undefined;
-        const answer = tools?.find((tool) => tool.name === "workspace_question_answer");
+        const answer = tools?.find((tool) => tool.name === "workspace_answer");
         const environment = tools?.find((tool) => tool.name === "environ_info");
         const open = tools?.find((tool) => tool.name === "workspace_open");
         assert.notEqual(environment, undefined);
@@ -339,7 +339,7 @@ test("tools/list uses group and capability filtering", async () => {
         const listedTools = response.body.result?.tools ?? [];
         const names = listedTools.map((tool: { name: string }) => tool.name);
         assert.equal(names.includes("bash_run"), true);
-        assert.equal(names.includes("read_logs"), false);
+        assert.equal(names.includes("file_logs"), false);
         const bashTool = listedTools.find((tool: { name: string }) => tool.name === "bash_run") as {
             _meta?: { securitySchemes?: unknown };
             securitySchemes?: unknown;
@@ -1388,7 +1388,7 @@ function createWorkerHarness(options?: {
     const events: Array<{ data: Record<string, JsonValue>; type: string }> = [];
     const tools: ToolDefinition[] = options?.tools ?? [
         { requiredCapabilities: ["execute"] as const, group: "bash", name: "bash_run", description: "Run shell", inputSchema: { type: "object", properties: { command: { type: "string" } } }, outputSchema: { type: "object" } },
-        { requiredCapabilities: ["read"] as const, group: "file", name: "read_logs", description: "Read logs", inputSchema: { type: "object" }, outputSchema: { type: "object" } }
+        { requiredCapabilities: ["read"] as const, group: "file", name: "file_logs", description: "Read logs", inputSchema: { type: "object" }, outputSchema: { type: "object" } }
     ];
     const hasToolSchemaCache = options?.hasToolSchemaCache ?? true;
     const ready = options?.ready ?? true;

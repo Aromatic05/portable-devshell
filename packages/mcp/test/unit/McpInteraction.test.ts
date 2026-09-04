@@ -45,7 +45,7 @@ test("workspace_ask holds the original call until the Workspace app answers", as
     assert.equal(settled, false);
 
     await handler.call(
-        "workspace_question_answer",
+        "workspace_answer",
         { answer: "B", token, waitId: wait.waitId },
         context,
         "call-app",
@@ -73,7 +73,7 @@ test("workspace_ask detaches durable wait state when the host cancels the held c
     await assert.rejects(held, /cancelled by the client/i);
     assert.equal(fake.waits.find((entry) => entry.waitId === wait.waitId)?.status, "detached");
     assert.deepEqual(await handler.call(
-        "workspace_question_answer",
+        "workspace_answer",
         { answer: "yes", token, waitId: wait.waitId },
         context,
         "call-answer",
@@ -103,7 +103,7 @@ test("workspace_ask keeps a resolved answer recoverable when post-answer process
     const wait = await fake.created;
 
     await handler.call(
-        "workspace_question_answer",
+        "workspace_answer",
         { answer: "yes", token, waitId: wait.waitId },
         context,
         "call-answer-post-answer-failure",
@@ -148,7 +148,7 @@ test("workspace_ask infers the current Todo association instead of requiring tas
     const wait = await fake.created;
     assert.equal(wait.taskId, "task-1");
     await handler.call(
-        "workspace_question_answer",
+        "workspace_answer",
         { answer: "yes", token, waitId: wait.waitId },
         context,
         "call-answer",
@@ -205,7 +205,7 @@ test("workspace_ask prefers the current Goal association over Todo", async () =>
     assert.equal(wait.goalId, "goal-1");
     assert.equal(wait.taskId, undefined);
     await handler.call(
-        "workspace_question_answer",
+        "workspace_answer",
         { answer: "continue", token, waitId: wait.waitId },
         context,
         "call-answer",
@@ -233,7 +233,7 @@ test("Workspace authorization stays in hidden metadata and gates app-only tools"
     assert.equal(JSON.stringify(snapshot.structuredContent).includes(meta.token), false);
     await assert.rejects(
         handler.call(
-            "workspace_approval_decide",
+            "workspace_approval",
             { approvalId: "approval-1", decision: "approve" },
             context,
             "call-app",
@@ -261,7 +261,7 @@ test("Workspace App can re-establish its lifecycle after remount", async () => {
     );
     const wait = await fake.created;
     await handler.call(
-        "workspace_question_answer",
+        "workspace_answer",
         { answer: "yes", token, waitId: wait.waitId },
         context,
         "call-answer",
@@ -670,7 +670,7 @@ test("Workspace question answer reports owner loss that races with resolution", 
     const token = await openWorkspace(handler);
 
     const result = await handler.call(
-        "workspace_question_answer",
+        "workspace_answer",
         { answer: "yes", token, waitId: "wait-question-race" },
         context,
         "call-answer-race",
@@ -696,7 +696,7 @@ test("Workspace can interrupt a live tmux wait without cancelling the tmux task"
     const token = await openWorkspace(handler);
 
     assert.deepEqual(await handler.call(
-        "workspace_wait_interrupt",
+        "workspace_interrupt",
         { token, waitId: "wait-tmux" },
         context,
         "call-app",
@@ -742,7 +742,7 @@ test("Workspace wait interruption reports owner loss that races with resolution"
     const handler = new McpEndpointHandlerInteraction({ gateway, instanceName: "demo" });
     const token = await openWorkspace(handler);
     const result = await handler.call(
-        "workspace_wait_interrupt",
+        "workspace_interrupt",
         { token, waitId: "wait-tmux-race" },
         context,
         "call-interrupt-race",
@@ -1049,7 +1049,7 @@ test("workspace_ask waits briefly for the Workspace App to establish a live watc
     );
     const wait = await fake.created;
     await handler.call(
-        "workspace_question_answer",
+        "workspace_answer",
         { answer: "yes", token, waitId: wait.waitId },
         context,
         "call-answer",
@@ -1175,7 +1175,7 @@ test("Workspace can resume a blocked Goal through the app-only control", async (
     const token = await openWorkspace(handler);
 
     const result = await handler.call(
-        "workspace_goal_resume",
+        "workspace_resume",
         { goalId: "goal-1", revision: 1, token },
         context,
         "call-goal-resume",
@@ -1218,7 +1218,7 @@ test("server re-entry arbiter gives each resolved Wait at most one notification 
         });
         const token = await openWorkspace(handler);
         const claim = (claimId: string) => handler.call(
-            "workspace_reentry_control",
+            "workspace_reentry",
             { action: "claim", claimId, intent: "automatic", token },
             context,
             `call-${claimId}`,
@@ -1234,21 +1234,21 @@ test("server re-entry arbiter gives each resolved Wait at most one notification 
         const claimId = winner.claimId!;
 
         const validated = await handler.call(
-            "workspace_reentry_control",
+            "workspace_reentry",
             { action: "validate", claimId, token },
             context,
             "call-validate-wait-once",
         ) as { valid?: boolean };
         assert.equal(validated.valid, true);
         const attempted = await handler.call(
-            "workspace_reentry_control",
+            "workspace_reentry",
             { action: "attempt", claimId, token },
             context,
             "call-attempt-wait-once",
         ) as { attempted?: boolean };
         assert.equal(attempted.attempted, true);
         await handler.call(
-            "workspace_reentry_control",
+            "workspace_reentry",
             { action: "report", claimId, outcome: "rejected", token },
             context,
             "call-report-wait-once",
@@ -1294,7 +1294,7 @@ test("server re-entry arbiter consumes a resolved Wait without notification whil
         });
         const token = await openWorkspace(handler);
         const result = await handler.call(
-            "workspace_reentry_control",
+            "workspace_reentry",
             { action: "claim", claimId: "claim-busy", intent: "automatic", token },
             context,
             "call-claim-busy",
@@ -1347,7 +1347,7 @@ test("server re-entry arbiter revalidates an associated task between claim and a
         const handler = new McpEndpointHandlerInteraction({ contextRegistry: registry, gateway: fake.gateway, instanceName: "demo" });
         const token = await openWorkspace(handler);
         const claim = await handler.call(
-            "workspace_reentry_control",
+            "workspace_reentry",
             { action: "claim", claimId: "claim-task-fence", intent: "automatic", token },
             context,
             "call-task-fence-claim",
@@ -1357,7 +1357,7 @@ test("server re-entry arbiter revalidates an associated task between claim and a
 
         taskStatus = "paused";
         const validated = await handler.call(
-            "workspace_reentry_control",
+            "workspace_reentry",
             { action: "validate", claimId: "claim-task-fence", token },
             context,
             "call-task-fence-validate",
@@ -1423,7 +1423,7 @@ test("server re-entry arbiter rejects a claimed Wait after its Goal is replaced"
         const handler = new McpEndpointHandlerInteraction({ contextRegistry: registry, gateway: fake.gateway, instanceName: "demo" });
         const token = await openWorkspace(handler);
         const claim = await handler.call(
-            "workspace_reentry_control",
+            "workspace_reentry",
             { action: "claim", claimId: "claim-goal-fence", intent: "automatic", token },
             context,
             "call-goal-fence-claim",
@@ -1431,7 +1431,7 @@ test("server re-entry arbiter rejects a claimed Wait after its Goal is replaced"
         assert.equal(claim.claimed, true);
         goalId = "goal-new";
         const validated = await handler.call(
-            "workspace_reentry_control",
+            "workspace_reentry",
             { action: "validate", claimId: "claim-goal-fence", token },
             context,
             "call-goal-fence-validate",
@@ -1483,7 +1483,7 @@ test("server re-entry arbiter owns Goal retry reset before explicit delivery", a
         const handler = new McpEndpointHandlerInteraction({ contextRegistry: registry, gateway: fake.gateway, instanceName: "demo" });
         const token = await openWorkspace(handler);
         const result = await handler.call(
-            "workspace_reentry_control",
+            "workspace_reentry",
             { action: "claim", claimId: "claim-goal-retry", intent: "goal-retry", sourceId: "goal-retry", token },
             context,
             "call-goal-retry",
@@ -1605,7 +1605,7 @@ test("server re-entry arbiter gives one-shot Wait priority over repeatable Goal 
             valid?: boolean;
         };
         const call = (action: string, claimId: string, extra: Record<string, unknown> = {}) => handler.call(
-            "workspace_reentry_control",
+            "workspace_reentry",
             { action, claimId, token, ...extra },
             context,
             `call-${action}-${claimId}`,
@@ -1643,15 +1643,15 @@ test("Workspace tool metadata keeps the explicit reopen compatibility tool and a
     const definitions = new McpToolCatalogInteraction().list();
     const adapter = new McpToolSchemaAdapter();
     const open = definitions.find((definition) => definition.name === "workspace_open");
-    const answer = definitions.find((definition) => definition.name === "workspace_question_answer");
-    const interrupt = definitions.find((definition) => definition.name === "workspace_wait_interrupt");
-    const recover = definitions.find((definition) => definition.name === "workspace_wait_recover");
+    const answer = definitions.find((definition) => definition.name === "workspace_answer");
+    const interrupt = definitions.find((definition) => definition.name === "workspace_interrupt");
+    const recover = definitions.find((definition) => definition.name === "workspace_recover");
     const watch = definitions.find((definition) => definition.name === "workspace_watch");
     const reconnect = definitions.find((definition) => definition.name === "workspace_reconnect");
     const ask = definitions.find((definition) => definition.name === "workspace_ask");
     const goal = definitions.find((definition) => definition.name === "workspace_goal");
-    const goalResume = definitions.find((definition) => definition.name === "workspace_goal_resume");
-    const goalStop = definitions.find((definition) => definition.name === "workspace_goal_stop");
+    const goalResume = definitions.find((definition) => definition.name === "workspace_resume");
+    const goalStop = definitions.find((definition) => definition.name === "workspace_stop");
 
     assert.deepEqual([...new Set(definitions.map((definition) => definition.group))], ["workspace"]);
     assert.ok(open);

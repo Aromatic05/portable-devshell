@@ -8,6 +8,11 @@ pub struct ToolName {
 
 impl ToolName {
     pub fn parse(raw: &str) -> Result<Self, String> {
+        if raw.bytes().filter(|value| *value == b'_').count() != 1 {
+            return Err(format!(
+                "tool method `{raw}` must contain exactly one `_` separator"
+            ));
+        }
         let Some((group, operation)) = raw.split_once('_') else {
             return Err(format!("tool method `{raw}` must use group_operation form"));
         };
@@ -54,5 +59,17 @@ impl ToolName {
 impl fmt::Display for ToolName {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ToolName;
+
+    #[test]
+    fn tool_name_requires_exactly_one_namespace_separator() {
+        assert_eq!(ToolName::parse("bash_run").unwrap().group(), "bash");
+        assert!(ToolName::parse("bash").is_err());
+        assert!(ToolName::parse("bash_run_extra").is_err());
     }
 }

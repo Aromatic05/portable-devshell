@@ -39,6 +39,15 @@ const fileSync: ToolDefinition = {
     requiredCapabilities: ["read", "write"]
 };
 
+const environInfo: ToolDefinition = {
+    description: "Prepare environment",
+    group: "environ",
+    inputSchema: { type: "object" },
+    name: "environ_info",
+    outputSchema: { type: "object" },
+    requiredCapabilities: []
+};
+
 test("MCP safety annotations are explicit for known semantics and conservative for unknown tools", () => {
     assert.deepEqual(mcpToolAnnotations("file_read"), {
         destructiveHint: false,
@@ -70,13 +79,13 @@ test("MCP safety annotations are explicit for known semantics and conservative f
         openWorldHint: false,
         readOnlyHint: false,
     });
-    assert.deepEqual(mcpToolAnnotations("workspace_approval_decide"), {
+    assert.deepEqual(mcpToolAnnotations("workspace_approval"), {
         destructiveHint: true,
         idempotentHint: false,
         openWorldHint: false,
         readOnlyHint: false,
     });
-    assert.deepEqual(mcpToolAnnotations("future_unknown_tool"), {
+    assert.deepEqual(mcpToolAnnotations("future_unknown"), {
         destructiveHint: true,
         idempotentHint: false,
         openWorldHint: true,
@@ -88,7 +97,7 @@ test("MCP tools expose concise human-readable titles with a safe fallback", () =
     assert.equal(mcpToolTitle("bash_run"), "Run shell command");
     assert.equal(mcpToolTitle("workspace_open"), "Open Workspace");
     assert.equal(mcpToolTitle("artifact_viewImage"), "View image");
-    assert.equal(mcpToolTitle("future_unknown_tool"), "Future unknown tool");
+    assert.equal(mcpToolTitle("future_unknown"), "Future unknown");
 });
 
 test("ChatGPT invocation status is limited to long-lived visible tool states", () => {
@@ -141,6 +150,25 @@ test("McpToolCatalogEndpoint merges worker and control tools before applying one
         "worker:bash_run",
         "todo:todo_read"
     ]);
+});
+
+test("McpToolCatalogEndpoint enforces namespace groups and reserves environ bootstrap", () => {
+    const emptyPolicyCatalog = new McpToolCatalogEndpoint({ capabilities: [], groups: [] });
+    const environmentEntries = emptyPolicyCatalog.merge([{ owner: "environment", tools: [environInfo] }]);
+    assert.deepEqual(
+        emptyPolicyCatalog.filter(environmentEntries).map((entry) => entry.definition.name),
+        ["environ_info"]
+    );
+
+    const namespaceCatalog = new McpToolCatalogEndpoint({ capabilities: [], groups: ["bash"] });
+    assert.throws(
+        () => namespaceCatalog.merge([{ owner: "worker", tools: [{ ...bashRun, group: "file" }] }]),
+        /namespace/iu,
+    );
+    assert.throws(
+        () => namespaceCatalog.merge([{ owner: "worker", tools: [environInfo] }]),
+        /reserved.*environ/iu,
+    );
 });
 
 test("McpToolCatalogEndpoint rejects duplicate names across providers", () => {

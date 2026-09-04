@@ -68,7 +68,21 @@ function validateInstance(instance: ControlInstanceConfig, index: number): void 
     validateScheduler(instance.tools?.scheduler, base);
     validateApprovalPolicy(instance, base);
     validateContainer(instance, base);
+    validateMcpGroups(instance, base);
     validateMcpAuth(instance, base);
+}
+
+function validateMcpGroups(instance: ControlInstanceConfig, base: readonly (string | number)[]): void {
+    for (const [index, group] of instance.mcp.tools.groups.entries()) {
+        if (!/^[a-z0-9]+$/u.test(group)) {
+            throw configInputError(
+                "semantic",
+                [...base, "mcp", "tools", "groups", index],
+                "config.instance.mcpGroupInvalid",
+                "must be a lowercase namespace without '_'"
+            );
+        }
+    }
 }
 
 function validateAlerts(alerts: ControlInstanceAlertsConfig | undefined, base: readonly (string | number)[]): void {
