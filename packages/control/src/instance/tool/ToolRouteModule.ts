@@ -17,6 +17,7 @@ import {
     limitToolCallResponse,
     readToolApprovalDecision,
     readToolApprovalId,
+    readToolApprovalListOptions,
     readToolCall,
     readToolCallQuery
 } from "./ToolRouteInput.js";
@@ -25,7 +26,7 @@ export interface ToolRouteInstancePort {
     name?: string;
     worker: Pick<
         WorkerInstance,
-        "callTool" | "decideApproval" | "getApproval" | "listApprovals" | "readToolCalls"
+        "callTool" | "decideApproval" | "getApproval" | "listApprovals" | "listPendingApprovals" | "readToolCalls"
     >;
 }
 
@@ -70,7 +71,12 @@ export function createToolRouteModule(
                 query
             ) as unknown as JsonValue;
         },
-        listApprovals: async () => await instance.worker.listApprovals() as unknown as JsonValue,
+        listApprovals: async (request) => {
+            const { pendingOnly } = readToolApprovalListOptions(request.payload);
+            return await (pendingOnly
+                ? instance.worker.listPendingApprovals()
+                : instance.worker.listApprovals()) as unknown as JsonValue;
+        },
         getApproval: async (request) => await instance.worker.getApproval(
             readToolApprovalId(request.payload, "tool.getApproval")
         ) as unknown as JsonValue,

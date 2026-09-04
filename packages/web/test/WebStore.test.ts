@@ -71,6 +71,19 @@ describe("WebStore", () => {
         expect(clients.overview.get).toHaveBeenCalledOnce();
     });
 
+    it("loads pending approvals and bounded logs for the instance read model", async () => {
+        const clients = fakeClients();
+        clients.tool.listApprovals = vi.fn(async () => []);
+        clients.runtime.readLogs = vi.fn(async () => []);
+        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+
+        await store.load();
+
+        expect(clients.tool.listApprovals).toHaveBeenCalledWith("demo", { pendingOnly: true });
+        expect(clients.runtime.readLogs).toHaveBeenCalledWith("demo", { limit: 100, maxDecodedBytes: 256 * 1024 });
+        store.close();
+    });
+
     it("refreshes every Audit read surface", async () => {
         const clients = fakeClients();
         clients.context.list = vi.fn(async () => []);

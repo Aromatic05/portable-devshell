@@ -28,6 +28,9 @@ function callHandler(callTool: (toolName: string, input: JsonValue) => Promise<J
             async listApprovals() {
                 throw new Error("unused");
             },
+            async listPendingApprovals() {
+                throw new Error("unused");
+            },
             async readToolCalls() {
                 throw new Error("unused");
             }
@@ -76,4 +79,26 @@ test("control tool route turns a thrown error into a structured hint instead of 
     assert.match(String(result.comment[0]), /^\[file\.revisionMismatch\] /u);
     assert.match(String(result.comment[0]), /read the latest content/i);
     assert.match(String(result.comment[0]), /regenerate the operation/i);
+});
+
+test("control tool route serves pending approval reads without scanning approval history", async () => {
+    const module = createToolRouteModule({
+        worker: {
+            async callTool() { throw new Error("unused"); },
+            async decideApproval() { throw new Error("unused"); },
+            async getApproval() { throw new Error("unused"); },
+            async listApprovals() { throw new Error("approval history must not be read"); },
+            async listPendingApprovals() { return [{ approvalId: "approval-pending" } as never]; },
+            async readToolCalls() { throw new Error("unused"); }
+        }
+    });
+    const operation = module.operations.find((entry) => entry.name === "listApprovals");
+    if (operation === undefined) throw new Error("tool.listApprovals operation is missing");
+
+    const result = await operation.handle(
+        { id: "1", name: "listApprovals", payload: { pendingOnly: true } },
+        routeContext("conn-3")
+    ) as Array<{ approvalId: string }>;
+
+    assert.deepEqual(result, [{ approvalId: "approval-pending" }]);
 });

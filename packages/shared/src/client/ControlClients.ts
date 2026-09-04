@@ -154,7 +154,7 @@ export interface ControlClients {
         openStart(instance: string): Promise<OpenedClientStream>;
         readLogs(
             instance: string,
-            query?: { fromSeq?: number; limit?: number },
+            query?: { fromSeq?: number; limit?: number; maxDecodedBytes?: number },
         ): Promise<InstanceLogEntry[]>;
         refresh(instance: string): Promise<InstanceRuntimeEnvelope>;
         snapshot(instance: string): Promise<InstanceRuntimeEnvelope>;
@@ -195,7 +195,7 @@ export interface ControlClients {
             options?: { policyPatch?: JsonValue; reason?: string; remember?: boolean },
         ): Promise<ApprovalRequest>;
         getApproval(instance: string, approvalId: string): Promise<ApprovalRequest>;
-        listApprovals(instance: string): Promise<ApprovalRequest[]>;
+        listApprovals(instance: string, options?: { pendingOnly?: boolean }): Promise<ApprovalRequest[]>;
         listCalls(instance: string, query?: ToolCallQuery): Promise<ToolCallRecord[]>;
     };
 }
@@ -340,7 +340,7 @@ export function createControlClients(
                 }),
             getApproval: (name, approvalId) =>
                 tool.request(name, "getApproval", { approvalId }),
-            listApprovals: (name) => tool.request(name, "listApprovals"),
+            listApprovals: (name, options) => tool.request(name, "listApprovals", options),
             listCalls: (name, query) => tool.request(name, "listCalls", query),
         },
     };

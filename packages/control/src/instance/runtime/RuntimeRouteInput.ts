@@ -8,10 +8,13 @@ export function readRuntimeLogQuery(payload?: JsonValue): { fromSeq?: number; li
     const limit = isRecord(payload) && typeof payload.limit === "number" && Number.isInteger(payload.limit)
         ? Math.min(Math.max(payload.limit, 1), MAX_LOG_READ_LIMIT)
         : MAX_LOG_READ_LIMIT;
+    const requestedBytes = isRecord(payload) && typeof payload.maxDecodedBytes === "number" && Number.isSafeInteger(payload.maxDecodedBytes)
+        ? payload.maxDecodedBytes
+        : MAX_LOG_RESPONSE_BYTES;
     return {
         fromSeq: isRecord(payload) && typeof payload.fromSeq === "number" ? payload.fromSeq : undefined,
         limit,
-        maxDecodedBytes: MAX_LOG_RESPONSE_BYTES
+        maxDecodedBytes: Math.min(Math.max(requestedBytes, 1), MAX_LOG_RESPONSE_BYTES)
     };
 }
 

@@ -135,10 +135,10 @@ export class AuditDatabase {
 
     readRecords<TRecord>(collection: AuditRecordCollection): TRecord[] {
         this.#assertOpen();
-        this.cleanup();
         return (this.#database
-            .prepare("SELECT payload, body, body_codec AS bodyCodec FROM audit_records WHERE collection = ? ORDER BY id ASC")
-            .all(collection) as unknown as AuditStoredRow[]).map((row) => decodeStoredRecord<TRecord>(collection, row));
+            .prepare("SELECT payload, body, body_codec AS bodyCodec FROM audit_records WHERE collection = ? AND occurred_at_ms >= ? ORDER BY id ASC")
+            .all(collection, this.#retentionCutoff()) as unknown as AuditStoredRow[])
+            .map((row) => decodeStoredRecord<TRecord>(collection, row));
     }
 
     readTailRecords<TRecord>(collection: AuditRecordCollection, limit: number): TRecord[] {
@@ -146,10 +146,9 @@ export class AuditDatabase {
         if (!Number.isSafeInteger(limit) || limit < 1) {
             throw new TypeError(`Invalid audit tail limit: ${limit}`);
         }
-        this.cleanup();
         const rows = this.#database
-            .prepare("SELECT payload, body, body_codec AS bodyCodec FROM audit_records WHERE collection = ? ORDER BY id DESC LIMIT ?")
-            .all(collection, limit) as unknown as AuditStoredRow[];
+            .prepare("SELECT payload, body, body_codec AS bodyCodec FROM audit_records WHERE collection = ? AND occurred_at_ms >= ? ORDER BY id DESC LIMIT ?")
+            .all(collection, this.#retentionCutoff(), limit) as unknown as AuditStoredRow[];
         rows.reverse();
         return rows.map((row) => decodeStoredRecord<TRecord>(collection, row));
     }
@@ -170,14 +169,15 @@ export class AuditDatabase {
         if (maxDecodedBytes !== undefined && (!Number.isSafeInteger(maxDecodedBytes) || maxDecodedBytes < 1)) {
             throw new TypeError(`Invalid audit decoded byte limit: ${maxDecodedBytes}.`);
         }
-        this.cleanup();
         const collectionSql = auditCollectionSql(collection);
         const statement = this.#database.prepare(
             `SELECT payload, body, body_codec AS bodyCodec FROM audit_records
-             WHERE collection = ${collectionSql} AND json_extract(payload, '$.seq') >= ?
+             WHERE collection = ${collectionSql} AND occurred_at_ms >= ? AND json_extract(payload, '$.seq') >= ?
              ORDER BY id ASC${limit === undefined ? "" : " LIMIT ?"}`
         );
-        const parameters = limit === undefined ? [fromSeq] : [fromSeq, limit];
+        const parameters = limit === undefined
+            ? [this.#retentionCutoff(), fromSeq]
+            : [this.#retentionCutoff(), fromSeq, limit];
         const records: TRecord[] = [];
         let decodedBytes = 0;
         for (const value of statement.iterate(...parameters)) {
@@ -196,10 +196,8 @@ export class AuditDatabase {
         if (query.limit !== undefined && (!Number.isSafeInteger(query.limit) || query.limit < 1)) {
             throw new TypeError(`Invalid audit tool-call limit: ${query.limit}.`);
         }
-        this.cleanup();
-
-        const predicates = ["collection = 'toolCalls'"];
-        const parameters: Array<number | string> = [];
+        const predicates = ["collection = 'toolCalls'", "occurred_at_ms >= ?"];
+        const parameters: Array<number | string> = [this.#retentionCutoff()];
         if (query.after !== undefined) {
             const afterId = this.#readToolCallId(query.after);
             if (afterId === undefined) return [];
@@ -245,7 +243,6 @@ export class AuditDatabase {
 
     hasToolCallRecord(callId: string): boolean {
         this.#assertOpen();
-        this.cleanup();
         return this.#readToolCallId(callId) !== undefined;
     }
 
@@ -254,7 +251,8 @@ export class AuditDatabase {
         if (!Number.isSafeInteger(sinceMs) || !Number.isSafeInteger(untilMs) || sinceMs > untilMs) {
             throw new TypeError("Invalid audit tool-call failure window.");
         }
-        this.cleanup();
+        const effectiveSinceMs = Math.max(sinceMs, this.#retentionCutoff());
+        if (effectiveSinceMs > untilMs) return { count: 0 };
         const where = `
             collection = 'toolCalls' AND
             occurred_at_ms >= ? AND occurred_at_ms <= ? AND
@@ -262,11 +260,11 @@ export class AuditDatabase {
         `;
         const count = this.#database
             .prepare(`SELECT COUNT(*) AS count FROM audit_records WHERE ${where}`)
-            .get(sinceMs, untilMs) as { count: number };
+            .get(effectiveSinceMs, untilMs) as { count: number };
         if (count.count === 0) return { count: 0 };
         const latest = this.#database
             .prepare(`SELECT payload FROM audit_records WHERE ${where} ORDER BY occurred_at_ms DESC, id DESC LIMIT 1`)
-            .get(sinceMs, untilMs) as { payload: string } | undefined;
+            .get(effectiveSinceMs, untilMs) as { payload: string } | undefined;
         return {
             count: count.count,
             ...(latest === undefined ? {} : { latest: JSON.parse(latest.payload) as ToolCallRecord }),
@@ -418,9 +416,13 @@ export class AuditDatabase {
 
     #readToolCallId(callId: string): number | undefined {
         const row = this.#database.prepare(
-            "SELECT id FROM audit_records WHERE collection = 'toolCalls' AND json_extract(payload, '$.callId') = ? ORDER BY id DESC LIMIT 1"
-        ).get(callId) as { id: number } | undefined;
+            "SELECT id FROM audit_records WHERE collection = 'toolCalls' AND occurred_at_ms >= ? AND json_extract(payload, '$.callId') = ? ORDER BY id DESC LIMIT 1"
+        ).get(this.#retentionCutoff(), callId) as { id: number } | undefined;
         return row?.id;
+    }
+
+    #retentionCutoff(): number {
+        return this.#now() - this.#retentionMs;
     }
 
     #fileBytes(): number {
@@ -534,7 +536,6 @@ export class AuditDatabase {
         try {
             this.#initializeSchema();
             this.#payloadBytes = this.#readPayloadBytes();
-            this.cleanup();
             return database;
         } catch (error) {
             this.#databaseHandle = undefined;

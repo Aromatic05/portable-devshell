@@ -85,6 +85,14 @@ export function readToolApprovalId(payload: JsonValue | undefined, operation: st
     return payload.approvalId;
 }
 
+export function readToolApprovalListOptions(payload?: JsonValue): { pendingOnly: boolean } {
+    if (payload === undefined) return { pendingOnly: false };
+    if (!isRecord(payload) || (payload.pendingOnly !== undefined && typeof payload.pendingOnly !== "boolean")) {
+        throw invalid("tool.listApprovals requires boolean pendingOnly.");
+    }
+    return { pendingOnly: payload.pendingOnly === true };
+}
+
 export function readToolApprovalDecision(
     payload?: JsonValue
 ): { decision: ApprovalDecision["decision"]; policyPatch?: JsonValue; reason?: string; remember?: boolean } {

@@ -25,6 +25,7 @@ import {
     limitToolCallResponse,
     readToolApprovalDecision,
     readToolApprovalId,
+    readToolApprovalListOptions,
     readToolCall,
     readToolCallQuery
 } from "../../src/instance/tool/ToolRouteInput.ts";
@@ -158,6 +159,8 @@ test("runtime route inputs clamp log queries and strictly validate subscription 
     assert.deepEqual(readRuntimeLogQuery({ fromSeq: 10, limit: 0 }), { fromSeq: 10, limit: 1, maxDecodedBytes: 1024 * 1024 });
     assert.deepEqual(readRuntimeLogQuery({ fromSeq: 10, limit: 500 }), { fromSeq: 10, limit: 100, maxDecodedBytes: 1024 * 1024 });
     assert.deepEqual(readRuntimeLogQuery({ fromSeq: 10, limit: 1.5 }), { fromSeq: 10, limit: 100, maxDecodedBytes: 1024 * 1024 });
+    assert.deepEqual(readRuntimeLogQuery({ maxDecodedBytes: 256 * 1024 }), { fromSeq: undefined, limit: 100, maxDecodedBytes: 256 * 1024 });
+    assert.deepEqual(readRuntimeLogQuery({ maxDecodedBytes: 2 * 1024 * 1024 }), { fromSeq: undefined, limit: 100, maxDecodedBytes: 1024 * 1024 });
 
     for (const cursor of [0, 1, Number.MAX_SAFE_INTEGER]) {
         assert.equal(readRuntimeSubscriptionFromSeq({ fromSeq: cursor }), cursor);
@@ -221,6 +224,8 @@ test("tool route inputs preserve call defaults, filters, and approval metadata",
         }
     );
     assert.equal(readToolApprovalId({ approvalId: "approval-1" }, "tool.getApproval"), "approval-1");
+    assert.deepEqual(readToolApprovalListOptions(), { pendingOnly: false });
+    assert.deepEqual(readToolApprovalListOptions({ pendingOnly: true }), { pendingOnly: true });
     assert.deepEqual(
         readToolApprovalDecision({
             decision: "approve",
@@ -251,6 +256,7 @@ test("tool route inputs reject malformed filters and approval decisions", () => 
         () => readToolCallQuery({ status: "queued" }),
         () => readToolCallQuery({ toolName: 1 } as never),
         () => readToolApprovalId({}, "tool.getApproval"),
+        () => readToolApprovalListOptions({ pendingOnly: "yes" } as never),
         () => readToolApprovalDecision({ decision: "allow" }),
         () => readToolApprovalDecision({ decision: "deny", reason: 1 } as never),
         () => readToolApprovalDecision({ decision: "deny", remember: "yes" } as never)

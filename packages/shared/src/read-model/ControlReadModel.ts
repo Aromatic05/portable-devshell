@@ -474,9 +474,9 @@ export class ControlReadModel {
                 return { sequence: envelope.lastSeq, snapshot: envelope.snapshot };
             }
             case "logs":
-                return (await this.#clients.runtime.readLogs(instance, { limit: 100 })).slice(-100);
+                return (await this.#clients.runtime.readLogs(instance, { limit: 100, maxDecodedBytes: 256 * 1024 })).slice(-100);
             case "approvals":
-                return await this.#clients.tool.listApprovals(instance);
+                return await this.#clients.tool.listApprovals(instance, { pendingOnly: true });
             case "goals":
                 return (await this.#clients.goal.get(instance)).goals;
             case "todo":

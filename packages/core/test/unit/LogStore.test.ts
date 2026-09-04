@@ -515,7 +515,7 @@ test("AuditDatabase migrates legacy JSONL exactly once", async () => {
     }
 });
 
-test("AuditDatabase removes expired rows on read and evicts oldest rows above maxBytes", async () => {
+test("AuditDatabase filters expired rows on read and evicts oldest rows above maxBytes", async () => {
     const root = await createTestTempDirectory("sqlite-cleanup");
     let now = Date.parse("2026-07-15T00:00:00.000Z");
 
