@@ -112,15 +112,15 @@ requiredScopes = ["mcp"]
 | ---------- | ---------------------------------------------------------------------------------------- | ----------------- |
 | `bash`     | `bash_run`                                                                               | `execute`         |
 | `file`     | `file_read`、`file_edit`、`file_find`、`file_search`、`file_info`          | `read`、`write`   |
-| `artifact` | `artifact_read`、`artifact_viewImage`、`artifact_share`、`artifact_transfer`             | `read`、`write`   |
+| `artifact` | `artifact_read`、`artifact_viewImage`、`artifact_transfer`                              | `read`、`write`   |
 | `tmux`     | `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_list`、`tmux_create`、`tmux_close` | `read`、`execute` |
 | `todo`     | `todo_read`、`todo_write`                                                                | 无硬性 capability |
 | `workspace` | `workspace_open`、`workspace_ask`、`workspace_goal`；另含仅 Workspace App 可调用的内部 helper | 无硬性 capability |
-| `instance` | `instance_list`、`instance_status`、`instance_create`、`instance_connect`、`instance_stop` | `manage`          |
+| `instance` | `instance_connect`                                                                        | `manage`          |
 
-默认不包含 `instance` group，也不授予 `manage`。`instance_connect` 是幂等的“确保可用”入口：目标未启动时由 Control 启动并连接，已经 ready 时不重复启动；可选 `workspace` 会作为当前 `ctxId` 在该 instance 上的 workspace attachment。`selfManaged` reverse worker 不由 Control 启动，`instance_connect` 只接受已经连入的 worker。`instance_stop` 仍只适用于由 Control 管理生命周期的 worker。用户从 TUI 定向发送给某个 Context 的 Comment 不作为独立 MCP 工具暴露；消息按 `ctxId` 排队，并附着到该 Context 下一次成功的普通工具结果中。
+默认不包含 `instance` group，也不授予 `manage`。`instance_connect` 是唯一保留在 MCP 的 instance 工具，因为它把目标 instance/workspace 附着到当前 Context。实例列表、状态、创建和停止统一使用 `devshell instance ...` CLI；Artifact 分享统一使用 `devshell artifact share|shares|revoke`。`selfManaged` reverse worker 不由 Control 启动，`instance_connect` 只接受已经连入的 worker。用户从 TUI 定向发送给某个 Context 的 Comment 不作为独立 MCP 工具暴露；消息按 `ctxId` 排队，并附着到该 Context 下一次成功的普通工具结果中。
 
-MCP 对已经被 ChatGPT 缓存的旧 recipient 保留一层隐藏兼容。兼容名字永远不重新出现在 `tools/list`：语义仍是当前操作安全超集的 `instance_start` 会透明路由到 `instance_connect`，并继续接受当前 group / capability / Context 校验；无法安全等价转换的 `context_message_read`、`file_write`、`tmux_send`、`tmux_capture`、`tmux_reclaim` 不执行旧操作，而是返回结构化 `staleToolSnapshot`，说明移除版本和当前迁移方式。未知且从未受支持的工具名仍按普通 not-exposed 错误处理。
+MCP 对已经被 ChatGPT 缓存的旧 recipient 保留一层隐藏兼容。兼容名字永远不重新出现在 `tools/list`：`instance_start` 会透明路由到 `instance_connect`；`artifact_share`、`instance_list`、`instance_status`、`instance_create`、`instance_stop` 返回结构化 `staleToolSnapshot` 并指向对应 CLI。其他无法安全等价转换的旧工具同样只返回迁移说明。未知且从未受支持的工具名仍按普通 not-exposed 错误处理。
 
 ## Workspace MCP App 与人工交互
 

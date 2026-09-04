@@ -518,8 +518,8 @@ test("environment and control-owned tools execute through the endpoint audit pat
         async transferArtifact() {
             return {};
         },
-        async connectInstance() {
-            return {};
+        async connectInstance(instance: string) {
+            return { instance };
         },
         async statusInstance() {
             return {};
@@ -552,12 +552,7 @@ test("environment and control-owned tools execute through the endpoint audit pat
     );
     const ctxId = String(structuredResult<{ ctxId?: string }>(environment).ctxId);
     await endpoint.callTool("todo_read", { ctxId }, requestContext);
-    await endpoint.callTool("instance_list", { ctxId }, requestContext);
-    await endpoint.callTool(
-        "artifact_share",
-        { ctxId, path: "./result.txt" },
-        requestContext,
-    );
+    await endpoint.callTool("instance_connect", { ctxId, instance: "demo-local" }, requestContext);
 
     assert.deepEqual(
         harness.auditedCalls.map((call) => ({
@@ -584,17 +579,10 @@ test("environment and control-owned tools execute through the endpoint audit pat
             },
             {
                 ctxId,
-                input: {},
+                input: { instance: "demo-local" },
                 requestId: "request-control-tools",
                 source: "mcp",
-                toolName: "instance_list",
-            },
-            {
-                ctxId,
-                input: { path: "./result.txt" },
-                requestId: "request-control-tools",
-                source: "mcp",
-                toolName: "artifact_share",
+                toolName: "instance_connect",
             },
         ],
     );
@@ -1056,7 +1044,7 @@ test("closing the HTTP request aborts an in-flight tools/call handler", async ()
     }
 });
 
-test("instance_list returns object structured content through SDK transport", async () => {
+test("instance_connect returns object structured content through SDK transport", async () => {
     const harness = createWorkerHarness({ hasToolSchemaCache: false, ready: false, tools: [] });
     const gateway = {
         assertReady() {},
@@ -1066,17 +1054,14 @@ test("instance_list returns object structured content through SDK transport", as
         async createSshInstance() {
             return {};
         },
-        async listInstances() {
-            return [{ name: "demo" }];
-        },
         async readTodo() {
             return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
         },
         listTools() {
             return [];
         },
-        async connectInstance() {
-            return {};
+        async connectInstance(instance: string) {
+            return { instance };
         },
         async statusInstance() {
             return {};
@@ -1104,12 +1089,12 @@ test("instance_list returns object structured content through SDK transport", as
         const response = await postJson(
             server.url,
             {
-                id: "req-instance-list",
+                id: "req-instance-connect",
                 jsonrpc: "2.0",
                 method: "tools/call",
                 params: {
-                    arguments: { ctxId },
-                    name: "instance_list"
+                    arguments: { ctxId, instance: "demo" },
+                    name: "instance_connect"
                 }
             },
             session.headers
@@ -1117,9 +1102,7 @@ test("instance_list returns object structured content through SDK transport", as
 
         assert.equal(response.status, 200);
         assert.equal(response.body.error, undefined);
-        assert.deepEqual(response.body.result?.structuredContent, {
-            instances: [{ name: "demo" }]
-        });
+        assert.deepEqual(response.body.result?.structuredContent, { instance: "demo" });
     } finally {
         await server.close();
     }

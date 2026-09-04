@@ -4,18 +4,17 @@
 
 ## MCP 工具面
 
-Artifact 使用四个 MCP 工具名：
+Artifact 使用三个 MCP 工具名：
 
 ```text
 artifact_read
 artifact_viewImage
-artifact_share
 artifact_transfer
 ```
 
 `artifact_read` 是 worker 工具，只读取 `bash_run` 为 stdout 或 stderr 创建的 Artifact。
 
-`artifact_viewImage`、`artifact_share` 和 `artifact_transfer` 由 control 提供，并合并到实例 MCP endpoint 的工具 catalog。普通文件、目录、分享 payload 和传输 payload 不会获得 Artifact handle，也不能通过 `artifact_read` 读取。
+`artifact_viewImage` 和 `artifact_transfer` 由 control 提供，并合并到实例 MCP endpoint 的工具 catalog。分享属于 control-plane 管理能力，只通过 CLI/TUI 暴露。普通文件、目录、分享 payload 和传输 payload 不会获得 Artifact handle，也不能通过 `artifact_read` 读取。
 
 ## 图片查看
 
@@ -54,14 +53,14 @@ control 重启后从持久化租约重建引用计数；单独维护的可变计
 
 ## 分享
 
-`artifact_share` 必须且只能接受一种来源：
+CLI `devshell artifact share` 必须且只能接受一种来源：
 
 ```text
 handle
 path
 ```
 
-来源 instance 默认是当前 MCP endpoint 对应的 instance。只有 payload 已经稳定后才能创建分享：
+来源 instance 由 CLI 显式指定。只有 payload 已经稳定后才能创建分享：
 
 - stdout/stderr Artifact：取得内容租约；
 - 普通文件：优先创建 reflink 快照，不支持时复制；

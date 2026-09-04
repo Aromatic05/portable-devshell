@@ -103,18 +103,13 @@ control 合并到 MCP catalog 的工具：
 
 ```text
 artifact_viewImage
-artifact_share
 artifact_transfer
 todo_read
 todo_write
-instance_list
-instance_status
-instance_create
 instance_connect
-instance_stop
 ```
 
-后五个实例工具只有在 `instance + manage` 策略下出现。
+`instance_connect` 只有在 `instance + manage` 策略下出现；其他实例管理以及 Artifact 分享属于 CLI/TUI control plane，不进入模型工具 catalog。
 
 ## 审批与调度
 

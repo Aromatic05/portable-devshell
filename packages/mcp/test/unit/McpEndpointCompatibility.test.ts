@@ -57,3 +57,19 @@ test("incompatible legacy MCP schemas stay tombstoned", () => {
     }
     assert.equal(resolveMcpLegacyTool("unknown_tool"), undefined);
 });
+
+test("control-plane MCP tools removed in 0.6.18 point cached clients to CLI", () => {
+    for (const [name, help] of [
+        ["artifact_share", "Use devshell artifact share, shares, or revoke."],
+        ["instance_create", "Use devshell instance create."],
+        ["instance_list", "Use devshell instance list."],
+        ["instance_status", "Use devshell instance status <instance>."],
+        ["instance_stop", "Use devshell instance stop <instance>."],
+    ] as const) {
+        assert.deepEqual(resolveMcpLegacyTool(name), {
+            help,
+            kind: "tombstone",
+            removedIn: "0.6.18",
+        }, name);
+    }
+});

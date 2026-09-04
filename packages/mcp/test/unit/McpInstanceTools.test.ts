@@ -9,8 +9,7 @@ import type {
 import {
     McpContextRegistry,
     McpEndpointWorker,
-    type McpInstanceGateway,
-    type McpSshInstanceCreateInput
+    type McpInstanceGateway
 } from "@portable-devshell/mcp/testing";
 import { withMcpContextId, withMcpInstanceTarget } from "../../src/endpoint/McpEndpointInput.ts";
 
@@ -77,7 +76,10 @@ test("management-enabled endpoint augments worker schemas for cross-instance rou
         (tools.find((tool) => tool.name === "environ_info")?.inputSchema as { properties?: Record<string, unknown> }).properties?.instance,
         undefined
     );
-    assert.equal(tools.some((tool) => tool.name === "instance_list"), true);
+    for (const name of ["instance_list", "instance_status", "instance_create", "instance_stop"]) {
+        assert.equal(tools.some((tool) => tool.name === name), false, name);
+    }
+    assert.equal(tools.some((tool) => tool.name === "instance_connect"), true);
     const connectSchema = tools.find((tool) => tool.name === "instance_connect")?.inputSchema as {
         properties?: Record<string, unknown>;
         required?: string[];
@@ -419,64 +421,18 @@ test("cancelling an instance lifecycle tool stops MCP waiting while the operatio
     await start;
 });
 
-test("instance management tools delegate to the gateway without requiring the local worker to be ready", async () => {
+test("instance_connect remains available without requiring the local worker to be ready", async () => {
     const calls: string[] = [];
-    let createInput: McpSshInstanceCreateInput | undefined;
     const gateway = createGateway({
-        createSshInstance: async (source, input) => {
-            calls.push(`create:${source}`);
-            createInput = input;
-            return { name: input.name };
-        },
-        listInstances: async () => {
-            calls.push("list");
-            return [];
-        },
         connectInstance: async (instance) => {
             calls.push(`connect:${instance}`);
-            return { instance };
-        },
-        statusInstance: async (instance) => {
-            calls.push(`status:${instance}`);
-            return { instance };
-        },
-        stopInstance: async (instance) => {
-            calls.push(`stop:${instance}`);
             return { instance };
         }
     });
     const endpoint = createManagedEndpoint(createWorker({ hasSchema: false, ready: false }), gateway);
 
-    assert.deepEqual(await endpoint.callTool("instance_list", withContext({}), context), { instances: [] });
-    await endpoint.callTool("instance_status", withContext({ instance: "remote-server" }), context);
     await endpoint.callTool("instance_connect", withContext({ instance: "remote-server" }), context);
-    await endpoint.callTool("instance_stop", withContext({ instance: "remote-server" }), context);
-    await endpoint.callTool(
-        "instance_create",
-        withContext({
-            host: "server.example.com",
-            identityFile: "~/.ssh/id_ed25519",
-            name: "remote-server",
-            port: 2222,
-            user: "dev"
-        }),
-        context
-    );
-
-    assert.deepEqual(calls, [
-        "list",
-        "status:remote-server",
-        "connect:remote-server",
-        "stop:remote-server",
-        "create:main-pc"
-    ]);
-    assert.deepEqual(createInput, {
-        host: "server.example.com",
-        identityFile: "~/.ssh/id_ed25519",
-        name: "remote-server",
-        port: 2222,
-        user: "dev"
-    });
+    assert.deepEqual(calls, ["connect:remote-server"]);
 });
 
 function createManagedEndpoint(

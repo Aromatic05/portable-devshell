@@ -1,27 +1,21 @@
 import type { ToolDefinition } from "@portable-devshell/shared";
 
-import {
-    artifactShareOutputSchema,
-    artifactTransferOutputSchema,
-} from "../McpToolOutputSchemas.js";
+import { artifactTransferOutputSchema } from "../McpToolOutputSchemas.js";
 
-export type McpToolCatalogArtifactName = "artifact_viewImage" | "artifact_share" | "artifact_transfer";
+export type McpToolCatalogArtifactName = "artifact_viewImage" | "artifact_transfer";
 
 export interface McpToolCatalogArtifactAvailability {
-    share?: boolean;
     transfer?: boolean;
     viewImage?: boolean;
 }
 
 export class McpToolCatalogArtifact {
     list(availability: McpToolCatalogArtifactAvailability = {
-        share: true,
         transfer: true,
         viewImage: true
     }): ToolDefinition[] {
         return [
             ...(availability.viewImage === true ? [artifactViewImageTool()] : []),
-            ...(availability.share === true ? [artifactShareTool()] : []),
             ...(availability.transfer === true ? [artifactTransferTool()] : [])
         ];
     }
@@ -82,42 +76,6 @@ function artifactViewImageTool(): ToolDefinition {
     };
 }
 
-function artifactShareTool(): ToolDefinition {
-    return {
-        description: "Create a temporary browser download link for a file, directory, or artifact. Provide exactly one of path or handle. path is resolved on the selected source instance; handle must come from a previous artifact-producing tool result. expiresInSeconds defaults to 3600 and must be between 60 and 604800.",
-        group: "artifact",
-        inputSchema: {
-            additionalProperties: false,
-            oneOf: [
-                { not: { required: ["path"] }, required: ["handle"] },
-                { not: { required: ["handle"] }, required: ["path"] }
-            ],
-            properties: {
-                expiresInSeconds: {
-                    description: "Link lifetime in seconds. Defaults to 3600; allowed range is 60 through 604800.",
-                    maximum: 604800,
-                    minimum: 60,
-                    type: "integer"
-                },
-                handle: {
-                    description: "Artifact handle returned by a previous artifact-producing tool result. Mutually exclusive with path.",
-                    minLength: 1,
-                    type: "string"
-                },
-                path: {
-                    description: "File or directory path on the selected source instance. Mutually exclusive with handle.",
-                    minLength: 1,
-                    type: "string"
-                }
-            },
-            type: "object"
-        },
-        name: "artifact_share",
-        outputSchema: artifactShareOutputSchema,
-        requiredCapabilities: ["read", "write"]
-    };
-}
-
 function artifactTransferTool(): ToolDefinition {
     const nonStartFields = ["handle", "sourcePath", "targetInstance", "targetPath", "targetWorkspace", "overwrite"]
         .map((field) => ({ required: [field] }));
@@ -168,7 +126,7 @@ function artifactTransferTool(): ToolDefinition {
                     type: "string"
                 },
                 targetInstance: {
-                    description: "Managed destination instance name returned by instance_list.",
+                    description: "Managed destination instance name from devshell instance list.",
                     minLength: 1,
                     type: "string"
                 },

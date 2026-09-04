@@ -1,7 +1,6 @@
 import {
     createError,
     errorCodes,
-    type ArtifactShareInput,
     type ArtifactTransferCancelInput,
     type ArtifactTransferLookupInput,
     type ArtifactTransferStartInput,
@@ -11,7 +10,6 @@ import {
     type ToolDefinition
 } from "@portable-devshell/shared";
 
-import type { McpSshInstanceCreateInput } from "../instance/McpInstanceGateway.js";
 import { McpToolSchemaUnavailableError } from "../tool/McpToolSchemaAdapter.js";
 
 export function withMcpContextId(tool: ToolDefinition, required = true): ToolDefinition {
@@ -90,7 +88,7 @@ export function readOptionalMcpContextInput(input: JsonValue): { ctxId?: string;
 
 export function withMcpInstanceTarget(tool: ToolDefinition): ToolDefinition {
     return withInputProperty(tool, "instance", {
-        description: "Managed instance name returned by instance_list.",
+        description: "Managed instance name from devshell instance list.",
         minLength: 1,
         type: "string"
     });
@@ -134,33 +132,6 @@ export function readMcpArtifactViewImageInput(input: JsonValue): ArtifactViewIma
     }
     if (path === undefined) {
         throw invalidArguments("artifact_viewImage requires path when handle is omitted.");
-    }
-    return { ...common, path, workspace: requiredString(input.workspace, "workspace") };
-}
-
-export function readMcpArtifactShareInput(input: JsonValue): ArtifactShareInput {
-    if (!isRecord(input)) {
-        throw invalidArguments("artifact_share requires an object input.");
-    }
-    const handle = optionalString(input.handle, "handle");
-    const path = optionalString(input.path, "path");
-    if ((handle === undefined) === (path === undefined)) {
-        throw invalidArguments("artifact_share requires exactly one of handle or path.");
-    }
-    const instance = optionalString(input.instance, "instance");
-    const expiresInSeconds = input.expiresInSeconds;
-    if (expiresInSeconds !== undefined && (typeof expiresInSeconds !== "number" || !Number.isInteger(expiresInSeconds) || expiresInSeconds < 60)) {
-        throw invalidArguments("expiresInSeconds must be an integer greater than or equal to 60.");
-    }
-    const common = {
-        ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }),
-        ...(instance === undefined ? {} : { instance })
-    };
-    if (handle !== undefined) {
-        return { ...common, handle };
-    }
-    if (path === undefined) {
-        throw invalidArguments("artifact_share requires path when handle is omitted.");
     }
     return { ...common, path, workspace: requiredString(input.workspace, "workspace") };
 }
@@ -210,19 +181,6 @@ export function readMcpArtifactTransferInput(
     };
 }
 
-export function assertMcpNoArguments(input: JsonValue, toolName: string): void {
-    if (!isRecord(input) || Object.keys(input).length !== 0) {
-        throw invalidArguments(`${toolName} does not accept arguments.`);
-    }
-}
-
-export function readMcpInstanceName(input: JsonValue, toolName: string): string {
-    if (!isRecord(input) || typeof input.instance !== "string" || input.instance.trim().length === 0) {
-        throw invalidArguments(`${toolName} requires instance.`);
-    }
-    return input.instance.trim();
-}
-
 export function readMcpInstanceConnectInput(input: JsonValue): { instance: string; workspace?: string } {
     if (!isRecord(input) || Object.keys(input).some((key) => key !== "instance" && key !== "workspace")) {
         throw invalidArguments("instance_connect accepts only instance and optional workspace.");
@@ -248,23 +206,6 @@ export function readMcpEnvironmentInfoInput(input: JsonValue): { ctxId?: string;
     return {
         ...(ctxId === undefined ? {} : { ctxId }),
         ...(workspace === undefined ? {} : { workspace })
-    };
-}
-
-export function readMcpSshCreateInput(input: JsonValue): McpSshInstanceCreateInput {
-    if (!isRecord(input)) {
-        throw invalidArguments("instance_create requires an object input.");
-    }
-    const port = input.port;
-    if (port !== undefined && (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535)) {
-        throw invalidArguments("port must be an integer between 1 and 65535.");
-    }
-    return {
-        host: requiredString(input.host, "host"),
-        identityFile: optionalString(input.identityFile, "identityFile"),
-        name: requiredString(input.name, "name"),
-        port: port as number | undefined,
-        user: optionalString(input.user, "user")
     };
 }
 

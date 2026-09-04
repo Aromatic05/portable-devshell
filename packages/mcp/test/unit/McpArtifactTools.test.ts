@@ -30,7 +30,7 @@ const png = Buffer.from(
     "base64"
 );
 
-test("artifact endpoint exposes worker read plus control share and transfer while worker is stopped", async () => {
+test("artifact endpoint exposes worker read plus control view and transfer while worker is stopped", async () => {
     const calls: Array<{ kind: string; defaultInstance: string; input: JsonValue }> = [];
     const gateway = createGateway({
         async viewArtifactImage(defaultInstance, input) {
@@ -49,10 +49,6 @@ test("artifact endpoint exposes worker read plus control share and transfer whil
                 }
             };
         },
-        async shareArtifact(defaultInstance, input) {
-            calls.push({ defaultInstance, input: input as unknown as JsonValue, kind: "share" });
-            return { shareId: "share-1" };
-        },
         async transferArtifact(defaultInstance, input) {
             calls.push({ defaultInstance, input: input as unknown as JsonValue, kind: "transfer" });
             return { transferId: "transfer-1" };
@@ -70,7 +66,7 @@ test("artifact endpoint exposes worker read plus control share and transfer whil
         const schema = tool.inputSchema as { properties?: Record<string, unknown> };
         assert.equal(schema.properties?.instance, undefined, tool.name);
     }
-    for (const name of ["artifact_viewImage", "artifact_share", "artifact_transfer"]) {
+    for (const name of ["artifact_viewImage", "artifact_transfer"]) {
         const schema = endpoint.listTools().find((tool) => tool.name === name)?.inputSchema as {
             oneOf?: unknown;
             properties?: Record<string, unknown>;
@@ -85,9 +81,7 @@ test("artifact endpoint exposes worker read plus control share and transfer whil
     };
     assert.equal(imageOutputSchema.properties?.source?.oneOf, undefined);
     assert.notEqual(imageOutputSchema.properties?.source?.properties, undefined);
-    assert.deepEqual(await endpoint.callTool("artifact_share", withContext({ path: "./dist" }), context), {
-        shareId: "share-1"
-    });
+    assert.equal(endpoint.listTools().some((tool) => tool.name === "artifact_share"), false);
     const image = await endpoint.callTool(
         "artifact_viewImage",
         withContext({ path: "./pixel.png" }),
@@ -124,7 +118,6 @@ test("artifact endpoint exposes worker read plus control share and transfer whil
         { transferId: "transfer-1" }
     );
     assert.deepEqual(calls, [
-        { defaultInstance: "main-pc", input: { path: "./dist", workspace: "/workspace" }, kind: "share" },
         { defaultInstance: "main-pc", input: { path: "./pixel.png", workspace: "/workspace" }, kind: "viewImage" },
         {
             defaultInstance: "main-pc",
@@ -173,8 +166,8 @@ test("artifact control tools apply read-only and mutating capability requirement
 
 test("remote artifact path operations request an instance workspace attachment", async () => {
     const gateway = createGateway({
-        async shareArtifact() {
-            return { shareId: "unexpected" };
+        async viewArtifactImage() {
+            throw new Error("unexpected");
         }
     });
     const endpoint = new McpEndpointWorker({
@@ -190,7 +183,7 @@ test("remote artifact path operations request an instance workspace attachment",
 
     await assert.rejects(
         endpoint.callTool(
-            "artifact_share",
+            "artifact_viewImage",
             withContext({ instance: "remote-server", path: "./dist" }),
             context
         ),
