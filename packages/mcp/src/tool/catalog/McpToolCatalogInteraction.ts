@@ -4,7 +4,6 @@ import { workspaceAppResourceUri } from "../../workspace/McpWorkspaceApp.js";
 import {
     todoReadOutputSchema,
     workspaceApprovalRequestOutputSchema,
-    workspaceGoalContinuationOutputSchema,
     workspaceGoalResultOutputSchema,
     workspaceOpenOutputSchema,
     workspaceQuestionAnswerOutputSchema,
@@ -26,7 +25,6 @@ export type McpToolCatalogInteractionName =
     | "workspace_wait_interrupt"
     | "workspace_task_control"
     | "workspace_wait_recover"
-    | "workspace_goal_continue"
     | "workspace_goal_pause"
     | "workspace_goal_resume"
     | "workspace_goal_stop"
@@ -225,45 +223,21 @@ export class McpToolCatalogInteraction {
         },
         {
             _meta: appOnlyMeta,
-            description: "Manage one detached-wait model re-entry with durable delivery fencing: claim, mark the outbound attempt before host dispatch, atomically complete an accepted send, safely release before dispatch, reject a definitively rejected send, or explicitly dismiss an uncertain delivery after human reconciliation. App-only recovery helper; models must not call it.",
+            description: "Dismiss one previously attempted detached-wait automatic resume after human reconciliation. Automatic delivery ownership is managed only by workspace_reentry_control. App-only helper; models must not call it.",
             group: "workspace",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
-                    action: { enum: ["claim", "attempt", "complete", "release", "reject", "dismiss"], type: "string" },
-                    claimId: { minLength: 1, type: "string" },
+                    action: { enum: ["dismiss"], type: "string" },
                     recoveryMessageId: { minLength: 1, type: "string" },
                     token: { minLength: 1, type: "string" },
                     waitId: { minLength: 1, type: "string" },
                 },
-                required: ["action", "waitId", "token"],
+                required: ["action", "recoveryMessageId", "waitId", "token"],
                 type: "object",
             },
             name: "workspace_wait_recover",
             outputSchema: workspaceWaitRecoveryOutputSchema,
-            requiredCapabilities: [],
-        },
-        {
-            _meta: appOnlyMeta,
-            description: "Manage automatic and user-initiated Workspace Goal continuation with one durable delivery fence. App-only helper; models must not call it.",
-            group: "workspace",
-            inputSchema: {
-                additionalProperties: false,
-                properties: {
-                    accepted: { type: "boolean" },
-                    action: { enum: ["claim", "validate", "attempt", "report", "reset"], type: "string" },
-                    available: { type: "boolean" },
-                    claimId: { maxLength: 128, minLength: 1, type: "string" },
-                    error: { maxLength: 2000, minLength: 1, type: "string" },
-                    goalId: { minLength: 1, type: "string" },
-                    token: { minLength: 1, type: "string" },
-                    userInitiated: { type: "boolean" },
-                },
-                required: ["action", "token"],
-                type: "object",
-            },
-            name: "workspace_goal_continue",
-            outputSchema: workspaceGoalContinuationOutputSchema,
             requiredCapabilities: [],
         },
         {
@@ -273,9 +247,12 @@ export class McpToolCatalogInteraction {
             inputSchema: {
                 additionalProperties: false,
                 properties: {
-                    action: { enum: ["get", "yield", "resume", "claim", "validate", "release"], type: "string" },
+                    action: { enum: ["get", "yield", "resume", "claim", "validate", "attempt", "report", "release"], type: "string" },
                     claimId: { maxLength: 128, minLength: 1, type: "string" },
+                    intent: { enum: ["automatic", "goal-resume", "goal-retry", "task-resume"], type: "string" },
+                    outcome: { enum: ["accepted", "rejected", "uncertain"], type: "string" },
                     reason: { maxLength: 2000, minLength: 1, type: "string" },
+                    sourceId: { maxLength: 256, minLength: 1, type: "string" },
                     token: { minLength: 1, type: "string" },
                 },
                 required: ["action", "token"],

@@ -800,7 +800,11 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     await waitUntil(() => waits[1]?.status === "consumed");
     assert.equal(waits[1]?.status, "consumed");
     assert.equal(waits[1]?.result, terminalResults.get("task-2"));
-    assert.equal(excludedCallIds.includes("call-tmux-run-2"), true);
+    assert.equal(
+        excludedCallIds.includes("call-tmux-run-2"),
+        false,
+        "the Context execution lease suppresses detached completion before the live-call fallback is needed",
+    );
     concurrentAgentCall = false;
     assert.equal(runCalls, 2);
     assert.equal(harness.audited.filter((entry) => entry.toolName === "tmux_run").length, 0);
@@ -858,6 +862,60 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     assert.deepEqual(synchronousResult.task, { id: "task-3", status: "0" });
     assert.equal(waits[3]?.status, "consumed");
     assert.equal(waits[3]?.detachedAt, undefined);
+
+    terminalResults.delete("task-4");
+    const transportAbort = new AbortController();
+    let transportSettled = false;
+    const transportInterrupted = dispatch.callTool(
+        "tmux_run",
+        { command: "sleep 10", ctxId: environment.ctxId, timeout: 660_000, wait: "block" },
+        { principal: "tester", requestId: "transport-abort-before-handoff" },
+        transportAbort.signal,
+    ).then(
+        (result) => {
+            transportSettled = true;
+            return { kind: "resolved" as const, result };
+        },
+        (error: unknown) => {
+            transportSettled = true;
+            return { error, kind: "rejected" as const };
+        },
+    );
+    await waitUntil(() => runCalls === 4 && waits.length === 5);
+    assert.equal(waits[4]?.status, "waiting");
+    transportAbort.abort("transport closed");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(transportSettled, true, "transport abort should hand off before the synchronous wait boundary");
+    assert.equal(waits[4]?.status, "detached");
+    const transportOutcome = await transportInterrupted;
+    assert.equal(transportOutcome.kind, "resolved");
+    if (transportOutcome.kind === "resolved") {
+        const result = transportOutcome.result as { detached?: boolean; task?: { id?: string; status?: string } };
+        assert.equal(result.detached, true);
+        assert.deepEqual(result.task, { id: "task-4", status: "running" });
+    }
+    assert.equal(waits[4]?.status, "detached");
+
+    terminalResults.delete("task-5");
+    const completionAbort = new AbortController();
+    const completesAfterTransportAbort = dispatch.callTool(
+        "tmux_run",
+        { command: "sleep 10", ctxId: environment.ctxId, timeout: 660_000, wait: "block" },
+        { principal: "tester", requestId: "transport-abort-before-completion" },
+        completionAbort.signal,
+    ) as Promise<{ detached?: boolean; task?: { id?: string; status?: string } }>;
+    await waitUntil(() => runCalls === 5 && waits.length === 6);
+    completionAbort.abort("transport closed");
+    const completedAfterAbort = await completesAfterTransportAbort;
+    assert.equal(completedAfterAbort.detached, true);
+    assert.deepEqual(completedAfterAbort.task, { id: "task-5", status: "running" });
+    assert.equal(waits[5]?.status, "detached");
+    assert.equal(typeof waits[5]?.detachedAt, "string");
+    terminalResults.set("task-5", { task: { id: "task-5", status: "0" } });
+    await waitUntil(() => waits[5]?.status === "resolved");
+    assert.equal(waits[5]?.status, "resolved");
+    assert.equal(typeof waits[5]?.detachedAt, "string");
+    assert.deepEqual(waits[5]?.result, terminalResults.get("task-5"));
 });
 
 test("tmux_read long waits detach into durable Workspace state", async () => {
@@ -976,9 +1034,11 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
         policy: { capabilities: ["read"], groups: ["tmux"] },
         worker,
     });
+    let executionNow = Date.now();
+    const contextRegistry = new McpContextRegistry({ now: () => executionNow });
     const dispatch = new McpEndpointDispatch({
         catalog,
-        contextRegistry: new McpContextRegistry(),
+        contextRegistry,
         gateway,
         instanceName: "demo-local",
         tmuxBlockSyncMs: 20,
@@ -1072,9 +1132,47 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
     assert.equal(idleResult.detached, true);
     const idleReplacement = waits.filter((entry) => entry.waitId.startsWith("wait-read-")).at(-1);
     assert.equal(idleReplacement?.status, "detached");
+    executionNow += 60_001;
     ready = true;
     await waitUntil(() => idleReplacement?.status === "resolved");
     assert.equal(idleReplacement?.status, "resolved");
+
+    ready = false;
+    const abortDispatch = new McpEndpointDispatch({
+        catalog,
+        contextRegistry,
+        gateway,
+        instanceName: "demo-local",
+        tmuxBlockSyncMs: 250,
+        tmuxWaitPollMs: 1,
+        worker,
+    });
+    const waitCountBeforeAbort = waits.length;
+    const transportAbort = new AbortController();
+    let transportSettled = false;
+    const abortedRead = abortDispatch.callTool(
+        "tmux_read",
+        { ctxId: environment.ctxId, line: 17, task: "task-existing", timeMs: 1_000 },
+        { principal: "tester", requestId: "wait-read-transport-abort" },
+        transportAbort.signal,
+    ).then((value) => {
+        transportSettled = true;
+        return value as { detached?: boolean };
+    });
+    await waitUntil(() => waits.length === waitCountBeforeAbort + 1);
+    const abortedReplacement = waits.at(-1);
+    assert.equal(abortedReplacement?.status, "waiting");
+    transportAbort.abort("transport closed");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(transportSettled, true, "tmux_read transport abort should hand off before the wait boundary");
+    assert.equal((await abortedRead).detached, true);
+    assert.equal(abortedReplacement?.status, "detached");
+    assert.equal(typeof abortedReplacement?.detachedAt, "string");
+
+    ready = true;
+    await waitUntil(() => abortedReplacement?.status === "resolved");
+    assert.equal(abortedReplacement?.status, "resolved");
+    assert.equal(typeof abortedReplacement?.detachedAt, "string");
 });
 
 test("failed environ_info rolls back only the undisclosed explicit Context", async () => {

@@ -27,7 +27,6 @@ const titles: Readonly<Record<string, string>> = {
     workspace_ask: "Ask user",
     workspace_approval_decide: "Decide approval",
     workspace_goal: "Manage goal",
-    workspace_goal_continue: "Continue goal",
     workspace_goal_resume: "Resume goal",
     workspace_goal_stop: "Stop goal",
     workspace_open: "Open Workspace",
@@ -36,7 +35,7 @@ const titles: Readonly<Record<string, string>> = {
     workspace_snapshot: "Read Workspace snapshot",
     workspace_task_control: "Control task",
     workspace_wait_interrupt: "Stop waiting",
-    workspace_wait_recover: "Recover wait",
+    workspace_wait_recover: "Dismiss wait resume",
     workspace_watch: "Watch Workspace",
 };
 

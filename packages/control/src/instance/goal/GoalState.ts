@@ -331,6 +331,14 @@ export class GoalState {
                     : { continuationRetryAfter: new Date(Date.parse(now) + GOAL_CONTINUATION_RETRY_MS).toISOString() }),
             };
             result = { goal: snapshot(next, now) };
+        } else if (input.action === "release") {
+            const claimId = requiredText(input.claimId, "claimId", 128);
+            if (!claimMatches(current, claimId)) throw new Error("Workspace Goal continuation claim is no longer active.");
+            if (current.continuationAttemptedAt !== undefined) {
+                throw new Error("Attempted Workspace Goal continuation cannot be released.");
+            }
+            next = clearContinuation(current);
+            result = { goal: snapshot(next, now), released: true };
         } else {
             throw new Error(`Unsupported Workspace Goal continuation action: ${String(input.action)}.`);
         }

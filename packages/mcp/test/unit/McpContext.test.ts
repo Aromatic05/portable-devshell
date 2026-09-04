@@ -173,6 +173,132 @@ test("McpContextRegistry arbitrates one automatic re-entry and preserves explici
     }
 });
 
+test("McpContextRegistry execution lease fences automatic re-entry across tool activity and accepted delivery", async () => {
+    const root = await createTestTempDirectory("context-execution-lease");
+    const filePath = join(root, "contexts.json");
+    let now = Date.parse("2026-09-03T00:00:00.000Z");
+    try {
+        const registry = new McpContextRegistry({
+            filePath,
+            idFactory: () => "ctx-execution",
+            now: () => now,
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo-local", principal: "local", workspace: "/workspace" });
+
+        assert.equal((await registry.readAutomaticReentry("ctx-execution", "demo-local")).executionActive, false);
+        assert.equal((await registry.claimAutomaticReentry("ctx-execution", "demo-local", "claim-before-tool")).claimed, true);
+
+        const active = await registry.observeExecutionActivity("ctx-execution", "demo-local");
+        assert.equal(active.executionActive, true);
+        assert.equal(active.executionEpoch, 1);
+        assert.equal(active.pending, false);
+        assert.equal((await registry.validateAutomaticReentry("ctx-execution", "demo-local", "claim-before-tool")).valid, false);
+        assert.equal((await registry.claimAutomaticReentry("ctx-execution", "demo-local", "claim-during-tool")).claimed, false);
+
+        now += 60_001;
+        assert.equal((await registry.readAutomaticReentry("ctx-execution", "demo-local")).executionActive, false);
+        assert.equal((await registry.claimAutomaticReentry("ctx-execution", "demo-local", "claim-after-idle")).claimed, true);
+        const delivered = await registry.markAutomaticReentryAccepted("ctx-execution", "demo-local", "claim-after-idle");
+        assert.equal(delivered.executionActive, true);
+        assert.equal(delivered.executionEpoch, 2);
+        assert.equal(delivered.pending, false);
+
+        const reloaded = new McpContextRegistry({ filePath, now: () => now });
+        await reloaded.initialize();
+        assert.equal((await reloaded.readAutomaticReentry("ctx-execution", "demo-local")).executionActive, true);
+        assert.equal((await reloaded.claimAutomaticReentry("ctx-execution", "demo-local", "claim-after-reload")).claimed, false);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("McpContextRegistry releases only the execution lease owned by the expected epoch", async () => {
+    const root = await createTestTempDirectory("context-execution-release");
+    const filePath = join(root, "contexts.json");
+    const now = Date.parse("2026-09-03T01:00:00.000Z");
+    try {
+        const registry = new McpContextRegistry({
+            filePath,
+            idFactory: () => "ctx-execution-release",
+            now: () => now,
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo-local", principal: "local", workspace: "/workspace" });
+
+        const first = await registry.observeExecutionActivity("ctx-execution-release", "demo-local");
+        assert.equal(first.executionEpoch, 1);
+        assert.equal(first.executionActive, true);
+        const staleBefore = await registry.releaseExecutionActivity("ctx-execution-release", "demo-local", 0);
+        assert.equal(staleBefore.executionEpoch, 1);
+        assert.equal(staleBefore.executionActive, true);
+
+        const second = await registry.observeExecutionActivity("ctx-execution-release", "demo-local");
+        assert.equal(second.executionEpoch, 2);
+        const staleAfter = await registry.releaseExecutionActivity("ctx-execution-release", "demo-local", 1);
+        assert.equal(staleAfter.executionEpoch, 2);
+        assert.equal(staleAfter.executionActive, true);
+
+        const released = await registry.releaseExecutionActivity("ctx-execution-release", "demo-local", 2);
+        assert.equal(released.executionEpoch, 3);
+        assert.equal(released.executionActive, false);
+
+        const reloaded = new McpContextRegistry({ filePath, now: () => now });
+        await reloaded.initialize();
+        const persisted = await reloaded.readAutomaticReentry("ctx-execution-release", "demo-local");
+        assert.equal(persisted.executionEpoch, 3);
+        assert.equal(persisted.executionActive, false);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("McpContextRegistry attempted delivery survives claim TTL and execution activity until it is settled", async () => {
+    const root = await createTestTempDirectory("context-attempted-reentry-fence");
+    const filePath = join(root, "contexts.json");
+    let now = Date.parse("2026-09-03T02:00:00.000Z");
+    try {
+        const registry = new McpContextRegistry({
+            filePath,
+            idFactory: () => "ctx-attempted",
+            now: () => now,
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo-local", principal: "local", workspace: "/workspace" });
+        assert.equal((await registry.claimAutomaticReentry("ctx-attempted", "demo-local", "claim-attempted")).claimed, true);
+        await registry.bindAutomaticReentrySource(
+            "ctx-attempted",
+            "demo-local",
+            "claim-attempted",
+            "task-resume",
+            "task-1",
+        );
+        const attempted = await registry.markAutomaticReentryAttempted("ctx-attempted", "demo-local", "claim-attempted");
+        assert.equal(attempted.attempted, true);
+        assert.equal(attempted.sourceKind, "task-resume");
+
+        now += 10 * 60_000;
+        const afterTtl = await registry.readAutomaticReentry("ctx-attempted", "demo-local");
+        assert.equal(afterTtl.pending, true);
+        assert.equal(afterTtl.attempted, true);
+        assert.equal((await registry.claimAutomaticReentry("ctx-attempted", "demo-local", "claim-replay")).claimed, false);
+
+        const active = await registry.observeExecutionActivity("ctx-attempted", "demo-local");
+        assert.equal(active.executionActive, true);
+        assert.equal(active.attempted, true);
+        assert.equal(active.claimId, "claim-attempted");
+        assert.equal(active.sourceId, "task-1");
+        assert.equal((await registry.claimAutomaticReentry("ctx-attempted", "demo-local", "claim-during-execution")).claimed, false);
+
+        const settled = await registry.markAutomaticReentryAccepted("ctx-attempted", "demo-local", "claim-attempted");
+        assert.equal(settled.attempted, false);
+        assert.equal(settled.pending, false);
+        assert.equal(settled.sourceKind, undefined);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
 test("McpContextRegistry keeps external bindings private and does not retire the previous Context", async () => {
     const root = await createTestTempDirectory("context-external-selector");
     const filePath = join(root, "contexts.json");
