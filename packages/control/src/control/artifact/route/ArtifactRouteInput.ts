@@ -21,13 +21,14 @@ export function readArtifactViewImageInput(params?: JsonValue): ArtifactViewImag
 export function readArtifactShareInput(params?: JsonValue): ArtifactShareInput {
     if (!isRecord(params)) throw invalid("artifact.createShare requires parameters.");
     const expiresInSeconds = readPositiveInteger(params.expiresInSeconds, "expiresInSeconds");
+    const maxDownloads = readPositiveInteger(params.maxDownloads, "maxDownloads");
     const instance = readOptionalString(params.instance, "instance");
     const handle = readOptionalString(params.handle, "handle");
     const path = readOptionalString(params.path, "path");
     if ((handle === undefined) === (path === undefined)) throw invalid("Exactly one of handle or path is required.");
     return handle === undefined
-        ? { ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }), ...(instance === undefined ? {} : { instance }), path: path!, workspace: readRequiredString(params.workspace, "workspace") }
-        : { ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }), handle, ...(instance === undefined ? {} : { instance }) };
+        ? { ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }), ...(instance === undefined ? {} : { instance }), ...(maxDownloads === undefined ? {} : { maxDownloads }), path: path!, workspace: readRequiredString(params.workspace, "workspace") }
+        : { ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }), handle, ...(instance === undefined ? {} : { instance }), ...(maxDownloads === undefined ? {} : { maxDownloads }) };
 }
 
 export function readArtifactTransferStartInput(params?: JsonValue): ArtifactTransferStartInput {

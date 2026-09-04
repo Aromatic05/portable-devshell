@@ -63,10 +63,10 @@ export async function executeArtifactCommand(
 }
 
 async function share(client: CliClientArtifactPort, args: readonly string[]): Promise<ArtifactShareResult> {
-    const parsed = parseOptions(args, new Set(["--authority", "--expires-in", "--workspace"]));
+    const parsed = parseOptions(args, new Set(["--authority", "--expires-in", "--max-downloads", "--workspace"]));
     if (parsed.positionals.length !== 2) {
         throw usage(
-            "artifact share requires <instance> <artifact:<handle>|path:<path>> [--workspace <absolute-path>] [--expires-in <seconds>] [--authority <instance>]"
+            "artifact share requires <instance> <artifact:<handle>|path:<path>> [--workspace <absolute-path>] [--expires-in <seconds>] [--max-downloads <count>] [--authority <instance>]"
         );
     }
     const instance = parsed.positionals[0]!;
@@ -81,15 +81,20 @@ async function share(client: CliClientArtifactPort, args: readonly string[]): Pr
     const expiresInSeconds = parsed.options.has("--expires-in")
         ? integerAtLeast(parsed.options.get("--expires-in"), "--expires-in", 60)
         : undefined;
+    const maxDownloads = parsed.options.has("--max-downloads")
+        ? integerAtLeast(parsed.options.get("--max-downloads"), "--max-downloads", 1)
+        : undefined;
     return await client.createShare(authority, "handle" in source
         ? {
             ...source,
             ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }),
+            ...(maxDownloads === undefined ? {} : { maxDownloads }),
             instance
         }
         : {
             ...source,
             ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }),
+            ...(maxDownloads === undefined ? {} : { maxDownloads }),
             instance,
             workspace: workspace!
         });
@@ -232,7 +237,7 @@ function writeJson(stream: { write(chunk: string): void }, value: unknown): void
 export function artifactUsage(): string {
     return [
         "Artifact commands:",
-        "  devshell artifact share <instance> <artifact:<handle>|path:<path>> [--workspace <absolute-path>] [--expires-in <seconds>] [--authority <instance>]",
+        "  devshell artifact share <instance> <artifact:<handle>|path:<path>> [--workspace <absolute-path>] [--expires-in <seconds>] [--max-downloads <count>] [--authority <instance>]",
         "  devshell artifact shares",
         "  devshell artifact revoke <shareId>",
         "  devshell artifact transfer <source-instance> <source> <target-instance> <target-path> --target-workspace <absolute-path> [--source-workspace <absolute-path>] [--overwrite] [--authority <instance>]",

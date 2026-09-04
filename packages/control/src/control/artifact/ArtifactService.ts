@@ -111,23 +111,28 @@ export class ArtifactService {
         return await this.#shareService.resolveShare(token);
     }
 
+    async beginShareDownload(token: string): Promise<ArtifactShareAccess> {
+        return await this.#shareService.beginShareDownload(token);
+    }
+
     async readSharePayload(
-        token: string,
+        access: ArtifactShareAccess,
         offsetBytes: number,
         maxBytes: number
     ): Promise<WorkerArtifactPayloadReadResult> {
         return await this.#shareService.readSharePayload(
-            token,
+            access,
             offsetBytes,
             maxBytes
         );
     }
 
-    async recordShareDownloaded(
+    async finishShareDownload(
         token: string,
+        completed: boolean,
         details?: JsonValue
     ): Promise<void> {
-        await this.#shareService.recordShareDownloaded(token, details);
+        await this.#shareService.finishShareDownload(token, completed, details);
     }
 
     async retireInstance(instance: string): Promise<void> {

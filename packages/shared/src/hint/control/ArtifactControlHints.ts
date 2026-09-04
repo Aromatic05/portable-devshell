@@ -158,6 +158,7 @@ export function artifactControlErrorHints(body: ControlErrorBody): ToolDiagnosti
             )];
         case "artifact.shareNotFound":
         case "artifact.shareRevoked":
+        case "artifact.shareExhausted":
         case "artifact.shareExpired":
             return [errorHint(
                 body.code,

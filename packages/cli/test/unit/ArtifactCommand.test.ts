@@ -107,14 +107,14 @@ test("artifact share uses the existing CLI control client", async () => {
     const client = createArtifactClientStub();
     const runtime = cli(client);
     assert.equal(
-        await runtime.instance.run(["artifact", "share", "source-a", "path:./dist", "--workspace", "/source", "--expires-in", "600"]),
+        await runtime.instance.run(["artifact", "share", "source-a", "path:./dist", "--workspace", "/source", "--expires-in", "600", "--max-downloads", "3"]),
         0
     );
     assert.deepEqual(client.calls, [
         {
             input: {
                 defaultInstance: "source-a",
-                input: { expiresInSeconds: 600, instance: "source-a", path: "./dist", workspace: "/source" }
+                input: { expiresInSeconds: 600, instance: "source-a", maxDownloads: 3, path: "./dist", workspace: "/source" }
             },
             method: "share"
         }

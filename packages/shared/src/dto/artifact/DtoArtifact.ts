@@ -1,4 +1,4 @@
-export const artifactShareStates = ["active", "expired", "revoked"] as const;
+export const artifactShareStates = ["active", "exhausted", "expired", "revoked"] as const;
 export type ArtifactShareState = (typeof artifactShareStates)[number];
 
 export const artifactTransferStatuses = [
@@ -98,12 +98,14 @@ export type ArtifactShareInput =
           expiresInSeconds?: number;
           handle: string;
           instance?: string;
+          maxDownloads?: number;
           path?: never;
       }
     | {
           expiresInSeconds?: number;
           handle?: never;
           instance?: string;
+          maxDownloads?: number;
           path: string;
           workspace: string;
       };
@@ -111,8 +113,10 @@ export type ArtifactShareInput =
 export interface ArtifactShareResult {
     blake3: string;
     bytes: number;
+    downloadCount?: number;
     downloadName: string;
     expiresAtMs: number;
+    maxDownloads?: number;
     mediaType: string;
     shareId: string;
     source: ArtifactSourceDescriptor;
@@ -185,6 +189,7 @@ export interface ArtifactTransferResult {
 export const artifactEventTypes = [
     "artifact.shareCreated",
     "artifact.shareDownloaded",
+    "artifact.shareExhausted",
     "artifact.shareExpired",
     "artifact.shareRevoked",
     "artifact.transferStarted",

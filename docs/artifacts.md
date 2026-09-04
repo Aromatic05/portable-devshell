@@ -243,7 +243,7 @@ control.artifact.cancelTransfer
 ## CLI
 
 ```text
-devshell artifact share <instance> <artifact:<handle>|path:<path>> [--workspace <absolute-path>] [--expires-in <seconds>] [--authority <instance>]
+devshell artifact share <instance> <artifact:<handle>|path:<path>> [--workspace <absolute-path>] [--expires-in <seconds>] [--max-downloads <count>] [--authority <instance>]
 devshell artifact shares
 devshell artifact revoke <shareId>
 
@@ -253,9 +253,9 @@ devshell artifact transfer cancel <transferId>
 devshell artifact transfers
 ```
 
-显式的 `artifact:` 和 `path:` 前缀避免普通路径被误判为 Artifact handle。path 来源需要显式绝对 workspace；transfer 的目标也必须提供 `--target-workspace`。启动传输后，CLI 输出排队记录，不等待任务完成。`artifact share` 创建成功时会返回一次可用的 bearer URL；`artifact shares` 历史列表会把该 URL 显示为 `[redacted]`，避免管理面批量回显仍有效的 bearer credential。
+显式的 `artifact:` 和 `path:` 前缀避免普通路径被误判为 Artifact handle。path 来源需要显式绝对 workspace；transfer 的目标也必须提供 `--target-workspace`。启动传输后，CLI 输出排队记录，不等待任务完成。`artifact share` 创建成功时会返回一次可用的 bearer URL；可选 `--max-downloads` 限制成功 GET 的次数，HEAD 与无效 Range 不消耗次数，达到上限后 share 进入 `exhausted` 并返回 HTTP 410。`artifact shares` 会显示 `downloadCount` / `maxDownloads`，同时把 URL 显示为 `[redacted]`，避免管理面批量回显仍有效的 bearer credential。
 
-Control 永远保留 active share 和非终态 transfer；expired / revoked share 以及 completed / failed / cancelled / interrupted transfer 的终态历史默认各保留最近 256 条。压缩在运行期间发生，并同步删除对应的持久化元数据文件，因此长期运行不会让 share / transfer record store 无界增长。
+Control 永远保留 active share 和非终态 transfer；exhausted / expired / revoked share 以及 completed / failed / cancelled / interrupted transfer 的终态历史默认各保留最近 256 条。压缩在运行期间发生，并同步删除对应的持久化元数据文件，因此长期运行不会让 share / transfer record store 无界增长。
 
 ## TUI
 

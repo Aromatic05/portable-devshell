@@ -636,6 +636,67 @@ test("artifact share persists its payload lease and revoke closes it", async (t)
     assert.equal(service.listShares()[0]?.state, "revoked");
 });
 
+test("artifact share persists maxDownloads and completed download count across restart", async (t) => {
+    const storageDir = await createTestTempDirectory("artifact-share-download-count");
+    t.after(() => rm(storageDir, { force: true, recursive: true }));
+    const source = new MemoryArtifactEndpoint(Buffer.from("share"));
+    const options = {
+        resolveEndpoint: resolver({ "source-a": source }),
+        shareUrl: (token: string) => `https://example.test/artifacts/share/${token}`,
+        storageDir
+    };
+    const first = new ArtifactService(options);
+    await first.initialize();
+    const share = await first.createShare({
+        maxDownloads: 2,
+        path: "./share.bin",
+        workspace: "/workspace"
+    }, "source-a");
+    const token = new URL(share.url).pathname.split("/").at(-1)!;
+    await first.beginShareDownload(token);
+    await first.finishShareDownload(token, true);
+    assert.equal(first.listShares()[0]?.downloadCount, 1);
+    assert.equal(first.listShares()[0]?.maxDownloads, 2);
+    await first.stop();
+
+    const reloaded = new ArtifactService(options);
+    await reloaded.initialize();
+    t.after(() => reloaded.stop());
+    assert.equal(reloaded.listShares()[0]?.downloadCount, 1);
+    assert.equal(reloaded.listShares()[0]?.maxDownloads, 2);
+    assert.equal(reloaded.listShares()[0]?.state, "active");
+});
+
+test("artifact share reserves maxDownloads slots and releases a failed download", async (t) => {
+    const storageDir = await createTestTempDirectory("artifact-share-download-reservation");
+    t.after(() => rm(storageDir, { force: true, recursive: true }));
+    const source = new MemoryArtifactEndpoint(Buffer.from("share"));
+    const service = new ArtifactService({
+        resolveEndpoint: resolver({ "source-a": source }),
+        shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
+        storageDir
+    });
+    await service.initialize();
+    t.after(() => service.stop());
+    const share = await service.createShare({
+        maxDownloads: 1,
+        path: "./share.bin",
+        workspace: "/workspace"
+    }, "source-a");
+    const token = new URL(share.url).pathname.split("/").at(-1)!;
+
+    await service.beginShareDownload(token);
+    await assert.rejects(
+        service.beginShareDownload(token),
+        (error: unknown) => typeof error === "object" && error !== null && "code" in error && error.code === "artifact.shareExhausted"
+    );
+    await service.finishShareDownload(token, false);
+    await service.beginShareDownload(token);
+    await service.finishShareDownload(token, true);
+    assert.equal(service.listShares()[0]?.state, "exhausted");
+    assert.equal(service.listShares()[0]?.downloadCount, 1);
+});
+
 test("artifact share history bounds terminal records while preserving active shares", async (t) => {
     const storageDir = await createTestTempDirectory("artifact-share-history");
     t.after(() => rm(storageDir, { force: true, recursive: true }));

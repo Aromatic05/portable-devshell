@@ -81,7 +81,8 @@ class MemoryShareEndpoint implements ArtifactServiceEndpoint {
 
 async function fixture(
     t: TestContext,
-    publicBaseUrl?: string
+    publicBaseUrl?: string,
+    maxDownloads?: number
 ) {
     const storageDir = await createTestTempDirectory("artifact-http");
     const endpoint = new MemoryShareEndpoint(Buffer.from("0123456789abcdef"));
@@ -109,7 +110,12 @@ async function fixture(
     });
     const port = requireTcpPort(server.address);
     const baseUrl = `http://127.0.0.1:${port}`;
-    const share = await service.createShare({ instance: "source-a", path: "./result.bin", workspace: "/workspace" }, "source-a");
+    const share = await service.createShare({
+        instance: "source-a",
+        ...(maxDownloads === undefined ? {} : { maxDownloads }),
+        path: "./result.bin",
+        workspace: "/workspace"
+    }, "source-a");
     const token = new URL(share.url).pathname.split("/").at(-1)!;
     const downloadUrl = `${baseUrl}${artifactShareRoute(publicBaseUrl)}/${token}`;
     return { downloadUrl, endpoint, service, share, token };
@@ -158,6 +164,30 @@ test("artifact HTTP route supports one byte range and rejects invalid or multipl
     const outside = await fetch(downloadUrl, { headers: { range: "bytes=99-100" } });
     assert.equal(outside.status, 416);
     assert.equal(outside.headers.get("content-range"), "bytes */16");
+});
+
+test("artifact HTTP route enforces maxDownloads while HEAD and invalid ranges do not consume it", async (t) => {
+    const { downloadUrl, service, share } = await fixture(t, undefined, 2);
+    assert.equal(share.downloadCount, 0);
+    assert.equal(share.maxDownloads, 2);
+
+    assert.equal((await fetch(downloadUrl, { method: "HEAD" })).status, 200);
+    assert.equal((await fetch(downloadUrl, { headers: { range: "bytes=99-100" } })).status, 416);
+    assert.equal(service.listShares()[0]?.downloadCount, 0);
+
+    const range = await fetch(downloadUrl, { headers: { range: "bytes=0-3" } });
+    assert.equal(range.status, 206);
+    assert.equal(await range.text(), "0123");
+    assert.equal(service.listShares()[0]?.downloadCount, 1);
+
+    const full = await fetch(downloadUrl);
+    assert.equal(full.status, 200);
+    assert.equal(await full.text(), "0123456789abcdef");
+    assert.equal(service.listShares()[0]?.downloadCount, 2);
+    assert.equal(service.listShares()[0]?.state, "exhausted");
+
+    assert.equal((await fetch(downloadUrl)).status, 410);
+    assert.equal((await fetch(downloadUrl, { method: "HEAD" })).status, 410);
 });
 
 test("artifact HTTP route returns 410 after explicit revocation and never exposes token in body", async (t) => {

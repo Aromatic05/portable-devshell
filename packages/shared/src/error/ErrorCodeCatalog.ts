@@ -5,6 +5,7 @@ export const errorCodes = {
     artifactImageTooLarge: "artifact.imageTooLarge",
     artifactImageUnsupported: "artifact.imageUnsupported",
     artifactPayloadInvalid: "artifact.payloadInvalid",
+    artifactShareExhausted: "artifact.shareExhausted",
     artifactShareExpired: "artifact.shareExpired",
     artifactShareNotFound: "artifact.shareNotFound",
     artifactShareRevoked: "artifact.shareRevoked",

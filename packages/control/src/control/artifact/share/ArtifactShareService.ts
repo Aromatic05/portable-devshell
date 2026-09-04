@@ -36,6 +36,7 @@ export interface ArtifactShareServiceOptions {
 }
 
 export class ArtifactShareService {
+    readonly #activeDownloads = new Map<string, number>();
     readonly #recordStore: ArtifactRecordStore;
     readonly #resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
     readonly #shareUrl: ArtifactServiceOptions["shareUrl"];
@@ -53,11 +54,13 @@ export class ArtifactShareService {
     }
 
     async initialize(): Promise<void> {
+        this.#activeDownloads.clear();
         this.#shares.clear();
         this.#shareIdsByToken.clear();
 
         for (const share of await this.#recordStore.loadShares()) {
             share.authorityInstance ??= share.sourceInstance;
+            share.result.downloadCount ??= 0;
             this.#shares.set(share.result.shareId, share);
             this.#shareIdsByToken.set(share.token, share.result.shareId);
             this.#lastTerminalAtMs = Math.max(this.#lastTerminalAtMs, share.terminalAtMs ?? 0);
@@ -66,7 +69,13 @@ export class ArtifactShareService {
         this.#initialized = true;
         const now = Date.now();
         for (const share of this.#shares.values()) {
-            if (share.result.state === "active" && share.result.expiresAtMs <= now) {
+            if (
+                share.result.state === "active" &&
+                share.result.maxDownloads !== undefined &&
+                (share.result.downloadCount ?? 0) >= share.result.maxDownloads
+            ) {
+                await this.#exhaustShare(share);
+            } else if (share.result.state === "active" && share.result.expiresAtMs <= now) {
                 await this.#expireShare(share);
             } else if (share.result.state !== "active" && !share.payloadClosed) {
                 await this.#closeSharePayload(share);
@@ -77,6 +86,7 @@ export class ArtifactShareService {
 
     stop(): void {
         this.#initialized = false;
+        this.#activeDownloads.clear();
     }
 
     async createShare(
@@ -91,6 +101,16 @@ export class ArtifactShareService {
             defaultInstance
         );
         const expiresInSeconds = input.expiresInSeconds ?? DEFAULT_ARTIFACT_SHARE_TTL_SECONDS;
+        if (
+            input.maxDownloads !== undefined &&
+            (!Number.isSafeInteger(input.maxDownloads) || input.maxDownloads < 1)
+        ) {
+            throw createError({
+                code: errorCodes.targetInvalid,
+                message: "maxDownloads must be a positive safe integer.",
+                retryable: false
+            });
+        }
 
         if (
             !Number.isInteger(expiresInSeconds) ||
@@ -115,8 +135,10 @@ export class ArtifactShareService {
         const result: ArtifactShareResult = {
             blake3: opened.descriptor.payloadBlake3,
             bytes: opened.descriptor.payloadBytes,
+            downloadCount: 0,
             downloadName: opened.descriptor.name,
             expiresAtMs,
+            ...(input.maxDownloads === undefined ? {} : { maxDownloads: input.maxDownloads }),
             mediaType: opened.descriptor.mediaType,
             shareId,
             source: sourceDescriptor(sourceInstance, sourceInput, opened.descriptor),
@@ -228,6 +250,9 @@ export class ArtifactShareService {
                 details: { shareId: share.result.shareId }
             });
         }
+        if (share.result.state === "exhausted") {
+            throw exhaustedShare(share.result.shareId);
+        }
         if (share.result.state === "expired" || share.result.expiresAtMs <= Date.now()) {
             await this.#expireShare(share);
             throw createError({
@@ -245,12 +270,26 @@ export class ArtifactShareService {
         };
     }
 
+    async beginShareDownload(token: string): Promise<ArtifactShareAccess> {
+        const access = await this.resolveShare(token);
+        const shareId = access.share.shareId;
+        const share = this.#shares.get(shareId)!;
+        const active = this.#activeDownloads.get(shareId) ?? 0;
+        if (
+            share.result.maxDownloads !== undefined &&
+            (share.result.downloadCount ?? 0) + active >= share.result.maxDownloads
+        ) {
+            throw exhaustedShare(shareId);
+        }
+        this.#activeDownloads.set(shareId, active + 1);
+        return access;
+    }
+
     async readSharePayload(
-        token: string,
+        access: ArtifactShareAccess,
         offsetBytes: number,
         maxBytes: number
     ): Promise<WorkerArtifactPayloadReadResult> {
-        const access = await this.resolveShare(token);
         const share = this.#shares.get(access.share.shareId);
         const endpoint = requireArtifactEndpoint(
             this.#resolveEndpoint,
@@ -264,15 +303,77 @@ export class ArtifactShareService {
         });
     }
 
-    async recordShareDownloaded(token: string, details?: JsonValue): Promise<void> {
-        const access = await this.resolveShare(token);
-        const endpoint = this.#resolveEndpoint(access.sourceInstance);
+    async finishShareDownload(token: string, completed: boolean, details?: JsonValue): Promise<void> {
+        const shareId = this.#shareIdsByToken.get(token);
+        const share = shareId === undefined ? undefined : this.#shares.get(shareId);
+        if (share === undefined) return;
+        if (!completed) {
+            this.#releaseDownload(share.result.shareId);
+            return;
+        }
+
+        await this.#commitDownload(share, details);
+    }
+
+    async #commitDownload(share: StoredArtifactShare, details?: JsonValue): Promise<void> {
+        const shareId = share.result.shareId;
+        const active = this.#activeDownloads.get(shareId) ?? 1;
+        const remainingActive = Math.max(0, active - 1);
+        share.result.downloadCount = (share.result.downloadCount ?? 0) + 1;
+        const exhausted =
+            share.result.maxDownloads !== undefined &&
+            share.result.downloadCount >= share.result.maxDownloads &&
+            remainingActive === 0;
+        if (exhausted) {
+            share.result.state = "exhausted";
+            share.terminalAtMs = this.#nextTerminalAtMs();
+        }
+        this.#releaseDownload(shareId);
+        await this.#recordStore.persistShare(share);
+
+        const endpoint = this.#resolveEndpoint(share.sourceInstance, share.authorityInstance);
         if (endpoint !== undefined) {
             await this.#emitToEndpoint(endpoint, "artifact.shareDownloaded", {
                 ...(isJsonRecord(details) ? details : {}),
-                shareId: access.share.shareId
+                downloadCount: share.result.downloadCount,
+                shareId
             });
         }
+        if (exhausted) {
+            await this.#closeSharePayload(share);
+            if (endpoint !== undefined) {
+                await this.#emitToEndpoint(endpoint, "artifact.shareExhausted", share.result);
+            }
+            await this.#compactTerminalHistory();
+        }
+    }
+
+    #releaseDownload(shareId: string): void {
+        const active = this.#activeDownloads.get(shareId) ?? 0;
+        if (active <= 1) this.#activeDownloads.delete(shareId);
+        else this.#activeDownloads.set(shareId, active - 1);
+    }
+
+    async #exhaustShare(share: StoredArtifactShare): Promise<void> {
+        if (share.result.state !== "exhausted") {
+            const previousState = share.result.state;
+            const previousTerminalAtMs = share.terminalAtMs;
+            share.result.state = "exhausted";
+            share.terminalAtMs = this.#nextTerminalAtMs();
+            try {
+                await this.#recordStore.persistShare(share);
+            } catch (error) {
+                share.result.state = previousState;
+                share.terminalAtMs = previousTerminalAtMs;
+                throw error;
+            }
+        }
+        await this.#closeSharePayload(share);
+        const endpoint = this.#resolveEndpoint(share.sourceInstance, share.authorityInstance);
+        if (endpoint !== undefined) {
+            await this.#emitToEndpoint(endpoint, "artifact.shareExhausted", share.result);
+        }
+        await this.#compactTerminalHistory();
     }
 
     async #expireShare(share: StoredArtifactShare): Promise<void> {
@@ -372,4 +473,13 @@ function toJsonValue(value: unknown): JsonValue {
 
 function isJsonRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function exhaustedShare(shareId: string) {
+    return createError({
+        code: errorCodes.artifactShareExhausted,
+        message: "Artifact share has reached its download limit.",
+        retryable: false,
+        details: { shareId }
+    });
 }

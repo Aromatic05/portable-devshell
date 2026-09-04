@@ -73,26 +73,30 @@ export class ArtifactHttpRoute {
         const start = range?.start ?? 0;
         const end = range?.end ?? Math.max(totalBytes - 1, 0);
         const length = totalBytes === 0 ? 0 : end - start + 1;
-        response.statusCode = range === undefined ? 200 : 206;
-        response.setHeader("Accept-Ranges", "bytes");
-        response.setHeader("Content-Type", access.share.mediaType);
-        response.setHeader("Content-Disposition", contentDisposition(access.share.downloadName));
-        response.setHeader("Content-Length", String(length));
-        if (range !== undefined) {
-            response.setHeader("Content-Range", `bytes ${start}-${end}/${totalBytes}`);
-        }
-
-        if (headOnly || length === 0) {
+        if (headOnly) {
+            response.statusCode = range === undefined ? 200 : 206;
+            setDownloadHeaders(response, access.share, range, start, end, totalBytes, length);
             response.end();
             return;
         }
 
-        const exclusiveEnd = end + 1;
-        let offset = start;
         try {
-            while (offset < exclusiveEnd) {
+            access = await this.#service.beginShareDownload(token);
+        } catch (error) {
+            sendShareError(response, error);
+            return;
+        }
+
+        response.statusCode = range === undefined ? 200 : 206;
+        setDownloadHeaders(response, access.share, range, start, end, totalBytes, length);
+        const exclusiveEnd = length === 0 ? start : end + 1;
+        let offset = start;
+        let downloadFinished = false;
+        let finalBytes: Buffer | undefined;
+        try {
+            while (offset < exclusiveEnd && length > 0) {
                 const requested = Math.min(HTTP_CHUNK_BYTES, exclusiveEnd - offset);
-                const chunk = await this.#service.readSharePayload(token, offset, requested);
+                const chunk = await this.#service.readSharePayload(access, offset, requested);
                 if (
                     chunk.encoding !== "base64" ||
                     chunk.offsetBytes !== offset ||
@@ -106,28 +110,56 @@ export class ArtifactHttpRoute {
                 if (bytes.length !== chunk.returnedBytes) {
                     throw new Error("Artifact payload byte count does not match its encoded content.");
                 }
+                const nextOffset = offset + bytes.length;
+                if (nextOffset >= exclusiveEnd) {
+                    finalBytes = bytes;
+                    offset = nextOffset;
+                    break;
+                }
                 if (!response.write(bytes)) {
                     await once(response, "drain");
                 }
-                offset += bytes.length;
+                offset = nextOffset;
+            }
+            await this.#service.finishShareDownload(token, true, {
+                endBytes: exclusiveEnd,
+                range: range !== undefined,
+                startBytes: start
+            });
+            downloadFinished = true;
+            if (finalBytes !== undefined && !response.write(finalBytes)) {
+                await once(response, "drain");
             }
             response.end();
-            if (await waitForResponseFinish(response)) {
-                await this.#service
-                    .recordShareDownloaded(token, {
-                        endBytes: exclusiveEnd,
-                        range: range !== undefined,
-                        startBytes: start
-                    })
-                    .catch(() => undefined);
-            }
         } catch (error) {
             if (!response.headersSent) {
                 sendShareError(response, error);
                 return;
             }
             response.destroy(error instanceof Error ? error : new Error(String(error)));
+        } finally {
+            if (!downloadFinished) {
+                await this.#service.finishShareDownload(token, false).catch(() => undefined);
+            }
         }
+    }
+}
+
+function setDownloadHeaders(
+    response: ServerResponse,
+    share: { downloadName: string; mediaType: string },
+    range: ByteRange | undefined,
+    start: number,
+    end: number,
+    totalBytes: number,
+    length: number
+): void {
+    response.setHeader("Accept-Ranges", "bytes");
+    response.setHeader("Content-Type", share.mediaType);
+    response.setHeader("Content-Disposition", contentDisposition(share.downloadName));
+    response.setHeader("Content-Length", String(length));
+    if (range !== undefined) {
+        response.setHeader("Content-Range", `bytes ${start}-${end}/${totalBytes}`);
     }
 }
 
@@ -223,7 +255,9 @@ function setSecurityHeaders(response: ServerResponse): void {
 function sendShareError(response: ServerResponse, error: unknown): void {
     const body = toControlErrorBody(error);
     const status =
-        body?.code === errorCodes.artifactShareExpired || body?.code === errorCodes.artifactShareRevoked
+        body?.code === errorCodes.artifactShareExpired ||
+        body?.code === errorCodes.artifactShareRevoked ||
+        body?.code === errorCodes.artifactShareExhausted
             ? 410
             : body?.code === errorCodes.artifactShareNotFound
               ? 404
@@ -243,26 +277,4 @@ function sendText(response: ServerResponse, status: number, message: string): vo
     response.setHeader("Content-Type", "text/plain; charset=utf-8");
     response.setHeader("Content-Length", String(body.length));
     response.end(body);
-}
-
-async function waitForResponseFinish(response: ServerResponse): Promise<boolean> {
-    if (response.writableFinished) {
-        return true;
-    }
-    return await new Promise<boolean>((resolve) => {
-        const cleanup = () => {
-            response.off("finish", onFinish);
-            response.off("close", onClose);
-        };
-        const onFinish = () => {
-            cleanup();
-            resolve(true);
-        };
-        const onClose = () => {
-            cleanup();
-            resolve(response.writableFinished);
-        };
-        response.once("finish", onFinish);
-        response.once("close", onClose);
-    });
 }
