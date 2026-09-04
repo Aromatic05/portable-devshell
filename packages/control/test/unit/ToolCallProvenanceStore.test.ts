@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdir, rm, stat } from "node:fs/promises";
+import { appendFile, readFile, readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -46,6 +46,30 @@ test("tool call provenance persists in Control and decorates matching Worker aud
             ...workerRecord,
             explanation: "The previous test isolated the failure to Workspace reconnect handling.",
             purpose: "Verify the reconnect fix"
+        }]);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("tool call provenance recovers a truncated hot JSONL tail after a crash", async () => {
+    const root = await createTestTempDirectory("tool-call-provenance-truncated-tail");
+    const filePath = join(root, "tool-call-provenance.jsonl");
+    try {
+        const store = new ToolCallProvenanceStore(filePath);
+        await store.record({ callId: "call-1", instance: "alpha", purpose: "keep me" });
+        await appendFile(filePath, '{"version":1,"callId":"partial', "utf8");
+
+        const recovered = new ToolCallProvenanceStore(filePath);
+        assert.deepEqual(await recovered.decorate("alpha", [toolCall("call-1")]), [{
+            ...toolCall("call-1"),
+            purpose: "keep me"
+        }]);
+        assert.doesNotMatch(await readFile(filePath, "utf8"), /partial/u);
+        await recovered.record({ callId: "call-2", instance: "alpha", purpose: "still writable" });
+        assert.deepEqual(await recovered.decorate("alpha", [toolCall("call-2")]), [{
+            ...toolCall("call-2"),
+            purpose: "still writable"
         }]);
     } finally {
         await rm(root, { force: true, recursive: true });

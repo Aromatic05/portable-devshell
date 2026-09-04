@@ -212,11 +212,24 @@ async function writeArchive(
     }
 }
 
-export function parseRecords(source: string): StoredToolCallProvenance[] {
+export function parseRecords(
+    source: string,
+    options: { allowIncompleteTail?: boolean } = {}
+): StoredToolCallProvenance[] {
     const records: StoredToolCallProvenance[] = [];
-    for (const line of source.split("\n")) {
+    const lines = source.split("\n");
+    for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index]!;
         if (line.length === 0) continue;
-        const record = JSON.parse(line) as unknown;
+        let record: unknown;
+        try {
+            record = JSON.parse(line) as unknown;
+        } catch (error) {
+            const incompleteTail = options.allowIncompleteTail === true &&
+                index === lines.length - 1 && !source.endsWith("\n");
+            if (incompleteTail) break;
+            throw error;
+        }
         if (isStoredToolCallProvenance(record)) records.push(record);
     }
     return records;

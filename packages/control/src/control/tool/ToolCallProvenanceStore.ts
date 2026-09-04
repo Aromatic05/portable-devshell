@@ -106,7 +106,8 @@ export class ToolCallProvenanceStore implements McpToolProvenanceRecorder {
             throw error;
         }
         const cutoff = this.#now() - this.#retentionMs;
-        const records = parseRecords(source).filter((record) => Date.parse(record.recordedAt) >= cutoff);
+        const records = parseRecords(source, { allowIncompleteTail: true })
+            .filter((record) => Date.parse(record.recordedAt) >= cutoff);
         for (const record of records) {
             this.#hotRecords.set(provenanceKey(record.instance, record.callId), record);
         }
