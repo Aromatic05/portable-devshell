@@ -17,7 +17,7 @@ import { WorkerRpcProcessConnector } from "./WorkerRpcProcessAdapter.js";
 const DEFAULT_CANCELLATION_RETENTION_MS = 30_000;
 
 export interface WorkerRpcConnector {
-    attach?(channel: Channel): void;
+    attach?(channel: Channel, lane?: "control" | "bulk"): void;
     connect(signal?: AbortSignal): Promise<Channel>;
     detach?(channel?: Channel): void;
 }

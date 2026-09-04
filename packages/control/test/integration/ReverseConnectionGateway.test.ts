@@ -105,7 +105,14 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
         assert.equal(worker.snapshot().reverse?.transport, "wss");
         assert.equal(worker.snapshot().reverse?.generation, 1);
 
+        const bulk = connectWorker(port, enrollment.deviceToken, 1, "bulk");
+        await bulk.opened;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(worker.snapshot().reverse?.generation, 1);
+        assert.equal(first.socket.readyState, WebSocket.OPEN);
+
         const firstClosed = first.closed;
+        const bulkClosed = bulk.closed;
         const second = connectWorker(port, enrollment.deviceToken, 2);
         await second.opened;
         await waitUntil(
@@ -113,6 +120,7 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
             () => JSON.stringify(worker.snapshot())
         );
         await firstClosed;
+        await bulkClosed;
         assert.equal(worker.snapshot().reverse?.transport, "wss");
 
         const reverseControl = new ReverseCredentialService({
@@ -287,7 +295,12 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
     }
 });
 
-function connectWorker(port: number, token: string, generation: number): {
+function connectWorker(
+    port: number,
+    token: string,
+    generation: number,
+    lane?: "control" | "bulk"
+): {
     closed: Promise<{ code: number; reason: string }>;
     errors: string[];
     methods: string[];
@@ -300,7 +313,8 @@ function connectWorker(port: number, token: string, generation: number): {
         headers: {
             Authorization: `Bearer ${token}`,
             "X-Devshell-Generation": String(generation),
-            "X-Devshell-Instance": "reverse-test"
+            "X-Devshell-Instance": "reverse-test",
+            ...(lane === undefined ? {} : { "X-Devshell-Rpc-Lane": lane })
         }
     });
     socket.on("message", (data, isBinary) => {

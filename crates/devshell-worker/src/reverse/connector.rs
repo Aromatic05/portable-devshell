@@ -99,11 +99,11 @@ impl ReverseConnector {
                 }
             };
             let (transport, established, result) = if wss_failures < WSS_FAILURES_BEFORE_SSE {
-                match self.connect_wss(generation) {
+                match self.connect_wss(generation, "control") {
                     Ok(socket) => {
                         wss_failures = 0;
                         backoff = Duration::from_secs(1);
-                        ("wss", true, self.run_wss(socket))
+                        ("wss", true, self.run_wss_generation(generation, socket))
                     }
                     Err(error) => ("wss", false, Err(error)),
                 }
@@ -144,6 +144,7 @@ impl ReverseConnector {
     fn connect_wss(
         &self,
         generation: u64,
+        lane: &str,
     ) -> Result<WebSocket<MaybeTlsStream<TcpStream>>, String> {
         let endpoint = reverse_endpoint(&self.config.controller_url, "/reverse/v1/connect", true)?;
         let mut request = endpoint
@@ -165,6 +166,10 @@ impl ReverseConnector {
             HeaderValue::from_str(&generation.to_string()).map_err(|error| error.to_string())?,
         );
         headers.insert(
+            "x-devshell-rpc-lane",
+            HeaderValue::from_str(lane).map_err(|error| error.to_string())?,
+        );
+        headers.insert(
             "sec-websocket-protocol",
             HeaderValue::from_static("devshell-worker-rpc.v1"),
         );
@@ -172,20 +177,56 @@ impl ReverseConnector {
         let (mut socket, _) = connect(request)
             .map_err(|error| format!("failed to connect reverse websocket: {error}"))?;
         set_websocket_read_timeout(&mut socket, Some(Duration::from_millis(50)))?;
-        self.router.clear_notifications()?;
+        if lane == "control" {
+            self.router.clear_notifications()?;
+        }
         append_log(
             &self.paths,
-            &format!("reverse connection established transport=wss generation={generation}"),
+            &format!(
+                "reverse connection established transport=wss generation={generation} lane={lane}"
+            ),
         )?;
         Ok(socket)
+    }
+
+    fn run_wss_generation(
+        &self,
+        generation: u64,
+        control_socket: WebSocket<MaybeTlsStream<TcpStream>>,
+    ) -> Result<(), String> {
+        let active = Arc::new(AtomicBool::new(true));
+        let bulk_connector = self.clone();
+        let bulk_active = Arc::clone(&active);
+        let bulk = thread::spawn(move || {
+            match bulk_connector.connect_wss(generation, "bulk") {
+                Ok(socket) => bulk_connector.run_wss(socket, false, bulk_active),
+                Err(error) => {
+                    let _ = append_log(
+                        &bulk_connector.paths,
+                        &format!(
+                            "reverse bulk lane unavailable; using control lane fallback: {error}"
+                        ),
+                    );
+                    Ok(())
+                }
+            }
+        });
+        let result = self.run_wss(control_socket, true, Arc::clone(&active));
+        active.store(false, Ordering::SeqCst);
+        let _ = bulk.join();
+        result
     }
 
     fn run_wss(
         &self,
         mut socket: WebSocket<MaybeTlsStream<TcpStream>>,
+        flush_shared: bool,
+        active: Arc<AtomicBool>,
     ) -> Result<(), String> {
-        while !self.router.shutdown_requested() {
-            self.flush_wss_responses(&mut socket)?;
+        while active.load(Ordering::SeqCst) && !self.router.shutdown_requested() {
+            if flush_shared {
+                self.flush_wss_responses(&mut socket)?;
+            }
             match socket.read() {
                 Ok(Message::Binary(frame)) => {
                     if let Some(response) = self.dispatcher.dispatch(&frame)?

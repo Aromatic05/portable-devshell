@@ -4,6 +4,7 @@ import {
     errorCodes,
     type JsonValue,
     type ReverseEnrollmentRequest,
+    type ReverseRpcLane,
     type ReverseUpstreamBatch
 } from "@portable-devshell/shared";
 
@@ -15,6 +16,7 @@ import type {
 import { ReverseRpcSseChannel } from "../rpc/ReverseRpcSseChannel.js";
 
 interface ActiveReverseConnection {
+    bulkChannel?: Channel;
     channel: Channel;
     generation: number;
     transport: "sse" | "wss";
@@ -79,11 +81,16 @@ export class ReverseConnectionService {
     async activate(
         identity: ReverseConnectionIdentity,
         transport: "sse" | "wss",
-        channel: Channel
+        channel: Channel,
+        lane?: ReverseRpcLane
     ): Promise<void> {
         try {
             await this.#exclusive(identity.descriptor.name, async () => {
                 this.#assertRunning(channel);
+                if (lane === "bulk") {
+                    await this.#activateBulk(identity, transport, channel);
+                    return;
+                }
                 let active: ActiveReverseConnection | undefined;
                 const authenticated = await this.#credentialStore.withAuthenticatedToken(
                     identity.descriptor.name,
@@ -100,6 +107,7 @@ export class ReverseConnectionService {
                 try {
                     await identity.descriptor.worker.acceptReverseChannel(channel, {
                         generation: identity.generation,
+                        lane: "control",
                         transport
                     });
                     if (this.#active.get(identity.descriptor.name) !== active) {
@@ -120,6 +128,51 @@ export class ReverseConnectionService {
             channel.close();
             throw error;
         }
+    }
+
+    async #activateBulk(
+        identity: ReverseConnectionIdentity,
+        transport: "sse" | "wss",
+        channel: Channel
+    ): Promise<void> {
+        if (transport !== "wss") {
+            throw createError({
+                code: errorCodes.reverseTransportUnavailable,
+                message: "Reverse bulk lane requires WSS.",
+                retryable: false
+            });
+        }
+        const active = this.#active.get(identity.descriptor.name);
+        if (active === undefined || active.transport !== "wss" || active.generation !== identity.generation) {
+            throw createError({
+                code: errorCodes.reverseGenerationInvalid,
+                details: {
+                    generation: identity.generation,
+                    instance: identity.descriptor.name,
+                    previousGeneration: active?.generation ?? 0
+                },
+                message: "Reverse bulk lane must join the active WSS generation.",
+                retryable: true
+            });
+        }
+        const authenticated = await this.#credentialStore.withAuthenticatedToken(
+            identity.descriptor.name,
+            identity.credentialToken,
+            async () => this.#assertRunning(channel)
+        );
+        if (!authenticated) throw invalidDeviceToken(identity.descriptor.name);
+
+        await identity.descriptor.worker.acceptReverseChannel(channel, {
+            generation: identity.generation,
+            lane: "bulk",
+            transport
+        });
+        const previous = active.bulkChannel;
+        active.bulkChannel = channel;
+        if (previous !== undefined && previous !== channel) previous.close();
+        channel.onClose(() => {
+            if (active.bulkChannel === channel) active.bulkChannel = undefined;
+        });
     }
 
     #prepareActivation(
@@ -155,6 +208,7 @@ export class ReverseConnectionService {
             generation: identity.generation,
             transport
         };
+        previous?.bulkChannel?.close();
         this.#active.set(identity.descriptor.name, active);
         channel.onClose(() => {
             if (this.#active.get(identity.descriptor.name) === active) {
@@ -207,12 +261,14 @@ export class ReverseConnectionService {
             return;
         }
         this.#active.delete(instance);
+        active.bulkChannel?.close();
         active.channel.close();
     }
 
     stop(): void {
         this.#stopped = true;
         for (const active of this.#active.values()) {
+            active.bulkChannel?.close();
             active.channel.close();
         }
         this.#active.clear();

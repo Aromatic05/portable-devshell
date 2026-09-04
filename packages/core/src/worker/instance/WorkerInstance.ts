@@ -9,6 +9,7 @@ import {
     type ToolCallQuery,
     type ToolCallRecord,
     type ReverseEnrollmentState,
+    type ReverseRpcLane,
     type ReverseTransport
 } from "@portable-devshell/shared";
 
@@ -168,7 +169,7 @@ export class WorkerInstance {
 
     async acceptReverseChannel(
         channel: Channel,
-        input: { connectedAt?: string; generation: number; transport: ReverseTransport }
+        input: { connectedAt?: string; generation: number; lane?: ReverseRpcLane; transport: ReverseTransport }
     ): Promise<InstanceSnapshot> {
         return await this.#connection.acceptReverseChannel(channel, input);
     }

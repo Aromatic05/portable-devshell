@@ -75,12 +75,15 @@ GET /reverse/v1/connect
 Authorization: Bearer <device token>
 X-Devshell-Instance: <instance name>
 X-Devshell-Generation: <positive integer>
+X-Devshell-Rpc-Lane: control | bulk
 Sec-WebSocket-Protocol: devshell-worker-rpc.v1
 ```
 
 每个二进制 WebSocket message 恰好包含一个完整的现有长度前缀 RPC frame。文本 message 被拒绝。
 
-经过认证、generation 更高的新连接会原子替换旧连接。来自已退役 generation 的 frame 被忽略，并关闭对应连接。
+`control` lane 承载普通工具、终端、状态与通知；`bulk` lane 只承载 `artifact.payload.*` 和 `artifact.receive.*`。两条 lane 属于同一个 generation，bulk 只有在同 generation 的 control 已经活动时才能加入。bulk 断开不会使 instance 离线，未完成的 bulk RPC 会以原 request ID 回放到 control lane；新的 bulk lane 可再次加入。经过认证、generation 更高的 control 连接会原子替换旧 generation，并同时关闭旧 control 与 bulk lane。
+
+该 header 对旧 worker 兼容：未提供时按 control lane 处理。新 worker 连接旧 Control 时，bulk lane 会被旧 generation 规则拒绝，worker 自动继续使用 control 单 lane，因此升级不要求两端同时切换版本。
 
 ## SSE + POST 回退传输
 
@@ -117,7 +120,7 @@ POST /reverse/v1/frames
 
 响应返回已经接受的最高连续上行 sequence。重复 sequence 只确认，不重复投递；非活动 generation 的 frame 被拒绝。gateway 接受批量 frame，当前 worker 实现每次 POST 上传一个响应 frame。
 
-SSE 响应禁用转换和代理缓冲，并发送 comment heartbeat。worker 通过新 generation 切换 transport；同一 generation 不会同时保持 WSS 和 SSE 活动。
+SSE 响应禁用转换和代理缓冲，并发送 comment heartbeat。SSE 保持单 lane fallback；worker 通过新 generation 切换 transport，同一 generation 不会同时保持 WSS 和 SSE 活动。
 
 ## 重连与请求重放
 

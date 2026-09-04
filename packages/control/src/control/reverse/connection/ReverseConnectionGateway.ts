@@ -98,6 +98,7 @@ export class ReverseConnectionGateway {
     ): Promise<void> {
         try {
             const identity = await this.#authenticateRequest(request);
+            const lane = readReverseRpcLane(request);
             if (!hasWebSocketProtocol(request, "devshell-worker-rpc.v1")) {
                 throw createError({
                     code: errorCodes.reverseTransportUnavailable,
@@ -117,7 +118,8 @@ export class ReverseConnectionGateway {
                     void this.#connectionService.activate(
                         identity,
                         "wss",
-                        channel
+                        channel,
+                        lane
                     ).catch(() => channel.close());
                 }
             );
@@ -275,6 +277,18 @@ function parseGeneration(value: string): number {
         });
     }
     return generation;
+}
+
+function readReverseRpcLane(request: IncomingMessage): "control" | "bulk" | undefined {
+    const raw = request.headers["x-devshell-rpc-lane"];
+    const value = Array.isArray(raw) ? raw[0] : raw;
+    if (value === undefined || value.length === 0) return undefined;
+    if (value === "control" || value === "bulk") return value;
+    throw createError({
+        code: errorCodes.reverseTransportUnavailable,
+        message: "x-devshell-rpc-lane must be control or bulk.",
+        retryable: false
+    });
 }
 
 function readLastEventId(request: IncomingMessage): number {
