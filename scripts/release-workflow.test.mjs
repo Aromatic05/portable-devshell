@@ -36,6 +36,7 @@ test("release verifies the tagged commit belongs to the default branch before as
 
 test("release automation writes a scoped conventional version bump commit", async () => {
     const workflow = await readReleaseWorkflow();
+    assert.match(workflow, /git add package\.json crates\/devshell-worker\/Cargo\.toml Cargo\.lock scripts\/install-local\.test\.mjs/u);
     assert.match(
         workflow,
         /git commit -m "chore\(release\): bump version to \$next_version"/u,

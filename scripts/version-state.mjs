@@ -46,14 +46,17 @@ export async function setProjectVersion(version, root = defaultRepoRoot) {
     const packagePath = resolve(root, "package.json");
     const cargoTomlPath = resolve(root, "crates/devshell-worker/Cargo.toml");
     const cargoLockPath = resolve(root, "Cargo.lock");
+    const installLocalTestPath = resolve(root, "scripts/install-local.test.mjs");
     const packageJson = JSON.parse(await readFile(packagePath, "utf8"));
     const cargoToml = await readFile(cargoTomlPath, "utf8");
     const cargoLock = await readFile(cargoLockPath, "utf8");
+    const installLocalTest = await readFile(installLocalTestPath, "utf8");
 
     packageJson.version = version;
     await writeFile(packagePath, `${JSON.stringify(packageJson, null, 4)}\n`, "utf8");
     await writeFile(cargoTomlPath, replaceCargoPackageVersion(cargoToml, version), "utf8");
     await writeFile(cargoLockPath, replaceCargoLockVersion(cargoLock, version), "utf8");
+    await writeFile(installLocalTestPath, replaceCurrentDevelopmentVersion(installLocalTest, version), "utf8");
 }
 
 export async function checkDevelopmentVersion(root = defaultRepoRoot) {
@@ -153,6 +156,12 @@ function replaceCargoPackageVersion(content, version) {
 function replaceCargoLockVersion(content, version) {
     const pattern = /(\[\[package\]\]\r?\nname = "devshell-worker"\r?\nversion = ")[^"]+("\r?\n)/u;
     if (!pattern.test(content)) throw new Error("Cargo.lock devshell-worker version is missing");
+    return content.replace(pattern, `$1${version}$2`);
+}
+
+function replaceCurrentDevelopmentVersion(content, version) {
+    const pattern = /(const CURRENT_DEVELOPMENT_VERSION = ")[^"]+("; \/\/ version-state:current-development)/u;
+    if (!pattern.test(content)) throw new Error("scripts/install-local.test.mjs current development version marker is missing");
     return content.replace(pattern, `$1${version}$2`);
 }
 

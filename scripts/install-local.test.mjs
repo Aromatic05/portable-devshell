@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+const CURRENT_DEVELOPMENT_VERSION = "0.6.17"; // version-state:current-development
 
  test("install-local rejects stale activation before stopping or changing active Worker aliases", {
     skip: process.platform === "win32",
@@ -493,7 +494,7 @@ test("install-local never downgrades after the new generation reaches real runti
 
         assert.notEqual(result.code, 0, `${result.stdout}${result.stderr}`);
         assert.match(result.stderr, /Automatic downgrade is disabled/iu);
-        assert.equal(await readlink(currentLink), "versions/0.6.16");
+        assert.equal(await readlink(currentLink), `versions/${CURRENT_DEVELOPMENT_VERSION}`);
         assert.deepEqual((await readFile(runtimeLog, "utf8")).trim().split("\n"), ["stop"]);
         assert.equal(await readFile(resolve(workerBinDirectory, workerAsset), "utf8"), "candidate-worker\n");
         const recoveryDirectories = (await readdir(installRoot)).filter((name) => name.startsWith(".worker-activation-backup-"));
