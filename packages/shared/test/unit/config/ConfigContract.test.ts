@@ -274,6 +274,35 @@ test("explicit managed MCP allowlists can disable the workspace group", () => {
     );
 });
 
+test("bootstrap environ namespace never appears in configurable MCP groups", () => {
+    const normalized = normalizeConfigInstanceDraft({
+        mcp: {
+            tools: {
+                groups: ["file", "environ", "environment", "bash", "environ"]
+            }
+        },
+        name: "bootstrap-policy",
+        provider: "local"
+    });
+
+    assert.deepEqual(normalized.mcp.tools.groups, ["file", "bash"]);
+});
+
+test("config rejects MCP groups that are not namespace tokens", () => {
+    const normalized = normalizeConfigDraft({
+        instances: [{
+            mcp: { tools: { groups: ["file", "bad_group"] } },
+            name: "bad-group",
+            provider: "local"
+        }]
+    });
+
+    assert.throws(
+        () => validateConfigSemantics(normalized),
+        /without '_'/u,
+    );
+});
+
 test("the obsolete interaction group normalizes to the workspace namespace", () => {
     const upgraded = normalizeConfigInstanceDraft({
         mcp: { tools: { groups: ["file", "interaction"] } },

@@ -171,6 +171,40 @@ test("version 2 instance documents migrate to version 3 without workspace", asyn
     }
 });
 
+test("instance config load rewrites non-canonical MCP groups without bootstrap namespaces", async () => {
+    const homeDirectory = await createTestTempDirectory("control-home");
+
+    try {
+        const paths = new ControlPathHome(homeDirectory);
+        await writeFileWithParents(paths.configFile, await readFixture("config-valid.toml"));
+        await writeFileWithParents(
+            paths.instanceConfigFile("canonical-groups"),
+            toml.encode({
+                enabled: true,
+                mcp: {
+                    enabled: true,
+                    tools: {
+                        capabilities: ["read"],
+                        groups: ["file", "environment", "environ", "interaction", "file"]
+                    }
+                },
+                name: "canonical-groups",
+                provider: "local",
+                version: 3
+            })
+        );
+
+        const config = await new ControlConfigStore().readOrCreate(homeDirectory);
+        assert.deepEqual(config.instances[0]?.mcp.tools.groups, ["file", "workspace"]);
+
+        const source = await readFile(paths.instanceConfigFile("canonical-groups"), "utf8");
+        assert.match(source, /groups = \[\s*"file", "workspace"\s*\]/u);
+        assert.doesNotMatch(source, /environment|environ|interaction/u);
+    } finally {
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
 test("global TOML round-trips the independent WebUI enable switch", () => {
     const config = normalizeConfigGlobalDraft({
         mcp: { enabled: false },

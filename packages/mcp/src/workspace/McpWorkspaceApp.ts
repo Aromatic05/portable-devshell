@@ -583,7 +583,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     if (goalTimer) clearTimeout(goalTimer);
     goalTimer = null;
     try {
-      var yielded = structured(await callTool("workspace_reentry_control", {
+      var yielded = structured(await callTool("workspace_reentry", {
         action: "yield",
         reason: reason || "user interrupted automatic execution"
       }, true));
@@ -640,12 +640,12 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         intent: intent || "automatic"
       };
       if (sourceId) claimArgs.sourceId = sourceId;
-      var claim = structured(await callTool("workspace_reentry_control", claimArgs, true));
+      var claim = structured(await callTool("workspace_reentry", claimArgs, true));
       if (snapshot && claim) snapshot.reentry = claim;
       if (!claim || !claim.claimed || !claim.delivery) return outcome;
       claimed = true;
 
-      var validation = structured(await callTool("workspace_reentry_control", {
+      var validation = structured(await callTool("workspace_reentry", {
         action: "validate",
         claimId: claimId
       }, true));
@@ -653,7 +653,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       if (!validation || !validation.valid) return outcome;
 
       await updateHostModelContext(claim.delivery.modelContext);
-      var marked = structured(await callTool("workspace_reentry_control", {
+      var marked = structured(await callTool("workspace_reentry", {
         action: "attempt",
         claimId: claimId
       }, true));
@@ -684,14 +684,14 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       if (claimed) {
         try {
           if (attempted) {
-            var reported = structured(await callTool("workspace_reentry_control", {
+            var reported = structured(await callTool("workspace_reentry", {
               action: "report",
               claimId: claimId,
               outcome: outcome.status === "accepted" ? "accepted" : outcome.status === "rejected" ? "rejected" : "uncertain"
             }, true));
             if (snapshot && reported) snapshot.reentry = reported;
           } else {
-            var released = structured(await callTool("workspace_reentry_control", {
+            var released = structured(await callTool("workspace_reentry", {
               action: "release",
               claimId: claimId
             }, true));
@@ -1235,14 +1235,14 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   }
 
   async function pauseGoalFromUi(goalId, revision) {
-    await act("goal-pause", "workspace_goal_pause", {
+    await act("goal-pause", "workspace_pause", {
       goalId: goalId,
       revision: revision
     });
   }
 
   async function resumeGoalFromUi(goalId, revision) {
-    var result = await act("goal-resume", "workspace_goal_resume", {
+    var result = await act("goal-resume", "workspace_resume", {
       goalId: goalId,
       revision: revision
     });
@@ -1251,7 +1251,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   }
 
   async function resumeTaskFromUi(taskId, revision) {
-    var result = await act("task:" + taskId, "workspace_task_control", {
+    var result = await act("task:" + taskId, "workspace_task", {
       action: "resume",
       revision: revision,
       taskId: taskId
@@ -1261,7 +1261,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   }
 
   async function retryGoalAutoResume(goalId) {
-    var resumed = structured(await callTool("workspace_reentry_control", { action: "resume" }, true));
+    var resumed = structured(await callTool("workspace_reentry", { action: "resume" }, true));
     if (snapshot && resumed) snapshot.reentry = resumed;
     render();
     var goal = snapshot && snapshot.goal;
@@ -1270,14 +1270,14 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   }
 
   async function answerQuestion(waitId, answer) {
-    var result = await act(waitId, "workspace_question_answer", { waitId: waitId, answer: answer });
+    var result = await act(waitId, "workspace_answer", { waitId: waitId, answer: answer });
     if (result && result.detached) {
       await dispatchAutomaticReentry();
     }
   }
 
   async function interruptWait(waitId) {
-    var result = await act(waitId, "workspace_wait_interrupt", { waitId: waitId });
+    var result = await act(waitId, "workspace_interrupt", { waitId: waitId });
     if (result && result.interrupted && result.detached) await dispatchAutomaticReentry();
   }
 
@@ -1442,7 +1442,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     }
     var goalStop = event.target.closest("[data-goal-stop]");
     if (goalStop && !goalStop.hasAttribute("disabled")) {
-      void act("goal-stop", "workspace_goal_stop", {
+      void act("goal-stop", "workspace_stop", {
         goalId: goalStop.getAttribute("data-goal-stop"),
         revision: Number(goalStop.getAttribute("data-goal-revision"))
       });
@@ -1452,7 +1452,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     if (waitDismiss && !waitDismiss.hasAttribute("disabled")) {
       var dismissWaitId = waitDismiss.getAttribute("data-wait-dismiss");
       var recoveryMessageId = waitDismiss.getAttribute("data-recovery-message-id");
-      if (dismissWaitId && recoveryMessageId) void act(dismissWaitId, "workspace_wait_recover", {
+      if (dismissWaitId && recoveryMessageId) void act(dismissWaitId, "workspace_recover", {
         action: "dismiss",
         recoveryMessageId: recoveryMessageId,
         waitId: dismissWaitId
@@ -1474,7 +1474,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         if (taskAction === "resume") {
           void resumeTaskFromUi(taskId, Number(taskControl.getAttribute("data-task-revision")));
         } else {
-          void act("task:" + taskId, "workspace_task_control", {
+          void act("task:" + taskId, "workspace_task", {
             action: taskAction,
             revision: Number(taskControl.getAttribute("data-task-revision")),
             taskId: taskId
@@ -1506,7 +1506,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     if (target) {
       var approvalId = target.getAttribute("data-approval");
       if (approvalId) {
-        void act(approvalId, "workspace_approval_decide", { approvalId: approvalId, decision: target.getAttribute("data-decision") });
+        void act(approvalId, "workspace_approval", { approvalId: approvalId, decision: target.getAttribute("data-decision") });
         return;
       }
     }

@@ -140,13 +140,14 @@ export class ControlConfigStore {
                 const source = await readFile(filePath, "utf8");
                 await secureFile(filePath);
                 const draft = this.#instanceDocument.decode(this.#tomlCodec.decode(source)) as ConfigInstanceDraftWithMigration;
-                migrated ||= draft.migratedFromVersion === 2;
-                instances.push(normalizeConfigInstanceDraft({
+                const normalized = normalizeConfigInstanceDraft({
                     ...draft,
                     mcp: draft.mcp?.enabled === false || legacyMcpAuth === undefined
                         ? draft.mcp
                         : { ...draft.mcp, ...toLegacyInstanceAuth(legacyMcpAuth) }
-                }));
+                });
+                migrated ||= draft.migratedFromVersion === 2 || mcpGroupsChanged(draft, normalized);
+                instances.push(normalized);
             } catch (error) {
                 throw attachConfigFile(error, filePath);
             }
@@ -167,6 +168,13 @@ export class ControlConfigStore {
 type ConfigInstanceDraftWithMigration = ConfigInstanceDraft & {
     migratedFromVersion?: 2;
 };
+
+function mcpGroupsChanged(draft: ConfigInstanceDraft, normalized: ControlInstanceConfig): boolean {
+    const configured = draft.mcp?.tools?.groups;
+    if (configured === undefined) return false;
+    const canonical = normalized.mcp.tools.groups;
+    return configured.length !== canonical.length || configured.some((group, index) => group !== canonical[index]);
+}
 
 interface ConfigTransactionManifest {
     existingGlobal: boolean;

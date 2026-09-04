@@ -527,7 +527,7 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (call.name === "workspace_watch") return;
-    if (call.name === "workspace_task_control") {
+    if (call.name === "workspace_task") {
         var taskId = String(call.arguments.taskId);
         var task = window.__orderingTasks[taskId];
         task.status = call.arguments.action === "pause" ? "paused" : task.status;
@@ -936,11 +936,11 @@ test("Workspace refreshes authoritative state after a stale Goal action is fence
         arguments?: Record<string, unknown>;
         name?: string;
     }>;
-    const stop = calls.find((call) => call.name === "workspace_goal_stop");
+    const stop = calls.find((call) => call.name === "workspace_stop");
     assert.equal(stop?.arguments?.goalId, "goal-A");
     assert.equal(stop?.arguments?.revision, 1);
     assert.equal(stop?.arguments?.token, "stale-goal-token");
-    assert.equal(calls.filter((call) => call.name === "workspace_goal_stop").length, 1);
+    assert.equal(calls.filter((call) => call.name === "workspace_stop").length, 1);
 });
 
 test("Workspace clears task cancel confirmation when the authoritative task revision changes", BROWSER_TEST_OPTIONS, async (t) => {
@@ -963,7 +963,7 @@ test("Workspace clears task cancel confirmation when the authoritative task revi
     await app.getByText("Task · Updated work", { exact: true }).waitFor({ state: "visible" });
     await app.getByRole("button", { name: "Cancel task", exact: true }).waitFor({ state: "visible" });
     assert.equal(await app.getByRole("button", { name: "Confirm cancel", exact: true }).count(), 0);
-    assert.equal(await page.evaluate("(window.__staleTaskConfirmCalls || []).some(call => call.name === 'workspace_task_control')"), false);
+    assert.equal(await page.evaluate("(window.__staleTaskConfirmCalls || []).some(call => call.name === 'workspace_task')"), false);
 });
 
 const STALE_TASK_CONFIRM_BRIDGE_SCRIPT = String.raw`
@@ -1031,7 +1031,7 @@ window.addEventListener("message", function (event) {
         window.__staleTaskConfirmWatch = { id: message.id, source: source };
         return;
     }
-    if (call.name === "workspace_task_control") {
+    if (call.name === "workspace_task") {
         reply({ structuredContent: { taskId: call.arguments.taskId } });
     }
 });
@@ -1094,7 +1094,7 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (call.name === "workspace_watch") return;
-    if (call.name === "workspace_goal_stop") {
+    if (call.name === "workspace_stop") {
         window.__staleGoalVersion = 2;
         reject("Workspace Goal changed from goal-A to goal-B; refresh before retrying.");
     }
@@ -1120,11 +1120,11 @@ test("Workspace fences an ambiguous detached-wait resume instead of replaying it
     assert.equal(await page.evaluate("window.__waitAmbiguousReports[0].outcome"), "uncertain");
     assert.equal(await page.evaluate("window.__waitAmbiguousConsumed"), true);
     assert.deepEqual(
-        await page.evaluate("(window.__waitAmbiguousCalls || []).filter(call => call.name === 'workspace_reentry_control').slice(-4).map(call => call.arguments.action)"),
+        await page.evaluate("(window.__waitAmbiguousCalls || []).filter(call => call.name === 'workspace_reentry').slice(-4).map(call => call.arguments.action)"),
         ["claim", "validate", "attempt", "report"],
     );
     assert.equal(
-        await page.evaluate("(window.__waitAmbiguousCalls || []).filter(call => call.name === 'workspace_wait_recover').length"),
+        await page.evaluate("(window.__waitAmbiguousCalls || []).filter(call => call.name === 'workspace_recover').length"),
         0,
     );
 
@@ -1161,7 +1161,7 @@ test("Workspace fences an ambiguous Goal continuation instead of replaying it", 
                 __goalAmbiguousCalls?: Array<{ arguments: Record<string, unknown>; name: string }>;
             };
             return (state.__goalAmbiguousCalls || [])
-                .filter((call) => call.name === "workspace_reentry_control" && call.arguments.claimId === claimId)
+                .filter((call) => call.name === "workspace_reentry" && call.arguments.claimId === claimId)
                 .map((call) => call.arguments.action);
         }, goalReportClaimId),
         ["claim", "validate", "attempt", "report"],
@@ -1280,7 +1280,7 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (call.name === "workspace_watch") return;
-    if (call.name === "workspace_reentry_control") {
+    if (call.name === "workspace_reentry") {
         var action = call.arguments.action;
         if (action === "claim") {
             var claimed = !window.__waitAmbiguousConsumed && !window.__waitAmbiguousAttempted && !window.__waitAmbiguousReentryClaimId;
@@ -1425,7 +1425,7 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (call.name === "workspace_watch") return;
-    if (call.name === "workspace_reentry_control") {
+    if (call.name === "workspace_reentry") {
         var action = call.arguments.action;
         if (action === "claim") {
             var claimed = !window.__goalAmbiguousAttempted && !window.__goalAmbiguousReentryClaimId;
@@ -1495,7 +1495,7 @@ test("Workspace releases re-entry before dispatch when model context injection f
     await page.waitForFunction("(window.__modelContextFailureActions || []).includes('release')");
     const releaseClaimId = await page.evaluate(`
         (window.__modelContextFailureCalls || [])
-            .find(call => call.name === "workspace_reentry_control" && call.arguments.action === "release")
+            .find(call => call.name === "workspace_reentry" && call.arguments.action === "release")
             ?.arguments.claimId
     `) as string;
     assert.deepEqual(
@@ -1504,7 +1504,7 @@ test("Workspace releases re-entry before dispatch when model context injection f
                 __modelContextFailureCalls?: Array<{ arguments: Record<string, unknown>; name: string }>;
             };
             return (state.__modelContextFailureCalls || [])
-                .filter((call) => call.name === "workspace_reentry_control" && call.arguments.claimId === claimId)
+                .filter((call) => call.name === "workspace_reentry" && call.arguments.claimId === claimId)
                 .map((call) => call.arguments.action);
         }, releaseClaimId),
         ["claim", "validate", "release"],
@@ -1564,7 +1564,7 @@ test("Workspace records uncertain delivery before resetting a failed Host messag
                 __modelContextFailureCalls?: Array<{ arguments: Record<string, unknown>; name: string }>;
             };
             return (state.__modelContextFailureCalls || [])
-                .filter((call) => call.name === "workspace_reentry_control" && call.arguments.claimId === claimId)
+                .filter((call) => call.name === "workspace_reentry" && call.arguments.claimId === claimId)
                 .map((call) => call.arguments.action);
         }, reportClaimId),
         ["claim", "validate", "attempt", "report"],
@@ -1679,7 +1679,7 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (call.name === "workspace_watch") return;
-    if (call.name === "workspace_reentry_control") {
+    if (call.name === "workspace_reentry") {
         var action = call.arguments.action;
         window.__modelContextFailureActions.push(action);
         if (action === "claim") {
@@ -1730,7 +1730,7 @@ window.addEventListener("message", function (event) {
         reply({ structuredContent: modelContextFailureSnapshot().reentry });
         return;
     }
-    if (call.name === "workspace_question_answer") {
+    if (call.name === "workspace_answer") {
         window.__modelContextFailureAnswered = true;
         reply({ structuredContent: {
             answer: call.arguments.answer,
@@ -2097,10 +2097,10 @@ test("Workspace waits for a delayed initial capability instead of minting reconn
     await page.waitForFunction("(window.__lateInitialCalls || []).some(call => call.name === 'workspace_reconnect' && call.arguments.token === 'token-initial')");
     await app.getByText("Continue after reconnect?", { exact: true }).waitFor({ state: "visible" });
     await app.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.waitForFunction("(window.__lateInitialCalls || []).some(call => call.name === 'workspace_question_answer')");
+    await page.waitForFunction("(window.__lateInitialCalls || []).some(call => call.name === 'workspace_answer')");
 
     const answerToken = await page.evaluate(
-        "(window.__lateInitialCalls || []).find(call => call.name === 'workspace_question_answer')?.arguments?.token",
+        "(window.__lateInitialCalls || []).find(call => call.name === 'workspace_answer')?.arguments?.token",
     );
     assert.equal(answerToken, "token-initial");
     await app.getByText("Continue after reconnect?", { exact: true }).waitFor({ state: "hidden" });
@@ -2175,7 +2175,7 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (call.name === "workspace_watch") return;
-    if (call.name === "workspace_question_answer") {
+    if (call.name === "workspace_answer") {
         if (call.arguments.token !== "token-initial") {
             reject("Workspace App authorization is invalid for the current Context.");
             return;

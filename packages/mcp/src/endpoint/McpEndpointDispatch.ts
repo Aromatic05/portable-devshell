@@ -223,7 +223,7 @@ export class McpEndpointDispatch {
                     context.requestId ?? "workspace-app",
                     signal
                 );
-                if (toolName === "workspace_wait_interrupt") {
+                if (toolName === "workspace_interrupt") {
                     const waitId = readWorkspaceWaitId(input);
                     if (waitId !== undefined) this.#interruptTmuxWaitTracker(this.#instanceName, waitId);
                 }
@@ -1169,15 +1169,15 @@ function isAppOnlyInteractionTool(toolName: string): boolean {
     return toolName === "workspace_reconnect" ||
         toolName === "workspace_snapshot" ||
         toolName === "workspace_watch" ||
-        toolName === "workspace_reentry_control" ||
-        toolName === "workspace_goal_pause" ||
-        toolName === "workspace_goal_resume" ||
-        toolName === "workspace_goal_stop" ||
-        toolName === "workspace_question_answer" ||
-        toolName === "workspace_wait_interrupt" ||
-        toolName === "workspace_task_control" ||
-        toolName === "workspace_wait_recover" ||
-        toolName === "workspace_approval_decide";
+        toolName === "workspace_reentry" ||
+        toolName === "workspace_pause" ||
+        toolName === "workspace_resume" ||
+        toolName === "workspace_stop" ||
+        toolName === "workspace_answer" ||
+        toolName === "workspace_interrupt" ||
+        toolName === "workspace_task" ||
+        toolName === "workspace_recover" ||
+        toolName === "workspace_approval";
 }
 
 function isPassiveWorkspaceRead(toolName: string): boolean {
