@@ -319,6 +319,9 @@ export class ArtifactShareService {
         const shareId = share.result.shareId;
         const active = this.#activeDownloads.get(shareId) ?? 1;
         const remainingActive = Math.max(0, active - 1);
+        const previousDownloadCount = share.result.downloadCount ?? 0;
+        const previousState = share.result.state;
+        const previousTerminalAtMs = share.terminalAtMs;
         share.result.downloadCount = (share.result.downloadCount ?? 0) + 1;
         const exhausted =
             share.result.maxDownloads !== undefined &&
@@ -329,7 +332,14 @@ export class ArtifactShareService {
             share.terminalAtMs = this.#nextTerminalAtMs();
         }
         this.#releaseDownload(shareId);
-        await this.#recordStore.persistShare(share);
+        try {
+            await this.#recordStore.persistShare(share);
+        } catch (error) {
+            share.result.downloadCount = previousDownloadCount;
+            share.result.state = previousState;
+            share.terminalAtMs = previousTerminalAtMs;
+            throw error;
+        }
 
         const endpoint = this.#resolveEndpoint(share.sourceInstance, share.authorityInstance);
         if (endpoint !== undefined) {

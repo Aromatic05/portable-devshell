@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -695,6 +695,40 @@ test("artifact share reserves maxDownloads slots and releases a failed download"
     await service.finishShareDownload(token, true);
     assert.equal(service.listShares()[0]?.state, "exhausted");
     assert.equal(service.listShares()[0]?.downloadCount, 1);
+});
+
+test("artifact share rolls back download quota state when persistence fails", async (t) => {
+    const storageDir = await createTestTempDirectory("artifact-share-download-persist-failure");
+    t.after(() => rm(storageDir, { force: true, recursive: true }));
+    const source = new MemoryArtifactEndpoint(Buffer.from("share"));
+    const service = new ArtifactService({
+        resolveEndpoint: resolver({ "source-a": source }),
+        shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
+        storageDir
+    });
+    await service.initialize();
+    t.after(() => service.stop());
+    const share = await service.createShare({
+        maxDownloads: 1,
+        path: "./share.bin",
+        workspace: "/workspace"
+    }, "source-a");
+    const token = new URL(share.url).pathname.split("/").at(-1)!;
+    await service.beginShareDownload(token);
+
+    const sharesDir = join(storageDir, "shares");
+    await rm(sharesDir, { force: true, recursive: true });
+    await writeFile(sharesDir, "not a directory", "utf8");
+    await assert.rejects(service.finishShareDownload(token, true));
+    assert.deepEqual(
+        { downloadCount: service.listShares()[0]?.downloadCount, state: service.listShares()[0]?.state },
+        { downloadCount: 0, state: "active" }
+    );
+
+    await rm(sharesDir, { force: true });
+    await mkdir(sharesDir, { recursive: true });
+    await service.beginShareDownload(token);
+    await service.finishShareDownload(token, false);
 });
 
 test("artifact share history bounds terminal records while preserving active shares", async (t) => {
