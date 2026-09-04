@@ -35,6 +35,7 @@ export type CliParsedCommand =
     | { kind: "control.stop" }
     | { args: string[]; kind: "artifact" }
     | { args: string[]; kind: "secret" }
+    | { args: string[]; kind: "skill" }
     | { kind: "tui" }
     | { input: JsonValue; instance: string; kind: "instance.call"; toolName: string; workspace: string }
     | { kind: "instance.create" }
@@ -96,6 +97,8 @@ export class CliParser {
                 return { args: [...argv.slice(1)], kind: "artifact" };
             case "secret":
                 return { args: [...argv.slice(1)], kind: "secret" };
+            case "skill":
+                return { args: [...argv.slice(1)], kind: "skill" };
             case "tui":
                 return this.#expectNoExtra(argv, { kind: "tui" });
             case "instance":
@@ -119,6 +122,8 @@ export class CliParser {
                 return { args: ["--help"], kind: "artifact" };
             case "secret":
                 return { args: ["--help"], kind: "secret" };
+            case "skill":
+                return { args: ["--help"], kind: "skill" };
             case "config":
             case "approval":
             case "oauth":

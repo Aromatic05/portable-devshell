@@ -146,7 +146,7 @@ detached wait 在任务完成、`tmux_read` 等待到新 output、timeout 或用
 
 ## Skills 与项目记忆提示
 
-Control 机器上的 Skill 目录固定为：
+Control 机器已有的受管 Skill 目录保持为：
 
 ```text
 ~/.devshell/skill
@@ -155,6 +155,16 @@ Control 机器上的 Skill 目录固定为：
 - local instance 直接使用同一台机器上的目录，不进行复制；
 - SSH、Docker 和 Podman instance 在启动或重新连接 worker 时，将该目录镜像到 worker 用户的 `~/.devshell/skill`；
 - self-managed reverse instance 由 worker 所在机器自行维护该目录，Control 不主动推送。
+
+本地 `devshell skill` catalog 在此基础上按以下优先级发现 Skill，同名 Skill 只采用最高优先级来源：
+
+```text
+project  <workspace>/.agents/skills
+managed  ~/.devshell/skill
+global   $XDG_CONFIG_HOME/agents/skills
+```
+
+未设置 `XDG_CONFIG_HOME` 时 global 使用 `~/.config/agents/skills`。`skill list` / `skill search` 只读取 `SKILL.md` 的轻量 description metadata；`skill load`（`skill inspect` 为别名）才读取完整 `SKILL.md` 并发现 `scripts/` 等附属文件，`skill read` 再按需读取单个附属文件。CLI catalog 是运行 `devshell` 的本机能力，不改变上述 managed Skill 向 worker 的同步规则。
 
 `environ_info` 接收 `workspace` 参数；它是 **worker 机器上的绝对目录**，由调用方在自己已获准访问的目录范围内选择。返回的 structured content 包含 canonical workspace、worker 上展开后的绝对 `skillsDirectory`，并提示 Agent 按需读取其中相关 Skill 的 `SKILL.md`；同一个结果的隐藏 metadata 同时携带 Workspace App capability 与 render template，因此环境准备与 Live Workspace bootstrap 不再需要两个模型工具调用。
 
