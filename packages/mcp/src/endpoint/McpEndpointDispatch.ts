@@ -144,11 +144,15 @@ export class McpEndpointDispatch {
         signal?: AbortSignal
     ): Promise<McpEndpointResult> {
         throwIfMcpEndpointAborted(signal);
+        const requestedToolName = toolName;
         const compatibility = resolveMcpLegacyTool(toolName);
         if (compatibility?.kind === "tombstone") {
             return mcpLegacyToolTombstone(toolName, compatibility);
         }
-        if (compatibility?.kind === "alias") {
+        const legacyWorkspaceAppTool = compatibility?.kind === "workspace-app-v0615"
+            ? requestedToolName
+            : undefined;
+        if (compatibility?.kind === "alias" || compatibility?.kind === "workspace-app-v0615") {
             toolName = compatibility.replacement;
         }
         const snapshot = this.#catalog.snapshot();
@@ -216,13 +220,19 @@ export class McpEndpointDispatch {
         try {
             if (appOnlyInteraction) {
                 this.#catalog.assertAdaptable(selected.definition);
-                const result = await this.#interaction.call(
-                    toolName as McpToolCatalogInteractionName,
-                    input,
-                    context,
-                    context.requestId ?? "workspace-app",
-                    signal
-                );
+                const result = legacyWorkspaceAppTool === undefined
+                    ? await this.#interaction.call(
+                        toolName as McpToolCatalogInteractionName,
+                        input,
+                        context,
+                        context.requestId ?? "workspace-app",
+                        signal
+                    )
+                    : await this.#interaction.callLegacyV0615(
+                        legacyWorkspaceAppTool,
+                        input,
+                        context,
+                    );
                 if (toolName === "workspace_interrupt") {
                     const waitId = readWorkspaceWaitId(input);
                     if (waitId !== undefined) this.#interruptTmuxWaitTracker(this.#instanceName, waitId);

@@ -20,6 +20,7 @@ import {
 } from "../../instance/McpInstanceGateway.js";
 import type { McpContextRegistry } from "../../context/McpContextRegistry.js";
 import type { McpToolCatalogInteractionName } from "../../tool/catalog/McpToolCatalogInteraction.js";
+import { McpWorkspaceLegacyV0615 } from "../../workspace/McpWorkspaceLegacyV0615.js";
 import { McpWorkspaceReentryArbiter } from "../../workspace/McpWorkspaceReentryArbiter.js";
 import { readWorkspaceSnapshot, workspaceEventBelongsTo } from "../../workspace/McpWorkspaceSnapshot.js";
 import { WorkspaceAppLeaseStore } from "../../workspace/WorkspaceAppLeaseStore.js";
@@ -30,6 +31,7 @@ import { McpNativeToolResult, type McpEndpointResult } from "../McpEndpointResul
 export class McpEndpointHandlerInteraction {
     readonly #appLeases: WorkspaceAppLeaseStore;
     readonly #appPresence: WorkspaceAppPresenceStore;
+    readonly #legacyV0615: McpWorkspaceLegacyV0615;
     readonly #reentry?: McpWorkspaceReentryArbiter;
 
     constructor(private readonly options: {
@@ -48,6 +50,7 @@ export class McpEndpointHandlerInteraction {
     }) {
         this.#appLeases = options.workspaceAppLeases ?? new WorkspaceAppLeaseStore();
         this.#appPresence = options.workspaceAppPresence ?? new WorkspaceAppPresenceStore({ now: options.now });
+        this.#legacyV0615 = new McpWorkspaceLegacyV0615(options);
         this.#reentry = options.workspaceReentryArbiter ?? (options.contextRegistry === undefined
             ? undefined
             : new McpWorkspaceReentryArbiter({
@@ -107,6 +110,15 @@ export class McpEndpointHandlerInteraction {
                 await this.#assertAppToken(input, context);
                 return await this.#decideApproval(gateway, input, context);
         }
+    }
+
+    async callLegacyV0615(
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+    ): Promise<McpEndpointResult> {
+        await this.#assertAppToken(input, context);
+        return await this.#legacyV0615.call(toolName, input, context);
     }
 
     async bootstrapWorkspace(

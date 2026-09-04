@@ -453,6 +453,47 @@ test("Workspace authorization metadata never enters audit results or MCP events"
     assert.equal(JSON.stringify(harness.events).includes(token), false);
 });
 
+test("v0.6.15 Workspace wire calls stay hidden but dispatch through the current Workspace policy", async () => {
+    const harness = createWorker({ tools: [] });
+    const unused = async () => { throw new Error("unused"); };
+    const gateway = {
+        consumeWait: unused,
+        createWait: unused,
+        decideApproval: unused,
+        detachWait: unused,
+        listApprovals: async () => [],
+        listTools: () => [],
+        listWaits: async () => [],
+        resolveWait: unused,
+        waitForWait: unused,
+    } as never;
+    const catalog = new McpEndpointCatalog({
+        gateway,
+        instanceName: "demo-local",
+        policy: { capabilities: [], groups: ["workspace"] },
+        worker: harness.worker,
+    });
+    const dispatch = new McpEndpointDispatch({ catalog, gateway, instanceName: "demo-local", worker: harness.worker });
+    const environment = await dispatch.callTool(
+        "environ_info",
+        { workspace: "/workspace" },
+        { principal: "tester", requestId: "workspace-legacy-environment" },
+    );
+    assert.ok(environment instanceof McpNativeToolResult);
+    const ctxId = (environment.structuredContent as { ctxId?: string }).ctxId;
+    const token = (environment._meta?.["portable-devshell/workspace"] as { token?: string } | undefined)?.token;
+    if (typeof ctxId !== "string" || typeof token !== "string") throw new Error("workspace bootstrap missing");
+
+    const result = await dispatch.callTool(
+        "workspace_reentry_control",
+        { action: "get", ctxId, token },
+        { principal: "tester", requestId: "workspace-legacy-reentry" },
+    ) as { mode?: string };
+    assert.equal(result.mode, "automatic");
+    assert.equal(catalog.snapshot().merged.some((entry) => entry.definition.name === "workspace_reentry_control"), false);
+    assert.equal(catalog.snapshot().exposed.some((entry) => entry.definition.name === "workspace_reentry_control"), false);
+});
+
 test("OpenAI session resolves Workspace once and the App continues by ctxId without session metadata", async () => {
     const harness = createWorker({ tools: [] });
     const unused = async () => {

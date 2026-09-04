@@ -620,6 +620,16 @@ test("Windows release installer rolls back application and worker aliases as one
     await verifyTransactionalRollback(true);
 });
 
+test("Windows release installer prepares rollback state before entering Control shutdown", async () => {
+    const source = await readFile(resolve(repositoryRoot, "scripts", "install-release.ps1"), "utf8");
+    const prepare = source.indexOf("    Backup-WorkerAliases $targets $devshellHome $workerBackupDirectory");
+    const transaction = source.indexOf("    try {", prepare);
+    const shutdown = source.indexOf("        Stop-InstalledControl $currentCli $devshellHome", transaction);
+    assert.ok(prepare >= 0, "Worker activation backup must be present");
+    assert.ok(transaction > prepare, "rollback scope must start after backup preparation");
+    assert.ok(shutdown > transaction, "Control shutdown must execute inside the rollback scope");
+});
+
 async function verifyTransactionalRollback(windows) {
     const root = await createTestTempDirectory(windows
         ? "windows-release-rollback-test"

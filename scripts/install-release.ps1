@@ -465,17 +465,16 @@ try {
     } elseif ($null -ne $runtimeState.Pid -and (Test-ControlProcessRunning $runtimeState.Pid)) {
         throw "Control PID $($runtimeState.Pid) 仍在运行但 RPC 不可用；安装在停机前取消。"
     }
-    Stop-InstalledControl $currentCli $devshellHome
-    $runtimeWasStopped = [bool]$runtimeState.ControlRunning
-
     $previousCommandContent = if (Test-Path -LiteralPath $commandPath -PathType Leaf) {
         Get-Content -Raw -LiteralPath $commandPath
     } else {
         $null
     }
-    $activated = $false
     Backup-WorkerAliases $targets $devshellHome $workerBackupDirectory
+    $runtimeWasStopped = [bool]$runtimeState.ControlRunning
+    $activated = $false
     try {
+        Stop-InstalledControl $currentCli $devshellHome
         foreach ($target in $targets) {
             Write-InstallDetail "安装 $target Worker"
             Install-Worker $target $temporary $devshellHome

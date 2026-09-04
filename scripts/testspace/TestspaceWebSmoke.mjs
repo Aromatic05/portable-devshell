@@ -4,6 +4,8 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { LINUX_TESTSPACE_ISOLATION, TESTSPACE_ISOLATION_ENV } from "./TestspaceNamespace.mjs";
+
 const TEST_HOST = "portable-devshell.test";
 const DEFAULT_TIMEOUT_MS = 15_000;
 
@@ -34,9 +36,15 @@ export function resolveChromiumExecutable(
 export function chromiumLaunchArguments(options = {}) {
     const environment = options.environment ?? process.env;
     const platform = options.platform ?? process.platform;
+    const uid = options.uid ?? (typeof process.getuid === "function" ? process.getuid() : undefined);
+    const sandboxUnavailable = platform === "linux" && (
+        environment.CI ||
+        environment[TESTSPACE_ISOLATION_ENV] === LINUX_TESTSPACE_ISOLATION ||
+        uid === 0
+    );
     return [
         "--headless=new",
-        ...(platform === "linux" && environment.CI ? ["--no-sandbox"] : []),
+        ...(sandboxUnavailable ? ["--no-sandbox"] : []),
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-gpu",

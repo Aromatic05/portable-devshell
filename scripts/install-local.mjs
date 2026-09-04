@@ -119,15 +119,14 @@ try {
             `Control PID ${runtimePid} is still running while Control RPC is unavailable; installation is cancelled before shutdown.`
         );
     }
-    await stopInstalledControl(frozenCurrentCli);
     await mkdir(versionsDirectory, { mode: 0o700, recursive: true });
-
     const previousWorkerActivation = await backupHostWorkerActivation(workerBackupDirectory);
     let previousVersionBackedUp = false;
     let candidateVersionMoved = false;
     let applicationActivationAttempted = false;
     let workerTransactionStarted = false;
     try {
+        await stopInstalledControl(frozenCurrentCli);
         const installedWorkers = {};
         workerTransactionStarted = true;
         for (const target of targets) {

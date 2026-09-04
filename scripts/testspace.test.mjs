@@ -57,19 +57,27 @@ test("testspace URLs point at the isolated instance and Web UI", () => {
     });
 });
 
-test("Web smoke disables the Chromium sandbox only for Linux CI", () => {
+test("Web smoke disables the Chromium sandbox for Linux CI or map-root Testspace", () => {
     assert.equal(
-        chromiumLaunchArguments({ environment: { CI: "true" }, platform: "linux" })
+        chromiumLaunchArguments({ environment: { CI: "true" }, platform: "linux", uid: 1000 })
             .includes("--no-sandbox"),
         true,
     );
     assert.equal(
-        chromiumLaunchArguments({ environment: {}, platform: "linux" })
+        chromiumLaunchArguments({
+            environment: { DEVSHELL_TESTSPACE_ISOLATION: LINUX_TESTSPACE_ISOLATION },
+            platform: "linux",
+            uid: 0,
+        }).includes("--no-sandbox"),
+        true,
+    );
+    assert.equal(
+        chromiumLaunchArguments({ environment: {}, platform: "linux", uid: 1000 })
             .includes("--no-sandbox"),
         false,
     );
     assert.equal(
-        chromiumLaunchArguments({ environment: { CI: "true" }, platform: "darwin" })
+        chromiumLaunchArguments({ environment: { CI: "true" }, platform: "darwin", uid: 0 })
             .includes("--no-sandbox"),
         false,
     );
