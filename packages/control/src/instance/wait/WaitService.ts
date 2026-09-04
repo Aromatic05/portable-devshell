@@ -48,8 +48,15 @@ export class WaitService {
         return await this.#commit("wait.reattached", (document) => this.#state.reattach(document, waitId, ownerCallId));
     }
 
-    async resolve(waitId: string, result?: JsonValue): Promise<WaitRecord> {
-        const record = await this.#commit("wait.resolved", (document) => this.#state.resolve(document, waitId, result));
+    async resolve(
+        waitId: string,
+        result?: JsonValue,
+        options: { consumeIfDetached?: boolean } = {},
+    ): Promise<WaitRecord> {
+        const record = await this.#commit(
+            (next) => next.status === "consumed" ? "wait.consumed" : "wait.resolved",
+            (document) => this.#state.resolve(document, waitId, result, options),
+        );
         this.#notify(record);
         return record;
     }
@@ -154,7 +161,9 @@ export class WaitService {
     }
 
     async #commit(
-        eventType: Extract<InstanceEventType, `wait.${string}`>,
+        eventType:
+            | Extract<InstanceEventType, `wait.${string}`>
+            | ((record: WaitRecord) => Extract<InstanceEventType, `wait.${string}`>),
         transition: (document: WaitDocument) => WaitTransition,
     ): Promise<WaitRecord> {
         return await this.#runExclusive(async () => {
@@ -162,7 +171,8 @@ export class WaitService {
             const stored = await this.#store.write(next.document);
             const record = stored.waits.find((entry) => entry.waitId === next.record.waitId);
             if (record === undefined) throw new Error(`Wait ${next.record.waitId} disappeared during persistence.`);
-            await this.#appendEvent(eventType, eventData(record)).catch(() => undefined);
+            const type = typeof eventType === "function" ? eventType(record) : eventType;
+            await this.#appendEvent(type, eventData(record)).catch(() => undefined);
             return record;
         });
     }

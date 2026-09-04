@@ -580,12 +580,20 @@ test("legacy aliases still obey the current MCP policy", async () => {
 });
 
 test("tmux_run block waits are interruptible before handoff and detach after the sync window", async () => {
+    let concurrentAgentCall = false;
     let observeCalls = 0;
     let runCalls = 0;
+    const excludedCallIds: Array<string | undefined> = [];
     const terminalResults = new Map<string, JsonValue>();
     const harness = createWorker({ tools: [tmuxRunBlockTool()] });
     const worker = {
         ...harness.worker,
+        async invokeToolInternal(toolName: string, input: JsonValue): Promise<JsonValue> {
+            assert.equal(toolName, "tmux_read");
+            const task = (input as { task?: string }).task;
+            if (task === undefined) throw new Error("tmux_read task is missing");
+            return terminalResults.get(task) ?? { task: { id: task, status: "running" } };
+        },
         async callTool(
             toolName: string,
             input: JsonValue,
@@ -664,6 +672,11 @@ test("tmux_run block waits are interruptible before handoff and detach after the
         },
         async decideApproval() { throw new Error("unused"); },
         async detachWait(_instance: string, waitId: string) { return update(waitId, "detached"); },
+        hasActiveToolCalls(_instance: string, ctxId: string, excludeCallId?: string) {
+            assert.equal(ctxId, environment.ctxId);
+            excludedCallIds.push(excludeCallId);
+            return concurrentAgentCall;
+        },
         async listApprovals() { return []; },
         async listWaits() { return waits; },
         listTools: () => [],
@@ -696,7 +709,18 @@ test("tmux_run block waits are interruptible before handoff and detach after the
                 tasks: [{ ctxId: environment.ctxId, status: "in_progress", taskId: "todo-task-1" }],
             };
         },
-        async resolveWait(_instance: string, waitId: string, result?: JsonValue) { return update(waitId, "resolved", result); },
+        async resolveWait(
+            _instance: string,
+            waitId: string,
+            result?: JsonValue,
+            options?: { consumeIfDetached?: boolean },
+        ) {
+            const wait = waits.find((entry) => entry.waitId === waitId);
+            if (wait === undefined) throw new Error(`missing wait ${waitId}`);
+            return options?.consumeIfDetached === true && wait.status === "detached"
+                ? update(waitId, "consumed", result)
+                : update(waitId, "resolved", result);
+        },
         async touchGoal() {},
         async waitForWait(_instance: string, waitId: string): Promise<Wait> {
             const wait = waits.find((entry) => entry.waitId === waitId);
@@ -771,10 +795,13 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     assert.equal(first.detached, true);
     assert.deepEqual(first.task, { id: "task-2", status: "running" });
     assert.equal(waits[1]?.status, "detached");
+    concurrentAgentCall = true;
     terminalResults.set("task-2", { task: { id: "task-2", status: "1" } });
-    await waitUntil(() => waits[1]?.status === "resolved");
-    assert.equal(waits[1]?.status, "resolved");
+    await waitUntil(() => waits[1]?.status === "consumed");
+    assert.equal(waits[1]?.status, "consumed");
     assert.equal(waits[1]?.result, terminalResults.get("task-2"));
+    assert.equal(excludedCallIds.includes("call-tmux-run-2"), true);
+    concurrentAgentCall = false;
     assert.equal(runCalls, 2);
     assert.equal(harness.audited.filter((entry) => entry.toolName === "tmux_run").length, 0);
     assert.equal(harness.auditResults.filter((entry) => entry.toolName === "tmux_run").length, 0);
@@ -817,9 +844,24 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     await waitUntil(() => waits.find((entry) => entry.waitId === "wait-restored")?.status === "resolved");
     assert.equal(restoreListCalls, 2);
     assert.equal(waits.find((entry) => entry.waitId === "wait-restored")?.result, terminalResults.get("task-2"));
+
+    terminalResults.delete("task-3");
+    const synchronous = dispatch.callTool(
+        "tmux_run",
+        { command: "sleep 10", ctxId: environment.ctxId, timeout: 660_000, wait: "block" },
+        { principal: "tester", requestId: "wait-completes-before-handoff" },
+    ) as Promise<{ detached?: boolean; task?: { id?: string; status?: string } }>;
+    await waitUntil(() => runCalls === 3 && waits.length === 4);
+    terminalResults.set("task-3", { task: { id: "task-3", status: "0" } });
+    const synchronousResult = await synchronous;
+    assert.equal(synchronousResult.detached, undefined);
+    assert.deepEqual(synchronousResult.task, { id: "task-3", status: "0" });
+    assert.equal(waits[3]?.status, "consumed");
+    assert.equal(waits[3]?.detachedAt, undefined);
 });
 
 test("tmux_read long waits detach into durable Workspace state", async () => {
+    let concurrentAgentCall = false;
     let ready = false;
     let internalReadCalls = 0;
     let logicalReadCalls = 0;
@@ -897,13 +939,29 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
         },
         async decideApproval() { throw new Error("unused"); },
         async detachWait(_instance: string, waitId: string) { return update(waitId, "detached"); },
+        hasActiveToolCalls(_instance: string, ctxId: string, excludeCallId?: string) {
+            assert.equal(ctxId, environment.ctxId);
+            assert.equal(excludeCallId, "call-tmux-read");
+            return concurrentAgentCall;
+        },
         async listApprovals() { return []; },
         async listWaits() { return waits; },
         listTools: () => [],
         async observeTmuxTask(_instance: string, taskId: string) { return { task: { id: taskId, status: "running" } }; },
         async readTodo() { return { items: [], revision: 0, tasks: [] }; },
         async reattachWait(_instance: string, waitId: string) { return update(waitId, "waiting"); },
-        async resolveWait(_instance: string, waitId: string, result?: JsonValue) { return update(waitId, "resolved", result); },
+        async resolveWait(
+            _instance: string,
+            waitId: string,
+            result?: JsonValue,
+            options?: { consumeIfDetached?: boolean },
+        ) {
+            const wait = waits.find((entry) => entry.waitId === waitId);
+            if (wait === undefined) throw new Error(`missing wait ${waitId}`);
+            return options?.consumeIfDetached === true && wait.status === "detached"
+                ? update(waitId, "consumed", result)
+                : update(waitId, "resolved", result);
+        },
         async touchGoal(_instance: string, _ctxId: string, kind: GoalActivityKind = "execution") { goalActivityKinds.push(kind); },
         async waitForWait(_instance: string, waitId: string): Promise<Wait> {
             const wait = waits.find((entry) => entry.waitId === waitId);
@@ -999,9 +1057,24 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
     assert.equal(logicalReadCalls - logicalReadsBeforeWait, 1);
     assert.equal(internalReadCalls > internalReadsBeforeWait, true);
 
+    concurrentAgentCall = true;
     ready = true;
-    await waitUntil(() => replacement?.status === "resolved");
-    assert.equal(replacement?.status, "resolved");
+    await waitUntil(() => replacement?.status === "consumed");
+    assert.equal(replacement?.status, "consumed");
+
+    concurrentAgentCall = false;
+    ready = false;
+    const idleResult = await dispatch.callTool(
+        "tmux_read",
+        { ctxId: environment.ctxId, line: 17, task: "task-existing", timeMs: 1_000 },
+        { principal: "tester", requestId: "wait-read-idle" },
+    ) as { detached?: boolean };
+    assert.equal(idleResult.detached, true);
+    const idleReplacement = waits.filter((entry) => entry.waitId.startsWith("wait-read-")).at(-1);
+    assert.equal(idleReplacement?.status, "detached");
+    ready = true;
+    await waitUntil(() => idleReplacement?.status === "resolved");
+    assert.equal(idleReplacement?.status, "resolved");
 });
 
 test("failed environ_info rolls back only the undisclosed explicit Context", async () => {

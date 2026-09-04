@@ -132,9 +132,9 @@ export class AuditToolCallHistory {
         return this.#activeCalls.has(callId);
     }
 
-    hasActiveForContext(ctxId: string): boolean {
+    hasActiveForContext(ctxId: string, excludeCallId?: string): boolean {
         for (const call of this.#activeCalls.values()) {
-            if (call.ctxId === ctxId) return true;
+            if (call.ctxId === ctxId && call.callId !== excludeCallId) return true;
         }
         return false;
     }

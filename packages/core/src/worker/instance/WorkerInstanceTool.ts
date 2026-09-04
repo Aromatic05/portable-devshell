@@ -117,8 +117,8 @@ export class WorkerInstanceTool {
         return await this.#audit.read(query);
     }
 
-    hasActiveToolCalls(ctxId: string): boolean {
-        return this.#audit.hasActiveForContext(ctxId);
+    hasActiveToolCalls(ctxId: string, excludeCallId?: string): boolean {
+        return this.#audit.hasActiveForContext(ctxId, excludeCallId);
     }
 
     async readToolCallFailureSummary(sinceMs: number, untilMs: number) {

@@ -41,6 +41,48 @@ test("WaitState preserves detach information through resolution and consumption"
     assert.equal(consumed.record.consumedAt, "2026-08-18T00:03:00.000Z");
 });
 
+test("WaitState atomically consumes a detached completion without consuming a synchronous completion", () => {
+    let tick = 0;
+    let waitId = 0;
+    const state = new WaitState({
+        now: () => new Date(Date.parse("2026-08-18T00:00:00.000Z") + tick++ * 1_000).toISOString(),
+        waitId: () => `wait-${++waitId}`,
+    });
+    const detached = state.detach(
+        state.create(state.emptyDocument(), {
+            createdByCtxId: "ctx-1",
+            kind: "tmux",
+            ownerCallId: "call-wait",
+            targetId: "tmux-detached",
+        }).document,
+        "wait-1",
+    );
+    const consumed = state.resolve(
+        detached.document,
+        detached.record.waitId,
+        { task: { id: "tmux-detached", status: "0" } },
+        { consumeIfDetached: true },
+    );
+    assert.equal(consumed.record.status, "consumed");
+    assert.equal(consumed.record.resolvedAt, consumed.record.consumedAt);
+    assert.deepEqual(consumed.record.result, { task: { id: "tmux-detached", status: "0" } });
+
+    const waiting = state.create(consumed.document, {
+        createdByCtxId: "ctx-1",
+        kind: "tmux",
+        ownerCallId: "call-sync",
+        targetId: "tmux-sync",
+    });
+    const resolved = state.resolve(
+        waiting.document,
+        waiting.record.waitId,
+        { task: { id: "tmux-sync", status: "0" } },
+        { consumeIfDetached: true },
+    );
+    assert.equal(resolved.record.status, "resolved");
+    assert.equal(resolved.record.consumedAt, undefined);
+});
+
 test("WaitState can detach a resolved result when its owner disappears after resolution", () => {
     const timestamps = [
         "2026-08-18T00:00:00.000Z",
@@ -219,6 +261,32 @@ test("WaitService serializes concurrent creation of the same tmux wait target", 
     const waits = await service.list();
     assert.equal(waits.length, 1);
     assert.equal(waits[0]?.status, "waiting");
+});
+
+test("WaitService emits consumed directly when a detached completion is already owned by active Agent work", async () => {
+    const root = await createTestTempDirectory("wait-service-consumed-completion-");
+    const events: string[] = [];
+    const service = new WaitService({
+        appendEvent: async (type) => { events.push(type); },
+        filePath: join(root, "waits.json"),
+        instanceName: "aromatic-pc",
+    });
+    const created = await service.create({
+        createdByCtxId: "ctx-1",
+        kind: "tmux",
+        ownerCallId: "call-wait",
+        targetId: "tmux-task-1",
+    });
+    await service.detach(created.waitId);
+    const completed = await service.resolve(
+        created.waitId,
+        { task: { id: "tmux-task-1", status: "0" } },
+        { consumeIfDetached: true },
+    );
+
+    assert.equal(completed.status, "consumed");
+    assert.equal(completed.resolvedAt, completed.consumedAt);
+    assert.deepEqual(events, ["wait.created", "wait.detached", "wait.consumed"]);
 });
 
 test("WaitState atomically completes an accepted recovery delivery", () => {

@@ -88,7 +88,12 @@ export interface McpInstanceGateway {
     rejectWaitRecovery?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
     disableWaitRecovery?(instance: string, waitId: string): Promise<WaitRecord>;
     consumeWait?(instance: string, waitId: string): Promise<WaitRecord>;
-    resolveWait?(instance: string, waitId: string, result?: JsonValue): Promise<WaitRecord>;
+    resolveWait?(
+        instance: string,
+        waitId: string,
+        result?: JsonValue,
+        options?: { consumeIfDetached?: boolean },
+    ): Promise<WaitRecord>;
     waitForWait?(instance: string, waitId: string): Promise<WaitRecord>;
     listWaits?(instance: string): Promise<WaitRecord[]>;
     listApprovals?(instance: string): Promise<ApprovalRequest[]>;
@@ -96,7 +101,7 @@ export interface McpInstanceGateway {
     decideApproval?(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<ApprovalRequest>;
     cancelApproval?(instance: string, approvalId: string, reason?: string): Promise<ApprovalRequest>;
     readToolCalls?(instance: string, ctxId: string, limit: number): Promise<ToolCallRecord[]>;
-    hasActiveToolCalls?(instance: string, ctxId: string): boolean;
+    hasActiveToolCalls?(instance: string, ctxId: string, excludeCallId?: string): boolean;
     readWorkspaceEvents?(instance: string, fromSeq: number): Promise<McpWorkspaceEventSlice>;
     controlTodo?(instance: string, taskId: string, action: TodoTaskControlAction, ctxId: string, expectedRevision?: number): Promise<JsonValue>;
     consumeContextMessages?(instance: string, ctxId: string, callId: string): Promise<ContextMessageReadResult>;
