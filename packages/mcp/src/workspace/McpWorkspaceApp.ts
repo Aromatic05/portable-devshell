@@ -138,7 +138,15 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var DISPLAY_MODE_RETRY_MS = 750;
   var DISPLAY_MODE_MAX_RETRIES = 2;
   var DISPLAY_MODE_TRANSITION_LEASE_MS = 2000;
-  var RECOVERY_NO_CHAT_SUFFIX = " Do not reply only with an acknowledgement, summary, plan, status update, apology, or statement that you will continue.";
+  var WAIT_CONTINUATION_MESSAGE = "Resume the existing execution from the Workspace continuation context.\n\nPerform the continuation operation, then continue the suspended work from its result.";
+  var GOAL_CONTINUATION_MESSAGE = "Finish the current Goal item shown in the Workspace context.\n\nThen immediately continue with the next Goal item.\n\nDo not stop after completing or reporting the current item.";
+  var GOAL_CONTINUATION_ENFORCEMENT = [
+    "",
+    "Wake attempt 2. The previous continuation produced no verifiable execution progress.",
+    "Wake attempt 3. Repeated continuation attempts have not produced verifiable execution progress. Take concrete execution actions instead of only describing the state.",
+    "Wake attempt 4. You have repeatedly failed to advance an actionable Goal. Stop substituting acknowledgements, plans, or status reports for execution.",
+    "Wake attempt {attempt}. Critical execution failure: the Goal remains actionable after repeated continuation attempts without verifiable progress. Execute concrete work now rather than another acknowledgement, plan, status report, apology, or promise."
+  ];
   var bridgeReady = false;
   var pendingToolResult = null;
   var initialToolResultResolve = null;
@@ -325,47 +333,54 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return value && typeof value === "object" && !Array.isArray(value) ? value : null;
   }
 
-  function recoveryMessage(item) {
+  function recoveryMessage() {
+    return WAIT_CONTINUATION_MESSAGE;
+  }
+
+  function waitContinuationContext(item, trigger) {
     var result = asRecord(item && item.result) || {};
     var task = asRecord(result.task) || {};
-    var taskId = String((item && item.targetId) || task.id || "the existing tmux task");
-    if (item && item.kind === "question") {
-      var answer = typeof result.answer === "string" ? result.answer : "";
-      if (answer.length > 500) answer = answer.slice(0, 500) + "…";
-      return "The user answered the pending Workspace question" +
-        (answer ? " with " + JSON.stringify(answer) : "") +
-        ". Use this answer immediately to resume the suspended work." + RECOVERY_NO_CHAT_SUFFIX;
-    }
-    if (item && item.kind === "tmux") {
-      if (result.interrupted === true) {
-        return "The user stopped waiting for tmux task " + taskId +
-          ". The task was not stopped. Inspect its current state once now and continue the suspended work from that state. Do not restart the task." +
-          RECOVERY_NO_CHAT_SUFFIX;
-      }
-      if (result.waitReason === "output") {
-        return "tmux task " + taskId +
-          " has unread output ready. Read the retained transcript with tmux_read now, then immediately continue the suspended work from that result. Do not restart the task." +
-          RECOVERY_NO_CHAT_SUFFIX;
-      }
-      if (result.waitReason === "timeout") {
-        return "The tmux_read wait interval for task " + taskId +
-          " elapsed. Read the task once now with tmux_read(timeMs=0). If the required work is still running, immediately re-enter a blocking tmux_read on the same task; otherwise consume the result and continue the suspended work. Do not restart the task or end the turn after only reporting its state.";
-      }
-      if (result.timedOut === true) {
-        return "The wait deadline for tmux task " + taskId +
-          " elapsed and the task is still running. Inspect the task once now. If its result is still required and it is still running, immediately re-enter a blocking wait on the same task. If it has completed, consume the result and continue the suspended work. Do not restart the task or end the turn with a status-only response.";
-      }
-      if (task.status !== undefined && String(task.status) !== "running") {
-        return "tmux task " + taskId + " finished while detached with status " +
-          String(task.status) + ". Read its retained transcript/result now and immediately continue the suspended work using that result. Do not restart the completed task." +
-          RECOVERY_NO_CHAT_SUFFIX;
-      }
-      return "The detached wait for tmux task " + taskId +
-        " resolved. Inspect the task once now and immediately continue the suspended work from its current result. Do not restart the task." +
-        RECOVERY_NO_CHAT_SUFFIX;
-    }
-    return "A detached Workspace wait resolved. Read the current Workspace state and triggering result now, then immediately continue the suspended work." +
-      RECOVERY_NO_CHAT_SUFFIX;
+    var taskId = String((item && item.targetId) || task.id || "");
+    var isQuestion = !!item && item.kind === "question";
+    var tmuxReason = result.interrupted === true
+      ? "tmux-wait-interrupted"
+      : result.waitReason === "output"
+        ? "tmux-output-ready"
+        : result.waitReason === "timeout"
+          ? "tmux-read-interval-elapsed"
+          : result.timedOut === true
+            ? "tmux-wait-deadline-elapsed"
+            : task.status !== undefined && String(task.status) !== "running"
+              ? "tmux-finished"
+              : "tmux-wait-resolved";
+    var timeoutContinuation = !isQuestion && (result.waitReason === "timeout" || result.timedOut === true)
+      ? {
+          operation: { kind: "blocking-wait", taskId: taskId, tool: "tmux_read" },
+          when: "task-still-running-and-result-required"
+        }
+      : undefined;
+    return {
+      kind: "wait",
+      reason: isQuestion ? "question-answered" : tmuxReason,
+      wait: {
+        goalId: item && item.goalId,
+        goalStepId: item && item.goalStepId,
+        kind: item && item.kind,
+        targetId: item && item.targetId,
+        taskId: item && item.taskId,
+        waitId: item && item.waitId
+      },
+      result: result,
+      trigger: trigger || undefined,
+      suspendedOperation: isQuestion
+        ? { kind: "workspace-question", waitId: item && item.waitId }
+        : { kind: "tmux-wait", taskId: taskId },
+      nextOperation: isQuestion
+        ? { kind: "resume-with-answer" }
+        : { kind: "tool", taskId: taskId, tool: "tmux_read" },
+      constraints: isQuestion ? undefined : { restartTask: false },
+      afterResult: timeoutContinuation
+    };
   }
 
   function applyHostContext(context) {
@@ -553,7 +568,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return configured || !!ctxId;
   }
 
-  function modelContext(extra) {
+  function modelContext(continuation) {
     var tasks = snapshot && Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
     var background = snapshot && Array.isArray(snapshot.background) ? snapshot.background : [];
     var state = {
@@ -576,7 +591,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         status: item.status,
         detachedAt: item.detachedAt
       }; }),
-      extra: extra || undefined
+      continuation: continuation || undefined
     };
     var cleanState = JSON.parse(JSON.stringify(state));
     return {
@@ -585,13 +600,13 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     };
   }
 
-  async function syncModelContext(extra) {
+  async function syncModelContext(continuation) {
     if (!initialized || !snapshot || automaticMessageInFlight) return;
     var epoch = modelContextEpoch;
     var controller = new AbortController();
     modelContextSyncController = controller;
     try {
-      await updateHostModelContext(modelContext(extra), {
+      await updateHostModelContext(modelContext(continuation), {
         ordinaryEpoch: epoch,
         signal: controller.signal
       });
@@ -602,9 +617,9 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     }
   }
 
-  async function requireModelContext(extra) {
+  async function requireModelContext(continuation) {
     if (!initialized || !snapshot) throw new Error("Workspace state is unavailable for model re-entry");
-    await updateHostModelContext(modelContext(extra));
+    await updateHostModelContext(modelContext(continuation));
   }
 
   async function updateHostModelContext(value, options) {
@@ -665,7 +680,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     await releaseAutomaticMessage(outcome.claimId);
   }
 
-  async function sendModelMessage(text, extra, canSend, beforeSend) {
+  async function sendModelMessage(text, continuation, canSend, beforeSend) {
     if (automaticMessageInFlight || !automaticReentryAvailable() || (canSend && !canSend())) {
       return { status: "blocked" };
     }
@@ -703,7 +718,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
 
       // Keep the recovery-specific context adjacent to the message it belongs to.
       // After this await there are no further asynchronous checks before dispatch.
-      await requireModelContext(extra);
+      await requireModelContext(continuation);
       if (!automaticReentryAvailable() || (canSend && !canSend())) {
         return { claimId: claimId, status: "blocked" };
       }
@@ -731,45 +746,42 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return "goal-continue-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
   }
 
-  function goalContinuationMessage(claim) {
+  function goalContinuationAttempt(claim) {
     var goal = claim && claim.goal;
-    var steps = goal && Array.isArray(goal.steps) ? goal.steps : [];
-    var attempt = goal && Number.isFinite(goal.noActionStreak)
+    return goal && Number.isFinite(goal.noActionStreak)
       ? Math.max(1, Math.floor(goal.noActionStreak) + 1)
       : claim && Number.isFinite(claim.continuationCount)
         ? Math.max(1, Math.floor(claim.continuationCount))
         : Math.max(1, ((goal && goal.continuationCount) || 0) + 1);
-    var currentStep = steps.find(function (step) { return step && step.status === "active"; }) ||
+  }
+
+  function goalContinuationContext(claim) {
+    var goal = claim && claim.goal;
+    var steps = goal && Array.isArray(goal.steps) ? goal.steps : [];
+    var currentItem = steps.find(function (step) { return step && step.status === "active"; }) ||
       steps.find(function (step) { return step && step.status === "pending"; });
-    var currentItem = currentStep
-      ? "[" + String(currentStep.id || "step") + "] " + String(currentStep.text || "Continue the current Goal step")
-      : "the current active Goal step";
-    var prefix = "Current task item: " + currentItem + ". ";
-    if (goal && Number.isFinite(goal.stagnationStreak) && goal.stagnationStreak >= 2) {
-      prefix += "Recent execution has repeatedly failed to advance this task item; stop cycling unrelated or reversible actions. ";
-    }
-    if (attempt <= 1) {
-      return prefix +
-        "Continue executing this task item immediately from its current state. Take the next concrete action now. " +
-        "Do not reply with an acknowledgement, plan, status update, apology, or statement that you will continue. " +
-        "Do not repeat completed work. Do not end the turn after only reading or describing the current state.";
-    }
-    if (attempt === 2) {
-      return prefix +
-        "The previous wake did not produce verifiable execution progress. Continue executing this task now. " +
-        "If this task item is actually complete, update its state immediately; completing the final task item completes the Goal. " +
-        "If execution genuinely cannot proceed without user input or an external condition, block the Goal with the concrete reason. " +
-        "Otherwise, continue taking concrete actions now. Do not reply only with an acknowledgement, progress report, plan, apology, or promise to continue. " +
-        "Reading state or describing what you intend to do is not sufficient.";
-    }
-    var enforcement = attempt >= 5
-      ? "This is a critical execution failure: the Goal remains actionable after repeated explicit continuation instructions. "
-      : attempt === 4
-        ? "You have ignored multiple explicit continuation instructions while the Goal remains actionable. "
-        : "The previous wake attempts ended without verifiable execution progress while the Goal remained actionable. ";
-    return prefix + "Wake attempt " + attempt + ". " + enforcement +
-      "Stop responding with acknowledgements, plans, status reports, apologies, promises, or other non-execution text. Execute the current task item now. " +
-      "You may end this turn only after the task has actually progressed, the Goal has completed, a genuine blocker has been recorded, or required work is inside a real blocking wait. Otherwise, continue working.";
+    var currentIndex = steps.indexOf(currentItem);
+    var terminalItem = { id: "finish-goal", kind: "goal-terminal", status: "pending", text: "Complete the Goal." };
+    var orderedItems = steps.concat([terminalItem]);
+    return {
+      kind: "goal",
+      goalId: goal && goal.goalId,
+      objective: goal && goal.objective,
+      orderedItems: orderedItems,
+      currentItem: orderedItems[currentIndex],
+      nextItem: orderedItems[currentIndex + 1],
+      attempt: goalContinuationAttempt(claim),
+      noActionStreak: goal && goal.noActionStreak,
+      stagnationStreak: goal && goal.stagnationStreak,
+      continuationMessageId: goal && goal.continuationMessageId
+    };
+  }
+
+  function goalContinuationMessage(claim) {
+    var attempt = goalContinuationAttempt(claim);
+    var enforcement = GOAL_CONTINUATION_ENFORCEMENT[Math.min(attempt, GOAL_CONTINUATION_ENFORCEMENT.length) - 1]
+      .replace("{attempt}", String(attempt));
+    return [enforcement, GOAL_CONTINUATION_MESSAGE].filter(Boolean).join("\n\n");
   }
 
   async function yieldAutomaticReentry(reason) {
@@ -860,7 +872,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       }
       outcome = await sendModelMessage(
         goalContinuationMessage(claim),
-        { goalContinuation: claim, continuationMessageId: claim && claim.goal && claim.goal.continuationMessageId },
+        goalContinuationContext(claim),
         goalContinuationAvailable,
         async function () {
           var marked = structured(await callTool("workspace_goal_continue", {
@@ -938,17 +950,14 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return !!task && task.status === "in_progress";
   }
 
-  async function dispatchRecovery(waitId, extra) {
+  async function dispatchRecovery(waitId, trigger) {
     var claimed = structured(await callTool("workspace_wait_recover", { action: "claim", waitId: waitId }, true));
     var attempted = !!claimed.recoveryMessageAttemptedAt;
     var outcome = { status: "blocked" };
     try {
       outcome = await sendModelMessage(
         recoveryMessage(claimed),
-        Object.assign({}, extra || {}, {
-          recoveredWait: claimed,
-          recoveryMessageId: claimed.recoveryMessageId
-        }),
+        waitContinuationContext(claimed, trigger),
         function () { return hasRecoverableWork(claimed); },
         async function () {
           await callTool("workspace_wait_recover", {
@@ -1547,8 +1556,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     }
   }
 
-  async function sendExplicitResume(text, extra, canSend) {
-    var outcome = await sendModelMessage(text, extra, canSend);
+  async function sendExplicitResume(text, continuation, canSend) {
+    var outcome = await sendModelMessage(text, continuation, canSend);
     try {
       await settleAutomaticMessageClaim(outcome);
     } finally {
@@ -1559,7 +1568,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return outcome;
   }
 
-  async function sendExplicitGoalResume(goalId, text, extra, canSend) {
+  async function sendExplicitGoalResume(goalId, text, continuation, canSend) {
     var claimId = newGoalContinuationClaimId();
     var claimed = false;
     var errorText = "";
@@ -1588,7 +1597,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
 
       outcome = await sendModelMessage(
         text,
-        extra,
+        continuation,
         canSend,
         async function () {
           var marked = structured(await callTool("workspace_goal_continue", {
