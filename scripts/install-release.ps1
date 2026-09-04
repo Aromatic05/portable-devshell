@@ -189,7 +189,7 @@ function Stop-InstalledControl([string]$CurrentCli, [string]$DevshellHome) {
 }
 
 function Get-InstalledRuntimeState([string]$CurrentCli) {
-    $stopped = [PSCustomObject]@{ ControlRunning = $false; Instances = @() }
+    $stopped = [PSCustomObject]@{ ControlRunning = $false; Pid = $null; Instances = @() }
     if ([string]::IsNullOrWhiteSpace($CurrentCli) -or -not (Test-Path -LiteralPath $CurrentCli -PathType Leaf)) {
         return $stopped
     }
@@ -198,8 +198,12 @@ function Get-InstalledRuntimeState([string]$CurrentCli) {
     if ($LASTEXITCODE -ne 0) {
         throw "无法读取安装前的 control 状态；为避免丢失运行实例，安装已取消。`n$statusOutput"
     }
+    $runtimePid = $null
+    if ($statusOutput -match '(?m)^pid:\s+([1-9][0-9]*)\s*$') {
+        $runtimePid = [int]$Matches[1]
+    }
     if ($statusOutput -notmatch '(?m)^control:\s+running\s*$') {
-        return $stopped
+        return [PSCustomObject]@{ ControlRunning = $false; Pid = $runtimePid; Instances = @() }
     }
 
     $overviewOutput = (& node $CurrentCli overview 2>&1 | Out-String)
@@ -224,7 +228,24 @@ function Get-InstalledRuntimeState([string]$CurrentCli) {
             -not $hasReverse -and $restorableStates -contains [string]$snapshot.daemonState
         } | ForEach-Object { [string]$_.name }
     )
-    return [PSCustomObject]@{ ControlRunning = $true; Instances = $instances }
+    return [PSCustomObject]@{ ControlRunning = $true; Pid = $runtimePid; Instances = $instances }
+}
+
+function Assert-RunningControlMatchesApplication([string]$ApplicationDirectory, $RuntimeState) {
+    if (-not $RuntimeState.ControlRunning) { return }
+    if ($null -eq $RuntimeState.Pid -or $RuntimeState.Pid -le 0) {
+        throw "无法验证正在运行的 Control PID；安装在停机前取消。"
+    }
+    $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $($RuntimeState.Pid)" -ErrorAction SilentlyContinue
+    if ($null -eq $processInfo) {
+        throw "安装前 Control PID $($RuntimeState.Pid) 已不存在；安装在停机前取消。"
+    }
+    $commandLine = [string]$processInfo.CommandLine
+    $root = [IO.Path]::GetFullPath($ApplicationDirectory).TrimEnd('\').Replace('\', '/')
+    $normalized = $commandLine.Replace('\', '/')
+    if (-not $normalized.Contains("ControlDaemon.js") -or -not $normalized.Contains("$root/")) {
+        throw "正在运行的 Control PID $($RuntimeState.Pid) 不属于当前激活的 application generation；安装在停机前取消。"
+    }
 }
 
 function Restore-InstalledRuntimeState([string]$Cli, $RuntimeState) {
@@ -418,11 +439,32 @@ try {
 
     Write-InstallStep "停止旧版本并切换安装"
     $currentCli = ""
+    $activatedApplicationDirectory = ""
     if (Test-Path -LiteralPath (Join-Path $currentDirectory "package.json") -PathType Leaf) {
         $currentCliRelativePath = Get-ApplicationCliRelativePath $currentDirectory
-        $currentCli = Join-Path $currentDirectory $currentCliRelativePath
+        $currentCli = (Resolve-Path -LiteralPath (Join-Path $currentDirectory $currentCliRelativePath)).Path
+        $activatedApplicationDirectory = (Resolve-Path -LiteralPath $currentDirectory).Path
     }
     $runtimeState = Get-InstalledRuntimeState $currentCli
+    if ($null -eq $runtimeState.Pid) {
+        $pidFile = Join-Path $devshellHome "control\control.pid"
+        if (Test-Path -LiteralPath $pidFile -PathType Leaf) {
+            $pidValue = 0
+            $pidSource = (Get-Content -Raw -LiteralPath $pidFile).Trim()
+            if (-not [int]::TryParse($pidSource, [ref]$pidValue) -or $pidValue -le 0) {
+                throw "control PID 文件无效：$pidFile"
+            }
+            $runtimeState.Pid = $pidValue
+        }
+    }
+    if ($runtimeState.ControlRunning) {
+        if ([string]::IsNullOrWhiteSpace($activatedApplicationDirectory)) {
+            throw "无法验证正在运行 Control 的激活 application generation；安装在停机前取消。"
+        }
+        Assert-RunningControlMatchesApplication $activatedApplicationDirectory $runtimeState
+    } elseif ($null -ne $runtimeState.Pid -and (Test-ControlProcessRunning $runtimeState.Pid)) {
+        throw "Control PID $($runtimeState.Pid) 仍在运行但 RPC 不可用；安装在停机前取消。"
+    }
     Stop-InstalledControl $currentCli $devshellHome
     $runtimeWasStopped = [bool]$runtimeState.ControlRunning
 
@@ -480,10 +522,14 @@ try {
             }
         }
     }
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $backupDirectory, $currentBackupDirectory, $workerBackupDirectory
     Write-InstallDetail "已安装命令可以正常启动"
     $runtimeWasStopped = $false
-    Restore-InstalledRuntimeState $cliPath $runtimeState
+    try {
+        Restore-InstalledRuntimeState $cliPath $runtimeState
+    } catch {
+        throw "新 generation 已激活，但无法恢复真实运行态；在可能访问持久状态后禁止自动降级。恢复材料已保留在 $installRoot。 $($_.Exception.Message)"
+    }
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $backupDirectory, $currentBackupDirectory, $workerBackupDirectory
     if ($runtimeState.ControlRunning) {
         Write-InstallDetail "已恢复 Control 和 $($runtimeState.Instances.Count) 个安装前运行的实例"
     }

@@ -138,6 +138,7 @@ capture_installed_runtime() {
         printf '%s\n' "$control_status" >&2
         return 1
     fi
+    runtime_control_pid=$(printf '%s\n' "$control_status" | awk '/^pid:[[:space:]]+[1-9][0-9]*[[:space:]]*$/ { print $2; exit }')
     case "$control_status" in
         *"control: running"*) runtime_restore_control=1 ;;
         *) return 0 ;;
@@ -164,6 +165,34 @@ for (const entry of payload.instances) {
 NODE
     then
         echo "安装前运行态格式无效；安装已取消。" >&2
+        return 1
+    fi
+}
+
+assert_running_control_matches_application() {
+    application_directory=$1
+    if [ "${runtime_restore_control:-0}" -ne 1 ]; then
+        return 0
+    fi
+    case "${runtime_control_pid:-}" in
+        ''|*[!0-9]*)
+            echo "无法验证正在运行的 Control PID；安装在停机前取消。" >&2
+            return 1
+            ;;
+    esac
+    if ! control_process_running "$runtime_control_pid"; then
+        echo "安装前 Control PID $runtime_control_pid 已不存在；安装在停机前取消。" >&2
+        return 1
+    fi
+    command_line=$(ps -p "$runtime_control_pid" -o command= 2>/dev/null || true)
+    if ! node - "$application_directory" "$command_line" <<'NODE'
+const path = require("path");
+const root = path.resolve(process.argv[2]).replaceAll("\\", "/").replace(/\/+$/u, "");
+const command = String(process.argv[3] ?? "").replaceAll("\\", "/");
+if (!command.includes("ControlDaemon.js") || !command.includes(`${root}/`)) process.exit(1);
+NODE
+    then
+        echo "正在运行的 Control PID $runtime_control_pid 不属于当前激活的 application generation；安装在停机前取消。" >&2
         return 1
     fi
 }
@@ -491,6 +520,7 @@ worker_backup_directory="$devshell_home/.install-worker-backup-$$"
 application_transaction_active=0
 worker_transaction_active=0
 runtime_restore_control=0
+runtime_control_pid=
 runtime_restore_instances="$temporary/runtime-restore-instances"
 runtime_was_stopped=0
 previous_version_present=0
@@ -540,11 +570,24 @@ detail "CLI 入口和运行时依赖验证通过"
 
 step "停止旧版本并切换安装"
 current_cli=
+activated_application_directory=
 if [ -f "$current_link/package.json" ]; then
     current_cli_relative_path=$(resolve_cli_relative_path "$current_link")
-    current_cli="$current_link/$current_cli_relative_path"
+    current_cli=$(node -e 'process.stdout.write(require("fs").realpathSync(process.argv[1]))' "$current_link/$current_cli_relative_path")
+    activated_application_directory=$(node -e 'process.stdout.write(require("fs").realpathSync(process.argv[1]))' "$current_link")
 fi
 if ! capture_installed_runtime "$current_cli"; then
+    exit 1
+fi
+if [ -z "${runtime_control_pid:-}" ] && [ -f "$devshell_home/control/control.pid" ]; then
+    IFS= read -r runtime_control_pid < "$devshell_home/control/control.pid" || runtime_control_pid=
+fi
+if [ "$runtime_restore_control" -eq 1 ]; then
+    if [ -z "$activated_application_directory" ] || ! assert_running_control_matches_application "$activated_application_directory"; then
+        exit 1
+    fi
+elif [ -n "${runtime_control_pid:-}" ] && control_process_running "$runtime_control_pid"; then
+    echo "Control PID $runtime_control_pid 仍在运行但 RPC 不可用；安装在停机前取消。" >&2
     exit 1
 fi
 if ! stop_installed_control "$current_cli"; then
@@ -593,14 +636,16 @@ if ! smoke_cli "$command_link" "安装结果验证失败"; then
     rollback_installation
     exit 1
 fi
-rm -rf "$backup_directory" "$worker_backup_directory"
 application_transaction_active=0
 worker_transaction_active=0
 detail "已安装命令可以正常启动"
 runtime_was_stopped=0
 if ! restore_installed_runtime "$command_link"; then
+    echo "新 generation 已激活，但无法恢复真实运行态；在可能访问持久状态后禁止自动降级。" >&2
+    echo "恢复材料已保留：$backup_directory $worker_backup_directory" >&2
     exit 1
 fi
+rm -rf "$backup_directory" "$worker_backup_directory"
 if [ "$runtime_restore_control" -eq 1 ]; then
     restored_instance_count=$(grep -c . "$runtime_restore_instances" || true)
     detail "已恢复 Control 和 ${restored_instance_count} 个安装前运行的实例"
