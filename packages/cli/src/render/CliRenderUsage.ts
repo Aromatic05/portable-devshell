@@ -24,6 +24,7 @@ export function renderCliUsage(): string {
         "  instance <command>             Manage instances",
         "  watch <command>                Follow instance state or logs",
         "  artifact <command>             Manage artifact shares and transfers",
+        "  secret <command>               Scan local files for likely secrets",
         "  help                           Show this help",
         "",
         "Run `devshell <command> --help` for related usage.",

@@ -5,6 +5,7 @@ import type { ConfigBatchUpdateRequest, ConfigDraft } from "@portable-devshell/s
 import { isCliEntrypoint } from "./CliEntrypoint.js";
 import { CliParser, type CliParsedCommand } from "./CliParser.js";
 import { executeArtifactCommand } from "./command/artifact/CliCommandArtifact.js";
+import { executeSecretCommand } from "./command/secret/CliCommandSecretScan.js";
 import {
     createCliClients as createControlClients,
     negotiateCliControl,
@@ -232,6 +233,9 @@ export class CliMain {
                 return;
             case "artifact":
                 await executeArtifactCommand(command.args, this.#clients.artifact, this.#stdout);
+                return;
+            case "secret":
+                await executeSecretCommand(command.args, this.#stdout);
                 return;
             case "tui":
                 await this.#startTui();
