@@ -38,6 +38,7 @@ interface OAuthEndpoints {
 
 interface PendingAuthorization {
     createdAt: number;
+    returnTo?: string;
     verifier: string;
 }
 
@@ -111,14 +112,20 @@ export class ControlWebOAuthFlow {
         };
     }
 
-    async #start(_request: IncomingMessage, response: ServerResponse): Promise<void> {
+    async #start(request: IncomingMessage, response: ServerResponse): Promise<void> {
         const endpoints = await this.#discover();
         const clientId = await this.#ensureClient(endpoints);
         const state = randomBytes(24).toString("base64url");
         const verifier = randomBytes(32).toString("base64url");
         const challenge = createHash("sha256").update(verifier).digest("base64url");
+        const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+        const returnTo = safeReturnTo(requestUrl.searchParams.get("returnTo"), this.#basePath);
         this.#prunePending();
-        this.#pending.set(state, { createdAt: this.#now(), verifier });
+        this.#pending.set(state, {
+            createdAt: this.#now(),
+            ...(returnTo === undefined ? {} : { returnTo }),
+            verifier
+        });
 
         const authorizationUrl = new URL(endpoints.authorizationEndpoint);
         authorizationUrl.searchParams.set("client_id", clientId);
@@ -182,7 +189,7 @@ export class ControlWebOAuthFlow {
             this.#stateCookie("", 0)
         ]);
         response.statusCode = 302;
-        response.setHeader("Location", `${stripTrailingSlash(this.#resourceUrl.href)}/`);
+        response.setHeader("Location", pending.returnTo ?? `${stripTrailingSlash(this.#resourceUrl.href)}/`);
         response.setHeader("Cache-Control", "no-store");
         response.end();
     }
@@ -340,6 +347,14 @@ function normalizeBasePath(value: string): string {
 
 function stripTrailingSlash(value: string): string {
     return value.endsWith("/") ? value.slice(0, -1) : value;
+}
+
+function safeReturnTo(value: string | null, basePath: string): string | undefined {
+    if (value === null || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return undefined;
+    const target = new URL(value, "http://localhost");
+    if (target.origin !== "http://localhost") return undefined;
+    if (target.pathname !== basePath && !target.pathname.startsWith(`${basePath}/`)) return undefined;
+    return `${target.pathname}${target.search}${target.hash}`;
 }
 
 function readCookie(header: string | undefined, name: string): string | undefined {

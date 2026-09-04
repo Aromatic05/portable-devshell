@@ -59,7 +59,8 @@ test("Agent Web proxy authenticates one shared /agent hub and strips credentials
     const removeSessionRoutes = sessions.install(http);
     const removeProxy = new AgentWebProxy({
         agent: { webEndpoint: () => endpoint },
-        basePath: "/web/agent"
+        basePath: "/web/agent",
+        loginPath: "/web/"
     }).install(http, sessions);
 
     try {
@@ -67,6 +68,13 @@ test("Agent Web proxy authenticates one shared /agent hub and strips credentials
         const address = http.address;
         assert.ok(typeof address === "object" && address !== null);
         const baseUrl = `http://127.0.0.1:${address.port}`;
+
+        const entry = await fetch(`${baseUrl}/web/agent/?session=ag-1`, { redirect: "manual" });
+        assert.equal(entry.status, 302);
+        const login = new URL(entry.headers.get("location")!, baseUrl);
+        assert.equal(login.pathname, "/web/");
+        assert.equal(login.searchParams.get("returnTo"), "/web/agent/?session=ag-1");
+        assert.equal(observed.length, 0);
 
         const unauthorized = await fetch(`${baseUrl}/web/agent/api/sessions`);
         assert.equal(unauthorized.status, 401);

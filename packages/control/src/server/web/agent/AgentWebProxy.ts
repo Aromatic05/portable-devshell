@@ -19,6 +19,7 @@ export interface AgentWebRegistry {
 export interface AgentWebProxyOptions {
     agent: AgentWebRegistry;
     basePath: string;
+    loginPath: string;
 }
 
 interface ResolvedAgentWebTarget {
@@ -29,15 +30,21 @@ interface ResolvedAgentWebTarget {
 export class AgentWebProxy {
     readonly #agent: AgentWebRegistry;
     readonly #basePath: string;
+    readonly #loginPath: string;
 
     constructor(options: AgentWebProxyOptions) {
         this.#agent = options.agent;
         this.#basePath = normalizeBasePath(options.basePath);
+        this.#loginPath = normalizeLoginPath(options.loginPath);
     }
 
     install(http: HttpHost, sessions: ControlWebSessionService): () => void {
         const removeHttp = http.registerRawPrefix(this.#basePath, async (request, response) => {
             if (!sessions.authorize(request)) {
+                if (isBrowserEntryRequest(request)) {
+                    redirectToLogin(response, this.#loginPath, this.#returnPath(request.url ?? "/"));
+                    return;
+                }
                 writeError(response, 401, "Unauthorized");
                 return;
             }
@@ -64,6 +71,15 @@ export class AgentWebProxy {
             removeUpgrade();
             removeHttp();
         };
+    }
+
+    #returnPath(value: string): string {
+        const url = new URL(value, "http://localhost");
+        if (pathMatchesPrefix(url.pathname, this.#basePath)) {
+            return `${url.pathname}${url.search}`;
+        }
+        const suffix = url.pathname === "/" ? "/" : `/${url.pathname.replace(/^\/+/, "")}`;
+        return `${this.#basePath}${suffix}${url.search}`;
     }
 
     #resolveHttpTarget(request: IncomingMessage): ResolvedAgentWebTarget | undefined {
@@ -252,10 +268,32 @@ function writeError(response: ServerResponse, statusCode: number, message: strin
     response.end(JSON.stringify({ error: message }));
 }
 
+function isBrowserEntryRequest(request: IncomingMessage): boolean {
+    const method = (request.method ?? "GET").toUpperCase();
+    if (method !== "GET" && method !== "HEAD") return false;
+    const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+    return pathname !== "/api" && !pathname.startsWith("/api/");
+}
+
+function redirectToLogin(response: ServerResponse, loginPath: string, returnTo: string): void {
+    const login = new URL(loginPath, "http://localhost");
+    login.searchParams.set("returnTo", returnTo);
+    response.statusCode = 302;
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("Location", `${login.pathname}${login.search}`);
+    response.end();
+}
+
 function normalizeBasePath(value: string): string {
     const trimmed = value.trim();
     if (!trimmed.startsWith("/")) throw new TypeError("Agent Web proxy base path must be absolute.");
     return trimmed === "/" ? "/" : trimmed.replace(/\/+$/u, "");
+}
+
+function normalizeLoginPath(value: string): string {
+    const trimmed = value.trim();
+    if (!trimmed.startsWith("/")) throw new TypeError("Agent Web login path must be absolute.");
+    return `${trimmed.replace(/\/+$/u, "")}/`;
 }
 
 function pathMatchesPrefix(pathname: string, prefix: string): boolean {

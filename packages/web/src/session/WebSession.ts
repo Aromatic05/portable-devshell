@@ -18,6 +18,7 @@ export class BrowserWebSession implements WebSession {
         private readonly navigate: (url: string) => void = (url) => {
             window.location.href = url;
         },
+        private readonly returnTo = webReturnTo(),
     ) {}
 
     async authMode(): Promise<WebAuthMode> {
@@ -45,11 +46,14 @@ export class BrowserWebSession implements WebSession {
             method: "GET",
         });
         if (response.status === 204) {
+            this.#navigateAfterAuthentication();
             return true;
         }
         if (response.status === 200) {
             const body = (await response.json()) as { authenticated?: unknown };
-            return body.authenticated === true;
+            const authenticated = body.authenticated === true;
+            if (authenticated) this.#navigateAfterAuthentication();
+            return authenticated;
         }
         if (response.status === 401) {
             return false;
@@ -72,7 +76,7 @@ export class BrowserWebSession implements WebSession {
     }
 
     startOAuth(): void {
-        this.navigate(this.oauthPath);
+        this.navigate(withReturnTo(this.oauthPath, this.returnTo));
     }
 
     private async send(token?: string): Promise<boolean> {
@@ -85,15 +89,21 @@ export class BrowserWebSession implements WebSession {
             method: "POST",
         });
         if (response.status === 204) {
+            this.#navigateAfterAuthentication();
             return true;
         }
         if (response.status === 200) {
+            this.#navigateAfterAuthentication();
             return true;
         }
         if (response.status === 401) {
             return false;
         }
         throw new Error("Unable to establish a session.");
+    }
+
+    #navigateAfterAuthentication(): void {
+        if (this.returnTo !== undefined) this.navigate(this.returnTo);
     }
 }
 
@@ -103,4 +113,21 @@ export function sessionPath(location: Location = window.location): string {
 
 export function oauthStartPath(location: Location = window.location): string {
     return webRoutePath(location.pathname, "/oauth/start");
+}
+
+export function webReturnTo(location: Location = window.location): string | undefined {
+    const raw = new URLSearchParams(location.search).get("returnTo");
+    if (raw === null || !raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return undefined;
+    const basePath = webRoutePath(location.pathname, "/session").slice(0, -"/session".length);
+    const target = new URL(raw, "http://localhost");
+    if (target.origin !== "http://localhost") return undefined;
+    if (target.pathname !== basePath && !target.pathname.startsWith(`${basePath}/`)) return undefined;
+    return `${target.pathname}${target.search}${target.hash}`;
+}
+
+function withReturnTo(path: string, returnTo: string | undefined): string {
+    if (returnTo === undefined) return path;
+    const url = new URL(path, "http://localhost");
+    url.searchParams.set("returnTo", returnTo);
+    return `${url.pathname}${url.search}`;
 }

@@ -180,7 +180,11 @@ export class ControlRuntime {
         });
         const agentWebProxy = this.#agent === undefined
             ? undefined
-            : new AgentWebProxy({ agent: this.#agent, basePath: `${basePath}/agent` });
+            : new AgentWebProxy({
+                  agent: this.#agent,
+                  basePath: `${basePath}/agent`,
+                  loginPath: `${basePath}/`
+              });
         return {
             ...(flow === undefined ? {} : { flow }),
             host: http,

@@ -334,7 +334,8 @@ test("web oauth2 preserves a public URL path prefix across discovery, PKCE, and 
     assert.equal(metadataBody.resource, `${origin}${basePath}`);
     assert.deepEqual(metadataBody.authorization_servers, [origin]);
 
-    const sessionCookie = await walkBrowserFlow(origin, protectedResource.approvals, basePath);
+    const returnTo = `${basePath}/agent/?session=ag-1`;
+    const sessionCookie = await walkBrowserFlow(origin, protectedResource.approvals, basePath, returnTo);
     assert.notEqual(sessionCookie, undefined);
     const authenticated = await fetch(`${origin}${basePath}/session`, {
         headers: { cookie: sessionCookie! }
@@ -356,10 +357,13 @@ function createMcpWorker() {
 async function walkBrowserFlow(
     origin: string,
     approvals: McpOAuthApprovalService,
-    basePath = "/web"
+    basePath = "/web",
+    returnTo?: string
 ): Promise<string | undefined> {
     let cookieHeader = "";
-    const start = await fetch(`${origin}${basePath}/oauth/start`, { redirect: "manual" });
+    const startUrl = new URL(`${origin}${basePath}/oauth/start`);
+    if (returnTo !== undefined) startUrl.searchParams.set("returnTo", returnTo);
+    const start = await fetch(startUrl, { redirect: "manual" });
     assert.equal(start.status, 302);
     cookieHeader = mergeCookieHeader(cookieHeader, start);
     assert.match(start.headers.get("set-cookie") ?? "", /devshell_web_oauth_state=/u);
@@ -406,7 +410,8 @@ async function walkBrowserFlow(
             cookieHeader = mergeCookieHeader(cookieHeader, callback);
             const callbackBody = await callback.text();
             assert.equal(callback.status, 302, callbackBody);
-            assert.equal(new URL(callback.headers.get("location")!, origin).pathname, `${basePath}/`);
+            const callbackLocation = new URL(callback.headers.get("location")!, origin);
+            assert.equal(`${callbackLocation.pathname}${callbackLocation.search}`, returnTo ?? `${basePath}/`);
             return extractCookie(cookieHeader, "devshell_web_session");
         }
         currentUrl = nextUrl.href;
