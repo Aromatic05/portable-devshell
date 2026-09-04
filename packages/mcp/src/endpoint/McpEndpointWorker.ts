@@ -14,6 +14,7 @@ import type { WorkspaceAppLeaseStore } from "../workspace/WorkspaceAppLeaseStore
 import type { WorkspaceAppPresenceStore } from "../workspace/WorkspaceAppPresenceStore.js";
 import { McpEndpointCatalog } from "./McpEndpointCatalog.js";
 import type { McpEndpointResult } from "./McpEndpointResult.js";
+import type { McpToolProvenanceRecorder } from "./McpToolProvenance.js";
 import {
     McpEndpointDispatch,
     type McpEndpointCallContext,
@@ -34,6 +35,7 @@ export interface McpEndpointWorkerOptions {
     instanceName: string;
     policy: ToolPolicy;
     readyWaitMs?: number;
+    toolProvenance?: McpToolProvenanceRecorder;
     worker: McpEndpointWorkerPort;
     workspaceAppLeases?: WorkspaceAppLeaseStore;
     workspaceAppPresence?: WorkspaceAppPresenceStore;
@@ -63,6 +65,7 @@ export class McpEndpointWorker {
             gateway: options.gateway,
             instanceName: options.instanceName,
             readyWaitMs: options.readyWaitMs,
+            toolProvenance: options.toolProvenance,
             worker: options.worker,
             workspaceAppLeases: options.workspaceAppLeases,
             workspaceAppPresence: options.workspaceAppPresence,

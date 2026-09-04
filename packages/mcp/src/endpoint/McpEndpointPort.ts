@@ -1,4 +1,4 @@
-import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
+import type { JsonValue, ToolCallContext, ToolCallQuery, ToolCallRecord } from "@portable-devshell/shared";
 
 import type { McpEndpointCatalogWorker } from "./McpEndpointCatalog.js";
 
@@ -37,6 +37,7 @@ export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
         temporaryDirectory: string;
         workspace: string;
     }>;
+    readToolCalls?(query: ToolCallQuery): Promise<ToolCallRecord[]>;
     readAlerts(workspace: string): Promise<{
         advice: Array<{ code: string; text: string }>;
     }>;

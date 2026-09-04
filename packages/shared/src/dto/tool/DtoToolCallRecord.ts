@@ -9,11 +9,15 @@ export interface ToolCallAssociation {
 }
 
 export interface ToolCallContext {
-    purpose?: string;
     requestId?: string;
     ctxId?: string;
     workspace?: string;
     source: ToolCallSource;
+}
+
+export interface ToolCallProvenance {
+    explanation?: string;
+    purpose?: string;
 }
 
 export type ToolCallStatus = "queued" | "pendingApproval" | "running" | "completed" | "failed" | "denied" | "expired" | "queueTimeout" | "cancelled";
@@ -31,7 +35,7 @@ export interface ToolCallQuery {
     toolName?: string;
 }
 
-export interface ToolCallRecord {
+export interface ToolCallRecord extends ToolCallProvenance {
     callId: string;
     completedAt?: string;
     decision?: ToolCallApprovalDecision;

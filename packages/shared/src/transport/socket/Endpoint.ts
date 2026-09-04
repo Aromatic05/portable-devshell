@@ -12,6 +12,7 @@ export class ControlPathHome {
     readonly artifactsDir: string;
     readonly configFile: string;
     readonly contextsFile: string;
+    readonly toolProvenanceFile: string;
     readonly workspaceAppLeasesFile: string;
     readonly instancesDir: string;
     readonly oauthDir: string;
@@ -22,6 +23,7 @@ export class ControlPathHome {
         this.artifactsDir = join(this.controlHomeDir, "artifacts");
         this.configFile = join(this.controlHomeDir, "config.toml");
         this.contextsFile = join(this.controlHomeDir, "contexts.json");
+        this.toolProvenanceFile = join(this.controlHomeDir, "tool-call-provenance.jsonl");
         this.workspaceAppLeasesFile = join(this.controlHomeDir, "workspace-app-leases.json");
         this.instancesDir = join(this.controlHomeDir, "instances");
         this.oauthDir = join(this.controlHomeDir, "oauth");

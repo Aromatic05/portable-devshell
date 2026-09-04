@@ -41,6 +41,8 @@ export function buildAuditCallBoxes(
                 formatField("Source", call.source),
                 formatField("Workspace", call.workspace ?? "-"),
                 formatField("Request", call.requestId ?? "-"),
+                ...(call.purpose === undefined ? [] : [formatField("Purpose", call.purpose)]),
+                ...(call.explanation === undefined ? [] : [formatField("Explanation", call.explanation)]),
                 formatField("Task", call.taskId ?? "-"),
                 formatField("Todo item", call.todoItemId ?? "-"),
                 {

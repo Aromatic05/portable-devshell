@@ -1,7 +1,8 @@
 import {
     McpHost,
     resolvePortableDevshellApplicationVersion,
-    type McpInstanceGateway
+    type McpInstanceGateway,
+    type McpToolProvenanceRecorder
 } from "@portable-devshell/mcp";
 import type { ControlConfig } from "@portable-devshell/shared";
 
@@ -20,7 +21,13 @@ export class McpRuntimeFactory {
     wire(
         config: ControlConfig,
         registry: InstanceRegistry,
-        options?: { contextFile?: string; gateway?: McpInstanceGateway; storageDir?: string; workspaceAppLeaseFile?: string }
+        options?: {
+            contextFile?: string;
+            gateway?: McpInstanceGateway;
+            storageDir?: string;
+            toolProvenance?: McpToolProvenanceRecorder;
+            workspaceAppLeaseFile?: string;
+        }
     ): McpHost | undefined {
         if (!config.mcp.enabled) {
             return undefined;
@@ -45,6 +52,7 @@ export class McpRuntimeFactory {
             publicBaseUrl: config.mcp.publicBaseUrl,
             serverVersion: this.#serverVersion ?? resolvePortableDevshellApplicationVersion(),
             storageDir: options?.storageDir,
+            toolProvenance: options?.toolProvenance,
             workspaceAppLeaseFile: options?.workspaceAppLeaseFile
         });
     }

@@ -21,6 +21,7 @@ import { createOperationalOverviewRouteModule } from "../control/overview/Operat
 import { OperationalOverviewService } from "../control/overview/OperationalOverviewService.js";
 import type { ReverseCredentialService } from "../control/reverse/credential/ReverseCredentialService.js";
 import { createReverseRouteModule } from "../control/reverse/route/ReverseRouteModule.js";
+import type { ToolCallProvenanceStore } from "../control/tool/ToolCallProvenanceStore.js";
 import { createContextMessageRouteModule } from "../instance/context/ContextMessageRouteModule.js";
 import { createGoalRouteModule } from "../instance/goal/GoalRouteModule.js";
 import { createRuntimeRouteModule } from "../instance/runtime/RuntimeRouteModule.js";
@@ -45,6 +46,7 @@ export interface ControlRouteCompositionOptions {
     reverse?: ReverseCredentialService;
     shutdown(): Promise<void> | void;
     terminalMaxUnackedBytes?: number;
+    toolProvenance?: ToolCallProvenanceStore;
 }
 
 export class ControlRouteComposition {
@@ -142,7 +144,7 @@ export class ControlRouteComposition {
                     )]),
                     createGoalRouteModule(descriptor),
                     createTodoRouteModule(descriptor, this.#subscriptions),
-                    createToolRouteModule(descriptor),
+                    createToolRouteModule(descriptor, this.#options.toolProvenance),
                     ...(descriptor.terminal === undefined ? [] : [createTerminalRouteModule({
                         backend: descriptor.terminal,
                         instance: descriptor.name,

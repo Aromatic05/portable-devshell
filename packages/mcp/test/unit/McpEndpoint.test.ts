@@ -602,23 +602,50 @@ test("environment and control-owned tools execute through the endpoint audit pat
 
 test("explicit context mode exposes ctxId and does not bind authority to OpenAI session metadata", async () => {
     const harness = createWorkerHarness();
+    const provenanceRecords: Array<{
+        callId: string;
+        explanation?: string;
+        instance: string;
+        purpose?: string;
+    }> = [];
     const endpoint = new McpEndpointWorker({
         instanceName: "demo",
         policy: { capabilities: ["execute"], groups: ["bash"] },
+        toolProvenance: {
+            async record(record) {
+                provenanceRecords.push(record);
+            },
+        },
         worker: harness.worker,
     });
     const bashTool = endpoint
         .listTools()
         .find((tool) => tool.name === "bash_run");
     assert.notEqual(bashTool, undefined);
-    assert.notEqual(
-        (bashTool?.inputSchema as { properties?: Record<string, unknown> })
-            .properties?.ctxId,
-        undefined,
-    );
+    const bashProperties = (bashTool?.inputSchema as {
+        properties?: Record<string, { description?: string; maxLength?: number }>;
+    }).properties;
+    assert.notEqual(bashProperties?.ctxId, undefined);
+    assert.deepEqual(bashProperties?.purpose, {
+        description: "Briefly state the intended outcome of this tool call. Do not just restate the tool or command.",
+        maxLength: 160,
+        minLength: 1,
+        type: "string",
+    });
+    assert.deepEqual(bashProperties?.explanation, {
+        description: "Optionally state why this tool call is useful now, including relevant observations or prior results.",
+        maxLength: 1000,
+        minLength: 1,
+        type: "string",
+    });
     const environmentTool = endpoint
         .listTools()
         .find((tool) => tool.name === "environ_info");
+    const environmentInputProperties = (environmentTool?.inputSchema as {
+        properties?: Record<string, unknown>;
+    }).properties;
+    assert.equal(environmentInputProperties?.purpose, undefined);
+    assert.equal(environmentInputProperties?.explanation, undefined);
     assert.notEqual(
         (
             environmentTool?.outputSchema as {
@@ -644,7 +671,12 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
 
     await endpoint.callTool(
         "bash_run",
-        { command: "pwd", ctxId },
+        {
+            command: "pwd",
+            ctxId,
+            explanation: "The prior result came from a different OpenAI session binding.",
+            purpose: "Verify explicit Context authority",
+        },
         {
             ...requestContext,
             requestMeta: { "openai/session": "chat-session-2" },
@@ -652,6 +684,21 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
     );
     assert.equal(harness.calls[0]?.ctxId, ctxId);
     assert.deepEqual(harness.calls[0]?.input, { command: "pwd" });
+    assert.deepEqual(provenanceRecords, [{
+        callId: "call-test",
+        explanation: "The prior result came from a different OpenAI session binding.",
+        instance: "demo",
+        purpose: "Verify explicit Context authority",
+    }]);
+
+    await assert.rejects(
+        endpoint.callTool(
+            "bash_run",
+            { command: "pwd", ctxId, purpose: "x".repeat(161) },
+            requestContext,
+        ),
+        (error: unknown) => (error as { code?: string }).code === "control.invalidTarget",
+    );
 
     await assert.rejects(
         endpoint.callTool("bash_run", { command: "pwd" }, requestContext),

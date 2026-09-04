@@ -7,6 +7,7 @@ export type {
 } from "./auth/oauth/McpOAuthProviderRuntime.js";
 export { McpHost } from "./host/McpHost.js";
 export type { McpHostInstanceConfig } from "./host/McpHost.js";
+export type { McpToolProvenanceRecord, McpToolProvenanceRecorder } from "./endpoint/McpToolProvenance.js";
 export { McpContextRegistry } from "./context/McpContextRegistry.js";
 export type { McpContextBinding } from "./context/McpContextRegistry.js";
 export { HttpHost } from "./host/HttpHost.js";

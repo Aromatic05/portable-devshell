@@ -8,7 +8,9 @@ import {
     type JsonValue,
     type McpContextEnvironment,
     type McpContextRecord,
-    type ToolCallContext
+    type ToolCallContext,
+    type ToolCallProvenance,
+    type ToolCallRecord
 } from "@portable-devshell/shared";
 
 import { McpContextRegistry } from "../context/McpContextRegistry.js";
@@ -30,9 +32,10 @@ import { throwIfMcpEndpointAborted, waitForMcpEndpointAbortable } from "./McpEnd
 import { mcpLegacyToolTombstone, resolveMcpLegacyTool } from "./McpEndpointCompatibility.js";
 import { attachMcpComments } from "./McpEndpointFeedback.js";
 import type { McpEndpointCatalog, McpEndpointCatalogWorker } from "./McpEndpointCatalog.js";
-import { readMcpRoutedInput } from "./McpEndpointInput.js";
+import { readMcpProvenanceInput, readMcpRoutedInput } from "./McpEndpointInput.js";
 import type { McpEndpointCallContext, McpEndpointWorkerPort } from "./McpEndpointPort.js";
 import { McpNativeToolResult, type McpEndpointResult } from "./McpEndpointResult.js";
+import type { McpToolProvenanceRecorder } from "./McpToolProvenance.js";
 import { McpEndpointHandlerArtifact } from "./handler/McpEndpointHandlerArtifact.js";
 import { McpEndpointHandlerEnvironment } from "./handler/McpEndpointHandlerEnvironment.js";
 import { McpEndpointHandlerInstance } from "./handler/McpEndpointHandlerInstance.js";
@@ -56,6 +59,7 @@ export interface McpEndpointDispatchOptions {
     readyWaitMs?: number;
     tmuxBlockSyncMs?: number;
     tmuxWaitPollMs?: number;
+    toolProvenance?: McpToolProvenanceRecorder;
     worker: McpEndpointWorkerPort;
     workspaceAppLeases?: WorkspaceAppLeaseStore;
     workspaceAppPresence?: WorkspaceAppPresenceStore;
@@ -81,6 +85,7 @@ export class McpEndpointDispatch {
     readonly #tmuxWaitRestores = new Map<string, Promise<void>>();
     readonly #tmuxWaitTrackers = new Map<string, { controller: AbortController; promise: Promise<JsonValue> }>();
     readonly #todo: McpEndpointHandlerTodo;
+    readonly #toolProvenance?: McpToolProvenanceRecorder;
     readonly #worker: McpEndpointWorkerPort;
     readonly #workerHandler: McpEndpointHandlerWorker;
 
@@ -97,6 +102,7 @@ export class McpEndpointDispatch {
         });
         this.#tmuxBlockSyncMs = options.tmuxBlockSyncMs ?? MCP_TMUX_BLOCK_SYNC_MS;
         this.#tmuxWaitPollMs = options.tmuxWaitPollMs ?? MCP_TMUX_WAIT_POLL_MS;
+        this.#toolProvenance = options.toolProvenance;
         this.#worker = options.worker;
         const controlOptions = {
             contextRegistry: this.#contextRegistry,
@@ -183,6 +189,8 @@ export class McpEndpointDispatch {
         }
 
         const appOnlyInteraction = selected.owner === "workspace" && isAppOnlyInteractionTool(toolName);
+        const provenanceInput = readMcpProvenanceInput(input);
+        input = provenanceInput.input;
         const resolvedContext = await this.#contextSelector.resolve(
             this.#contextRegistry,
             input,
@@ -217,6 +225,23 @@ export class McpEndpointDispatch {
         }
 
         const touchGoalAfter = goalActivity !== undefined && context.ctxId !== undefined;
+        let provenanceRecorded = false;
+        const recordProvenance = async (callId: string): Promise<void> => {
+            if (!hasToolProvenance(provenanceInput.provenance) || this.#toolProvenance === undefined) {
+                provenanceRecorded = true;
+                return;
+            }
+            try {
+                await this.#toolProvenance.record({
+                    callId,
+                    ...provenanceInput.provenance,
+                    instance: routed.instance
+                });
+                provenanceRecorded = true;
+            } catch {
+                // Provenance must not change tool execution semantics.
+            }
+        };
         try {
             if (appOnlyInteraction) {
                 this.#catalog.assertAdaptable(selected.definition);
@@ -252,6 +277,7 @@ export class McpEndpointDispatch {
                     input,
                     context,
                     routed.instance,
+                    recordProvenance,
                     signal
                 );
             }
@@ -264,6 +290,7 @@ export class McpEndpointDispatch {
                     context,
                     routed.instance,
                     ownerWorkspace,
+                    recordProvenance,
                     signal,
                     executionEpoch,
                 );
@@ -280,6 +307,7 @@ export class McpEndpointDispatch {
                     context,
                     routed.instance,
                     ownerWorkspace,
+                    recordProvenance,
                     signal,
                     executionEpoch,
                 );
@@ -293,6 +321,7 @@ export class McpEndpointDispatch {
                 snapshot.instanceRoutingEnabled,
                 signal,
                 async (result, callId) => {
+                    await recordProvenance(callId);
                     if (toolName === "tmux_read" && context.ctxId !== undefined) {
                         await this.#supersedeObservedTmuxWaits(
                             routed.instance,
@@ -305,6 +334,12 @@ export class McpEndpointDispatch {
                     return await this.#attachComments(toolName, result, context, callId, routed.instance);
                 }
             );
+        } catch (error) {
+            if (selected.owner === "worker" && !provenanceRecorded && hasToolProvenance(provenanceInput.provenance)) {
+                const callId = await this.#findLatestWorkerCallId(routed.instance, toolName, context).catch(() => undefined);
+                if (callId !== undefined) await recordProvenance(callId);
+            }
+            throw error;
         } finally {
             if (!appOnlyInteraction && context.ctxId !== undefined && signal?.aborted !== true) {
                 await this.#reentry.observeExecutionActivity(context.ctxId);
@@ -320,6 +355,7 @@ export class McpEndpointDispatch {
         context: ToolCallContext,
         instance: string,
         ownerWorkspace: string | undefined,
+        recordProvenance: (callId: string) => Promise<void>,
         signal?: AbortSignal,
         executionEpoch?: number,
     ): Promise<JsonValue> {
@@ -330,17 +366,20 @@ export class McpEndpointDispatch {
         const task = readTmuxReadTask(input);
         const startedAt = Date.now();
         const invocationInput = { consumeOutput: false, line: 0, task, timeMs: 0 } as JsonValue;
-        const transformResult = async (observed: JsonValue, callId: string) => await this.#finishTmuxRead(
-            input,
-            context,
-            callId,
-            instance,
-            ownerWorkspace,
-            observed,
-            startedAt,
-            signal,
-            executionEpoch,
-        );
+        const transformResult = async (observed: JsonValue, callId: string) => {
+            await recordProvenance(callId);
+            return await this.#finishTmuxRead(
+                input,
+                context,
+                callId,
+                instance,
+                ownerWorkspace,
+                observed,
+                startedAt,
+                signal,
+                executionEpoch,
+            );
+        };
         return instance === this.#instanceName
             ? await this.#worker.callTool("tmux_read", input, context, signal, transformResult, invocationInput)
             : await gateway.callTool(instance, "tmux_read", input, context, signal, transformResult, invocationInput);
@@ -472,6 +511,7 @@ export class McpEndpointDispatch {
         context: ToolCallContext,
         instance: string,
         ownerWorkspace: string | undefined,
+        recordProvenance: (callId: string) => Promise<void>,
         signal?: AbortSignal,
         executionEpoch?: number,
     ): Promise<JsonValue> {
@@ -485,17 +525,20 @@ export class McpEndpointDispatch {
             consumeOutput: false,
             wait: "nonblock",
         } as JsonValue;
-        const transformResult = async (started: JsonValue, callId: string) => await this.#finishTmuxRun(
-            input,
-            context,
-            callId,
-            instance,
-            ownerWorkspace,
-            started,
-            startedAt,
-            signal,
-            executionEpoch,
-        );
+        const transformResult = async (started: JsonValue, callId: string) => {
+            await recordProvenance(callId);
+            return await this.#finishTmuxRun(
+                input,
+                context,
+                callId,
+                instance,
+                ownerWorkspace,
+                started,
+                startedAt,
+                signal,
+                executionEpoch,
+            );
+        };
         return instance === this.#instanceName
             ? await this.#worker.callTool("tmux_run", input, context, signal, transformResult, initialInput)
             : await gateway.callTool(instance, "tmux_run", input, context, signal, transformResult, initialInput);
@@ -1100,12 +1143,31 @@ export class McpEndpointDispatch {
         await this.#gateway?.touchTemporaryDirectory(instance, path);
     }
 
+    async #findLatestWorkerCallId(
+        instance: string,
+        toolName: string,
+        context: ToolCallContext
+    ): Promise<string | undefined> {
+        if (context.ctxId === undefined) return undefined;
+        const records = instance === this.#instanceName
+            ? await this.#worker.readToolCalls?.({ ctxId: context.ctxId, limit: 64 })
+            : await this.#gateway?.readToolCalls?.(instance, context.ctxId, 64);
+        let latest: ToolCallRecord | undefined;
+        for (const record of records ?? []) {
+            if (record.toolName !== toolName) continue;
+            if (context.requestId !== undefined && record.requestId !== context.requestId) continue;
+            if (latest === undefined || record.startedAt >= latest.startedAt) latest = record;
+        }
+        return latest?.callId;
+    }
+
     async #auditControlTool(
         owner: "artifact" | "instance" | "workspace" | "todo",
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
         instance: string,
+        recordProvenance: (callId: string) => Promise<void>,
         signal?: AbortSignal
     ): Promise<McpEndpointResult> {
         let nativeResult: McpNativeToolResult | undefined;
@@ -1115,6 +1177,7 @@ export class McpEndpointDispatch {
             input,
             localInstance: this.#instanceName,
             operation: async (callId) => {
+                await recordProvenance(callId);
                 const result = await this.#callControlTool(owner, toolName, input, context, callId, signal);
                 if (result instanceof McpNativeToolResult) {
                     const structuredContent = await this.#attachComments(toolName, result.structuredContent, context, callId, instance);
@@ -1306,6 +1369,10 @@ function isRecoverableContextTemporaryError(error: unknown): boolean {
     }
     const code = (error as { code?: unknown }).code;
     return code === "workspace.temporaryUnavailable" || code === "workspace.temporaryInvalid";
+}
+
+function hasToolProvenance(provenance: ToolCallProvenance): boolean {
+    return provenance.purpose !== undefined || provenance.explanation !== undefined;
 }
 
 function contextEnvironment(record: McpContextRecord, instance: string): McpContextEnvironment | undefined {

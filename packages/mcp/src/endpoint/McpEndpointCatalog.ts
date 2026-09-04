@@ -27,7 +27,8 @@ import { McpToolCatalogTodo } from "../tool/catalog/McpToolCatalogTodo.js";
 import { withMcpCommentOutputSchema } from "./McpEndpointFeedback.js";
 import {
     withMcpContextId,
-    withMcpInstanceTarget
+    withMcpInstanceTarget,
+    withMcpProvenance
 } from "./McpEndpointInput.js";
 
 export interface McpEndpointCatalogWorker {
@@ -124,10 +125,13 @@ export class McpEndpointCatalog {
 
     adapt(tool: ToolDefinition): McpTool {
         const modelTool = hideInternalWorkerInput(tool);
-        const exposed = isMcpEnvironmentToolName(modelTool.name)
+        const provenanceTool = isMcpEnvironmentToolName(modelTool.name) || !isModelFacingTool(modelTool)
             ? modelTool
+            : withMcpProvenance(modelTool);
+        const exposed = isMcpEnvironmentToolName(provenanceTool.name)
+            ? provenanceTool
             : withMcpCommentOutputSchema(
-                  withMcpContextId(modelTool, this.#contextSelector.requiresExplicitContextId)
+                  withMcpContextId(provenanceTool, this.#contextSelector.requiresExplicitContextId)
               );
         const adapted = this.#schemaAdapter.toMcpTool(
             exposed,
@@ -249,4 +253,9 @@ function asRecord(value: JsonValue | undefined): Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value)
         ? value
         : {};
+}
+
+function isModelFacingTool(tool: ToolDefinition): boolean {
+    const visibility = asRecord(asRecord(tool._meta).ui).visibility;
+    return !Array.isArray(visibility) || visibility.some((entry) => entry === "model");
 }
