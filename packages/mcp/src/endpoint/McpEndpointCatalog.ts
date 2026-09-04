@@ -181,7 +181,6 @@ export class McpEndpointCatalog {
 
         if (this.#gateway !== undefined) {
             const artifactTools = this.#artifactTools.list({
-                share: this.#gateway.shareArtifact !== undefined,
                 transfer: this.#gateway.transferArtifact !== undefined,
                 viewImage: this.#gateway.viewArtifactImage !== undefined
             });

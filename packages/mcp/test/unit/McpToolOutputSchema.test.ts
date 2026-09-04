@@ -23,9 +23,6 @@ test("Control-owned MCP tools describe their structured output instead of generi
         assertMeaningfulSchema(definition);
     }
 
-    assert.deepEqual(required(definition(definitions, "artifact_share").outputSchema), [
-        "blake3", "bytes", "downloadName", "expiresAtMs", "mediaType", "shareId", "source", "state", "url"
-    ]);
     assertProperties(definition(definitions, "artifact_transfer").outputSchema, ["operation", "transfer"]);
 
     const environment = definition(definitions, "environ_info");
@@ -41,10 +38,6 @@ test("Control-owned MCP tools describe their structured output instead of generi
     assert.equal(record(distribution).additionalProperties, false);
     assert.deepEqual(required(distribution), ["id", "name"]);
 
-    assertProperties(definition(definitions, "instance_list").outputSchema, ["instances"]);
-    assertProperties(definition(definitions, "instance_status").outputSchema, [
-        "enabled", "mcpEnabled", "name", "provider", "snapshot"
-    ]);
     assertProperties(definition(definitions, "instance_connect").outputSchema, [
         "connectionState", "daemonState", "lastSeq", "name", "ready", "status", "workspace"
     ]);

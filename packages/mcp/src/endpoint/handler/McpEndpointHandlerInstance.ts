@@ -4,12 +4,7 @@ import type { McpContextRegistry } from "../../context/McpContextRegistry.js";
 import type { McpInstanceGateway } from "../../instance/McpInstanceGateway.js";
 import type { McpToolCatalogInstanceName } from "../../tool/catalog/McpToolCatalogInstance.js";
 import { waitForMcpEndpointAbortable } from "../McpEndpointCancellation.js";
-import {
-    assertMcpNoArguments,
-    readMcpInstanceConnectInput,
-    readMcpInstanceName,
-    readMcpSshCreateInput
-} from "../McpEndpointInput.js";
+import { readMcpInstanceConnectInput } from "../McpEndpointInput.js";
 import { requireMcpEndpointGateway } from "./McpEndpointHandlerSupport.js";
 
 export class McpEndpointHandlerInstance {
@@ -34,22 +29,7 @@ export class McpEndpointHandlerInstance {
         signal?: AbortSignal
     ): Promise<JsonValue> {
         const gateway = requireMcpEndpointGateway(this.#gateway, this.#instanceName);
-        switch (toolName) {
-            case "instance_list":
-                assertMcpNoArguments(input, toolName);
-                return { instances: await waitForMcpEndpointAbortable(gateway.listInstances(), signal) };
-            case "instance_status":
-                return await waitForMcpEndpointAbortable(gateway.statusInstance(readMcpInstanceName(input, toolName)), signal);
-            case "instance_connect":
-                return await this.#connect(gateway, input, context, signal);
-            case "instance_stop":
-                return await waitForMcpEndpointAbortable(gateway.stopInstance(readMcpInstanceName(input, toolName)), signal);
-            case "instance_create":
-                return await waitForMcpEndpointAbortable(
-                    gateway.createSshInstance(this.#instanceName, readMcpSshCreateInput(input)),
-                    signal
-                );
-        }
+        return await this.#connect(gateway, input, context, signal);
     }
 
     async #connect(

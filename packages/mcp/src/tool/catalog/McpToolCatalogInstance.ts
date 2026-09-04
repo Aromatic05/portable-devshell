@@ -1,44 +1,14 @@
 import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
 
-import {
-    instanceConnectOutputSchema,
-    instanceCreateOutputSchema,
-    instanceListOutputSchema,
-    instanceSnapshotOutputSchema,
-    instanceStatusOutputSchema,
-} from "../McpToolOutputSchemas.js";
+import { instanceConnectOutputSchema } from "../McpToolOutputSchemas.js";
 
-export type McpToolCatalogInstanceName =
-    | "instance_list"
-    | "instance_status"
-    | "instance_create"
-    | "instance_connect"
-    | "instance_stop";
-
-const emptyObjectSchema: JsonValue = {
-    additionalProperties: false,
-    properties: {},
-    type: "object"
-};
-
-const instanceNameSchema: JsonValue = {
-    additionalProperties: false,
-    properties: {
-        instance: {
-            description: "Managed instance name returned by instance_list.",
-            minLength: 1,
-            type: "string"
-        }
-    },
-    required: ["instance"],
-    type: "object"
-};
+export type McpToolCatalogInstanceName = "instance_connect";
 
 const instanceConnectSchema: JsonValue = {
     additionalProperties: false,
     properties: {
         instance: {
-            description: "Managed instance name returned by instance_list.",
+            description: "Managed instance name from devshell instance list.",
             minLength: 1,
             type: "string"
         },
@@ -53,65 +23,14 @@ const instanceConnectSchema: JsonValue = {
 };
 
 export class McpToolCatalogInstance {
-    readonly #definitions: readonly ToolDefinition[] = [
-        definition(
-            "instance_list",
-            "List managed instances and obtain names for cross-instance tool calls. Only use names returned here in another tool's instance field.",
-            emptyObjectSchema
-        ),
-        definition(
-            "instance_status",
-            "Read the current status of one managed instance.",
-            instanceNameSchema
-        ),
-        definition(
-            "instance_create",
-            "Create an SSH instance. Use only when explicitly requested by the user.",
-            {
-                additionalProperties: false,
-                properties: {
-                    host: {
-                        description: "SSH host name, address, or SSH config host alias.",
-                        minLength: 1,
-                        type: "string"
-                    },
-                    identityFile: {
-                        description: "Optional SSH identity file path.",
-                        minLength: 1,
-                        type: "string"
-                    },
-                    name: {
-                        description: "New portable-devshell instance name.",
-                        minLength: 1,
-                        pattern: "^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$",
-                        type: "string"
-                    },
-                    port: {
-                        maximum: 65535,
-                        minimum: 1,
-                        type: "integer"
-                    },
-                    user: {
-                        description: "Optional SSH user name.",
-                        minLength: 1,
-                        type: "string"
-                    }
-                },
-                required: ["name", "host"],
-                type: "object"
-            }
-        ),
-        definition(
-            "instance_connect",
-            "Ensure a managed instance is ready and optionally attach an absolute workspace to this session context. The operation is idempotent. Omitting workspace is sufficient for instance-level operations; worker tools on that target require a workspace attachment, so provide an absolute workspace to satisfy mcp.contextWorkspaceRequired for cross-instance work.",
-            instanceConnectSchema
-        ),
-        definition(
-            "instance_stop",
-            "Stop a managed instance. Use only when explicitly requested by the user.",
-            instanceNameSchema
-        )
-    ];
+    readonly #definitions: readonly ToolDefinition[] = [{
+        description: "Ensure a managed instance is ready and optionally attach an absolute workspace to this session context. The operation is idempotent. Omitting workspace is sufficient for instance-level operations; worker tools on that target require a workspace attachment, so provide an absolute workspace to satisfy mcp.contextWorkspaceRequired for cross-instance work.",
+        group: "instance",
+        inputSchema: instanceConnectSchema,
+        name: "instance_connect",
+        outputSchema: instanceConnectOutputSchema,
+        requiredCapabilities: ["manage"]
+    }];
 
     list(): ToolDefinition[] {
         return this.#definitions.map((definition) => ({ ...definition }));
@@ -123,31 +42,5 @@ export class McpToolCatalogInstance {
 
     isInstanceTool(name: string): name is McpToolCatalogInstanceName {
         return this.get(name) !== undefined;
-    }
-}
-
-function definition(name: McpToolCatalogInstanceName, description: string, inputSchema: JsonValue): ToolDefinition {
-    return {
-        requiredCapabilities: ["manage"],
-        description,
-        group: "instance",
-        inputSchema,
-        name,
-        outputSchema: outputSchema(name)
-    };
-}
-
-function outputSchema(name: McpToolCatalogInstanceName): JsonValue {
-    switch (name) {
-        case "instance_list":
-            return instanceListOutputSchema;
-        case "instance_create":
-            return instanceCreateOutputSchema;
-        case "instance_connect":
-            return instanceConnectOutputSchema;
-        case "instance_status":
-            return instanceStatusOutputSchema;
-        case "instance_stop":
-            return instanceSnapshotOutputSchema;
     }
 }

@@ -178,7 +178,8 @@ test("McpEndpointCatalog keeps control tools available without a worker schema",
     });
 
     const tools = catalog.listTools();
-    assert.equal(tools.some((tool) => tool.name === "instance_list"), true);
+    assert.equal(tools.some((tool) => tool.name === "instance_connect"), true);
+    assert.equal(tools.some((tool) => tool.name === "instance_list"), false);
     assert.equal(tools.some((tool) => tool.name === "bash_run"), false);
     assert.equal(catalog.snapshot().hasWorkerSchema, false);
 });
@@ -268,12 +269,12 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
     assert.equal(typeof environment.ctxId, "string");
     await contextRegistry.suppressAutomaticReentry(environment.ctxId, "demo-local", "user interrupted", "user_owned");
 
-    const listed = await dispatch.callTool(
-        "instance_list",
+    const todo = await dispatch.callTool(
+        "todo_read",
         { ctxId: environment.ctxId },
-        { principal: "tester", requestId: "request-list" }
+        { principal: "tester", requestId: "request-todo" }
     );
-    assert.deepEqual(listed, { instances: [{ name: "demo-local" }] });
+    assert.deepEqual(todo, { items: [], revision: 0 });
     assert.equal((await contextRegistry.readAutomaticReentry(environment.ctxId, "demo-local")).mode, "user_owned");
 
     recoverableWaits.push({
@@ -329,11 +330,11 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
         {
             context: {
                 ctxId: environment.ctxId,
-                requestId: "request-list",
+                requestId: "request-todo",
                 source: "mcp",
                 workspace: "/workspace",
             },
-            toolName: "instance_list",
+            toolName: "todo_read",
         },
     ]);
 });

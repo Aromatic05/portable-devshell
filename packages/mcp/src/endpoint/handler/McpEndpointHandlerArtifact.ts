@@ -4,7 +4,6 @@ import type { McpInstanceGateway } from "../../instance/McpInstanceGateway.js";
 import type { McpToolCatalogArtifactName } from "../../tool/catalog/McpToolCatalogArtifact.js";
 import { waitForMcpEndpointAbortable } from "../McpEndpointCancellation.js";
 import {
-    readMcpArtifactShareInput,
     readMcpArtifactTransferInput,
     readMcpArtifactViewImageInput
 } from "../McpEndpointInput.js";
@@ -49,14 +48,6 @@ export class McpEndpointHandlerArtifact {
                     structuredContent
                 });
             }
-            case "artifact_share":
-                if (gateway.shareArtifact === undefined) {
-                    throw mcpEndpointToolNotExposed(toolName, this.options.instanceName);
-                }
-                return await waitForMcpEndpointAbortable(
-                    gateway.shareArtifact(this.options.instanceName, readMcpArtifactShareInput(withSourceWorkspace(input, context))),
-                    signal
-                );
             case "artifact_transfer":
                 if (gateway.transferArtifact === undefined) {
                     throw mcpEndpointToolNotExposed(toolName, this.options.instanceName);

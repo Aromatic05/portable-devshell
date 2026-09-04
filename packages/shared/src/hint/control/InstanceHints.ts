@@ -12,12 +12,12 @@ export function instanceErrorHints(body: ControlErrorBody): ToolDiagnosticHint[]
         case "control.instanceNotFound":
             return [errorHint(
                 "control.instanceNotFound",
-                "Check instance_list for a valid name."
+                "Run devshell instance list for a valid name."
             )];
         case "instance.conflict":
             return [errorHint(
                 "instance.conflict",
-                "Check instance_status before retrying."
+                "Run devshell instance status before retrying."
             )];
         case "control.configInvalid":
             return [errorHint(
