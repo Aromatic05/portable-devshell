@@ -49,6 +49,24 @@ test("secret scan respects ignore files and skips obvious placeholders", async (
     }
 });
 
+test("secret scan fallback respects ignore files when ripgrep is unavailable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "devshell-secret-fallback-ignore-"));
+    const previousPath = process.env.PATH;
+    try {
+        await mkdir(join(root, "ignored"));
+        await writeFile(join(root, ".gitignore"), "ignored/\n", "utf8");
+        await writeFile(join(root, "ignored/secret.env"), "PASSWORD = 'ignored-secret-value'\n", "utf8");
+        await writeFile(join(root, "visible.env"), "PASSWORD = 'visible-secret-value'\n", "utf8");
+        process.env.PATH = "";
+
+        const result = await scanSecrets({ cwd: root, limit: 20 });
+        assert.deepEqual(result.findings.map((finding) => finding.path), ["visible.env"]);
+    } finally {
+        process.env.PATH = previousPath;
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
 test("secret scan applies glob and result limits", async () => {
     const root = await mkdtemp(join(tmpdir(), "devshell-secret-limit-"));
     try {

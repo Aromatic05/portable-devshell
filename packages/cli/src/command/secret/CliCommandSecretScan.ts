@@ -1,13 +1,26 @@
 import { spawnSync } from "node:child_process";
-import { open, readdir, stat } from "node:fs/promises";
+import { open, readFile, readdir, stat } from "node:fs/promises";
 import { matchesGlob, relative, resolve } from "node:path";
+import ignore, { type Ignore } from "ignore";
 
 import { CliRenderError } from "../../render/CliRenderError.js";
 
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 1_000;
 const MAX_FILE_BYTES = 1024 * 1024;
+const MAX_DISCOVERED_FILES = 20_000;
+const MAX_DISCOVERY_ENTRIES = 50_000;
 const FALLBACK_SKIP_DIRECTORIES = new Set([".git", ".hg", ".svn", "node_modules"]);
+
+interface DiscoveryResult {
+    files: string[];
+    truncated: boolean;
+}
+
+interface IgnoreScope {
+    directory: string;
+    matcher: Ignore;
+}
 
 const SECRET_PATTERNS: ReadonlyArray<{ pattern: RegExp; type: string }> = [
     { pattern: /gh[pousr]_[A-Za-z0-9_]{36,}/gu, type: "github_token" },
@@ -56,11 +69,11 @@ export async function scanSecrets(options: SecretScanOptions): Promise<SecretSca
     const baseStat = await stat(base);
     if (!baseStat.isDirectory()) throw CliRenderError.usage(`secret scan path must be a directory: ${options.cwd}`);
 
-    const candidates = discoverWithRipgrep(base) ?? await discoverFallback(base);
+    const discovery = discoverWithRipgrep(base) ?? await discoverFallback(base);
     const findings: SecretScanFinding[] = [];
     let truncatedFiles = 0;
 
-    for (const candidate of candidates) {
+    for (const candidate of discovery.files) {
         const displayPath = normalizePath(candidate);
         if (options.glob !== undefined && !matchesGlob(displayPath, options.glob)) continue;
         const read = await readCandidate(resolve(base, candidate));
@@ -78,7 +91,7 @@ export async function scanSecrets(options: SecretScanOptions): Promise<SecretSca
             }
         }
     }
-    return { findings, truncated: false, truncatedFiles };
+    return { findings, truncated: discovery.truncated, truncatedFiles };
 }
 
 export function renderSecretUsage(): string {
@@ -127,7 +140,7 @@ function normalizeLimit(limit: number | undefined): number {
     return Math.min(value, MAX_LIMIT);
 }
 
-function discoverWithRipgrep(base: string): string[] | undefined {
+function discoverWithRipgrep(base: string): DiscoveryResult | undefined {
     const result = spawnSync("rg", ["--files", "--hidden", "--glob", "!.git/**"], {
         cwd: base,
         encoding: "utf8",
@@ -135,24 +148,78 @@ function discoverWithRipgrep(base: string): string[] | undefined {
         windowsHide: true
     });
     if (result.error !== undefined || (result.status !== 0 && result.status !== 1)) return undefined;
-    return result.stdout.split(/\r?\n/u).filter((value) => value.length > 0).sort();
+    const files = result.stdout.split(/\r?\n/u).filter((value) => value.length > 0).sort();
+    return {
+        files: files.slice(0, MAX_DISCOVERED_FILES),
+        truncated: files.length > MAX_DISCOVERED_FILES
+    };
 }
 
-async function discoverFallback(base: string): Promise<string[]> {
+async function discoverFallback(base: string): Promise<DiscoveryResult> {
     const files: string[] = [];
-    await walk(base, base, files);
+    const state = { scanned: 0, truncated: false };
+    await walk(base, base, files, [], state);
     files.sort();
-    return files;
+    return { files, truncated: state.truncated };
 }
 
-async function walk(base: string, directory: string, files: string[]): Promise<void> {
+async function walk(
+    base: string,
+    directory: string,
+    files: string[],
+    inheritedScopes: readonly IgnoreScope[],
+    state: { scanned: number; truncated: boolean }
+): Promise<void> {
+    if (state.truncated) return;
+    const localScope = await readIgnoreScope(directory);
+    const scopes = localScope === undefined ? inheritedScopes : [...inheritedScopes, localScope];
     for (const entry of await readdir(directory, { withFileTypes: true })) {
+        state.scanned += 1;
+        if (state.scanned > MAX_DISCOVERY_ENTRIES) {
+            state.truncated = true;
+            return;
+        }
+        const path = resolve(directory, entry.name);
+        const displayPath = normalizePath(relative(base, path));
         if (entry.isDirectory()) {
-            if (!FALLBACK_SKIP_DIRECTORIES.has(entry.name)) await walk(base, resolve(directory, entry.name), files);
+            if (!FALLBACK_SKIP_DIRECTORIES.has(entry.name) && !ignoredByScopes(path, true, scopes)) {
+                await walk(base, path, files, scopes, state);
+            }
             continue;
         }
-        if (entry.isFile()) files.push(relative(base, resolve(directory, entry.name)));
+        if (!entry.isFile() || ignoredByScopes(path, false, scopes)) continue;
+        files.push(displayPath);
+        if (files.length >= MAX_DISCOVERED_FILES) {
+            state.truncated = true;
+            return;
+        }
     }
+}
+
+async function readIgnoreScope(directory: string): Promise<IgnoreScope | undefined> {
+    const patterns: string[] = [];
+    for (const name of [".gitignore", ".ignore"]) {
+        try {
+            patterns.push(await readFile(resolve(directory, name), "utf8"));
+        } catch (error) {
+            if (!isEnoent(error)) throw error;
+        }
+    }
+    if (patterns.length === 0) return undefined;
+    return { directory, matcher: ignore().add(patterns) };
+}
+
+function ignoredByScopes(path: string, directory: boolean, scopes: readonly IgnoreScope[]): boolean {
+    let ignored = false;
+    for (const scope of scopes) {
+        let candidate = normalizePath(relative(scope.directory, path));
+        if (candidate === ".." || candidate.startsWith("../")) continue;
+        if (directory) candidate += "/";
+        const result = scope.matcher.test(candidate);
+        if (result.ignored) ignored = true;
+        else if (result.unignored) ignored = false;
+    }
+    return ignored;
 }
 
 async function readCandidate(path: string): Promise<{ text: string; truncated: boolean } | undefined> {
@@ -186,4 +253,8 @@ function lineAt(text: string, offset: number): number {
 
 function normalizePath(path: string): string {
     return path.replaceAll("\\", "/");
+}
+
+function isEnoent(error: unknown): boolean {
+    return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
