@@ -6,6 +6,7 @@ import { isCliEntrypoint } from "./CliEntrypoint.js";
 import { CliParser, type CliParsedCommand } from "./CliParser.js";
 import { executeArtifactCommand } from "./command/artifact/CliCommandArtifact.js";
 import { executeSecretCommand } from "./command/secret/CliCommandSecretScan.js";
+import { executeSkillCommand } from "./command/skill/CliCommandSkill.js";
 import {
     createCliClients as createControlClients,
     negotiateCliControl,
@@ -236,6 +237,9 @@ export class CliMain {
                 return;
             case "secret":
                 await executeSecretCommand(command.args, this.#stdout);
+                return;
+            case "skill":
+                await executeSkillCommand(command.args, this.#stdout, { home: this.#homeDirectory });
                 return;
             case "tui":
                 await this.#startTui();
