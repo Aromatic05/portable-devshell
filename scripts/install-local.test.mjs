@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
-const CURRENT_DEVELOPMENT_VERSION = "0.6.17"; // version-state:current-development
+const CURRENT_DEVELOPMENT_VERSION = "0.6.18"; // version-state:current-development
 
  test("install-local rejects stale activation before stopping or changing active Worker aliases", {
     skip: process.platform === "win32",
