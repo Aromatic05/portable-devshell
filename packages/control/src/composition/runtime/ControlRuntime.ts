@@ -64,7 +64,8 @@ export class ControlRuntime {
             }),
             restart: options.restart,
             reverse: options.reverse.service,
-            shutdown: options.shutdown
+            shutdown: options.shutdown,
+            toolProvenance: options.mcp.toolProvenance
         });
         this.#mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
             await this.#routes.retireInstance(instance.name);

@@ -6,6 +6,7 @@ import { McpOAuthProtectedResource } from "../auth/oauth/McpOAuthProtectedResour
 import type { McpOAuthApprovalService } from "../auth/oauth/McpOAuthApprovalService.js";
 import { McpEndpointBinding } from "../endpoint/McpEndpointBinding.js";
 import { McpEndpointWorker } from "../endpoint/McpEndpointWorker.js";
+import type { McpToolProvenanceRecorder } from "../endpoint/McpToolProvenance.js";
 import { installMcpWorkspaceLiveRoute, workspaceLiveBaseUrl } from "../workspace/McpWorkspaceLiveRoute.js";
 import { WorkspaceAppLeaseStore } from "../workspace/WorkspaceAppLeaseStore.js";
 import { WorkspaceAppPresenceStore } from "../workspace/WorkspaceAppPresenceStore.js";
@@ -63,6 +64,7 @@ export interface McpHostConfig {
     publicBaseUrl?: string;
     serverVersion?: string;
     storageDir?: string;
+    toolProvenance?: McpToolProvenanceRecorder;
     workspaceAppLeaseFile?: string;
 }
 
@@ -148,6 +150,7 @@ export class McpHost {
                 gateway: instance.gateway,
                 policy: instance.policy,
                 instanceName: instance.name,
+                toolProvenance: this.#config.toolProvenance,
                 worker: instance.worker,
                 ...(workspaceApp ? {
                     workspaceAppLeases: this.#workspaceAppLeases,

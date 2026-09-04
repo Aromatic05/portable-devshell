@@ -12,6 +12,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../../route/ControlRouteFactory.js";
+import type { ToolCallProvenanceStore } from "../../control/tool/ToolCallProvenanceStore.js";
 import {
     limitToolCallResponse,
     readToolApprovalDecision,
@@ -21,13 +22,17 @@ import {
 } from "./ToolRouteInput.js";
 
 export interface ToolRouteInstancePort {
+    name?: string;
     worker: Pick<
         WorkerInstance,
         "callTool" | "decideApproval" | "getApproval" | "listApprovals" | "readToolCalls"
     >;
 }
 
-export function createToolRouteModule(instance: ToolRouteInstancePort): PrefixRouteModuleDefinition {
+export function createToolRouteModule(
+    instance: ToolRouteInstancePort,
+    provenance?: ToolCallProvenanceStore
+): PrefixRouteModuleDefinition {
     return routeModule("tool", {
         call: async (request, context) => {
             const { input, toolName, workspace } = readToolCall(request.payload);
@@ -56,8 +61,12 @@ export function createToolRouteModule(instance: ToolRouteInstancePort): PrefixRo
         },
         listCalls: async (request) => {
             const query = readToolCallQuery(request.payload);
+            const records = await instance.worker.readToolCalls(query);
+            const decorated = provenance === undefined || instance.name === undefined
+                ? records
+                : await provenance.decorate(instance.name, records).catch(() => records);
             return limitToolCallResponse(
-                await instance.worker.readToolCalls(query),
+                decorated,
                 query
             ) as unknown as JsonValue;
         },

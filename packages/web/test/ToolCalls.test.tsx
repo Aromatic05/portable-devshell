@@ -9,10 +9,12 @@ const alphaCall = {
     callId: "call-alpha",
     completedAt: "2026-07-31T09:00:01Z",
     ctxId: "ctx-alpha",
+    explanation: "The previous run returned a non-zero exit code.",
     input: { command: "false" },
     inputSummary: '{"command":"false"}',
     instance: asInstanceName("alpha"),
     output: { exitCode: 1, stderr: "failed", stdout: "" },
+    purpose: "Confirm the failing command",
     source: "mcp" as const,
     startedAt: "2026-07-31T09:00:00Z",
     status: "failed" as const,
@@ -132,6 +134,12 @@ it("filters structured tool calls by ctxId and queues a Comment for the selected
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
 
+    fireEvent.change(screen.getByLabelText("Search"), {
+        target: { value: "previous run returned" },
+    });
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+
     fireEvent.change(screen.getByLabelText("Workspace"), {
         target: { value: "projects/alpha" },
     });
@@ -171,6 +179,8 @@ it("refreshes an expanded tool call to retrieve its latest content", async () =>
 
     fireEvent.click(screen.getByText("bash_run", { selector: "strong" }));
     expect(await screen.findByText("/projects/alpha")).toBeInTheDocument();
+    expect(screen.getByText("Confirm the failing command")).toBeInTheDocument();
+    expect(screen.getByText("The previous run returned a non-zero exit code.")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
 
     await waitFor(() => expect(refreshToolCall).toHaveBeenCalledWith("alpha"));

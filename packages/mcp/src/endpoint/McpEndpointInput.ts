@@ -7,6 +7,7 @@ import {
     type ArtifactTransferStartInput,
     type ArtifactViewImageInput,
     type JsonValue,
+    type ToolCallProvenance,
     type ToolDefinition
 } from "@portable-devshell/shared";
 
@@ -19,6 +20,47 @@ export function withMcpContextId(tool: ToolDefinition, required = true): ToolDef
         minLength: 1,
         type: "string"
     }, required);
+}
+
+const MCP_PURPOSE_MAX_LENGTH = 160;
+const MCP_EXPLANATION_MAX_LENGTH = 1000;
+
+export function withMcpProvenance(tool: ToolDefinition): ToolDefinition {
+    return withInputProperty(
+        withInputProperty(tool, "purpose", {
+            description: "Briefly state the intended outcome of this tool call. Do not just restate the tool or command.",
+            maxLength: MCP_PURPOSE_MAX_LENGTH,
+            minLength: 1,
+            type: "string"
+        }),
+        "explanation",
+        {
+            description: "Optionally state why this tool call is useful now, including relevant observations or prior results.",
+            maxLength: MCP_EXPLANATION_MAX_LENGTH,
+            minLength: 1,
+            type: "string"
+        }
+    );
+}
+
+export function readMcpProvenanceInput(input: JsonValue): {
+    input: JsonValue;
+    provenance: ToolCallProvenance;
+} {
+    if (!isRecord(input)) return { input, provenance: {} };
+    const hasPurpose = Object.hasOwn(input, "purpose");
+    const hasExplanation = Object.hasOwn(input, "explanation");
+    if (!hasPurpose && !hasExplanation) return { input, provenance: {} };
+    const purpose = optionalBoundedString(input.purpose, "purpose", MCP_PURPOSE_MAX_LENGTH);
+    const explanation = optionalBoundedString(input.explanation, "explanation", MCP_EXPLANATION_MAX_LENGTH);
+    const { purpose: _purpose, explanation: _explanation, ...toolInput } = input;
+    return {
+        input: toolInput,
+        provenance: {
+            ...(explanation === undefined ? {} : { explanation }),
+            ...(purpose === undefined ? {} : { purpose })
+        }
+    };
 }
 
 export function readMcpContextInput(input: JsonValue): { ctxId: string; input: JsonValue } {
@@ -307,6 +349,14 @@ function optionalString(value: JsonValue | undefined, field: string): string | u
         throw invalidArguments(`${field} must be a non-empty string.`);
     }
     return value.trim();
+}
+
+function optionalBoundedString(value: JsonValue | undefined, field: string, maxLength: number): string | undefined {
+    const normalized = optionalString(value, field);
+    if (normalized !== undefined && normalized.length > maxLength) {
+        throw invalidArguments(`${field} must be at most ${maxLength} characters.`);
+    }
+    return normalized;
 }
 
 function invalidArguments(message: string) {

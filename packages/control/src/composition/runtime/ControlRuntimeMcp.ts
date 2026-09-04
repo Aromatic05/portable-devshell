@@ -4,6 +4,7 @@ import { HttpHost, type McpHost, type McpOAuthApprovalService } from "@portable-
 import type { ControlConfig, ControlWebAuthConfig, JsonValue } from "@portable-devshell/shared";
 
 import { ConfigEditorCoordinator, type ConfigRuntimeChangeSet } from "../../control/config/editor/ConfigEditorCoordinator.js";
+import { ToolCallProvenanceStore } from "../../control/tool/ToolCallProvenanceStore.js";
 import { McpInstanceGatewayControl } from "../McpInstanceGatewayControl.js";
 import { decorateMcpInstanceGatewayArtifact } from "../McpInstanceGatewayArtifactDecorator.js";
 import { InstanceCreateCoordinator } from "../../control/instance/create/InstanceCreateCoordinator.js";
@@ -23,6 +24,7 @@ export class ControlRuntimeMcp {
     readonly configEditor: ConfigEditorCoordinator;
     readonly instanceCreate: InstanceCreateCoordinator;
     readonly instanceGateway: McpInstanceGatewayControl;
+    readonly toolProvenance: ToolCallProvenanceStore;
     #publicBaseUrl?: string;
     #webHost?: HttpHost;
     #webPublicBaseUrl?: string;
@@ -43,6 +45,7 @@ export class ControlRuntimeMcp {
         this.#state = options.state;
         this.#artifact = options.artifact;
         this.#controlPaths = options.controlPaths;
+        this.toolProvenance = new ToolCallProvenanceStore(options.controlPaths.toolProvenanceFile);
         const config = options.state.requireConfig();
         this.#mcpEnabled = config.mcp.enabled;
         this.#publicBaseUrl = config.mcp.publicBaseUrl;
@@ -62,13 +65,15 @@ export class ControlRuntimeMcp {
         this.instanceGateway = new McpInstanceGatewayControl({
             createService: this.instanceCreate,
             getConfig: () => options.state.requireConfig(),
-            instanceRegistry: options.state.instances
+            instanceRegistry: options.state.instances,
+            toolProvenance: this.toolProvenance
         });
         gatewayHolder.value = this.instanceGateway;
         this.#host = factory.wire(options.state.requireConfig(), options.state.instances, {
             contextFile: options.controlPaths.contextsFile,
             gateway: decorateMcpInstanceGatewayArtifact(this.instanceGateway, options.artifact.service),
             storageDir: options.controlPaths.oauthDir,
+            toolProvenance: this.toolProvenance,
             workspaceAppLeaseFile: options.controlPaths.workspaceAppLeasesFile
         });
         if (config.web.enabled) {
@@ -116,6 +121,7 @@ export class ControlRuntimeMcp {
             contextFile: this.#controlPaths.contextsFile,
             gateway: decorateMcpInstanceGatewayArtifact(this.instanceGateway, this.#artifact.service),
             storageDir: this.#controlPaths.oauthDir,
+            toolProvenance: this.toolProvenance,
             workspaceAppLeaseFile: this.#controlPaths.workspaceAppLeasesFile
         });
         const previous = this.#host;

@@ -66,6 +66,8 @@ function ToolCallDetails({
             <div><dt>Completed</dt><dd>{call.completedAt ?? "-"}</dd></div>
             <div><dt>Duration</dt><dd>{toolCallDuration(call)}</dd></div>
             <div><dt>Request</dt><dd>{call.requestId ?? "-"}</dd></div>
+            {call.purpose === undefined ? null : <div><dt>Purpose</dt><dd>{call.purpose}</dd></div>}
+            {call.explanation === undefined ? null : <div><dt>Explanation</dt><dd>{call.explanation}</dd></div>}
             <div><dt>Termination</dt><dd>{call.termination ?? "-"}</dd></div>
             <div><dt>Exit code</dt><dd>{call.exitCode ?? "-"}</dd></div>
         </dl>

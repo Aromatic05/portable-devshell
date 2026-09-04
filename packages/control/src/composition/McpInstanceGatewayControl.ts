@@ -13,22 +13,26 @@ import {
 import type { InstanceCreateCoordinator } from "../control/instance/create/InstanceCreateCoordinator.js";
 import type { ControlConfig } from "@portable-devshell/shared";
 import type { InstanceRegistry } from "../control/instance/registry/InstanceRegistry.js";
+import type { ToolCallProvenanceStore } from "../control/tool/ToolCallProvenanceStore.js";
 
 export interface McpInstanceGatewayControlOptions {
     createService: InstanceCreateCoordinator;
     getConfig: () => ControlConfig;
     instanceRegistry: InstanceRegistry;
+    toolProvenance?: ToolCallProvenanceStore;
 }
 
 export class McpInstanceGatewayControl implements McpInstanceGateway {
     readonly #createService: InstanceCreateCoordinator;
     readonly #getConfig: () => ControlConfig;
     readonly #instanceRegistry: InstanceRegistry;
+    readonly #toolProvenance?: ToolCallProvenanceStore;
 
     constructor(options: McpInstanceGatewayControlOptions) {
         this.#createService = options.createService;
         this.#getConfig = options.getConfig;
         this.#instanceRegistry = options.instanceRegistry;
+        this.#toolProvenance = options.toolProvenance;
     }
 
     async appendMcpToolCalled(instance: string, toolName: string, context: { requestId?: string; ctxId?: string }): Promise<void> {
@@ -228,7 +232,9 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     }
 
     async readToolCalls(instance: string, ctxId: string, limit: number) {
-        return await this.#requireDescriptor(instance).worker.readToolCalls({ ctxId, limit });
+        const records = await this.#requireDescriptor(instance).worker.readToolCalls({ ctxId, limit });
+        if (this.#toolProvenance === undefined) return records;
+        return await this.#toolProvenance.decorate(instance, records).catch(() => records);
     }
 
     hasActiveToolCalls(instance: string, ctxId: string, excludeCallId?: string) {
