@@ -99,7 +99,7 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
     const home = await createTestTempDirectory("reverse-generation-service");
     const credentialStore = new ReverseCredentialStore(home);
     let generation = 0;
-    const accepted: Array<{ channel: Channel; generation: number; transport: string }> = [];
+    const accepted: Array<{ channel: Channel; generation: number; lane?: "control" | "bulk"; transport: string }> = [];
     const descriptor = {
         name: asInstanceName("remote-test"),
         provider: "reverse" as const,
@@ -107,9 +107,9 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
         worker: {
             acceptReverseChannel: async (
                 channel: Channel,
-                options: { generation: number; transport: "sse" | "wss" }
+                options: { generation: number; lane?: "control" | "bulk"; transport: "sse" | "wss" }
             ): Promise<InstanceSnapshot> => {
-                generation = options.generation;
+                if (options.lane !== "bulk") generation = options.generation;
                 accepted.push({ channel, ...options });
                 return {
                     connectionState: "connected",
@@ -149,6 +149,13 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
     await service.activate(identityOne, "wss", first);
     assert.equal(accepted.length, 1);
     assert.equal(accepted[0]?.generation, 1);
+    assert.equal(accepted[0]?.lane, "control");
+
+    const bulk = new MemoryRpcChannel();
+    await service.activate(identityOne, "wss", bulk, "bulk");
+    assert.equal(accepted.length, 2);
+    assert.equal(accepted[1]?.generation, 1);
+    assert.equal(accepted[1]?.lane, "bulk");
 
     const duplicate = new MemoryRpcChannel();
     await assert.rejects(
@@ -164,8 +171,9 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
     );
     const second = new MemoryRpcChannel();
     await service.activate(identityTwo, "wss", second);
-    assert.equal(accepted.length, 2);
-    assert.equal(accepted[1]?.generation, 2);
+    assert.equal(accepted.length, 3);
+    assert.equal(accepted[2]?.generation, 2);
+    assert.equal(bulk.closed, true);
 
     service.disconnect(descriptor.name);
     assert.equal(second.closed, true);

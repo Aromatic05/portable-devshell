@@ -4,6 +4,7 @@ import {
     type JsonValue,
     type ReverseEnrollmentState,
     type ReverseInstanceStatus,
+    type ReverseRpcLane,
     type ReverseTransport
 } from "@portable-devshell/shared";
 
@@ -154,10 +155,27 @@ export class WorkerInstanceConnection {
 
     async acceptReverseChannel(
         channel: Channel,
-        input: { connectedAt?: string; generation: number; transport: ReverseTransport }
+        input: { connectedAt?: string; generation: number; lane?: ReverseRpcLane; transport: ReverseTransport }
     ): Promise<InstanceSnapshot> {
         this.#requireSelfManaged();
         const previousGeneration = this.#reverseStatus?.generation ?? 0;
+        if (input.lane === "bulk") {
+            if (input.transport !== "wss" || input.generation !== previousGeneration || previousGeneration === 0) {
+                channel.close();
+                throw createError({
+                    code: errorCodes.reverseGenerationInvalid,
+                    details: {
+                        generation: input.generation,
+                        instance: this.#config.name,
+                        previousGeneration
+                    },
+                    message: "Reverse bulk lane must join the active WSS generation.",
+                    retryable: true
+                });
+            }
+            this.#config.rpcConnector?.attach?.(channel, "bulk");
+            return this.#snapshot();
+        }
         if (!Number.isInteger(input.generation) || input.generation <= previousGeneration) {
             channel.close();
             throw createError({
@@ -173,8 +191,11 @@ export class WorkerInstanceConnection {
         }
 
         const connectedAt = input.connectedAt ?? new Date().toISOString();
-        this.#config.rpcConnector?.attach?.(channel);
-        await this.#rpcBridge.replaceChannel(channel);
+        this.#config.rpcConnector?.attach?.(channel, "control");
+        const rpcChannel = this.#config.rpcConnector === undefined
+            ? channel
+            : await this.#config.rpcConnector.connect();
+        await this.#rpcBridge.replaceChannel(rpcChannel);
         this.#reverseStatus = {
             availability: "online",
             connectedAt,
