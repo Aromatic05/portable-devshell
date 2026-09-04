@@ -15,6 +15,7 @@ import {
     type McpWorkspaceGateway,
     workspaceAppResourceUri,
 } from "@portable-devshell/mcp/testing";
+import { McpWorkspaceReentryArbiter } from "../../src/workspace/McpWorkspaceReentryArbiter.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const context: ToolCallContext = { ctxId: "ctx-question", source: "mcp" };
@@ -1255,6 +1256,556 @@ test("server re-entry arbiter gives each resolved Wait at most one notification 
         );
         assert.equal(fake.waits.find((wait) => wait.waitId === "wait-once")?.status, "consumed");
         assert.equal((await claim("claim-after-consume")).claimed, false);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("server re-entry arbiter does not settle a Wait delivery when Wait consumption persistence fails", async () => {
+    const root = await createTestTempDirectory("reentry-wait-consume-failure");
+    try {
+        const registry = new McpContextRegistry({
+            filePath: join(root, "contexts.json"),
+            idFactory: () => context.ctxId!,
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo", principal: "local", workspace: "/workspace" });
+        const fake = createInteractionGateway();
+        const now = new Date().toISOString();
+        fake.waits.push({
+            automaticRecovery: true,
+            createdAt: now,
+            createdByCtxId: context.ctxId!,
+            detachedAt: now,
+            kind: "tmux",
+            resolvedAt: now,
+            result: { task: { id: "task-consume-failure", status: "0" } },
+            status: "resolved",
+            targetId: "task-consume-failure",
+            updatedAt: now,
+            waitId: "wait-consume-failure",
+        });
+        Object.assign(fake.gateway, {
+            async consumeWait() {
+                throw new Error("wait persistence failed");
+            },
+        });
+        const handler = new McpEndpointHandlerInteraction({
+            contextRegistry: registry,
+            gateway: fake.gateway,
+            instanceName: "demo",
+        });
+        const token = await openWorkspace(handler);
+        const call = (action: string, extra: Record<string, unknown> = {}) => handler.call(
+            "workspace_reentry",
+            { action, claimId: "claim-consume-failure", token, ...extra },
+            context,
+            `call-${action}-consume-failure`,
+        );
+
+        assert.equal((await call("claim", { intent: "automatic" }) as { claimed?: boolean }).claimed, true);
+        assert.equal((await call("validate") as { valid?: boolean }).valid, true);
+        assert.equal((await call("attempt") as { attempted?: boolean }).attempted, true);
+        await assert.rejects(
+            call("report", { outcome: "rejected" }),
+            /wait persistence failed/u,
+        );
+        assert.equal(fake.waits.find((wait) => wait.waitId === "wait-consume-failure")?.status, "resolved");
+        const reentry = await registry.readAutomaticReentry(context.ctxId!, "demo");
+        assert.equal(reentry.claimId, "claim-consume-failure");
+        assert.equal(reentry.attempted, true);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("server re-entry arbiter keeps its Context claim when releasing the Wait source fails", async () => {
+    const root = await createTestTempDirectory("reentry-wait-release-failure");
+    try {
+        const registry = new McpContextRegistry({
+            filePath: join(root, "contexts.json"),
+            idFactory: () => context.ctxId!,
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo", principal: "local", workspace: "/workspace" });
+        const fake = createInteractionGateway();
+        const now = new Date().toISOString();
+        fake.waits.push({
+            automaticRecovery: true,
+            createdAt: now,
+            createdByCtxId: context.ctxId!,
+            detachedAt: now,
+            kind: "tmux",
+            resolvedAt: now,
+            result: { task: { id: "task-release-failure", status: "0" } },
+            status: "resolved",
+            targetId: "task-release-failure",
+            updatedAt: now,
+            waitId: "wait-release-failure",
+        });
+        const handler = new McpEndpointHandlerInteraction({
+            contextRegistry: registry,
+            gateway: fake.gateway,
+            instanceName: "demo",
+        });
+        const token = await openWorkspace(handler);
+        const claimId = "claim-release-failure";
+        const claimed = await handler.call(
+            "workspace_reentry",
+            { action: "claim", claimId, intent: "automatic", token },
+            context,
+            "call-claim-release-failure",
+        ) as { claimed?: boolean };
+        assert.equal(claimed.claimed, true);
+        Object.assign(fake.gateway, {
+            async releaseWaitRecovery() {
+                throw new Error("wait release persistence failed");
+            },
+        });
+
+        await assert.rejects(
+            handler.call(
+                "workspace_reentry",
+                { action: "release", claimId, token },
+                context,
+                "call-release-failure",
+            ),
+            /wait release persistence failed/u,
+        );
+        const reentry = await registry.readAutomaticReentry(context.ctxId!, "demo");
+        assert.equal(reentry.claimId, claimId);
+        assert.equal(fake.waits.find((wait) => wait.waitId === "wait-release-failure")?.recoveryClaimId, claimId);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("server re-entry arbiter keeps both claims when source-attempt rollback fails", async () => {
+    const root = await createTestTempDirectory("reentry-wait-attempt-rollback-failure");
+    try {
+        const registry = new McpContextRegistry({
+            filePath: join(root, "contexts.json"),
+            idFactory: () => context.ctxId!,
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo", principal: "local", workspace: "/workspace" });
+        const fake = createInteractionGateway();
+        const now = new Date().toISOString();
+        fake.waits.push({
+            automaticRecovery: true,
+            createdAt: now,
+            createdByCtxId: context.ctxId!,
+            detachedAt: now,
+            kind: "tmux",
+            resolvedAt: now,
+            result: { task: { id: "task-attempt-rollback-failure", status: "0" } },
+            status: "resolved",
+            targetId: "task-attempt-rollback-failure",
+            updatedAt: now,
+            waitId: "wait-attempt-rollback-failure",
+        });
+        const handler = new McpEndpointHandlerInteraction({
+            contextRegistry: registry,
+            gateway: fake.gateway,
+            instanceName: "demo",
+        });
+        const token = await openWorkspace(handler);
+        const claimId = "claim-attempt-rollback-failure";
+        const claimed = await handler.call(
+            "workspace_reentry",
+            { action: "claim", claimId, intent: "automatic", token },
+            context,
+            "call-claim-attempt-rollback-failure",
+        ) as { claimed?: boolean };
+        assert.equal(claimed.claimed, true);
+        Object.assign(fake.gateway, {
+            async markWaitRecoveryAttempted() {
+                throw new Error("wait attempt persistence failed");
+            },
+            async releaseWaitRecovery() {
+                throw new Error("wait release persistence failed");
+            },
+        });
+
+        await assert.rejects(
+            handler.call(
+                "workspace_reentry",
+                { action: "attempt", claimId, token },
+                context,
+                "call-attempt-rollback-failure",
+            ),
+            /wait attempt persistence failed|rollback was incomplete/u,
+        );
+        const reentry = await registry.readAutomaticReentry(context.ctxId!, "demo");
+        assert.equal(reentry.claimId, claimId);
+        assert.equal(fake.waits.find((wait) => wait.waitId === "wait-attempt-rollback-failure")?.recoveryClaimId, claimId);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("server re-entry arbiter rolls back a Goal source claim when Context source binding fails", async () => {
+    const root = await createTestTempDirectory("reentry-goal-bind-failure");
+    try {
+        const registry = new McpContextRegistry({
+            filePath: join(root, "contexts.json"),
+            idFactory: () => context.ctxId!,
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo", principal: "local", workspace: "/workspace" });
+        Object.assign(registry, {
+            async bindAutomaticReentrySource() {
+                throw new Error("context source bind persistence failed");
+            },
+        });
+        const fake = createInteractionGateway();
+        const now = new Date().toISOString();
+        const goal = {
+            autoContinueExhausted: false,
+            continuationCount: 0,
+            continuationDue: true,
+            continuationDueAt: now,
+            continuationPending: false,
+            createdAt: now,
+            goalId: "goal-bind-failure",
+            lastAgentActivityAt: now,
+            lastProgressAt: now,
+            maxContinuations: 8,
+            objective: "Keep source and arbiter claims atomic",
+            revision: 1,
+            status: "active" as const,
+            steps: [{ id: "work", status: "active" as const, text: "Work" }],
+            updatedAt: now,
+        };
+        const actions: string[] = [];
+        Object.assign(fake.gateway, {
+            async goalContinuation(_instance: string, input: GoalContinuationInput) {
+                actions.push(input.action);
+                if (input.action === "claim") {
+                    return { claimed: true, claimId: input.claimId, continuationCount: 0, goal };
+                }
+                if (input.action === "release") return { goal, released: true };
+                return { goal };
+            },
+            async manageGoal() { return goal; },
+            async readGoal() { return goal; },
+        });
+        const handler = new McpEndpointHandlerInteraction({
+            contextRegistry: registry,
+            gateway: fake.gateway,
+            instanceName: "demo",
+        });
+        const token = await openWorkspace(handler);
+
+        await assert.rejects(
+            handler.call(
+                "workspace_reentry",
+                { action: "claim", claimId: "claim-goal-bind-failure", intent: "automatic", token },
+                context,
+                "call-goal-bind-failure",
+            ),
+            /context source bind persistence failed/u,
+        );
+        assert.deepEqual(actions, ["claim", "release"]);
+        assert.equal((await registry.readAutomaticReentry(context.ctxId!, "demo")).claimId, undefined);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("server re-entry arbiter does not hide an accepted Goal report persistence failure", async () => {
+    const root = await createTestTempDirectory("reentry-goal-report-failure");
+    try {
+        const registry = new McpContextRegistry({
+            filePath: join(root, "contexts.json"),
+            idFactory: () => context.ctxId!,
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo", principal: "local", workspace: "/workspace" });
+        const fake = createInteractionGateway();
+        const now = new Date().toISOString();
+        let continuationPending = false;
+        let continuationAttemptedAt: string | undefined;
+        const goalSnapshot = () => ({
+            autoContinueExhausted: false,
+            continuationAttemptedAt,
+            continuationCount: 0,
+            continuationDue: !continuationPending,
+            continuationDueAt: now,
+            continuationPending,
+            continuationUncertain: continuationAttemptedAt !== undefined,
+            createdAt: now,
+            goalId: "goal-report-failure",
+            lastAgentActivityAt: now,
+            lastProgressAt: now,
+            maxContinuations: 8,
+            objective: "Preserve failed Goal settlement",
+            revision: 1,
+            status: "active" as const,
+            steps: [{ id: "work", status: "active" as const, text: "Work" }],
+            updatedAt: now,
+        });
+        Object.assign(fake.gateway, {
+            async goalContinuation(_instance: string, input: GoalContinuationInput) {
+                if (input.action === "claim") {
+                    continuationPending = true;
+                    return { claimed: true, claimId: input.claimId, continuationCount: 0, goal: goalSnapshot() };
+                }
+                if (input.action === "validate") return { goal: goalSnapshot(), valid: true };
+                if (input.action === "attempt") {
+                    continuationAttemptedAt = now;
+                    return { attempted: true, goal: goalSnapshot() };
+                }
+                if (input.action === "report") throw new Error("goal report persistence failed");
+                if (input.action === "release") {
+                    continuationPending = false;
+                    continuationAttemptedAt = undefined;
+                    return { goal: goalSnapshot(), released: true };
+                }
+                return { goal: goalSnapshot() };
+            },
+            async manageGoal() { return goalSnapshot(); },
+            async readGoal() { return goalSnapshot(); },
+        });
+        const handler = new McpEndpointHandlerInteraction({
+            contextRegistry: registry,
+            gateway: fake.gateway,
+            instanceName: "demo",
+        });
+        const token = await openWorkspace(handler);
+        const claimId = "claim-goal-report-failure";
+        const call = (action: string, extra: Record<string, unknown> = {}) => handler.call(
+            "workspace_reentry",
+            { action, claimId, token, ...extra },
+            context,
+            `call-${action}-goal-report-failure`,
+        );
+        assert.equal((await call("claim", { intent: "automatic" }) as { claimed?: boolean }).claimed, true);
+        assert.equal((await call("validate") as { valid?: boolean }).valid, true);
+        assert.equal((await call("attempt") as { attempted?: boolean }).attempted, true);
+
+        await assert.rejects(call("report", { outcome: "accepted" }), /goal report persistence failed/u);
+        const reentry = await registry.readAutomaticReentry(context.ctxId!, "demo");
+        assert.equal(reentry.claimId, claimId);
+        assert.equal(reentry.attempted, true);
+        assert.equal(continuationPending, true);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("server re-entry arbiter reconciles a source-settled Wait after Context acceptance persistence fails", async () => {
+    const root = await createTestTempDirectory("reentry-context-accept-failure");
+    try {
+        const registry = new McpContextRegistry({
+            filePath: join(root, "contexts.json"),
+            idFactory: () => context.ctxId!,
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo", principal: "local", workspace: "/workspace" });
+        const fake = createInteractionGateway();
+        const now = new Date().toISOString();
+        fake.waits.push({
+            automaticRecovery: true,
+            createdAt: now,
+            createdByCtxId: context.ctxId!,
+            detachedAt: now,
+            kind: "tmux",
+            resolvedAt: now,
+            result: { task: { id: "task-context-accept-failure", status: "0" } },
+            status: "resolved",
+            targetId: "task-context-accept-failure",
+            updatedAt: now,
+            waitId: "wait-context-accept-failure",
+        });
+        const arbiter = new McpWorkspaceReentryArbiter({
+            contextRegistry: registry,
+            gateway: fake.gateway,
+            instanceName: "demo",
+        });
+        const handler = new McpEndpointHandlerInteraction({
+            contextRegistry: registry,
+            gateway: fake.gateway,
+            instanceName: "demo",
+            workspaceReentryArbiter: arbiter,
+        });
+        const token = await openWorkspace(handler);
+        const claimId = "claim-context-accept-failure";
+        const call = (action: string, extra: Record<string, unknown> = {}) => handler.call(
+            "workspace_reentry",
+            { action, claimId, token, ...extra },
+            context,
+            `call-${action}-context-accept-failure`,
+        );
+        assert.equal((await call("claim", { intent: "automatic" }) as { claimed?: boolean }).claimed, true);
+        assert.equal((await call("validate") as { valid?: boolean }).valid, true);
+        assert.equal((await call("attempt") as { attempted?: boolean }).attempted, true);
+
+        const markAccepted = registry.markAutomaticReentryAccepted.bind(registry);
+        Object.assign(registry, {
+            async markAutomaticReentryAccepted() {
+                throw new Error("context acceptance persistence failed");
+            },
+        });
+        await assert.rejects(call("report", { outcome: "accepted" }), /context acceptance persistence failed/u);
+        assert.equal(fake.waits.find((wait) => wait.waitId === "wait-context-accept-failure")?.status, "consumed");
+        assert.equal((await registry.readAutomaticReentry(context.ctxId!, "demo")).claimId, claimId);
+
+        Object.assign(registry, { markAutomaticReentryAccepted: markAccepted });
+        await arbiter.observeExecutionStart(context.ctxId!);
+        const reconciled = await registry.readAutomaticReentry(context.ctxId!, "demo");
+        assert.equal(reconciled.claimId, undefined);
+        assert.equal(reconciled.attempted, false);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("server re-entry arbiter recovers a Goal whose validation cleared the source before Context release failed", async () => {
+    const root = await createTestTempDirectory("reentry-goal-validation-release-failure");
+    try {
+        const registry = new McpContextRegistry({ filePath: join(root, "contexts.json"), idFactory: () => context.ctxId! });
+        await registry.initialize();
+        await registry.create({ instance: "demo", principal: "local", workspace: "/workspace" });
+        const fake = createInteractionGateway();
+        const now = new Date().toISOString();
+        let continuationPending = false;
+        const goalSnapshot = () => ({
+            autoContinueExhausted: false,
+            continuationCount: 0,
+            continuationDue: !continuationPending,
+            continuationDueAt: now,
+            continuationPending,
+            continuationUncertain: false,
+            createdAt: now,
+            goalId: "goal-validation-release-failure",
+            lastAgentActivityAt: now,
+            lastProgressAt: now,
+            maxContinuations: 8,
+            objective: "Recover validation release",
+            revision: 1,
+            status: "active" as const,
+            steps: [{ id: "work", status: "active" as const, text: "Work" }],
+            updatedAt: now,
+        });
+        Object.assign(fake.gateway, {
+            async goalContinuation(_instance: string, input: GoalContinuationInput) {
+                if (input.action === "claim") {
+                    continuationPending = true;
+                    return { claimed: true, claimId: input.claimId, continuationCount: 0, goal: goalSnapshot() };
+                }
+                if (input.action === "validate") {
+                    continuationPending = false;
+                    return { goal: goalSnapshot(), valid: false };
+                }
+                if (input.action === "release") {
+                    if (!continuationPending) throw new Error("goal claim is no longer active");
+                    continuationPending = false;
+                    return { goal: goalSnapshot(), released: true };
+                }
+                return { goal: goalSnapshot() };
+            },
+            async manageGoal() { return goalSnapshot(); },
+            async readGoal() { return goalSnapshot(); },
+        });
+        const handler = new McpEndpointHandlerInteraction({ contextRegistry: registry, gateway: fake.gateway, instanceName: "demo" });
+        const token = await openWorkspace(handler);
+        const claimId = "claim-goal-validation-release-failure";
+        assert.equal((await handler.call(
+            "workspace_reentry",
+            { action: "claim", claimId, intent: "automatic", token },
+            context,
+            "call-goal-validation-release-failure-claim",
+        ) as { claimed?: boolean }).claimed, true);
+
+        const releaseContext = registry.releaseAutomaticReentry.bind(registry);
+        let failContextRelease = true;
+        Object.assign(registry, {
+            async releaseAutomaticReentry(ctxId: string, instance: string, requestedClaimId: string) {
+                if (failContextRelease) throw new Error("context release persistence failed");
+                return await releaseContext(ctxId, instance, requestedClaimId);
+            },
+        });
+        await assert.rejects(
+            handler.call(
+                "workspace_reentry",
+                { action: "validate", claimId, token },
+                context,
+                "call-goal-validation-release-failure-validate",
+            ),
+            /context release persistence failed/u,
+        );
+        assert.equal((await registry.readAutomaticReentry(context.ctxId!, "demo")).claimId, claimId);
+        assert.equal(continuationPending, false);
+
+        failContextRelease = false;
+        const released = await handler.call(
+            "workspace_reentry",
+            { action: "release", claimId, token },
+            context,
+            "call-goal-validation-release-failure-release",
+        ) as { released?: boolean };
+        assert.equal(released.released, true);
+        assert.equal((await registry.readAutomaticReentry(context.ctxId!, "demo")).claimId, undefined);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("server re-entry arbiter does not reset an explicit Goal before its Context source binding commits", async () => {
+    const root = await createTestTempDirectory("reentry-explicit-bind-failure");
+    try {
+        const registry = new McpContextRegistry({ filePath: join(root, "contexts.json"), idFactory: () => context.ctxId! });
+        await registry.initialize();
+        await registry.create({ instance: "demo", principal: "local", workspace: "/workspace" });
+        Object.assign(registry, {
+            async bindAutomaticReentrySource() {
+                throw new Error("explicit source bind persistence failed");
+            },
+        });
+        const fake = createInteractionGateway();
+        const now = new Date().toISOString();
+        const goal = {
+            autoContinueExhausted: false,
+            continuationCount: 1,
+            continuationDue: false,
+            continuationDueAt: "2099-01-01T00:00:00.000Z",
+            continuationPending: false,
+            continuationUncertain: false,
+            createdAt: now,
+            goalId: "goal-explicit-bind-failure",
+            lastAgentActivityAt: now,
+            lastProgressAt: now,
+            maxContinuations: 8,
+            objective: "Retry without partial reset",
+            revision: 1,
+            status: "active" as const,
+            steps: [{ id: "work", status: "active" as const, text: "Work" }],
+            updatedAt: now,
+        };
+        const actions: string[] = [];
+        Object.assign(fake.gateway, {
+            async goalContinuation(_instance: string, input: GoalContinuationInput) {
+                actions.push(input.action);
+                return { goal, reset: input.action === "reset" };
+            },
+            async manageGoal() { return goal; },
+            async readGoal() { return goal; },
+        });
+        const handler = new McpEndpointHandlerInteraction({ contextRegistry: registry, gateway: fake.gateway, instanceName: "demo" });
+        const token = await openWorkspace(handler);
+        const claimId = "claim-explicit-bind-failure";
+        await assert.rejects(
+            handler.call(
+                "workspace_reentry",
+                { action: "claim", claimId, intent: "goal-retry", sourceId: goal.goalId, token },
+                context,
+                "call-explicit-bind-failure",
+            ),
+            /explicit source bind persistence failed/u,
+        );
+        assert.deepEqual(actions, []);
+        assert.equal((await registry.readAutomaticReentry(context.ctxId!, "demo")).claimId, undefined);
     } finally {
         await rm(root, { force: true, recursive: true });
     }

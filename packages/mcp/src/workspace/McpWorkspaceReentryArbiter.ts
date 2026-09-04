@@ -190,11 +190,15 @@ export class McpWorkspaceReentryArbiter {
             await this.#hasBlockingAutomaticWait(gateway, ctxId) ||
             await this.#hasPendingContextApproval(gateway, ctxId)
         ) {
-            await goalGateway.goalContinuation(
-                this.options.instanceName,
-                { action: "release", claimId, goalId: goal.goalId },
+            await this.#runGoalSourceTransitionOrConfirmSettled(
                 ctxId,
-            ).catch(() => undefined);
+                goal.goalId,
+                async () => await goalGateway.goalContinuation(
+                    this.options.instanceName,
+                    { action: "release", claimId, goalId: goal.goalId },
+                    ctxId,
+                ),
+            );
             if (await this.#contextExecutionBusy(gateway, ctxId)) {
                 await this.#consumeResolvedWaitsDuringExecution(gateway, ctxId);
             }
@@ -203,20 +207,41 @@ export class McpWorkspaceReentryArbiter {
 
         const claimedGoal = await goalGateway.readGoal(this.options.instanceName, ctxId);
         if (claimedGoal === undefined) {
-            await goalGateway.goalContinuation(
-                this.options.instanceName,
-                { action: "release", claimId, goalId: goal.goalId },
+            await this.#runGoalSourceTransitionOrConfirmSettled(
                 ctxId,
-            ).catch(() => undefined);
+                goal.goalId,
+                async () => await goalGateway.goalContinuation(
+                    this.options.instanceName,
+                    { action: "release", claimId, goalId: goal.goalId },
+                    ctxId,
+                ),
+            );
             return await this.#releaseUnclaimedContext(ctxId, claimId);
         }
-        await this.options.contextRegistry.bindAutomaticReentrySource(
-            ctxId,
-            this.options.instanceName,
-            claimId,
-            "goal",
-            claimedGoal.goalId,
-        );
+        try {
+            await this.options.contextRegistry.bindAutomaticReentrySource(
+                ctxId,
+                this.options.instanceName,
+                claimId,
+                "goal",
+                claimedGoal.goalId,
+            );
+        } catch (error) {
+            await this.#rollbackUnboundSourceClaim(
+                ctxId,
+                claimId,
+                async () => await this.#runGoalSourceTransitionOrConfirmSettled(
+                    ctxId,
+                    claimedGoal.goalId,
+                    async () => await goalGateway.goalContinuation(
+                        this.options.instanceName,
+                        { action: "release", claimId, goalId: claimedGoal.goalId },
+                        ctxId,
+                    ),
+                ),
+                error,
+            );
+        }
         const delivery = goalReentryDelivery(
             claimedGoal,
             typeof claimed.continuationCount === "number" ? claimed.continuationCount : undefined,
@@ -248,6 +273,21 @@ export class McpWorkspaceReentryArbiter {
         ) {
             return await this.#releaseUnclaimedContext(ctxId, claimId);
         }
+        if (!await this.#explicitSourceAvailable(gateway, ctxId, intent, sourceId)) {
+            return await this.#releaseUnclaimedContext(ctxId, claimId);
+        }
+        let state;
+        try {
+            state = await this.options.contextRegistry.bindAutomaticReentrySource(
+                ctxId,
+                this.options.instanceName,
+                claimId,
+                intent,
+                sourceId,
+            );
+        } catch (error) {
+            await this.#rollbackContextClaimAfterFailure(ctxId, claimId, error);
+        }
         if (intent === "goal-retry") {
             try {
                 await requireGoalGateway(this.options.gateway, this.options.instanceName).goalContinuation(
@@ -256,24 +296,9 @@ export class McpWorkspaceReentryArbiter {
                     ctxId,
                 );
             } catch (error) {
-                await this.options.contextRegistry.releaseAutomaticReentry(
-                    ctxId,
-                    this.options.instanceName,
-                    claimId,
-                ).catch(() => undefined);
-                throw error;
+                await this.#rollbackContextClaimAfterFailure(ctxId, claimId, error);
             }
         }
-        if (!await this.#explicitSourceAvailable(gateway, ctxId, intent, sourceId)) {
-            return await this.#releaseUnclaimedContext(ctxId, claimId);
-        }
-        const state = await this.options.contextRegistry.bindAutomaticReentrySource(
-            ctxId,
-            this.options.instanceName,
-            claimId,
-            intent,
-            sourceId,
-        );
         return {
             ...state,
             claimed: true,
@@ -326,7 +351,7 @@ export class McpWorkspaceReentryArbiter {
         const claimedWait = await this.#claimedWait(gateway, ctxId, claimId);
         const sourceKind = validation.state.sourceKind ?? (claimedWait === undefined ? "goal" : "wait");
         if (await this.#contextExecutionBusy(gateway, ctxId)) {
-            if (claimedWait !== undefined) await gateway.consumeWait(this.options.instanceName, claimedWait.waitId).catch(() => undefined);
+            if (claimedWait !== undefined) await gateway.consumeWait(this.options.instanceName, claimedWait.waitId);
             else await this.#releaseSource(gateway, ctxId, claimId);
             const state = await this.options.contextRegistry.releaseAutomaticReentry(ctxId, this.options.instanceName, claimId);
             return { ...state, valid: false } as unknown as JsonValue;
@@ -341,7 +366,7 @@ export class McpWorkspaceReentryArbiter {
             try {
                 await assertWorkspaceWaitRecoveryAssociationAvailable(this.options, claimedWait, context);
             } catch {
-                await gateway.consumeWait(this.options.instanceName, claimedWait.waitId).catch(() => undefined);
+                await gateway.consumeWait(this.options.instanceName, claimedWait.waitId);
                 return await this.#invalidClaim(ctxId, claimId);
             }
             return { ...validation.state, valid: true } as unknown as JsonValue;
@@ -365,7 +390,7 @@ export class McpWorkspaceReentryArbiter {
             ctxId,
         ));
         const valid = goalValidation?.valid === true;
-        if (!valid) await this.options.contextRegistry.releaseAutomaticReentry(ctxId, this.options.instanceName, claimId).catch(() => undefined);
+        if (!valid) await this.options.contextRegistry.releaseAutomaticReentry(ctxId, this.options.instanceName, claimId);
         const state = await this.options.contextRegistry.readAutomaticReentry(ctxId, this.options.instanceName);
         return { ...state, valid } as unknown as JsonValue;
     }
@@ -401,12 +426,26 @@ export class McpWorkspaceReentryArbiter {
                 if (attempted?.attempted !== true) throw new Error("Workspace Goal continuation attempt was rejected.");
             }
         } catch (error) {
-            await this.#releaseSource(gateway, ctxId, claimId).catch(() => undefined);
-            await this.options.contextRegistry.markAutomaticReentryRejected(
-                ctxId,
-                this.options.instanceName,
-                claimId,
-            ).catch(() => undefined);
+            try {
+                await this.#releaseSource(gateway, ctxId, claimId);
+            } catch (releaseError) {
+                throw new AggregateError(
+                    [error, releaseError],
+                    "Workspace re-entry attempt failed and source rollback was incomplete.",
+                );
+            }
+            try {
+                await this.options.contextRegistry.markAutomaticReentryRejected(
+                    ctxId,
+                    this.options.instanceName,
+                    claimId,
+                );
+            } catch (contextError) {
+                throw new AggregateError(
+                    [error, contextError],
+                    "Workspace re-entry attempt failed and Context rollback was incomplete.",
+                );
+            }
             throw error;
         }
         return { ...state, attempted: true } as unknown as JsonValue;
@@ -432,22 +471,32 @@ export class McpWorkspaceReentryArbiter {
                         this.options.instanceName,
                         ctxId,
                         claimedWait.recoveryGoalProgressEpoch ?? claimedWait.goalProgressEpoch,
-                    ).catch(() => undefined);
+                    );
                 }
                 await recoveryGateway.completeWaitRecovery(this.options.instanceName, claimedWait.waitId, claimId);
             } else {
-                await gateway.consumeWait(this.options.instanceName, claimedWait.waitId).catch(() => undefined);
+                await gateway.consumeWait(this.options.instanceName, claimedWait.waitId);
             }
         } else if (sourceKind === "goal") {
             const goalGateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
             if (outcome !== "uncertain") {
-                await goalGateway.goalContinuation(
-                    this.options.instanceName,
-                    { action: "report", accepted: outcome === "accepted", claimId },
-                    ctxId,
-                ).catch((error: unknown) => {
-                    if (outcome !== "accepted") throw error;
-                });
+                if (outcome === "accepted") {
+                    await this.#runGoalSourceTransitionOrConfirmSettled(
+                        ctxId,
+                        reentry.sourceId,
+                        async () => await goalGateway.goalContinuation(
+                            this.options.instanceName,
+                            { action: "report", accepted: true, claimId },
+                            ctxId,
+                        ),
+                    );
+                } else {
+                    await goalGateway.goalContinuation(
+                        this.options.instanceName,
+                        { action: "report", accepted: false, claimId },
+                        ctxId,
+                    );
+                }
             }
         } else if (
             (sourceKind === "goal-resume" || sourceKind === "goal-retry") &&
@@ -460,15 +509,13 @@ export class McpWorkspaceReentryArbiter {
                     this.options.instanceName,
                     ctxId,
                     goal.progressEpoch,
-                ).catch(() => undefined);
+                );
             }
         }
 
         const state = outcome === "rejected"
             ? await this.options.contextRegistry.markAutomaticReentryRejected(ctxId, this.options.instanceName, claimId)
-            : await this.options.contextRegistry.markAutomaticReentryAccepted(ctxId, this.options.instanceName, claimId).catch(async () =>
-                await this.options.contextRegistry.readAutomaticReentry(ctxId, this.options.instanceName)
-            );
+            : await this.#markContextAcceptedOrConfirmSettled(ctxId, claimId);
         return { ...state, outcome, reported: true } as unknown as JsonValue;
     }
 
@@ -478,22 +525,27 @@ export class McpWorkspaceReentryArbiter {
         claimId: string,
     ): Promise<WorkspaceReentryDelivery | undefined> {
         if (!isMcpWaitRecoveryGateway(this.options.gateway)) return undefined;
+        const recoveryGateway = this.options.gateway;
         const ctxId = requireCtxId(context);
         const candidates = await this.#resolvedAutomaticWaits(gateway, ctxId);
         for (const wait of candidates) {
             if (wait.recoveryMessageAttemptedAt !== undefined || wait.recoveryMessageSentAt !== undefined) {
-                await gateway.consumeWait(this.options.instanceName, wait.waitId).catch(() => undefined);
+                await gateway.consumeWait(this.options.instanceName, wait.waitId);
                 continue;
             }
             try {
                 await assertWorkspaceWaitRecoveryAssociationAvailable(this.options, wait, context);
             } catch {
-                await gateway.consumeWait(this.options.instanceName, wait.waitId).catch(() => undefined);
+                await gateway.consumeWait(this.options.instanceName, wait.waitId);
                 continue;
             }
             let claimed: WaitRecord;
             try {
-                claimed = await this.options.gateway.claimWaitRecovery(this.options.instanceName, wait.waitId, claimId);
+                claimed = await recoveryGateway.claimWaitRecovery(this.options.instanceName, wait.waitId, claimId);
+            } catch {
+                return undefined;
+            }
+            try {
                 await this.options.contextRegistry.bindAutomaticReentrySource(
                     ctxId,
                     this.options.instanceName,
@@ -501,9 +553,17 @@ export class McpWorkspaceReentryArbiter {
                     "wait",
                     claimed.waitId,
                 );
-            } catch {
-                await this.options.gateway.releaseWaitRecovery(this.options.instanceName, wait.waitId, claimId).catch(() => undefined);
-                return undefined;
+            } catch (error) {
+                await this.#rollbackUnboundSourceClaim(
+                    ctxId,
+                    claimId,
+                    async () => await recoveryGateway.releaseWaitRecovery(
+                        this.options.instanceName,
+                        wait.waitId,
+                        claimId,
+                    ),
+                    error,
+                );
             }
             return waitReentryDelivery(claimed, await this.#workspaceSnapshot(gateway, ctxId));
         }
@@ -514,7 +574,7 @@ export class McpWorkspaceReentryArbiter {
         const reentry = await this.options.contextRegistry.readAutomaticReentry(
             ctxId,
             this.options.instanceName,
-        ).catch(() => undefined);
+        );
         if (reentry?.claimId !== claimId) return;
         if (reentry.sourceKind === "wait") {
             const claimedWait = await this.#claimedWait(gateway, ctxId, claimId);
@@ -523,16 +583,105 @@ export class McpWorkspaceReentryArbiter {
                     this.options.instanceName,
                     claimedWait.waitId,
                     claimId,
-                ).catch(() => undefined);
+                );
             }
             return;
         }
         if (reentry.sourceKind === "goal" && isMcpGoalGateway(this.options.gateway)) {
-            await this.options.gateway.goalContinuation(
-                this.options.instanceName,
-                { action: "release", claimId },
+            const goalGateway = this.options.gateway;
+            await this.#runGoalSourceTransitionOrConfirmSettled(
                 ctxId,
-            ).catch(() => undefined);
+                reentry.sourceId,
+                async () => await goalGateway.goalContinuation(
+                    this.options.instanceName,
+                    { action: "release", claimId },
+                    ctxId,
+                ),
+            );
+        }
+    }
+
+    async #rollbackContextClaimAfterFailure(
+        ctxId: string,
+        claimId: string,
+        error: unknown,
+    ): Promise<never> {
+        try {
+            await this.options.contextRegistry.releaseAutomaticReentry(ctxId, this.options.instanceName, claimId);
+        } catch (contextError) {
+            throw new AggregateError(
+                [error, contextError],
+                "Workspace re-entry operation failed and Context claim rollback was incomplete.",
+            );
+        }
+        throw error;
+    }
+
+    async #rollbackUnboundSourceClaim(
+        ctxId: string,
+        claimId: string,
+        releaseSource: () => Promise<unknown>,
+        error: unknown,
+    ): Promise<never> {
+        try {
+            await releaseSource();
+        } catch (releaseError) {
+            throw new AggregateError(
+                [error, releaseError],
+                "Workspace re-entry source claim rollback was incomplete.",
+            );
+        }
+        try {
+            await this.options.contextRegistry.releaseAutomaticReentry(ctxId, this.options.instanceName, claimId);
+        } catch (contextError) {
+            throw new AggregateError(
+                [error, contextError],
+                "Workspace re-entry Context claim rollback was incomplete.",
+            );
+        }
+        throw error;
+    }
+
+    async #markContextAcceptedOrConfirmSettled(
+        ctxId: string,
+        claimId: string,
+    ) {
+        try {
+            return await this.options.contextRegistry.markAutomaticReentryAccepted(
+                ctxId,
+                this.options.instanceName,
+                claimId,
+            );
+        } catch (error) {
+            const state = await this.options.contextRegistry.readAutomaticReentry(ctxId, this.options.instanceName);
+            if (state.claimId === claimId) throw error;
+            return state;
+        }
+    }
+
+    async #runGoalSourceTransitionOrConfirmSettled(
+        ctxId: string,
+        sourceId: string | undefined,
+        operation: () => Promise<unknown>,
+    ): Promise<void> {
+        try {
+            await operation();
+            return;
+        } catch (error) {
+            if (sourceId === undefined) throw error;
+            const goalGateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
+            let goal;
+            try {
+                goal = await goalGateway.readGoal(this.options.instanceName, ctxId);
+            } catch (readError) {
+                throw new AggregateError(
+                    [error, readError],
+                    "Workspace Goal source transition failed and durable source state could not be read.",
+                );
+            }
+            if (goal?.goalId === sourceId && goal.continuationPending) {
+                throw error;
+            }
         }
     }
 
@@ -549,15 +698,31 @@ export class McpWorkspaceReentryArbiter {
         let settled = true;
         try {
             if (state.sourceKind === "wait") {
-                if (sourceId === undefined || this.options.gateway?.completeWaitRecovery === undefined) settled = false;
-                else await this.options.gateway.completeWaitRecovery(this.options.instanceName, sourceId, claimId);
+                if (sourceId === undefined || this.options.gateway?.completeWaitRecovery === undefined) {
+                    settled = false;
+                } else {
+                    try {
+                        await this.options.gateway.completeWaitRecovery(this.options.instanceName, sourceId, claimId);
+                    } catch {
+                        const wait = (await this.options.gateway.listWaits?.(this.options.instanceName))
+                            ?.find((candidate) => candidate.waitId === sourceId);
+                        settled = wait?.status === "consumed" || wait?.status === "cancelled";
+                    }
+                }
             } else if (state.sourceKind === "goal") {
-                if (this.options.gateway?.goalContinuation === undefined) settled = false;
-                else await this.options.gateway.goalContinuation(
-                    this.options.instanceName,
-                    { action: "report", accepted: true, claimId, ...(sourceId === undefined ? {} : { goalId: sourceId }) },
-                    ctxId,
-                );
+                if (this.options.gateway?.goalContinuation === undefined) {
+                    settled = false;
+                } else {
+                    await this.#runGoalSourceTransitionOrConfirmSettled(
+                        ctxId,
+                        sourceId,
+                        async () => await this.options.gateway!.goalContinuation!(
+                            this.options.instanceName,
+                            { action: "report", accepted: true, claimId, ...(sourceId === undefined ? {} : { goalId: sourceId }) },
+                            ctxId,
+                        ),
+                    );
+                }
             } else if (state.sourceKind === "goal-resume" || state.sourceKind === "goal-retry") {
                 if (this.options.gateway?.recordGoalReentry !== undefined) {
                     const goal = await this.options.gateway.readGoal?.(this.options.instanceName, ctxId);
@@ -627,7 +792,7 @@ export class McpWorkspaceReentryArbiter {
 
     async #consumeResolvedWaitsDuringExecution(gateway: McpInteractionGateway, ctxId: string): Promise<void> {
         for (const wait of await this.#resolvedAutomaticWaits(gateway, ctxId)) {
-            await gateway.consumeWait(this.options.instanceName, wait.waitId).catch(() => undefined);
+            await gateway.consumeWait(this.options.instanceName, wait.waitId);
         }
     }
 
