@@ -806,9 +806,15 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return /ctxId is disabled|Context is disabled/i.test(message);
   }
 
+  function workspaceFeatureDisabled(error) {
+    var message = error && error.message ? String(error.message) : String(error || "");
+    return /Tool workspace_[A-Za-z0-9_]+ is not exposed/i.test(message);
+  }
+
   function workspaceTerminalStatus(error) {
     if (workspaceContextExpired(error)) return "Context expired — continue in chat";
     if (workspaceContextDisabled(error)) return "Context disabled";
+    if (workspaceFeatureDisabled(error)) return "Workspace disabled";
     if (workspaceAuthorizationFailed(error)) return "Reopen Workspace";
     return "";
   }

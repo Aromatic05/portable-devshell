@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
+import { EXTENSION_ID, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
@@ -68,6 +68,7 @@ export class McpEndpointBinding {
             },
             {
                 capabilities: {
+                    ...(workspaceApp ? { extensions: { [EXTENSION_ID]: {} } } : {}),
                     ...(workspaceApp ? { resources: {} } : {}),
                     tools: {}
                 }

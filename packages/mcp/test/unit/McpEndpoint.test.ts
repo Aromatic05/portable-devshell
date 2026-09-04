@@ -174,6 +174,18 @@ test("MCP endpoint without Workspace policy does not expose HTML resources", asy
 
     try {
         const session = await initialize(server.url);
+        assert.equal(session.initializeResult?.capabilities?.extensions?.["io.modelcontextprotocol/ui"], undefined);
+        const tools = await postJson(server.url, {
+            id: "req-tools-workspace-disabled",
+            jsonrpc: "2.0",
+            method: "tools/list",
+            params: {}
+        }, session.headers);
+        const toolNames = (tools.body.result?.tools as Array<{ name?: string }> | undefined)?.map((tool) => tool.name) ?? [];
+        assert.equal(toolNames.includes("environ_info"), true);
+        assert.equal(toolNames.includes("bash_run"), true);
+        assert.equal(toolNames.some((name) => name?.startsWith("workspace_")), false);
+
         const listed = await postJson(server.url, {
             id: "req-resources-disabled",
             jsonrpc: "2.0",
@@ -194,6 +206,7 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
 
     try {
         const session = await initialize(server.url);
+        assert.deepEqual(session.initializeResult?.capabilities?.extensions?.["io.modelcontextprotocol/ui"], {});
         const listed = await postJson(server.url, {
             id: "req-resources-list",
             jsonrpc: "2.0",
@@ -1292,7 +1305,12 @@ async function handleRequest(binding: McpEndpointBinding, request: IncomingMessa
     await binding.handleRequest(request, response, body);
 }
 
-async function initialize(url: string): Promise<{ headers: Record<string, string> }> {
+async function initialize(url: string): Promise<{
+    headers: Record<string, string>;
+    initializeResult?: {
+        capabilities?: { extensions?: Record<string, JsonValue> };
+    };
+}> {
     const response = await postJson(url, await readFixture("mcp-initialize.json"));
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("mcp-session-id"), null);
@@ -1310,7 +1328,12 @@ async function initialize(url: string): Promise<{ headers: Record<string, string
     );
 
     assert.equal(initialized.status, 202);
-    return { headers };
+    return {
+        headers,
+        initializeResult: response.body.result as {
+            capabilities?: { extensions?: Record<string, JsonValue> };
+        } | undefined,
+    };
 }
 
 async function createContext(url: string, headers: Record<string, string>, workspace = "/workspace"): Promise<string> {

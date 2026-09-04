@@ -398,6 +398,26 @@ test("disabling Workspace policy removes live transport and revokes existing App
         assert.equal(goalRecovery.pending, false);
         assert.equal(goalRecovery.retired, 2);
         const disabledEndpoint = `http://127.0.0.1:${requireTcpPort(disabled.server.address)}/demo/mcp`;
+        const disabledToolsResponse = await fetch(disabledEndpoint, {
+            body: JSON.stringify({
+                id: "disabled-workspace-tools",
+                jsonrpc: "2.0",
+                method: "tools/list",
+                params: {},
+            }),
+            headers: {
+                accept: "application/json, text/event-stream",
+                "content-type": "application/json",
+            },
+            method: "POST",
+        });
+        assert.equal(disabledToolsResponse.status, 200);
+        const disabledTools = parseMcpHttpResponse(await disabledToolsResponse.text()) as {
+            result?: { tools?: Array<{ name?: string }> };
+        };
+        const disabledToolNames = (disabledTools.result?.tools as Array<{ name?: string }> | undefined)?.map((tool) => tool.name) ?? [];
+        assert.equal(disabledToolNames.includes("environ_info"), true);
+        assert.equal(disabledToolNames.some((name) => name?.startsWith("workspace_")), false);
         const disabledOpen = await callMcpTool(disabledEndpoint, "workspace_open", { ctxId: created.ctxId });
         assert.match(disabledOpen.error?.message ?? "", /not exposed/i);
         const disabledLive = await fetch(

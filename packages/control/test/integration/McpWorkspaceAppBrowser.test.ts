@@ -1196,6 +1196,30 @@ test("Workspace remount follows current ChatGPT tool output and falls back to wi
     assert.equal(await page.evaluate("(window.__remountCalls || []).some(call => call.arguments.ctxId === 'ctx-stale')"), false);
 });
 
+test("mounted Workspace stops reconnecting after Workspace tools are disabled", BROWSER_TEST_OPTIONS, async (t) => {
+    const browser = await launchBrowser();
+    t.after(async () => await browser.close());
+
+    const page = await browser.newPage();
+    await page.setContent('<iframe id="workspace" style="width:800px;height:320px"></iframe>');
+    await page.evaluate(WORKSPACE_DISABLED_BRIDGE_SCRIPT);
+    await page.evaluate((html) => {
+        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+        if (iframe === null) throw new Error("Workspace iframe is missing.");
+        iframe.srcdoc = html;
+    }, workspaceAppHtml);
+
+    const app = page.frameLocator("#workspace");
+    await app.getByText("Ready", { exact: true }).waitFor({ state: "visible" });
+    await page.waitForFunction("window.__disabledWorkspacePendingWatch !== null");
+    assert.equal(await page.evaluate("window.__disableWorkspacePolicy()"), true);
+    await app.getByText("Workspace disabled", { exact: true }).waitFor({ state: "visible" });
+
+    const callsAfterDisable = await page.evaluate("window.__disabledWorkspaceCalls.length") as number;
+    await page.waitForTimeout(1_200);
+    assert.equal(await page.evaluate("window.__disabledWorkspaceCalls.length"), callsAfterDisable);
+});
+
 async function launchBrowser(): Promise<Browser> {
     if (CHROMIUM_EXECUTABLE === undefined) {
         throw new Error("A Chromium executable is required for this browser test.");
@@ -1219,6 +1243,96 @@ function resolveChromiumExecutable(): string | undefined {
     ].filter((candidate): candidate is string => candidate !== undefined && candidate.length > 0);
     return candidates.find((candidate) => existsSync(candidate));
 }
+
+const WORKSPACE_DISABLED_BRIDGE_SCRIPT = String.raw`
+window.__disabledWorkspaceCalls = [];
+window.__disabledWorkspacePolicy = false;
+window.__disabledWorkspacePendingWatch = null;
+
+window.__disableWorkspacePolicy = function () {
+    window.__disabledWorkspacePolicy = true;
+    var pending = window.__disabledWorkspacePendingWatch;
+    if (!pending) return false;
+    window.__disabledWorkspacePendingWatch = null;
+    pending.source.postMessage({
+        error: { code: -32601, message: "Tool workspace_watch is not exposed for instance browser-instance." },
+        id: pending.id,
+        jsonrpc: "2.0"
+    }, "*");
+    return true;
+};
+
+window.addEventListener("message", function (event) {
+    if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
+    var source = event.source;
+    var message = event.data;
+    function reply(result) {
+        if (message.id === undefined) return;
+        source.postMessage({ id: message.id, jsonrpc: "2.0", result: result }, "*");
+    }
+    function disabled() {
+        if (message.id === undefined) return;
+        source.postMessage({
+            error: { code: -32601, message: "Tool " + ((message.params || {}).name || "workspace") + " is not exposed for instance browser-instance." },
+            id: message.id,
+            jsonrpc: "2.0"
+        }, "*");
+    }
+
+    if (message.method === "ui/initialize") {
+        source.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-input",
+            params: { arguments: { ctxId: "ctx-disabled-workspace" } }
+        }, "*");
+        source.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-result",
+            params: {
+                _meta: { "portable-devshell/workspace": { token: "disabled-workspace-token" } },
+                content: [{ type: "text", text: "portable-devshell Workspace opened." }],
+                structuredContent: { ctxId: "ctx-disabled-workspace", instance: "browser-instance" }
+            }
+        }, "*");
+        reply({
+            hostCapabilities: {},
+            hostContext: {},
+            hostInfo: { name: "test-host", version: "1.0.0" },
+            protocolVersion: "2026-01-26"
+        });
+        return;
+    }
+    if (message.method === "ui/update-model-context") {
+        reply({});
+        return;
+    }
+    if (message.method !== "tools/call") return;
+
+    var call = message.params || {};
+    window.__disabledWorkspaceCalls.push(call);
+    if (window.__disabledWorkspacePolicy) {
+        disabled();
+        return;
+    }
+    if (call.name === "workspace_snapshot" || call.name === "workspace_reconnect") {
+        reply({
+            _meta: { "portable-devshell/workspace": { token: "disabled-workspace-token" } },
+            structuredContent: {
+                activity: [], approvals: [], background: [], currentEvent: null, questions: [], tasks: [], waits: [],
+                contextSelector: { requiresExplicitContextId: true },
+                ctxId: "ctx-disabled-workspace", cursor: 1, instance: "browser-instance",
+                reentry: { attempted: false, epoch: 0, executionActive: false, executionEpoch: 0, mode: "automatic", pending: false }
+            }
+        });
+        return;
+    }
+    if (call.name === "workspace_watch") {
+        window.__disabledWorkspacePendingWatch = { id: message.id, source: source };
+        return;
+    }
+    reply({ structuredContent: {} });
+});
+`;
 
 const REMOUNT_BRIDGE_SCRIPT = String.raw`
 window.__remountCalls = [];
