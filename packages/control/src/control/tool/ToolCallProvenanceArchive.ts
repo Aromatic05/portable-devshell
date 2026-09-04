@@ -9,7 +9,7 @@ import {
     writeFile
 } from "node:fs/promises";
 import { join } from "node:path";
-import { constants as zlibConstants, zstdCompressSync, zstdDecompressSync } from "node:zlib";
+import { constants as zlibConstants, zstdCompress, zstdDecompress } from "node:zlib";
 
 import type { McpToolProvenanceRecord } from "@portable-devshell/mcp";
 
@@ -85,7 +85,6 @@ export class ToolCallProvenanceArchive {
     }
 
     async lookup(keys: readonly string[]): Promise<Map<string, StoredToolCallProvenance>> {
-        await this.#pruneRetention();
         const cutoff = this.#now() - this.#retentionMs;
         const byArchive = new Map<string, Set<string>>();
         for (const key of keys) {
@@ -190,7 +189,7 @@ export function isStoredToolCallProvenance(value: unknown): value is StoredToolC
 
 async function readArchive(path: string): Promise<StoredToolCallProvenance[]> {
     const compressed = await readFile(path);
-    const source = zstdDecompressSync(compressed).toString("utf8");
+    const source = (await decompress(compressed)).toString("utf8");
     return parseRecords(source);
 }
 
@@ -199,7 +198,7 @@ async function writeArchive(
     records: readonly StoredToolCallProvenance[]
 ): Promise<void> {
     const source = serializeRecords(records);
-    const compressed = zstdCompressSync(Buffer.from(source, "utf8"), {
+    const compressed = await compress(Buffer.from(source, "utf8"), {
         params: { [zlibConstants.ZSTD_c_compressionLevel]: 1 }
     });
     const temporary = `${path}.${randomUUID()}.tmp`;
@@ -210,6 +209,18 @@ async function writeArchive(
         await unlink(temporary).catch(() => undefined);
         throw error;
     }
+}
+
+function decompress(source: Buffer): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+        zstdDecompress(source, (error, result) => error === null ? resolve(result) : reject(error));
+    });
+}
+
+function compress(source: Buffer, options: Parameters<typeof zstdCompress>[1]): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+        zstdCompress(source, options, (error, result) => error === null ? resolve(result) : reject(error));
+    });
 }
 
 export function parseRecords(

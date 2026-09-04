@@ -38,6 +38,10 @@ export class TodoStore {
         return structuredClone(this.#document);
     }
 
+    readActive(): TodoDocument {
+        return { active: structuredClone(this.#document.active), archived: [], version: 4 };
+    }
+
     reload(): TodoDocument {
         this.#document = this.#loadFromDisk();
         return this.read();

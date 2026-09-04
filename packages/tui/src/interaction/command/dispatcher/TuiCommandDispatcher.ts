@@ -5,7 +5,8 @@ import type {
     ConfigBatchUpdateRequest,
     ConfigDraft,
     ArtifactViewImageResult,
-    JsonValue
+    JsonValue,
+    ToolCallRecord
 } from "@portable-devshell/shared";
 
 import type { TuiFocusManager } from "../../focus/TuiFocusManager.js";
@@ -49,6 +50,7 @@ export interface TuiCommandDispatcherOptions {
         toolName: string,
         input: string
     ): Promise<boolean>;
+    onToolCallDetail?(instance: string, callId: string): Promise<ToolCallRecord | undefined>;
     onContextMessage?(instance: string, ctxId: string, text: string): Promise<void>;
     onContextDisable?(instance: string, ctxId: string): Promise<void>;
     onContextRenew?(instance: string, ctxId: string): Promise<void>;
@@ -94,6 +96,7 @@ export class TuiCommandDispatcher {
             dispatch: (intent) => this.dispatch(intent),
             focusManager: this.#focusManager,
             onArtifactViewImage: options.onArtifactViewImage,
+            onToolCallDetail: options.onToolCallDetail,
             store: this.#store
         });
         this.#editor = new TuiCommandDispatcherEditor({

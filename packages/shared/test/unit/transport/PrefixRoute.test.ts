@@ -143,6 +143,49 @@ test("PrefixRoute consumes destination/module and gives the handler a local oper
     assert.deepEqual(reply.event.payload, { items: [] });
 });
 
+test("request.cancel aborts only the addressed server request", async (t) => {
+    let started!: () => void;
+    const startedPromise = new Promise<void>((resolve) => { started = resolve; });
+    let aborted!: () => void;
+    const abortedPromise = new Promise<void>((resolve) => { aborted = resolve; });
+    const snapshot = PrefixRoute.snapshot([{
+        destination: instance,
+        modules: [{
+            name: "service",
+            operations: [{
+                name: "slow",
+                handle: async (_request, context) => {
+                    started();
+                    await new Promise<void>((_resolve, reject) => {
+                        context.signal.addEventListener("abort", () => {
+                            aborted();
+                            reject(context.signal.reason);
+                        }, { once: true });
+                    });
+                    return undefined;
+                },
+            }],
+        }],
+    }]);
+    const value = await pair(() => snapshot);
+    t.after(() => closePair(value));
+
+    await value.client.send(instance, "service", { id: "tui-slow", name: "slow" });
+    await startedPromise;
+    await value.client.send(instance, "request", {
+        id: "tui-cancel",
+        name: "cancel",
+        payload: { requestId: "tui-slow" },
+    });
+    await abortedPromise;
+
+    const replies = [await value.events.next(), await value.events.next()];
+    const cancelReply = replies.find((reply) => reply.event.replyTo === "tui-cancel");
+    const slowReply = replies.find((reply) => reply.event.replyTo === "tui-slow");
+    assert.equal(cancelReply?.event.error, undefined);
+    assert.equal(slowReply?.event.error?.message, "Request cancelled by client.");
+});
+
 test("PrefixRoute returns normal protocol errors for missing destination, module, and operation", async (t) => {
     const snapshot = PrefixRoute.snapshot([
         {

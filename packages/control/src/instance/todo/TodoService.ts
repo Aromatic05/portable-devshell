@@ -39,15 +39,15 @@ export class TodoService {
 
     async read(input?: TodoReadInput | string): Promise<TodoReadResult> {
         await this.#operation;
-        return this.#readDocument(this.#store.read(), input);
+        return this.#readDocument(input === undefined ? this.#store.readActive() : this.#store.read(), input);
     }
 
     summaries(): ActiveTodoSummary[] {
-        return this.#state.activeSummaries(this.#store.read());
+        return this.#state.activeSummaries(this.#store.readActive());
     }
 
     currentAssociation(ctxId?: string): ToolCallAssociation | undefined {
-        return this.#state.currentAssociation(this.#store.read(), ctxId);
+        return this.#state.currentAssociation(this.#store.readActive(), ctxId);
     }
 
     async write(

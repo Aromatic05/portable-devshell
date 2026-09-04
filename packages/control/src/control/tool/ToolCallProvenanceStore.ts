@@ -50,6 +50,10 @@ export class ToolCallProvenanceStore implements McpToolProvenanceRecorder {
         });
     }
 
+    async warmup(): Promise<void> {
+        await this.#initialize();
+    }
+
     async record(record: McpToolProvenanceRecord): Promise<void> {
         if (record.purpose === undefined && record.explanation === undefined) return;
         await this.#initialize();
@@ -72,13 +76,20 @@ export class ToolCallProvenanceStore implements McpToolProvenanceRecorder {
     async decorate(instance: string, records: readonly ToolCallRecord[]): Promise<ToolCallRecord[]> {
         await this.#initialize();
         const operation = this.#mutation.then(async () => {
-            await this.#pruneHotRetention();
+            const cutoff = this.#now() - this.#retentionMs;
             const keys = records.map((record) => provenanceKey(instance, record.callId));
-            const missing = keys.filter((key) => !this.#hotRecords.has(key));
+            const hot = new Map<string, StoredToolCallProvenance>();
+            for (const key of keys) {
+                const provenance = this.#hotRecords.get(key);
+                if (provenance !== undefined && Date.parse(provenance.recordedAt) >= cutoff) {
+                    hot.set(key, provenance);
+                }
+            }
+            const missing = keys.filter((key) => !hot.has(key));
             const cold = missing.length === 0 ? new Map() : await this.#archive.lookup(missing);
             return records.map((record) => {
                 const key = provenanceKey(instance, record.callId);
-                const provenance = this.#hotRecords.get(key) ?? cold.get(key);
+                const provenance = hot.get(key) ?? cold.get(key);
                 if (provenance === undefined) return record;
                 return {
                     ...record,

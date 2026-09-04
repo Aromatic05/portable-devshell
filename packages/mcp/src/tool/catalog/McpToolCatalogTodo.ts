@@ -1,4 +1,12 @@
-import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
+import {
+    TODO_MAX_CHECKPOINT_BLOCKERS,
+    TODO_MAX_ID_LENGTH,
+    TODO_MAX_ITEMS,
+    TODO_MAX_TEXT_LENGTH,
+    TODO_MAX_TITLE_LENGTH,
+    type JsonValue,
+    type ToolDefinition
+} from "@portable-devshell/shared";
 
 export type McpToolCatalogTodoName = "todo_read" | "todo_write";
 
@@ -15,16 +23,19 @@ const todoItemSchema: JsonValue = {
         content: {
             description: "Complete user-visible description of this todo item.",
             minLength: 1,
+            maxLength: TODO_MAX_TEXT_LENGTH,
             type: "string"
         },
         detail: {
             description: "Additional status detail. Required when status is blocked or failed.",
             minLength: 1,
+            maxLength: TODO_MAX_TEXT_LENGTH,
             type: "string"
         },
         id: {
             description: "Stable identifier unique within the complete todo list.",
             minLength: 1,
+            maxLength: TODO_MAX_ID_LENGTH,
             type: "string"
         },
         status: {
@@ -58,9 +69,9 @@ const todoSummarySchema: JsonValue = {
 const checkpointOutputSchema: JsonValue = {
     additionalProperties: false,
     properties: {
-        blockers: { items: { minLength: 1, type: "string" }, type: "array" },
-        next: { minLength: 1, type: "string" },
-        summary: { minLength: 1, type: "string" },
+        blockers: { items: { minLength: 1, maxLength: TODO_MAX_TEXT_LENGTH, type: "string" }, maxItems: TODO_MAX_CHECKPOINT_BLOCKERS, type: "array" },
+        next: { minLength: 1, maxLength: TODO_MAX_TEXT_LENGTH, type: "string" },
+        summary: { minLength: 1, maxLength: TODO_MAX_TEXT_LENGTH, type: "string" },
         updatedAt: { minLength: 1, type: "string" },
     },
     required: ["summary", "updatedAt"],
@@ -146,9 +157,9 @@ export class McpToolCatalogTodo {
                         additionalProperties: false,
                         description: "Optional durable handoff checkpoint. Omit to preserve the previous checkpoint.",
                         properties: {
-                            blockers: { items: { minLength: 1, type: "string" }, type: "array" },
-                            next: { minLength: 1, type: "string" },
-                            summary: { minLength: 1, type: "string" },
+                            blockers: { items: { minLength: 1, maxLength: TODO_MAX_TEXT_LENGTH, type: "string" }, maxItems: TODO_MAX_CHECKPOINT_BLOCKERS, type: "array" },
+                            next: { minLength: 1, maxLength: TODO_MAX_TEXT_LENGTH, type: "string" },
+                            summary: { minLength: 1, maxLength: TODO_MAX_TEXT_LENGTH, type: "string" },
                         },
                         required: ["summary"],
                         type: "object",
@@ -161,11 +172,13 @@ export class McpToolCatalogTodo {
                     taskId: {
                         description: "Stable task identifier returned when the task was created. Prefer this on every update; omit when creating revision 0.",
                         minLength: 1,
+                        maxLength: TODO_MAX_ID_LENGTH,
                         type: "string"
                     },
                     title: {
                         description: "Immutable task namespace, unique among live tasks.",
                         minLength: 1,
+                        maxLength: TODO_MAX_TITLE_LENGTH,
                         type: "string"
                     },
                     todos: {
@@ -177,6 +190,7 @@ export class McpToolCatalogTodo {
                         },
                         items: todoItemSchema,
                         maxContains: 1,
+                        maxItems: TODO_MAX_ITEMS,
                         minContains: 0,
                         type: "array",
                     },

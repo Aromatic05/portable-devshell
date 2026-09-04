@@ -419,8 +419,10 @@ test("AuditDatabase queries bounded tool-call history and failure summaries with
                 callId: "ctx-b",
                 completedAt: "2026-09-01T10:00:00.000Z",
                 ctxId: "ctx-b",
+                input: { command: "echo secret" },
                 inputSummary: "{}",
                 instance: instanceName,
+                output: { text: "x".repeat(4_096) },
                 source: "mcp",
                 startedAt: "2026-09-01T09:59:00.000Z",
                 status: "completed",
@@ -449,6 +451,16 @@ test("AuditDatabase queries bounded tool-call history and failure summaries with
                 .map((record) => record.callId),
             ["ctx-b"],
         );
+        const compact = await store.readQuery({
+            includeInput: false,
+            includeOutput: false,
+            limit: 10,
+            maxBytes: 1024,
+        });
+        assert.equal(compact.some((record) => record.callId === "ctx-b"), true);
+        assert.equal(compact.find((record) => record.callId === "ctx-b")?.input, undefined);
+        assert.equal(compact.find((record) => record.callId === "ctx-b")?.output, undefined);
+        assert.equal(Buffer.byteLength(JSON.stringify(compact), "utf8") <= 1024, true);
         assert.deepEqual(
             await store.readFailureSummary(now - 24 * 60 * 60 * 1_000, now),
             { count: 2, latest: records[2] },

@@ -292,7 +292,7 @@ test("operational overview counts the full 24 hour failure window while bounding
     assert.equal(overview.activity.length, 20);
     assert.equal(overview.activity.some((activity) => activity.callId === "older-failure"), false);
     assert.equal(overview.activity[0]?.callId, "future-failure");
-    assert.deepEqual(activityQuery, { limit: 20 });
+    assert.deepEqual(activityQuery, { includeInput: false, includeOutput: false, limit: 20, maxBytes: 128 * 1024 });
     assert.deepEqual(failureWindow, [now.getTime() - 24 * 60 * 60 * 1_000, now.getTime()]);
 });
 

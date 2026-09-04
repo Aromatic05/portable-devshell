@@ -207,7 +207,10 @@ test("tool route inputs preserve call defaults, filters, and approval metadata",
             before: "2026-02-01",
             callIds: ["call-1", "call-2"],
             ctxId: "ctx-1",
+            includeInput: false,
+            includeOutput: true,
             limit: 25,
+            maxBytes: 4096,
             source: "mcp",
             status: "pendingApproval",
             toolName: "bash_run"
@@ -217,7 +220,10 @@ test("tool route inputs preserve call defaults, filters, and approval metadata",
             before: "2026-02-01",
             callIds: ["call-1", "call-2"],
             ctxId: "ctx-1",
+            includeInput: false,
+            includeOutput: true,
             limit: 25,
+            maxBytes: 4096,
             source: "mcp",
             status: "pendingApproval",
             toolName: "bash_run"
@@ -250,8 +256,12 @@ test("tool route inputs reject malformed filters and approval decisions", () => 
         () => readToolCallQuery({ callIds: ["call-1", null] } as never),
         () => readToolCallQuery({ callIds: [""] }),
         () => readToolCallQuery({ ctxId: 1 } as never),
+        () => readToolCallQuery({ includeInput: "yes" } as never),
+        () => readToolCallQuery({ includeOutput: "yes" } as never),
         () => readToolCallQuery({ limit: "10" } as never),
         () => readToolCallQuery({ limit: 1.5 }),
+        () => readToolCallQuery({ maxBytes: "1024" } as never),
+        () => readToolCallQuery({ maxBytes: 1.5 }),
         () => readToolCallQuery({ source: "web" }),
         () => readToolCallQuery({ status: "queued" }),
         () => readToolCallQuery({ toolName: 1 } as never),
@@ -288,6 +298,11 @@ test("tool call responses stay bounded while preserving pagination direction", (
     assertTargetInvalid(() => limitToolCallResponse([
         { ...records[0]!, output: { text: "x".repeat(9 * 1024 * 1024) } }
     ], { callIds: ["call-1"], limit: 1 }));
+
+    assert.deepEqual(
+        limitToolCallResponse(records, { limit: 200, maxBytes: 4 * 1024 * 1024 }).map((record) => record.callId),
+        ["call-3"],
+    );
 });
 
 function assertTargetInvalid(action: () => unknown): void {

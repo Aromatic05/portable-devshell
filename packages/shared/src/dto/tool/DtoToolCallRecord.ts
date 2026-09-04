@@ -29,7 +29,10 @@ export interface ToolCallQuery {
     before?: string;
     callIds?: string[];
     ctxId?: string;
+    includeInput?: boolean;
+    includeOutput?: boolean;
     limit?: number;
+    maxBytes?: number;
     source?: ToolCallSource;
     status?: ToolCallStatus;
     toolName?: string;

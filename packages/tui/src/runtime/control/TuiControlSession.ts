@@ -10,6 +10,7 @@ import {
     type InstanceListEntry,
     type InstanceSnapshot,
     type JsonValue,
+    type ToolCallRecord,
     type TodoReadInput,
 } from "@portable-devshell/shared";
 import {
@@ -164,6 +165,10 @@ export class TuiControlSession {
             instance,
             ["toolCalls", "approvals", "comments"],
         );
+    }
+
+    async readToolCallDetail(instance: string, callId: string): Promise<ToolCallRecord | undefined> {
+        return await this.#model.readToolCallDetail(instance, callId);
     }
 
     async refreshLogsForInstance(

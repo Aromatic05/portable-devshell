@@ -1,3 +1,10 @@
+export const TODO_MAX_ARCHIVED = 256;
+export const TODO_MAX_ITEMS = 100;
+export const TODO_MAX_TEXT_LENGTH = 4_000;
+export const TODO_MAX_TITLE_LENGTH = 256;
+export const TODO_MAX_ID_LENGTH = 128;
+export const TODO_MAX_CHECKPOINT_BLOCKERS = 32;
+
 export type TodoStatus =
     | "pending"
     | "in_progress"

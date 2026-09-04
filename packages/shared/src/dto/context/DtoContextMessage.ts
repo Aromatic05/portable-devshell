@@ -19,7 +19,10 @@ export interface ContextMessageQueueInput {
 }
 
 export interface ContextMessageListInput {
+    before?: string;
     ctxId?: string;
+    limit?: number;
+    maxBytes?: number;
 }
 
 export interface ContextMessageReadResult {

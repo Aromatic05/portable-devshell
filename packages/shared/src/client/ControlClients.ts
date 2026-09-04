@@ -16,6 +16,7 @@ import type {
     ConfigUpdateWebRequest,
 } from "../config/ConfigModel.js";
 import type {
+    ContextMessageListInput,
     ContextMessageQueueInput,
     ContextMessageRecord,
 } from "../dto/context/DtoContextMessage.js";
@@ -121,7 +122,7 @@ export interface ControlClients {
         renew(ctxId: string): Promise<McpContextRecord>;
     };
     contextMessage: {
-        list(instance: string, ctxId?: string): Promise<ContextMessageRecord[]>;
+        list(instance: string, input?: ContextMessageListInput | string): Promise<ContextMessageRecord[]>;
         queue(instance: string, input: ContextMessageQueueInput): Promise<ContextMessageRecord>;
     };
     goal: {
@@ -251,11 +252,11 @@ export function createControlClients(
             renew: (ctxId) => context.request("renew", { ctxId }),
         },
         contextMessage: {
-            list: (name, ctxId) =>
+            list: (name, input) =>
                 contextMessage.request(
                     name,
                     "list",
-                    ctxId === undefined ? {} : { ctxId },
+                    typeof input === "string" ? { ctxId: input } : (input ?? {}),
                 ),
             queue: (name, input) => contextMessage.request(name, "queue", input),
         },

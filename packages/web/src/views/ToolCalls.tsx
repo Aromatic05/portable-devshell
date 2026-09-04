@@ -401,6 +401,7 @@ export function ToolCalls({
                         disabled={!interactive}
                         key={`${call.instance}-${call.callId}`}
                         logs={instanceState[call.instance]?.logs ?? []}
+                        onLoadDetail={async () => typeof store.readToolCallDetail === "function" ? await store.readToolCallDetail(call.instance, call.callId) : call}
                         onRefresh={async () => await store.refreshToolCall(call.instance)}
                     />)}
                 </ol>}

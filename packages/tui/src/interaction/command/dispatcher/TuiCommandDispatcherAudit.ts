@@ -1,6 +1,7 @@
 import type {
     ArtifactViewImageResult,
     JsonValue,
+    ToolCallRecord,
 } from "@portable-devshell/shared";
 
 import {
@@ -25,6 +26,7 @@ interface CommandAuditOptions {
         instance: string,
         input: TuiArtifactViewImageRequest,
     ): Promise<ArtifactViewImageResult>;
+    onToolCallDetail?(instance: string, callId: string): Promise<ToolCallRecord | undefined>;
     store: TuiAppStore;
 }
 
@@ -32,12 +34,14 @@ export class TuiCommandDispatcherAudit {
     readonly #dispatch: CommandAuditOptions["dispatch"];
     readonly #focusManager: TuiFocusManager;
     readonly #onArtifactViewImage?: CommandAuditOptions["onArtifactViewImage"];
+    readonly #onToolCallDetail?: CommandAuditOptions["onToolCallDetail"];
     readonly #store: TuiAppStore;
 
     constructor(options: CommandAuditOptions) {
         this.#dispatch = options.dispatch;
         this.#focusManager = options.focusManager;
         this.#onArtifactViewImage = options.onArtifactViewImage;
+        this.#onToolCallDetail = options.onToolCallDetail;
         this.#store = options.store;
     }
 
@@ -60,11 +64,7 @@ export class TuiCommandDispatcherAudit {
     }
 
     async openInput(instance: string, callId: string): Promise<boolean> {
-        const record = this.#store
-            .getState()
-            .readModel.instanceState[instance]?.toolCalls.find(
-                (candidate) => candidate.callId === callId,
-            );
+        const record = await this.#readToolCall(instance, callId);
         if (record === undefined) return false;
         return await this.#dispatch({
             body: auditInputText(record.input, record.inputSummary),
@@ -74,11 +74,7 @@ export class TuiCommandDispatcherAudit {
     }
 
     async openOutput(instance: string, callId: string): Promise<boolean> {
-        const record = this.#store
-            .getState()
-            .readModel.instanceState[instance]?.toolCalls.find(
-                (candidate) => candidate.callId === callId,
-            );
+        const record = await this.#readToolCall(instance, callId);
         if (record === undefined) return false;
         const output = resolveAuditOutput(
             record.output,
@@ -130,9 +126,7 @@ export class TuiCommandDispatcherAudit {
             case "back":
                 return this.returnToPage();
             case "input": {
-                const toolCall = state.readModel.instanceState[
-                    overlay.instance
-                ]?.toolCalls?.find((candidate) => candidate.callId === approval.callId);
+                const toolCall = await this.#readToolCall(overlay.instance, approval.callId);
                 return await this.#dispatch({
                     body: auditInputText(
                         toolCall?.input,
@@ -168,6 +162,17 @@ export class TuiCommandDispatcherAudit {
                     type: "overlay.openConfirm",
                 });
         }
+    }
+
+    async #readToolCall(instance: string, callId: string): Promise<ToolCallRecord | undefined> {
+        const compact = this.#store
+            .getState()
+            .readModel.instanceState[instance]?.toolCalls.find(
+                (candidate) => candidate.callId === callId,
+            );
+        if (compact === undefined) return undefined;
+        if (compact.input !== undefined && compact.output !== undefined) return compact;
+        return await this.#onToolCallDetail?.(instance, callId) ?? compact;
     }
 
     async #openImageOutput(

@@ -315,6 +315,9 @@ export class TuiRuntime {
                     input,
                 );
             },
+            onToolCallDetail: async (instance, callId) => {
+                return await this.session.readToolCallDetail(instance, callId);
+            },
             onValidateConfigDraft: async (draft) => {
                 await this.#operations.validateConfigDraft(draft);
             },

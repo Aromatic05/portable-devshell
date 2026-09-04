@@ -39,6 +39,15 @@ export function readToolCallQuery(payload?: JsonValue): ToolCallQuery {
     if (payload.ctxId !== undefined && typeof payload.ctxId !== "string") {
         throw invalid("tool.listCalls requires string ctxId.");
     }
+    if (payload.includeInput !== undefined && typeof payload.includeInput !== "boolean") {
+        throw invalid("tool.listCalls requires boolean includeInput.");
+    }
+    if (payload.includeOutput !== undefined && typeof payload.includeOutput !== "boolean") {
+        throw invalid("tool.listCalls requires boolean includeOutput.");
+    }
+    if (payload.maxBytes !== undefined && (typeof payload.maxBytes !== "number" || !Number.isSafeInteger(payload.maxBytes))) {
+        throw invalid("tool.listCalls requires integer maxBytes.");
+    }
     const callIds = payload.callIds === undefined
         ? undefined
         : readCallIds(payload.callIds);
@@ -50,7 +59,10 @@ export function readToolCallQuery(payload?: JsonValue): ToolCallQuery {
         ...(payload.before === undefined ? {} : { before: payload.before }),
         ...(callIds === undefined ? {} : { callIds }),
         ...(payload.ctxId === undefined ? {} : { ctxId: payload.ctxId }),
+        ...(payload.includeInput === undefined ? {} : { includeInput: payload.includeInput }),
+        ...(payload.includeOutput === undefined ? {} : { includeOutput: payload.includeOutput }),
         limit: readToolCallLimit(payload.limit),
+        ...(payload.maxBytes === undefined ? {} : { maxBytes: readToolCallBytes(payload.maxBytes) }),
         ...(payload.source === undefined ? {} : { source: readSource(payload.source) }),
         ...(payload.status === undefined ? {} : { status: readStatus(payload.status) }),
         ...(payload.toolName === undefined ? {} : { toolName: payload.toolName })
@@ -61,11 +73,12 @@ export function limitToolCallResponse(records: ToolCallRecord[], query: ToolCall
     const newestFirst = query.after === undefined;
     const candidates = newestFirst ? [...records].reverse() : records;
     const accepted: ToolCallRecord[] = [];
+    const maxBytes = Math.min(query.maxBytes ?? MAX_TOOL_CALL_RESPONSE_BYTES, MAX_TOOL_CALL_RESPONSE_BYTES);
     let responseBytes = 2;
     for (const record of candidates) {
         const separatorBytes = accepted.length === 0 ? 0 : 1;
         const recordBytes = Buffer.byteLength(JSON.stringify(record), "utf8");
-        if (responseBytes + separatorBytes + recordBytes > MAX_TOOL_CALL_RESPONSE_BYTES) {
+        if (responseBytes + separatorBytes + recordBytes > maxBytes) {
             if (accepted.length === 0) {
                 throw invalid(`tool.listCalls record ${record.callId} exceeds the safe response size.`);
             }
@@ -151,6 +164,10 @@ function readCallIds(value: JsonValue): string[] {
 function readToolCallLimit(value: JsonValue | undefined): number {
     if (value === undefined) return DEFAULT_TOOL_CALL_READ_LIMIT;
     return Math.min(Math.max(value as number, 1), MAX_TOOL_CALL_READ_LIMIT);
+}
+
+function readToolCallBytes(value: JsonValue): number {
+    return Math.min(Math.max(value as number, 1), MAX_TOOL_CALL_RESPONSE_BYTES);
 }
 
 function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {

@@ -17,7 +17,13 @@ import {
     type TodoTaskControlAction,
     type TodoTaskSummary,
     type TodoWriteInput,
-    type ToolCallAssociation
+    type ToolCallAssociation,
+    TODO_MAX_ARCHIVED,
+    TODO_MAX_CHECKPOINT_BLOCKERS,
+    TODO_MAX_ID_LENGTH,
+    TODO_MAX_ITEMS,
+    TODO_MAX_TEXT_LENGTH,
+    TODO_MAX_TITLE_LENGTH
 } from "@portable-devshell/shared";
 
 export interface TodoDocument {
@@ -76,11 +82,11 @@ export class TodoState {
         const active = activeValues.map((entry) => this.#normalizeStoredState(entry, version === 1));
         const titles = new Set(active.map((entry) => entry.title));
         if (titles.size !== active.length) throw new Error("active todo titles must be unique");
-        return {
+        return this.compact({
             active,
             archived: value.archived.map((entry) => this.#normalizeStoredState(entry, version === 1)),
             version: 4
-        };
+        });
     }
 
     transition(document: TodoDocument, input: TodoWriteInput, ctxId: string): TodoTransition {
@@ -134,7 +140,7 @@ export class TodoState {
             archived.push(archivedState);
             events.push(todoEvent("todo.archived", archivedState));
         }
-        return { document: { active, archived, version: 4 }, events };
+        return { document: this.compact({ active, archived, version: 4 }), events };
     }
 
     control(
@@ -187,14 +193,14 @@ export class TodoState {
             const archivedState = { ...next, archivedAt: now };
             archived.push(archivedState);
             return {
-                document: { active, archived, version: 4 },
+                document: this.compact({ active, archived, version: 4 }),
                 events: [todoEvent("todo.updated", next), todoEvent("todo.archived", archivedState)]
             };
         }
 
         active[previousIndex] = next;
         return {
-            document: { active, archived, version: 4 },
+            document: this.compact({ active, archived, version: 4 }),
             events: [todoEvent("todo.updated", next)]
         };
     }
@@ -212,6 +218,14 @@ export class TodoState {
             },
             events: [todoEvent("todo.deleted", state)]
         };
+    }
+
+    compact(document: TodoDocument): TodoDocument {
+        const archived = [...document.archived]
+            .sort((left, right) => (right.archivedAt ?? right.updatedAt).localeCompare(left.archivedAt ?? left.updatedAt))
+            .slice(0, TODO_MAX_ARCHIVED)
+            .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+        return { active: document.active, archived, version: 4 };
     }
 
     readResult(document: TodoDocument, input: TodoReadInput | string = {}): TodoReadResult {
@@ -355,24 +369,25 @@ function normalizeInput(input: TodoWriteInput): TodoWriteInput {
     return {
         ...(input.checkpoint === undefined ? {} : { checkpoint: normalizeCheckpointInput(input.checkpoint) }),
         revision: requiredRevision(input.revision),
-        ...(input.taskId === undefined ? {} : { taskId: normalizeText(input.taskId, "taskId") }),
-        title: normalizeText(input.title, "title"),
+        ...(input.taskId === undefined ? {} : { taskId: normalizeText(input.taskId, "taskId", TODO_MAX_ID_LENGTH) }),
+        title: normalizeText(input.title, "title", TODO_MAX_TITLE_LENGTH),
         todos: normalizeItems(input.todos)
     };
 }
 
 function normalizeItems(value: unknown): TodoItem[] {
     if (!Array.isArray(value)) throw invalidTodo("todos must be an array");
+    if (value.length > TODO_MAX_ITEMS) throw invalidTodo(`todos may contain at most ${TODO_MAX_ITEMS} items`);
     const ids = new Set<string>();
     let inProgress = 0;
     return value.map((entry, index) => {
         if (!isRecord(entry)) throw invalidTodo(`todos[${index}] must be an object`);
-        const id = normalizeText(entry.id, `todos[${index}].id`);
-        const content = normalizeText(entry.content, `todos[${index}].content`);
+        const id = normalizeText(entry.id, `todos[${index}].id`, TODO_MAX_ID_LENGTH);
+        const content = normalizeText(entry.content, `todos[${index}].content`, TODO_MAX_TEXT_LENGTH);
         const status = readStatus(entry.status, index);
         const detail = entry.detail === undefined
             ? undefined
-            : normalizeText(entry.detail, `todos[${index}].detail`);
+            : normalizeText(entry.detail, `todos[${index}].detail`, TODO_MAX_TEXT_LENGTH);
         if (ids.has(id)) throw invalidTodo(`todo id must be unique: ${id}`);
         ids.add(id);
         if (status === "in_progress" && ++inProgress > 1) {
@@ -390,11 +405,11 @@ function normalizeCheckpointInput(value: unknown): TodoCheckpointInput {
     const blockers = value.blockers === undefined
         ? undefined
         : normalizeTextArray(value.blockers, "checkpoint.blockers");
-    const next = value.next === undefined ? undefined : normalizeText(value.next, "checkpoint.next");
+    const next = value.next === undefined ? undefined : normalizeText(value.next, "checkpoint.next", TODO_MAX_TEXT_LENGTH);
     return {
         ...(blockers === undefined ? {} : { blockers }),
         ...(next === undefined ? {} : { next }),
-        summary: normalizeText(value.summary, "checkpoint.summary")
+        summary: normalizeText(value.summary, "checkpoint.summary", TODO_MAX_TEXT_LENGTH)
     };
 }
 
@@ -409,7 +424,8 @@ function checkpoint(input: TodoCheckpointInput, updatedAt: string): TodoCheckpoi
 
 function normalizeTextArray(value: unknown, field: string): string[] {
     if (!Array.isArray(value)) throw invalidTodo(`${field} must be an array`);
-    return value.map((entry, index) => normalizeText(entry, `${field}[${index}]`));
+    if (value.length > TODO_MAX_CHECKPOINT_BLOCKERS) throw invalidTodo(`${field} may contain at most ${TODO_MAX_CHECKPOINT_BLOCKERS} entries`);
+    return value.map((entry, index) => normalizeText(entry, `${field}[${index}]`, TODO_MAX_TEXT_LENGTH));
 }
 
 function summarize(items: readonly TodoItem[]): TodoSummary {
@@ -496,8 +512,8 @@ function readStatus(value: unknown, index: number): TodoStatus {
     throw invalidTodo(`todos[${index}].status is invalid`);
 }
 
-function normalizeText(value: unknown, field: string): string {
-    if (typeof value !== "string" || value.trim().length === 0) {
+function normalizeText(value: unknown, field: string, maxLength = TODO_MAX_TEXT_LENGTH): string {
+    if (typeof value !== "string" || value.trim().length === 0 || value.length > maxLength) {
         throw invalidTodo(`${field} must be a non-empty string`);
     }
     return value.trim();

@@ -53,7 +53,12 @@ export class OperationalOverviewInstanceCollector {
 
         const [approvalsResult, callsResult, failureResult] = await Promise.allSettled([
             descriptor.worker.listPendingApprovals(),
-            descriptor.worker.readToolCalls({ limit: Math.max(1, this.#activityLimit) }),
+            descriptor.worker.readToolCalls({
+                includeInput: false,
+                includeOutput: false,
+                limit: Math.max(1, this.#activityLimit),
+                maxBytes: 128 * 1024,
+            }),
             descriptor.worker.readToolCallFailureSummary(
                 now.getTime() - failureWindowMs,
                 now.getTime(),

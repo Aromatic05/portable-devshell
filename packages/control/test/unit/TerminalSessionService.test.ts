@@ -384,3 +384,41 @@ test("closing an instance fences a pending open from its replaced backend", asyn
     assert.equal(process.disposed, true);
     assert.deepEqual(service.list("alpha"), []);
 });
+
+test("terminal history keeps active sessions and bounds completed sessions newest-first", async () => {
+    let nextId = 0;
+    let now = 0;
+    const service = new TerminalSessionService({
+        idFactory: () => `terminal-history-${++nextId}`,
+        maxTerminalHistory: 2,
+        now: () => new Date(++now * 1_000),
+    });
+    const activeProcess = new FakeTerminalProcess();
+    const active = await service.open({
+        backend: { open: async () => activeProcess },
+        cols: 80,
+        instance: "alpha",
+        rows: 24,
+        workspace: "/workspace",
+    });
+    for (let index = 0; index < 3; index += 1) {
+        const process = new FakeTerminalProcess();
+        await service.open({
+            backend: { open: async () => process },
+            cols: 80,
+            instance: "alpha",
+            rows: 24,
+            workspace: "/workspace",
+        });
+        process.exit({ exitCode: 0, signal: 0 });
+    }
+
+    const listed = service.list("alpha");
+    assert.equal(listed.length, 3);
+    assert.equal(listed[0]?.terminalId, active.terminalId);
+    assert.deepEqual(listed.slice(1).map((session) => session.terminalId), [
+        "terminal-history-4",
+        "terminal-history-3",
+    ]);
+    assert.throws(() => service.get("terminal-history-2"), /not found/u);
+});

@@ -1,4 +1,5 @@
 import type {
+    ContextMessageListInput,
     ContextMessageQueueInput,
     ContextMessageReadResult,
     ContextMessageRecord,
@@ -58,13 +59,29 @@ export class ContextMessageService {
         });
     }
 
-    async list(ctxId?: string): Promise<ContextMessageRecord[]> {
+    async list(input: ContextMessageListInput | string = {}): Promise<ContextMessageRecord[]> {
         await this.#operation;
-        return this.#store
+        const query = typeof input === "string" ? { ctxId: input } : input;
+        let messages = this.#store
             .read()
             .messages.filter(
-                (message) => ctxId === undefined || message.ctxId === ctxId,
+                (message) => query.ctxId === undefined || message.ctxId === query.ctxId,
             );
+        if (query.before !== undefined) {
+            const index = messages.findIndex((message) => message.id === query.before);
+            if (index >= 0) messages = messages.slice(0, index);
+        }
+        if (query.limit !== undefined) messages = messages.slice(-query.limit);
+        if (query.maxBytes === undefined) return messages;
+        const accepted: ContextMessageRecord[] = [];
+        let bytes = 2;
+        for (const message of [...messages].reverse()) {
+            const messageBytes = Buffer.byteLength(JSON.stringify(message), "utf8") + (accepted.length === 0 ? 0 : 1);
+            if (bytes + messageBytes > query.maxBytes) break;
+            accepted.unshift(message);
+            bytes += messageBytes;
+        }
+        return accepted;
     }
 
     async failAllPending(reason: string): Promise<ContextMessageRecord[]> {

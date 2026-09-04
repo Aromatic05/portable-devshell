@@ -140,6 +140,10 @@ export class WebStore {
         await this.#model.refreshInstance(instance, ["toolCalls", "logs"]);
     }
 
+    async readToolCallDetail(instance: string, callId: string) {
+        return await this.#model.readToolCallDetail(instance, callId);
+    }
+
     async refreshAudit(): Promise<void> {
         await this.#model.refreshControl();
         await Promise.all(this.#model.state.instances.map(async ({ name }) => {
