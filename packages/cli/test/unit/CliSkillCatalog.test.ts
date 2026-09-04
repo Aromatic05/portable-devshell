@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -79,6 +79,32 @@ test("skill read loads one bounded related file and rejects SKILL.md", async () 
         await assert.rejects(
             readSkillFile("build", "SKILL.md", { configHome, home, workspace }),
             /skill load/u
+        );
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("skill load and read reject symlink targets outside the Skill root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "devshell-skill-symlink-"));
+    try {
+        const workspace = join(root, "workspace");
+        const home = join(root, "home");
+        const configHome = join(root, "config");
+        const directory = join(workspace, ".agents/skills/review");
+        const outside = join(root, "outside.txt");
+        await mkdir(directory, { recursive: true });
+        await writeFile(outside, "outside\n", "utf8");
+        await symlink(outside, join(directory, "SKILL.md"));
+        await assert.rejects(loadSkill("review", { configHome, home, workspace }), /outside the Skill directory/u);
+
+        await rm(join(directory, "SKILL.md"));
+        await writeFile(join(directory, "SKILL.md"), "# Review\n\nInside.\n", "utf8");
+        await mkdir(join(directory, "scripts"));
+        await symlink(outside, join(directory, "scripts/outside.txt"));
+        await assert.rejects(
+            readSkillFile("review", "scripts/outside.txt", { configHome, home, workspace }),
+            /outside the Skill directory/u
         );
     } finally {
         await rm(root, { force: true, recursive: true });

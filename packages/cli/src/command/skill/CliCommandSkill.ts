@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { lstat, open, readdir } from "node:fs/promises";
+import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
 import { CliRenderError } from "../../render/CliRenderError.js";
@@ -102,8 +102,8 @@ export async function listSkills(options: SkillCatalogOptions = {}): Promise<Ski
                 warnings.push(`Skill list truncated at ${MAX_SKILLS} entries`);
                 return { skills: sortedSkills(skills), sources, warnings };
             }
-            const entryPath = join(source.path, name, "SKILL.md");
-            const preview = await readText(entryPath, MAX_LIST_PREVIEW_BYTES, true).catch((error) => {
+            const root = join(source.path, name);
+            const preview = await readTextWithinRoot(root, "SKILL.md", MAX_LIST_PREVIEW_BYTES, true).catch((error) => {
                 warnings.push(`${source.source}: skipping Skill '${name}': ${errorMessage(error)}`);
                 return undefined;
             });
@@ -137,7 +137,7 @@ export async function loadSkill(name: string, options: SkillCatalogOptions = {})
         const root = join(source.path, name);
         if (!await isDirectory(root)) continue;
         try {
-            const entry = await readText(join(root, "SKILL.md"), MAX_ENTRY_BYTES, false);
+            const entry = await readTextWithinRoot(root, "SKILL.md", MAX_ENTRY_BYTES, false);
             return {
                 bytes: entry.bytes,
                 content: entry.content,
@@ -164,7 +164,7 @@ export async function readSkillFile(
     const relativePath = validateRelatedPath(path);
     if (relativePath === "SKILL.md") throw new Error("Use skill load to read SKILL.md");
     const selected = await selectSkillSource(name, options);
-    const file = await readText(join(selected.root, ...relativePath.split("/")), MAX_ENTRY_BYTES, false);
+    const file = await readTextWithinRoot(selected.root, relativePath, MAX_ENTRY_BYTES, false);
     return {
         bytes: file.bytes,
         content: file.content,
@@ -216,7 +216,7 @@ async function selectSkillSource(
         const root = join(source.path, name);
         if (!await isDirectory(root)) continue;
         try {
-            await readText(join(root, "SKILL.md"), MAX_ENTRY_BYTES, false);
+            await readTextWithinRoot(root, "SKILL.md", MAX_ENTRY_BYTES, false);
             return { root, source };
         } catch (error) {
             errors.push(`${source.source}: ${errorMessage(error)}`);
@@ -285,6 +285,22 @@ async function readText(
     } finally {
         await handle?.close().catch(() => undefined);
     }
+}
+
+async function readTextWithinRoot(
+    root: string,
+    relativePath: string,
+    maxBytes: number,
+    allowTruncate: boolean
+): Promise<{ bytes: number; content: string }> {
+    const canonicalRoot = await realpath(root);
+    const canonicalTarget = await realpath(join(root, ...relativePath.split("/")));
+    const escaped = relative(canonicalRoot, canonicalTarget);
+    const parentPrefix = `..${process.platform === "win32" ? "\\" : "/"}`;
+    if (escaped === ".." || escaped.startsWith(parentPrefix) || isAbsolute(escaped)) {
+        throw new Error("Skill file resolves outside the Skill directory");
+    }
+    return await readText(canonicalTarget, maxBytes, allowTruncate);
 }
 
 async function isDirectory(path: string): Promise<boolean> {
