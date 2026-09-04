@@ -403,8 +403,8 @@ export class WorkerInstance {
         return await this.#tool.readToolCalls(query);
     }
 
-    hasActiveToolCalls(ctxId: string): boolean {
-        return this.#tool.hasActiveToolCalls(ctxId);
+    hasActiveToolCalls(ctxId: string, excludeCallId?: string): boolean {
+        return this.#tool.hasActiveToolCalls(ctxId, excludeCallId);
     }
 
     async readToolCallFailureSummary(sinceMs: number, untilMs: number) {

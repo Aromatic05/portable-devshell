@@ -122,17 +122,23 @@ export class WaitState {
         });
     }
 
-    resolve(document: WaitDocument, waitId: string, result?: JsonValue): WaitTransition {
+    resolve(
+        document: WaitDocument,
+        waitId: string,
+        result?: JsonValue,
+        options: { consumeIfDetached?: boolean } = {},
+    ): WaitTransition {
         return this.#update(document, waitId, (record) => {
             if (record.status !== "waiting" && record.status !== "detached") {
                 throw invalidTransition(record, "resolve");
             }
             const now = this.#now();
+            const consume = options.consumeIfDetached === true && record.status === "detached";
             return {
                 ...record,
                 ...(result === undefined ? {} : { result: structuredClone(result) }),
                 resolvedAt: now,
-                status: "resolved",
+                ...(consume ? { consumedAt: now, status: "consumed" as const } : { status: "resolved" as const }),
                 updatedAt: now,
             };
         });

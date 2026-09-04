@@ -381,6 +381,7 @@ export class McpEndpointDispatch {
             instance,
             task,
             context,
+            callId,
             startedAt + timeout,
         );
 
@@ -541,6 +542,7 @@ export class McpEndpointDispatch {
             instance,
             task,
             context,
+            callId,
             timeout === undefined ? undefined : startedAt + timeout,
         );
 
@@ -669,6 +671,7 @@ export class McpEndpointDispatch {
         targetInstance: string,
         taskId: string,
         context: ToolCallContext,
+        ownerCallId?: string,
         deadlineAt?: number,
     ): Promise<JsonValue> {
         const gateway = this.#gateway;
@@ -680,7 +683,8 @@ export class McpEndpointDispatch {
         if (existing !== undefined) return existing.promise;
         const controller = new AbortController();
         const tracker = this.#trackTmuxTask(gateway, targetInstance, taskId, context, controller.signal, deadlineAt).then(async (result) => {
-            await gateway.resolveWait(waitInstance, waitId, result);
+            const consumeIfDetached = await this.#hasConcurrentAgentToolCall(context.ctxId, ownerCallId);
+            await gateway.resolveWait(waitInstance, waitId, result, { consumeIfDetached });
             return result;
         }, async (error: unknown) => {
             if (!controller.signal.aborted) {
@@ -701,6 +705,7 @@ export class McpEndpointDispatch {
         targetInstance: string,
         taskId: string,
         context: ToolCallContext,
+        ownerCallId: string | undefined,
         deadlineAt: number,
     ): Promise<JsonValue> {
         const gateway = this.#gateway;
@@ -719,7 +724,8 @@ export class McpEndpointDispatch {
             controller.signal,
             deadlineAt,
         ).then(async (result) => {
-            await gateway.resolveWait(waitInstance, waitId, result);
+            const consumeIfDetached = await this.#hasConcurrentAgentToolCall(context.ctxId, ownerCallId);
+            await gateway.resolveWait(waitInstance, waitId, result, { consumeIfDetached });
             return result;
         }, async (error: unknown) => {
             if (!controller.signal.aborted) {
@@ -753,6 +759,7 @@ export class McpEndpointDispatch {
                         wait.targetInstance ?? instance,
                         wait.targetId,
                         { ctxId: wait.createdByCtxId, source: "mcp" },
+                        wait.ownerCallId,
                         Date.parse(wait.deadlineAt),
                     );
                 } else {
@@ -762,6 +769,7 @@ export class McpEndpointDispatch {
                         wait.targetInstance ?? instance,
                         wait.targetId,
                         { ctxId: wait.createdByCtxId, source: "mcp" },
+                        wait.ownerCallId,
                         wait.deadlineAt === undefined ? undefined : Date.parse(wait.deadlineAt),
                     );
                 }
@@ -777,6 +785,29 @@ export class McpEndpointDispatch {
                 this.#tmuxWaitRestores.delete(instance);
             }
         }
+    }
+
+    async #hasConcurrentAgentToolCall(ctxId: string | undefined, ownerCallId?: string): Promise<boolean> {
+        const gateway = this.#gateway;
+        if (ctxId === undefined || gateway?.hasActiveToolCalls === undefined) return false;
+        let instances = [this.#instanceName];
+        try {
+            const context = await this.#contextRegistry.validateForInstance(ctxId, this.#instanceName);
+            instances = [...new Set([
+                this.#instanceName,
+                ...context.environments.map((environment) => environment.instance),
+            ])];
+        } catch {
+            // A detached wait can outlive Context metadata. The owning instance remains the safe fallback.
+        }
+        for (const instance of instances) {
+            try {
+                if (gateway.hasActiveToolCalls(instance, ctxId, ownerCallId)) return true;
+            } catch {
+                // A disconnected auxiliary instance must not prevent the wait result from settling.
+            }
+        }
+        return false;
     }
 
     async #trackTmuxTask(

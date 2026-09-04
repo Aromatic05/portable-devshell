@@ -165,8 +165,13 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return await this.#requireWait(instance).consume(waitId);
     }
 
-    async resolveWait(instance: string, waitId: string, result?: JsonValue) {
-        return await this.#requireWait(instance).resolve(waitId, result);
+    async resolveWait(
+        instance: string,
+        waitId: string,
+        result?: JsonValue,
+        options?: { consumeIfDetached?: boolean },
+    ) {
+        return await this.#requireWait(instance).resolve(waitId, result, options);
     }
 
     async waitForWait(instance: string, waitId: string) {
@@ -226,8 +231,8 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return await this.#requireDescriptor(instance).worker.readToolCalls({ ctxId, limit });
     }
 
-    hasActiveToolCalls(instance: string, ctxId: string) {
-        return this.#requireDescriptor(instance).worker.hasActiveToolCalls(ctxId);
+    hasActiveToolCalls(instance: string, ctxId: string, excludeCallId?: string) {
+        return this.#requireDescriptor(instance).worker.hasActiveToolCalls(ctxId, excludeCallId);
     }
 
     async readWorkspaceEvents(instance: string, fromSeq: number) {

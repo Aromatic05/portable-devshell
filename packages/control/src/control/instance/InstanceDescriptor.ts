@@ -62,7 +62,11 @@ export interface InstanceWaitPort {
     reattach(waitId: string, ownerCallId?: string): Promise<WaitRecord>;
     rejectRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
     releaseRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
-    resolve(waitId: string, result?: JsonValue): Promise<WaitRecord>;
+    resolve(
+        waitId: string,
+        result?: JsonValue,
+        options?: { consumeIfDetached?: boolean },
+    ): Promise<WaitRecord>;
     waitForResolution(waitId: string): Promise<WaitRecord>;
 }
 

@@ -293,8 +293,8 @@ export class WorkerInstanceToolAudit {
         return await this.#toolCallHistory.read(query);
     }
 
-    hasActiveForContext(ctxId: string): boolean {
-        return this.#toolCallHistory.hasActiveForContext(ctxId);
+    hasActiveForContext(ctxId: string, excludeCallId?: string): boolean {
+        return this.#toolCallHistory.hasActiveForContext(ctxId, excludeCallId);
     }
 
     async readFailureSummary(sinceMs: number, untilMs: number) {

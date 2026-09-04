@@ -330,6 +330,32 @@ test("AuditToolCallHistory keeps cursor pagination bounded while merging active 
     assert.equal(readAllCalled, false);
 });
 
+test("AuditToolCallHistory can exclude the detached wait owner from Context activity", async () => {
+    const instanceName = asInstanceName("active-context-exclusion");
+    const history = new AuditToolCallHistory(instanceName, {
+        async append() {},
+        async readAll() { return []; },
+    });
+    await history.started(
+        "call-wait-owner",
+        "tmux_run",
+        "{}",
+        { ctxId: "ctx-active", source: "mcp" },
+        "2026-09-01T00:00:00.000Z",
+    );
+    assert.equal(history.hasActiveForContext("ctx-active"), true);
+    assert.equal(history.hasActiveForContext("ctx-active", "call-wait-owner"), false);
+
+    await history.started(
+        "call-concurrent",
+        "file_read",
+        "{}",
+        { ctxId: "ctx-active", source: "mcp" },
+        "2026-09-01T00:00:01.000Z",
+    );
+    assert.equal(history.hasActiveForContext("ctx-active", "call-wait-owner"), true);
+});
+
 test("AuditDatabase queries bounded tool-call history and failure summaries without materializing all records", async () => {
     const root = await createTestTempDirectory("sqlite-tool-query");
     const instanceName = asInstanceName("sqlite-tool-query");
