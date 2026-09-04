@@ -750,122 +750,6 @@ test("Workspace wait interruption reports owner loss that races with resolution"
     assert.equal(result.detached, true);
 });
 
-test("Workspace task control and detached-wait recovery use durable server state", async () => {
-    const fake = createInteractionGateway();
-    const now = new Date().toISOString();
-    fake.waits.push({
-        createdAt: now,
-        createdByCtxId: context.ctxId!,
-        detachedAt: now,
-        kind: "tmux",
-        resolvedAt: now,
-        result: { task: { status: "0" } },
-        status: "resolved",
-        targetId: "tmux-task-1",
-        taskId: "task-1",
-        updatedAt: now,
-        waitId: "wait-recover",
-    });
-    let controlled: { action?: string; ctxId?: string; taskId?: string } = {};
-    let taskStatus = "in_progress";
-    const gateway = Object.assign(fake.gateway, {
-        async controlTodo(_instance: string, taskId: string, action: string, ctxId: string) {
-            controlled = { action, ctxId, taskId };
-            if (action === "pause") taskStatus = "paused";
-            if (action === "resume") taskStatus = "in_progress";
-            return { taskId };
-        },
-        async readTodo(_instance: string, input?: { taskId?: string }) {
-            if (input?.taskId === "task-1") {
-                return {
-                    items: [],
-                    revision: 1,
-                    summary: { completed: 0, total: 1 },
-                    taskId: "task-1",
-                    tasks: [{ ctxId: context.ctxId, status: taskStatus, taskId: "task-1" }],
-                    title: "Task"
-                };
-            }
-            return {
-                items: [],
-                revision: 0,
-                summary: { completed: 0, total: 0 },
-                tasks: [{ ctxId: context.ctxId, status: taskStatus, taskId: "task-1" }],
-            };
-        },
-        async readToolCalls() { return []; },
-        async readWorkspaceEvents() { return { events: [], gap: false, lastSeq: 1 }; },
-    }) as McpWorkspaceGateway;
-    const handler = new McpEndpointHandlerInteraction({ gateway, instanceName: "demo" });
-    const token = await openWorkspace(handler);
-
-    await handler.call(
-        "workspace_task_control",
-        { action: "pause", revision: 1, taskId: "task-1", token },
-        context,
-        "call-control",
-    );
-    assert.deepEqual(controlled, { action: "pause", ctxId: context.ctxId, taskId: "task-1" });
-
-    await assert.rejects(handler.call(
-        "workspace_wait_recover",
-        { action: "claim", token, waitId: "wait-recover" },
-        context,
-        "call-recover-paused",
-    ), /not available for automatic recovery/);
-
-    await handler.call(
-        "workspace_task_control",
-        { action: "resume", revision: 1, taskId: "task-1", token },
-        context,
-        "call-resume",
-    );
-
-    const recovered = await handler.call(
-        "workspace_wait_recover",
-        { action: "claim", token, waitId: "wait-recover" },
-        context,
-        "call-recover",
-    ) as { claimId: string; kind: string; recoveryMessageId: string; result: JsonValue; targetId: string; taskId: string; waitId: string };
-    assert.match(recovered.claimId, /^recovery-/u);
-    assert.match(recovered.recoveryMessageId, /^recovery-message-/u);
-    assert.deepEqual({ ...recovered, claimId: "<claim>" }, {
-        claimId: "<claim>",
-        kind: "tmux",
-        recoveryMessageId: recovered.recoveryMessageId,
-        result: { task: { status: "0" } },
-        taskId: "task-1",
-        targetId: "tmux-task-1",
-        waitId: "wait-recover",
-    });
-    const claimed = fake.waits.find((entry) => entry.waitId === "wait-recover");
-    assert.equal(claimed?.status, "resolved");
-    assert.equal(claimed?.recoveryClaimId, recovered.claimId);
-
-    const attempted = await handler.call(
-        "workspace_wait_recover",
-        { action: "attempt", claimId: recovered.claimId, token, waitId: "wait-recover" },
-        context,
-        "call-recover-attempt",
-    ) as { attempted: true; recoveryMessageAttemptedAt: string; recoveryMessageId: string; waitId: string };
-    assert.equal(attempted.attempted, true);
-    assert.equal(attempted.waitId, "wait-recover");
-    assert.equal(claimed?.recoveryMessageAttemptedAt, attempted.recoveryMessageAttemptedAt);
-
-    assert.deepEqual(await handler.call(
-        "workspace_wait_recover",
-        { action: "complete", claimId: recovered.claimId, token, waitId: "wait-recover" },
-        context,
-        "call-recover-complete",
-    ), {
-        completed: true,
-        kind: "tmux",
-        targetId: "tmux-task-1",
-        waitId: "wait-recover",
-    });
-    assert.equal(claimed?.status, "consumed");
-});
-
 test("Workspace Goal revision changes disable revision-only detached wait recovery", async () => {
     const fake = createInteractionGateway();
     const now = new Date().toISOString();
@@ -970,322 +854,6 @@ test("Workspace Goal metadata revisions preserve progress-bound detached wait re
     const wait = fake.waits.find((entry) => entry.waitId === "wait-goal-progress-token");
     assert.notEqual(wait?.automaticRecovery, false);
     assert.equal(wait?.recoveryDisabledAt, undefined);
-});
-
-test("Workspace detached-wait recovery accepts an active Goal without Todo", async () => {
-    const fake = createInteractionGateway();
-    const now = new Date().toISOString();
-    fake.waits.push({
-        createdAt: now,
-        createdByCtxId: context.ctxId!,
-        detachedAt: now,
-        goalId: "goal-recover",
-        goalProgressAt: now,
-        goalProgressEpoch: 0,
-        goalStepId: "work",
-        kind: "tmux",
-        resolvedAt: now,
-        result: { task: { status: "0" } },
-        status: "resolved",
-        targetId: "tmux-goal",
-        updatedAt: now,
-        waitId: "wait-goal-recover",
-    });
-    let goalProgressAt = now;
-    let goalProgressEpoch = 0;
-    const goalReentryEpochs: Array<number | undefined> = [];
-    let goalStatus = "stopped";
-    Object.assign(fake.gateway, {
-        async goalContinuation() {
-            return { goal: null };
-        },
-        async manageGoal() {
-            return undefined;
-        },
-        async readGoal() {
-            return {
-                autoContinueExhausted: false,
-                continuationCount: 0,
-                continuationDue: false,
-                continuationDueAt: "2026-08-20T00:15:00.000Z",
-                continuationPending: false,
-                createdAt: now,
-                goalId: "goal-recover",
-                lastAgentActivityAt: now,
-                lastProgressAt: goalProgressAt,
-                maxContinuations: 10,
-                objective: "Recover Goal work",
-                progressEpoch: goalProgressEpoch,
-                revision: 1,
-                status: goalStatus,
-                steps: [{ id: "work", status: "active", text: "Wait for background work" }],
-                updatedAt: now,
-            };
-        },
-        async recordGoalReentry(_instance: string, _ctxId: string, progressEpoch?: number) {
-            goalReentryEpochs.push(progressEpoch);
-        },
-    });
-    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
-    const token = await openWorkspace(handler);
-
-    await assert.rejects(handler.call(
-        "workspace_wait_recover",
-        { action: "claim", token, waitId: "wait-goal-recover" },
-        context,
-        "call-goal-recover-stopped",
-    ), /not available for automatic recovery/u);
-
-    goalStatus = "active";
-    const recovered = await handler.call(
-        "workspace_wait_recover",
-        { action: "claim", token, waitId: "wait-goal-recover" },
-        context,
-        "call-goal-recover",
-    ) as { claimId: string; goalId: string; waitId: string };
-    assert.equal(recovered.goalId, "goal-recover");
-    assert.equal(recovered.waitId, "wait-goal-recover");
-    assert.match(recovered.claimId, /^recovery-/u);
-    goalProgressAt = new Date(Date.parse(now) + 1_000).toISOString();
-    goalProgressEpoch = 1;
-    const attempted = await handler.call(
-        "workspace_wait_recover",
-        { action: "attempt", claimId: recovered.claimId, token, waitId: "wait-goal-recover" },
-        context,
-        "call-goal-recover-attempt",
-    ) as { recoveryGoalProgressEpoch?: number };
-    assert.equal(attempted.recoveryGoalProgressEpoch, 1);
-    await handler.call(
-        "workspace_wait_recover",
-        { action: "complete", claimId: recovered.claimId, token, waitId: "wait-goal-recover" },
-        context,
-        "call-goal-recover-complete",
-    );
-    assert.deepEqual(goalReentryEpochs, [1]);
-    assert.equal(fake.waits.find((entry) => entry.waitId === "wait-goal-recover")?.status, "consumed");
-});
-
-test("Workspace wait recovery completion never attributes an old delivery to a replacement Goal", async () => {
-    const fake = createInteractionGateway();
-    const now = new Date().toISOString();
-    fake.waits.push({
-        createdAt: now,
-        createdByCtxId: context.ctxId!,
-        detachedAt: now,
-        goalId: "goal-old",
-        kind: "tmux",
-        resolvedAt: now,
-        result: { task: { status: "0" } },
-        status: "resolved",
-        targetId: "tmux-old-goal",
-        updatedAt: now,
-        waitId: "wait-old-goal",
-    });
-    let currentGoalId = "goal-old";
-    let reentries = 0;
-    Object.assign(fake.gateway, {
-        async goalContinuation() {
-            return { goal: null };
-        },
-        async manageGoal() {
-            return undefined;
-        },
-        async readGoal() {
-            return {
-                autoContinueExhausted: false,
-                continuationCount: 0,
-                continuationDue: false,
-                continuationDueAt: "2099-01-01T00:00:00.000Z",
-                continuationPending: false,
-                createdAt: now,
-                goalId: currentGoalId,
-                lastAgentActivityAt: now,
-                lastProgressAt: now,
-                maxContinuations: 0,
-                objective: currentGoalId,
-                revision: 1,
-                status: "active",
-                steps: [{ id: "work", status: "active", text: "Work" }],
-                updatedAt: now,
-            };
-        },
-        async recordGoalReentry() {
-            reentries += 1;
-        },
-    });
-    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
-    const token = await openWorkspace(handler);
-    const claimed = await handler.call(
-        "workspace_wait_recover",
-        { action: "claim", token, waitId: "wait-old-goal" },
-        context,
-        "call-old-goal-claim",
-    ) as { claimId: string };
-    await handler.call(
-        "workspace_wait_recover",
-        { action: "attempt", claimId: claimed.claimId, token, waitId: "wait-old-goal" },
-        context,
-        "call-old-goal-attempt",
-    );
-
-    currentGoalId = "goal-new";
-    await handler.call(
-        "workspace_wait_recover",
-        { action: "complete", claimId: claimed.claimId, token, waitId: "wait-old-goal" },
-        context,
-        "call-old-goal-complete",
-    );
-
-    assert.equal(reentries, 0);
-    assert.equal(fake.waits.find((entry) => entry.waitId === "wait-old-goal")?.status, "consumed");
-});
-
-test("Workspace legacy wait receipt never covers Goal progress that happened after the wait", async () => {
-    const fake = createInteractionGateway();
-    const waitProgressAt = "2026-08-20T00:00:00.000Z";
-    const currentProgressAt = "2026-08-20T00:01:00.000Z";
-    fake.waits.push({
-        createdAt: waitProgressAt,
-        createdByCtxId: context.ctxId!,
-        detachedAt: waitProgressAt,
-        goalId: "goal-legacy",
-        goalProgressAt: waitProgressAt,
-        goalStepId: "work",
-        kind: "tmux",
-        recoveryClaimId: "legacy-claim",
-        recoveryClaimedAt: currentProgressAt,
-        recoveryMessageAttemptedAt: currentProgressAt,
-        recoveryMessageId: "legacy-message",
-        resolvedAt: currentProgressAt,
-        result: { task: { status: "0" } },
-        status: "resolved",
-        targetId: "tmux-legacy-goal",
-        updatedAt: currentProgressAt,
-        waitId: "wait-legacy-goal",
-    });
-    const recordedEpochs: Array<number | undefined> = [];
-    Object.assign(fake.gateway, {
-        async goalContinuation() {
-            return { goal: null };
-        },
-        async manageGoal() {
-            return undefined;
-        },
-        async readGoal() {
-            return {
-                autoContinueExhausted: false,
-                continuationCount: 0,
-                continuationDue: false,
-                continuationDueAt: "2099-01-01T00:00:00.000Z",
-                continuationPending: false,
-                createdAt: waitProgressAt,
-                goalId: "goal-legacy",
-                lastAgentActivityAt: currentProgressAt,
-                lastProgressAt: currentProgressAt,
-                maxContinuations: 0,
-                objective: "Legacy Goal",
-                progressEpoch: 1,
-                revision: 2,
-                status: "active",
-                steps: [{ id: "work", status: "active", text: "Work" }],
-                updatedAt: currentProgressAt,
-            };
-        },
-        async recordGoalReentry(_instance: string, _ctxId: string, progressEpoch?: number) {
-            recordedEpochs.push(progressEpoch);
-        },
-    });
-    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
-    const token = await openWorkspace(handler);
-    await handler.call(
-        "workspace_wait_recover",
-        { action: "complete", claimId: "legacy-claim", token, waitId: "wait-legacy-goal" },
-        context,
-        "call-legacy-goal-complete",
-    );
-
-    assert.deepEqual(recordedEpochs, []);
-    assert.equal(fake.waits.find((entry) => entry.waitId === "wait-legacy-goal")?.status, "consumed");
-});
-
-test("Workspace detached-wait recovery revalidates an associated task before dispatch attempt", async () => {
-    const fake = createInteractionGateway();
-    const now = new Date().toISOString();
-    fake.waits.push({
-        createdAt: now,
-        createdByCtxId: context.ctxId!,
-        detachedAt: now,
-        kind: "tmux",
-        resolvedAt: now,
-        result: { task: { status: "0" } },
-        status: "resolved",
-        targetId: "tmux-race",
-        taskId: "task-race",
-        updatedAt: now,
-        waitId: "wait-race",
-    });
-    let taskStatus = "in_progress";
-    const gateway = Object.assign(fake.gateway, {
-        async readTodo() {
-            return {
-                items: [],
-                revision: 1,
-                summary: { completed: 0, total: 1 },
-                tasks: [{ ctxId: context.ctxId, status: taskStatus, taskId: "task-race" }],
-            };
-        },
-    });
-    const handler = new McpEndpointHandlerInteraction({ gateway, instanceName: "demo" });
-    const token = await openWorkspace(handler);
-
-    const claimed = await handler.call(
-        "workspace_wait_recover",
-        { action: "claim", token, waitId: "wait-race" },
-        context,
-        "call-race-claim",
-    ) as { claimId: string };
-
-    taskStatus = "paused";
-    await assert.rejects(
-        handler.call(
-            "workspace_wait_recover",
-            { action: "attempt", claimId: claimed.claimId, token, waitId: "wait-race" },
-            context,
-            "call-race-attempt",
-        ),
-        /not available for automatic recovery/u,
-    );
-    assert.equal(fake.waits.find((entry) => entry.waitId === "wait-race")?.recoveryMessageAttemptedAt, undefined);
-});
-
-test("Workspace detached-wait recovery accepts Context-only durable state", async () => {
-    const fake = createInteractionGateway();
-    const now = new Date().toISOString();
-    fake.waits.push({
-        createdAt: now,
-        createdByCtxId: context.ctxId!,
-        detachedAt: now,
-        kind: "question",
-        resolvedAt: now,
-        result: { answer: "continue" },
-        status: "resolved",
-        targetId: "question-context-only",
-        updatedAt: now,
-        waitId: "wait-context-only",
-    });
-    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
-    const token = await openWorkspace(handler);
-
-    const recovered = await handler.call(
-        "workspace_wait_recover",
-        { action: "claim", token, waitId: "wait-context-only" },
-        context,
-        "call-context-only-recover",
-    ) as { claimId: string; kind: string; result: JsonValue; waitId: string };
-    assert.equal(recovered.kind, "question");
-    assert.deepEqual(recovered.result, { answer: "continue" });
-    assert.equal(recovered.waitId, "wait-context-only");
-    assert.match(recovered.claimId, /^recovery-/u);
 });
 
 test("workspace_watch skips unrelated events and returns on the current Context event", async () => {
@@ -1619,131 +1187,456 @@ test("Workspace can resume a blocked Goal through the app-only control", async (
     assert.equal(typeof wait?.recoveryDisabledAt, "string");
 });
 
-test("Workspace Goal continuation is unavailable while the current Context still has a detached wait", async () => {
-    const fake = createInteractionGateway();
-    const continuationInputs: GoalContinuationInput[] = [];
-    Object.assign(fake.gateway, {
-        async goalContinuation(_instance: string, input: GoalContinuationInput) {
-            continuationInputs.push({ ...input });
-            return { claimed: false, goal: null };
-        },
-        async manageGoal() {
-            return undefined;
-        },
-        async readGoal() {
-            return undefined;
-        },
-    });
-    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
-    const token = await openWorkspace(handler);
-    fake.waits.push({
-        createdAt: "2026-08-20T00:00:00.000Z",
-        createdByCtxId: context.ctxId!,
-        detachedAt: "2026-08-20T00:01:00.000Z",
-        kind: "tmux",
-        status: "detached",
-        targetId: "task-long",
-        updatedAt: "2026-08-20T00:01:00.000Z",
-        waitId: "wait-long",
-    });
+test("server re-entry arbiter gives each resolved Wait at most one notification and fences concurrent clients", async () => {
+    const root = await createTestTempDirectory("reentry-wait-once");
+    try {
+        const registry = new McpContextRegistry({
+            filePath: join(root, "contexts.json"),
+            idFactory: () => context.ctxId!,
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo", principal: "local", workspace: "/workspace" });
+        const fake = createInteractionGateway();
+        const now = new Date().toISOString();
+        fake.waits.push({
+            automaticRecovery: true,
+            createdAt: now,
+            createdByCtxId: context.ctxId!,
+            detachedAt: now,
+            kind: "tmux",
+            resolvedAt: now,
+            result: { task: { id: "task-once", status: "0" } },
+            status: "resolved",
+            targetId: "task-once",
+            updatedAt: now,
+            waitId: "wait-once",
+        });
+        const handler = new McpEndpointHandlerInteraction({
+            contextRegistry: registry,
+            gateway: fake.gateway,
+            instanceName: "demo",
+        });
+        const token = await openWorkspace(handler);
+        const claim = (claimId: string) => handler.call(
+            "workspace_reentry_control",
+            { action: "claim", claimId, intent: "automatic", token },
+            context,
+            `call-${claimId}`,
+        ) as Promise<{ claimed?: boolean; claimId?: string; delivery?: { kind?: string; sourceId?: string }; sourceKind?: string }>;
 
-    await handler.call(
-        "workspace_goal_continue",
-        { action: "claim", available: true, claimId: "claim-1", token },
-        context,
-        "call-goal-continue",
-    );
+        const [left, right] = await Promise.all([claim("claim-left"), claim("claim-right")]);
+        const winners = [left, right].filter((value) => value.claimed === true);
+        assert.equal(winners.length, 1);
+        const winner = winners[0]!;
+        assert.equal(winner.delivery?.kind, "wait");
+        assert.equal(winner.delivery?.sourceId, "wait-once");
+        assert.equal(winner.sourceKind, "wait");
+        const claimId = winner.claimId!;
 
-    assert.equal(continuationInputs.length, 1);
-    assert.equal(continuationInputs[0]?.available, false);
+        const validated = await handler.call(
+            "workspace_reentry_control",
+            { action: "validate", claimId, token },
+            context,
+            "call-validate-wait-once",
+        ) as { valid?: boolean };
+        assert.equal(validated.valid, true);
+        const attempted = await handler.call(
+            "workspace_reentry_control",
+            { action: "attempt", claimId, token },
+            context,
+            "call-attempt-wait-once",
+        ) as { attempted?: boolean };
+        assert.equal(attempted.attempted, true);
+        await handler.call(
+            "workspace_reentry_control",
+            { action: "report", claimId, outcome: "rejected", token },
+            context,
+            "call-report-wait-once",
+        );
+        assert.equal(fake.waits.find((wait) => wait.waitId === "wait-once")?.status, "consumed");
+        assert.equal((await claim("claim-after-consume")).claimed, false);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
 });
 
-test("Workspace Goal explicit resume uses the durable continuation claim path", async () => {
-    const fake = createInteractionGateway();
-    const continuationInputs: GoalContinuationInput[] = [];
-    Object.assign(fake.gateway, {
-        async goalContinuation(_instance: string, input: GoalContinuationInput) {
-            continuationInputs.push({ ...input });
-            return { claimed: true, claimId: input.claimId, goal: null };
-        },
-        async manageGoal() {
-            return undefined;
-        },
-        async readGoal() {
-            return undefined;
-        },
-    });
-    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
-    const token = await openWorkspace(handler);
-
-    await handler.call(
-        "workspace_goal_continue",
-        {
-            action: "claim",
-            available: true,
-            claimId: "explicit-claim",
-            goalId: "goal-explicit-resume",
-            token,
-            userInitiated: true,
-        },
-        context,
-        "call-goal-explicit-claim",
-    );
-
-    assert.equal(continuationInputs.length, 1);
-    assert.equal(continuationInputs[0]?.action, "claim");
-    assert.equal(continuationInputs[0]?.goalId, "goal-explicit-resume");
-    assert.equal(continuationInputs[0]?.userInitiated, true);
+test("server re-entry arbiter consumes a resolved Wait without notification while Context execution is active", async () => {
+    const root = await createTestTempDirectory("reentry-wait-busy");
+    try {
+        const nowMs = Date.parse("2026-09-03T00:00:00.000Z");
+        const registry = new McpContextRegistry({
+            filePath: join(root, "contexts.json"),
+            idFactory: () => context.ctxId!,
+            now: () => nowMs,
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo", principal: "local", workspace: "/workspace" });
+        await registry.observeExecutionActivity(context.ctxId!, "demo");
+        const fake = createInteractionGateway();
+        const now = new Date(nowMs).toISOString();
+        fake.waits.push({
+            automaticRecovery: true,
+            createdAt: now,
+            createdByCtxId: context.ctxId!,
+            detachedAt: now,
+            kind: "tmux",
+            resolvedAt: now,
+            result: { task: { id: "task-busy", status: "0" } },
+            status: "resolved",
+            targetId: "task-busy",
+            updatedAt: now,
+            waitId: "wait-busy",
+        });
+        const handler = new McpEndpointHandlerInteraction({
+            contextRegistry: registry,
+            gateway: fake.gateway,
+            instanceName: "demo",
+        });
+        const token = await openWorkspace(handler);
+        const result = await handler.call(
+            "workspace_reentry_control",
+            { action: "claim", claimId: "claim-busy", intent: "automatic", token },
+            context,
+            "call-claim-busy",
+        ) as { claimed?: boolean; executionActive?: boolean };
+        assert.equal(result.claimed, false);
+        assert.equal(result.executionActive, true);
+        assert.equal(fake.waits.find((wait) => wait.waitId === "wait-busy")?.status, "consumed");
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
 });
 
-test("Workspace Goal continuation rechecks live tool activity before every dispatch phase", async () => {
-    const fake = createInteractionGateway();
-    const continuationInputs: GoalContinuationInput[] = [];
-    Object.assign(fake.gateway, {
-        async goalContinuation(_instance: string, input: GoalContinuationInput) {
-            continuationInputs.push({ ...input });
-            return { claimed: false, goal: null };
-        },
-        async manageGoal() {
-            return undefined;
-        },
-        async readGoal() {
-            return undefined;
-        },
-        async readToolCalls() {
-            return [{
-                callId: "call-running",
-                ctxId: context.ctxId,
-                inputSummary: "long command",
-                instance: "demo",
-                source: "mcp",
-                startedAt: "2026-08-30T00:00:00.000Z",
-                status: "running",
-                toolName: "bash_run",
-            }];
-        },
-        async readWorkspaceEvents() {
-            return { events: [], gap: false, lastSeq: 0 };
-        },
-    });
-    const handler = new McpEndpointHandlerInteraction({ gateway: fake.gateway, instanceName: "demo" });
-    const token = await openWorkspace(handler);
+test("server re-entry arbiter revalidates an associated task between claim and attempt", async () => {
+    const root = await createTestTempDirectory("reentry-task-fence");
+    try {
+        const registry = new McpContextRegistry({
+            filePath: join(root, "contexts.json"),
+            idFactory: () => context.ctxId!,
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo", principal: "local", workspace: "/workspace" });
+        const fake = createInteractionGateway();
+        let taskStatus = "in_progress";
+        const now = new Date().toISOString();
+        fake.waits.push({
+            automaticRecovery: true,
+            createdAt: now,
+            createdByCtxId: context.ctxId!,
+            detachedAt: now,
+            kind: "tmux",
+            resolvedAt: now,
+            result: { task: { id: "tmux-task-fence", status: "0" } },
+            status: "resolved",
+            targetId: "tmux-task-fence",
+            taskId: "task-fence",
+            updatedAt: now,
+            waitId: "wait-task-fence",
+        });
+        Object.assign(fake.gateway, {
+            async readTodo(_instance: string, input?: { taskId?: string }) {
+                return {
+                    items: [],
+                    revision: 1,
+                    summary: { completed: 0, total: 1 },
+                    ...(input?.taskId === "task-fence" ? { taskId: "task-fence" } : {}),
+                    tasks: [{ ctxId: context.ctxId, status: taskStatus, taskId: "task-fence" }],
+                };
+            },
+        });
+        const handler = new McpEndpointHandlerInteraction({ contextRegistry: registry, gateway: fake.gateway, instanceName: "demo" });
+        const token = await openWorkspace(handler);
+        const claim = await handler.call(
+            "workspace_reentry_control",
+            { action: "claim", claimId: "claim-task-fence", intent: "automatic", token },
+            context,
+            "call-task-fence-claim",
+        ) as { claimed?: boolean; delivery?: { kind?: string } };
+        assert.equal(claim.claimed, true);
+        assert.equal(claim.delivery?.kind, "wait");
 
-    await handler.call(
-        "workspace_goal_continue",
-        { action: "validate", available: true, claimId: "claim-running", token },
-        context,
-        "call-goal-validate-running",
-    );
-    await handler.call(
-        "workspace_goal_continue",
-        { action: "attempt", available: true, claimId: "claim-running", token },
-        context,
-        "call-goal-attempt-running",
-    );
-    assert.equal(continuationInputs.length, 2);
-    assert.equal(continuationInputs[0]?.available, false);
-    assert.equal(continuationInputs[1]?.available, false);
+        taskStatus = "paused";
+        const validated = await handler.call(
+            "workspace_reentry_control",
+            { action: "validate", claimId: "claim-task-fence", token },
+            context,
+            "call-task-fence-validate",
+        ) as { valid?: boolean };
+        assert.equal(validated.valid, false);
+        assert.equal(fake.waits.find((wait) => wait.waitId === "wait-task-fence")?.status, "consumed");
+        assert.equal(fake.waits.find((wait) => wait.waitId === "wait-task-fence")?.recoveryMessageAttemptedAt, undefined);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("server re-entry arbiter rejects a claimed Wait after its Goal is replaced", async () => {
+    const root = await createTestTempDirectory("reentry-goal-fence");
+    try {
+        const registry = new McpContextRegistry({
+            filePath: join(root, "contexts.json"),
+            idFactory: () => context.ctxId!,
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo", principal: "local", workspace: "/workspace" });
+        const fake = createInteractionGateway();
+        const now = new Date().toISOString();
+        let goalId = "goal-old";
+        fake.waits.push({
+            automaticRecovery: true,
+            createdAt: now,
+            createdByCtxId: context.ctxId!,
+            detachedAt: now,
+            goalId: "goal-old",
+            goalStepId: "work",
+            kind: "tmux",
+            resolvedAt: now,
+            result: { task: { id: "tmux-goal-fence", status: "0" } },
+            status: "resolved",
+            targetId: "tmux-goal-fence",
+            updatedAt: now,
+            waitId: "wait-goal-fence",
+        });
+        Object.assign(fake.gateway, {
+            async goalContinuation() { return { goal: null }; },
+            async manageGoal() { return undefined; },
+            async readGoal() {
+                return {
+                    autoContinueExhausted: false,
+                    continuationCount: 0,
+                    continuationDue: false,
+                    continuationDueAt: "2099-01-01T00:00:00.000Z",
+                    continuationPending: false,
+                    createdAt: now,
+                    goalId,
+                    lastAgentActivityAt: now,
+                    lastProgressAt: now,
+                    maxContinuations: 0,
+                    objective: goalId,
+                    revision: 1,
+                    status: "active" as const,
+                    steps: [{ id: "work", status: "active" as const, text: "Work" }],
+                    updatedAt: now,
+                };
+            },
+        });
+        const handler = new McpEndpointHandlerInteraction({ contextRegistry: registry, gateway: fake.gateway, instanceName: "demo" });
+        const token = await openWorkspace(handler);
+        const claim = await handler.call(
+            "workspace_reentry_control",
+            { action: "claim", claimId: "claim-goal-fence", intent: "automatic", token },
+            context,
+            "call-goal-fence-claim",
+        ) as { claimed?: boolean };
+        assert.equal(claim.claimed, true);
+        goalId = "goal-new";
+        const validated = await handler.call(
+            "workspace_reentry_control",
+            { action: "validate", claimId: "claim-goal-fence", token },
+            context,
+            "call-goal-fence-validate",
+        ) as { valid?: boolean };
+        assert.equal(validated.valid, false);
+        assert.equal(fake.waits.find((wait) => wait.waitId === "wait-goal-fence")?.status, "consumed");
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("server re-entry arbiter owns Goal retry reset before explicit delivery", async () => {
+    const root = await createTestTempDirectory("reentry-goal-retry");
+    try {
+        const registry = new McpContextRegistry({
+            filePath: join(root, "contexts.json"),
+            idFactory: () => context.ctxId!,
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo", principal: "local", workspace: "/workspace" });
+        const fake = createInteractionGateway();
+        const actions: string[] = [];
+        const now = new Date().toISOString();
+        const goal = {
+            autoContinueExhausted: false,
+            continuationCount: 1,
+            continuationDue: false,
+            continuationDueAt: "2099-01-01T00:00:00.000Z",
+            continuationPending: false,
+            createdAt: now,
+            goalId: "goal-retry",
+            lastAgentActivityAt: now,
+            lastProgressAt: now,
+            maxContinuations: 0,
+            objective: "Retry Goal",
+            revision: 1,
+            status: "active" as const,
+            steps: [{ id: "work", status: "active" as const, text: "Work" }],
+            updatedAt: now,
+        };
+        Object.assign(fake.gateway, {
+            async goalContinuation(_instance: string, input: GoalContinuationInput) {
+                actions.push(input.action);
+                return { goal };
+            },
+            async manageGoal() { return goal; },
+            async readGoal() { return goal; },
+        });
+        const handler = new McpEndpointHandlerInteraction({ contextRegistry: registry, gateway: fake.gateway, instanceName: "demo" });
+        const token = await openWorkspace(handler);
+        const result = await handler.call(
+            "workspace_reentry_control",
+            { action: "claim", claimId: "claim-goal-retry", intent: "goal-retry", sourceId: "goal-retry", token },
+            context,
+            "call-goal-retry",
+        ) as { claimed?: boolean; delivery?: { kind?: string; sourceId?: string } };
+        assert.equal(result.claimed, true);
+        assert.equal(result.delivery?.kind, "explicit");
+        assert.equal(result.delivery?.sourceId, "goal-retry");
+        assert.deepEqual(actions, ["reset"]);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("server re-entry arbiter gives one-shot Wait priority over repeatable Goal continuation", async () => {
+    const root = await createTestTempDirectory("reentry-wait-goal-priority");
+    try {
+        let nowMs = Date.parse("2026-09-03T01:00:00.000Z");
+        const registry = new McpContextRegistry({
+            filePath: join(root, "contexts.json"),
+            idFactory: () => context.ctxId!,
+            now: () => nowMs,
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo", principal: "local", workspace: "/workspace" });
+        const fake = createInteractionGateway();
+        let goalClaimId: string | undefined;
+        let goalAttempted = false;
+        let goalContinuationCount = 0;
+        let goalClaimCalls = 0;
+        const goalSnapshot = () => ({
+            autoContinueExhausted: false,
+            continuationAttemptedAt: goalAttempted ? new Date(nowMs).toISOString() : undefined,
+            continuationCount: goalContinuationCount,
+            continuationDue: goalClaimId === undefined,
+            continuationDueAt: new Date(nowMs).toISOString(),
+            continuationMessageId: goalClaimId === undefined ? undefined : `goal-message-${goalClaimId}`,
+            continuationPending: goalClaimId !== undefined,
+            continuationUncertain: false,
+            createdAt: "2026-09-03T00:00:00.000Z",
+            goalId: "goal-priority",
+            lastAgentActivityAt: "2026-09-03T00:00:00.000Z",
+            lastProgressAt: "2026-09-03T00:00:00.000Z",
+            maxContinuations: 0,
+            noActionStreak: 0,
+            objective: "Keep working",
+            progressEpoch: 0,
+            revision: 1,
+            stagnationStreak: 0,
+            status: "active" as const,
+            steps: [{ id: "work", status: "active" as const, text: "Work" }],
+            updatedAt: new Date(nowMs).toISOString(),
+        });
+        Object.assign(fake.gateway, {
+            async goalContinuation(_instance: string, input: GoalContinuationInput) {
+                if (input.action === "claim") {
+                    goalClaimCalls += 1;
+                    if (goalClaimId !== undefined) return { claimed: false, goal: goalSnapshot() };
+                    goalClaimId = input.claimId;
+                    goalAttempted = false;
+                    return {
+                        claimed: true,
+                        claimId: goalClaimId,
+                        continuationCount: goalContinuationCount + 1,
+                        goal: goalSnapshot(),
+                    };
+                }
+                if (input.action === "validate") {
+                    return { goal: goalSnapshot(), valid: goalClaimId === input.claimId };
+                }
+                if (input.action === "attempt") {
+                    if (goalClaimId !== input.claimId) return { attempted: false, goal: goalSnapshot() };
+                    goalAttempted = true;
+                    return { attempted: true, goal: goalSnapshot(), messageId: `goal-message-${goalClaimId}` };
+                }
+                if (input.action === "report") {
+                    if (goalClaimId !== input.claimId) throw new Error("goal claim mismatch");
+                    if (input.accepted === true) goalContinuationCount += 1;
+                    goalClaimId = undefined;
+                    goalAttempted = false;
+                    return { goal: goalSnapshot() };
+                }
+                if (input.action === "release") {
+                    if (goalClaimId === input.claimId && !goalAttempted) goalClaimId = undefined;
+                    return { goal: goalSnapshot(), released: true };
+                }
+                return { goal: goalSnapshot(), reset: true };
+            },
+            async manageGoal() {
+                return goalSnapshot();
+            },
+            async readGoal() {
+                return goalSnapshot();
+            },
+        });
+        const now = new Date(nowMs).toISOString();
+        fake.waits.push({
+            automaticRecovery: true,
+            createdAt: now,
+            createdByCtxId: context.ctxId!,
+            detachedAt: now,
+            kind: "tmux",
+            resolvedAt: now,
+            result: { task: { id: "task-priority", status: "0" } },
+            status: "resolved",
+            targetId: "task-priority",
+            updatedAt: now,
+            waitId: "wait-priority",
+        });
+        const handler = new McpEndpointHandlerInteraction({
+            contextRegistry: registry,
+            gateway: fake.gateway,
+            instanceName: "demo",
+        });
+        const token = await openWorkspace(handler);
+        type ReentryResult = {
+            attempted?: boolean;
+            claimed?: boolean;
+            delivery?: { kind?: string };
+            valid?: boolean;
+        };
+        const call = (action: string, claimId: string, extra: Record<string, unknown> = {}) => handler.call(
+            "workspace_reentry_control",
+            { action, claimId, token, ...extra },
+            context,
+            `call-${action}-${claimId}`,
+        ) as Promise<ReentryResult>;
+
+        const waitClaim = await call("claim", "claim-wait", { intent: "automatic" });
+        assert.equal(waitClaim.claimed, true);
+        assert.equal(waitClaim.delivery?.kind, "wait");
+        assert.equal(goalClaimCalls, 0, "Goal must not claim while a one-shot Wait can notify");
+        assert.equal((await call("validate", "claim-wait")).valid, true);
+        assert.equal((await call("attempt", "claim-wait")).attempted, true);
+        await call("report", "claim-wait", { outcome: "rejected" });
+        assert.equal(fake.waits.find((wait) => wait.waitId === "wait-priority")?.status, "consumed");
+
+        const firstGoal = await call("claim", "claim-goal-1", { intent: "automatic" });
+        assert.equal(firstGoal.claimed, true);
+        assert.equal(firstGoal.delivery?.kind, "goal");
+        assert.equal(goalClaimCalls, 1);
+        assert.equal((await call("validate", "claim-goal-1")).valid, true);
+        assert.equal((await call("attempt", "claim-goal-1")).attempted, true);
+        await call("report", "claim-goal-1", { outcome: "accepted" });
+        assert.equal(goalContinuationCount, 1);
+
+        nowMs += 60_001;
+        const secondGoal = await call("claim", "claim-goal-2", { intent: "automatic" });
+        assert.equal(secondGoal.claimed, true, "Goal remains repeatable after the previous continuation lease expires");
+        assert.equal(secondGoal.delivery?.kind, "goal");
+        assert.equal(goalClaimCalls, 2);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
 });
 
 test("Workspace tool metadata keeps the explicit reopen compatibility tool and app-only action tools", () => {
@@ -1757,7 +1650,6 @@ test("Workspace tool metadata keeps the explicit reopen compatibility tool and a
     const reconnect = definitions.find((definition) => definition.name === "workspace_reconnect");
     const ask = definitions.find((definition) => definition.name === "workspace_ask");
     const goal = definitions.find((definition) => definition.name === "workspace_goal");
-    const goalContinue = definitions.find((definition) => definition.name === "workspace_goal_continue");
     const goalResume = definitions.find((definition) => definition.name === "workspace_goal_resume");
     const goalStop = definitions.find((definition) => definition.name === "workspace_goal_stop");
 
@@ -1770,7 +1662,7 @@ test("Workspace tool metadata keeps the explicit reopen compatibility tool and a
     assert.ok(reconnect);
     assert.ok(ask);
     assert.ok(goal);
-    assert.ok(goalContinue);
+    assert.equal(definitions.some((definition) => definition.name === "workspace_goal_continue"), false);
     assert.ok(goalResume);
     assert.ok(goalStop);
     assert.deepEqual((reconnect.inputSchema as { required?: string[] }).required, ["token"]);
@@ -1787,15 +1679,13 @@ test("Workspace tool metadata keeps the explicit reopen compatibility tool and a
     assert.deepEqual((adaptedWatch._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     assert.deepEqual((reconnect?._meta as { ui?: { visibility?: string[] } })?.ui?.visibility, ["app"]);
     const recoveryInputSchema = recover.inputSchema as {
-        properties?: { action?: { enum?: string[] } };
+        properties?: { action?: { enum?: string[] }; claimId?: unknown; recoveryMessageId?: unknown };
+        required?: string[];
     };
-    assert.deepEqual(recoveryInputSchema.properties?.action?.enum, ["claim", "attempt", "complete", "release", "reject", "dismiss"]);
-    const goalContinuationInputSchema = goalContinue.inputSchema as {
-        properties?: { action?: { enum?: string[] }; goalId?: unknown; userInitiated?: unknown };
-    };
-    assert.deepEqual(goalContinuationInputSchema.properties?.action?.enum, ["claim", "validate", "attempt", "report", "reset"]);
-    assert.notEqual(goalContinuationInputSchema.properties?.goalId, undefined);
-    assert.notEqual(goalContinuationInputSchema.properties?.userInitiated, undefined);
+    assert.deepEqual(recoveryInputSchema.properties?.action?.enum, ["dismiss"]);
+    assert.equal(recoveryInputSchema.properties?.claimId, undefined);
+    assert.notEqual(recoveryInputSchema.properties?.recoveryMessageId, undefined);
+    assert.deepEqual(recoveryInputSchema.required, ["action", "recoveryMessageId", "waitId", "token"]);
     const askInputSchema = ask.inputSchema as {
         properties?: Record<string, unknown>;
         required?: string[];

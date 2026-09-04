@@ -2,7 +2,7 @@ export type GoalStepStatus = "pending" | "active" | "completed" | "skipped";
 export type GoalStatus = "active" | "blocked" | "paused" | "completed" | "stopped";
 export type GoalAction = "start" | "get" | "update" | "block" | "pause" | "resume" | "finish" | "stop";
 export type GoalActivityKind = "observation" | "execution" | "mutation" | "wait";
-export type GoalContinuationAction = "claim" | "validate" | "attempt" | "report" | "reset";
+export type GoalContinuationAction = "claim" | "validate" | "attempt" | "report" | "release" | "reset";
 
 export interface GoalStep {
     id: string;

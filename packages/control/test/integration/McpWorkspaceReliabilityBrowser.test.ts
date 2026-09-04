@@ -1115,28 +1115,23 @@ test("Workspace fences an ambiguous detached-wait resume instead of replaying it
     }, workspaceAppHtml);
 
     await mount();
-    const app = page.frameLocator("#workspace");
-    await app.getByText("Delivery uncertain", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("Automatic retry stopped to avoid duplicate agent execution.", { exact: true }).waitFor({ state: "visible" });
-    assert.equal(await page.evaluate("(window.__waitAmbiguousMessages || []).length"), 1);
+    await page.waitForFunction("(window.__waitAmbiguousMessages || []).length === 1");
+    await page.waitForFunction("(window.__waitAmbiguousReports || []).length === 1");
+    assert.equal(await page.evaluate("window.__waitAmbiguousReports[0].outcome"), "uncertain");
+    assert.equal(await page.evaluate("window.__waitAmbiguousConsumed"), true);
+    assert.deepEqual(
+        await page.evaluate("(window.__waitAmbiguousCalls || []).filter(call => call.name === 'workspace_reentry_control').slice(-4).map(call => call.arguments.action)"),
+        ["claim", "validate", "attempt", "report"],
+    );
+    assert.equal(
+        await page.evaluate("(window.__waitAmbiguousCalls || []).filter(call => call.name === 'workspace_wait_recover').length"),
+        0,
+    );
 
     await mount();
-    await app.getByText("Delivery uncertain", { exact: true }).waitFor({ state: "visible" });
     await page.waitForTimeout(250);
     assert.equal(await page.evaluate("(window.__waitAmbiguousMessages || []).length"), 1);
-    const beforeDismiss = await page.evaluate(
-        "(window.__waitAmbiguousCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)",
-    );
-    assert.deepEqual(beforeDismiss, ["claim", "attempt"]);
-
-    await app.getByRole("button", { name: "Dismiss automatic resume", exact: true }).click();
-    await page.waitForFunction("window.__waitAmbiguousDismissed === true");
-    await app.getByText("Delivery uncertain", { exact: true }).waitFor({ state: "detached" });
-    const actions = await page.evaluate(
-        "(window.__waitAmbiguousCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)",
-    );
-    assert.deepEqual(actions, ["claim", "attempt", "dismiss"]);
-    assert.equal(await page.evaluate("(window.__waitAmbiguousMessages || []).length"), 1);
+    assert.equal(await page.evaluate("(window.__waitAmbiguousReports || []).length"), 1);
 });
 
 test("Workspace fences an ambiguous Goal continuation instead of replaying it", BROWSER_TEST_OPTIONS, async (t) => {
@@ -1154,37 +1149,65 @@ test("Workspace fences an ambiguous Goal continuation instead of replaying it", 
 
     await mount();
     const app = page.frameLocator("#workspace");
+    await page.waitForFunction("(window.__goalAmbiguousMessages || []).length === 1");
+    await page.waitForFunction("(window.__goalAmbiguousReports || []).length === 1");
+    assert.equal(await page.evaluate("window.__goalAmbiguousReports[0].outcome"), "uncertain");
     await app.getByText("Delivery uncertain", { exact: true }).waitFor({ state: "visible" });
     await app.getByText("Continuation delivery uncertain", { exact: true }).waitFor({ state: "visible" });
-    assert.equal(await page.evaluate("(window.__goalAmbiguousMessages || []).length"), 1);
+    const goalReportClaimId = await page.evaluate("window.__goalAmbiguousReports[0].claimId") as string;
     assert.deepEqual(
-        await page.evaluate("(window.__goalAmbiguousCalls || []).filter(call => call.name === 'workspace_goal_continue').map(call => call.arguments.action)"),
-        ["claim", "validate", "attempt"],
+        await page.evaluate((claimId) => {
+            const state = window as typeof window & {
+                __goalAmbiguousCalls?: Array<{ arguments: Record<string, unknown>; name: string }>;
+            };
+            return (state.__goalAmbiguousCalls || [])
+                .filter((call) => call.name === "workspace_reentry_control" && call.arguments.claimId === claimId)
+                .map((call) => call.arguments.action);
+        }, goalReportClaimId),
+        ["claim", "validate", "attempt", "report"],
+    );
+    assert.equal(
+        await page.evaluate("(window.__goalAmbiguousCalls || []).filter(call => call.name === 'workspace_goal_continue').length"),
+        0,
     );
 
     await mount();
     await app.getByText("Delivery uncertain", { exact: true }).waitFor({ state: "visible" });
     await page.waitForTimeout(250);
     assert.equal(await page.evaluate("(window.__goalAmbiguousMessages || []).length"), 1);
-    assert.deepEqual(
-        await page.evaluate("(window.__goalAmbiguousCalls || []).filter(call => call.name === 'workspace_goal_continue').map(call => call.arguments.action)"),
-        ["claim", "validate", "attempt"],
-    );
+    assert.equal(await page.evaluate("(window.__goalAmbiguousReports || []).length"), 1);
 });
 
 const WAIT_AMBIGUOUS_BRIDGE_SCRIPT = String.raw`
 window.__waitAmbiguousReentryClaimId = "";
 window.__waitAmbiguousCalls = [];
 window.__waitAmbiguousMessages = [];
+window.__waitAmbiguousReports = [];
 window.__waitAmbiguousAttempted = false;
-window.__waitAmbiguousDismissed = false;
-window.__waitAmbiguousPendingWatch = null;
-window.__waitAmbiguousSnapshotDelivered = false;
+window.__waitAmbiguousConsumed = false;
 
+function waitAmbiguousContinuation() {
+    return {
+        kind: "wait",
+        reason: "tmux-finished",
+        wait: { kind: "tmux", taskId: "task-ambiguous", waitId: "wait-ambiguous" },
+        result: { task: { id: "tmux-ambiguous", status: "0" } },
+        suspendedOperation: { kind: "tmux-wait", taskId: "tmux-ambiguous" },
+        nextOperation: { kind: "tool", taskId: "tmux-ambiguous", tool: "tmux_read" },
+        constraints: { restartTask: false }
+    };
+}
+function waitAmbiguousModelContext() {
+    var state = { ctxId: "ctx-wait-ambiguous", continuation: waitAmbiguousContinuation() };
+    return {
+        content: [{ type: "text", text: "portable-devshell durable Workspace state:\n" + JSON.stringify(state, null, 2) }],
+        structuredContent: { portableDevshellWorkspace: state }
+    };
+}
 function waitAmbiguousSnapshot() {
     return {
         approvals: [],
-        background: window.__waitAmbiguousDismissed ? [] : [{
+        background: window.__waitAmbiguousConsumed ? [] : [{
             detachedAt: "2026-08-29T12:00:00.000Z",
             recoveryMessageAttemptedAt: window.__waitAmbiguousAttempted ? "2026-08-29T12:00:01.000Z" : undefined,
             recoveryMessageId: window.__waitAmbiguousAttempted ? "resume-message-ambiguous" : undefined,
@@ -1196,10 +1219,20 @@ function waitAmbiguousSnapshot() {
         }],
         ctxId: "ctx-wait-ambiguous",
         currentEvent: null,
-        cursor: window.__waitAmbiguousAttempted ? 2 : 1,
+        cursor: window.__waitAmbiguousConsumed ? 2 : 1,
         goal: null,
         instance: "browser-instance",
         questions: [],
+        reentry: {
+            attempted: window.__waitAmbiguousAttempted,
+            claimId: window.__waitAmbiguousReentryClaimId || undefined,
+            epoch: 0,
+            executionActive: false,
+            executionEpoch: 0,
+            pending: !!window.__waitAmbiguousReentryClaimId,
+            sourceId: window.__waitAmbiguousReentryClaimId ? "wait-ambiguous" : undefined,
+            sourceKind: window.__waitAmbiguousReentryClaimId ? "wait" : undefined
+        },
         tasks: [{
             completed: 1,
             currentItem: "Continue work manually",
@@ -1212,7 +1245,6 @@ function waitAmbiguousSnapshot() {
         }]
     };
 }
-
 window.addEventListener("message", function (event) {
     if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
     var source = event.source;
@@ -1226,11 +1258,7 @@ window.addEventListener("message", function (event) {
         source.postMessage({ error: { code: -32001, message: messageText }, id: message.id, jsonrpc: "2.0" }, "*");
     }
     if (message.method === "ui/initialize") {
-        source.postMessage({
-            jsonrpc: "2.0",
-            method: "ui/notifications/tool-input",
-            params: { arguments: { ctxId: "ctx-wait-ambiguous" } }
-        }, "*");
+        source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-input", params: { arguments: { ctxId: "ctx-wait-ambiguous" } } }, "*");
         source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: {
             _meta: { "portable-devshell/workspace": { token: "wait-ambiguous-token" } },
             structuredContent: { ctxId: "ctx-wait-ambiguous", instance: "browser-instance" }
@@ -1251,67 +1279,54 @@ window.addEventListener("message", function (event) {
         reply({ _meta: { "portable-devshell/workspace": { token: "wait-ambiguous-token" } }, structuredContent: waitAmbiguousSnapshot() });
         return;
     }
-    if (call.name === "workspace_watch") {
-        window.__waitAmbiguousPendingWatch = { id: message.id, source: source };
-        return;
-    }
+    if (call.name === "workspace_watch") return;
     if (call.name === "workspace_reentry_control") {
-        if (call.arguments.action === "claim") {
-            window.__waitAmbiguousReentryClaimId = call.arguments.claimId;
-            reply({ structuredContent: { claimId: window.__waitAmbiguousReentryClaimId, claimed: true, epoch: 0, pending: true } });
+        var action = call.arguments.action;
+        if (action === "claim") {
+            var claimed = !window.__waitAmbiguousConsumed && !window.__waitAmbiguousAttempted && !window.__waitAmbiguousReentryClaimId;
+            if (claimed) window.__waitAmbiguousReentryClaimId = call.arguments.claimId;
+            reply({ structuredContent: Object.assign(waitAmbiguousSnapshot().reentry, {
+                claimId: call.arguments.claimId,
+                claimed: claimed,
+                delivery: claimed ? {
+                    kind: "wait",
+                    message: "Resume the existing execution from the Workspace continuation context.\n\nPerform the continuation operation, then continue the suspended work from its result.",
+                    messageId: "resume-message-ambiguous",
+                    modelContext: waitAmbiguousModelContext(),
+                    sourceId: "wait-ambiguous"
+                } : undefined
+            }) });
             return;
         }
-        if (call.arguments.action === "validate") {
-            reply({ structuredContent: { claimId: window.__waitAmbiguousReentryClaimId, epoch: 0, pending: true, valid: window.__waitAmbiguousReentryClaimId === call.arguments.claimId } });
+        if (action === "validate") {
+            reply({ structuredContent: Object.assign(waitAmbiguousSnapshot().reentry, {
+                valid: !window.__waitAmbiguousConsumed && window.__waitAmbiguousReentryClaimId === call.arguments.claimId
+            }) });
             return;
         }
-        if (call.arguments.action === "release") {
+        if (action === "attempt") {
+            window.__waitAmbiguousAttempted = window.__waitAmbiguousReentryClaimId === call.arguments.claimId;
+            reply({ structuredContent: Object.assign(waitAmbiguousSnapshot().reentry, { attempted: window.__waitAmbiguousAttempted }) });
+            return;
+        }
+        if (action === "report") {
+            window.__waitAmbiguousReports.push(call.arguments);
+            window.__waitAmbiguousConsumed = true;
+            window.__waitAmbiguousAttempted = false;
             window.__waitAmbiguousReentryClaimId = "";
-            reply({ structuredContent: { epoch: 0, pending: false, released: true } });
+            reply({ structuredContent: {
+                attempted: false, epoch: 0, executionActive: true, executionEpoch: 1,
+                outcome: call.arguments.outcome, pending: false, reported: true
+            } });
             return;
         }
-        reply({ structuredContent: { epoch: 0, pending: !!window.__waitAmbiguousReentryClaimId } });
+        if (action === "release") {
+            if (!window.__waitAmbiguousAttempted && window.__waitAmbiguousReentryClaimId === call.arguments.claimId) window.__waitAmbiguousReentryClaimId = "";
+            reply({ structuredContent: { attempted: false, epoch: 0, executionActive: false, executionEpoch: 0, pending: false, released: true } });
+            return;
+        }
+        reply({ structuredContent: waitAmbiguousSnapshot().reentry });
         return;
-    }
-    if (call.name === "workspace_wait_recover") {
-        if (call.arguments.action === "claim") {
-            reply({ structuredContent: {
-                claimId: "wait-ambiguous-claim",
-                kind: "tmux",
-                recoveryMessageId: "resume-message-ambiguous",
-                result: { task: { status: "0" } },
-                taskId: "task-ambiguous",
-                targetId: "tmux-ambiguous",
-                waitId: "wait-ambiguous"
-            } });
-            return;
-        }
-        if (call.arguments.action === "attempt") {
-            window.__waitAmbiguousAttempted = true;
-            reply({ structuredContent: {
-                attempted: true,
-                recoveryMessageAttemptedAt: "2026-08-29T12:00:01.000Z",
-                recoveryMessageId: "resume-message-ambiguous",
-                waitId: "wait-ambiguous"
-            } });
-            var pending = window.__waitAmbiguousPendingWatch;
-            if (pending && !window.__waitAmbiguousSnapshotDelivered) {
-                window.__waitAmbiguousPendingWatch = null;
-                window.__waitAmbiguousSnapshotDelivered = true;
-                pending.source.postMessage({
-                    id: pending.id,
-                    jsonrpc: "2.0",
-                    result: { structuredContent: { changed: true, cursor: 2, snapshot: waitAmbiguousSnapshot() } }
-                }, "*");
-            }
-            return;
-        }
-        if (call.arguments.action === "dismiss") {
-            window.__waitAmbiguousDismissed = true;
-            reply({ structuredContent: { dismissed: true, kind: "tmux", targetId: "tmux-ambiguous", waitId: "wait-ambiguous" } });
-            return;
-        }
-        reject("unsafe recovery action after ambiguous delivery: " + call.arguments.action);
     }
 });
 `;
@@ -1320,6 +1335,7 @@ const GOAL_AMBIGUOUS_BRIDGE_SCRIPT = String.raw`
 window.__goalAmbiguousReentryClaimId = "";
 window.__goalAmbiguousCalls = [];
 window.__goalAmbiguousMessages = [];
+window.__goalAmbiguousReports = [];
 window.__goalAmbiguousAttempted = false;
 
 function goalAmbiguousGoal() {
@@ -1335,6 +1351,7 @@ function goalAmbiguousGoal() {
         createdAt: "2026-08-29T12:00:00.000Z",
         goalId: "goal-ambiguous",
         lastAgentActivityAt: "2026-08-29T12:00:00.000Z",
+        lastProgressAt: "2026-08-29T12:00:00.000Z",
         maxContinuations: 10,
         objective: "Continue without duplicate dispatch",
         revision: 1,
@@ -1343,10 +1360,34 @@ function goalAmbiguousGoal() {
         updatedAt: "2026-08-29T12:00:00.000Z"
     };
 }
+function goalAmbiguousContinuation() {
+    var terminal = { id: "finish-goal", kind: "goal-terminal", status: "pending", text: "Complete the Goal." };
+    return {
+        kind: "goal", goalId: "goal-ambiguous", objective: "Continue without duplicate dispatch",
+        orderedItems: [{ id: "work", status: "active", text: "Continue work" }, terminal],
+        currentItem: { id: "work", status: "active", text: "Continue work" }, nextItem: terminal, attempt: 1
+    };
+}
+function goalAmbiguousModelContext() {
+    var state = { ctxId: "ctx-goal-ambiguous", continuation: goalAmbiguousContinuation(), goal: goalAmbiguousGoal() };
+    return {
+        content: [{ type: "text", text: "portable-devshell durable Workspace state:\n" + JSON.stringify(state, null, 2) }],
+        structuredContent: { portableDevshellWorkspace: state }
+    };
+}
 function goalAmbiguousSnapshot() {
     return {
         approvals: [], background: [], ctxId: "ctx-goal-ambiguous", currentEvent: null,
-        cursor: 1, goal: goalAmbiguousGoal(), instance: "browser-instance", questions: [], tasks: []
+        cursor: 1, goal: goalAmbiguousGoal(), instance: "browser-instance", questions: [],
+        reentry: {
+            attempted: window.__goalAmbiguousAttempted,
+            claimId: window.__goalAmbiguousReentryClaimId || undefined,
+            epoch: 0, executionActive: false, executionEpoch: 0,
+            pending: !!window.__goalAmbiguousReentryClaimId,
+            sourceId: window.__goalAmbiguousReentryClaimId ? "goal-ambiguous" : undefined,
+            sourceKind: window.__goalAmbiguousReentryClaimId ? "goal" : undefined
+        },
+        tasks: []
     };
 }
 window.addEventListener("message", function (event) {
@@ -1383,51 +1424,57 @@ window.addEventListener("message", function (event) {
         reply({ _meta: { "portable-devshell/workspace": { token: "goal-ambiguous-token" } }, structuredContent: goalAmbiguousSnapshot() });
         return;
     }
-    if (call.name === "workspace_watch") {
-        window.__goalAmbiguousPendingWatch = { id: message.id, source: source };
-        return;
-    }
+    if (call.name === "workspace_watch") return;
     if (call.name === "workspace_reentry_control") {
-        if (call.arguments.action === "claim") {
-            window.__goalAmbiguousReentryClaimId = call.arguments.claimId;
-            reply({ structuredContent: { claimId: window.__goalAmbiguousReentryClaimId, claimed: true, epoch: 0, pending: true } });
+        var action = call.arguments.action;
+        if (action === "claim") {
+            var claimed = !window.__goalAmbiguousAttempted && !window.__goalAmbiguousReentryClaimId;
+            if (claimed) window.__goalAmbiguousReentryClaimId = call.arguments.claimId;
+            reply({ structuredContent: Object.assign(goalAmbiguousSnapshot().reentry, {
+                claimId: call.arguments.claimId,
+                claimed: claimed,
+                delivery: claimed ? {
+                    kind: "goal",
+                    message: "Finish the current Goal item shown in the Workspace context.\n\nThen immediately continue with the next Goal item.\n\nDo not stop after completing or reporting the current item.",
+                    messageId: "goal-message-ambiguous",
+                    modelContext: goalAmbiguousModelContext(),
+                    sourceId: "goal-ambiguous"
+                } : undefined
+            }) });
             return;
         }
-        if (call.arguments.action === "validate") {
-            reply({ structuredContent: { claimId: window.__goalAmbiguousReentryClaimId, epoch: 0, pending: true, valid: window.__goalAmbiguousReentryClaimId === call.arguments.claimId } });
+        if (action === "validate") {
+            reply({ structuredContent: Object.assign(goalAmbiguousSnapshot().reentry, {
+                valid: window.__goalAmbiguousReentryClaimId === call.arguments.claimId && !window.__goalAmbiguousAttempted
+            }) });
             return;
         }
-        if (call.arguments.action === "release") {
+        if (action === "attempt") {
+            window.__goalAmbiguousAttempted = window.__goalAmbiguousReentryClaimId === call.arguments.claimId;
+            reply({ structuredContent: Object.assign(goalAmbiguousSnapshot().reentry, { attempted: window.__goalAmbiguousAttempted }) });
+            return;
+        }
+        if (action === "report") {
+            window.__goalAmbiguousReports.push(call.arguments);
             window.__goalAmbiguousReentryClaimId = "";
-            reply({ structuredContent: { epoch: 0, pending: false, released: true } });
-            return;
-        }
-        reply({ structuredContent: { epoch: 0, pending: !!window.__goalAmbiguousReentryClaimId } });
-        return;
-    }
-    if (call.name === "workspace_goal_continue") {
-        if (call.arguments.action === "claim") {
             reply({ structuredContent: {
-                claimed: true, claimId: call.arguments.claimId, continuationCount: 1,
-                goal: Object.assign({}, goalAmbiguousGoal(), { continuationDue: false, continuationMessageId: "goal-message-ambiguous", continuationPending: true })
+                attempted: false, epoch: 0, executionActive: true, executionEpoch: 1,
+                outcome: call.arguments.outcome, pending: false, reported: true
             } });
             return;
         }
-        if (call.arguments.action === "validate") {
-            reply({ structuredContent: { valid: true, goal: Object.assign({}, goalAmbiguousGoal(), { continuationDue: false, continuationMessageId: "goal-message-ambiguous", continuationPending: true }) } });
+        if (action === "release") {
+            if (!window.__goalAmbiguousAttempted && window.__goalAmbiguousReentryClaimId === call.arguments.claimId) window.__goalAmbiguousReentryClaimId = "";
+            reply({ structuredContent: { attempted: false, epoch: 0, executionActive: false, executionEpoch: 0, pending: false, released: true } });
             return;
         }
-        if (call.arguments.action === "attempt") {
-            window.__goalAmbiguousAttempted = true;
-            reply({ structuredContent: { attempted: true, messageId: "goal-message-ambiguous", goal: goalAmbiguousGoal() } });
-            return;
-        }
-        reject("unsafe goal continuation replay: " + call.arguments.action);
+        reply({ structuredContent: goalAmbiguousSnapshot().reentry });
+        return;
     }
 });
 `;
 
-test("Workspace does not dispatch automatic recovery when model context injection fails", BROWSER_TEST_OPTIONS, async (t) => {
+test("Workspace releases re-entry before dispatch when model context injection fails", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
 
@@ -1445,21 +1492,31 @@ test("Workspace does not dispatch automatic recovery when model context injectio
     const app = page.frameLocator("#workspace");
     await app.getByText("Resume after answer?", { exact: true }).waitFor({ state: "visible" });
     await app.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.waitForFunction("(window.__modelContextFailureActions || []).length >= 3");
+    await page.waitForFunction("(window.__modelContextFailureActions || []).includes('release')");
+    const releaseClaimId = await page.evaluate(`
+        (window.__modelContextFailureCalls || [])
+            .find(call => call.name === "workspace_reentry_control" && call.arguments.action === "release")
+            ?.arguments.claimId
+    `) as string;
     assert.deepEqual(
-        await page.evaluate("window.__modelContextFailureActions || []"),
-        ["claim", "attempt", "reject"],
+        await page.evaluate((claimId) => {
+            const state = window as typeof window & {
+                __modelContextFailureCalls?: Array<{ arguments: Record<string, unknown>; name: string }>;
+            };
+            return (state.__modelContextFailureCalls || [])
+                .filter((call) => call.name === "workspace_reentry_control" && call.arguments.claimId === claimId)
+                .map((call) => call.arguments.action);
+        }, releaseClaimId),
+        ["claim", "validate", "release"],
     );
     assert.equal(await page.evaluate("(window.__modelContextFailureMessages || []).length"), 0);
+    assert.equal(await page.evaluate("(window.__modelContextFailureActions || []).includes('attempt')"), false);
+    assert.equal(await page.evaluate("(window.__modelContextFailureActions || []).includes('report')"), false);
     await page.waitForTimeout(250);
-    assert.deepEqual(
-        await page.evaluate("window.__modelContextFailureActions || []"),
-        ["claim", "attempt", "reject"],
-    );
     assert.deepEqual(pageFailures, []);
 });
 
-test("Workspace records a safe recovery rejection before resetting a timed-out Host bridge", BROWSER_TEST_OPTIONS, async (t) => {
+test("Workspace records uncertain delivery before resetting a failed Host message bridge", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
 
@@ -1467,10 +1524,25 @@ test("Workspace records a safe recovery rejection before resetting a timed-out H
     const pageFailures: string[] = [];
     page.on("pageerror", (error) => pageFailures.push(error.message));
     await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    const bridge = MODEL_CONTEXT_FAILURE_BRIDGE_SCRIPT.replace(
-        'reject("model context unavailable");',
-        'if ((window.__modelContextFailureActions || []).includes("attempt") && !window.__modelContextTransportFailed) { window.__modelContextTransportFailed = true; source.postMessage({ error: { code: -32001, message: "model context timed out" }, id: message.id, jsonrpc: "2.0" }, "*"); } else { reply({}); }',
-    );
+    const bridge = MODEL_CONTEXT_FAILURE_BRIDGE_SCRIPT
+        .replace('reject("model context unavailable");', 'reply({});')
+        .replace(
+            `if (message.method === "ui/message") {
+        window.__modelContextFailureMessages.push(message.params || {});
+        reply({});
+        return;
+    }`,
+            `if (message.method === "ui/message") {
+        window.__modelContextFailureMessages.push(message.params || {});
+        if (!window.__modelContextTransportFailed) {
+            window.__modelContextTransportFailed = true;
+            source.postMessage({ error: { code: -32001, message: "message delivery timed out" }, id: message.id, jsonrpc: "2.0" }, "*");
+        } else {
+            reply({});
+        }
+        return;
+    }`,
+        );
     await page.evaluate(bridge);
     await page.evaluate((html) => {
         const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
@@ -1481,25 +1553,53 @@ test("Workspace records a safe recovery rejection before resetting a timed-out H
     const app = page.frameLocator("#workspace");
     await app.getByText("Resume after answer?", { exact: true }).waitFor({ state: "visible" });
     await app.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.waitForFunction("(window.__modelContextFailureActions || []).includes('reject')");
+    await page.waitForFunction("(window.__modelContextFailureReports || []).length === 1");
+    assert.equal(await page.evaluate("window.__modelContextFailureReports[0].outcome"), "uncertain");
     await page.waitForFunction("(window.__modelContextFailureInitializeCount || 0) >= 2");
-    await page.waitForFunction("(window.__modelContextFailureActions || []).includes('complete')");
+    await page.waitForTimeout(250);
+    const reportClaimId = await page.evaluate("window.__modelContextFailureReports[0].claimId") as string;
     assert.deepEqual(
-        await page.evaluate("window.__modelContextFailureActions || []"),
-        ["claim", "attempt", "reject", "claim", "attempt", "complete"],
+        await page.evaluate((claimId) => {
+            const state = window as typeof window & {
+                __modelContextFailureCalls?: Array<{ arguments: Record<string, unknown>; name: string }>;
+            };
+            return (state.__modelContextFailureCalls || [])
+                .filter((call) => call.name === "workspace_reentry_control" && call.arguments.claimId === claimId)
+                .map((call) => call.arguments.action);
+        }, reportClaimId),
+        ["claim", "validate", "attempt", "report"],
     );
     assert.equal(await page.evaluate("(window.__modelContextFailureMessages || []).length"), 1);
-    await page.waitForTimeout(250);
-    assert.equal(await page.evaluate("(window.__modelContextFailureMessages || []).length"), 1);
+    assert.equal(await page.evaluate("window.__modelContextFailureConsumed"), true);
     assert.deepEqual(pageFailures, []);
 });
 
 const MODEL_CONTEXT_FAILURE_BRIDGE_SCRIPT = String.raw`
 window.__modelContextFailureReentryClaimId = "";
+window.__modelContextFailureCalls = [];
 window.__modelContextFailureActions = [];
 window.__modelContextFailureMessages = [];
+window.__modelContextFailureReports = [];
 window.__modelContextFailureAnswered = false;
+window.__modelContextFailureAttempted = false;
+window.__modelContextFailureConsumed = false;
 window.__modelContextFailureInitializeCount = 0;
+function modelContextFailureContinuation() {
+    return {
+        kind: "wait", reason: "question-answered",
+        wait: { kind: "question", waitId: "wait-model-context" },
+        result: { answer: "Continue" },
+        suspendedOperation: { kind: "workspace-question", waitId: "wait-model-context" },
+        nextOperation: { kind: "resume-with-answer" }
+    };
+}
+function modelContextFailureModelContext() {
+    var state = { ctxId: "ctx-model-context", continuation: modelContextFailureContinuation() };
+    return {
+        content: [{ type: "text", text: "portable-devshell durable Workspace state:\n" + JSON.stringify(state, null, 2) }],
+        structuredContent: { portableDevshellWorkspace: state }
+    };
+}
 function modelContextFailureSnapshot() {
     var question = {
         detachedAt: "2026-08-30T00:00:00.000Z",
@@ -1514,19 +1614,29 @@ function modelContextFailureSnapshot() {
     };
     return {
         approvals: [],
-        background: window.__modelContextFailureAnswered ? [{
+        background: window.__modelContextFailureAnswered && !window.__modelContextFailureConsumed ? [{
             detachedAt: question.detachedAt,
             kind: "question",
+            recoveryMessageAttemptedAt: window.__modelContextFailureAttempted ? "2026-08-30T00:00:02.000Z" : undefined,
+            recoveryMessageId: window.__modelContextFailureAttempted ? "model-context-message" : undefined,
             status: "resolved",
             updatedAt: "2026-08-30T00:00:02.000Z",
             waitId: question.waitId
         }] : [],
         ctxId: "ctx-model-context",
         currentEvent: window.__modelContextFailureAnswered ? null : question,
-        cursor: 1,
+        cursor: window.__modelContextFailureConsumed ? 2 : 1,
         goal: null,
         instance: "browser-instance",
         questions: window.__modelContextFailureAnswered ? [] : [question],
+        reentry: {
+            attempted: window.__modelContextFailureAttempted,
+            claimId: window.__modelContextFailureReentryClaimId || undefined,
+            epoch: 0, executionActive: false, executionEpoch: 0,
+            pending: !!window.__modelContextFailureReentryClaimId,
+            sourceId: window.__modelContextFailureReentryClaimId ? "wait-model-context" : undefined,
+            sourceKind: window.__modelContextFailureReentryClaimId ? "wait" : undefined
+        },
         tasks: []
     };
 }
@@ -1563,27 +1673,61 @@ window.addEventListener("message", function (event) {
     }
     if (message.method !== "tools/call") return;
     var call = message.params || {};
+    window.__modelContextFailureCalls.push(call);
     if (call.name === "workspace_snapshot" || call.name === "workspace_reconnect") {
         reply({ _meta: { "portable-devshell/workspace": { token: "model-context-token" } }, structuredContent: modelContextFailureSnapshot() });
         return;
     }
     if (call.name === "workspace_watch") return;
     if (call.name === "workspace_reentry_control") {
-        if (call.arguments.action === "claim") {
-            window.__modelContextFailureReentryClaimId = call.arguments.claimId;
-            reply({ structuredContent: { claimId: window.__modelContextFailureReentryClaimId, claimed: true, epoch: 0, pending: true } });
+        var action = call.arguments.action;
+        window.__modelContextFailureActions.push(action);
+        if (action === "claim") {
+            var claimed = window.__modelContextFailureAnswered && !window.__modelContextFailureConsumed && !window.__modelContextFailureAttempted && !window.__modelContextFailureReentryClaimId;
+            if (claimed) window.__modelContextFailureReentryClaimId = call.arguments.claimId;
+            reply({ structuredContent: Object.assign(modelContextFailureSnapshot().reentry, {
+                claimId: call.arguments.claimId,
+                claimed: claimed,
+                delivery: claimed ? {
+                    kind: "wait",
+                    message: "Resume the existing execution from the Workspace continuation context.\n\nPerform the continuation operation, then continue the suspended work from its result.",
+                    messageId: "model-context-message",
+                    modelContext: modelContextFailureModelContext(),
+                    sourceId: "wait-model-context"
+                } : undefined
+            }) });
             return;
         }
-        if (call.arguments.action === "validate") {
-            reply({ structuredContent: { claimId: window.__modelContextFailureReentryClaimId, epoch: 0, pending: true, valid: window.__modelContextFailureReentryClaimId === call.arguments.claimId } });
+        if (action === "validate") {
+            reply({ structuredContent: Object.assign(modelContextFailureSnapshot().reentry, {
+                valid: window.__modelContextFailureReentryClaimId === call.arguments.claimId && !window.__modelContextFailureConsumed
+            }) });
             return;
         }
-        if (call.arguments.action === "release") {
+        if (action === "attempt") {
+            window.__modelContextFailureAttempted = window.__modelContextFailureReentryClaimId === call.arguments.claimId;
+            reply({ structuredContent: Object.assign(modelContextFailureSnapshot().reentry, { attempted: window.__modelContextFailureAttempted }) });
+            return;
+        }
+        if (action === "report") {
+            window.__modelContextFailureReports.push(call.arguments);
+            window.__modelContextFailureConsumed = true;
+            window.__modelContextFailureAttempted = false;
             window.__modelContextFailureReentryClaimId = "";
-            reply({ structuredContent: { epoch: 0, pending: false, released: true } });
+            reply({ structuredContent: {
+                attempted: false, epoch: 0, executionActive: true, executionEpoch: 1,
+                outcome: call.arguments.outcome, pending: false, reported: true
+            } });
             return;
         }
-        reply({ structuredContent: { epoch: 0, pending: !!window.__modelContextFailureReentryClaimId } });
+        if (action === "release") {
+            if (!window.__modelContextFailureAttempted && window.__modelContextFailureReentryClaimId === call.arguments.claimId) {
+                window.__modelContextFailureReentryClaimId = "";
+            }
+            reply({ structuredContent: { attempted: false, epoch: 0, executionActive: false, executionEpoch: 0, pending: false, released: true } });
+            return;
+        }
+        reply({ structuredContent: modelContextFailureSnapshot().reentry });
         return;
     }
     if (call.name === "workspace_question_answer") {
@@ -1595,40 +1739,6 @@ window.addEventListener("message", function (event) {
             waitId: "wait-model-context"
         } });
         return;
-    }
-    if (call.name === "workspace_wait_recover") {
-        window.__modelContextFailureActions.push(call.arguments.action);
-        if (call.arguments.action === "claim") {
-            reply({ structuredContent: {
-                claimId: "model-context-claim",
-                kind: "question",
-                recoveryMessageId: "model-context-message",
-                result: { answer: "Continue" },
-                targetId: "question-model-context",
-                waitId: "wait-model-context"
-            } });
-            return;
-        }
-        if (call.arguments.action === "attempt") {
-            reply({ structuredContent: {
-                attempted: true,
-                recoveryMessageAttemptedAt: "2026-08-30T00:00:02.000Z",
-                recoveryMessageId: "model-context-message",
-                waitId: "wait-model-context"
-            } });
-            return;
-        }
-        if (call.arguments.action === "release") {
-            reply({ structuredContent: { released: true, waitId: "wait-model-context" } });
-            return;
-        }
-        if (call.arguments.action === "reject") {
-            reply({ structuredContent: { rejected: true, waitId: "wait-model-context" } });
-            return;
-        }
-        if (call.arguments.action === "complete") {
-            reply({ structuredContent: { completed: true, kind: "question", targetId: "question-model-context", waitId: "wait-model-context" } });
-        }
     }
 });
 `;

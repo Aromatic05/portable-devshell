@@ -121,7 +121,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var watchGeneration = 0;
   var watchStarted = false;
   var reconnectOnStart = false;
-  var recovering = false;
   var busy = new Set();
   var confirmingTaskCancel = new Map();
   var expandedQuestions = new Set();
@@ -138,23 +137,12 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var DISPLAY_MODE_RETRY_MS = 750;
   var DISPLAY_MODE_MAX_RETRIES = 2;
   var DISPLAY_MODE_TRANSITION_LEASE_MS = 2000;
-  var WAIT_CONTINUATION_MESSAGE = "Resume the existing execution from the Workspace continuation context.\n\nPerform the continuation operation, then continue the suspended work from its result.";
-  var GOAL_CONTINUATION_MESSAGE = "Finish the current Goal item shown in the Workspace context.\n\nThen immediately continue with the next Goal item.\n\nDo not stop after completing or reporting the current item.";
-  var GOAL_CONTINUATION_ENFORCEMENT = [
-    "",
-    "Wake attempt 2. The previous continuation produced no verifiable execution progress.",
-    "Wake attempt 3. Repeated continuation attempts have not produced verifiable execution progress. Take concrete execution actions instead of only describing the state.",
-    "Wake attempt 4. You have repeatedly failed to advance an actionable Goal. Stop substituting acknowledgements, plans, or status reports for execution.",
-    "Wake attempt {attempt}. Critical execution failure: the Goal remains actionable after repeated continuation attempts without verifiable progress. Execute concrete work now rather than another acknowledgement, plan, status report, apology, or promise."
-  ];
   var bridgeReady = false;
   var pendingToolResult = null;
   var initialToolResultResolve = null;
   var liveAbortController = null;
   var goalTimer = null;
-  var goalContinuationClaimId = "";
   var automaticMessageInFlight = false;
-  var heldReentryClaimId = "";
   var hostBridgeGeneration = 0;
   var modelContextEpoch = 0;
   var modelContextSyncController = null;
@@ -331,56 +319,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
 
   function asRecord(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : null;
-  }
-
-  function recoveryMessage() {
-    return WAIT_CONTINUATION_MESSAGE;
-  }
-
-  function waitContinuationContext(item, trigger) {
-    var result = asRecord(item && item.result) || {};
-    var task = asRecord(result.task) || {};
-    var taskId = String((item && item.targetId) || task.id || "");
-    var isQuestion = !!item && item.kind === "question";
-    var tmuxReason = result.interrupted === true
-      ? "tmux-wait-interrupted"
-      : result.waitReason === "output"
-        ? "tmux-output-ready"
-        : result.waitReason === "timeout"
-          ? "tmux-read-interval-elapsed"
-          : result.timedOut === true
-            ? "tmux-wait-deadline-elapsed"
-            : task.status !== undefined && String(task.status) !== "running"
-              ? "tmux-finished"
-              : "tmux-wait-resolved";
-    var timeoutContinuation = !isQuestion && (result.waitReason === "timeout" || result.timedOut === true)
-      ? {
-          operation: { kind: "blocking-wait", taskId: taskId, tool: "tmux_read" },
-          when: "task-still-running-and-result-required"
-        }
-      : undefined;
-    return {
-      kind: "wait",
-      reason: isQuestion ? "question-answered" : tmuxReason,
-      wait: {
-        goalId: item && item.goalId,
-        goalStepId: item && item.goalStepId,
-        kind: item && item.kind,
-        targetId: item && item.targetId,
-        taskId: item && item.taskId,
-        waitId: item && item.waitId
-      },
-      result: result,
-      trigger: trigger || undefined,
-      suspendedOperation: isQuestion
-        ? { kind: "workspace-question", waitId: item && item.waitId }
-        : { kind: "tmux-wait", taskId: taskId },
-      nextOperation: isQuestion
-        ? { kind: "resume-with-answer" }
-        : { kind: "tool", taskId: taskId, tool: "tmux_read" },
-      constraints: isQuestion ? undefined : { restartTask: false },
-      afterResult: timeoutContinuation
-    };
   }
 
   function applyHostContext(context) {
@@ -617,11 +555,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     }
   }
 
-  async function requireModelContext(continuation) {
-    if (!initialized || !snapshot) throw new Error("Workspace state is unavailable for model re-entry");
-    await updateHostModelContext(modelContext(continuation));
-  }
-
   async function updateHostModelContext(value, options) {
     var generation = hostBridgeGeneration;
     var operation = modelContextUpdateTail.then(async function () {
@@ -646,144 +579,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return "workspace-reentry-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
   }
 
-  function automaticReentryAvailable() {
-    if (!initialized || !bridgeReady || bridgeResetting || shuttingDown) return false;
-    var reentry = snapshot && snapshot.reentry;
-    if (!reentry) return true;
-    if (reentry.mode && reentry.mode !== "automatic") return false;
-    if (reentry.suppressedAt) return false;
-    if (reentry.pending && (!heldReentryClaimId || reentry.claimId !== heldReentryClaimId)) return false;
-    return true;
-  }
-
-  async function releaseAutomaticMessage(claimId) {
-    if (!claimId) return;
-    try {
-      var released = structured(await callTool("workspace_reentry_control", {
-        action: "release",
-        claimId: claimId
-      }, true));
-      if (snapshot && released) snapshot.reentry = released;
-    } catch (error) {
-      console.error(error);
-    } finally {
-      if (heldReentryClaimId === claimId) heldReentryClaimId = "";
-    }
-  }
-
-  async function settleAutomaticMessageClaim(outcome) {
-    if (!outcome || !outcome.claimId) return;
-    if (outcome.status === "accepted" || outcome.status === "uncertain") {
-      if (heldReentryClaimId === outcome.claimId) heldReentryClaimId = "";
-      return;
-    }
-    await releaseAutomaticMessage(outcome.claimId);
-  }
-
-  async function sendModelMessage(text, continuation, canSend, beforeSend) {
-    if (automaticMessageInFlight || !automaticReentryAvailable() || (canSend && !canSend())) {
-      return { status: "blocked" };
-    }
-    automaticMessageInFlight = true;
-    modelContextEpoch += 1;
-    if (modelContextSyncController) modelContextSyncController.abort("automatic model re-entry");
-    var claimId = newReentryClaimId();
-    var messageDispatched = false;
-    try {
-      var arbitration = structured(await callTool("workspace_reentry_control", {
-        action: "claim",
-        claimId: claimId
-      }, true));
-      if (snapshot && arbitration) snapshot.reentry = arbitration;
-      if (!arbitration || !arbitration.claimed) return { status: "blocked" };
-      heldReentryClaimId = claimId;
-      if (!automaticReentryAvailable() || (canSend && !canSend())) {
-        return { claimId: claimId, status: "blocked" };
-      }
-      if (beforeSend) {
-        var prepared = await beforeSend();
-        if (prepared === false) return { claimId: claimId, status: "blocked" };
-      }
-      if (!automaticReentryAvailable() || (canSend && !canSend())) {
-        return { claimId: claimId, status: "blocked" };
-      }
-      var validation = structured(await callTool("workspace_reentry_control", {
-        action: "validate",
-        claimId: claimId
-      }, true));
-      if (snapshot && validation) snapshot.reentry = validation;
-      if (!validation || !validation.valid || !automaticReentryAvailable() || (canSend && !canSend())) {
-        return { claimId: claimId, status: "blocked" };
-      }
-
-      // Keep the recovery-specific context adjacent to the message it belongs to.
-      // After this await there are no further asynchronous checks before dispatch.
-      await requireModelContext(continuation);
-      if (!automaticReentryAvailable() || (canSend && !canSend())) {
-        return { claimId: claimId, status: "blocked" };
-      }
-      messageDispatched = true;
-      var result = await sendHostMessage({
-        role: "user",
-        content: [{ type: "text", text: text }]
-      });
-      return { claimId: claimId, status: result && result.isError ? "rejected" : "accepted" };
-    } catch (error) {
-      console.error(error);
-      return {
-        bridgeFailure: hostBridgeTransportFailure(error),
-        claimId: heldReentryClaimId === claimId ? claimId : undefined,
-        error: error instanceof Error ? error.message : String(error),
-        status: messageDispatched ? "uncertain" : "blocked"
-      };
-    } finally {
-      automaticMessageInFlight = false;
-    }
-  }
-
-  function newGoalContinuationClaimId() {
-    if (crypto && typeof crypto.randomUUID === "function") return "goal-continue-" + crypto.randomUUID();
-    return "goal-continue-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
-  }
-
-  function goalContinuationAttempt(claim) {
-    var goal = claim && claim.goal;
-    return goal && Number.isFinite(goal.noActionStreak)
-      ? Math.max(1, Math.floor(goal.noActionStreak) + 1)
-      : claim && Number.isFinite(claim.continuationCount)
-        ? Math.max(1, Math.floor(claim.continuationCount))
-        : Math.max(1, ((goal && goal.continuationCount) || 0) + 1);
-  }
-
-  function goalContinuationContext(claim) {
-    var goal = claim && claim.goal;
-    var steps = goal && Array.isArray(goal.steps) ? goal.steps : [];
-    var currentItem = steps.find(function (step) { return step && step.status === "active"; }) ||
-      steps.find(function (step) { return step && step.status === "pending"; });
-    var currentIndex = steps.indexOf(currentItem);
-    var terminalItem = { id: "finish-goal", kind: "goal-terminal", status: "pending", text: "Complete the Goal." };
-    var orderedItems = steps.concat([terminalItem]);
-    return {
-      kind: "goal",
-      goalId: goal && goal.goalId,
-      objective: goal && goal.objective,
-      orderedItems: orderedItems,
-      currentItem: orderedItems[currentIndex],
-      nextItem: orderedItems[currentIndex + 1],
-      attempt: goalContinuationAttempt(claim),
-      noActionStreak: goal && goal.noActionStreak,
-      stagnationStreak: goal && goal.stagnationStreak,
-      continuationMessageId: goal && goal.continuationMessageId
-    };
-  }
-
-  function goalContinuationMessage(claim) {
-    var attempt = goalContinuationAttempt(claim);
-    var enforcement = GOAL_CONTINUATION_ENFORCEMENT[Math.min(attempt, GOAL_CONTINUATION_ENFORCEMENT.length) - 1]
-      .replace("{attempt}", String(attempt));
-    return [enforcement, GOAL_CONTINUATION_MESSAGE].filter(Boolean).join("\n\n");
-  }
-
   async function yieldAutomaticReentry(reason) {
     if (goalTimer) clearTimeout(goalTimer);
     goalTimer = null;
@@ -793,7 +588,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         reason: reason || "user interrupted automatic execution"
       }, true));
       if (snapshot && yielded) snapshot.reentry = yielded;
-      heldReentryClaimId = "";
       render();
     } catch (error) {
       console.error(error);
@@ -805,116 +599,122 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return reason.indexOf("user") >= 0 || reason.indexOf("stop") >= 0;
   }
 
-  function goalContinuationAvailable() {
-    var goal = snapshot && snapshot.goal;
-    if (!goal || goal.status !== "active" || !automaticReentryAvailable() || snapshot.agentBusy || visibleEvent() || busy.size > 0 || recovering) return false;
-    var steps = Array.isArray(goal.steps) ? goal.steps : [];
-    if (!steps.some(function (step) { return step && (step.status === "active" || step.status === "pending"); })) return false;
-    var background = Array.isArray(snapshot.background) ? snapshot.background : [];
-    return !background.some(function (item) {
-      return item && item.goalId === goal.goalId && item.automaticRecovery !== false && !item.recoveryDisabledAt &&
-        item.status !== "consumed" && item.status !== "cancelled";
-    });
-  }
-
-  function scheduleGoalContinuation(minDelayMs) {
+  function scheduleAutomaticReentry(minDelayMs) {
     if (goalTimer) clearTimeout(goalTimer);
     goalTimer = null;
     var goal = snapshot && snapshot.goal;
-    if (!goal || goal.status !== "active" || goal.continuationPending || goal.autoContinueExhausted || !goalContinuationAvailable()) return;
+    if (!goal || goal.status !== "active" || automaticMessageInFlight || !hostDeliveryAvailable()) return;
     var dueAt = Date.parse(goal.continuationDueAt || "");
     if (!Number.isFinite(dueAt)) return;
     var retryAt = Date.parse(goal.continuationRetryAfter || "");
     var readyAt = Number.isFinite(retryAt) ? Math.max(dueAt, retryAt) : dueAt;
+    var reentry = snapshot && snapshot.reentry;
+    var executionLeaseUntil = Date.parse(reentry && reentry.executionLeaseUntil || "");
+    if (reentry && reentry.executionActive && Number.isFinite(executionLeaseUntil)) {
+      readyAt = Math.max(readyAt, executionLeaseUntil);
+    }
     var delayMs = Math.max(minDelayMs || 0, readyAt - Date.now(), 0);
     goalTimer = setTimeout(function () {
       goalTimer = null;
-      void continueGoal();
+      void dispatchAutomaticReentry();
     }, delayMs);
   }
 
-  async function continueGoal() {
-    var goal = snapshot && snapshot.goal;
-    if (!goal || goal.status !== "active" || goal.autoContinueExhausted || goal.continuationPending || automaticMessageInFlight || !goalContinuationAvailable()) return;
-    var claimId = goalContinuationClaimId || newGoalContinuationClaimId();
-    goalContinuationClaimId = claimId;
-    var attempted = false;
-    var errorText = "";
+  function hostDeliveryAvailable() {
+    return initialized && bridgeReady && !bridgeResetting && !shuttingDown;
+  }
+
+  async function dispatchServerReentry(intent, sourceId) {
+    if (automaticMessageInFlight || !appToken || !snapshot || !hostDeliveryAvailable()) return { status: "blocked" };
+    automaticMessageInFlight = true;
+    modelContextEpoch += 1;
+    var claimId = newReentryClaimId();
     var claimed = false;
+    var attempted = false;
+    var messageDispatched = false;
     var outcome = { status: "blocked" };
     try {
-      var claim = structured(await callTool("workspace_goal_continue", {
+      var claimArgs = {
         action: "claim",
-        available: goalContinuationAvailable(),
         claimId: claimId,
-        goalId: goal.goalId
-      }, true));
-      if (claim && claim.goal) snapshot.goal = claim.goal;
-      if (!claim || !claim.claimed) {
-        goalContinuationClaimId = "";
-        render();
-        scheduleGoalContinuation(30000);
-        return;
-      }
+        intent: intent || "automatic"
+      };
+      if (sourceId) claimArgs.sourceId = sourceId;
+      var claim = structured(await callTool("workspace_reentry_control", claimArgs, true));
+      if (snapshot && claim) snapshot.reentry = claim;
+      if (!claim || !claim.claimed || !claim.delivery) return outcome;
       claimed = true;
-      var validation = structured(await callTool("workspace_goal_continue", {
+
+      var validation = structured(await callTool("workspace_reentry_control", {
         action: "validate",
-        available: goalContinuationAvailable(),
-        claimId: claimId,
-        goalId: goal.goalId
+        claimId: claimId
       }, true));
-      if (validation && validation.goal) snapshot.goal = validation.goal;
-      if (!validation || !validation.valid) {
-        goalContinuationClaimId = "";
-        render();
-        scheduleGoalContinuation(30000);
-        return;
-      }
-      outcome = await sendModelMessage(
-        goalContinuationMessage(claim),
-        goalContinuationContext(claim),
-        goalContinuationAvailable,
-        async function () {
-          var marked = structured(await callTool("workspace_goal_continue", {
-            action: "attempt",
-            available: goalContinuationAvailable(),
-            claimId: claimId,
-            goalId: goal.goalId
-          }, true));
-          if (marked && marked.goal) snapshot.goal = marked.goal;
-          if (!marked || marked.attempted === false) return false;
-          attempted = true;
-          return true;
-        }
-      );
-      if (outcome.status === "rejected") errorText = "Host rejected the Workspace continuation message.";
-      if (outcome.error) errorText = outcome.error;
+      if (snapshot && validation) snapshot.reentry = validation;
+      if (!validation || !validation.valid) return outcome;
+
+      await updateHostModelContext(claim.delivery.modelContext);
+      var marked = structured(await callTool("workspace_reentry_control", {
+        action: "attempt",
+        claimId: claimId
+      }, true));
+      if (snapshot && marked) snapshot.reentry = marked;
+      if (!marked || marked.attempted !== true) return outcome;
+      attempted = true;
+
+      messageDispatched = true;
+      var result = await sendHostMessage({
+        role: "user",
+        content: [{ type: "text", text: String(claim.delivery.message || "") }]
+      });
+      outcome = {
+        claimId: claimId,
+        status: result && result.isError ? "rejected" : "accepted"
+      };
+      return outcome;
     } catch (error) {
-      errorText = error instanceof Error ? error.message : String(error);
       console.error(error);
+      outcome = {
+        bridgeFailure: hostBridgeTransportFailure(error),
+        claimId: claimed ? claimId : undefined,
+        error: error instanceof Error ? error.message : String(error),
+        status: attempted || messageDispatched ? "uncertain" : "blocked"
+      };
+      return outcome;
     } finally {
-      var uncertain = outcome && outcome.status === "uncertain";
-      if (claimed && !uncertain) {
+      if (claimed) {
         try {
-          var reportArgs = {
-            accepted: outcome && outcome.status === "accepted",
-            action: "report",
-            claimId: claimId,
-            goalId: goal.goalId
-          };
-          if (errorText) reportArgs.error = errorText;
-          var report = structured(await callTool("workspace_goal_continue", reportArgs, true));
-          if (report && report.goal) snapshot.goal = report.goal;
-        } catch (reportError) {
-          console.error(reportError);
+          if (attempted) {
+            var reported = structured(await callTool("workspace_reentry_control", {
+              action: "report",
+              claimId: claimId,
+              outcome: outcome.status === "accepted" ? "accepted" : outcome.status === "rejected" ? "rejected" : "uncertain"
+            }, true));
+            if (snapshot && reported) snapshot.reentry = reported;
+          } else {
+            var released = structured(await callTool("workspace_reentry_control", {
+              action: "release",
+              claimId: claimId
+            }, true));
+            if (snapshot && released) snapshot.reentry = released;
+          }
+        } catch (settleError) {
+          console.error(settleError);
         }
       }
-      await settleAutomaticMessageClaim(outcome);
-      goalContinuationClaimId = "";
+      automaticMessageInFlight = false;
       render();
-      scheduleGoalContinuation(0);
       if (outcome && outcome.bridgeFailure) await resetHostBridge();
+      await refresh(false).catch(function () {});
+      scheduleAutomaticReentry(0);
     }
+  }
+
+  async function dispatchAutomaticReentry() {
+    return await dispatchServerReentry("automatic");
+  }
+
+  async function dispatchExplicitReentry(intent, sourceId) {
+    return await dispatchServerReentry(intent, sourceId);
   }
 
   function findTask(taskId) {
@@ -927,128 +727,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       var task = findTask(taskId);
       if (!task || task.revision !== revision) confirmingTaskCancel.delete(taskId);
     });
-  }
-
-  function hasRecoverableWork(item) {
-    if (!item) return false;
-    var explicitHumanResume = item.kind === "question" || (item.result && item.result.interrupted === true);
-    if (item.recoveryDisabledAt || (item.automaticRecovery === false && !explicitHumanResume)) return false;
-    if (item.goalId) {
-      var goal = snapshot && snapshot.goal;
-      if (!goal || goal.goalId !== item.goalId) return false;
-      var explicitHumanResume = item.kind === "question" || (item.result && item.result.interrupted === true);
-      if (goal.status !== "active" && !(goal.status === "blocked" && explicitHumanResume)) return false;
-      if (item.goalStepId) {
-        return !!(Array.isArray(goal.steps) && goal.steps.some(function (step) {
-          return step.id === item.goalStepId && step.status === "active";
-        }));
-      }
-      return true;
-    }
-    if (!item.taskId) return true;
-    var task = findTask(item.taskId);
-    return !!task && task.status === "in_progress";
-  }
-
-  async function dispatchRecovery(waitId, trigger) {
-    var claimed = structured(await callTool("workspace_wait_recover", { action: "claim", waitId: waitId }, true));
-    var attempted = !!claimed.recoveryMessageAttemptedAt;
-    var outcome = { status: "blocked" };
-    try {
-      outcome = await sendModelMessage(
-        recoveryMessage(claimed),
-        waitContinuationContext(claimed, trigger),
-        function () { return hasRecoverableWork(claimed); },
-        async function () {
-          await callTool("workspace_wait_recover", {
-            action: "attempt",
-            claimId: claimed.claimId,
-            waitId: waitId
-          }, true);
-          attempted = true;
-          return true;
-        }
-      );
-      if (outcome.status === "uncertain") return;
-      if (outcome.status === "rejected" || outcome.status === "blocked") {
-        await callTool("workspace_wait_recover", {
-          action: attempted ? "reject" : "release",
-          claimId: claimed.claimId,
-          waitId: waitId
-        }, true).catch(function () {});
-        await settleAutomaticMessageClaim(outcome);
-        return;
-      }
-      await callTool("workspace_wait_recover", {
-        action: "complete",
-        claimId: claimed.claimId,
-        waitId: waitId
-      }, true);
-      await settleAutomaticMessageClaim(outcome);
-    } catch (error) {
-      if (!attempted && claimed && claimed.claimId) {
-        await callTool("workspace_wait_recover", {
-          action: "release",
-          claimId: claimed.claimId,
-          waitId: waitId
-        }, true).catch(function () {});
-      }
-      await settleAutomaticMessageClaim(outcome);
-      throw error;
-    } finally {
-      if (outcome && outcome.bridgeFailure) await resetHostBridge();
-    }
-  }
-
-  async function recoverDetachedWait(preferredWaitId) {
-    if (
-      recovering || automaticMessageInFlight || !appToken || !snapshot ||
-      !automaticReentryAvailable() || snapshot.agentBusy || visibleEvent() || busy.size > 0
-    ) return;
-    var background = Array.isArray(snapshot.background) ? snapshot.background : [];
-    var item = background.find(function (entry) {
-      return (!preferredWaitId || entry.waitId === preferredWaitId) &&
-        entry.status === "resolved" && !!entry.detachedAt &&
-        !entry.recoveryMessageAttemptedAt &&
-        hasRecoverableWork(entry);
-    });
-    if (!item) return;
-    recovering = true;
-    try {
-      await dispatchRecovery(
-        item.waitId,
-        { backgroundWait: item }
-      );
-      await refresh(false);
-    } catch (error) {
-      status.textContent = "Resume available";
-      console.error(error);
-    } finally {
-      recovering = false;
-      scheduleGoalContinuation(0);
-    }
-  }
-
-  function backgroundWaitForResume(goalId, taskId) {
-    var background = snapshot && Array.isArray(snapshot.background) ? snapshot.background : [];
-    return background.find(function (entry) {
-      if (!entry || entry.status === "consumed" || entry.status === "cancelled" || !hasRecoverableWork(entry)) return false;
-      if (goalId) return entry.goalId === goalId;
-      if (taskId) return entry.taskId === taskId;
-      return false;
-    });
-  }
-
-  async function resumeThroughExistingWait(goalId, taskId) {
-    var item = backgroundWaitForResume(goalId, taskId);
-    if (!item) return false;
-    if (item.status === "resolved" && item.detachedAt && hasRecoverableWork(item)) {
-      if (!item.recoveryMessageAttemptedAt) {
-        await recoverDetachedWait(item.waitId);
-        return true;
-      }
-    }
-    return true;
   }
 
   async function applySnapshot(nextSnapshot, allowRecovery, requestSerial) {
@@ -1074,8 +752,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     persistWorkspaceHint();
     render();
     await syncModelContext();
-    scheduleGoalContinuation(0);
-    if (allowRecovery !== false) void recoverDetachedWait();
+    scheduleAutomaticReentry(0);
+    if (allowRecovery !== false) void dispatchAutomaticReentry();
   }
 
   async function refresh(allowRecovery, generation, signal) {
@@ -1556,94 +1234,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     }
   }
 
-  async function sendExplicitResume(text, continuation, canSend) {
-    var outcome = await sendModelMessage(text, continuation, canSend);
-    try {
-      await settleAutomaticMessageClaim(outcome);
-    } finally {
-      if (outcome && outcome.bridgeFailure) await resetHostBridge();
-    }
-    if (outcome && outcome.status === "rejected") status.textContent = "Host rejected model resume";
-    if (outcome && outcome.status === "uncertain") status.textContent = "Resume delivery uncertain";
-    return outcome;
-  }
-
-  async function sendExplicitGoalResume(goalId, text, continuation, canSend) {
-    var claimId = newGoalContinuationClaimId();
-    var claimed = false;
-    var errorText = "";
-    var outcome = { status: "blocked" };
-    try {
-      var claim = structured(await callTool("workspace_goal_continue", {
-        action: "claim",
-        available: canSend ? canSend() : true,
-        claimId: claimId,
-        goalId: goalId,
-        userInitiated: true
-      }, true));
-      if (claim && claim.goal) snapshot.goal = claim.goal;
-      if (!claim || !claim.claimed) return outcome;
-      claimed = true;
-
-      var validation = structured(await callTool("workspace_goal_continue", {
-        action: "validate",
-        available: canSend ? canSend() : true,
-        claimId: claimId,
-        goalId: goalId,
-        userInitiated: true
-      }, true));
-      if (validation && validation.goal) snapshot.goal = validation.goal;
-      if (!validation || !validation.valid) return outcome;
-
-      outcome = await sendModelMessage(
-        text,
-        continuation,
-        canSend,
-        async function () {
-          var marked = structured(await callTool("workspace_goal_continue", {
-            action: "attempt",
-            available: canSend ? canSend() : true,
-            claimId: claimId,
-            goalId: goalId,
-            userInitiated: true
-          }, true));
-          if (marked && marked.goal) snapshot.goal = marked.goal;
-          return !!marked && marked.attempted !== false;
-        }
-      );
-      if (outcome.status === "rejected") errorText = "Host rejected the explicit Workspace Goal resume message.";
-      if (outcome.error) errorText = outcome.error;
-      return outcome;
-    } catch (error) {
-      errorText = error instanceof Error ? error.message : String(error);
-      console.error(error);
-      return outcome;
-    } finally {
-      var uncertain = outcome && outcome.status === "uncertain";
-      if (claimed && !uncertain) {
-        try {
-          var reportArgs = {
-            accepted: outcome && outcome.status === "accepted",
-            action: "report",
-            claimId: claimId,
-            goalId: goalId,
-            userInitiated: true
-          };
-          if (errorText) reportArgs.error = errorText;
-          var report = structured(await callTool("workspace_goal_continue", reportArgs, true));
-          if (report && report.goal) snapshot.goal = report.goal;
-        } catch (reportError) {
-          console.error(reportError);
-        }
-      }
-      await settleAutomaticMessageClaim(outcome);
-      render();
-      if (outcome && outcome.status === "rejected") status.textContent = "Host rejected model resume";
-      if (outcome && outcome.status === "uncertain") status.textContent = "Resume delivery uncertain";
-      if (outcome && outcome.bridgeFailure) await resetHostBridge();
-    }
-  }
-
   async function pauseGoalFromUi(goalId, revision) {
     await act("goal-pause", "workspace_goal_pause", {
       goalId: goalId,
@@ -1657,17 +1247,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       revision: revision
     });
     if (!result || !result.goal || result.goal.status !== "active") return;
-    if (await resumeThroughExistingWait(goalId, "")) return;
-    await sendExplicitGoalResume(
-      goalId,
-      "The user resumed the active Workspace Goal. Continue the Goal immediately from its current durable state; do not restart completed work.",
-      { resumedGoal: result.goal },
-      function () {
-        var goal = snapshot && snapshot.goal;
-        return !!goal && goal.goalId === goalId && goal.status === "active" &&
-          !backgroundWaitForResume(goalId, "") && !snapshot.agentBusy && !visibleEvent();
-      }
-    );
+    await dispatchExplicitReentry("goal-resume", goalId);
   }
 
   async function resumeTaskFromUi(taskId, revision) {
@@ -1677,66 +1257,28 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       taskId: taskId
     });
     if (!result) return;
-    if (await resumeThroughExistingWait("", taskId)) return;
-    await sendExplicitResume(
-      "The user resumed this Workspace task. Continue the task immediately from its current durable state.",
-      { resumedTask: result },
-      function () {
-        var task = findTask(taskId);
-        return !!task && task.status === "in_progress" &&
-          !backgroundWaitForResume("", taskId) && !snapshot.agentBusy && !visibleEvent();
-      }
-    );
+    await dispatchExplicitReentry("task-resume", taskId);
   }
 
   async function retryGoalAutoResume(goalId) {
-    var reset = structured(await callTool("workspace_goal_continue", { action: "reset" }, true));
-    if (reset && reset.goal) snapshot.goal = reset.goal;
     var resumed = structured(await callTool("workspace_reentry_control", { action: "resume" }, true));
     if (snapshot && resumed) snapshot.reentry = resumed;
     render();
     var goal = snapshot && snapshot.goal;
     if (!goal || goal.goalId !== goalId || goal.status !== "active") return;
-    if (await resumeThroughExistingWait(goalId, "")) return;
-    await sendExplicitGoalResume(
-      goalId,
-      "The user explicitly retried automatic execution for this Workspace Goal. Continue immediately from the current durable Goal state.",
-      { retriedGoal: goal },
-      function () {
-        var current = snapshot && snapshot.goal;
-        return !!current && current.goalId === goalId && current.status === "active" &&
-          !backgroundWaitForResume(goalId, "") && !snapshot.agentBusy && !visibleEvent();
-      }
-    );
+    await dispatchExplicitReentry("goal-retry", goalId);
   }
 
   async function answerQuestion(waitId, answer) {
     var result = await act(waitId, "workspace_question_answer", { waitId: waitId, answer: answer });
-    if (result && result.detached && hasRecoverableWork(result)) {
-      try {
-        await dispatchRecovery(
-          result.waitId,
-          { answeredQuestion: result }
-        );
-        await refresh(false);
-      } catch (error) {
-        console.error(error);
-        await refresh(false).catch(function () {});
-        status.textContent = "Resume available";
-      }
+    if (result && result.detached) {
+      await dispatchAutomaticReentry();
     }
   }
 
   async function interruptWait(waitId) {
-    var previousRecovering = recovering;
-    recovering = true;
-    var result;
-    try {
-      result = await act(waitId, "workspace_wait_interrupt", { waitId: waitId });
-    } finally {
-      recovering = previousRecovering;
-    }
-    if (result && result.interrupted && result.detached) await recoverDetachedWait();
+    var result = await act(waitId, "workspace_wait_interrupt", { waitId: waitId });
+    if (result && result.interrupted && result.detached) await dispatchAutomaticReentry();
   }
 
   function visibleEvent() {
