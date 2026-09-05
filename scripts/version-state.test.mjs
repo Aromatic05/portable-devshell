@@ -15,6 +15,9 @@ async function createRepository(version, releaseTag) {
     await writeFile(join(root, "crates/devshell-worker/Cargo.toml"), `[package]\nname = "devshell-worker"\nversion = "${version}"\nedition = "2024"\n`);
     await writeFile(join(root, "Cargo.lock"), `[[package]]\nname = "devshell-worker"\nversion = "${version}"\n`);
     execFileSync("git", ["init", "-q"], { cwd: root });
+    const hooksDirectory = join(root, ".git-hooks-disabled");
+    await mkdir(hooksDirectory, { recursive: true });
+    execFileSync("git", ["config", "core.hooksPath", hooksDirectory], { cwd: root });
     execFileSync("git", ["config", "user.email", "version-test@example.invalid"], { cwd: root });
     execFileSync("git", ["config", "user.name", "Version Test"], { cwd: root });
     execFileSync("git", ["add", "."], { cwd: root });
