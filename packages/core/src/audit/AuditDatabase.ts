@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { mkdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { constants as zlibConstants, zstdCompressSync, zstdDecompressSync } from "node:zlib";
+import { constants as zlibConstants, zstdCompress, zstdCompressSync, zstdDecompressSync } from "node:zlib";
 
 import type { ApprovalRequest, ToolCallQuery, ToolCallRecord } from "@portable-devshell/shared";
 
@@ -54,6 +54,7 @@ const IDENTITY_BODY_CODEC = "identity";
 const LOG_BODY_COMPRESSION_THRESHOLD_BYTES = 8 * 1024;
 const LOG_BODY_COMPRESSION_SAMPLE_BYTES = 32 * 1024;
 const LOG_BODY_SAMPLE_MAX_RATIO = 0.7;
+const LOG_BODY_ASYNC_COMPRESSION_THRESHOLD_BYTES = 256 * 1024;
 const PAYLOAD_BYTES_METADATA_KEY = "payloadBytes:v1";
 const ROUTINE_INCREMENTAL_VACUUM_PAGES = 64;
 const SCHEMA_VERSION = 2;
@@ -149,14 +150,14 @@ export class AuditDatabase {
         };
     }
 
-    appendRecord<TRecord>(
+    async appendRecord<TRecord>(
         collection: AuditRecordCollection,
         record: TRecord,
         options: AuditStoreOptions<TRecord>
-    ): void {
+    ): Promise<void> {
         this.#assertOpen();
         this.#startPayloadBackfill();
-        this.#insertRecord(collection, record, options);
+        await this.#insertRecord(collection, record, options);
         this.#evictForPayloadLimit();
         this.#scheduleWalCheckpoint();
     }
@@ -373,7 +374,7 @@ export class AuditDatabase {
         this.#database.exec("BEGIN IMMEDIATE");
         try {
             for (const record of records) {
-                this.#insertRecord(collection, record, options);
+                this.#insertRecordSync(collection, record, options);
             }
             this.#writeMetadata(migrationKey, "complete");
             this.#database.exec("COMMIT");
@@ -439,12 +440,29 @@ export class AuditDatabase {
         this.#upgradeSchema();
     }
 
-    #insertRecord<TRecord>(
+    async #insertRecord<TRecord>(
+        collection: AuditRecordCollection,
+        record: TRecord,
+        options: AuditStoreOptions<TRecord>
+    ): Promise<void> {
+        const stored = await encodeStoredRecord(collection, record);
+        this.#insertStoredRecord(collection, record, options, stored);
+    }
+
+    #insertRecordSync<TRecord>(
         collection: AuditRecordCollection,
         record: TRecord,
         options: AuditStoreOptions<TRecord>
     ): void {
-        const stored = encodeStoredRecord(collection, record);
+        this.#insertStoredRecord(collection, record, options, encodeStoredRecordSync(collection, record));
+    }
+
+    #insertStoredRecord<TRecord>(
+        collection: AuditRecordCollection,
+        record: TRecord,
+        options: AuditStoreOptions<TRecord>,
+        stored: AuditStoredRow & { payloadBytes: number }
+    ): void {
         const occurredAtMs = normalizeTimestamp(options.timestamp(record), this.#now());
         this.#database
             .prepare("INSERT INTO audit_records(collection, occurred_at_ms, payload_bytes, payload, body, body_codec) VALUES (?, ?, ?, ?, ?, ?)")
@@ -768,7 +786,7 @@ class AuditRecordStoreSqlite<TRecord> implements AuditRecordStore<TRecord> {
 
     async append(record: TRecord): Promise<void> {
         this.#ensureMigrated();
-        this.#database.appendRecord(this.#collection, record, this.#options);
+        await this.#database.appendRecord(this.#collection, record, this.#options);
     }
 
     async readAll(): Promise<TRecord[]> {
@@ -805,7 +823,7 @@ class AuditToolCallRecordStoreSqlite implements AuditToolCallRecordStore {
 
     async append(record: ToolCallRecord): Promise<void> {
         this.#ensureMigrated();
-        this.#database.appendRecord("toolCalls", record, this.#options);
+        await this.#database.appendRecord("toolCalls", record, this.#options);
     }
 
     async hasCall(callId: string): Promise<boolean> {
@@ -857,7 +875,7 @@ class AuditApprovalRecordStoreSqlite implements AuditApprovalRecordStore {
 
     async append(record: ApprovalRequest): Promise<void> {
         this.#ensureMigrated();
-        this.#database.appendRecord("approvals", record, this.#options);
+        await this.#database.appendRecord("approvals", record, this.#options);
     }
 
     async readAll(): Promise<ApprovalRequest[]> {
@@ -906,10 +924,10 @@ function normalizeTimestamp(value: number | string, fallback: number): number {
     return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
 }
 
-function encodeStoredRecord<TRecord>(
+async function encodeStoredRecord<TRecord>(
     collection: AuditRecordCollection,
     record: TRecord,
-): AuditStoredRow & { payloadBytes: number } {
+): Promise<AuditStoredRow & { payloadBytes: number }> {
     if (collection !== "logs" || typeof record !== "object" || record === null || Array.isArray(record)) {
         return inlineStoredRecord(JSON.stringify(record));
     }
@@ -932,11 +950,38 @@ function encodeStoredRecord<TRecord>(
         return bodyStoredRecord(payload, message, IDENTITY_BODY_CODEC);
     }
 
-    const compressed = compressLogBody(message);
+    const compressed = message.byteLength >= LOG_BODY_ASYNC_COMPRESSION_THRESHOLD_BYTES
+        ? await compressLogBodyAsync(message)
+        : compressLogBody(message);
     if (compressed.byteLength >= message.byteLength) {
         return bodyStoredRecord(payload, message, IDENTITY_BODY_CODEC);
     }
     return bodyStoredRecord(payload, compressed, ZSTD_BODY_CODEC);
+}
+
+function encodeStoredRecordSync<TRecord>(
+    collection: AuditRecordCollection,
+    record: TRecord,
+): AuditStoredRow & { payloadBytes: number } {
+    if (collection !== "logs" || typeof record !== "object" || record === null || Array.isArray(record)) {
+        return inlineStoredRecord(JSON.stringify(record));
+    }
+    const source = record as Record<string, unknown>;
+    if (typeof source.message !== "string") return inlineStoredRecord(JSON.stringify(record));
+    const messageBytes = Buffer.byteLength(source.message, "utf8");
+    if (messageBytes < LOG_BODY_COMPRESSION_THRESHOLD_BYTES) return inlineStoredRecord(JSON.stringify(record));
+    const { message: _message, ...metadata } = source;
+    const payload = JSON.stringify(metadata);
+    const message = Buffer.from(source.message, "utf8");
+    const sample = message.subarray(0, Math.min(message.byteLength, LOG_BODY_COMPRESSION_SAMPLE_BYTES));
+    const compressedSample = compressLogBody(sample);
+    if (compressedSample.byteLength / sample.byteLength > LOG_BODY_SAMPLE_MAX_RATIO) {
+        return bodyStoredRecord(payload, message, IDENTITY_BODY_CODEC);
+    }
+    const compressed = compressLogBody(message);
+    return compressed.byteLength < message.byteLength
+        ? bodyStoredRecord(payload, compressed, ZSTD_BODY_CODEC)
+        : bodyStoredRecord(payload, message, IDENTITY_BODY_CODEC);
 }
 
 function bodyStoredRecord(payload: string, body: Uint8Array, bodyCodec: string): AuditStoredRow & { payloadBytes: number } {
@@ -951,6 +996,17 @@ function bodyStoredRecord(payload: string, body: Uint8Array, bodyCodec: string):
 function compressLogBody(body: Uint8Array): Buffer {
     return zstdCompressSync(body, {
         params: { [zlibConstants.ZSTD_c_compressionLevel]: ZSTD_COMPRESSION_LEVEL }
+    });
+}
+
+function compressLogBodyAsync(body: Uint8Array): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+        zstdCompress(body, {
+            params: { [zlibConstants.ZSTD_c_compressionLevel]: ZSTD_COMPRESSION_LEVEL }
+        }, (error, compressed) => {
+            if (error !== null) reject(error);
+            else resolve(compressed);
+        });
     });
 }
 
