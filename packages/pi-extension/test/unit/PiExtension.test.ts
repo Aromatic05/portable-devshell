@@ -230,6 +230,80 @@ test("Pi devshell workspace resources load native project skills and prompt temp
     }]);
 });
 
+test("Pi devshell workspace resources probe optional remote directories before globbing", async () => {
+    const cases: Array<{
+        expectedPaths: string[];
+        files: Map<string, string>;
+        infoEntries: JsonValue[];
+        promptNames: string[];
+        skillNames: string[];
+    }> = [
+        {
+            files: new Map([
+                ["./.pi/prompts/release.md", "---\ndescription: Release\n---\nrelease"]
+            ]),
+            infoEntries: [
+                { exists: false, path: "./.pi/skills" },
+                { path: "./.pi/prompts", type: "directory" }
+            ],
+            expectedPaths: ["./.pi/prompts/*.md"],
+            promptNames: ["release"],
+            skillNames: []
+        },
+        {
+            files: new Map([
+                ["./.pi/skills/review/SKILL.md", "---\nname: review\ndescription: Review\n---\nreview"]
+            ]),
+            infoEntries: [
+                { path: "./.pi/skills", type: "directory" },
+                { exists: false, path: "./.pi/prompts" }
+            ],
+            expectedPaths: ["./.pi/skills/*.md", "./.pi/skills/**/SKILL.md"],
+            promptNames: [],
+            skillNames: ["review"]
+        },
+        {
+            files: new Map<string, string>(),
+            infoEntries: [
+                { exists: false, path: "./.pi/skills" },
+                { exists: false, path: "./.pi/prompts" }
+            ],
+            expectedPaths: [],
+            promptNames: [],
+            skillNames: []
+        }
+    ];
+
+    for (const scenario of cases) {
+        let resourceFindPaths: unknown;
+        const resources = await loadDevshellPiWorkspaceResources(
+            { instance: "worker-a", workspace: "/repo" },
+            new Set(["file_find", "file_info", "file_read"]),
+            async (toolName, input, operationId): Promise<JsonValue> => {
+                if (operationId === "pi-context-find") return { entries: [] };
+                if (operationId === "pi-resources-info") return { entries: scenario.infoEntries };
+                if (operationId === "pi-resources-find") {
+                    resourceFindPaths = (input as { paths: unknown }).paths;
+                    return {
+                        entries: [...scenario.files.keys()].map((path) => ({ path, type: "file" }))
+                    };
+                }
+                assert.equal(toolName, "file_read");
+                const path = (input as { path: string }).path;
+                const content = scenario.files.get(path);
+                assert.notEqual(content, undefined, path);
+                return {
+                    content: content!.split("\n").map((line, index) => `${index + 1}:${line}`).join("\n")
+                };
+            }
+        );
+
+        assert.deepEqual(resourceFindPaths, scenario.expectedPaths.length === 0 ? undefined : scenario.expectedPaths);
+        assert.deepEqual(resources.prompts.map((prompt) => prompt.name), scenario.promptNames);
+        assert.deepEqual(resources.skills.map((skill) => skill.resource.name), scenario.skillNames);
+    }
+});
+
 test("Pi devshell remote skill input transform preserves Pi delivery while avoiding local file reads", () => {
     const transformed = transformDevshellPiSkillInput([
         {

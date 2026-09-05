@@ -45,6 +45,8 @@ const PI_CONTEXT_FILE_NAMES = [
 
 const PI_PROJECT_SKILLS = "./.pi/skills/";
 const PI_PROJECT_PROMPTS = "./.pi/prompts/";
+const PI_PROJECT_SKILLS_DIRECTORY = "./.pi/skills";
+const PI_PROJECT_PROMPTS_DIRECTORY = "./.pi/prompts";
 
 export async function loadDevshellPiWorkspaceResources(
     target: AgentTarget,
@@ -55,14 +57,12 @@ export async function loadDevshellPiWorkspaceResources(
     if (!toolNames.has("file_find") || !toolNames.has("file_read")) {
         return { contextFiles, prompts: [], skills: [] };
     }
+    const resourcePaths = await projectResourcePaths(toolNames, callTool);
+    if (resourcePaths.length === 0) return { contextFiles, prompts: [], skills: [] };
     const found = asRecord(await callTool("file_find", {
         gitignore: true,
         hidden: true,
-        paths: [
-            "./.pi/skills/*.md",
-            "./.pi/skills/**/SKILL.md",
-            "./.pi/prompts/*.md"
-        ],
+        paths: resourcePaths,
         type: "file"
     }, "pi-resources-find"));
     const paths = Array.isArray(found?.entries)
@@ -89,6 +89,28 @@ export async function loadDevshellPiWorkspaceResources(
         if (prompt !== undefined) prompts.push(prompt);
     }
     return { contextFiles, prompts, skills };
+}
+
+async function projectResourcePaths(
+    toolNames: ReadonlySet<string>,
+    callTool: DevshellPiToolCall
+): Promise<string[]> {
+    const skillPaths = ["./.pi/skills/*.md", "./.pi/skills/**/SKILL.md"];
+    const promptPaths = ["./.pi/prompts/*.md"];
+    if (!toolNames.has("file_info")) return [...skillPaths, ...promptPaths];
+
+    const info = asRecord(await callTool("file_info", {
+        paths: [PI_PROJECT_SKILLS_DIRECTORY, PI_PROJECT_PROMPTS_DIRECTORY]
+    }, "pi-resources-info"));
+    const entries = Array.isArray(info?.entries) ? info.entries : [];
+    const directories = new Set(entries.flatMap((value) => {
+        const entry = asRecord(value);
+        return typeof entry?.path === "string" && entry.type === "directory" ? [entry.path] : [];
+    }));
+    return [
+        ...(directories.has(PI_PROJECT_SKILLS_DIRECTORY) ? skillPaths : []),
+        ...(directories.has(PI_PROJECT_PROMPTS_DIRECTORY) ? promptPaths : [])
+    ];
 }
 
 export function transformDevshellPiSkillInput(
