@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 
 import { createError, errorCodes } from "@portable-devshell/shared";
 
+import { cleanupStaleAtomicStateTemps } from "../AtomicStateFile.js";
 import { GoalState, type GoalDocument } from "./GoalState.js";
 
 export class GoalStore {
@@ -17,6 +18,7 @@ export class GoalStore {
         this.#filePath = options.filePath;
         this.#instanceName = options.instanceName;
         this.#state = options.state;
+        cleanupStaleAtomicStateTemps(this.#filePath);
         this.#document = this.#load();
     }
 

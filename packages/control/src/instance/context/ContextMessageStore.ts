@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 
 import { createError, errorCodes, type ContextMessageRecord } from "@portable-devshell/shared";
 
+import { cleanupStaleAtomicStateTemps } from "../AtomicStateFile.js";
 import { ContextMessageState, type ContextMessageDocument } from "./ContextMessageState.js";
 
 export class ContextMessageStore {
@@ -17,6 +18,7 @@ export class ContextMessageStore {
         this.#filePath = options.filePath;
         this.#instanceName = options.instanceName;
         this.#state = options.state;
+        cleanupStaleAtomicStateTemps(this.#filePath);
         this.#document = this.#load();
     }
 

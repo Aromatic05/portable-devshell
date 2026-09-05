@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 
 import { createError, errorCodes } from "@portable-devshell/shared";
 
+import { cleanupStaleAtomicStateTemps } from "../AtomicStateFile.js";
 import { TodoState, type TodoDocument } from "./TodoState.js";
 
 export interface TodoStoreOptions {
@@ -23,6 +24,7 @@ export class TodoStore {
         this.#filePath = options.filePath;
         this.#instanceName = options.instanceName;
         this.#state = options.state;
+        cleanupStaleAtomicStateTemps(this.#filePath);
         this.#document = this.#loadFromDisk();
     }
 

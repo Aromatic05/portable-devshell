@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 
 import { createError, errorCodes } from "@portable-devshell/shared";
 
+import { cleanupStaleAtomicStateTemps } from "../AtomicStateFile.js";
 import { WaitState, type WaitDocument } from "./WaitState.js";
 import type { WaitRecord } from "@portable-devshell/shared";
 
@@ -18,6 +19,7 @@ export class WaitStore {
         this.#filePath = options.filePath;
         this.#instanceName = options.instanceName;
         this.#state = options.state;
+        cleanupStaleAtomicStateTemps(this.#filePath);
         this.#document = this.#load();
     }
 
