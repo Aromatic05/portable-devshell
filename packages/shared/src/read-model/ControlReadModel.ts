@@ -105,6 +105,8 @@ const instanceKeys: readonly ControlInstanceReadKey[] = [
     "toolCalls",
     "comments",
 ];
+const heavyInstanceKeys = new Set<ControlInstanceReadKey>(["logs", "toolCalls", "comments"]);
+const initialInstanceKeys = instanceKeys.filter((key) => !heavyInstanceKeys.has(key));
 
 export class ControlReadModel {
     readonly #clients: ControlClients;
@@ -117,6 +119,7 @@ export class ControlReadModel {
     readonly #versions = new Map<string, number>();
     readonly #refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
     readonly #pendingKeys = new Map<string, Set<ControlInstanceReadKey>>();
+    readonly #materializedKeys = new Map<string, Set<ControlInstanceReadKey>>();
     readonly #authoritativeSnapshots = new Map<string, InstanceSnapshot>();
     readonly #decidedToolApprovals = new Map<string, Set<string>>();
     readonly #decidedOAuthApprovals = new Set<string>();
@@ -174,7 +177,7 @@ export class ControlReadModel {
             options.artifacts === true ? this.refreshArtifacts(epoch) : Promise.resolve(),
             ...instances
                 .filter((instance) => instance.snapshot.status === "ready" || instance.snapshot.status === "running")
-                .map(async ({ name }) => await this.refreshInstance(name, instanceKeys, undefined, epoch)),
+                .map(async ({ name }) => await this.#refreshInstance(name, initialInstanceKeys, undefined, epoch)),
         ]);
         if (!this.#current(epoch)) return;
         this.#replaceSubscriptions(instances.map(({ name }) => name), epoch);
@@ -316,6 +319,16 @@ export class ControlReadModel {
         todoInput?: TodoReadInput,
         epoch = this.#epoch,
     ): Promise<number | undefined> {
+        this.#markMaterialized(instance, keys);
+        return await this.#refreshInstance(instance, keys, todoInput, epoch);
+    }
+
+    async #refreshInstance(
+        instance: string,
+        keys: readonly ControlInstanceReadKey[],
+        todoInput: TodoReadInput | undefined,
+        epoch: number,
+    ): Promise<number | undefined> {
         await Promise.all(keys.map(async (key) => {
             await this.#refreshInstanceKey(instance, key, todoInput, epoch);
         }));
@@ -396,6 +409,7 @@ export class ControlReadModel {
         for (const timer of this.#refreshTimers.values()) clearTimeout(timer);
         this.#refreshTimers.clear();
         this.#pendingKeys.clear();
+        this.#materializedKeys.clear();
         this.#versions.clear();
         this.#authoritativeSnapshots.clear();
         this.#decidedToolApprovals.clear();
@@ -421,7 +435,9 @@ export class ControlReadModel {
         if (state.snapshot !== undefined) {
             state.snapshot = { ...state.snapshot, lastSeq: state.sequence };
         }
-        const keys = keysForEvent(event);
+        const keys = keysForEvent(event).filter((key) =>
+            !heavyInstanceKeys.has(key) || this.#isMaterialized(event.instanceName, key)
+        );
         if (keys.length > 0) this.#scheduleRefresh(event.instanceName, keys, epoch);
         if (
             event.type.startsWith("artifact.share") ||
@@ -445,7 +461,7 @@ export class ControlReadModel {
             const selected = [...(this.#pendingKeys.get(instance) ?? [])];
             this.#pendingKeys.delete(instance);
             if (selected.length > 0 && this.#current(epoch)) {
-                void this.refreshInstance(instance, selected, undefined, epoch);
+                void this.#refreshInstance(instance, selected, undefined, epoch);
             }
         }, this.#scheduleDelayMs);
         this.#refreshTimers.set(instance, timer);
@@ -606,6 +622,7 @@ export class ControlReadModel {
         for (const name of Object.keys(this.#state.instanceState)) {
             if (!names.has(name)) {
                 delete this.#state.instanceState[name];
+                this.#materializedKeys.delete(name);
                 this.#closeSubscription(name);
             }
         }
@@ -725,7 +742,12 @@ export class ControlReadModel {
         fromSeq: number,
         epoch: number,
     ): Promise<void> {
-        const next = await this.refreshInstance(instance, instanceKeys, undefined, epoch);
+        const next = await this.#refreshInstance(
+            instance,
+            [...initialInstanceKeys, ...this.#materializedHeavyKeys(instance)],
+            undefined,
+            epoch,
+        );
         if (!this.#current(epoch)) return;
         if (next === undefined || next <= fromSeq) {
             this.#setFailure(
@@ -746,6 +768,22 @@ export class ControlReadModel {
             new Error(`Subscription produced ${streak} consecutive gaps.`),
         );
         this.#scheduleSubscription(instance, epoch);
+    }
+
+    #markMaterialized(instance: string, keys: readonly ControlInstanceReadKey[]): void {
+        const heavy = keys.filter((key) => heavyInstanceKeys.has(key));
+        if (heavy.length === 0) return;
+        const materialized = this.#materializedKeys.get(instance) ?? new Set<ControlInstanceReadKey>();
+        for (const key of heavy) materialized.add(key);
+        this.#materializedKeys.set(instance, materialized);
+    }
+
+    #isMaterialized(instance: string, key: ControlInstanceReadKey): boolean {
+        return this.#materializedKeys.get(instance)?.has(key) ?? false;
+    }
+
+    #materializedHeavyKeys(instance: string): ControlInstanceReadKey[] {
+        return [...(this.#materializedKeys.get(instance) ?? [])].filter((key) => heavyInstanceKeys.has(key));
     }
 
     #scheduleSubscription(instance: string, epoch: number): void {

@@ -796,23 +796,30 @@ export class TuiRuntime {
 
     #syncTmuxPanes(): void {
         const state = this.store.getState();
+        const instance = state.ui.selectedInstance;
         const active =
             state.ui.selectedPage === "terminal" &&
-            selectTerminalTab(state) === "tmuxPanes";
+            selectTerminalTab(state) === "tmuxPanes" &&
+            instance !== undefined;
         if (!active) {
             if (this.#tmuxPanesActive) {
                 this.#tmuxPanesActive = false;
                 this.#tmuxPanesInstance = undefined;
                 this.tmuxPanes.stopPolling();
+                void this.tmuxPanes.bind(undefined);
             }
             return;
         }
-        const instance = state.ui.selectedInstance;
         this.tmuxPanes.setViewportRows(Math.max(1, this.rows - 8));
         if (!this.#tmuxPanesActive || this.#tmuxPanesInstance !== instance) {
             this.#tmuxPanesActive = true;
             this.#tmuxPanesInstance = instance;
-            void this.tmuxPanes.bind(instance).then(() => {
+            this.tmuxPanes.stopPolling();
+            void this.tmuxPanes.bind(undefined).then(async () => {
+                if (!this.#tmuxPanesActive || this.#tmuxPanesInstance !== instance) return;
+                await this.session.refreshToolCallsForInstance(instance);
+                if (!this.#tmuxPanesActive || this.#tmuxPanesInstance !== instance) return;
+                await this.tmuxPanes.bind(instance);
                 if (this.#tmuxPanesActive && this.#tmuxPanesInstance === instance) {
                     this.tmuxPanes.startPolling(2000);
                 }

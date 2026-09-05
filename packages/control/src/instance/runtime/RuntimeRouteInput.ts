@@ -25,14 +25,19 @@ export function readRuntimeSubscriptionFromSeq(payload?: JsonValue): number {
     return payload.fromSeq;
 }
 
-export function limitRuntimeLogResponse<TLog extends { message: string }>(logs: TLog[]): TLog[] {
+export function limitRuntimeLogResponse<TLog extends { message: string }>(
+    logs: TLog[],
+    preserveNewest: boolean,
+): TLog[] {
+    const candidates = preserveNewest ? [...logs].reverse() : logs;
     const response: TLog[] = [];
     let responseBytes = 2;
-    for (const log of logs) {
+    for (const log of candidates) {
         const separatorBytes = response.length === 0 ? 0 : 1;
         const logBytes = Buffer.byteLength(JSON.stringify(log), "utf8");
         if (responseBytes + separatorBytes + logBytes <= MAX_LOG_RESPONSE_BYTES) {
-            response.push(log);
+            if (preserveNewest) response.unshift(log);
+            else response.push(log);
             responseBytes += separatorBytes + logBytes;
             continue;
         }
@@ -41,7 +46,8 @@ export function limitRuntimeLogResponse<TLog extends { message: string }>(logs: 
             message: truncateLogMessage(log, MAX_LOG_RESPONSE_BYTES - responseBytes - separatorBytes)
         };
         if (responseBytes + separatorBytes + Buffer.byteLength(JSON.stringify(compact), "utf8") <= MAX_LOG_RESPONSE_BYTES) {
-            response.push(compact);
+            if (preserveNewest) response.unshift(compact);
+            else response.push(compact);
         }
         return response;
     }

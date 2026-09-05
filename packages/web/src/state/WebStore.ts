@@ -133,7 +133,7 @@ export class WebStore {
     }
 
     async refreshInstance(name: string): Promise<void> {
-        await this.#model.refreshInstance(name);
+        await this.#model.refreshInstance(name, ["snapshot", "logs"]);
     }
 
     async refreshToolCall(instance: string): Promise<void> {

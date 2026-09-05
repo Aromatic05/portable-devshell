@@ -167,6 +167,16 @@ export class TuiControlSession {
         );
     }
 
+    async refreshToolCallsForInstance(
+        instance: string,
+        generation = this.#generation,
+        signal?: AbortSignal,
+    ): Promise<void> {
+        if (this.#canRefresh(generation, signal)) {
+            await this.#model.refreshInstance(instance, ["toolCalls"]);
+        }
+    }
+
     async readToolCallDetail(instance: string, callId: string): Promise<ToolCallRecord | undefined> {
         return await this.#model.readToolCallDetail(instance, callId);
     }
@@ -205,7 +215,7 @@ export class TuiControlSession {
         generation = this.#generation,
     ): Promise<number | undefined> {
         if (!this.#current(generation)) return undefined;
-        const sequence = await this.#model.refreshInstance(instance);
+        const sequence = await this.#model.refreshInstance(instance, ["snapshot", "approvals", "goals", "todo"]);
         if (sequence !== undefined) this.#model.ensureInstanceSubscription(instance);
         return sequence;
     }

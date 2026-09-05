@@ -758,6 +758,61 @@ test("LogStoreInstance pushes fromSeq and limit into sequenced storage", async (
     assert.deepEqual(range, [3, 2]);
 });
 
+test("LogStoreInstance reads the newest bounded window when no sequence cursor is supplied", async () => {
+    const instanceName = asInstanceName("log-tail-read");
+    const entries: InstanceLogEntry[] = Array.from({ length: 5 }, (_, index) => ({
+        at: `2026-08-13T00:00:0${index}.000Z`,
+        instanceName,
+        message: `line-${index + 1}`,
+        seq: index + 1,
+        stream: "stdout",
+    }));
+    let tail: [number, number | undefined] | undefined;
+    const store = {
+        async append() {},
+        async readAll() { throw new Error("unbounded log read should not run"); },
+        async readHighWater() { return 5; },
+        async readTail(limit: number, maxDecodedBytes?: number) {
+            tail = [limit, maxDecodedBytes];
+            return entries.slice(-limit);
+        },
+    } as never;
+    const logs = new LogStoreInstance(instanceName, store);
+
+    assert.deepEqual(
+        (await logs.read({ limit: 2, maxDecodedBytes: 1234 })).map((entry) => entry.seq),
+        [4, 5],
+    );
+    assert.deepEqual(tail, [2, 1234]);
+});
+
+test("LogStoreInstance serializes concurrent appends and commits sequence only after persistence", async () => {
+    const instanceName = asInstanceName("log-append-order");
+    const persisted: InstanceLogEntry[] = [];
+    let failFirst = true;
+    const store = {
+        async append(record: InstanceLogEntry) {
+            if (failFirst) {
+                failFirst = false;
+                throw new Error("audit unavailable");
+            }
+            persisted.push(record);
+        },
+        async readAll() { return []; },
+        async readHighWater() { return 0; },
+        async readTail() { return []; },
+    } as never;
+    const logs = new LogStoreInstance(instanceName, store);
+
+    const failed = logs.append("stdout", "failed", "2026-08-13T00:00:00.000Z");
+    const second = logs.append("stdout", "second", "2026-08-13T00:00:01.000Z");
+    const third = logs.append("stderr", "third", "2026-08-13T00:00:02.000Z");
+
+    await assert.rejects(failed, /audit unavailable/u);
+    assert.deepEqual((await Promise.all([second, third])).map((entry) => entry.seq), [1, 2]);
+    assert.deepEqual(persisted.map((entry) => entry.seq), [1, 2]);
+});
+
 test("LogStoreInstance and AuditToolCallHistory write and query per-instance records", async () => {
     const root = await createTestTempDirectory("storage");
     const instanceName = asInstanceName("task-5-storage");

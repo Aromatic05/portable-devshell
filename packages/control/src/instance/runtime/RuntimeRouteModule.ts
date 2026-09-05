@@ -87,9 +87,13 @@ export function createRuntimeRouteModule(
             }
             return result as unknown as JsonValue;
         },
-        readLogs: async (request) => limitRuntimeLogResponse(
-            await instance.worker.readLogs(readRuntimeLogQuery(request.payload))
-        ) as unknown as JsonValue,
+        readLogs: async (request) => {
+            const query = readRuntimeLogQuery(request.payload);
+            return limitRuntimeLogResponse(
+                await instance.worker.readLogs(query),
+                query.fromSeq === undefined,
+            ) as unknown as JsonValue;
+        },
         subscribe: async (request, context) => {
             await subscriptions.subscribe(
                 context,

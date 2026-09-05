@@ -143,16 +143,29 @@ export class AuditDatabase {
             .map((row) => decodeStoredRecord<TRecord>(collection, row));
     }
 
-    readTailRecords<TRecord>(collection: AuditRecordCollection, limit: number): TRecord[] {
+    readTailRecords<TRecord>(collection: AuditRecordCollection, limit: number, maxDecodedBytes?: number): TRecord[] {
         this.#assertOpen();
         if (!Number.isSafeInteger(limit) || limit < 1) {
             throw new TypeError(`Invalid audit tail limit: ${limit}`);
         }
-        const rows = this.#database
-            .prepare("SELECT payload, body, body_codec AS bodyCodec FROM audit_records WHERE collection = ? AND occurred_at_ms >= ? ORDER BY id DESC LIMIT ?")
-            .all(collection, this.#retentionCutoff(), limit) as unknown as AuditStoredRow[];
-        rows.reverse();
-        return rows.map((row) => decodeStoredRecord<TRecord>(collection, row));
+        if (maxDecodedBytes !== undefined && (!Number.isSafeInteger(maxDecodedBytes) || maxDecodedBytes < 1)) {
+            throw new TypeError(`Invalid audit decoded byte limit: ${maxDecodedBytes}.`);
+        }
+        const statement = this.#database.prepare(
+            "SELECT payload, body, body_codec AS bodyCodec FROM audit_records WHERE collection = ? AND occurred_at_ms >= ? ORDER BY id DESC LIMIT ?"
+        );
+        const records: TRecord[] = [];
+        let decodedBytes = 0;
+        for (const value of statement.iterate(collection, this.#retentionCutoff(), limit)) {
+            const record = decodeStoredRecord<TRecord>(collection, value as unknown as AuditStoredRow);
+            records.push(record);
+            if (collection === "logs" && maxDecodedBytes !== undefined) {
+                decodedBytes += decodedLogMessageBytes(record);
+                if (decodedBytes >= maxDecodedBytes) break;
+            }
+        }
+        records.reverse();
+        return records;
     }
 
     readSequenceRecords<TRecord>(
@@ -628,9 +641,9 @@ class AuditRecordStoreSqlite<TRecord> implements AuditRecordStore<TRecord> {
         return this.#database.readHighWater(this.#collection);
     }
 
-    async readTail(limit: number): Promise<TRecord[]> {
+    async readTail(limit: number, maxDecodedBytes?: number): Promise<TRecord[]> {
         this.#ensureMigrated();
-        return this.#database.readTailRecords<TRecord>(this.#collection, limit);
+        return this.#database.readTailRecords<TRecord>(this.#collection, limit, maxDecodedBytes);
     }
 
     #ensureMigrated(): void {

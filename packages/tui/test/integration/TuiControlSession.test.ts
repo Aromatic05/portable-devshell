@@ -163,6 +163,7 @@ test("Comment delivery never stalls visible Audit refreshes for the bound call o
     await waitFor(() => session.store.getState().connection.status === "connected");
     session.store.setSelectedInstance("alpha");
     session.store.setSelectedPage("audit");
+    await session.refreshAudit("alpha");
     session.store.patchControlReadModel({ instanceState: { ["alpha"]: { contextMessages: [
         {
             createdAt: new Date(8).toISOString(),

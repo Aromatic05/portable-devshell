@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 
 import { Navigation } from "../components/Navigation.js";
 import { PartialFailures } from "../components/PartialFailures.js";
@@ -33,6 +33,11 @@ export function Application({
     );
     const [route, navigate] = useHashRoute();
     const interactionDisabled = busy !== undefined;
+    useEffect(() => {
+        if (route === "activity" && state.connection === "online") {
+            void store.refreshAudit();
+        }
+    }, [route, state.connection, store]);
     const counts = {
         approvals: pendingApprovals(state),
         instances: state.readModel.instances.length,

@@ -72,7 +72,7 @@ export class ControlCommands {
         );
         if (this.#current(epoch)) {
             this.#model.recordToolDecision(instance, decided.approvalId);
-            this.#refreshInstance(instance, ["approvals", "todo", "toolCalls", "comments"]);
+            this.#refreshInstance(instance, ["approvals", "todo"]);
             this.#refreshOverview();
         }
         return decided;
@@ -134,7 +134,7 @@ export class ControlCommands {
 
     #acceptSnapshot(snapshot: InstanceSnapshot): void {
         this.#model.applyAuthoritativeSnapshot(snapshot);
-        this.#refreshInstance(snapshot.name);
+        this.#refreshInstance(snapshot.name, ["approvals", "goals", "todo"]);
         this.#refreshOverview();
     }
 

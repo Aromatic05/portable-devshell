@@ -176,9 +176,24 @@ test("runtime log response limiting stays within one MiB and retains the newest 
     const logs = [
         { message: "first", seq: 1 },
         { message: `${"前".repeat(600_000)}TAIL`, seq: 2 },
-        { message: "must-not-be-returned", seq: 3 }
+        { message: "newest", seq: 3 }
     ];
-    const limited = limitRuntimeLogResponse(logs);
+    const limited = limitRuntimeLogResponse(logs, true);
+
+    assert.equal(limited.length, 2);
+    assert.match(limited[0]?.message ?? "", /TAIL$/u);
+    assert.equal(limited[0]?.message === logs[1]?.message, false);
+    assert.equal(limited[1]?.message, "newest");
+    assert.equal(Buffer.byteLength(JSON.stringify(limited), "utf8") <= 1024 * 1024, true);
+});
+
+test("runtime log response limiting preserves the oldest unread prefix for cursor reads", () => {
+    const logs = [
+        { message: "first", seq: 1 },
+        { message: `${"前".repeat(600_000)}TAIL`, seq: 2 },
+        { message: "later", seq: 3 }
+    ];
+    const limited = limitRuntimeLogResponse(logs, false);
 
     assert.equal(limited.length, 2);
     assert.equal(limited[0]?.message, "first");

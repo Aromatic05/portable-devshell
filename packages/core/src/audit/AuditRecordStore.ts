@@ -3,5 +3,5 @@ export interface AuditRecordStore<TRecord> {
     readAll(): Promise<TRecord[]>;
     readFromSeq?(fromSeq: number, limit?: number, maxDecodedBytes?: number): Promise<TRecord[]>;
     readHighWater?(): Promise<number>;
-    readTail?(limit: number): Promise<TRecord[]>;
+    readTail?(limit: number, maxDecodedBytes?: number): Promise<TRecord[]>;
 }

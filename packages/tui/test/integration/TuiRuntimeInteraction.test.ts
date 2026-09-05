@@ -124,7 +124,6 @@ test("serializes rapid Audit Input navigation and activation", async () => {
 
     try {
         await waitUntil(() => runtime.store.getState().connection.status === "connected");
-        await waitUntil(() => runtime.store.getState().readModel.instanceState.alpha?.toolCalls.length === 1);
         runtime.store.setSelectedInstance("alpha");
         runtime.store.setSelectedPage("audit");
         runtime.store.replaceRoute({
@@ -133,6 +132,8 @@ test("serializes rapid Audit Input navigation and activation", async () => {
             scope: "context",
             view: "context",
         });
+        await runtime.session.refreshAudit("alpha");
+        await waitUntil(() => runtime.store.getState().readModel.instanceState.alpha?.toolCalls.length === 1);
         await waitUntil(() => selectMainScreenModel(runtime.store.getState()).boxes.some(
             (candidate) => candidate.id === "audit-call:rapid-input",
         ));

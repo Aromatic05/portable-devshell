@@ -32,7 +32,7 @@ describe("WebStore", () => {
         expect(listApprovals).not.toHaveBeenCalled();
     });
 
-    it("loads tool calls and queues Context messages through the instance routes", async () => {
+    it("loads Audit data lazily and queues Context messages through the instance routes", async () => {
         const clients = fakeClients();
         const call = {
             callId: "call-1",
@@ -59,6 +59,9 @@ describe("WebStore", () => {
         const store = new WebStore(clients);
 
         await store.load();
+        expect(clients.tool.listCalls).not.toHaveBeenCalled();
+        expect(clients.contextMessage.list).not.toHaveBeenCalled();
+        await store.refreshAudit();
         expect(store.state.readModel.instanceState.demo?.toolCalls).toEqual([call]);
         expect(await store.queueContextMessage("demo", "ctx-demo", queued.text)).toBe(true);
         expect(clients.contextMessage.queue).toHaveBeenCalledWith("demo", {
@@ -71,7 +74,7 @@ describe("WebStore", () => {
         expect(clients.overview.get).toHaveBeenCalledOnce();
     });
 
-    it("loads pending approvals and bounded logs for the instance read model", async () => {
+    it("loads pending approvals without eagerly reading logs", async () => {
         const clients = fakeClients();
         clients.tool.listApprovals = vi.fn(async () => []);
         clients.runtime.readLogs = vi.fn(async () => []);
@@ -80,6 +83,8 @@ describe("WebStore", () => {
         await store.load();
 
         expect(clients.tool.listApprovals).toHaveBeenCalledWith("demo", { pendingOnly: true });
+        expect(clients.runtime.readLogs).not.toHaveBeenCalled();
+        await store.refreshInstance("demo");
         expect(clients.runtime.readLogs).toHaveBeenCalledWith("demo", { limit: 100, maxDecodedBytes: 256 * 1024 });
         store.close();
     });
@@ -103,6 +108,73 @@ describe("WebStore", () => {
         expect(clients.tool.listCalls).toHaveBeenCalledOnce();
         expect(clients.contextMessage.list).toHaveBeenCalledOnce();
         expect(clients.runtime.readLogs).toHaveBeenCalledOnce();
+        store.close();
+    });
+
+    it("refreshes heavy event state only after that state has been materialized", async () => {
+        const stream = controllableStream();
+        const clients = fakeClients({ subscribe: async () => stream });
+        clients.tool.listCalls = vi.fn(async () => []);
+        clients.contextMessage.list = vi.fn(async () => []);
+        clients.runtime.readLogs = vi.fn(async () => []);
+        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+
+        await store.load();
+        expect(clients.tool.listCalls).not.toHaveBeenCalled();
+        expect(clients.contextMessage.list).not.toHaveBeenCalled();
+        expect(clients.runtime.readLogs).not.toHaveBeenCalled();
+
+        stream.push({
+            event: {
+                at: "2026-07-31T00:00:10Z",
+                instanceName: asInstanceName("demo"),
+                seq: 10,
+                type: "log.appended",
+            },
+            kind: "event",
+        });
+        stream.push({
+            event: {
+                at: "2026-07-31T00:00:11Z",
+                instanceName: asInstanceName("demo"),
+                seq: 11,
+                type: "toolCall.completed",
+            },
+            kind: "event",
+        });
+        await vi.waitFor(() => expect(store.state.readModel.instanceState.demo?.sequence).toBe(11));
+        expect(clients.tool.listCalls).not.toHaveBeenCalled();
+        expect(clients.contextMessage.list).not.toHaveBeenCalled();
+        expect(clients.runtime.readLogs).not.toHaveBeenCalled();
+
+        await store.refreshAudit();
+        vi.mocked(clients.tool.listCalls).mockClear();
+        vi.mocked(clients.contextMessage.list).mockClear();
+        vi.mocked(clients.runtime.readLogs).mockClear();
+
+        stream.push({
+            event: {
+                at: "2026-07-31T00:00:12Z",
+                instanceName: asInstanceName("demo"),
+                seq: 12,
+                type: "log.appended",
+            },
+            kind: "event",
+        });
+        stream.push({
+            event: {
+                at: "2026-07-31T00:00:13Z",
+                instanceName: asInstanceName("demo"),
+                seq: 13,
+                type: "toolCall.completed",
+            },
+            kind: "event",
+        });
+        await vi.waitFor(() => {
+            expect(clients.runtime.readLogs).toHaveBeenCalled();
+            expect(clients.tool.listCalls).toHaveBeenCalled();
+            expect(clients.contextMessage.list).toHaveBeenCalled();
+        });
         store.close();
     });
 
@@ -511,7 +583,7 @@ describe("WebStore recovery and consistency", () => {
         expect(store.state.error).toBe("queue b failed");
     });
 
-    it("loads logs with Tool Calls so legacy output is available immediately", async () => {
+    it("loads logs with Tool Calls when Audit is materialized", async () => {
         const clients = fakeClients();
         clients.runtime.readLogs = vi.fn(async () => [{
             at: "2026-07-31T00:00:01Z",
@@ -524,6 +596,8 @@ describe("WebStore recovery and consistency", () => {
         const store = new WebStore(clients);
 
         await store.load();
+        expect(clients.runtime.readLogs).not.toHaveBeenCalled();
+        await store.refreshAudit();
 
         expect(store.state.readModel.instanceState.demo?.logs?.[0]?.callId).toBe("call-1");
     });
