@@ -640,11 +640,26 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     const harness = createWorker({ tools: [tmuxRunBlockTool()] });
     const worker = {
         ...harness.worker,
-        async invokeToolInternal(toolName: string, input: JsonValue): Promise<JsonValue> {
+        async invokeToolInternal(
+            toolName: string,
+            input: JsonValue,
+            _context?: ToolCallContext,
+            signal?: AbortSignal,
+        ): Promise<JsonValue> {
             assert.equal(toolName, "tmux_read");
             const task = (input as { task?: string }).task;
             if (task === undefined) throw new Error("tmux_read task is missing");
-            return terminalResults.get(task) ?? { task: { id: task, status: "running" } };
+            observeCalls += 1;
+            const timeMs = (input as { timeMs?: number }).timeMs ?? 0;
+            const deadline = Date.now() + timeMs;
+            while (!terminalResults.has(task) && Date.now() < deadline) {
+                if (signal?.aborted === true) throw new Error("tmux wait aborted");
+                await new Promise((resolve) => setTimeout(resolve, 1));
+            }
+            return terminalResults.get(task) ?? {
+                task: { id: task, status: "running" },
+                waitReason: "timeout",
+            };
         },
         async callTool(
             toolName: string,
@@ -734,7 +749,6 @@ test("tmux_run block waits are interruptible before handoff and detach after the
         async listWaits() { return waits; },
         listTools: () => [],
         async observeTmuxTask(_instance: string, taskId: string) {
-            observeCalls += 1;
             return terminalResults.get(taskId) ?? { task: { id: taskId, status: "running" } };
         },
         async reattachWait(_instance: string, waitId: string, ownerCallId?: string) {
@@ -1039,10 +1053,14 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
             let result: JsonValue;
             if (record.consumeOutput === false) {
                 const timeMs = typeof record.timeMs === "number" ? record.timeMs : 0;
-                if (timeMs > 0) await new Promise((resolve) => setTimeout(resolve, timeMs));
+                const line = typeof record.line === "number" ? record.line : 80;
+                const deadline = Date.now() + timeMs;
+                while (timeMs > 0 && Date.now() < deadline && (line < 0 || !ready)) {
+                    await new Promise((resolve) => setTimeout(resolve, 1));
+                }
                 result = {
                     task: { id: "task-existing", status: "running" },
-                    waitReason: ready ? "output" : "timeout",
+                    waitReason: line >= 0 && ready ? "output" : "timeout",
                 };
             } else {
                 result = {
@@ -1202,7 +1220,7 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
     assert.equal(replacement?.targetInstance, "demo-local");
     assert.deepEqual(replacement?.payload, { line: 17, operation: "read" });
     assert.equal(logicalReadCalls - logicalReadsBeforeWait, 1);
-    assert.equal(internalReadCalls > internalReadsBeforeWait, true);
+    assert.equal(internalReadCalls - internalReadsBeforeWait, 1, "positive-line wait should use one blocking observation");
 
     concurrentAgentCall = true;
     ready = true;

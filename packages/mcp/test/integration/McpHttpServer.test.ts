@@ -512,6 +512,12 @@ function createWorkspaceHost(
                 async appendMcpSessionOpened() {},
                 async appendMcpToolCalled() {},
                 async callTool() { return {}; },
+                async invokeToolInternal(toolName: string) {
+                    assert.equal(toolName, "tmux_read");
+                    if (recovery === undefined) throw new Error("unused");
+                    recovery.observed += 1;
+                    return { task: { id: "tmux-restored", status: "0" }, waitReason: "terminal" };
+                },
                 listTools() { return []; },
                 async readAlerts() { return { advice: [] }; },
                 snapshot() { return { ready: true }; },

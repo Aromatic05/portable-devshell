@@ -107,6 +107,32 @@ test("MCP tmux block wait returns the full unread transcript instead of discardi
     });
 });
 
+test("MCP tmux block timeout returns current transcript without a follow-up read", tmuxTestOptions(workerBinaryPath), async () => {
+    await withTmuxHarness("aromatic-mcp-tmux-block-timeout-output", async ({ callTool, createContext, readToolCalls }) => {
+        const ctxId = await createContext();
+        const result = await callTool("block-timeout-output", "tmux_run", {
+            command: "printf 'EARLY\\n'; sleep 2",
+            ctxId,
+            line: -20,
+            timeout: 300,
+            wait: "block"
+        });
+        assert.equal(result.error, undefined, JSON.stringify(result));
+        assert.equal(result.result?.structuredContent?.task?.status, "running", JSON.stringify(result));
+        assert.equal(result.result?.structuredContent?.timedOut, true, JSON.stringify(result));
+        const output = result.result?.structuredContent?.output ?? [];
+        assert.equal(output.some((line) => line === "EARLY"), true, JSON.stringify(result));
+
+        const task = readString(result.result?.structuredContent?.task?.id, "tmux_run task id");
+        const closed = await callTool("block-timeout-close", "tmux_close", { ctxId, force: true, task });
+        assert.equal(closed.error, undefined, JSON.stringify(closed));
+
+        const toolCalls = await readToolCalls();
+        assert.equal(toolCalls.filter((record) => record.toolName === "tmux_run").length, 1, JSON.stringify(toolCalls));
+        assert.equal(toolCalls.filter((record) => record.toolName === "tmux_read").length, 0, JSON.stringify(toolCalls));
+    });
+});
+
 test("MCP tmux lets a refreshed context continue a task while preserving busy checks", tmuxTestOptions(workerBinaryPath), async () => {
     await withTmuxHarness("aromatic-mcp-tmux-cross-context", async ({ callTool, createContext }) => {
         const firstCtxId = await createContext();

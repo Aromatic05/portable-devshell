@@ -684,9 +684,10 @@ export class McpEndpointDispatch {
                 throw new Error("tmux_run wait resolved without a task result.");
             }
             if (isTmuxTaskRunning(current.result, task)) {
+                const completed = await this.#readTmuxTaskOutput(instance, task, line, context, signal);
                 return await this.#attachComments(
                     "tmux_run",
-                    { ...started, ...current.result },
+                    { ...started, ...current.result, ...completed },
                     context,
                     callId,
                     instance,
@@ -890,22 +891,54 @@ export class McpEndpointDispatch {
     ): Promise<JsonValue> {
         while (true) {
             throwIfMcpEndpointAborted(signal);
-            if (deadlineAt !== undefined && Date.now() >= deadlineAt) {
+            const remaining = deadlineAt === undefined
+                ? 3_600_000
+                : Math.max(0, deadlineAt - Date.now());
+            if (remaining === 0) {
                 return { task: { id: taskId, status: "running" }, timedOut: true };
             }
             try {
-                const result = await gateway.observeTmuxTask(instance, taskId, context, signal);
+                const result = await this.#observeTmuxRead(
+                    instance,
+                    taskId,
+                    context,
+                    Math.min(3_600_000, remaining),
+                    -1,
+                    signal,
+                );
                 if (!isTmuxTaskRunning(result, taskId)) return result;
+                if (deadlineAt !== undefined && Date.now() >= deadlineAt) {
+                    return { ...result, timedOut: true };
+                }
+                if (result.waitReason === "output" || result.waitReason === undefined) {
+                    await waitForMcpEndpointAbortable(
+                        new Promise<void>((resolve) => setTimeout(
+                            resolve,
+                            Math.min(
+                                this.#tmuxWaitPollMs,
+                                deadlineAt === undefined
+                                    ? this.#tmuxWaitPollMs
+                                    : Math.max(1, deadlineAt - Date.now()),
+                            ),
+                        )),
+                        signal,
+                    );
+                }
             } catch (error) {
                 if (!isRetryableTmuxObservationError(error)) throw error;
+                await waitForMcpEndpointAbortable(
+                    new Promise<void>((resolve) => setTimeout(
+                        resolve,
+                        Math.min(
+                            this.#tmuxWaitPollMs,
+                            deadlineAt === undefined
+                                ? this.#tmuxWaitPollMs
+                                : Math.max(1, deadlineAt - Date.now()),
+                        ),
+                    )),
+                    signal,
+                );
             }
-            await waitForMcpEndpointAbortable(
-                new Promise<void>((resolve) => setTimeout(resolve, Math.min(
-                    this.#tmuxWaitPollMs,
-                    deadlineAt === undefined ? this.#tmuxWaitPollMs : Math.max(1, deadlineAt - Date.now()),
-                ))),
-                signal
-            );
         }
     }
 
@@ -926,7 +959,7 @@ export class McpEndpointDispatch {
                     instance,
                     taskId,
                     context,
-                    line < 0 ? remaining : Math.min(this.#tmuxWaitPollMs, remaining),
+                    remaining,
                     line,
                     signal,
                 );
