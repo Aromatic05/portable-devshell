@@ -218,10 +218,15 @@ test("Live Workspace completes its initial PiP claim when Host capabilities arri
 
     const page = await browser.newPage();
     await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT.replace(
-        'hostContext: { availableDisplayModes: ["inline", "pip"], displayMode: "inline" },',
-        'hostContext: { displayMode: "inline" },',
-    );
+    const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT
+        .replace(
+            'hostContext: { availableDisplayModes: ["inline", "pip"], displayMode: "inline" },',
+            'hostContext: { displayMode: "inline" },',
+        )
+        .replace(
+            'if (message.method === "ui/initialize") {',
+            'if (message.method === "ui/initialize") { window.__lateCapabilityInitializeCount = (window.__lateCapabilityInitializeCount || 0) + 1;',
+        );
     await page.evaluate(bridge);
     await page.evaluate((html) => {
         const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
@@ -229,7 +234,7 @@ test("Live Workspace completes its initial PiP claim when Host capabilities arri
         iframe.srcdoc = html;
     }, workspaceAppHtml);
 
-    await page.waitForTimeout(100);
+    await page.waitForFunction("(window.__lateCapabilityInitializeCount || 0) === 1");
     assert.equal(await page.evaluate("(window.__liveDisplayModeRequests || []).length"), 0);
     await page.evaluate(() => {
         const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
