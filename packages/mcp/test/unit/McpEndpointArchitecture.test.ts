@@ -10,7 +10,10 @@ import type {
 } from "@portable-devshell/shared";
 
 import { McpEndpointCatalog } from "../../src/endpoint/McpEndpointCatalog.ts";
-import { McpEndpointDispatch } from "../../src/endpoint/McpEndpointDispatch.ts";
+import {
+    McpEndpointDispatch,
+    mcpTmuxBlockSyncMsForContextMode,
+} from "../../src/endpoint/McpEndpointDispatch.ts";
 import { McpNativeToolResult } from "../../src/endpoint/McpEndpointResult.ts";
 import { McpContextRegistry } from "../../src/context/McpContextRegistry.ts";
 import { createMcpContextSelector } from "../../src/context/McpContextSelector.ts";
@@ -621,6 +624,11 @@ test("legacy aliases still obey the current MCP policy", async () => {
         ),
         /not exposed/i,
     );
+});
+
+test("tmux block sync windows preserve explicit clients while handing host-bound sessions off early", () => {
+    assert.equal(mcpTmuxBlockSyncMsForContextMode("explicit"), 180_000);
+    assert.equal(mcpTmuxBlockSyncMsForContextMode("openai-session"), 90_000);
 });
 
 test("tmux_run block waits are interruptible before handoff and detach after the sync window", async () => {
