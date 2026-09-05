@@ -161,7 +161,7 @@ pub fn register_tools(
     ))?;
     registry.register(tool::<TmuxInputParams, TmuxInputOutput>(
         ToolName::parse("tmux_input").unwrap(),
-        "Send raw terminal input to either a running managed task or a persistent interactive pane. Task input may wait for and consume transcript output with timeMs/line; pane input returns after send and should be observed with tmux_inspect. Input may start programs inside the target but never creates a new managed task. Caret notation supports control keys such as ^B, ^C, ^D, ^I, and ^M.",
+        "Send raw terminal input to either a running managed task or a persistent interactive pane. Task input with a positive line returns when new output appears; a negative line waits until terminal state or timeMs then returns the requested tail. Pane input returns after send and should be observed with tmux_inspect. Input may start programs inside the target but never creates a new managed task. Caret notation supports control keys such as ^B, ^C, ^D, ^I, and ^M.",
         ToolCapability::Execute,
         Arc::clone(&states),
         TmuxState::input,

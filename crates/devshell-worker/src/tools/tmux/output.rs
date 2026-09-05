@@ -91,8 +91,20 @@ impl TranscriptCursor {
         self.offset
     }
 
+    pub fn end_offset(&self) -> Result<u64, ToolError> {
+        self.logical_end()
+    }
+
     pub fn has_output(&self, terminal: bool) -> Result<bool, ToolError> {
         let mut cursor = self.clone();
+        Ok(!cursor
+            .take_oldest(1, "probe", &mut Vec::new(), terminal)?
+            .is_empty())
+    }
+
+    pub fn has_output_after(&self, offset: u64, terminal: bool) -> Result<bool, ToolError> {
+        let mut cursor = self.clone();
+        cursor.offset = cursor.offset.max(offset);
         Ok(!cursor
             .take_oldest(1, "probe", &mut Vec::new(), terminal)?
             .is_empty())

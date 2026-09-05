@@ -22,6 +22,7 @@ use crate::tools::{ToolCall, ToolCancellation, ToolName, ToolRegistry};
 
 const MAX_CONCURRENT_TOOL_CALLS: usize = 8;
 const MAX_STANDARD_TOOL_CALLS: usize = 6;
+const MAX_TMUX_WAIT_OBSERVATIONS: usize = 16;
 
 pub struct RpcRouter {
     active_processes: Arc<ActiveProcessRegistry>,
@@ -207,6 +208,14 @@ struct ActiveToolCallState {
     control_active: usize,
     standard_active: usize,
     stopping: bool,
+    tmux_wait_observations: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ToolCallClass {
+    Standard,
+    Urgent,
+    TmuxWaitObservation,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -234,7 +243,7 @@ impl ActiveToolCallRegistry {
     }
 
     pub fn acquire(self: &Arc<Self>, request: &RpcRequest) -> Result<ToolCallPermit, RpcError> {
-        let urgent = is_urgent_tool(&request.method);
+        let class = tool_call_class(request);
         let mut state = self.state.lock().map_err(|_| {
             RpcError::new(
                 "worker.toolSchedulerFailed",
@@ -249,9 +258,17 @@ impl ActiveToolCallRegistry {
             ));
         }
 
-        if state.active >= MAX_CONCURRENT_TOOL_CALLS
-            || (!urgent && state.standard_active >= MAX_STANDARD_TOOL_CALLS)
-        {
+        let capacity_reached = match class {
+            ToolCallClass::Standard => {
+                state.active >= MAX_CONCURRENT_TOOL_CALLS
+                    || state.standard_active >= MAX_STANDARD_TOOL_CALLS
+            }
+            ToolCallClass::Urgent => state.active >= MAX_CONCURRENT_TOOL_CALLS,
+            ToolCallClass::TmuxWaitObservation => {
+                state.tmux_wait_observations >= MAX_TMUX_WAIT_OBSERVATIONS
+            }
+        };
+        if capacity_reached {
             let mut error = RpcError::new(
                 "worker.toolConcurrencyLimit",
                 "Worker tool concurrency limit reached.",
@@ -260,9 +277,15 @@ impl ActiveToolCallRegistry {
             error.details = Some(serde_json::json!({
                 "maxConcurrentToolCalls": MAX_CONCURRENT_TOOL_CALLS,
                 "maxStandardToolCalls": MAX_STANDARD_TOOL_CALLS,
+                "maxTmuxWaitObservations": MAX_TMUX_WAIT_OBSERVATIONS,
                 "runningToolCalls": state.active,
                 "runningStandardToolCalls": state.standard_active,
-                "urgent": urgent,
+                "runningTmuxWaitObservations": state.tmux_wait_observations,
+                "toolCallClass": match class {
+                    ToolCallClass::Standard => "standard",
+                    ToolCallClass::Urgent => "urgent",
+                    ToolCallClass::TmuxWaitObservation => "tmuxWaitObservation",
+                },
             }));
             return Err(error);
         }
@@ -276,15 +299,19 @@ impl ActiveToolCallRegistry {
         }
         let cancellation = ToolCancellation::default();
         state.calls.insert(key.clone(), cancellation.clone());
-        state.active += 1;
-        if !urgent {
-            state.standard_active += 1;
+        match class {
+            ToolCallClass::Standard => {
+                state.active += 1;
+                state.standard_active += 1;
+            }
+            ToolCallClass::Urgent => state.active += 1,
+            ToolCallClass::TmuxWaitObservation => state.tmux_wait_observations += 1,
         }
         Ok(ToolCallPermit {
             cancellation,
+            class,
             key,
             registry: Arc::clone(self),
-            urgent,
         })
     }
 
@@ -356,12 +383,12 @@ impl ActiveToolCallRegistry {
             .lock()
             .map_err(|_| "active tool call registry lock poisoned".to_string())?;
 
-        while state.active > 0 || state.control_active > 0 {
+        while state.active > 0 || state.control_active > 0 || state.tmux_wait_observations > 0 {
             let now = Instant::now();
             if now >= deadline {
                 return Err(format!(
                     "timed out waiting for {} active tool call(s) to stop",
-                    state.active + state.control_active
+                    state.active + state.control_active + state.tmux_wait_observations
                 ));
             }
 
@@ -372,10 +399,14 @@ impl ActiveToolCallRegistry {
                 .map_err(|_| "active tool call registry lock poisoned".to_string())?;
             state = next_state;
 
-            if wait_result.timed_out() && (state.active > 0 || state.control_active > 0) {
+            if wait_result.timed_out()
+                && (state.active > 0
+                    || state.control_active > 0
+                    || state.tmux_wait_observations > 0)
+            {
                 return Err(format!(
                     "timed out waiting for {} active tool call(s) to stop",
-                    state.active + state.control_active
+                    state.active + state.control_active + state.tmux_wait_observations
                 ));
             }
         }
@@ -383,16 +414,22 @@ impl ActiveToolCallRegistry {
         Ok(())
     }
 
-    fn release(&self, key: &ActiveToolCallKey, urgent: bool) {
+    fn release(&self, key: &ActiveToolCallKey, class: ToolCallClass) {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
         state.calls.remove(key);
-        state.active = state.active.saturating_sub(1);
-        if !urgent {
-            state.standard_active = state.standard_active.saturating_sub(1);
+        match class {
+            ToolCallClass::Standard => {
+                state.active = state.active.saturating_sub(1);
+                state.standard_active = state.standard_active.saturating_sub(1);
+            }
+            ToolCallClass::Urgent => state.active = state.active.saturating_sub(1),
+            ToolCallClass::TmuxWaitObservation => {
+                state.tmux_wait_observations = state.tmux_wait_observations.saturating_sub(1);
+            }
         }
-        if state.active == 0 && state.control_active == 0 {
+        if state.active == 0 && state.control_active == 0 && state.tmux_wait_observations == 0 {
             self.idle.notify_all();
         }
     }
@@ -403,7 +440,7 @@ impl ActiveToolCallRegistry {
         };
         state.calls.remove(key);
         state.control_active = state.control_active.saturating_sub(1);
-        if state.active == 0 && state.control_active == 0 {
+        if state.active == 0 && state.control_active == 0 && state.tmux_wait_observations == 0 {
             self.idle.notify_all();
         }
     }
@@ -411,9 +448,9 @@ impl ActiveToolCallRegistry {
 
 pub struct ToolCallPermit {
     cancellation: ToolCancellation,
+    class: ToolCallClass,
     key: ActiveToolCallKey,
     registry: Arc<ActiveToolCallRegistry>,
-    urgent: bool,
 }
 
 impl ToolCallPermit {
@@ -424,7 +461,7 @@ impl ToolCallPermit {
 
 impl Drop for ToolCallPermit {
     fn drop(&mut self) {
-        self.registry.release(&self.key, self.urgent);
+        self.registry.release(&self.key, self.class);
     }
 }
 
@@ -447,7 +484,34 @@ impl Drop for ControlCallPermit {
 }
 
 fn is_urgent_tool(method: &str) -> bool {
-    matches!(method, "tmux_input" | "tmux_inspect" | "tmux_list")
+    matches!(
+        method,
+        "tmux_input" | "tmux_inspect" | "tmux_list" | "tmux_close"
+    )
+}
+
+fn is_tmux_wait_observation(request: &RpcRequest) -> bool {
+    request.method == "tmux_read"
+        && request
+            .params
+            .get("consumeOutput")
+            .and_then(serde_json::Value::as_bool)
+            == Some(false)
+        && request
+            .params
+            .get("timeMs")
+            .and_then(serde_json::Value::as_u64)
+            .is_some_and(|time_ms| time_ms > 0)
+}
+
+fn tool_call_class(request: &RpcRequest) -> ToolCallClass {
+    if is_tmux_wait_observation(request) {
+        ToolCallClass::TmuxWaitObservation
+    } else if is_urgent_tool(&request.method) {
+        ToolCallClass::Urgent
+    } else {
+        ToolCallClass::Standard
+    }
 }
 
 pub trait ControlHandler: Send + Sync {
@@ -549,14 +613,14 @@ mod tests {
         let urgent_one = registry
             .acquire(&RpcRequest::request(
                 "3",
-                "tmux_input",
+                "tmux_close",
                 serde_json::json!({}),
             ))
             .unwrap();
         let urgent_two = registry
             .acquire(&RpcRequest::request(
                 "4",
-                "tmux_inspect",
+                "tmux_input",
                 serde_json::json!({}),
             ))
             .unwrap();
@@ -564,7 +628,7 @@ mod tests {
             registry
                 .acquire(&RpcRequest::request(
                     "5",
-                    "tmux_list",
+                    "tmux_inspect",
                     serde_json::json!({})
                 ))
                 .is_err()
@@ -575,6 +639,70 @@ mod tests {
                 .acquire(&RpcRequest::request("2", "bash_run", serde_json::json!({})))
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn tmux_wait_observations_have_separate_worker_capacity() {
+        let registry = Arc::new(ActiveToolCallRegistry::new());
+        let observations = (0..16)
+            .map(|index| {
+                registry
+                    .acquire(&RpcRequest::request(
+                        format!("observation-{index}"),
+                        "tmux_read",
+                        serde_json::json!({
+                            "consumeOutput": false,
+                            "line": -1,
+                            "task": format!("task-{index}"),
+                            "timeMs": 60_000,
+                        }),
+                    ))
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            registry
+                .acquire(&RpcRequest::request(
+                    "observation-over-capacity",
+                    "tmux_read",
+                    serde_json::json!({
+                        "consumeOutput": false,
+                        "line": -1,
+                        "task": "task-over-capacity",
+                        "timeMs": 60_000,
+                    }),
+                ))
+                .is_err()
+        );
+
+        let standard = (0..6)
+            .map(|index| {
+                registry
+                    .acquire(&RpcRequest::request(
+                        format!("standard-with-observation-{index}"),
+                        "tmux_run",
+                        serde_json::json!({}),
+                    ))
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let urgent_one = registry
+            .acquire(&RpcRequest::request(
+                "urgent-with-observation-1",
+                "tmux_close",
+                serde_json::json!({}),
+            ))
+            .unwrap();
+        let urgent_two = registry
+            .acquire(&RpcRequest::request(
+                "urgent-with-observation-2",
+                "tmux_input",
+                serde_json::json!({}),
+            ))
+            .unwrap();
+
+        drop((observations, standard, urgent_one, urgent_two));
+        assert!(registry.wait_idle(Duration::from_millis(10)).is_ok());
     }
 
     #[test]

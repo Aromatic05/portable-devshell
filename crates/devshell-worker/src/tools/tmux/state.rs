@@ -150,7 +150,12 @@ impl TmuxState {
         }
         let cwd = resolve_cwd(call, params.cwd.as_deref())?;
         let wait = params.wait.unwrap_or(TmuxWaitMode::Nonblock);
-        let time_ms = validate_time(params.time_ms.unwrap_or(DEFAULT_RUN_TIME_MS))?;
+        let time_ms = validate_time(
+            params
+                .time_ms
+                .or(params.timeout)
+                .unwrap_or(DEFAULT_RUN_TIME_MS),
+        )?;
         let line = validate_line(params.line.unwrap_or(DEFAULT_LINE))?;
 
         let task_id = new_task_id();
@@ -207,6 +212,7 @@ impl TmuxState {
                 .insert(task);
         }
 
+        let mut timed_out = false;
         if wait == TmuxWaitMode::Block {
             let deadline = Instant::now() + Duration::from_millis(time_ms);
             while Instant::now() < deadline {
@@ -217,18 +223,24 @@ impl TmuxState {
                     )
                     .with_details(serde_json::json!({ "task": task_id })));
                 }
-                self.refresh_task(&task_id)?;
+                if self.backend.task_exit_recorded(&task_id) && !self.task_is_terminal(&task_id)? {
+                    self.refresh_task(&task_id)?;
+                }
                 if self.task_is_terminal(&task_id)? {
                     break;
                 }
                 thread::sleep(Duration::from_millis(50));
             }
             if !self.task_is_terminal(&task_id)? {
-                self.push_task_warning(
-                    &task_id,
-                    "tmux.blockTimeout",
-                    "block wait timed out; the task is still running",
-                )?;
+                self.refresh_task(&task_id)?;
+                if !self.task_is_terminal(&task_id)? {
+                    timed_out = true;
+                    self.push_task_warning(
+                        &task_id,
+                        "tmux.blockTimeout",
+                        "block wait timed out; the task is still running",
+                    )?;
+                }
             }
         } else {
             self.refresh_task(&task_id)?;
@@ -244,7 +256,7 @@ impl TmuxState {
             timeout: params.timeout,
             detached: None,
             interrupted: None,
-            timed_out: None,
+            timed_out: timed_out.then_some(true),
             pane: output.pane,
             output: output.output,
             warnings: output.warnings,
@@ -294,6 +306,7 @@ impl TmuxState {
                     (task.pane_id.clone(), pane.tmux_pane_id.clone())
                 };
                 let pane_lock = self.pane_lock(&pane_id)?;
+                let output_watermark;
                 {
                     let _pane_guard = pane_lock.lock().map_err(|_| lock_error("pane operation"))?;
                     self.refresh_task(&task_id)?;
@@ -307,6 +320,7 @@ impl TmuxState {
                             ));
                         }
                     }
+                    output_watermark = self.task_output_end(&task_id)?;
                     self.backend.send_input(&tmux_pane_id, &params.input)?;
                 }
                 let deadline = Instant::now() + Duration::from_millis(time_ms);
@@ -321,11 +335,18 @@ impl TmuxState {
                             "inputDelivered": true
                         })));
                     }
-                    self.refresh_task(&task_id)?;
-                    if self.task_has_output(&task_id)?
+                    if self.backend.task_exit_recorded(&task_id) && !self.task_is_terminal(&task_id)? {
+                        self.refresh_task(&task_id)?;
+                    }
+                    if (line >= 0 && self.task_has_output_after(&task_id, output_watermark)?)
                         || self.task_is_terminal(&task_id)?
-                        || Instant::now() >= deadline
                     {
+                        break;
+                    }
+                    if Instant::now() >= deadline {
+                        if time_ms > 0 {
+                            self.refresh_task(&task_id)?;
+                        }
                         break;
                     }
                     thread::sleep(Duration::from_millis(50));
@@ -391,9 +412,13 @@ impl TmuxState {
         let time_ms = validate_time(params.time_ms.unwrap_or(DEFAULT_READ_TIME_MS))?;
         let line = validate_line(params.line.unwrap_or(DEFAULT_LINE))?;
         let deadline = Instant::now() + Duration::from_millis(time_ms);
+        self.refresh_task(&params.task)?;
+        let mut refreshed_at_deadline = time_ms == 0;
         let wait_reason = loop {
             call.check_cancelled()?;
-            self.refresh_task(&params.task)?;
+            if self.backend.task_exit_recorded(&params.task) && !self.task_is_terminal(&params.task)? {
+                self.refresh_task(&params.task)?;
+            }
             if line >= 0 && self.task_has_output(&params.task)? {
                 break TmuxReadWaitReason::Output;
             }
@@ -401,6 +426,11 @@ impl TmuxState {
                 break TmuxReadWaitReason::Terminal;
             }
             if Instant::now() >= deadline {
+                if !refreshed_at_deadline {
+                    self.refresh_task(&params.task)?;
+                    refreshed_at_deadline = true;
+                    continue;
+                }
                 break TmuxReadWaitReason::Timeout;
             }
             thread::sleep(Duration::from_millis(50));
@@ -453,13 +483,22 @@ impl TmuxState {
         let selected = if all {
             workspace.panes.clone()
         } else {
-            vec![self.backend.resolve(&workspace, pane.as_deref())?.clone()]
+            vec![self
+                .backend
+                .resolve(&workspace, Some(pane.as_deref().unwrap_or("main")))?
+                .clone()]
         };
-        let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
+        let selected_tasks = {
+            let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
+            selected
+                .iter()
+                .map(|pane| current_task(&tasks, &pane.id).cloned())
+                .collect::<Vec<_>>()
+        };
         let mut panes = Vec::with_capacity(selected.len());
-        for pane in selected {
+        for (pane, task) in selected.into_iter().zip(selected_tasks) {
             let lines = self.backend.capture_lines(&pane.tmux_pane_id, start, end)?;
-            panes.push(pane_detail(&pane, current_task(&tasks, &pane.id), lines));
+            panes.push(pane_detail(&pane, task.as_ref(), lines));
         }
         Ok(self.pane_output(panes, self.output_warnings(&workspace)?))
     }
@@ -1102,6 +1141,20 @@ impl TmuxState {
             && task.last_pane.is_none()
             && !self.backend.task_runtime_pending(task_id);
         task.transcript.has_output(terminal)
+    }
+
+    fn task_output_end(&self, task_id: &str) -> Result<u64, ToolError> {
+        let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
+        require_task(&tasks, task_id)?.transcript.end_offset()
+    }
+
+    fn task_has_output_after(&self, task_id: &str, offset: u64) -> Result<bool, ToolError> {
+        let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
+        let task = require_task(&tasks, task_id)?;
+        let terminal = !task.state.is_active()
+            && task.last_pane.is_none()
+            && !self.backend.task_runtime_pending(task_id);
+        task.transcript.has_output_after(offset, terminal)
     }
 
     fn task_is_terminal(&self, task_id: &str) -> Result<bool, ToolError> {

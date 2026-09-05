@@ -58,11 +58,11 @@ pub struct TmuxTaskInputParams {
     #[schemars(length(min = 1))]
     pub input: String,
     #[serde(default)]
-    /// Maximum time this call waits for new task transcript output. Defaults to 0.
+    /// Maximum wait after sending input. With line < 0, waits until terminal state or the full interval. Defaults to 0.
     #[schemars(range(min = 0, max = 3600000))]
     pub time_ms: Option<u64>,
     #[serde(default)]
-    /// Task transcript lines to consume after sending input. Defaults to 80, range -400..=400.
+    /// Task transcript lines to consume after sending input. Negative values return the tail after the wait interval. Defaults to 80, range -400..=400.
     #[schemars(range(min = -400, max = 400))]
     pub line: Option<i64>,
 }

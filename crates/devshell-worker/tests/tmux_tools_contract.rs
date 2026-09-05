@@ -509,6 +509,152 @@ fn tmux_run_returns_a_task_and_preserves_clean_first_output() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
+fn tmux_run_public_timeout_bounds_direct_block_wait() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-run-timeout";
+    start(&env, instance);
+
+    let started = Instant::now();
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({
+            "command": "sleep 0.8",
+            "wait": "block",
+            "timeout": 120,
+            "line": 0
+        }),
+        "ctx-timeout",
+        "run-public-timeout",
+    );
+    let elapsed = started.elapsed();
+
+    assert_eq!(run["ok"], true, "{run}");
+    assert!(
+        elapsed < Duration::from_millis(600),
+        "public timeout was ignored; block wait lasted {elapsed:?}: {run}"
+    );
+    assert_eq!(run["result"]["task"]["status"], "running", "{run}");
+    assert_eq!(run["result"]["timedOut"], true, "{run}");
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
+fn tmux_input_waits_for_output_after_input_not_preexisting_backlog() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-input-new-output";
+    start(&env, instance);
+
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({
+            "command": "stty -echo; printf 'OLD\\n'; read -r value; sleep 0.2; printf 'NEW:%s\\n' \"$value\"; sleep 1",
+            "consumeOutput": false,
+            "wait": "nonblock",
+            "line": 0
+        }),
+        "ctx-input",
+        "run-input-wait",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap();
+    thread::sleep(Duration::from_millis(100));
+
+    let started = Instant::now();
+    let input = call(
+        &env,
+        instance,
+        "2",
+        "tmux_input",
+        json!({ "task": task, "input": "hello^M", "line": 20, "timeMs": 600 }),
+        "ctx-input",
+        "input-waits-for-new-output",
+    );
+    let elapsed = started.elapsed();
+
+    assert_eq!(input["ok"], true, "{input}");
+    assert!(
+        elapsed >= Duration::from_millis(150),
+        "preexisting backlog satisfied the post-input wait after {elapsed:?}: {input}"
+    );
+    assert!(
+        input["result"]["output"]
+            .as_array()
+            .is_some_and(|lines| lines.iter().any(|line| line == "NEW:hello")),
+        "{input}"
+    );
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
+fn tmux_input_negative_line_waits_for_the_interval_before_returning_tail() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-input-tail-wait";
+    start(&env, instance);
+
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({
+            "command": "stty -echo; read -r value; printf 'FIRST:%s\\n' \"$value\"; sleep 0.1; printf 'SECOND\\n'; sleep 1",
+            "consumeOutput": false,
+            "wait": "nonblock",
+            "line": 0
+        }),
+        "ctx-input-tail",
+        "run-input-tail-wait",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap();
+
+    let started = Instant::now();
+    let input = call(
+        &env,
+        instance,
+        "2",
+        "tmux_input",
+        json!({ "task": task, "input": "hello^M", "line": -20, "timeMs": 300 }),
+        "ctx-input-tail",
+        "input-tail-wait",
+    );
+    let elapsed = started.elapsed();
+
+    assert_eq!(input["ok"], true, "{input}");
+    assert!(
+        elapsed >= Duration::from_millis(250),
+        "negative-line input returned too early after {elapsed:?}: {input}"
+    );
+    assert_eq!(input["result"]["task"]["status"], "running", "{input}");
+    let output = input["result"]["output"].as_array().unwrap();
+    assert!(output.iter().any(|line| line == "FIRST:hello"), "{input}");
+    assert!(output.iter().any(|line| line == "SECOND"), "{input}");
+
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
 fn tmux_run_can_start_without_consuming_transcript_output() {
     assert!(
         tmux_available(),
@@ -1148,6 +1294,43 @@ fn pane_incarnation_change_invalidates_stale_task_control() {
         stale_input["error"]["code"], "tmux.taskNotRunning",
         "{stale_input}"
     );
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
+fn tmux_inspect_defaults_to_main_when_other_panes_exist() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-inspect-default-main";
+    start(&env, instance);
+
+    let created = call(
+        &env,
+        instance,
+        "1",
+        "tmux_create",
+        json!({ "name": "extra" }),
+        "ctx-a",
+        "create-extra-pane",
+    );
+    assert_eq!(created["ok"], true, "{created}");
+
+    let inspect = call(
+        &env,
+        instance,
+        "2",
+        "tmux_inspect",
+        json!({}),
+        "ctx-a",
+        "inspect-default-main",
+    );
+    assert_eq!(inspect["ok"], true, "{inspect}");
+    assert_eq!(inspect["result"]["panes"].as_array().unwrap().len(), 1, "{inspect}");
+    assert_eq!(inspect["result"]["panes"][0]["name"], "main", "{inspect}");
     stop(&env, instance);
 }
 

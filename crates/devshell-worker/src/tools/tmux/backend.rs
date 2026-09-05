@@ -338,7 +338,7 @@ impl TmuxBackend {
             "-t".into(),
             tmux_pane_id.into(),
             "-S".into(),
-            "-".into(),
+            start.to_string(),
             "-E".into(),
             "-".into(),
         ])?;
@@ -616,6 +616,10 @@ impl TmuxBackend {
 
     fn task_exit_path(&self, task_id: &str) -> PathBuf {
         self.tasks_dir.join(format!("{task_id}.exit"))
+    }
+
+    pub fn task_exit_recorded(&self, task_id: &str) -> bool {
+        self.task_exit_path(task_id).exists()
     }
 
     fn read_task_exit_status(&self, task_id: &str) -> Option<i32> {
