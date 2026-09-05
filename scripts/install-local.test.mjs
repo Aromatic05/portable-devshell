@@ -152,7 +152,7 @@ async function runProcess(command, args, env) {
     return { code, stderr, stdout };
 }
 
-test("install-local rolls back application and Worker activation before restoring the exact previous runtime", {
+test("install-local rolls back application and Worker activation when the candidate Control cannot start", {
     skip: process.platform === "win32",
 }, async () => {
     const root = await createTestTempDirectory("install-local-rollback-test");
@@ -216,7 +216,7 @@ test("install-local rolls back application and Worker activation before restorin
         const fakePnpm = resolve(fakeBin, "pnpm");
         await writeFile(fakePnpm, [
             "#!/usr/bin/env node",
-            "import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';",
+            "import { mkdirSync, writeFileSync } from 'node:fs';",
             "import { resolve } from 'node:path';",
             "const args = process.argv.slice(2);",
             "const deploy = args.indexOf('deploy');",
@@ -224,7 +224,7 @@ test("install-local rolls back application and Worker activation before restorin
             "  const out = resolve(args[deploy + 1]);",
             "  mkdirSync(resolve(out, 'dist'), { recursive: true });",
             "  writeFileSync(resolve(out, 'package.json'), JSON.stringify({ name: '@portable-devshell/cli', version: '0.0.0', type: 'module', bin: { devshell: './dist/CliMain.js' } }));",
-            "  writeFileSync(resolve(out, 'dist', 'CliMain.js'), `#!/usr/bin/env node\\nimport { realpathSync } from 'node:fs';\\nconst staged = realpathSync(process.argv[1]).includes('.staging-');\\nif ((process.argv[2] ?? 'status') === 'status' && staged) process.stdout.write('control: stopped\\\\n'); else { process.stderr.write('post-activation failure\\\\n'); process.exit(1); }\\n`);",
+            "  writeFileSync(resolve(out, 'dist', 'CliMain.js'), `#!/usr/bin/env node\\nconst command = process.argv[2] ?? 'status';\\nif (command === 'status') process.stdout.write('control: stopped\\\\n'); else if (command === 'start') { process.stderr.write('candidate control start failure\\\\n'); process.exit(1); } else process.exit(0);\\n`);",
             "}",
             "",
         ].join("\n"), "utf8");
@@ -258,7 +258,7 @@ test("install-local rolls back application and Worker activation before restorin
         });
 
         assert.notEqual(result.code, 0, `${result.stdout}${result.stderr}`);
-        assert.match(result.stderr, /post-activation failure/iu);
+        assert.match(result.stderr, /candidate control start failure/iu);
         assert.equal(await readlink(currentLink), "versions/9.8.7-running");
         assert.equal(await readFile(resolve(workerBinDirectory, workerAsset), "utf8"), "old-worker\n");
         assert.equal(await readlink(resolve(workerBinDirectory, "devshell-worker")), workerAsset);
@@ -388,7 +388,7 @@ test("install-local completes Worker activation backup before stopping the previ
     }
 });
 
-test("install-local never downgrades after the new generation reaches real runtime restore", {
+test("install-local does not downgrade after candidate Control is ready and instance restore begins", {
     skip: process.platform === "win32",
 }, async () => {
     const root = await createTestTempDirectory("install-local-real-runtime-failure-test");
@@ -431,7 +431,7 @@ test("install-local never downgrades after the new generation reaches real runti
             "const command = process.argv[2] ?? 'status';",
             "const pid = existsSync(pidFile) ? Number.parseInt(readFileSync(pidFile, 'utf8').trim(), 10) : undefined;",
             "if (command === 'status') process.stdout.write(pid ? `control: running\\npid: ${pid}\\ninstances: 0\\n` : 'control: stopped\\n');",
-            "else if (command === 'overview') process.stdout.write(JSON.stringify({ instances: [] }));",
+            "else if (command === 'overview') process.stdout.write(JSON.stringify({ instances: [{ name: 'aromatic-pc', snapshot: { daemonState: 'running' } }] }));",
             "else if (command === 'stop') { if (pid) process.kill(pid, 'SIGTERM'); rmSync(pidFile, { force: true }); appendFileSync(runtimeLog, 'stop\\n'); }",
             "else if (command === 'start') appendFileSync(runtimeLog, 'old-start\\n');",
             "else process.exit(2);",
@@ -459,7 +459,7 @@ test("install-local never downgrades after the new generation reaches real runti
             "  const out = resolve(args[deploy + 1]);",
             "  mkdirSync(resolve(out, 'dist'), { recursive: true });",
             "  writeFileSync(resolve(out, 'package.json'), JSON.stringify({ name: '@portable-devshell/cli', version: '0.0.0', type: 'module', bin: { devshell: './dist/CliMain.js' } }));",
-            "  writeFileSync(resolve(out, 'dist', 'CliMain.js'), `#!/usr/bin/env node\\nconst command = process.argv[2] ?? 'status';\\nif (command === 'status') process.stdout.write('control: stopped\\\\n'); else if (command === 'start') { process.stderr.write('real-state start failure\\\\n'); process.exit(1); } else process.exit(0);\\n`);",
+            "  writeFileSync(resolve(out, 'dist', 'CliMain.js'), `#!/usr/bin/env node\\nconst command = process.argv[2] ?? 'status';\\nif (command === 'status') process.stdout.write('control: stopped\\\\n'); else if (command === 'start') process.exit(0); else if (command === 'instance' && process.argv[3] === 'start') { process.stderr.write('instance restore failure\\\\n'); process.exit(1); } else process.exit(0);\\n`);",
             "}",
             "",
         ].join("\n"), "utf8");
@@ -493,7 +493,8 @@ test("install-local never downgrades after the new generation reaches real runti
         });
 
         assert.notEqual(result.code, 0, `${result.stdout}${result.stderr}`);
-        assert.match(result.stderr, /Automatic downgrade is disabled/iu);
+        assert.match(result.stderr, /instance restore failure/iu);
+        assert.match(result.stderr, /Automatic downgrade is disabled after candidate instances/iu);
         assert.equal(await readlink(currentLink), `versions/${CURRENT_DEVELOPMENT_VERSION}`);
         assert.deepEqual((await readFile(runtimeLog, "utf8")).trim().split("\n"), ["stop"]);
         assert.equal(await readFile(resolve(workerBinDirectory, workerAsset), "utf8"), "candidate-worker\n");

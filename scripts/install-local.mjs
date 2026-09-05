@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { assertPackageBinFile, readPackageBinPath, writePortableApplicationManifest, tryReadPackageBinPath } from "./application-layout.mjs";
 import { resolveInstallHome } from "./install-home.mjs";
-import { captureInstalledRuntimeState, restoreInstalledRuntimeState } from "./install-runtime-state.mjs";
+import { captureInstalledRuntimeState, restoreInstalledControl, restoreInstalledInstances, restoreInstalledRuntimeState } from "./install-runtime-state.mjs";
 import { assertRunningControlMatchesApplication } from "./install-runtime-identity.mjs";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
@@ -125,6 +125,7 @@ try {
     let candidateVersionMoved = false;
     let applicationActivationAttempted = false;
     let workerTransactionStarted = false;
+    let installedCli;
     try {
         await stopInstalledControl(frozenCurrentCli);
         const installedWorkers = {};
@@ -154,8 +155,20 @@ try {
         await activateApplication(versionDirectory);
         beginStep("验证安装结果");
         await assertInstalledCommandStarts();
+        installedCli = await assertPackageBinFile(await readPackageBinPath(versionDirectory, "devshell"));
+        restoreInstalledControl(
+            (args) => runInstalledCli(installedCli.absolutePath, args),
+            runtimeState,
+        );
     } catch (error) {
         const rollbackFailures = [];
+        if (installedCli !== undefined) {
+            try {
+                await stopInstalledControl(installedCli);
+            } catch (rollbackError) {
+                rollbackFailures.push(rollbackError);
+            }
+        }
         if (candidateVersionMoved || previousVersionBackedUp || applicationActivationAttempted) {
             try {
                 if (candidateVersionMoved) {
@@ -193,17 +206,16 @@ try {
         throw error;
     }
 
-    const installedCli = await assertPackageBinFile(await readPackageBinPath(versionDirectory, "devshell"));
     try {
-        restoreInstalledRuntimeState(
+        restoreInstalledInstances(
             (args) => runInstalledCli(installedCli.absolutePath, args),
             runtimeState,
         );
     } catch (error) {
         throw new Error(
             [
-                "The new application generation was activated but could not restore the previous runtime state.",
-                "Automatic downgrade is disabled after the new generation may have accessed persistent state.",
+                "The new Control was restored but one or more previous instances could not be restarted.",
+                "Automatic downgrade is disabled after candidate instances may have accessed persistent state.",
                 `Recovery artifacts were preserved under ${installRoot}.`,
             ].join("\n"),
             { cause: error },

@@ -43,9 +43,17 @@ export function captureInstalledRuntimeState(runCli) {
 }
 
 export function restoreInstalledRuntimeState(runCli, state) {
-    if (state.controlRunning !== true) return;
+    restoreInstalledControl(runCli, state);
+    restoreInstalledInstances(runCli, state);
+}
 
+export function restoreInstalledControl(runCli, state) {
+    if (state.controlRunning !== true) return;
     assertCliSuccess(runCli(["start"]), "restart Control after installation");
+}
+
+export function restoreInstalledInstances(runCli, state) {
+    if (state.controlRunning !== true) return;
     const failures = [];
     for (const instance of state.instances) {
         try {
