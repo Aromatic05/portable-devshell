@@ -32,6 +32,7 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
     const workspaceMarkerName = "mcp-real-selected-workspace-marker.txt";
     const workspaceMarker = "portable-devshell-mcp-real-selected-workspace";
     await writeFile(join(selectedWorkspacePath, workspaceMarkerName), workspaceMarker, "utf8");
+    await writeFile(join(selectedWorkspacePath, "legacy-read.txt"), "legacy read\n", "utf8");
     const instance = new WorkerInstanceFactory().create({
         env: { ...process.env, HOME: homeDirectory },
         homeDirectory,
@@ -83,8 +84,12 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         assert.equal(list.error, undefined);
         const tools = list.result?.tools as Array<{ inputSchema: Record<string, unknown>; name: string }>;
         const bash = tools.find((tool) => tool.name === "bash_run");
+        const fileRead = tools.find((tool) => tool.name === "file_read");
         const tmuxCreate = tools.find((tool) => tool.name === "tmux_create");
         assert.notEqual(bash, undefined);
+        assert.notEqual(fileRead, undefined);
+        assert.notEqual((fileRead?.inputSchema.properties as Record<string, unknown>).files, undefined);
+        assert.equal((fileRead?.inputSchema.properties as Record<string, unknown>).path, undefined);
         assert.equal(tmuxCreate === undefined, !tmuxAvailable);
         const workerBashSchema = instance.listTools().find((tool) => tool.name === "bash_run")?.inputSchema as Record<string, unknown>;
         const workerTmuxSchema = instance.listTools().find((tool) => tool.name === "tmux_create")?.inputSchema as Record<string, unknown> | undefined;
@@ -131,6 +136,26 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         }
 
         const ctxId = await createContext(endpoint, sessionHeaders, selectedWorkspacePath);
+        const legacyRead = await postJson(endpoint, {
+            id: "req-stale-file-read",
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: {
+                arguments: {
+                    ctxId,
+                    path: "./legacy-read.txt",
+                    selector: "1-1:raw",
+                    view: "content"
+                },
+                name: "file_read"
+            }
+        }, sessionHeaders);
+        assert.equal(legacyRead.error, undefined, JSON.stringify(legacyRead));
+        assert.equal(legacyRead.result?.isError, false);
+        assert.equal(
+            (legacyRead.result?.structuredContent as { content?: JsonValue } | undefined)?.content,
+            "1:legacy read"
+        );
         const callRequest = withToolContext(
             await readFixture("mcp-tools-call.json"),
             ctxId

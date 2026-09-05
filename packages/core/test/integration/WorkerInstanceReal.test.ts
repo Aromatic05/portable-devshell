@@ -315,8 +315,10 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
         assert.equal(jsonRecord(secondResult)?.stdout, "ls output\n");
 
         const invalidCall = instance.callTool("bash_run", { bad: true } as JsonValue, cliToolCallContext);
+        await harness.waitForMethodCount("bash_run", 3);
+        harness.fail("bash_run", "tool.invalidArguments");
         await assert.rejects(invalidCall, (error: unknown) => {
-            assert.equal((error as { code?: string }).code, errorCodes.coreToolSchemaUnavailable);
+            assert.equal((error as { code?: string }).code, "tool.invalidArguments");
             return true;
         });
 
@@ -328,7 +330,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
         assert.equal(records[0]?.stdoutBytes, 240);
         assert.equal(records[0]?.stderrBytes, 0);
         assert.equal(records[0]?.termination, undefined);
-        assert.equal(records[2]?.error, errorCodes.coreToolSchemaUnavailable);
+        assert.equal(records[2]?.error, "tool.invalidArguments");
         assert.deepEqual(
             (await instance.readToolCalls({ after: records[1]?.callId, limit: 1, status: "failed", toolName: "bash_run" })).map(
                 (record) => record.callId
@@ -416,7 +418,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
         assert.deepEqual(failedEvent?.data, {
             callId: records[2]?.callId,
             completedAt: jsonRecord(failedEvent?.data)?.completedAt,
-            errorCode: errorCodes.coreToolSchemaUnavailable,
+            errorCode: "tool.invalidArguments",
             inputSummary: "{\"bad\":true}",
             source: "cli",
             startedAt: jsonRecord(failedEvent?.data)?.startedAt,
@@ -989,6 +991,7 @@ type HarnessTool = {
 
 function createWorkerInstanceHarness(): {
     disconnect: () => void;
+    fail: (method: string, code: string) => void;
     failNextRpcStarts: (count?: number) => void;
     setTools: (tools: HarnessTool[]) => void;
     transport: WorkerCommandTransport;
@@ -1107,6 +1110,29 @@ function createWorkerInstanceHarness(): {
         disconnect() {
             activeProcess?.stdout.end();
             activeProcess?.exitResolve?.({ code: 1, signal: null });
+        },
+        fail(method, code) {
+            const requestIds = pending.get(method);
+            if (requestIds === undefined) {
+                throw new Error(`No pending request for ${method}.`);
+            }
+            const requestId = requestIds.shift();
+            if (requestId === undefined) {
+                throw new Error(`No pending request for ${method}.`);
+            }
+            if (requestIds.length === 0) {
+                pending.delete(method);
+            }
+            activeProcess?.write({
+                error: {
+                    code,
+                    message: `worker rejected ${method}`,
+                    retryable: false
+                },
+                id: requestId,
+                ok: false,
+                type: "response"
+            } as unknown as JsonValue);
         },
         failNextRpcStarts(count = 1) {
             rpcSpawnFailures = count;

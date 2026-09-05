@@ -4,18 +4,27 @@ import test from "node:test";
 import type { JsonValue } from "@portable-devshell/shared";
 import { WorkerToolCatalog, WorkerToolInvoker } from "@portable-devshell/core/testing";
 
-test("WorkerToolInvoker enforces all JSON Schema constraints for input and output", async () => {
+test("WorkerToolInvoker treats current schemas as discovery metadata, not a wire firewall", async () => {
     const catalog = new WorkerToolCatalog();
     catalog.refresh([{
         requiredCapabilities: ["read"],
-        description: "Read a file.",
+        description: "Read files in a batch.",
         group: "file",
         inputSchema: {
             type: "object",
             properties: {
-                path: { type: "string" }
+                files: {
+                    type: "array",
+                    minItems: 1,
+                    items: {
+                        type: "object",
+                        properties: { path: { type: "string" } },
+                        required: ["path"],
+                        additionalProperties: false
+                    }
+                }
             },
-            required: ["path"],
+            required: ["files"],
             additionalProperties: false
         },
         name: "file_read",
@@ -28,17 +37,18 @@ test("WorkerToolInvoker enforces all JSON Schema constraints for input and outpu
             additionalProperties: false
         }
     }]);
+    const calls: JsonValue[] = [];
     const rpcClient = {
-        async request(): Promise<JsonValue> {
-            return { type: "directory" };
+        async request(_method: string, input: JsonValue): Promise<JsonValue> {
+            calls.push(input);
+            return { legacyContent: "1:legacy" };
         }
     };
     const invoker = new WorkerToolInvoker(rpcClient as never, catalog);
 
-    await assert.rejects(invoker.invoke("file_read", { path: "./file.txt", extra: true }), {
-        code: "core.toolSchemaUnavailable"
-    });
-    await assert.rejects(invoker.invoke("file_read", { path: "./file.txt" }), {
-        code: "core.toolSchemaUnavailable"
-    });
+    assert.deepEqual(
+        await invoker.invoke("file_read", { path: "./legacy.txt", view: "content" }),
+        { legacyContent: "1:legacy" }
+    );
+    assert.deepEqual(calls, [{ path: "./legacy.txt", view: "content" }]);
 });

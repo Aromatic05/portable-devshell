@@ -101,9 +101,6 @@ importers:
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
-      ajv:
-        specifier: 8.20.0
-        version: 8.20.0
       string-argv:
         specifier: ^0.3.2
         version: 0.3.2
@@ -2615,7 +2612,6 @@ snapshots:
   '@portable-devshell/core@file:packages/core':
     dependencies:
       '@portable-devshell/shared': file:packages/shared
-      ajv: 8.20.0
       string-argv: 0.3.2
       tar-stream: 3.2.0
     transitivePeerDependencies:
