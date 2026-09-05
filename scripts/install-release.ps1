@@ -248,12 +248,16 @@ function Assert-RunningControlMatchesApplication([string]$ApplicationDirectory, 
     }
 }
 
-function Restore-InstalledRuntimeState([string]$Cli, $RuntimeState) {
+function Restore-InstalledControl([string]$Cli, $RuntimeState) {
     if (-not $RuntimeState.ControlRunning) { return }
     & node $Cli start *> $null
     if ($LASTEXITCODE -ne 0) {
         throw "新版本已安装，但无法恢复安装前运行的 control。"
     }
+}
+
+function Restore-InstalledInstances([string]$Cli, $RuntimeState) {
+    if (-not $RuntimeState.ControlRunning) { return }
     $failedInstances = @()
     foreach ($instance in $RuntimeState.Instances) {
         & node $Cli instance start $instance *> $null
@@ -264,6 +268,11 @@ function Restore-InstalledRuntimeState([string]$Cli, $RuntimeState) {
     if ($failedInstances.Count -gt 0) {
         throw "无法恢复以下实例：$($failedInstances -join ', ')"
     }
+}
+
+function Restore-InstalledRuntimeState([string]$Cli, $RuntimeState) {
+    Restore-InstalledControl $Cli $RuntimeState
+    Restore-InstalledInstances $Cli $RuntimeState
 }
 
 function Get-WorkerAssetName([string]$Target) {
@@ -472,6 +481,7 @@ try {
     }
     Backup-WorkerAliases $targets $devshellHome $workerBackupDirectory
     $runtimeWasStopped = [bool]$runtimeState.ControlRunning
+    $candidateControlRestoreAttempted = $false
     $activated = $false
     try {
         Stop-InstalledControl $currentCli $devshellHome
@@ -491,9 +501,18 @@ try {
 
         Write-InstallStep "验证安装结果"
         Assert-CliStarts $commandPath "安装结果验证失败" $true
+        $candidateControlRestoreAttempted = [bool]$runtimeState.ControlRunning
+        Restore-InstalledControl $cliPath $runtimeState
         $activated = $true
     } finally {
         if (-not $activated) {
+            if ($candidateControlRestoreAttempted) {
+                try {
+                    Stop-InstalledControl $commandPath $devshellHome
+                } catch {
+                    throw "候选 Control 无法安全停止；为避免让运行进程与磁盘 generation 不一致，拒绝自动回滚。 $($_.Exception.Message)"
+                }
+            }
             try {
                 if (Test-Path -LiteralPath $currentBackupDirectory) {
                     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $currentDirectory
@@ -524,9 +543,9 @@ try {
     Write-InstallDetail "已安装命令可以正常启动"
     $runtimeWasStopped = $false
     try {
-        Restore-InstalledRuntimeState $cliPath $runtimeState
+        Restore-InstalledInstances $cliPath $runtimeState
     } catch {
-        throw "新 generation 已激活，但无法恢复真实运行态；在可能访问持久状态后禁止自动降级。恢复材料已保留在 $installRoot。 $($_.Exception.Message)"
+        throw "新 Control 已恢复，但一个或多个安装前运行的实例无法恢复；候选实例可能已访问持久状态，禁止自动降级。恢复材料已保留在 $installRoot。 $($_.Exception.Message)"
     }
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $backupDirectory, $currentBackupDirectory, $workerBackupDirectory
     if ($runtimeState.ControlRunning) {

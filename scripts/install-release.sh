@@ -197,7 +197,7 @@ NODE
     fi
 }
 
-restore_installed_runtime() {
+restore_installed_control() {
     cli=$1
     if [ "${runtime_restore_control:-0}" -ne 1 ]; then
         return 0
@@ -205,6 +205,13 @@ restore_installed_runtime() {
     if ! node "$cli" start >/dev/null; then
         echo "新版本已安装，但无法恢复安装前运行的 control。" >&2
         return 1
+    fi
+}
+
+restore_installed_instances() {
+    cli=$1
+    if [ "${runtime_restore_control:-0}" -ne 1 ]; then
+        return 0
     fi
     restore_failed=0
     while IFS= read -r instance; do
@@ -215,6 +222,12 @@ restore_installed_runtime() {
         fi
     done < "$runtime_restore_instances"
     return "$restore_failed"
+}
+
+restore_installed_runtime() {
+    cli=$1
+    restore_installed_control "$cli" || return 1
+    restore_installed_instances "$cli"
 }
 
 cleanup_control_runtime() {
@@ -523,6 +536,7 @@ runtime_restore_control=0
 runtime_control_pid=
 runtime_restore_instances="$temporary/runtime-restore-instances"
 runtime_was_stopped=0
+candidate_control_restore_attempted=0
 previous_version_present=0
 if [ -e "$version_directory" ] || [ -L "$version_directory" ]; then
     previous_version_present=1
@@ -531,13 +545,21 @@ fi
 cleanup_installation() {
     status=$?
     trap - EXIT HUP INT TERM
+    rollback_blocked=0
+    if [ "$status" -ne 0 ] && [ "$candidate_control_restore_attempted" -eq 1 ] && { [ "$application_transaction_active" -eq 1 ] || [ "$worker_transaction_active" -eq 1 ]; }; then
+        if ! stop_installed_control "$command_link"; then
+            echo "候选 Control 无法安全停止；为避免让运行进程与磁盘 generation 不一致，拒绝自动回滚。" >&2
+            rollback_blocked=1
+            status=1
+        fi
+    fi
     if [ "$application_transaction_active" -eq 1 ] || [ "$worker_transaction_active" -eq 1 ]; then
-        if ! rollback_installation; then
+        if [ "$rollback_blocked" -eq 0 ] && ! rollback_installation; then
             echo "安装回滚未完整完成；备份目录已保留以便人工恢复。" >&2
             status=1
         fi
     fi
-    if [ "$status" -ne 0 ] && [ "${runtime_was_stopped:-0}" -eq 1 ] && [ "${runtime_restore_control:-0}" -eq 1 ]; then
+    if [ "$status" -ne 0 ] && [ "${runtime_was_stopped:-0}" -eq 1 ] && [ "${runtime_restore_control:-0}" -eq 1 ] && [ "$application_transaction_active" -eq 0 ] && [ "$worker_transaction_active" -eq 0 ]; then
         if ! restore_installed_runtime "$current_cli"; then
             echo "安装失败后未能恢复原 control/instance 运行态。" >&2
             status=1
@@ -636,12 +658,20 @@ if ! smoke_cli "$command_link" "安装结果验证失败"; then
     rollback_installation
     exit 1
 fi
+if [ "$runtime_restore_control" -eq 1 ]; then
+    candidate_control_restore_attempted=1
+fi
+if ! restore_installed_control "$command_link"; then
+    echo "候选 Control 无法恢复真实运行态，正在恢复原安装。" >&2
+    exit 1
+fi
 application_transaction_active=0
 worker_transaction_active=0
 detail "已安装命令可以正常启动"
 runtime_was_stopped=0
-if ! restore_installed_runtime "$command_link"; then
-    echo "新 generation 已激活，但无法恢复真实运行态；在可能访问持久状态后禁止自动降级。" >&2
+if ! restore_installed_instances "$command_link"; then
+    echo "新 Control 已恢复，但一个或多个安装前运行的实例无法恢复。" >&2
+    echo "候选实例可能已访问持久状态，禁止自动降级。" >&2
     echo "恢复材料已保留：$backup_directory $worker_backup_directory" >&2
     exit 1
 fi

@@ -556,7 +556,7 @@ test("Unix release installer rejects stale activation before stopping a differen
     }
 });
 
-test("Unix release installer never downgrades after the candidate reaches real runtime restore", {
+test("Unix release installer rolls back when the candidate Control cannot restore real state", {
     skip: process.platform === "win32"
 }, async () => {
     const root = await createTestTempDirectory("release-real-runtime-failure-test");
@@ -602,10 +602,82 @@ test("Unix release installer never downgrades after the candidate reaches real r
             PORTABLE_DEVSHELL_TEST_RUNNING: "1",
         }, false);
         assert.notEqual(failed.status, 0, `${failed.stdout}${failed.stderr}`);
+        assert.match(failed.stderr, /候选 Control 无法恢复真实运行态/u);
+        const current = JSON.parse(await readFile(resolve(installRoot, "current", "package.json"), "utf8"));
+        assert.equal(current.version, "9.8.7-runtime-old");
+        assert.deepEqual((await readFile(runtimeLog, "utf8")).trim().split("\n"), [
+            "stop",
+            "candidate-start-failed",
+            "stop",
+            "start",
+            "instance:ready-local",
+            "instance:starting-ssh",
+            "instance:stale-local",
+        ]);
+        const workerBackups = (await readdir(devshellHome)).filter((name) => name.startsWith(".install-worker-backup-"));
+        assert.equal(workerBackups.length, 0);
+    } finally {
+        oldControl?.kill("SIGKILL");
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("Unix release installer never downgrades after candidate instances may access persistent state", {
+    skip: process.platform === "win32"
+}, async () => {
+    const root = await createTestTempDirectory("release-instance-runtime-failure-test");
+    const release = resolve(root, "release");
+    const app = resolve(root, "app");
+    const home = resolve(root, "home");
+    const installRoot = resolve(root, "installed");
+    const binDirectory = resolve(root, "bin");
+    const devshellHome = resolve(root, "devshell-home");
+    const runtimeLog = resolve(root, "runtime.log");
+    const environment = {
+        ...process.env,
+        HOME: home,
+        XDG_DATA_HOME: resolve(root, "data"),
+        PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(release).href.replace(/\/$/u, ""),
+        PORTABLE_DEVSHELL_INSTALL_ROOT: installRoot,
+        PORTABLE_DEVSHELL_BIN_DIR: binDirectory,
+        PORTABLE_DEVSHELL_HOME: devshellHome,
+        PORTABLE_DEVSHELL_TEST_LIVE_HOME: devshellHome,
+        PORTABLE_DEVSHELL_TEST_RUNTIME_LOG: runtimeLog,
+    };
+    let oldControl;
+    try {
+        await writeTransactionalReleaseFixture({
+            app,
+            release,
+            version: "9.8.7-instance-old",
+            workerContent: "old-worker\n"
+        });
+        const installed = runInstallerRaw(environment, false);
+        assert.equal(installed.status, 0, `${installed.stdout}${installed.stderr}`);
+
+        oldControl = await startFakeControl(resolve(installRoot, "versions", "9.8.7-instance-old"), devshellHome);
+        await writeTransactionalReleaseFixture({
+            app,
+            failInstanceRestore: true,
+            release,
+            version: "9.8.8-instance-new",
+            workerContent: "new-worker\n"
+        });
+        const failed = runInstallerRaw({
+            ...environment,
+            PORTABLE_DEVSHELL_TEST_RUNNING: "1",
+        }, false);
+        assert.notEqual(failed.status, 0, `${failed.stdout}${failed.stderr}`);
         assert.match(failed.stderr, /禁止自动降级/u);
         const current = JSON.parse(await readFile(resolve(installRoot, "current", "package.json"), "utf8"));
-        assert.equal(current.version, "9.8.8-runtime-new");
-        assert.deepEqual((await readFile(runtimeLog, "utf8")).trim().split("\n"), ["stop", "candidate-start-failed"]);
+        assert.equal(current.version, "9.8.8-instance-new");
+        assert.deepEqual((await readFile(runtimeLog, "utf8")).trim().split("\n"), [
+            "stop",
+            "start",
+            "instance:ready-local",
+            "instance:starting-ssh",
+            "instance:stale-local",
+        ]);
         const workerBackups = (await readdir(devshellHome)).filter((name) => name.startsWith(".install-worker-backup-"));
         assert.equal(workerBackups.length, 1);
     } finally {
@@ -628,6 +700,18 @@ test("Windows release installer prepares rollback state before entering Control 
     assert.ok(prepare >= 0, "Worker activation backup must be present");
     assert.ok(transaction > prepare, "rollback scope must start after backup preparation");
     assert.ok(shutdown > transaction, "Control shutdown must execute inside the rollback scope");
+});
+
+test("Windows release installer commits only after candidate Control restore", async () => {
+    const source = await readFile(resolve(repositoryRoot, "scripts", "install-release.ps1"), "utf8");
+    const restoreControl = source.indexOf("        Restore-InstalledControl $cliPath $runtimeState");
+    const commit = source.indexOf("        $activated = $true", restoreControl);
+    const stopCandidate = source.indexOf("                    Stop-InstalledControl $commandPath $devshellHome", restoreControl);
+    const restoreInstances = source.indexOf("        Restore-InstalledInstances $cliPath $runtimeState", commit);
+    assert.ok(restoreControl >= 0, "candidate Control restore must be present");
+    assert.ok(commit > restoreControl, "candidate Control must restore before committing activation");
+    assert.ok(stopCandidate > restoreControl, "failed candidate Control must be stopped before rollback");
+    assert.ok(restoreInstances > commit, "instance restore must happen only after the rollback boundary closes");
 });
 
 async function verifyTransactionalRollback(windows) {
@@ -692,7 +776,7 @@ async function verifyTransactionalRollback(windows) {
     }
 }
 
-async function writeTransactionalReleaseFixture({ app, failAfterActivation = false, failRuntimeRestore = false, release, version, workerContent }) {
+async function writeTransactionalReleaseFixture({ app, failAfterActivation = false, failInstanceRestore = false, failRuntimeRestore = false, release, version, workerContent }) {
     await rm(app, { force: true, recursive: true });
     await mkdir(resolve(app, "custom"), { recursive: true });
     await mkdir(release, { recursive: true });
@@ -737,7 +821,11 @@ async function writeTransactionalReleaseFixture({ app, failAfterActivation = fal
         ] : [
             "else if (command === 'start') record('start');"
         ]),
-        "else if (command === 'instance' && process.argv[3] === 'start') record(`instance:${process.argv[4]}`);",
+        ...(failInstanceRestore ? [
+            "else if (command === 'instance' && process.argv[3] === 'start') { record(`instance:${process.argv[4]}`); if (process.argv[4] === 'ready-local') { process.stderr.write('instance restore failure\\n'); process.exit(1); } }"
+        ] : [
+            "else if (command === 'instance' && process.argv[3] === 'start') record(`instance:${process.argv[4]}`);"
+        ]),
         "else { process.stderr.write(`unsupported test command: ${command}\\n`); process.exit(2); }",
         ""
     ].join("\n"), "utf8");
