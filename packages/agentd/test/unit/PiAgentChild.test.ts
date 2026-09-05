@@ -10,8 +10,26 @@ import type { PiChildMessage } from "../../src/provider/pi/PiProcessProtocol.ts"
 
 function nextMessage(child: ChildProcess): Promise<PiChildMessage> {
     return new Promise((resolve, reject) => {
-        child.once("message", (message) => resolve(message as PiChildMessage));
-        child.once("error", reject);
+        const cleanup = () => {
+            child.off("message", onMessage);
+            child.off("error", onError);
+            child.off("exit", onExit);
+        };
+        const onMessage = (message: unknown) => {
+            cleanup();
+            resolve(message as PiChildMessage);
+        };
+        const onError = (error: Error) => {
+            cleanup();
+            reject(error);
+        };
+        const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+            cleanup();
+            reject(new Error(`Pi provider child exited before replying (code=${String(code)}, signal=${String(signal)}).`));
+        };
+        child.once("message", onMessage);
+        child.once("error", onError);
+        child.once("exit", onExit);
     });
 }
 
@@ -35,7 +53,7 @@ function waitForExit(child: ChildProcess): Promise<{ code: number | null; signal
 test("Pi provider child exits when its parent IPC channel disconnects", async () => {
     const stateDirectory = await mkdtemp(join(tmpdir(), "devshell-pi-child-disconnect-"));
     const childPath = fileURLToPath(new URL("../../src/provider/pi/PiAgentChild.ts", import.meta.url));
-    const workspaceLoader = new URL("../../../core/test/RegisterWorkspacePackages.mjs", import.meta.url).href;
+    const workspaceLoader = new URL("../RegisterWorkspacePackages.mjs", import.meta.url).href;
     const child = fork(childPath, [], {
         cwd: process.cwd(),
         env: {
