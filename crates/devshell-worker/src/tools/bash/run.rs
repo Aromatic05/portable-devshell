@@ -25,6 +25,8 @@ const DEFAULT_MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_TIMEOUT_MS: u64 = 100_000;
 const MAX_CAPTURE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_STDIN_BYTES: usize = 4 * 1024 * 1024;
+const MAX_INLINE_JSON_BYTES_PER_STREAM: usize = 6 * 1024 * 1024;
+const FALLBACK_INLINE_BYTES_PER_STREAM: usize = 512 * 1024;
 
 pub struct BashRunTool {
     name: ToolName,
@@ -107,15 +109,10 @@ impl ToolHandler for BashRunTool {
             }
         };
         let mut child = ManagedBashChild::new(child, pid, process_guard);
-        if let Some(stdin) = params.stdin {
-            let mut input = child
-                .stdin
-                .take()
-                .ok_or_else(|| ToolError::new("bash.ioFailed", "missing stdin pipe"))?;
-            input
-                .write_all(stdin.as_bytes())
-                .map_err(|error| ToolError::new("bash.ioFailed", error.to_string()))?;
-        }
+        let input = child
+            .stdin
+            .take()
+            .ok_or_else(|| ToolError::new("bash.ioFailed", "missing stdin pipe"))?;
         let stdout = child
             .stdout
             .take()
@@ -144,21 +141,34 @@ impl ToolHandler for BashRunTool {
             stderr_draft,
             stderr_warning,
         );
-        let wait_outcome = wait(
-            &mut child,
-            pid,
-            Duration::from_millis(timeout_ms),
-            &call.cancellation,
-        )?;
+        let stdin_thread = match params.stdin {
+            Some(stdin) => Some(spawn_stdin_writer(input, stdin)),
+            None => {
+                drop(input);
+                None
+            }
+        };
+        let deadline = started + Duration::from_millis(timeout_ms);
+        let wait_outcome = wait(&mut child, pid, deadline, &call.cancellation)?;
         let status = child
             .wait_and_reap()
             .map_err(|error| ToolError::new("bash.ioFailed", error.to_string()))?;
+        let stdin_result = if let Some(stdin_thread) = stdin_thread {
+            stdin_thread
+                .join()
+                .map_err(|_| ToolError::new("bash.ioFailed", "stdin writer panicked"))?
+        } else {
+            Ok(())
+        };
         let mut stdout = stdout_thread
             .join()
             .map_err(|_| ToolError::new("bash.ioFailed", "stdout reader panicked"))??;
         let mut stderr = stderr_thread
             .join()
             .map_err(|_| ToolError::new("bash.ioFailed", "stderr reader panicked"))??;
+        stdin_result?;
+        enforce_inline_rpc_budget(&mut stdout);
+        enforce_inline_rpc_budget(&mut stderr);
         let term_signal = status.signal();
         let termination = match wait_outcome {
             BashWaitOutcome::Cancelled => BashTermination::Signaled,
@@ -364,6 +374,55 @@ fn spawn_reader(
     })
 }
 
+fn spawn_stdin_writer(
+    mut writer: impl Write + Send + 'static,
+    input: String,
+) -> thread::JoinHandle<Result<(), ToolError>> {
+    thread::spawn(move || match writer.write_all(input.as_bytes()) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        Err(error) => Err(ToolError::new("bash.ioFailed", error.to_string())),
+    })
+}
+
+fn enforce_inline_rpc_budget(output: &mut StreamOutput) {
+    if json_string_upper_bound(&output.kept) <= MAX_INLINE_JSON_BYTES_PER_STREAM {
+        return;
+    }
+    if output.kept.len() > FALLBACK_INLINE_BYTES_PER_STREAM {
+        let head = FALLBACK_INLINE_BYTES_PER_STREAM / 2;
+        let tail = FALLBACK_INLINE_BYTES_PER_STREAM - head;
+        let mut kept = Vec::with_capacity(FALLBACK_INLINE_BYTES_PER_STREAM);
+        kept.extend_from_slice(&output.kept[..head]);
+        kept.extend_from_slice(&output.kept[output.kept.len() - tail..]);
+        output.kept = kept;
+    }
+    output.truncated = true;
+}
+
+fn json_string_upper_bound(bytes: &[u8]) -> usize {
+    let body = match std::str::from_utf8(bytes) {
+        Ok(text) => text
+            .chars()
+            .map(|character| match character {
+                '"' | '\\' => 2,
+                '\u{00}'..='\u{1f}' => 6,
+                _ => character.len_utf8(),
+            })
+            .sum::<usize>(),
+        Err(_) => bytes
+            .iter()
+            .map(|byte| match byte {
+                b'"' | b'\\' => 2,
+                0x00..=0x1f => 6,
+                0x20..=0x7e => 1,
+                _ => 3,
+            })
+            .sum::<usize>(),
+    };
+    body.saturating_add(2)
+}
+
 fn begin_artifact(
     store: &ArtifactStore,
     stream: ArtifactStream,
@@ -409,26 +468,28 @@ enum BashWaitOutcome {
 fn wait(
     child: &mut Child,
     pid: i32,
-    timeout: Duration,
+    deadline: Instant,
     cancellation: &crate::tools::ToolCancellation,
 ) -> Result<BashWaitOutcome, ToolError> {
-    let started = Instant::now();
     loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                terminate(pid)?;
+                return Ok(BashWaitOutcome::Termination(BashTermination::Exited));
+            }
+            Ok(None) => {}
+            Err(error) => return Err(ToolError::new("bash.ioFailed", error.to_string())),
+        }
         if cancellation.is_cancelled() {
             terminate(pid)?;
             return Ok(BashWaitOutcome::Cancelled);
         }
-        if started.elapsed() >= timeout {
+        let now = Instant::now();
+        if now >= deadline {
             terminate(pid)?;
             return Ok(BashWaitOutcome::Termination(BashTermination::Timeout));
         }
-        match child.try_wait() {
-            Ok(Some(_)) => {
-                return Ok(BashWaitOutcome::Termination(BashTermination::Exited));
-            }
-            Ok(None) => thread::sleep(Duration::from_millis(10)),
-            Err(error) => return Err(ToolError::new("bash.ioFailed", error.to_string())),
-        }
+        thread::sleep(Duration::from_millis(10).min(deadline.saturating_duration_since(now)));
     }
 }
 fn terminate(pid: i32) -> Result<(), ToolError> {

@@ -16,6 +16,7 @@ pub struct BashRunParams {
     #[schemars(length(min = 1))]
     pub cwd: Option<String>,
     #[serde(default)]
+    /// Standard input text. Omit to close stdin immediately and deliver EOF.
     pub stdin: Option<String>,
     /// Required command timeout in milliseconds. Use tmux_run for work that may exceed 100000 ms.
     #[schemars(range(min = 1, max = 100000))]

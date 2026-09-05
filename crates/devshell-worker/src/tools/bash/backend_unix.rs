@@ -19,7 +19,7 @@ pub fn spawn_shell(
         .map_err(|error| ToolError::new("bash.invalidCwd", error.to_string()))?;
     let mut command = Command::new(&shell.executable);
     command
-        .arg("-lc")
+        .args(["--noprofile", "--norc", "-c"])
         .arg(command_text)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -43,6 +43,7 @@ pub fn spawn_shell(
 }
 
 fn apply_environment(command: &mut Command, env: &BTreeMap<String, Option<String>>) {
+    command.env_remove("BASH_ENV");
     for (key, value) in env {
         match value {
             Some(value) => {

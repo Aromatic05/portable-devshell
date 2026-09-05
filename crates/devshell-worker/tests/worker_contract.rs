@@ -671,6 +671,226 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
 }
 
 #[test]
+fn bash_run_closes_omitted_stdin_and_handles_bidirectional_pipe_pressure() {
+    let env = TestEnv::new();
+    let instance = "aromatic-bash-stdio";
+    env.command()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    #[cfg(unix)]
+    let eof_command = "cat; printf done";
+    #[cfg(windows)]
+    let eof_command = "$null = [Console]::In.ReadToEnd(); [Console]::Out.Write('done')";
+    let eof = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "stdin-eof",
+            "method": "bash_run",
+            "params": { "command": eof_command, "timeoutMs": 2_000 },
+            "context": { "workspace": env.workspace() }
+        }),
+    );
+    assert_eq!(eof["ok"], true, "{eof}");
+    assert_eq!(eof["result"]["termination"], "exited", "{eof}");
+    assert_eq!(eof["result"]["stdout"], "done", "{eof}");
+
+    let stdin = "i".repeat(512 * 1024);
+    #[cfg(unix)]
+    let pressure_command = "head -c 524288 /dev/zero | tr '\\0' o; cat >/dev/null; printf done >&2";
+    #[cfg(windows)]
+    let pressure_command = "[Console]::Out.Write('o' * 524288); $null = [Console]::In.ReadToEnd(); [Console]::Error.Write('done')";
+    let pressure = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "stdio-pressure",
+            "method": "bash_run",
+            "params": {
+                "command": pressure_command,
+                "stdin": stdin,
+                "timeoutMs": 5_000,
+                "maxCaptureBytes": 1024
+            },
+            "context": { "workspace": env.workspace() }
+        }),
+    );
+    assert_eq!(pressure["ok"], true, "{pressure}");
+    assert_eq!(pressure["result"]["termination"], "exited", "{pressure}");
+    assert_eq!(pressure["result"]["stderr"], "done", "{pressure}");
+    assert_eq!(pressure["result"]["stdoutBytes"], 524288, "{pressure}");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[cfg(unix)]
+#[test]
+fn bash_run_does_not_load_login_or_interactive_shell_profiles() {
+    let env = TestEnv::new();
+    fs::write(
+        env.home().join(".bash_profile"),
+        "export DEVSHELL_PROFILE_MARKER=login\n",
+    )
+    .unwrap();
+    fs::write(
+        env.home().join(".bashrc"),
+        "export DEVSHELL_RC_MARKER=interactive\n",
+    )
+    .unwrap();
+    let instance = "aromatic-bash-clean-profile";
+    env.command()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let response = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "clean-profile",
+            "method": "bash_run",
+            "params": {
+                "command": "printf '%s/%s' \"${DEVSHELL_PROFILE_MARKER:-unset}\" \"${DEVSHELL_RC_MARKER:-unset}\"",
+                "timeoutMs": 2_000
+            },
+            "context": { "workspace": env.workspace() }
+        }),
+    );
+    assert_eq!(response["ok"], true, "{response}");
+    assert_eq!(response["result"]["stdout"], "unset/unset", "{response}");
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[cfg(unix)]
+#[test]
+fn bash_run_ignores_inherited_bash_env_but_allows_an_explicit_override() {
+    let env = TestEnv::new();
+    let bash_env = env.home().join("bash-env.sh");
+    fs::write(&bash_env, "export DEVSHELL_BASH_ENV_MARKER=loaded\n").unwrap();
+    let instance = "aromatic-bash-env";
+    env.command_with_env("BASH_ENV", bash_env.to_string_lossy().as_ref())
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let inherited = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "inherited-bash-env",
+            "method": "bash_run",
+            "params": {
+                "command": "printf '%s' \"${DEVSHELL_BASH_ENV_MARKER:-unset}\"",
+                "timeoutMs": 2_000
+            },
+            "context": { "workspace": env.workspace() }
+        }),
+    );
+    assert_eq!(inherited["ok"], true, "{inherited}");
+    assert_eq!(inherited["result"]["stdout"], "unset", "{inherited}");
+
+    let explicit = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "explicit-bash-env",
+            "method": "bash_run",
+            "params": {
+                "command": "printf '%s' \"${DEVSHELL_BASH_ENV_MARKER:-unset}\"",
+                "env": { "BASH_ENV": bash_env },
+                "timeoutMs": 2_000
+            },
+            "context": { "workspace": env.workspace() }
+        }),
+    );
+    assert_eq!(explicit["ok"], true, "{explicit}");
+    assert_eq!(explicit["result"]["stdout"], "loaded", "{explicit}");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[cfg(unix)]
+#[test]
+fn bash_run_cleans_background_processes_after_the_shell_exits() {
+    let env = TestEnv::new();
+    let instance = "aromatic-bash-background";
+    env.command()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let response = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "background-child",
+            "method": "bash_run",
+            "params": {
+                "command": "sleep 2 & printf done",
+                "timeoutMs": 500
+            },
+            "context": { "workspace": env.workspace() }
+        }),
+    );
+
+    assert_eq!(response["ok"], true, "{response}");
+    assert_eq!(response["result"]["termination"], "exited", "{response}");
+    assert_eq!(response["result"]["stdout"], "done", "{response}");
+    assert!(
+        response["result"]["durationMs"].as_u64().unwrap() < 500,
+        "background child kept bash_run alive: {response}"
+    );
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[cfg(unix)]
+#[test]
+fn bash_run_keeps_legal_large_capture_within_the_rpc_frame() {
+    let env = TestEnv::new();
+    let instance = "aromatic-bash-large-capture";
+    env.command()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let response = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "large-capture",
+            "method": "bash_run",
+            "params": {
+                "command": "head -c 7340032 /dev/zero | tr '\\0' x",
+                "timeoutMs": 30_000,
+                "maxCaptureBytes": 16_777_216
+            },
+            "context": { "workspace": env.workspace() }
+        }),
+    );
+
+    assert_eq!(response["ok"], true, "{response}");
+    assert_eq!(response["result"]["termination"], "exited", "{response}");
+    assert_eq!(response["result"]["stdoutBytes"], 7_340_032, "{response}");
+    assert_eq!(response["result"]["stdoutTruncated"], true, "{response}");
+    assert!(
+        response["result"]["stdout"].as_str().unwrap().len() <= 512 * 1024,
+        "{response}"
+    );
+    assert_eq!(
+        response["result"]["stdoutArtifact"]["sourceBytes"], 7_340_032,
+        "{response}"
+    );
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
 fn rejects_old_cli_shapes_and_invalid_instance_names() {
     let env = TestEnv::new();
 
