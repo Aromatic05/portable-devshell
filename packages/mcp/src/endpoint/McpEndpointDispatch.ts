@@ -416,7 +416,7 @@ export class McpEndpointDispatch {
         const line = readTmuxLine(input);
         if (!isRecord(observedValue)) throw new Error(`tmux_read returned an invalid observation for task ${task}.`);
         const observed = observedValue;
-        if (tmuxReadReady(observed)) {
+        if (tmuxReadReady(observed, line)) {
             const completed = await this.#consumeTmuxRead(instance, task, line, context, signal);
             await this.#supersedeObservedTmuxWaits(instance, task, context.ctxId, completed, false);
             return await this.#attachComments("tmux_read", completed, context, callId, instance);
@@ -459,6 +459,7 @@ export class McpEndpointDispatch {
             task,
             context,
             callId,
+            line,
             startedAt + timeout,
         );
 
@@ -791,6 +792,7 @@ export class McpEndpointDispatch {
         taskId: string,
         context: ToolCallContext,
         ownerCallId: string | undefined,
+        line: number,
         deadlineAt: number,
     ): Promise<JsonValue> {
         const gateway = this.#gateway;
@@ -807,6 +809,7 @@ export class McpEndpointDispatch {
             taskId,
             context,
             controller.signal,
+            line,
             deadlineAt,
         ).then(async (result) => {
             const consumeIfDetached = await this.#contextExecutionActive(context.ctxId, ownerCallId);
@@ -845,6 +848,7 @@ export class McpEndpointDispatch {
                         wait.targetId,
                         { ctxId: wait.createdByCtxId, source: "mcp" },
                         wait.ownerCallId,
+                        readTmuxLine(payload),
                         Date.parse(wait.deadlineAt),
                     );
                 } else {
@@ -911,6 +915,7 @@ export class McpEndpointDispatch {
         taskId: string,
         context: ToolCallContext,
         signal: AbortSignal,
+        line: number,
         deadlineAt: number,
     ): Promise<JsonValue> {
         while (true) {
@@ -921,10 +926,21 @@ export class McpEndpointDispatch {
                     instance,
                     taskId,
                     context,
-                    Math.min(this.#tmuxWaitPollMs, remaining),
+                    line < 0 ? remaining : Math.min(this.#tmuxWaitPollMs, remaining),
+                    line,
                     signal,
                 );
-                if (tmuxReadReady(result) || Date.now() >= deadlineAt) return result;
+                if (tmuxReadReady(result, line)) return result;
+                if (Date.now() >= deadlineAt) return { ...result, waitReason: "timeout" };
+                if (line < 0 && result.waitReason === "output") {
+                    await waitForMcpEndpointAbortable(
+                        new Promise<void>((resolve) => setTimeout(
+                            resolve,
+                            Math.min(this.#tmuxWaitPollMs, Math.max(1, deadlineAt - Date.now())),
+                        )),
+                        signal,
+                    );
+                }
             } catch (error) {
                 if (!isRetryableTmuxObservationError(error)) throw error;
                 if (Date.now() >= deadlineAt) throw error;
@@ -944,9 +960,10 @@ export class McpEndpointDispatch {
         taskId: string,
         context: ToolCallContext,
         timeMs: number,
+        line: number,
         signal?: AbortSignal,
     ): Promise<Record<string, JsonValue>> {
-        const input = { consumeOutput: false, line: 0, task: taskId, timeMs };
+        const input = { consumeOutput: false, line, task: taskId, timeMs };
         const result = await this.#invokeToolInternal(instance, "tmux_read", input, context, signal);
         if (!isRecord(result)) throw new Error(`tmux_read returned an invalid observation for task ${taskId}.`);
         return result;
@@ -1360,9 +1377,9 @@ function isTmuxTaskRunning(result: JsonValue, taskId: string): boolean {
     return task.status === "running";
 }
 
-function tmuxReadReady(result: JsonValue): boolean {
+function tmuxReadReady(result: JsonValue, line: number): boolean {
     if (!isRecord(result)) return false;
-    return result.waitReason === "output" || result.waitReason === "terminal";
+    return result.waitReason === "terminal" || (line >= 0 && result.waitReason === "output");
 }
 
 function isRetryableTmuxObservationError(error: unknown): boolean {

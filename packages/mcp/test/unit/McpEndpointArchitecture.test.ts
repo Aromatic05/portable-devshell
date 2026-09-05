@@ -1224,6 +1224,24 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
     await waitUntil(() => idleReplacement?.status === "resolved");
     assert.equal(idleReplacement?.status, "resolved");
 
+    const tailStartedAt = Date.now();
+    const internalReadsBeforeTail = internalReadCalls;
+    const tailResult = await dispatch.callTool(
+        "tmux_read",
+        { ctxId: environment.ctxId, line: -17, task: "task-existing", timeMs: 60 },
+        { principal: "tester", requestId: "wait-read-tail" },
+    ) as { detached?: boolean };
+    assert.equal(tailResult.detached, true);
+    executionNow += 60_001;
+    const tailReplacement = waits.filter((entry) => entry.waitId.startsWith("wait-read-")).at(-1);
+    assert.equal(tailReplacement?.status, "detached");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(tailReplacement?.status, "detached", "negative-line wait must ignore early output");
+    await waitUntil(() => tailReplacement?.status === "resolved");
+    assert.equal(Date.now() - tailStartedAt >= 50, true, "negative-line wait returned before its interval elapsed");
+    assert.equal((tailReplacement?.result as { waitReason?: string } | undefined)?.waitReason, "timeout");
+    assert.equal(internalReadCalls - internalReadsBeforeTail, 1, "negative-line wait should use one blocking observation");
+
     ready = false;
     const abortDispatch = new McpEndpointDispatch({
         catalog,

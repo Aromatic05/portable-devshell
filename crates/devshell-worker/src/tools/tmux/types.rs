@@ -85,11 +85,11 @@ pub struct TmuxReadParams {
     #[schemars(length(min = 1))]
     pub task: String,
     #[serde(default)]
-    /// Maximum time this call waits for new output. Defaults to 0.
+    /// Maximum wait. With line < 0, waits until terminal state or the full interval. Defaults to 0.
     #[schemars(range(min = 0, max = 3600000))]
     pub time_ms: Option<u64>,
     #[serde(default)]
-    /// Output lines to consume. Defaults to 80. Range: -400..=400.
+    /// Output lines to consume. Negative values return the tail after the wait interval. Defaults to 80. Range: -400..=400.
     #[schemars(range(min = -400, max = 400))]
     pub line: Option<i64>,
     #[serde(default)]

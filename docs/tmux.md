@@ -234,7 +234,7 @@ Transcript 从 task 自己的 fresh pane 通过 tmux `pipe-pane` 旁路采集。
 ```text
 line > 0  返回最早的 N 行未读 transcript
 line = 0  丢弃当前未读 transcript
-line < 0  返回最后 N 行，并丢弃更早的未读内容
+line < 0  等到 task 终态或 timeMs 用满，再返回最后 N 行并丢弃更早的未读内容
 ```
 
 `line` 的有效范围是 `-400..=400`。单条 terminal record 的展示最多保留 4096 bytes；超过时返回截断后的 record，并附带 `tmux.lineTruncated` warning。这样 transcript 文件大小和单次 RPC 输出都有明确边界。
@@ -247,7 +247,7 @@ Transcript 展示层会处理常见 terminal 控制：ANSI control sequence 不�
 
 `tmux_read` 的已读 offset 也会持久化。worker restart / running-task adoption 后继续读取时，不会把 restart 前已经消费或丢弃的 transcript 当成新输出重复返回。
 
-`tmux_read(timeMs > 0)` 若在 Host 同步窗口之后转成 detached Wait，新 output 或 terminal 状态使该 Wait resolved 时会恢复模型一次。这是一次明确的等待完成事件；仅仅存在 unread transcript、但当前没有对应的 detached `tmux_read` Wait 时，不会主动产生 Workspace 消息。
+`tmux_read(timeMs > 0)` 若在 Host 同步窗口之后转成 detached Wait，`line >= 0` 会在新 output、terminal 或 deadline 时完成；`line < 0` 只在 terminal 或 deadline 时完成，不因中途 output 提前唤醒。仅仅存在 unread transcript、但当前没有对应的 detached `tmux_read` Wait 时，不会主动产生 Workspace 消息。
 
 ## `tmux_run` 的 Workspace block handoff
 

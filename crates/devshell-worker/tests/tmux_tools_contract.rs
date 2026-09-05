@@ -404,6 +404,60 @@ fn tmux_read_preserves_output_after_a_task_exits_nonzero() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
+fn tmux_read_negative_line_waits_for_the_interval_before_returning_tail() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-read-tail-wait";
+    start(&env, instance);
+
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({
+            "command": "sleep 0.05; printf 'FIRST\\n'; sleep 0.1; printf 'SECOND\\n'; sleep 1",
+            "wait": "nonblock",
+            "timeMs": 0,
+            "line": 0
+        }),
+        "ctx-tail",
+        "run-tail-wait",
+    );
+    assert_eq!(run["ok"], true, "{run}");
+    let task = run["result"]["task"]["id"].as_str().unwrap();
+
+    let started = Instant::now();
+    let read = call(
+        &env,
+        instance,
+        "2",
+        "tmux_read",
+        json!({ "task": task, "line": -20, "timeMs": 300 }),
+        "ctx-tail",
+        "read-tail-wait",
+    );
+    let elapsed = started.elapsed();
+
+    assert_eq!(read["ok"], true, "{read}");
+    assert!(
+        elapsed >= Duration::from_millis(250),
+        "negative-line read returned too early after {elapsed:?}: {read}"
+    );
+    assert_eq!(read["result"]["waitReason"], "timeout", "{read}");
+    assert_eq!(read["result"]["task"]["status"], "running", "{read}");
+    let output = read["result"]["output"].as_array().unwrap();
+    assert!(output.iter().any(|line| line == "FIRST"), "{read}");
+    assert!(output.iter().any(|line| line == "SECOND"), "{read}");
+
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
 fn tmux_run_returns_a_task_and_preserves_clean_first_output() {
     assert!(
         tmux_available(),

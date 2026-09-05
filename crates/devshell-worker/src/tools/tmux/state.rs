@@ -394,7 +394,7 @@ impl TmuxState {
         let wait_reason = loop {
             call.check_cancelled()?;
             self.refresh_task(&params.task)?;
-            if self.task_has_output(&params.task)? {
+            if line >= 0 && self.task_has_output(&params.task)? {
                 break TmuxReadWaitReason::Output;
             }
             if self.task_is_terminal(&params.task)? {
