@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { appendFile, readFile, readdir, rm, stat } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -61,16 +61,36 @@ test("tool call provenance recovers a truncated hot JSONL tail after a crash", a
         await appendFile(filePath, '{"version":1,"callId":"partial', "utf8");
 
         const recovered = new ToolCallProvenanceStore(filePath);
+        await recovered.record({ callId: "call-2", instance: "alpha", purpose: "still writable" });
         assert.deepEqual(await recovered.decorate("alpha", [toolCall("call-1")]), [{
             ...toolCall("call-1"),
             purpose: "keep me"
         }]);
         assert.doesNotMatch(await readFile(filePath, "utf8"), /partial/u);
-        await recovered.record({ callId: "call-2", instance: "alpha", purpose: "still writable" });
         assert.deepEqual(await recovered.decorate("alpha", [toolCall("call-2")]), [{
             ...toolCall("call-2"),
             purpose: "still writable"
         }]);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("tool call provenance record does not initialize cold archives", async () => {
+    const root = await createTestTempDirectory("tool-call-provenance-lazy-cold");
+    const filePath = join(root, "tool-call-provenance.jsonl");
+    const archiveDirectory = `${filePath}.archive`;
+    try {
+        await mkdir(archiveDirectory, { recursive: true });
+        await writeFile(join(archiveDirectory, "0000000000000-corrupt.jsonl.zst"), "not-zstd", "utf8");
+        const store = new ToolCallProvenanceStore(filePath);
+
+        await assert.doesNotReject(store.record({
+            callId: "call-hot",
+            instance: "alpha",
+            purpose: "write without touching cold history"
+        }));
+        await assert.rejects(store.decorate("alpha", [toolCall("call-cold-miss")]));
     } finally {
         await rm(root, { force: true, recursive: true });
     }

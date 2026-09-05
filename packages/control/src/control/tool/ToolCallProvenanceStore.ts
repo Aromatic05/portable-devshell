@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, stat, truncate, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile, stat, truncate, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import type { McpToolProvenanceRecord, McpToolProvenanceRecorder } from "@portable-devshell/mcp";
@@ -32,6 +32,8 @@ export class ToolCallProvenanceStore implements McpToolProvenanceRecorder {
     readonly #hotRecords = new Map<string, StoredToolCallProvenance>();
     readonly #now: () => number;
     readonly #retentionMs: number;
+    #archiveInitializePromise?: Promise<void>;
+    #initialized = false;
     #initializePromise?: Promise<void>;
     #mutation: Promise<void> = Promise.resolve();
 
@@ -56,9 +58,10 @@ export class ToolCallProvenanceStore implements McpToolProvenanceRecorder {
 
     async record(record: McpToolProvenanceRecord): Promise<void> {
         if (record.purpose === undefined && record.explanation === undefined) return;
-        await this.#initialize();
         const operation = this.#mutation.then(async () => {
-            await this.#pruneHotRetention();
+            if (this.#initializePromise !== undefined) await this.#initialize();
+            if (this.#initialized) await this.#pruneHotRetention();
+            else await this.#repairIncompleteHotTail();
             const stored: StoredToolCallProvenance = {
                 ...record,
                 recordedAt: new Date(this.#now()).toISOString(),
@@ -66,7 +69,7 @@ export class ToolCallProvenanceStore implements McpToolProvenanceRecorder {
             };
             await mkdir(dirname(this.#filePath), { mode: 0o700, recursive: true });
             await appendFile(this.#filePath, `${JSON.stringify(stored)}\n`, { encoding: "utf8", mode: 0o600 });
-            this.#hotRecords.set(provenanceKey(record.instance, record.callId), stored);
+            if (this.#initialized) this.#hotRecords.set(provenanceKey(record.instance, record.callId), stored);
             await this.#rotateIfNeeded();
         });
         this.#mutation = operation.catch(() => undefined);
@@ -86,6 +89,7 @@ export class ToolCallProvenanceStore implements McpToolProvenanceRecorder {
                 }
             }
             const missing = keys.filter((key) => !hot.has(key));
+            if (missing.length > 0) await this.#initializeArchive();
             const cold = missing.length === 0 ? new Map() : await this.#archive.lookup(missing);
             return records.map((record) => {
                 const key = provenanceKey(instance, record.callId);
@@ -108,12 +112,14 @@ export class ToolCallProvenanceStore implements McpToolProvenanceRecorder {
     }
 
     async #load(): Promise<void> {
-        await this.#archive.initialize();
         let source: string;
         try {
             source = await readFile(this.#filePath, "utf8");
         } catch (error) {
-            if (isEnoent(error)) return;
+            if (isEnoent(error)) {
+                this.#initialized = true;
+                return;
+            }
             throw error;
         }
         const cutoff = this.#now() - this.#retentionMs;
@@ -124,6 +130,7 @@ export class ToolCallProvenanceStore implements McpToolProvenanceRecorder {
         }
         const compacted = serializeRecords([...this.#hotRecords.values()]);
         if (compacted !== source) await writeFile(this.#filePath, compacted, { encoding: "utf8", mode: 0o600 });
+        this.#initialized = true;
         await this.#rotateIfNeeded();
     }
 
@@ -150,11 +157,54 @@ export class ToolCallProvenanceStore implements McpToolProvenanceRecorder {
             if (isEnoent(error)) return;
             throw error;
         }
-        if (size <= this.#hotMaxBytes || this.#hotRecords.size === 0) return;
+        if (size <= this.#hotMaxBytes) return;
+        if (!this.#initialized) {
+            await this.#initialize();
+            size = (await stat(this.#filePath)).size;
+            if (size <= this.#hotMaxBytes) return;
+        }
+        if (this.#hotRecords.size === 0) return;
         const records = [...this.#hotRecords.values()];
+        await this.#initializeArchive();
         await this.#archive.append(records);
         await truncate(this.#filePath, 0);
         this.#hotRecords.clear();
+    }
+
+    async #initializeArchive(): Promise<void> {
+        this.#archiveInitializePromise ??= this.#archive.initialize();
+        await this.#archiveInitializePromise;
+    }
+
+    async #repairIncompleteHotTail(): Promise<void> {
+        let fileSize: number;
+        try {
+            fileSize = (await stat(this.#filePath)).size;
+        } catch (error) {
+            if (isEnoent(error)) return;
+            throw error;
+        }
+        if (fileSize === 0) return;
+        const handle = await open(this.#filePath, "r");
+        try {
+            let end = fileSize;
+            const buffer = Buffer.alloc(Math.min(64 * 1024, fileSize));
+            while (end > 0) {
+                const start = Math.max(0, end - buffer.length);
+                const length = end - start;
+                await handle.read(buffer, 0, length, start);
+                if (buffer[length - 1] === 0x0a) return;
+                const newline = buffer.subarray(0, length).lastIndexOf(0x0a);
+                if (newline >= 0) {
+                    await truncate(this.#filePath, start + newline + 1);
+                    return;
+                }
+                end = start;
+            }
+            await truncate(this.#filePath, 0);
+        } finally {
+            await handle.close();
+        }
     }
 }
 
