@@ -10,6 +10,11 @@ import {
     type McpContextRecord,
 } from "@portable-devshell/shared";
 
+import {
+    McpContextExecutionStore,
+    type McpContextExecutionRecord,
+} from "./McpContextExecutionStore.js";
+
 export type { McpContextRecord } from "@portable-devshell/shared";
 
 export const defaultMcpContextTtlMs = 24 * 60 * 60 * 1_000;
@@ -81,6 +86,7 @@ interface McpContextDocument {
 }
 
 export interface McpContextRegistryOptions {
+    executionFilePath?: string;
     filePath?: string;
     idFactory?: () => string;
     maxTerminalContexts?: number;
@@ -90,6 +96,8 @@ export interface McpContextRegistryOptions {
 
 export class McpContextRegistry {
     readonly #contexts = new Map<string, McpContextStoredRecord>();
+    readonly #executionHydrated = new Set<string>();
+    readonly #executionStore: McpContextExecutionStore;
     readonly #filePath?: string;
     readonly #idFactory: () => string;
     readonly #maxTerminalContexts: number;
@@ -101,6 +109,9 @@ export class McpContextRegistry {
 
     constructor(options: McpContextRegistryOptions = {}) {
         this.#filePath = options.filePath;
+        this.#executionStore = new McpContextExecutionStore(
+            options.executionFilePath ?? contextExecutionFilePath(options.filePath),
+        );
         this.#initialized = this.#filePath === undefined;
         this.#idFactory = options.idFactory ?? (() => `ctx-${randomUUID()}`);
         this.#maxTerminalContexts =
@@ -363,6 +374,7 @@ export class McpContextRegistry {
     async validateForInstance(
         ctxId: string,
         instance: string,
+        options: { execution?: boolean } = {},
     ): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
@@ -391,6 +403,7 @@ export class McpContextRegistry {
             if (contextEnvironment(record, instance) === undefined) {
                 throw invalidContext(ctxId);
             }
+            if (options.execution === true) this.#hydrateExecution(record);
             return cloneRecord(record);
         });
     }
@@ -399,7 +412,7 @@ export class McpContextRegistry {
         ctxId: string,
         instance: string,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.validateForInstance(ctxId, instance);
+        await this.validateForInstance(ctxId, instance, { execution: true });
         return await this.#run(async () => {
             const record = this.#contexts.get(ctxId);
             if (record === undefined) throw invalidContext(ctxId);
@@ -413,7 +426,7 @@ export class McpContextRegistry {
         reason: string,
         mode: Exclude<McpContextAutomaticReentryMode, "automatic"> = "user_owned",
     ): Promise<McpContextAutomaticReentryState> {
-        await this.validateForInstance(ctxId, instance);
+        await this.validateForInstance(ctxId, instance, { execution: true });
         return await this.#run(async () => {
             const record = this.#contexts.get(ctxId);
             if (record === undefined) throw invalidContext(ctxId);
@@ -438,7 +451,7 @@ export class McpContextRegistry {
         ctxId: string,
         instance: string,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.validateForInstance(ctxId, instance);
+        await this.validateForInstance(ctxId, instance, { execution: true });
         return await this.#run(async () => {
             const record = this.#contexts.get(ctxId);
             if (record === undefined) throw invalidContext(ctxId);
@@ -463,7 +476,7 @@ export class McpContextRegistry {
         instance: string,
         kind: GoalActivityKind,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.validateForInstance(ctxId, instance);
+        await this.validateForInstance(ctxId, instance, { execution: true });
         return await this.#run(async () => {
             const record = this.#contexts.get(ctxId);
             if (record === undefined) throw invalidContext(ctxId);
@@ -490,12 +503,20 @@ export class McpContextRegistry {
         ctxId: string,
         instance: string,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.validateForInstance(ctxId, instance);
+        await this.validateForInstance(ctxId, instance, { execution: true });
         return await this.#run(async () => {
             const record = this.#contexts.get(ctxId);
             if (record === undefined) throw invalidContext(ctxId);
             const now = this.#now();
-            await this.#mutateRecordAndPersist(record, () => {
+            const previous = cloneStoredRecord(record);
+            const clearsClaim = record.automaticReentryAttemptedAt === undefined && (
+                record.automaticReentryClaimedAt !== undefined ||
+                record.automaticReentryClaimId !== undefined ||
+                record.automaticReentryInstance !== undefined ||
+                record.automaticReentrySourceId !== undefined ||
+                record.automaticReentrySourceKind !== undefined
+            );
+            try {
                 record.executionEpoch = (record.executionEpoch ?? 0) + 1;
                 record.executionLastActivityAt = new Date(now).toISOString();
                 record.executionLeaseUntil = new Date(now + MCP_CONTEXT_EXECUTION_LEASE_MS).toISOString();
@@ -506,7 +527,12 @@ export class McpContextRegistry {
                     delete record.automaticReentrySourceId;
                     delete record.automaticReentrySourceKind;
                 }
-            });
+                await this.#persistExecution(record, clearsClaim);
+            } catch (error) {
+                this.#contexts.set(previous.ctxId, previous);
+                this.#executionHydrated.delete(previous.ctxId);
+                throw error;
+            }
             return automaticReentryState(record, now);
         });
     }
@@ -516,7 +542,7 @@ export class McpContextRegistry {
         instance: string,
         expectedEpoch: number,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.validateForInstance(ctxId, instance);
+        await this.validateForInstance(ctxId, instance, { execution: true });
         return await this.#run(async () => {
             const record = this.#contexts.get(ctxId);
             if (record === undefined) throw invalidContext(ctxId);
@@ -524,10 +550,16 @@ export class McpContextRegistry {
             if ((record.executionEpoch ?? 0) !== expectedEpoch) {
                 return automaticReentryState(record, now);
             }
-            await this.#mutateRecordAndPersist(record, () => {
+            const previous = cloneStoredRecord(record);
+            try {
                 record.executionEpoch = expectedEpoch + 1;
                 delete record.executionLeaseUntil;
-            });
+                await this.#persistExecution(record, false);
+            } catch (error) {
+                this.#contexts.set(previous.ctxId, previous);
+                this.#executionHydrated.delete(previous.ctxId);
+                throw error;
+            }
             return automaticReentryState(record, now);
         });
     }
@@ -537,7 +569,7 @@ export class McpContextRegistry {
         instance: string,
         claimId: string,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.validateForInstance(ctxId, instance);
+        await this.validateForInstance(ctxId, instance, { execution: true });
         return await this.#run(async () => {
             const record = this.#contexts.get(ctxId);
             if (record === undefined) throw invalidContext(ctxId);
@@ -565,7 +597,7 @@ export class McpContextRegistry {
         instance: string,
         claimId: string,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.validateForInstance(ctxId, instance);
+        await this.validateForInstance(ctxId, instance, { execution: true });
         return await this.#run(async () => {
             const record = this.#contexts.get(ctxId);
             if (record === undefined) throw invalidContext(ctxId);
@@ -589,6 +621,7 @@ export class McpContextRegistry {
                 delete record.automaticReentrySourceId;
                 delete record.automaticReentrySourceKind;
             });
+            this.#persistExecutionBestEffort(record);
             return automaticReentryState(record, now);
         });
     }
@@ -598,7 +631,7 @@ export class McpContextRegistry {
         instance: string,
         claimId: string,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.validateForInstance(ctxId, instance);
+        await this.validateForInstance(ctxId, instance, { execution: true });
         return await this.#run(async () => {
             const record = this.#contexts.get(ctxId);
             if (record === undefined) throw invalidContext(ctxId);
@@ -621,7 +654,7 @@ export class McpContextRegistry {
         instance: string,
         claimId: string,
     ): Promise<{ claimed: boolean; state: McpContextAutomaticReentryState }> {
-        await this.validateForInstance(ctxId, instance);
+        await this.validateForInstance(ctxId, instance, { execution: true });
         return await this.#run(async () => {
             const record = this.#contexts.get(ctxId);
             if (record === undefined) throw invalidContext(ctxId);
@@ -656,7 +689,7 @@ export class McpContextRegistry {
         sourceKind: "goal" | "goal-resume" | "goal-retry" | "task-resume" | "wait",
         sourceId: string,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.validateForInstance(ctxId, instance);
+        await this.validateForInstance(ctxId, instance, { execution: true });
         return await this.#run(async () => {
             const record = this.#contexts.get(ctxId);
             if (record === undefined) throw invalidContext(ctxId);
@@ -689,7 +722,7 @@ export class McpContextRegistry {
         instance: string,
         claimId: string,
     ): Promise<{ state: McpContextAutomaticReentryState; valid: boolean }> {
-        await this.validateForInstance(ctxId, instance);
+        await this.validateForInstance(ctxId, instance, { execution: true });
         return await this.#run(async () => {
             const record = this.#contexts.get(ctxId);
             if (record === undefined) throw invalidContext(ctxId);
@@ -706,7 +739,7 @@ export class McpContextRegistry {
         instance: string,
         claimId: string,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.validateForInstance(ctxId, instance);
+        await this.validateForInstance(ctxId, instance, { execution: true });
         return await this.#run(async () => {
             const record = this.#contexts.get(ctxId);
             if (record === undefined) throw invalidContext(ctxId);
@@ -730,7 +763,7 @@ export class McpContextRegistry {
         ctxId: string,
         instance: string,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.validateForInstance(ctxId, instance);
+        await this.validateForInstance(ctxId, instance, { execution: true });
         return await this.#run(async () => {
             const record = this.#contexts.get(ctxId);
             if (record === undefined) throw invalidContext(ctxId);
@@ -1006,17 +1039,6 @@ export class McpContextRegistry {
         }
     }
 
-    async #mutateRecordAndPersist(record: McpContextStoredRecord, mutate: () => void): Promise<void> {
-        const previous = cloneStoredRecord(record);
-        mutate();
-        try {
-            await this.#persist();
-        } catch (error) {
-            this.#contexts.set(previous.ctxId, previous);
-            throw error;
-        }
-    }
-
     async #touchRecord(record: McpContextStoredRecord, now: number): Promise<void> {
         const previous = cloneStoredRecord(record);
         const persistedUntil = this.#persistedExpiresAt.get(record.ctxId) ?? Date.parse(record.expiresAt);
@@ -1029,6 +1051,43 @@ export class McpContextRegistry {
         } catch (error) {
             this.#contexts.set(previous.ctxId, previous);
             throw error;
+        }
+    }
+
+    #hydrateExecution(record: McpContextStoredRecord): void {
+        if (this.#executionHydrated.has(record.ctxId)) return;
+        const stored = this.#executionStore.read(record.ctxId);
+        const currentEpoch = record.executionEpoch ?? 0;
+        if (stored !== undefined && stored.executionEpoch > currentEpoch) {
+            applyExecutionRecord(record, stored);
+        } else if (
+            stored === undefined &&
+            (record.executionEpoch !== undefined || record.executionLastActivityAt !== undefined || record.executionLeaseUntil !== undefined)
+        ) {
+            this.#persistExecutionBestEffort(record);
+        } else if (stored !== undefined && currentEpoch > stored.executionEpoch) {
+            this.#persistExecutionBestEffort(record);
+        }
+        this.#executionHydrated.add(record.ctxId);
+    }
+
+    async #persistExecution(record: McpContextStoredRecord, persistStructural: boolean): Promise<void> {
+        try {
+            this.#executionStore.write(record.ctxId, executionRecord(record));
+            this.#executionHydrated.add(record.ctxId);
+        } catch {
+            await this.#persist();
+            return;
+        }
+        if (persistStructural) await this.#persist();
+    }
+
+    #persistExecutionBestEffort(record: McpContextStoredRecord): void {
+        try {
+            this.#executionStore.write(record.ctxId, executionRecord(record));
+            this.#executionHydrated.add(record.ctxId);
+        } catch {
+            // The main Context document remains a durable compatibility fallback.
         }
     }
 
@@ -1085,6 +1144,8 @@ export class McpContextRegistry {
         while (terminal.length > this.#maxTerminalContexts) {
             const record = terminal.shift()!;
             this.#contexts.delete(record.ctxId);
+            this.#executionHydrated.delete(record.ctxId);
+            this.#executionStore.delete(record.ctxId);
             changed = true;
         }
         return changed;
@@ -1402,6 +1463,29 @@ function automaticReentryState(record: McpContextStoredRecord, now = Date.now())
         ...(record.automaticReentrySourceId === undefined ? {} : { sourceId: record.automaticReentrySourceId }),
         ...(record.automaticReentrySourceKind === undefined ? {} : { sourceKind: record.automaticReentrySourceKind }),
     };
+}
+
+function applyExecutionRecord(record: McpContextStoredRecord, execution: McpContextExecutionRecord): void {
+    record.executionEpoch = execution.executionEpoch;
+    if (execution.executionLastActivityAt === undefined) delete record.executionLastActivityAt;
+    else record.executionLastActivityAt = execution.executionLastActivityAt;
+    if (execution.executionLeaseUntil === undefined) delete record.executionLeaseUntil;
+    else record.executionLeaseUntil = execution.executionLeaseUntil;
+}
+
+function executionRecord(record: McpContextStoredRecord): McpContextExecutionRecord {
+    return {
+        executionEpoch: record.executionEpoch ?? 0,
+        ...(record.executionLastActivityAt === undefined ? {} : { executionLastActivityAt: record.executionLastActivityAt }),
+        ...(record.executionLeaseUntil === undefined ? {} : { executionLeaseUntil: record.executionLeaseUntil }),
+    };
+}
+
+function contextExecutionFilePath(filePath: string | undefined): string | undefined {
+    if (filePath === undefined) return undefined;
+    return filePath.endsWith(".json")
+        ? `${filePath.slice(0, -5)}.activity.sqlite3`
+        : `${filePath}.activity.sqlite3`;
 }
 
 function contextExecutionActive(record: McpContextStoredRecord, now: number): boolean {

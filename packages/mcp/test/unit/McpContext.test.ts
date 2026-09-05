@@ -6,6 +6,7 @@ import test from "node:test";
 import { McpContextRegistry, McpEndpointWorker, McpHost, McpNativeToolResult } from "@portable-devshell/mcp/testing";
 import type { JsonValue, ToolCallContext, ToolDefinition } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+import { McpContextExecutionStore } from "../../src/context/McpContextExecutionStore.ts";
 
 function structuredResult<T>(result: JsonValue | McpNativeToolResult): T {
     return (result instanceof McpNativeToolResult ? result.structuredContent : result) as T;
@@ -333,6 +334,7 @@ test("McpContextRegistry releases only the execution lease owned by the expected
         });
         await registry.initialize();
         await registry.create({ instance: "demo-local", principal: "local", workspace: "/workspace" });
+        const structuralState = await readFile(filePath, "utf8");
 
         const first = await registry.observeExecutionActivity("ctx-execution-release", "demo-local");
         assert.equal(first.executionEpoch, 1);
@@ -350,12 +352,62 @@ test("McpContextRegistry releases only the execution lease owned by the expected
         const released = await registry.releaseExecutionActivity("ctx-execution-release", "demo-local", 2);
         assert.equal(released.executionEpoch, 3);
         assert.equal(released.executionActive, false);
+        assert.equal(await readFile(filePath, "utf8"), structuralState);
 
         const reloaded = new McpContextRegistry({ filePath, now: () => now });
         await reloaded.initialize();
         const persisted = await reloaded.readAutomaticReentry("ctx-execution-release", "demo-local");
         assert.equal(persisted.executionEpoch, 3);
         assert.equal(persisted.executionActive, false);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("McpContextRegistry prunes execution sidecar state with terminal Context history", async () => {
+    const root = await createTestTempDirectory("context-execution-prune-");
+    const filePath = join(root, "contexts.json");
+    const executionFilePath = join(root, "execution.sqlite3");
+    try {
+        const registry = new McpContextRegistry({
+            executionFilePath,
+            filePath,
+            idFactory: () => "ctx-pruned-execution",
+            maxTerminalContexts: 0,
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo-local", principal: "local", workspace: "/workspace" });
+        await registry.observeExecutionActivity("ctx-pruned-execution", "demo-local");
+        assert.equal(new McpContextExecutionStore(executionFilePath).read("ctx-pruned-execution")?.executionEpoch, 1);
+
+        await registry.disable("ctx-pruned-execution");
+        assert.equal(new McpContextExecutionStore(executionFilePath).read("ctx-pruned-execution"), undefined);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("McpContextRegistry ordinary instance validation does not depend on execution sidecar health", async () => {
+    const root = await createTestTempDirectory("context-execution-isolation-");
+    const filePath = join(root, "contexts.json");
+    const executionFilePath = join(root, "execution.sqlite3");
+    try {
+        const registry = new McpContextRegistry({
+            executionFilePath,
+            filePath,
+            idFactory: () => "ctx-execution-isolation",
+        });
+        await registry.initialize();
+        await registry.create({ instance: "demo-local", principal: "local", workspace: "/workspace" });
+        await writeFile(executionFilePath, "not-a-sqlite-database", "utf8");
+
+        assert.equal(
+            (await registry.validateForInstance("ctx-execution-isolation", "demo-local")).ctxId,
+            "ctx-execution-isolation",
+        );
+        await assert.rejects(
+            registry.readAutomaticReentry("ctx-execution-isolation", "demo-local"),
+        );
     } finally {
         await rm(root, { force: true, recursive: true });
     }
