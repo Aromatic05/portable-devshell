@@ -5,6 +5,8 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
@@ -130,6 +132,16 @@ impl ArtifactPayloadStore {
         Ok(store)
     }
 
+    pub fn schedule_maintenance(self: &Arc<Self>) {
+        let store = Arc::downgrade(self);
+        thread::spawn(move || {
+            thread::sleep(Duration::from_secs(1));
+            if let Some(store) = store.upgrade() {
+                let _ = store.collect_stale();
+            }
+        });
+    }
+
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, ()>, ToolError> {
         self.guard
             .lock()
@@ -143,7 +155,6 @@ impl ArtifactPayloadStore {
     ) -> Result<ArtifactPayloadOpenResult, ToolError> {
         validate_expiration(expires_at_ms)?;
         let _guard = self.lock()?;
-        self.gc_locked()?;
 
         let payload_id = Uuid::new_v4().to_string();
         let lease = self.artifacts.acquire_lease(handle, expires_at_ms)?;
@@ -250,7 +261,6 @@ impl ArtifactPayloadStore {
             .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
 
         let _guard = self.lock()?;
-        self.gc_locked()?;
 
         let payload_id = Uuid::new_v4().to_string();
         let descriptor = if metadata.is_file() {
@@ -501,36 +511,67 @@ impl ArtifactPayloadStore {
         }
     }
 
-    fn gc_locked(&self) -> Result<(), ToolError> {
+    fn collect_stale(&self) -> Result<(), ToolError> {
         let now = unix_time_millis();
         for path in storage::json_files(&self.root)? {
+            let Some(payload_id) = path.file_stem().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if validate_id(payload_id).is_err() {
+                let _ = fs::remove_file(&path);
+                continue;
+            }
             let metadata = fs::read(&path)
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<ArtifactPayloadMetadata>(&bytes).ok());
-            let Some(metadata) = metadata else {
-                let _ = fs::remove_file(&path);
-                if let Some(stem) = path.file_stem().and_then(|value| value.to_str()) {
-                    let _ = fs::remove_file(self.data_path(stem));
-                }
-                continue;
-            };
-            if metadata.version != METADATA_VERSION
-                || validate_id(&metadata.payload_id).is_err()
-                || metadata.expires_at_ms <= now
-            {
-                self.remove_payload_locked(&metadata)?;
+            if metadata.as_ref().is_none_or(|metadata| {
+                metadata.version != METADATA_VERSION
+                    || metadata.payload_id != payload_id
+                    || metadata.expires_at_ms <= now
+            }) {
+                self.remove_stale_candidate(payload_id, now)?;
             }
         }
         self.remove_orphan_data_files()?;
         Ok(())
     }
 
+    fn remove_stale_candidate(&self, payload_id: &str, now: u128) -> Result<(), ToolError> {
+        let _guard = self.lock()?;
+        let metadata_path = self.metadata_path(payload_id);
+        let metadata = fs::read(&metadata_path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<ArtifactPayloadMetadata>(&bytes).ok());
+        match metadata {
+            Some(metadata)
+                if metadata.version == METADATA_VERSION
+                    && metadata.payload_id == payload_id
+                    && metadata.expires_at_ms > now =>
+            {
+                Ok(())
+            }
+            Some(metadata)
+                if metadata.version == METADATA_VERSION
+                    && metadata.payload_id == payload_id =>
+            {
+                self.remove_payload_locked(&metadata)
+            }
+            Some(metadata) => {
+                storage::remove_file_if_exists(&metadata_path)?;
+                storage::remove_file_if_exists(&self.data_path(payload_id))?;
+                if let ArtifactPayloadBacking::ArtifactLease { lease_id } = metadata.backing {
+                    let _ = self.artifacts.release_lease(&lease_id);
+                }
+                Ok(())
+            }
+            None => {
+                storage::remove_file_if_exists(&metadata_path)?;
+                storage::remove_file_if_exists(&self.data_path(payload_id))
+            }
+        }
+    }
+
     fn remove_orphan_data_files(&self) -> Result<(), ToolError> {
-        let known_ids = storage::json_files(&self.root)?
-            .into_iter()
-            .filter_map(|path| path.file_stem().and_then(|value| value.to_str()).map(str::to_owned))
-            .filter(|payload_id| validate_id(payload_id).is_ok())
-            .collect::<std::collections::HashSet<_>>();
         for entry in fs::read_dir(&self.root)
             .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?
         {
@@ -550,10 +591,13 @@ impl ArtifactPayloadStore {
             let Some(payload_id) = path.file_stem().and_then(|value| value.to_str()) else {
                 continue;
             };
-            if validate_id(payload_id).is_err() || known_ids.contains(payload_id) {
+            if validate_id(payload_id).is_err() || self.metadata_path(payload_id).is_file() {
                 continue;
             }
-            storage::remove_file_if_exists(&path)?;
+            let _guard = self.lock()?;
+            if !self.metadata_path(payload_id).is_file() {
+                storage::remove_file_if_exists(&path)?;
+            }
         }
         Ok(())
     }
@@ -1032,7 +1076,7 @@ mod tests {
     }
 
     #[test]
-    fn payload_read_does_not_run_unrelated_payload_gc() {
+    fn payload_open_and_read_do_not_run_unrelated_payload_gc() {
         let root = crate::testing::temp_dir();
         let workspace = root.path().join("workspace");
         fs::create_dir(&workspace).unwrap();
@@ -1060,6 +1104,10 @@ mod tests {
         payloads
             .open_path(&workspace, "./next.txt", &policy, expires_at_ms())
             .unwrap();
+        assert!(payloads.metadata_path(&expired.payload_id).is_file());
+        assert!(payloads.data_path(&expired.payload_id).is_file());
+
+        payloads.collect_stale().unwrap();
         assert!(!payloads.metadata_path(&expired.payload_id).exists());
         assert!(!payloads.data_path(&expired.payload_id).exists());
     }
@@ -1194,12 +1242,9 @@ mod tests {
     }
 
     #[test]
-    fn payload_startup_defers_gc_until_the_next_open() {
+    fn payload_startup_defers_gc_to_maintenance() {
         let root = crate::testing::temp_dir();
         let artifacts = ArtifactStore::new(root.path().join("artifacts")).unwrap();
-        let mut draft = artifacts.begin(ArtifactStream::Stdout).unwrap();
-        draft.write_chunk(b"source").unwrap();
-        let source = artifacts.persist(draft).unwrap();
         let payload_root = root.path().join("payloads");
         let payloads = ArtifactPayloadStore::new(payload_root.clone(), Arc::clone(&artifacts)).unwrap();
         drop(payloads);
@@ -1214,7 +1259,7 @@ mod tests {
         assert!(orphan_path.is_file());
         assert!(unknown_path.is_file());
 
-        reopened.open_handle(&source.handle, expires_at_ms()).unwrap();
+        reopened.collect_stale().unwrap();
         assert!(!orphan_path.exists());
         assert!(unknown_path.is_file());
     }

@@ -81,6 +81,7 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     )
     .map_err(|error| error.message)?;
     let tools = Arc::new(builtin_tools);
+    let payload_maintenance = Arc::clone(&payloads);
     let router = Arc::new(RpcRouter::new(
         config.clone(),
         runtime,
@@ -88,6 +89,7 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
         payloads,
         receives,
     ));
+    payload_maintenance.schedule_maintenance();
     let _reverse_connector = config.reverse.clone().map(|reverse| {
         ReverseConnector::new(
             instance.clone(),
