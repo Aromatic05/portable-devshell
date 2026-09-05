@@ -447,6 +447,46 @@ test("OIDC file adapter serializes concurrent updates without losing records", a
     }
 });
 
+test("OIDC file adapters share cached model state and invalidate it after a failed write", async () => {
+    const storageDir = await createTestTempDirectory("mcp-oauth-adapter-cache");
+    let failStorage = false;
+    const secureStorage = async () => {
+        if (failStorage) throw new Error("secure storage failed");
+    };
+    const first = createMcpOAuthOidcFileAdapterFactory(storageDir, secureStorage)("AccessToken");
+    const second = createMcpOAuthOidcFileAdapterFactory(storageDir, secureStorage)("AccessToken");
+
+    try {
+        await first.upsert("stable", { clientId: "client-stable", nested: { value: "original" } } as never, 3600);
+        const shared = await second.find("stable");
+        assert.equal(shared?.clientId, "client-stable");
+        (shared as { nested?: { value?: string } }).nested!.value = "mutated";
+        assert.equal(((await first.find("stable")) as { nested?: { value?: string } })?.nested?.value, "original");
+
+        failStorage = true;
+        await assert.rejects(
+            second.upsert("failed", { clientId: "client-failed" } as never, 3600),
+            /secure storage failed/u
+        );
+        failStorage = false;
+
+        assert.equal(await first.find("failed"), undefined);
+        assert.equal((await second.find("stable"))?.clientId, "client-stable");
+
+        await Promise.all(
+            Array.from({ length: 32 }, async (_, index) => {
+                const adapter = index % 2 === 0 ? first : second;
+                await adapter.upsert(`shared-${index}`, { clientId: `client-${index}` } as never, 3600);
+            })
+        );
+        for (let index = 0; index < 32; index += 1) {
+            assert.equal((await first.find(`shared-${index}`))?.clientId, `client-${index}`);
+        }
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
 test("OAuth registration limiter rejects bursts above its configured quota", () => {
     let now = 0;
     const limiter = new McpOAuthRegistrationLimiter({ maxRequests: 2, now: () => now, windowMs: 1000 });

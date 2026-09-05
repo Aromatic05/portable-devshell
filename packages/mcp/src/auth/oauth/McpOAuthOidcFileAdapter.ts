@@ -12,24 +12,29 @@ interface StoredRecord {
 
 type StoredState = Record<string, StoredRecord>;
 
+interface SharedAdapterState {
+    readonly lock: AsyncMutex;
+    state?: StoredState;
+}
+
 const MAX_CLIENT_RECORDS = 256;
 const MAX_DEFAULT_RECORDS = 4096;
+const sharedStores = new Map<string, SharedAdapterState>();
 
 export function createMcpOAuthOidcFileAdapterFactory(
     storageDir: string,
     secureStorage: (path: string) => Promise<void> = async () => {},
 ): AdapterFactory {
-    const locks = new Map<string, AsyncMutex>();
     return (name: string) => {
         const filePath = join(storageDir, `${name}.json`);
-        let lock = locks.get(filePath);
-        if (lock === undefined) {
-            lock = new AsyncMutex();
-            locks.set(filePath, lock);
+        let store = sharedStores.get(filePath);
+        if (store === undefined) {
+            store = { lock: new AsyncMutex() };
+            sharedStores.set(filePath, store);
         }
         return new McpOidcFileAdapter(
             filePath,
-            lock,
+            store,
             name === "Client" ? MAX_CLIENT_RECORDS : MAX_DEFAULT_RECORDS,
             secureStorage,
         );
@@ -39,44 +44,48 @@ export function createMcpOAuthOidcFileAdapterFactory(
 class McpOidcFileAdapter implements Adapter {
     constructor(
         private readonly filePath: string,
-        private readonly lock: AsyncMutex,
+        private readonly store: SharedAdapterState,
         private readonly maxRecords: number,
         private readonly secureStorage: (path: string) => Promise<void>,
     ) {}
 
     async consume(id: string): Promise<void> {
-        await this.lock.runExclusive(async () => {
-            const state = await this.#readState();
+        await this.store.lock.runExclusive(async () => {
+            const state = await this.#state();
             const record = state[id];
             if (record === undefined) {
                 return;
             }
-            record.consumed = Math.floor(Date.now() / 1000);
-            await this.#writeState(state);
+            await this.#commit({
+                ...state,
+                [id]: { ...record, consumed: Math.floor(Date.now() / 1000) }
+            });
         });
     }
 
     async destroy(id: string): Promise<void> {
-        await this.lock.runExclusive(async () => {
-            const state = await this.#readState();
+        await this.store.lock.runExclusive(async () => {
+            const state = await this.#state();
             if (state[id] === undefined) {
                 return;
             }
-            delete state[id];
-            await this.#writeState(state);
+            const next = { ...state };
+            delete next[id];
+            await this.#commit(next);
         });
     }
 
     async find(id: string): Promise<AdapterPayload | undefined> {
-        return await this.lock.runExclusive(async () => {
-            const state = await this.#readState();
+        return await this.store.lock.runExclusive(async () => {
+            const state = await this.#state();
             const record = state[id];
             if (record === undefined) {
                 return undefined;
             }
             if (isExpired(record)) {
-                delete state[id];
-                await this.#writeState(state);
+                const next = { ...state };
+                delete next[id];
+                await this.#commit(next);
                 return undefined;
             }
             return toAdapterPayload(record);
@@ -92,46 +101,67 @@ class McpOidcFileAdapter implements Adapter {
     }
 
     async revokeByGrantId(grantId: string): Promise<void> {
-        await this.lock.runExclusive(async () => {
-            const state = await this.#readState();
-            let changed = pruneExpired(state);
-            for (const [id, record] of Object.entries(state)) {
+        await this.store.lock.runExclusive(async () => {
+            const current = await this.#state();
+            const pruned = pruneExpiredCopy(current);
+            const state = pruned.state === current ? { ...current } : pruned.state;
+            let changed = pruned.changed;
+            for (const [id, record] of Object.entries(current)) {
                 if (record.payload.grantId === grantId) {
                     delete state[id];
                     changed = true;
                 }
             }
             if (changed) {
-                await this.#writeState(state);
+                await this.#commit(state);
             }
         });
     }
 
     async upsert(id: string, payload: AdapterPayload, expiresIn: number): Promise<void> {
-        await this.lock.runExclusive(async () => {
-            const state = await this.#readState();
-            pruneExpired(state);
+        await this.store.lock.runExclusive(async () => {
+            const current = await this.#state();
+            const pruned = pruneExpiredCopy(current);
+            const state = pruned.state === current ? { ...current } : pruned.state;
             if (state[id] === undefined && Object.keys(state).length >= this.maxRecords) {
                 throw new Error(`OIDC ${this.#modelName()} storage limit of ${this.maxRecords} records was reached.`);
             }
             state[id] = {
                 expiresAt: expiresIn > 0 ? Math.floor(Date.now() / 1000) + expiresIn : undefined,
-                payload
+                payload: structuredClone(payload)
             };
-            await this.#writeState(state);
+            await this.#commit(state);
         });
     }
 
     async #findBy(predicate: (record: StoredRecord) => boolean): Promise<AdapterPayload | undefined> {
-        return await this.lock.runExclusive(async () => {
-            const state = await this.#readState();
-            const changed = pruneExpired(state);
+        return await this.store.lock.runExclusive(async () => {
+            const current = await this.#state();
+            const pruned = pruneExpiredCopy(current);
+            const state = pruned.state;
             const record = Object.values(state).find(predicate);
-            if (changed) {
-                await this.#writeState(state);
+            if (pruned.changed) {
+                await this.#commit(state);
             }
             return record === undefined ? undefined : toAdapterPayload(record);
         });
+    }
+
+    async #state(): Promise<StoredState> {
+        if (this.store.state === undefined) {
+            this.store.state = await this.#readState();
+        }
+        return this.store.state;
+    }
+
+    async #commit(state: StoredState): Promise<void> {
+        try {
+            await this.#writeState(state);
+            this.store.state = state;
+        } catch (error) {
+            this.store.state = undefined;
+            throw error;
+        }
     }
 
     async #readState(): Promise<StoredState> {
@@ -209,15 +239,15 @@ class AsyncMutex {
     }
 }
 
-function pruneExpired(state: StoredState): boolean {
-    let changed = false;
+function pruneExpiredCopy(state: StoredState): { changed: boolean; state: StoredState } {
+    let next = state;
     for (const [id, record] of Object.entries(state)) {
         if (isExpired(record)) {
-            delete state[id];
-            changed = true;
+            if (next === state) next = { ...state };
+            delete next[id];
         }
     }
-    return changed;
+    return { changed: next !== state, state: next };
 }
 
 function isExpired(record: StoredRecord): boolean {
@@ -239,8 +269,8 @@ function isStoredState(value: unknown): value is StoredState {
 }
 
 function toAdapterPayload(record: StoredRecord): AdapterPayload {
-    return {
+    return structuredClone({
         ...record.payload,
         ...(record.consumed === undefined ? {} : { consumed: record.consumed })
-    };
+    });
 }
