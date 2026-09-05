@@ -52,8 +52,7 @@ test("Pi integration installs a devshell-only launcher and default extension loa
         assert.deepEqual(await resolvePiDeploymentTargets(currentLink), { extensionTarget, piTarget });
         const before = await capturePiIntegration({ binDirectory, currentLink, home, platform: "linux" });
         const paths = await activatePiIntegration({ binDirectory, currentLink, home, platform: "linux" });
-        const devshellHome = resolve(root, "devshell-home");
-        const launcherEnvironment = { ...process.env, PORTABLE_DEVSHELL_HOME: devshellHome };
+        const launcherEnvironment = { ...process.env };
         const launched = spawnSync(paths.command, ["hello"], {
             cwd: root,
             encoding: "utf8",
@@ -61,19 +60,71 @@ test("Pi integration installs a devshell-only launcher and default extension loa
         });
         assert.equal(launched.status, 0, launched.stderr);
         const launchedState = JSON.parse(launched.stdout.trim());
-        assert.deepEqual(launchedState.args, ["--no-builtin-tools", "hello"]);
+        assert.deepEqual(launchedState.args, ["--no-builtin-tools", "hello", "--no-approve"]);
         assert.equal(launchedState.workspace, root);
-        assert.equal(launchedState.cwd.startsWith(resolve(devshellHome, "pi", "workspaces")), true);
-        assert.match(launchedState.cwd, /[\\/][a-f0-9]{16}$/u);
+        assert.equal(launchedState.cwd, root);
         const withBuiltins = spawnSync(paths.command, ["hello"], {
             cwd: root,
             encoding: "utf8",
             env: { ...launcherEnvironment, DEVSHELL_PI_BUILTIN_TOOLS: "1" }
         });
         const withBuiltinsState = JSON.parse(withBuiltins.stdout.trim());
-        assert.deepEqual(withBuiltinsState.args, ["hello"]);
+        assert.deepEqual(withBuiltinsState.args, ["hello", "--no-approve"]);
         assert.equal(withBuiltinsState.workspace, root);
-        assert.equal(withBuiltinsState.cwd, launchedState.cwd);
+        assert.equal(withBuiltinsState.cwd, root);
+
+        const explicitApprove = spawnSync(paths.command, ["--approve", "hello"], {
+            cwd: root,
+            encoding: "utf8",
+            env: launcherEnvironment
+        });
+        assert.equal(explicitApprove.status, 0, explicitApprove.stderr);
+        assert.deepEqual(JSON.parse(explicitApprove.stdout.trim()).args, [
+            "--no-builtin-tools",
+            "--approve",
+            "hello",
+            "--no-approve"
+        ]);
+
+        const literalApprove = spawnSync(paths.command, ["--", "--approve"], {
+            cwd: root,
+            encoding: "utf8",
+            env: launcherEnvironment
+        });
+        assert.equal(literalApprove.status, 0, literalApprove.stderr);
+        assert.deepEqual(JSON.parse(literalApprove.stdout.trim()).args, [
+            "--no-builtin-tools",
+            "--no-approve",
+            "--",
+            "--approve"
+        ]);
+
+        for (const managementArgs of [
+            ["install", "example-package"],
+            ["remove", "example-package"],
+            ["uninstall", "example-package"],
+            ["update"],
+            ["list"],
+            ["config", "get", "theme"],
+            ["auth", "status"]
+        ]) {
+            const management = spawnSync(paths.command, managementArgs, {
+                cwd: root,
+                encoding: "utf8",
+                env: launcherEnvironment
+            });
+            assert.equal(management.status, 0, management.stderr);
+            assert.deepEqual(JSON.parse(management.stdout.trim()).args, managementArgs);
+        }
+        for (const metadataArgs of [["--help"], ["--version"]]) {
+            const metadata = spawnSync(paths.command, metadataArgs, {
+                cwd: root,
+                encoding: "utf8",
+                env: launcherEnvironment
+            });
+            assert.equal(metadata.status, 0, metadata.stderr);
+            assert.deepEqual(JSON.parse(metadata.stdout.trim()).args, metadataArgs);
+        }
         assert.match(await readFile(paths.command, "utf8"), /portable-devshell managed Pi launcher/u);
         assert.match(await readFile(paths.extension, "utf8"), /portable-devshell managed Pi extension loader/u);
         assert.match(await readFile(paths.extension, "utf8"), /pi-extension\/dist\/index\.js/u);

@@ -38,7 +38,7 @@ export function appendDevshellRemoteWorkspacePrompt(basePrompt: string, target: 
     const devshellPrompt = [
         "portable-devshell execution environment:",
         `- The real project workspace is ${remoteWorkspace}.`,
-        "- Your local process cwd is only Pi runtime state. It is not the project workspace.",
+        "- The local Pi process cwd is the launch workspace used for Pi session identity; it may differ from the real project workspace.",
         "- Use the provided devshell tools for every project filesystem, shell, process, and artifact operation.",
         "- Do not attempt to access the project with local Node.js filesystem/process APIs.",
         "- Tool results come directly from devshell attached to the real project workspace."
