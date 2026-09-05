@@ -159,6 +159,7 @@ impl TmuxState {
         let line = validate_line(params.line.unwrap_or(DEFAULT_LINE))?;
 
         let task_id = new_task_id();
+        let task_started_at;
         {
             let _structure_guard = self
                 .structure
@@ -185,6 +186,7 @@ impl TmuxState {
                     super::transcript_ring::remove(&self.backend.transcript_buffer_name(&task_id));
                 return Err(error);
             }
+            task_started_at = Instant::now();
             if let Err(error) = self.backend.start_task_pane(&task_id) {
                 let _ = self.backend.close_pane(&pane);
                 self.backend.remove_task_runtime(&task_id);
@@ -214,7 +216,7 @@ impl TmuxState {
 
         let mut timed_out = false;
         if wait == TmuxWaitMode::Block {
-            let deadline = Instant::now() + Duration::from_millis(time_ms);
+            let deadline = task_started_at + Duration::from_millis(time_ms);
             while Instant::now() < deadline {
                 if call.cancellation.is_cancelled() {
                     return Err(ToolError::new(
@@ -232,7 +234,9 @@ impl TmuxState {
                 thread::sleep(Duration::from_millis(50));
             }
             if !self.task_is_terminal(&task_id)? {
-                self.refresh_task(&task_id)?;
+                if self.backend.task_exit_recorded(&task_id) {
+                    self.refresh_task(&task_id)?;
+                }
                 if !self.task_is_terminal(&task_id)? {
                     timed_out = true;
                     self.push_task_warning(

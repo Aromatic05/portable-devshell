@@ -422,7 +422,8 @@ fn tmux_read_negative_line_waits_for_the_interval_before_returning_tail() {
             "command": "sleep 0.05; printf 'FIRST\\n'; sleep 0.1; printf 'SECOND\\n'; sleep 1",
             "wait": "nonblock",
             "timeMs": 0,
-            "line": 0
+            "line": 0,
+            "consumeOutput": false
         }),
         "ctx-tail",
         "run-tail-wait",
