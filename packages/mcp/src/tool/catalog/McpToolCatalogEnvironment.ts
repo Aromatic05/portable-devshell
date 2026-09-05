@@ -7,15 +7,11 @@ export const mcpEnvironmentToolName = "environ_info" as const;
 export type McpToolCatalogEnvironmentName = typeof mcpEnvironmentToolName;
 
 export interface McpToolCatalogEnvironmentListOptions {
+    requireExplicitContextId?: boolean;
     workspaceApp?: boolean;
 }
 
-const contextIdentityProperties: Record<string, JsonValue> = {
-    ctxId: {
-        description: "Internal Context ID used by portable-devshell to anchor this Context.",
-        minLength: 1,
-        type: "string",
-    },
+const contextStateProperties: Record<string, JsonValue> = {
     expiresAt: {
         description: "Current Context lease expiration time.",
         minLength: 1,
@@ -41,11 +37,6 @@ export class McpToolCatalogEnvironment {
         inputSchema: {
             additionalProperties: false,
             properties: {
-                ctxId: {
-                    description: "Internal Context ID when explicitly selecting an existing Context.",
-                    minLength: 1,
-                    type: "string",
-                },
                 workspace: {
                     description:
                         "Absolute workspace path. Required when the current Context has no workspace attachment; may switch the attachment for this instance.",
@@ -59,7 +50,7 @@ export class McpToolCatalogEnvironment {
         outputSchema: {
             additionalProperties: false,
             properties: {
-                ...contextIdentityProperties,
+                ...contextStateProperties,
                 comment: {
                     description: "Actionable notes.",
                     items: { minLength: 1, type: "string" },
@@ -102,7 +93,6 @@ export class McpToolCatalogEnvironment {
                 workspace: { minLength: 1, type: "string" },
             },
             required: [
-                "ctxId",
                 "expiresAt",
                 "status",
                 "instance",
@@ -118,6 +108,37 @@ export class McpToolCatalogEnvironment {
 
     list(options: McpToolCatalogEnvironmentListOptions = {}): ToolDefinition[] {
         const definition = structuredClone(this.#definition);
+        const requireExplicitContextId = options.requireExplicitContextId !== false;
+        if (requireExplicitContextId) {
+            const inputSchema = definition.inputSchema as {
+                properties?: Record<string, JsonValue>;
+            };
+            if (inputSchema.properties !== undefined) {
+                inputSchema.properties.ctxId = {
+                    description: "Internal Context ID when explicitly selecting an existing Context.",
+                    minLength: 1,
+                    type: "string",
+                };
+            }
+            const outputSchema = definition.outputSchema as {
+                properties?: Record<string, JsonValue>;
+                required?: string[];
+            };
+            if (outputSchema.properties !== undefined) {
+                outputSchema.properties.ctxId = {
+                    description: "Internal Context ID used by portable-devshell to anchor this Context.",
+                    minLength: 1,
+                    type: "string",
+                };
+            }
+            if (outputSchema.required !== undefined) {
+                outputSchema.required = ["ctxId", ...outputSchema.required];
+            }
+        }
+        definition.description = environmentDescription(
+            options.workspaceApp === true,
+            requireExplicitContextId,
+        );
         if (options.workspaceApp === true) {
             definition._meta = {
                 ui: { resourceUri: workspaceAppResourceUri, visibility: ["model", "app"] },
@@ -125,9 +146,16 @@ export class McpToolCatalogEnvironment {
                 "openai/outputTemplate": workspaceAppResourceUri,
                 "openai/widgetAccessible": true,
             };
-            definition.description =
-                "Prepare and inspect the workspace environment for the current portable-devshell Context; the same call also bootstraps the Live Workspace App. This is the single Context and Workspace bootstrap tool: with workspace it creates or attaches a Context when needed, stable external session bindings are reused automatically, and an expired Context lease is renewed without changing ctxId. Call it once before using other portable-devshell tools. Pass ctxId only when explicitly selecting an existing Context.";
         }
         return [definition];
     }
+}
+
+function environmentDescription(workspaceApp: boolean, requireExplicitContextId: boolean): string {
+    const prefix = workspaceApp
+        ? "Prepare and inspect the workspace environment for the current portable-devshell Context; the same call also bootstraps the Live Workspace App."
+        : "Prepare and inspect the workspace environment for the current portable-devshell Context.";
+    return requireExplicitContextId
+        ? `${prefix} This is the single Context bootstrap tool: with workspace it creates or attaches a Context when needed, and an expired Context lease can be renewed. Call it once before using other portable-devshell tools. Pass ctxId only when explicitly selecting an existing Context.`
+        : `${prefix} This is the single Context bootstrap tool: with workspace it creates or attaches a Context when needed, the stable external session binding selects it automatically, and an expired Context lease is renewed automatically. Call it once before using other portable-devshell tools.`;
 }

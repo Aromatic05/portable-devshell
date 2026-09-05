@@ -554,12 +554,14 @@ test("OpenAI session resolves Workspace once and the App continues by ctxId with
         requestMeta: { "openai/session": "openai-workspace-session" },
     };
 
-    const acquired = structuredResult<{ ctxId: string }>(await dispatch.callTool(
+    const acquired = structuredResult<Record<string, unknown>>(await dispatch.callTool(
         "environ_info",
         { workspace: "/workspace" },
         sessionContext,
     ));
-    assert.equal(acquired.ctxId, "ctx-workspace-session");
+    assert.equal("ctxId" in acquired, false);
+    const ctxId = (await registry.list())[0]?.ctxId;
+    assert.equal(ctxId, "ctx-workspace-session");
 
     const opened = await dispatch.callTool(
         "workspace_open",
@@ -569,27 +571,27 @@ test("OpenAI session resolves Workspace once and the App continues by ctxId with
     assert.ok(opened instanceof McpNativeToolResult);
     assert.equal(
         (opened.structuredContent as { ctxId?: string }).ctxId,
-        acquired.ctxId,
+        ctxId,
     );
     const token = (
         opened._meta?.["portable-devshell/workspace"] as
             { token?: string } | undefined
     )?.token;
     if (typeof token !== "string") throw new Error("workspace token missing");
-    const beforeSnapshot = await registry.lookup(acquired.ctxId, { principal: "tester" });
+    const beforeSnapshot = await registry.lookup(ctxId!, { principal: "tester" });
     now += 50;
 
     const snapshot = await dispatch.callTool(
         "workspace_snapshot",
-        { ctxId: acquired.ctxId, token },
+        { ctxId, token },
         { principal: "tester", requestId: "workspace-app-snapshot" },
     );
     assert.ok(snapshot instanceof McpNativeToolResult);
     assert.equal(
         (snapshot.structuredContent as { ctxId?: string }).ctxId,
-        acquired.ctxId,
+        ctxId,
     );
-    const afterSnapshot = await registry.lookup(acquired.ctxId, { principal: "tester" });
+    const afterSnapshot = await registry.lookup(ctxId!, { principal: "tester" });
     assert.equal(afterSnapshot.expiresAt, beforeSnapshot.expiresAt);
 });
 

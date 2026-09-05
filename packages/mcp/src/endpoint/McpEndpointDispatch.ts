@@ -32,7 +32,7 @@ import { throwIfMcpEndpointAborted, waitForMcpEndpointAbortable } from "./McpEnd
 import { mcpLegacyToolTombstone, resolveMcpLegacyTool } from "./McpEndpointCompatibility.js";
 import { attachMcpComments } from "./McpEndpointFeedback.js";
 import type { McpEndpointCatalog, McpEndpointCatalogWorker } from "./McpEndpointCatalog.js";
-import { readMcpProvenanceInput, readMcpRoutedInput } from "./McpEndpointInput.js";
+import { readMcpContextInput, readMcpProvenanceInput, readMcpRoutedInput } from "./McpEndpointInput.js";
 import type { McpEndpointCallContext, McpEndpointWorkerPort } from "./McpEndpointPort.js";
 import { McpNativeToolResult, type McpEndpointResult } from "./McpEndpointResult.js";
 import type { McpToolProvenanceRecorder } from "./McpToolProvenance.js";
@@ -177,10 +177,10 @@ export class McpEndpointDispatch {
             const workspaceApp = snapshot.exposed.some((entry) =>
                 entry.owner === "workspace" && entry.definition.name === "workspace_open"
             );
-            if (!workspaceApp) return environment;
+            if (!workspaceApp) return environment.structuredContent;
             return await this.#interaction.bootstrapWorkspace(
-                requireEnvironmentContextId(environment),
-                environment,
+                environment.ctxId,
+                environment.structuredContent,
             );
         }
 
@@ -191,13 +191,15 @@ export class McpEndpointDispatch {
         const appOnlyInteraction = selected.owner === "workspace" && isAppOnlyInteractionTool(toolName);
         const provenanceInput = readMcpProvenanceInput(input);
         input = provenanceInput.input;
-        const resolvedContext = await this.#contextSelector.resolve(
-            this.#contextRegistry,
-            input,
-            requestContext,
-            this.#instanceName,
-            { touch: !isPassiveWorkspaceRead(toolName) },
-        );
+        const resolvedContext = appOnlyInteraction
+            ? await this.#resolveAppOnlyContext(input, requestContext, !isPassiveWorkspaceRead(toolName))
+            : await this.#contextSelector.resolve(
+                  this.#contextRegistry,
+                  input,
+                  requestContext,
+                  this.#instanceName,
+                  { touch: !isPassiveWorkspaceRead(toolName) },
+              );
         input = resolvedContext.input;
         const routed = selected.owner === "worker" || selected.owner === "artifact"
             ? readMcpRoutedInput(input, snapshot.instanceRoutingEnabled, this.#instanceName)
@@ -1078,6 +1080,22 @@ export class McpEndpointDispatch {
         return context;
     }
 
+    async #resolveAppOnlyContext(
+        input: JsonValue,
+        requestContext: McpEndpointCallContext,
+        touch: boolean,
+    ): Promise<{ input: JsonValue; record: McpContextRecord }> {
+        const contextInput = readMcpContextInput(input);
+        const record = touch
+            ? await this.#contextRegistry.validateAndTouch(contextInput.ctxId, {
+                  principal: requestContext.principal,
+              })
+            : await this.#contextRegistry.validate(contextInput.ctxId, {
+                  principal: requestContext.principal,
+              });
+        return { input: contextInput.input, record };
+    }
+
     async #ensureContextWorkerState(
         record: Awaited<ReturnType<McpContextRegistry["validateAndTouch"]>>,
         instance: string
@@ -1225,17 +1243,6 @@ export class McpEndpointDispatch {
         }
     }
 
-}
-
-function requireEnvironmentContextId(result: JsonValue): string {
-    if (typeof result !== "object" || result === null || Array.isArray(result)) {
-        throw new Error("environ_info returned an invalid structured result.");
-    }
-    const ctxId = result.ctxId;
-    if (typeof ctxId !== "string" || ctxId.length === 0) {
-        throw new Error("environ_info result is missing ctxId.");
-    }
-    return ctxId;
 }
 
 function isAppOnlyInteractionTool(toolName: string): boolean {

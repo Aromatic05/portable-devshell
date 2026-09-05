@@ -634,6 +634,7 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
     }).properties;
     assert.equal(environmentInputProperties?.purpose, undefined);
     assert.equal(environmentInputProperties?.explanation, undefined);
+    assert.notEqual(environmentInputProperties?.ctxId, undefined);
     assert.notEqual(
         (
             environmentTool?.outputSchema as {
@@ -786,43 +787,70 @@ test("OpenAI session binding resolves one internal ctxId without making models c
         properties?: Record<string, unknown>;
         required?: string[];
     };
-    assert.notEqual(bashSchema.properties?.ctxId, undefined);
+    assert.equal(bashSchema.properties?.ctxId, undefined);
     assert.equal(bashSchema.required?.includes("ctxId") ?? false, false);
-    const first = structuredResult<{ ctxId: string; status: string; workspace: string }>(await endpoint.callTool(
+    const environmentTool = endpoint
+        .listTools()
+        .find((tool) => tool.name === "environ_info");
+    assert.equal(
+        (environmentTool?.inputSchema as { properties?: Record<string, unknown> }).properties?.ctxId,
+        undefined,
+    );
+    assert.equal(
+        (environmentTool?.outputSchema as { properties?: Record<string, unknown> }).properties?.ctxId,
+        undefined,
+    );
+
+    const first = structuredResult<{ status: string; workspace: string }>(await endpoint.callTool(
         "environ_info",
         { workspace: "/workspace/one" },
         requestContext,
     ));
-    const second = structuredResult<{ ctxId: string; status: string; workspace: string }>(await endpoint.callTool(
+    assert.equal("ctxId" in first, false);
+    const internalCtxId = (await registry.list())[0]?.ctxId;
+    assert.equal(internalCtxId, "ctx-openai-stable");
+
+    const second = structuredResult<{ status: string; workspace: string }>(await endpoint.callTool(
         "environ_info",
         { workspace: "/workspace/two" },
         requestContext,
     ));
 
-    assert.equal(first.ctxId, "ctx-openai-stable");
     assert.equal(first.workspace, "/workspace/one");
-    assert.equal(second.ctxId, first.ctxId);
+    assert.equal("ctxId" in second, false);
     assert.equal(second.status, "active");
     assert.equal(second.workspace, "/workspace/two");
+    assert.deepEqual((await registry.list()).map((record) => record.ctxId), [internalCtxId]);
     assert.equal(endpoint.listTools().some((tool) => tool.name === "context_acquire"), false);
     assert.equal(endpoint.listTools().some((tool) => tool.name === "context_renew"), false);
 
     await endpoint.callTool("bash_run", { command: "pwd" }, requestContext);
-    assert.equal(harness.calls[0]?.ctxId, first.ctxId);
+    assert.equal(harness.calls[0]?.ctxId, internalCtxId);
     assert.deepEqual(harness.calls[0]?.input, { command: "pwd" });
 
-    await endpoint.callTool(
-        "bash_run",
-        { command: "pwd", ctxId: first.ctxId },
-        {
-            ...requestContext,
-            requestMeta: { "openai/session": "another-session" },
-        },
+    await assert.rejects(
+        endpoint.callTool(
+            "bash_run",
+            { command: "pwd", ctxId: internalCtxId },
+            {
+                ...requestContext,
+                requestMeta: { "openai/session": "another-session" },
+            },
+        ),
+        (error: unknown) => (error as { code?: string }).code === "mcp.contextInvalid",
     );
-    assert.equal(harness.calls[1]?.ctxId, first.ctxId);
+    await assert.rejects(
+        endpoint.callTool(
+            "environ_info",
+            { ctxId: internalCtxId, workspace: "/workspace/three" },
+            requestContext,
+        ),
+        (error: unknown) => (error as { code?: string }).code === "control.invalidTarget",
+    );
+    assert.equal(harness.calls.length, 1);
 });
 
-test("expired OpenAI session binding renews the same ctxId on ordinary activity", async () => {
+test("expired OpenAI session binding renews the same internal Context on ordinary activity", async () => {
     let now = 1_000;
     const harness = createWorkerHarness();
     const registry = new McpContextRegistry({
@@ -844,17 +872,19 @@ test("expired OpenAI session binding renews the same ctxId on ordinary activity"
         requestId: "request-openai-renew",
     };
 
-    const acquired = structuredResult<{ ctxId: string; status: string }>(await endpoint.callTool(
+    const acquired = structuredResult<{ status: string }>(await endpoint.callTool(
         "environ_info",
         { workspace: "/workspace" },
         requestContext,
     ));
-    assert.equal(acquired.ctxId, "ctx-openai-renew");
+    assert.equal("ctxId" in acquired, false);
+    const ctxId = (await registry.list())[0]?.ctxId;
+    assert.equal(ctxId, "ctx-openai-renew");
 
     now = 1_101;
     await endpoint.callTool("bash_run", { command: "pwd" }, requestContext);
-    assert.equal(harness.calls.at(-1)?.ctxId, acquired.ctxId);
-    const renewed = await registry.lookup(acquired.ctxId, { principal: "subject-1" });
+    assert.equal(harness.calls.at(-1)?.ctxId, ctxId);
+    const renewed = await registry.lookup(ctxId!, { principal: "subject-1" });
     assert.equal(renewed.status, "active");
 });
 
@@ -876,13 +906,15 @@ test("disabled OpenAI session binding reacquires a new Context and moves the bin
         requestId: "request-openai-disabled",
     };
 
-    const first = structuredResult<{ ctxId: string; status: string }>(await endpoint.callTool(
+    const first = structuredResult<{ status: string }>(await endpoint.callTool(
         "environ_info",
         { workspace: "/workspace/old" },
         requestContext,
     ));
-    assert.equal(first.ctxId, "ctx-openai-disabled");
-    await registry.disable(first.ctxId);
+    assert.equal("ctxId" in first, false);
+    const firstCtxId = (await registry.list())[0]?.ctxId;
+    assert.equal(firstCtxId, "ctx-openai-disabled");
+    await registry.disable(firstCtxId!);
 
     await assert.rejects(
         endpoint.callTool("bash_run", { command: "pwd" }, requestContext),
@@ -890,12 +922,12 @@ test("disabled OpenAI session binding reacquires a new Context and moves the bin
             (error as { code?: string }).code === "mcp.contextDisabled",
     );
 
-    const replacement = structuredResult<{ ctxId: string; status: string; workspace: string }>(await endpoint.callTool(
+    const replacement = structuredResult<{ status: string; workspace: string }>(await endpoint.callTool(
         "environ_info",
         { workspace: "/workspace/new" },
         requestContext,
     ));
-    assert.equal(replacement.ctxId, "ctx-openai-replacement");
+    assert.equal("ctxId" in replacement, false);
     assert.equal(replacement.status, "active");
     assert.equal(replacement.workspace, "/workspace/new");
 
@@ -903,11 +935,11 @@ test("disabled OpenAI session binding reacquires a new Context and moves the bin
         { kind: "openai/session", value: "chat-session-disabled" },
         { principal: "subject-1" },
     );
-    assert.equal(bound?.ctxId, replacement.ctxId);
-    assert.equal((await registry.lookup(first.ctxId, { principal: "subject-1" })).status, "disabled");
+    assert.equal(bound?.ctxId, "ctx-openai-replacement");
+    assert.equal((await registry.lookup(firstCtxId!, { principal: "subject-1" })).status, "disabled");
 
     await endpoint.callTool("bash_run", { command: "pwd" }, requestContext);
-    assert.equal(harness.calls.at(-1)?.ctxId, replacement.ctxId);
+    assert.equal(harness.calls.at(-1)?.ctxId, "ctx-openai-replacement");
 });
 
 test("HTTP forwards OpenAI session metadata into the generic Context binding", async () => {
@@ -935,15 +967,12 @@ test("HTTP forwards OpenAI session metadata into the generic Context binding", a
             );
 
         const first = await acquire("/workspace/one");
-        const second = await acquire("/workspace/two");
-        const firstCtxId = first.body.result?.structuredContent?.ctxId;
-        assert.equal(typeof firstCtxId, "string");
-        assert.equal(second.body.result?.structuredContent?.ctxId, firstCtxId);
+        assert.equal("ctxId" in (first.body.result?.structuredContent ?? {}), false);
 
-        const run = await postJson(
+        const firstRun = await postJson(
             server.url,
             {
-                id: "req-session-run-with-binding",
+                id: "req-session-run-with-first-binding",
                 jsonrpc: "2.0",
                 method: "tools/call",
                 params: {
@@ -954,9 +983,30 @@ test("HTTP forwards OpenAI session metadata into the generic Context binding", a
             },
             session.headers,
         );
-        assert.equal(run.status, 200);
-        assert.equal(run.body.error, undefined, JSON.stringify(run.body));
-        assert.equal(harness.calls[0]?.ctxId, firstCtxId);
+        assert.equal(firstRun.status, 200);
+        assert.equal(firstRun.body.error, undefined, JSON.stringify(firstRun.body));
+        const firstCtxId = harness.calls[0]?.ctxId;
+        assert.equal(typeof firstCtxId, "string");
+
+        const second = await acquire("/workspace/two");
+        assert.equal("ctxId" in (second.body.result?.structuredContent ?? {}), false);
+        const secondRun = await postJson(
+            server.url,
+            {
+                id: "req-session-run-with-second-binding",
+                jsonrpc: "2.0",
+                method: "tools/call",
+                params: {
+                    _meta: meta,
+                    arguments: { command: "pwd" },
+                    name: "bash_run",
+                },
+            },
+            session.headers,
+        );
+        assert.equal(secondRun.status, 200);
+        assert.equal(secondRun.body.error, undefined, JSON.stringify(secondRun.body));
+        assert.equal(harness.calls[1]?.ctxId, firstCtxId);
     } finally {
         await server.close();
     }

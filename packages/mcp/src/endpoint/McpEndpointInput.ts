@@ -12,12 +12,12 @@ import {
 
 import { McpToolSchemaUnavailableError } from "../tool/McpToolSchemaAdapter.js";
 
-export function withMcpContextId(tool: ToolDefinition, required = true): ToolDefinition {
+export function withMcpContextId(tool: ToolDefinition): ToolDefinition {
     return withInputProperty(tool, "ctxId", {
-        description: "Internal Context ID. Optional when the request has a stable external Context binding.",
+        description: "Context ID returned by environ_info in explicit Context mode.",
         minLength: 1,
         type: "string"
-    }, required);
+    }, true);
 }
 
 const MCP_PURPOSE_MAX_LENGTH = 160;
@@ -197,11 +197,17 @@ export function readMcpWorkspace(input: JsonValue, toolName: string): string {
     return requiredString(input.workspace, "workspace");
 }
 
-export function readMcpEnvironmentInfoInput(input: JsonValue): { ctxId?: string; workspace?: string } {
-    if (!isRecord(input) || Object.keys(input).some((key) => key !== "ctxId" && key !== "workspace")) {
-        throw invalidArguments("environ_info accepts only optional ctxId and workspace.");
+export function readMcpEnvironmentInfoInput(
+    input: JsonValue,
+    options: { allowContextId?: boolean } = {},
+): { ctxId?: string; workspace?: string } {
+    const allowContextId = options.allowContextId !== false;
+    if (!isRecord(input) || Object.keys(input).some((key) => key !== "workspace" && (!allowContextId || key !== "ctxId"))) {
+        throw invalidArguments(allowContextId
+            ? "environ_info accepts only optional ctxId and workspace."
+            : "environ_info accepts only optional workspace when Context authority is externally bound.");
     }
-    const ctxId = optionalString(input.ctxId, "ctxId");
+    const ctxId = allowContextId ? optionalString(input.ctxId, "ctxId") : undefined;
     const workspace = optionalString(input.workspace, "workspace");
     return {
         ...(ctxId === undefined ? {} : { ctxId }),

@@ -128,11 +128,12 @@ export class McpEndpointCatalog {
         const provenanceTool = isMcpEnvironmentToolName(modelTool.name) || !isModelFacingTool(modelTool)
             ? modelTool
             : withMcpProvenance(modelTool);
-        const exposed = isMcpEnvironmentToolName(provenanceTool.name)
-            ? provenanceTool
-            : withMcpCommentOutputSchema(
-                  withMcpContextId(provenanceTool, this.#contextSelector.requiresExplicitContextId)
-              );
+        const contextualTool = this.#contextSelector.requiresExplicitContextId
+            ? withMcpContextId(provenanceTool)
+            : provenanceTool;
+        const exposed = isMcpEnvironmentToolName(contextualTool.name)
+            ? contextualTool
+            : withMcpCommentOutputSchema(contextualTool);
         const adapted = this.#schemaAdapter.toMcpTool(
             exposed,
             this.#descriptionEnhancer.enhance(exposed.description)
@@ -169,7 +170,10 @@ export class McpEndpointCatalog {
         );
         const sources: McpToolCatalogEndpointSource[] = [{
             owner: "environment",
-            tools: this.#environmentTools.list({ workspaceApp })
+            tools: this.#environmentTools.list({
+                requireExplicitContextId: this.#contextSelector.requiresExplicitContextId,
+                workspaceApp,
+            })
         }];
 
         if (hasWorkerSchema) {

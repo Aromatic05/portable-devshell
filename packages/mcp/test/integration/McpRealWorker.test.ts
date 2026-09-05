@@ -99,7 +99,7 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
             );
         }
         assert.deepEqual((bash?.inputSchema.properties as Record<string, unknown>).ctxId, {
-            description: "Internal Context ID. Optional when the request has a stable external Context binding.",
+            description: "Context ID returned by environ_info in explicit Context mode.",
             minLength: 1,
             type: "string"
         });

@@ -60,7 +60,7 @@ class UnifiedContextSelector implements McpContextSelector {
     }
 
     expose(record: McpContextRecord): Record<string, JsonValue> {
-        return { ctxId: record.ctxId };
+        return this.requiresExplicitContextId ? { ctxId: record.ctxId } : {};
     }
 
     async resolve(
@@ -74,11 +74,25 @@ class UnifiedContextSelector implements McpContextSelector {
             ? await registry.validate(ctxId, { principal: requestContext.principal })
             : await registry.validateAndTouch(ctxId, { principal: requestContext.principal });
         const contextInput = readOptionalMcpContextInput(input);
-        if (contextInput.ctxId !== undefined) {
+        if (this.requiresExplicitContextId) {
+            if (contextInput.ctxId === undefined) {
+                throw createError({
+                    code: errorCodes.mcpContextInvalid,
+                    message: "No Context is referenced by this request. Call environ_info with workspace or provide ctxId.",
+                    retryable: false,
+                });
+            }
             return {
                 input: contextInput.input,
                 record: await validate(contextInput.ctxId),
             };
+        }
+        if (contextInput.ctxId !== undefined) {
+            throw createError({
+                code: errorCodes.mcpContextInvalid,
+                message: "ctxId is internal when Context authority is externally bound.",
+                retryable: false,
+            });
         }
         let boundCtxId: string | undefined;
         for (const binding of this.bindings(requestContext)) {
@@ -111,8 +125,7 @@ class UnifiedContextSelector implements McpContextSelector {
         }
         throw createError({
             code: errorCodes.mcpContextInvalid,
-            message:
-                "No Context is bound to this request. Call environ_info with workspace or provide ctxId.",
+            message: "No Context is bound to this request. Call environ_info with workspace.",
             retryable: false,
         });
     }

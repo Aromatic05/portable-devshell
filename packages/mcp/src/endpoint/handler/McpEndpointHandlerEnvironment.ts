@@ -29,6 +29,11 @@ interface BoundContextLookup {
     record?: McpContextRecord;
 }
 
+export interface McpEnvironmentHandlerResult {
+    ctxId: string;
+    structuredContent: JsonValue;
+}
+
 export class McpEndpointHandlerEnvironment {
     readonly #contextRegistry: McpContextRegistry;
     readonly #contextSelector: McpContextSelector;
@@ -56,7 +61,7 @@ export class McpEndpointHandlerEnvironment {
         requestContext: McpEndpointCallContext,
         exposed: boolean,
         signal?: AbortSignal,
-    ): Promise<JsonValue> {
+    ): Promise<McpEnvironmentHandlerResult> {
         if (!exposed) {
             throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
         }
@@ -76,8 +81,10 @@ export class McpEndpointHandlerEnvironment {
         input: JsonValue,
         requestContext: McpEndpointCallContext,
         signal?: AbortSignal,
-    ): Promise<JsonValue> {
-        const environmentInput = readMcpEnvironmentInfoInput(input);
+    ): Promise<McpEnvironmentHandlerResult> {
+        const environmentInput = readMcpEnvironmentInfoInput(input, {
+            allowContextId: this.#contextSelector.requiresExplicitContextId,
+        });
         const resolution = await this.#resolveEnvironmentContext(
             environmentInput,
             requestContext,
@@ -189,7 +196,10 @@ export class McpEndpointHandlerEnvironment {
                     previousWorkspace,
                 ).catch(() => undefined);
             }
-            return result;
+            return {
+                ctxId: attached.ctxId,
+                structuredContent: result,
+            };
         } catch (error) {
             if (resolution.created) {
                 await this.#rollbackUndisclosedContext(
@@ -238,6 +248,13 @@ export class McpEndpointHandlerEnvironment {
         record: McpContextRecord;
     }> {
         if (input.ctxId !== undefined) {
+            if (!this.#contextSelector.requiresExplicitContextId) {
+                throw createError({
+                    code: errorCodes.mcpContextInvalid,
+                    message: "ctxId is internal when Context authority is externally bound.",
+                    retryable: false,
+                });
+            }
             const record = await this.#contextRegistry.lookup(input.ctxId, {
                 principal: requestContext.principal,
             });
@@ -283,7 +300,7 @@ export class McpEndpointHandlerEnvironment {
         const workspace = input.workspace ?? (bound.record === undefined
             ? undefined
             : contextWorkspace(bound.record, this.#instanceName) ?? bound.record.workspace);
-        if (workspace === undefined) throw unboundContext();
+        if (workspace === undefined) throw unboundContext(this.#contextSelector.requiresExplicitContextId);
 
         return {
             bindings: bound.bindings,
@@ -405,11 +422,12 @@ function conflictingExternalBindings() {
     });
 }
 
-function unboundContext() {
+function unboundContext(requireExplicitContextId: boolean) {
     return createError({
         code: errorCodes.mcpContextInvalid,
-        message:
-            "No Context is bound to this request. Call environ_info with workspace or provide ctxId.",
+        message: requireExplicitContextId
+            ? "No Context is bound to this request. Call environ_info with workspace or provide ctxId."
+            : "No Context is bound to this request. Call environ_info with workspace.",
         retryable: false,
     });
 }
