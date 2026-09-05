@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { HttpHost } from "@portable-devshell/mcp/testing";
+import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("MCP HTTP server rejects a declared oversized request body before dispatch", async () => {
@@ -27,7 +28,7 @@ test("MCP HTTP server rejects a declared oversized request body before dispatch"
         const response = await requestHttp(address.port, "/demo/mcp", {
             body,
             headers: {
-                "content-length": String(1024 * 1024 + 1),
+                "content-length": String(TRANSPORT_MAX_FRAME_SIZE + 1),
                 "content-type": "application/json"
             },
             method: "POST"
@@ -35,6 +36,41 @@ test("MCP HTTP server rejects a declared oversized request body before dispatch"
         assert.equal(response.status, 413);
         assert.match(response.body, /exceeds/u);
         assert.equal(handled, false);
+    } finally {
+        await server.stop();
+    }
+});
+
+test("MCP HTTP server accepts tool requests larger than the old one MiB host cap", async () => {
+    const server = new HttpHost({
+        listenHost: "127.0.0.1",
+        listenPort: 0
+    });
+    let receivedBytes = 0;
+    server.registerBinding("/demo/mcp", {
+        async handleRequest(_request: unknown, response: { statusCode: number; end(): void }, body: { payload?: string }) {
+            receivedBytes = Buffer.byteLength(body.payload ?? "");
+            response.statusCode = 204;
+            response.end();
+        }
+    } as never);
+
+    try {
+        await server.start();
+        const address = server.address;
+        assert.ok(typeof address === "object" && address !== null);
+        const payload = "x".repeat(2 * 1024 * 1024);
+        const body = JSON.stringify({ payload });
+        const response = await requestHttp(address.port, "/demo/mcp", {
+            body,
+            headers: {
+                "content-length": String(Buffer.byteLength(body)),
+                "content-type": "application/json"
+            },
+            method: "POST"
+        });
+        assert.equal(response.status, 204);
+        assert.equal(receivedBytes, Buffer.byteLength(payload));
     } finally {
         await server.stop();
     }

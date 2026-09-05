@@ -3,6 +3,7 @@ import type { Duplex } from "node:stream";
 
 import express, { type NextFunction, type Request, type RequestHandler, type Response } from "express";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
 
 import type { McpAuthConfig } from "../auth/McpAuthConfig.js";
 import { McpAuthProviderToken } from "../auth/provider/McpAuthProviderToken.js";
@@ -20,7 +21,7 @@ export interface HttpHostOptions {
     shutdownGraceMs?: number;
 }
 
-const MCP_MAX_REQUEST_BODY_BYTES = 1024 * 1024;
+const MCP_MAX_REQUEST_BODY_BYTES = TRANSPORT_MAX_FRAME_SIZE;
 const MCP_HEADERS_TIMEOUT_MS = 10_000;
 const MCP_REQUEST_TIMEOUT_MS = 30_000;
 const MCP_KEEP_ALIVE_TIMEOUT_MS = 5_000;
