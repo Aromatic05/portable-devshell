@@ -433,3 +433,5 @@ function isJsonValue(value: unknown): value is JsonValue {
 function renderToolResult(value: JsonValue): string {
     return typeof value === "string" ? value : JSON.stringify(value, null, 2);
 }
+
+export default createDevshellPiExtension();

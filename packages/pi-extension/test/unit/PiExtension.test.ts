@@ -4,7 +4,7 @@ import test from "node:test";
 import type { Component } from "@earendil-works/pi-tui";
 import type { JsonValue } from "@portable-devshell/shared";
 
-import {
+import devshellPiExtension, {
     loadDevshellPiWorkspaceContext,
     loadDevshellPiWorkspaceResources,
     parseDevshellAgentTarget,
@@ -23,6 +23,10 @@ import {
     type PiThemeLike,
     type PiToolRenderContextLike
 } from "../../src/renderer.ts";
+
+test("Pi devshell package default export is a Pi extension factory", () => {
+    assert.equal(typeof devshellPiExtension, "function");
+});
 
 const identityTheme: PiThemeLike = {
     bg: (_role, text) => text,

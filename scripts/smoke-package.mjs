@@ -1,6 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { lstat, mkdir, readdir, rm, symlink } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, isAbsolute, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { assertPackageBinFile, readPackageBinPath } from "./application-layout.mjs";
 import { activatePiIntegration } from "./pi-integration.mjs";
@@ -45,6 +47,7 @@ try {
         runInstalled({ executable: pi.command, args: [] }, ["--version"], environment),
         "packaged Pi runtime"
     );
+    await assertPiExtensionFactory(pi);
 
     assertCommandOutput(
         runInstalled(command, ["status"], environment),
@@ -113,6 +116,18 @@ async function assertNoSymlinks(directory) {
         if (metadata.isDirectory()) {
             await assertNoSymlinks(path);
         }
+    }
+}
+
+async function assertPiExtensionFactory(pi) {
+    const requireFromPi = createRequire(pi.piTarget);
+    const jitiPackage = requireFromPi.resolve("jiti/package.json");
+    const jitiEntry = resolve(dirname(jitiPackage), "lib", "jiti-static.mjs");
+    const { createJiti } = await import(pathToFileURL(jitiEntry).href);
+    const jiti = createJiti(import.meta.url, { moduleCache: false });
+    const factory = await jiti.import(pi.extension, { default: true });
+    if (typeof factory !== "function") {
+        throw new Error("packaged Pi extension does not export a valid default factory function");
     }
 }
 
