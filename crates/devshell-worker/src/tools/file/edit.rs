@@ -3,11 +3,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::security::path::{parse_requested_path, ResolvedPath, ResolvedTarget};
-use crate::tools::file::context_patch;
+use crate::tools::file::{context_patch, context_patch_stream};
 use crate::tools::file::diff;
 use crate::tools::file::publish::{self, PublishMode};
 use crate::tools::file::state::{
-    ContextFileSnapshot, SnapshotContent, TextFile, FULL_SNAPSHOT_LIMIT,
+    ContextFileSnapshot, SnapshotContent, TextFile, TextInspection, FULL_SNAPSHOT_LIMIT,
 };
 use crate::tools::file::types::{
     FileChangeAction, FileChangeError, FileChangeOperationOutput, FileChangeResultDetail,
@@ -54,7 +54,7 @@ impl ToolHandler for FileEditTool {
         let parsed = parse_change_set(&input.changes)?;
         call.check_cancelled()?;
         let prepared = self.preflight(&call, parsed)?;
-        let mut output = self.execute(&call, prepared);
+        let mut output = self.execute(&call, prepared, detail);
         if detail == FileChangeResultDetail::Summary {
             for operation in &mut output.operations {
                 operation.diff = None;
@@ -294,7 +294,12 @@ impl FileEditTool {
             .latest_for_path(&call.ctx_id, path)
     }
 
-    fn execute(&self, call: &ToolCall, operations: Vec<PreparedOperation>) -> FileChangeSetOutput {
+    fn execute(
+        &self,
+        call: &ToolCall,
+        operations: Vec<PreparedOperation>,
+        detail: FileChangeResultDetail,
+    ) -> FileChangeSetOutput {
         let mut outputs = Vec::with_capacity(operations.len());
         let mut local_snapshots = HashMap::<PathBuf, ContextFileSnapshot>::new();
         let mut failed = false;
@@ -318,7 +323,7 @@ impl FileEditTool {
                     continue;
                 }
             };
-            match self.execute_one(call, index, bound, &mut local_snapshots) {
+            match self.execute_one(call, index, bound, detail, &mut local_snapshots) {
                 Ok(output) => outputs.push(output),
                 Err(error) => {
                     outputs.push(failed_output(index, &operation, error));
@@ -337,6 +342,7 @@ impl FileEditTool {
         call: &ToolCall,
         index: usize,
         operation: PreparedOperation,
+        detail: FileChangeResultDetail,
         local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
     ) -> Result<FileChangeOperationOutput, ToolError> {
         match operation {
@@ -350,18 +356,36 @@ impl FileEditTool {
                 path,
                 patch,
                 base,
-            } => self.execute_patch(call, index, display, path, patch, base, local_snapshots),
+            } => self.execute_patch(
+                call,
+                index,
+                display,
+                path,
+                patch,
+                base,
+                detail,
+                local_snapshots,
+            ),
             PreparedOperation::Rewrite {
                 display,
                 path,
                 content,
                 base,
-            } => self.execute_rewrite(call, index, display, path, content, base, local_snapshots),
+            } => self.execute_rewrite(
+                call,
+                index,
+                display,
+                path,
+                content,
+                base,
+                detail,
+                local_snapshots,
+            ),
             PreparedOperation::Delete {
                 display,
                 path,
                 base,
-            } => self.execute_delete(call, index, display, path, base, local_snapshots),
+            } => self.execute_delete(call, index, display, path, base, detail, local_snapshots),
             PreparedOperation::Move {
                 source_display,
                 source,
@@ -441,32 +465,71 @@ impl FileEditTool {
         path: PathBuf,
         content: String,
         base: Option<ContextFileSnapshot>,
+        detail: FileChangeResultDetail,
         local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
     ) -> Result<FileChangeOperationOutput, ToolError> {
         let base = require_bound_base(base)?;
         let resolved = rebind_for_execution(call, &display, &path)?;
         let lock = self.state.write_lock(&path);
         let _guard = lock.lock().unwrap();
-        let current = TextFile::read_file(
+        let inspection = TextInspection::inspect_file(
             resolved
                 .open_file()
                 .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
             &call.cancellation,
         )?;
-        require_revision(&base, &current)?;
-        let rewritten = TextFile::from_normalized(&current, &content)?;
-        publish_text(&resolved, &rewritten, Some(&current), &call.cancellation)?;
+        require_revision_value(&base, &inspection.metadata.revision)?;
+        let rewritten = TextFile::from_normalized_format(inspection.format, &content)?;
+        let sparse_before = if detail == FileChangeResultDetail::Diff
+            && matches!(base.content, SnapshotContent::Sparse)
+        {
+            Some(
+                TextFile::read_file(
+                    resolved
+                        .open_file()
+                        .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+                    &call.cancellation,
+                )?
+                .normalized(),
+            )
+        } else {
+            None
+        };
+        publish_text(
+            &resolved,
+            &rewritten,
+            Some(&base.revision),
+            &call.cancellation,
+        )?;
         let snapshot = self.remember_complete(call, &path, &rewritten);
         local_snapshots.insert(path.clone(), snapshot);
-        Ok(applied_text_output(
-            index,
-            FileChangeAction::Rewrite,
-            display,
-            false,
-            &current.normalized(),
-            &rewritten.normalized(),
-            &rewritten,
-        ))
+        let before = match &base.content {
+            SnapshotContent::Full(content) => Some(content.as_str()),
+            SnapshotContent::Sparse => sparse_before.as_deref(),
+        };
+        if let Some(before) = before {
+            return Ok(applied_text_output(
+                index,
+                FileChangeAction::Rewrite,
+                display,
+                false,
+                before,
+                &rewritten.normalized(),
+                &rewritten,
+            ));
+        }
+        Ok(FileChangeOperationOutput {
+            added_lines: (!rewritten.lines.is_empty()).then_some(rewritten.lines.len()),
+            removed_lines: (inspection.metadata.total_lines > 0)
+                .then_some(inspection.metadata.total_lines),
+            ..base_output(
+                index,
+                FileChangeAction::Rewrite,
+                display,
+                None,
+                FileChangeStatus::Applied,
+            )
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -478,12 +541,27 @@ impl FileEditTool {
         path: PathBuf,
         patch: String,
         base: Option<ContextFileSnapshot>,
+        detail: FileChangeResultDetail,
         local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
     ) -> Result<FileChangeOperationOutput, ToolError> {
         let base = require_bound_base(base)?;
         let resolved = rebind_for_execution(call, &display, &path)?;
         let lock = self.state.write_lock(&path);
         let _guard = lock.lock().unwrap();
+        if matches!(base.content, SnapshotContent::Sparse)
+            && detail == FileChangeResultDetail::Summary
+        {
+            return self.execute_sparse_patch(
+                call,
+                index,
+                display,
+                path,
+                patch,
+                base,
+                &resolved,
+                local_snapshots,
+            );
+        }
         let current = TextFile::read_file(
             resolved
                 .open_file()
@@ -510,7 +588,12 @@ impl FileEditTool {
             return Err(revision_mismatch());
         };
         let updated = TextFile::from_normalized(&current, &normalized)?;
-        publish_text(&resolved, &updated, Some(&current), &call.cancellation)?;
+        publish_text(
+            &resolved,
+            &updated,
+            Some(&current.revision),
+            &call.cancellation,
+        )?;
 
         let seen = if merged {
             application.resulting_known_lines.clone()
@@ -533,6 +616,111 @@ impl FileEditTool {
         Ok(output)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn execute_sparse_patch(
+        &self,
+        call: &ToolCall,
+        index: usize,
+        display: String,
+        path: PathBuf,
+        patch: String,
+        base: ContextFileSnapshot,
+        resolved: &ResolvedPath,
+        local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
+    ) -> Result<FileChangeOperationOutput, ToolError> {
+        let plan = context_patch_stream::plan_streaming(
+            resolved
+                .open_file()
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+            &patch,
+            &call.cancellation,
+        )?;
+        require_revision_value(&base, &plan.inspection.metadata.revision)?;
+        require_coverage(&base, &plan.required_lines)?;
+        let seen = plan.remap_seen_lines(&base.seen_lines);
+        let target = resolved
+            .target()
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        #[cfg(unix)]
+        let permissions = Some(
+            resolved
+                .metadata()
+                .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
+                .mode(),
+        );
+        #[cfg(not(unix))]
+        let permissions = None;
+        let expected_revision = base.revision.clone();
+        let mut updated_metadata = None;
+        publish::write_atomic_with(
+            &target,
+            PublishMode::Replace,
+            permissions,
+            |writer| {
+                updated_metadata = Some(plan.write(
+                    resolved
+                        .open_file()
+                        .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+                    writer,
+                    &call.cancellation,
+                )?);
+                Ok(())
+            },
+            || {
+                let current = crate::tools::file::state::TextMetadata::inspect_file(
+                    resolved
+                        .open_file()
+                        .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+                    &call.cancellation,
+                )?;
+                if current.revision != expected_revision {
+                    return Err(ToolError::retryable(
+                        "file.revisionMismatch",
+                        "file changed while preparing the write",
+                    ));
+                }
+                Ok(())
+            },
+        )?;
+        let updated_metadata = updated_metadata.ok_or_else(|| {
+            ToolError::new(
+                "tool.internalError",
+                "streaming patch did not produce output metadata",
+            )
+        })?;
+        let ordinal = self.state.next_snapshot_ordinal();
+        self.state.context_snapshots.lock().unwrap().remember_sparse(
+            &call.ctx_id,
+            &path,
+            &updated_metadata,
+            seen.iter().copied(),
+            ordinal,
+        );
+        local_snapshots.insert(
+            path.clone(),
+            ContextFileSnapshot {
+                canonical_path: path.display().to_string(),
+                revision: updated_metadata.revision.clone(),
+                seen_lines: seen,
+                total_lines: updated_metadata.total_lines,
+                content: SnapshotContent::Sparse,
+                ordinal,
+                last_accessed_at_ms: 0,
+            },
+        );
+        Ok(FileChangeOperationOutput {
+            added_lines: (plan.added_lines > 0).then_some(plan.added_lines),
+            removed_lines: (plan.removed_lines > 0).then_some(plan.removed_lines),
+            ..base_output(
+                index,
+                FileChangeAction::Patch,
+                display,
+                None,
+                FileChangeStatus::Applied,
+            )
+        })
+    }
+
     fn execute_delete(
         &self,
         call: &ToolCall,
@@ -540,19 +728,36 @@ impl FileEditTool {
         display: String,
         path: PathBuf,
         base: Option<ContextFileSnapshot>,
+        detail: FileChangeResultDetail,
         local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
     ) -> Result<FileChangeOperationOutput, ToolError> {
         let base = require_bound_base(base)?;
         let resolved = rebind_for_execution(call, &display, &path)?;
         let lock = self.state.write_lock(&path);
         let _guard = lock.lock().unwrap();
-        let current = TextFile::read_file(
+        let inspection = TextInspection::inspect_file(
             resolved
                 .open_file()
                 .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
             &call.cancellation,
         )?;
-        require_revision(&base, &current)?;
+        require_revision_value(&base, &inspection.metadata.revision)?;
+        let before = if detail == FileChangeResultDetail::Diff {
+            match &base.content {
+                SnapshotContent::Full(content) => Some(content.clone()),
+                SnapshotContent::Sparse => Some(
+                    TextFile::read_file(
+                        resolved
+                            .open_file()
+                            .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+                        &call.cancellation,
+                    )?
+                    .normalized(),
+                ),
+            }
+        } else {
+            None
+        };
         resolved
             .target()
             .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
@@ -564,12 +769,12 @@ impl FileEditTool {
             .unwrap()
             .remove_path(&call.ctx_id, &path);
         local_snapshots.remove(&path);
-        let before = current.normalized();
-        let diff = limit_detail(diff::render(&before, ""));
+        let diff = before.as_deref().map(|before| limit_detail(diff::render(before, "")));
         Ok(FileChangeOperationOutput {
-            removed_lines: (!current.lines.is_empty()).then_some(current.lines.len()),
-            diff: Some(diff.0),
-            truncated: diff.1.then_some(true),
+            removed_lines: (inspection.metadata.total_lines > 0)
+                .then_some(inspection.metadata.total_lines),
+            diff: diff.as_ref().map(|diff| diff.0.clone()),
+            truncated: diff.as_ref().and_then(|diff| diff.1.then_some(true)),
             ..base_output(
                 index,
                 FileChangeAction::Delete,
@@ -1122,7 +1327,11 @@ fn ensure_text(content: &str) -> Result<(), ToolError> {
 }
 
 fn require_revision(base: &ContextFileSnapshot, current: &TextFile) -> Result<(), ToolError> {
-    if current.revision == base.revision {
+    require_revision_value(base, &current.revision)
+}
+
+fn require_revision_value(base: &ContextFileSnapshot, revision: &str) -> Result<(), ToolError> {
+    if revision == base.revision {
         Ok(())
     } else {
         Err(revision_mismatch())
@@ -1160,14 +1369,14 @@ fn revision_mismatch() -> ToolError {
 fn publish_text(
     resolved: &ResolvedPath,
     text: &TextFile,
-    source: Option<&TextFile>,
+    expected_revision: Option<&str>,
     cancellation: &crate::tools::ToolCancellation,
 ) -> Result<(), ToolError> {
     let target = resolved
         .target()
         .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
     #[cfg(unix)]
-    let permissions = source
+    let permissions = expected_revision
         .map(|_| resolved.metadata())
         .transpose()
         .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
@@ -1180,14 +1389,14 @@ fn publish_text(
         PublishMode::Replace,
         permissions,
         || {
-            if let Some(source) = source {
+            if let Some(expected_revision) = expected_revision {
                 let current = crate::tools::file::state::TextMetadata::inspect_file(
                     resolved
                         .open_file()
                         .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
                     cancellation,
                 )?;
-                if current.revision != source.revision {
+                if current.revision != expected_revision {
                     return Err(ToolError::retryable(
                         "file.revisionMismatch",
                         "file changed while preparing the write",

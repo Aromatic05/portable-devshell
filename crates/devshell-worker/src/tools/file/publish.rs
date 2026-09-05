@@ -46,10 +46,30 @@ pub fn write_atomic(
     permissions: Option<u32>,
     before_publish: impl FnOnce() -> Result<(), ToolError>,
 ) -> Result<(), ToolError> {
+    write_atomic_with(
+        target,
+        mode,
+        permissions,
+        |writer| {
+            writer
+                .write_all(bytes)
+                .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))
+        },
+        before_publish,
+    )
+}
+
+pub fn write_atomic_with(
+    target: &ResolvedTarget,
+    mode: PublishMode,
+    permissions: Option<u32>,
+    write: impl FnOnce(&mut dyn Write) -> Result<(), ToolError>,
+    before_publish: impl FnOnce() -> Result<(), ToolError>,
+) -> Result<(), ToolError> {
+    let mut write = Some(write);
     if !target.is_anchored() {
         let mut temp = new_temp(target.path())?;
-        temp.write_all(bytes)
-            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        write.take().expect("atomic writer is available")(&mut temp)?;
         temp.flush()
             .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
         #[cfg(unix)]
@@ -70,8 +90,7 @@ pub fn write_atomic(
         let mut file = temporary
             .create_file_new()
             .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
-        file.write_all(bytes)
-            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        write.take().expect("atomic writer is available")(&mut file)?;
         file.flush()
             .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
         file.sync_all()

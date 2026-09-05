@@ -1,4 +1,5 @@
 pub mod context_patch;
+mod context_patch_stream;
 pub mod cursor;
 pub mod diff;
 pub mod discover;

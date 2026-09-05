@@ -1,19 +1,19 @@
 use std::collections::BTreeSet;
-
 use crate::tools::ToolError;
 
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Boundary {
+pub(super) enum Boundary {
     Anywhere,
     Beginning,
     End,
 }
 
 #[derive(Clone, Debug)]
-struct Hunk {
-    boundary: Boundary,
-    old_lines: Vec<String>,
-    new_lines: Vec<String>,
+pub(super) struct Hunk {
+    pub(super) boundary: Boundary,
+    pub(super) old_lines: Vec<String>,
+    pub(super) new_lines: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -28,27 +28,7 @@ pub struct PatchApplication {
 
 impl PatchApplication {
     pub fn remap_seen_lines(&self, old: &BTreeSet<usize>) -> BTreeSet<usize> {
-        let mut result = self.resulting_known_lines.clone();
-        for line in old {
-            let zero_based = line.saturating_sub(1);
-            let mut delta = 0isize;
-            let mut replaced = false;
-            for (position, old_len, new_len) in &self.line_edits {
-                if zero_based < *position {
-                    break;
-                }
-                if zero_based < position + old_len {
-                    replaced = true;
-                    break;
-                }
-                delta += *new_len as isize - *old_len as isize;
-            }
-            if !replaced {
-                let mapped = (zero_based as isize + delta + 1).max(1) as usize;
-                result.insert(mapped);
-            }
-        }
-        result
+        remap_seen_lines(&self.resulting_known_lines, &self.line_edits, old)
     }
 }
 
@@ -77,21 +57,11 @@ pub fn apply(base: &str, patch: &str) -> Result<PatchApplication, ToolError> {
         located.push((position, hunk));
     }
 
-    let mut ordered = located
-        .iter()
-        .map(|(position, hunk)| (*position, hunk.old_lines.len()))
-        .collect::<Vec<_>>();
-    ordered.sort_unstable();
-    for pair in ordered.windows(2) {
-        let (left_start, left_len) = pair[0];
-        let (right_start, _) = pair[1];
-        if left_start + left_len > right_start {
-            return Err(ToolError::new(
-                "file.patchOverlap",
-                "patch hunks overlap in the original snapshot",
-            ));
-        }
-    }
+    validate_located_overlap(
+        located
+            .iter()
+            .map(|(position, hunk)| (*position, hunk.old_lines.len())),
+    )?;
 
     let mut required_lines = BTreeSet::new();
     let mut resulting_known_lines = BTreeSet::new();
@@ -140,7 +110,55 @@ pub fn apply(base: &str, patch: &str) -> Result<PatchApplication, ToolError> {
     })
 }
 
-fn parse(patch: &str) -> Result<Vec<Hunk>, ToolError> {
+pub(super) fn validate_located_overlap(
+    edits: impl IntoIterator<Item = (usize, usize)>,
+) -> Result<(), ToolError> {
+    let mut ordered = edits.into_iter().collect::<Vec<_>>();
+    ordered.sort_unstable();
+    for pair in ordered.windows(2) {
+        let (left_start, left_len) = pair[0];
+        let (right_start, right_len) = pair[1];
+        if (left_start == right_start && (left_len > 0 || right_len > 0))
+            || left_start + left_len > right_start
+        {
+            return Err(ToolError::new(
+                "file.patchOverlap",
+                "patch hunks overlap in the original snapshot",
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn remap_seen_lines(
+    resulting_known_lines: &BTreeSet<usize>,
+    line_edits: &[(usize, usize, usize)],
+    old: &BTreeSet<usize>,
+) -> BTreeSet<usize> {
+    let mut result = resulting_known_lines.clone();
+    for line in old {
+        let zero_based = line.saturating_sub(1);
+        let mut delta = 0isize;
+        let mut replaced = false;
+        for (position, old_len, new_len) in line_edits {
+            if zero_based < *position {
+                break;
+            }
+            if zero_based < position + old_len {
+                replaced = true;
+                break;
+            }
+            delta += *new_len as isize - *old_len as isize;
+        }
+        if !replaced {
+            let mapped = (zero_based as isize + delta + 1).max(1) as usize;
+            result.insert(mapped);
+        }
+    }
+    result
+}
+
+pub(super) fn parse(patch: &str) -> Result<Vec<Hunk>, ToolError> {
     let lines = patch
         .split('\n')
         .map(|line| line.strip_suffix('\r').unwrap_or(line))
@@ -254,7 +272,7 @@ fn candidate_lines(lines: &[String], hunk: &Hunk) -> Vec<usize> {
         .collect()
 }
 
-fn changed_span(hunk: &Hunk) -> (usize, usize) {
+pub(super) fn changed_span(hunk: &Hunk) -> (usize, usize) {
     let common_prefix = hunk
         .old_lines
         .iter()
@@ -286,7 +304,12 @@ fn invalid(message: impl Into<String>) -> ToolError {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
+    use crate::tools::ToolCancellation;
+
     use super::apply;
+    use crate::tools::file::context_patch_stream::plan_streaming;
 
     #[test]
     fn applies_multiple_hunks_against_original_coordinates() {
@@ -312,5 +335,55 @@ mod tests {
                 .normalized,
             "head\nmiddle\ntail\n"
         );
+    }
+
+    #[test]
+    fn rejects_insertion_and_replacement_at_the_same_source_position() {
+        for patch in [
+            "@@ BOF\n+inserted\n@@\n-original\n+replacement",
+            "@@\n-original\n+replacement\n@@ BOF\n+inserted",
+        ] {
+            let error = apply("original\n", patch).unwrap_err();
+            assert_eq!(error.code, "file.patchOverlap");
+        }
+    }
+
+    #[test]
+    fn streaming_patch_matches_materialized_patch() {
+        let base = "one\ntwo\nthree\nfour\n";
+        let patch = "@@\n one\n-two\n+second\n@@\n three\n-four\n+fourth";
+        let directory = crate::testing::temp_dir();
+        let path = directory.path().join("document.txt");
+        fs::write(&path, base).unwrap();
+        let cancellation = ToolCancellation::default();
+        let plan = plan_streaming(fs::File::open(&path).unwrap(), patch, &cancellation).unwrap();
+        let mut output = Vec::new();
+        let metadata = plan
+            .write(fs::File::open(&path).unwrap(), &mut output, &cancellation)
+            .unwrap();
+
+        let expected = apply(base, patch).unwrap().normalized;
+        assert_eq!(String::from_utf8(output.clone()).unwrap(), expected);
+        assert_eq!(metadata.revision, blake3::hash(&output).to_hex().to_string());
+        assert_eq!(metadata.total_lines, 4);
+    }
+
+    #[test]
+    fn streaming_patch_preserves_bom_crlf_and_final_newline() {
+        let directory = crate::testing::temp_dir();
+        let path = directory.path().join("document.txt");
+        fs::write(&path, b"\xef\xbb\xbfone\r\ntwo\r\n").unwrap();
+        let cancellation = ToolCancellation::default();
+        let plan = plan_streaming(
+            fs::File::open(&path).unwrap(),
+            "@@\n one\n-two\n+second",
+            &cancellation,
+        )
+        .unwrap();
+        let mut output = Vec::new();
+        plan.write(fs::File::open(&path).unwrap(), &mut output, &cancellation)
+            .unwrap();
+
+        assert_eq!(output, b"\xef\xbb\xbfone\r\nsecond\r\n");
     }
 }

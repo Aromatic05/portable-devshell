@@ -1126,6 +1126,94 @@ fn file_edit_preserves_the_detected_line_ending_style() {
 }
 
 #[test]
+fn file_edit_streams_sparse_patch_for_files_larger_than_the_snapshot_limit() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-sparse-patch";
+    let mut source = String::from("target old\n");
+    while source.len() <= 4 * 1024 * 1024 + 64 * 1024 {
+        source.push_str("filler line 0123456789abcdef0123456789abcdef\n");
+    }
+    let original_len = source.len();
+    fs::write(env.workspace().join("large.txt"), source).unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "./large.txt", "view": "content", "selector": "1-1:raw" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+
+    let edited = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Patch File: ./large.txt\n@@ BOF\n-target old\n+target new\n*** End Edit"
+        }),
+    );
+
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(edited["result"]["operations"][0]["status"], "applied");
+    assert_eq!(edited["result"]["operations"][0]["addedLines"], 1);
+    assert_eq!(edited["result"]["operations"][0]["removedLines"], 1);
+    assert!(edited["result"]["operations"][0].get("diff").is_none());
+    let result = fs::read_to_string(env.workspace().join("large.txt")).unwrap();
+    assert!(result.starts_with("target new\nfiller line"));
+    assert_eq!(result.len(), original_len);
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_sparse_rewrite_preserves_bom_and_crlf_without_old_content_diff() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-sparse-rewrite";
+    let mut source = b"\xef\xbb\xbfold first\r\n".to_vec();
+    while source.len() <= 4 * 1024 * 1024 + 64 * 1024 {
+        source.extend_from_slice(b"filler line 0123456789abcdef0123456789abcdef\r\n");
+    }
+    fs::write(env.workspace().join("large.txt"), source).unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "./large.txt", "view": "content", "selector": "1-1:raw" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+
+    let edited = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Rewrite File: ./large.txt\nnew first\nnew second\n*** End Edit"
+        }),
+    );
+
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(edited["result"]["operations"][0]["status"], "applied");
+    assert!(edited["result"]["operations"][0].get("diff").is_none());
+    assert_eq!(
+        fs::read(env.workspace().join("large.txt")).unwrap(),
+        b"\xef\xbb\xbfnew first\r\nnew second\r\n"
+    );
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
 fn file_edit_rejects_conflicting_external_changes_without_overwriting_them() {
     let env = TestEnv::new();
     let instance = "aromatic-file-conflict-v2";
