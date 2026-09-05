@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { Readable } from "node:stream";
 import test from "node:test";
 
@@ -170,6 +171,120 @@ async function runRealWorkerSmoke(): Promise<void> {
     }
 }
 
+async function runStartupFailureDiagnostics(): Promise<void> {
+    const homeDirectory = await createTestTempDirectory("cli-startup-failure-home");
+    const xdgRuntimeDir = await createTestTempDirectory("cli-startup-failure-runtime");
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const runCli = async (args: string[]) => await new CliMain({
+        homeDirectory,
+        stderr,
+        stdout,
+        xdgRuntimeDir
+    }).run(args);
+
+    try {
+        const controlDirectory = join(homeDirectory, ".devshell", "control");
+        const logDirectory = join(controlDirectory, "logs");
+        await mkdir(logDirectory, { recursive: true });
+        await writeFile(join(logDirectory, "control.log"), "HISTORICAL_STARTUP_MARKER\n", "utf8");
+        await writeFile(join(controlDirectory, "config.toml"), "this is not valid toml = [\n", "utf8");
+
+        assert.notEqual(await runCli(["start"]), 0);
+        const failure = stderr.flush();
+        assert.match(failure, /control startup log/u);
+        assert.match(failure, /STARTUP control state load started/u);
+        assert.match(failure, /Invalid TOML document/u);
+        assert.doesNotMatch(failure, /HISTORICAL_STARTUP_MARKER/u);
+        assert.equal(stdout.flush(), "");
+    } finally {
+        await rm(homeDirectory, { force: true, recursive: true });
+        await rm(xdgRuntimeDir, { force: true, recursive: true });
+    }
+}
+
+async function runControlStartupWithLockedAudit(): Promise<void> {
+    const homeDirectory = await createTestTempDirectory("cli-locked-audit-home");
+    const xdgRuntimeDir = await createTestTempDirectory("cli-locked-audit-runtime");
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const workerEnvName = workerPathEnvironmentName();
+    const previousWorkerPath = process.env[workerEnvName];
+    const runCli = async (args: string[]) => await new CliMain({
+        homeDirectory,
+        stderr,
+        stdout,
+        xdgRuntimeDir
+    }).run(args);
+    const auditDirectory = join(homeDirectory, ".devshell", "aromatic-pc", "control-worker");
+    const auditDatabaseFile = join(auditDirectory, "audit.sqlite3");
+    let controlStarted = false;
+    let database: DatabaseSync | undefined;
+
+    try {
+        process.env[workerEnvName] = workerBinaryPath!;
+        await mkdir(join(homeDirectory, ".devshell", "control", "instances"), { recursive: true });
+        await mkdir(auditDirectory, { recursive: true });
+        await writeFile(
+            join(homeDirectory, ".devshell", "control", "config.toml"),
+            createRealConfig(),
+            "utf8"
+        );
+        await writeFile(
+            join(homeDirectory, ".devshell", "control", "instances", "aromatic-pc.toml"),
+            createLocalInstanceConfig("aromatic-pc"),
+            "utf8"
+        );
+
+        database = new DatabaseSync(auditDatabaseFile);
+        database.exec(`
+            CREATE TABLE audit_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection TEXT NOT NULL,
+                occurred_at_ms INTEGER NOT NULL,
+                payload_bytes INTEGER NOT NULL CHECK(payload_bytes >= 0),
+                payload TEXT NOT NULL,
+                body BLOB,
+                body_codec TEXT
+            ) STRICT;
+            CREATE TABLE audit_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            ) STRICT;
+            BEGIN EXCLUSIVE;
+        `);
+
+        assert.equal(await runCli(["start"]), 0);
+        controlStarted = true;
+        assert.match(stdout.flush(), /control: running/u);
+        assert.equal(stderr.flush(), "");
+
+        database.exec("ROLLBACK");
+        database.close();
+        database = undefined;
+
+        assert.equal(await runCli(["stop"]), 0);
+        controlStarted = false;
+        assert.equal(stdout.flush(), "control: stopped\n");
+        assert.equal(stderr.flush(), "");
+    } finally {
+        if (database !== undefined) {
+            try {
+                database.exec("ROLLBACK");
+            } catch {
+                // Ignore rollback after a failed setup.
+            }
+            database.close();
+        }
+        if (controlStarted) {
+            await runCli(["stop"]).catch(() => undefined);
+        }
+        restoreEnv(workerEnvName, previousWorkerPath);
+        await rm(homeDirectory, { force: true, recursive: true });
+        await rm(xdgRuntimeDir, { force: true, recursive: true });
+    }
+}
+
 async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void> | void): void }): Promise<void> {
     const homeDirectory = await createTestTempDirectory("cli-create-home");
     const xdgRuntimeDir = await createTestTempDirectory("cli-create-runtime");
@@ -284,6 +399,12 @@ async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void>
 test("CliInstance integration", async (t) => {
     await t.test("CliMain covers Task 11 instance commands through control rpc", async (subtest) => {
         await runInstanceCommandsThroughControlRpc(subtest);
+    });
+    await t.test("CliMain reports only the current daemon startup failure", async () => {
+        await runStartupFailureDiagnostics();
+    });
+    await t.test("CliMain starts Control without touching a locked instance audit database", realWorkerTestOptions(workerBinaryPath), async () => {
+        await runControlStartupWithLockedAudit();
     });
     await t.test("CliMain runs Task 12 real worker smoke through control lifecycle", realWorkerTestOptions(workerBinaryPath), async () => {
         await runRealWorkerSmoke();
