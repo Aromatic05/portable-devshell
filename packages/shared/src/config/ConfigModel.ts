@@ -161,7 +161,7 @@ export interface ControlGlobalConfig {
         enabled: boolean;
         listenHost: string;
         listenPort: number;
-        publicBaseUrl: string;
+        publicBaseUrl?: string;
     };
     web: {
         auth: ControlWebAuthConfig;

@@ -55,7 +55,7 @@ export function normalizeConfigGlobalDraft(draft: ConfigGlobalDraft): ControlGlo
             enabled: draft.mcp?.enabled ?? false,
             listenHost: mcpListenHost,
             listenPort: mcpListenPort,
-            publicBaseUrl: normalizePublicBaseUrl(draft.mcp?.publicBaseUrl, mcpListenHost, mcpListenPort)
+            publicBaseUrl: normalizeMcpPublicBaseUrl(draft.mcp?.publicBaseUrl, mcpListenHost, mcpListenPort)
         },
         web: {
             auth: normalizeWebAuth(draft.web),
@@ -401,6 +401,14 @@ export function normalizePublicBaseUrl(
     if (source === undefined) return `http://${formatUrlHost(listenHost)}:${listenPort}`;
     if (/^https?:\/\//iu.test(source)) return source;
     return `http://${formatUrlHost(source)}:${listenPort}`;
+}
+
+function normalizeMcpPublicBaseUrl(
+    value: string | null | undefined,
+    listenHost: string,
+    listenPort: number
+): string | undefined {
+    return value === null ? undefined : normalizePublicBaseUrl(value, listenHost, listenPort);
 }
 
 function formatUrlHost(value: string): string {

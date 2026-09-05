@@ -382,6 +382,17 @@ test("semantic validation permits explicitly exposed unauthenticated endpoints a
         "config.reverse.mcpRequired"
     );
 
+    const reverseWithoutPublicBaseUrl = normalizeConfigDraft({
+        instances: [{ name: "reverse-one", provider: "reverse" }],
+        mcp: { enabled: true, publicBaseUrl: null }
+    });
+    assertConfigIssue(
+        () => validateConfigSemantics(reverseWithoutPublicBaseUrl),
+        "semantic",
+        ["mcp", "publicBaseUrl"],
+        "config.reverse.publicBaseUrlRequired"
+    );
+
 });
 
 function assertConfigIssue(

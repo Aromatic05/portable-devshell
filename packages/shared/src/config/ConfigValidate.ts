@@ -120,7 +120,9 @@ function validateGlobalMcp(config: ControlConfig): void {
         );
     }
 
-    parseUrl(config.mcp.publicBaseUrl, ["mcp", "publicBaseUrl"]);
+    if (config.mcp.publicBaseUrl !== undefined) {
+        parseUrl(config.mcp.publicBaseUrl, ["mcp", "publicBaseUrl"]);
+    }
 }
 
 function validateWeb(config: ControlConfig): void {
