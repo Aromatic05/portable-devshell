@@ -431,6 +431,72 @@ test("tools/call delegates to WorkerInstance.callTool", async () => {
     }
 });
 
+test("tools/call forwards stale worker arguments even when the advertised schema has changed", async () => {
+    const harness = createWorkerHarness({
+        tools: [{
+            requiredCapabilities: ["read"],
+            group: "file",
+            name: "file_read",
+            description: "Read files in a batch",
+            inputSchema: {
+                additionalProperties: false,
+                properties: {
+                    files: {
+                        items: {
+                            additionalProperties: false,
+                            properties: { path: { type: "string" } },
+                            required: ["path"],
+                            type: "object",
+                        },
+                        minItems: 1,
+                        type: "array",
+                    },
+                },
+                required: ["files"],
+                type: "object",
+            },
+            outputSchema: { type: "object" },
+        }],
+    });
+    const binding = new McpEndpointBinding(new McpEndpointWorker({
+        instanceName: "demo",
+        policy: { capabilities: ["read"], groups: ["file"] },
+        worker: harness.worker,
+    }));
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        const ctxId = await createContext(server.url, session.headers);
+        const legacyArguments = {
+            ctxId,
+            path: "./legacy.txt",
+            selector: "1-1:raw",
+            view: "content",
+        };
+        const response = await postJson(server.url, {
+            id: "req-stale-file-read",
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: {
+                arguments: legacyArguments,
+                name: "file_read",
+            },
+        }, session.headers);
+
+        assert.equal(response.status, 200);
+        assert.equal(response.body.error, undefined, JSON.stringify(response.body));
+        assert.equal(harness.calls.length, 1);
+        assert.deepEqual(harness.calls[0]?.input, {
+            path: "./legacy.txt",
+            selector: "1-1:raw",
+            view: "content",
+        });
+    } finally {
+        await server.close();
+    }
+});
+
 test("tools/call returns a structured hint when the tool fails", async () => {
     const harness = createWorkerHarness({
         async callHandler() {

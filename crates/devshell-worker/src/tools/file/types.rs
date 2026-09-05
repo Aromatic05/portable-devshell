@@ -17,9 +17,9 @@ pub enum FileParseStatus {
     Partial,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FileReadInput {
+pub struct FileReadRequest {
     #[schemars(length(min = 1))]
     pub path: String,
     #[serde(default)]
@@ -27,6 +27,20 @@ pub struct FileReadInput {
     /// Content selector using N, N-M, N+count, or sorted non-overlapping comma-separated ranges. Append :raw to disable editing-context expansion; a single N still opens the default window, so use N-N:raw for exactly one line. Without :raw, each range includes one preceding line and up to three following lines. Cannot be combined with view=outline.
     #[schemars(length(min = 1))]
     pub selector: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FileReadBatchInput {
+    #[schemars(length(min = 1))]
+    pub files: Vec<FileReadRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum FileReadInput {
+    Batch(FileReadBatchInput),
+    Legacy(FileReadRequest),
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -43,6 +57,43 @@ pub struct FileReadOutput {
     pub language: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parse_status: Option<FileParseStatus>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FileReadBatchEntry {
+    pub path: String,
+    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view: Option<FileReadView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_selector: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_status: Option<FileParseStatus>,
+}
+
+impl FileReadBatchEntry {
+    pub fn from_output(path: String, output: FileReadOutput) -> Self {
+        Self {
+            path,
+            content: output.content,
+            view: output.view,
+            truncated: output.truncated,
+            next_selector: output.next_selector,
+            language: output.language,
+            parse_status: output.parse_status,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FileReadBatchOutput {
+    pub files: Vec<FileReadBatchEntry>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

@@ -78,6 +78,111 @@ fn file_read_auto_returns_content_for_small_files_without_snapshot_tokens() {
 }
 
 #[test]
+fn file_read_batch_reads_multiple_files_and_keeps_paths_in_results() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-read-batch";
+    fs::write(env.workspace().join("first.txt"), "first\n").unwrap();
+    fs::write(env.workspace().join("second.txt"), "second\n").unwrap();
+    start(&env, instance);
+
+    let response = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({
+            "files": [
+                { "path": "./first.txt", "view": "content", "selector": "1-1:raw" },
+                { "path": "./second.txt" }
+            ]
+        }),
+    );
+
+    assert_eq!(response["ok"], true, "{response}");
+    let files = response["result"]["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[0]["path"], "./first.txt");
+    assert_eq!(files[0]["content"], "1:first");
+    assert_eq!(files[1]["path"], "./second.txt");
+    assert_eq!(files[1]["content"], "1:second");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_read_legacy_wire_input_keeps_the_legacy_result_shape() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-read-legacy-wire";
+    fs::write(env.workspace().join("legacy.txt"), "legacy\n").unwrap();
+    start(&env, instance);
+
+    let response = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "./legacy.txt", "view": "content", "selector": "1-1:raw" }),
+    );
+
+    assert_eq!(response["ok"], true, "{response}");
+    assert_eq!(response["result"]["content"], "1:legacy");
+    assert!(response["result"].get("files").is_none());
+    assert!(response["result"].get("path").is_none());
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_read_batch_establishes_edit_coverage_for_every_returned_file() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-read-batch-snapshots";
+    fs::write(env.workspace().join("first.txt"), "old first\n").unwrap();
+    fs::write(env.workspace().join("second.txt"), "old second\n").unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({
+            "files": [
+                { "path": "./first.txt" },
+                { "path": "./second.txt" }
+            ]
+        }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+
+    let edited = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": concat!(
+                "*** Begin Edit\n",
+                "*** Rewrite File: ./first.txt\n",
+                "new first\n",
+                "*** Rewrite File: ./second.txt\n",
+                "new second\n",
+                "*** End Edit"
+            )
+        }),
+    );
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert!(edited["result"]["operations"].as_array().unwrap().iter().all(|operation| operation["status"] == "applied"));
+    assert_eq!(fs::read_to_string(env.workspace().join("first.txt")).unwrap(), "new first\n");
+    assert_eq!(fs::read_to_string(env.workspace().join("second.txt")).unwrap(), "new second\n");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
 fn file_read_outline_reports_symbol_ranges_and_hierarchy() {
     let env = TestEnv::new();
     let instance = "aromatic-file-read-outline";

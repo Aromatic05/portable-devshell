@@ -3,7 +3,10 @@ use std::sync::Arc;
 use crate::security::path::ResolvedPath;
 use crate::tools::file::state::{TextFile, TextMetadata, FULL_SNAPSHOT_LIMIT};
 use crate::tools::file::structure;
-use crate::tools::file::types::{FileParseStatus, FileReadInput, FileReadOutput, FileReadView};
+use crate::tools::file::types::{
+    FileParseStatus, FileReadBatchEntry, FileReadBatchInput, FileReadBatchOutput, FileReadInput,
+    FileReadOutput, FileReadRequest, FileReadView,
+};
 use crate::tools::file::{resolve_existing, FileToolState};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
@@ -12,6 +15,7 @@ const AUTO_CONTENT_MAX_LINES: usize = 300;
 const AUTO_CONTENT_MAX_BYTES: usize = 64 * 1024;
 const MAX_RANGES: usize = 16;
 const MAX_CONTENT_BYTES: usize = 1024 * 1024;
+const MAX_BATCH_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 
 pub struct FileReadTool {
     name: ToolName,
@@ -30,22 +34,71 @@ impl ToolHandler for FileReadTool {
         &self.name
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        crate::tools::contract::catalog_entry::<FileReadInput, FileReadOutput>(
+        crate::tools::contract::catalog_entry::<FileReadBatchInput, FileReadBatchOutput>(
             &self.name,
-            "Read UTF-8 text. All file tools use ./ for workspace-relative paths and / for absolute paths. Use view=content with selector forms N, N-M, N+count, or sorted non-overlapping comma-separated ranges; append :raw for exact lines. Without :raw, each range includes one preceding line and up to three following lines for editing context. A single N reads the default window and may return nextSelector. Use view=outline for structural navigation; selector cannot be combined with view=outline. Returned content ranges prepare those lines for file_edit; outline alone does not prepare source lines for patching.".to_string(),
+            "Read one or more UTF-8 text files in one call. Pass files=[{path, view?, selector?}, ...]. All file tools use ./ for workspace-relative paths and / for absolute paths. Use view=content with selector forms N, N-M, N+count, or sorted non-overlapping comma-separated ranges; append :raw for exact lines. Without :raw, each range includes one preceding line and up to three following lines for editing context. A single N reads the default window and may return nextSelector. Use view=outline for structural navigation; selector cannot be combined with view=outline. Returned content ranges prepare those lines for file_edit; outline alone does not prepare source lines for patching.".to_string(),
             [ToolCapability::Read],
         )
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
         let input: FileReadInput = call.parse_params()?;
+        match input {
+            FileReadInput::Legacy(input) => {
+                let output = self.read_one(&call, &input)?;
+                crate::tools::contract::serialize(output)
+            }
+            FileReadInput::Batch(input) => self.read_batch(&call, input),
+        }
+    }
+}
+
+impl FileReadTool {
+    fn read_batch(
+        &self,
+        call: &ToolCall,
+        input: FileReadBatchInput,
+    ) -> Result<serde_json::Value, ToolError> {
+        if input.files.is_empty() {
+            return Err(ToolError::new(
+                "tool.invalidArguments",
+                "files cannot be empty",
+            ));
+        }
+        let mut files = Vec::with_capacity(input.files.len());
+        let mut serialized_bytes = br#"{"files":[]}"#.len();
+        for input in input.files {
+            call.check_cancelled()?;
+            let path = input.path.clone();
+            let output = self.read_one(call, &input)?;
+            let entry = FileReadBatchEntry::from_output(path, output);
+            let entry_bytes = serde_json::to_vec(&entry)
+                .map_err(|error| ToolError::new("tool.internalError", error.to_string()))?
+                .len()
+                .saturating_add(usize::from(!files.is_empty()));
+            if serialized_bytes.saturating_add(entry_bytes) > MAX_BATCH_OUTPUT_BYTES {
+                return Err(ToolError::new(
+                    "file.outputTooLarge",
+                    "file_read batch exceeds the serialized output budget; split files into smaller batches",
+                ));
+            }
+            serialized_bytes = serialized_bytes.saturating_add(entry_bytes);
+            files.push(entry);
+        }
+        crate::tools::contract::serialize(FileReadBatchOutput { files })
+    }
+
+    fn read_one(
+        &self,
+        call: &ToolCall,
+        input: &FileReadRequest,
+    ) -> Result<FileReadOutput, ToolError> {
         if input.view == FileReadView::Outline && input.selector.is_some() {
             return Err(ToolError::new(
                 "tool.invalidArguments",
                 "selector cannot be combined with view=outline",
             ));
         }
-
         let ordinal = self.state.next_snapshot_ordinal();
         let (_, resolved) = resolve_existing(&call, &input.path, false)?;
         if !resolved
@@ -76,11 +129,9 @@ impl ToolHandler for FileReadTool {
                 ordinal,
             )?,
         };
-        crate::tools::contract::serialize(output)
+        Ok(output)
     }
-}
 
-impl FileReadTool {
     fn read_outline(
         &self,
         call: &ToolCall,
@@ -140,7 +191,7 @@ impl FileReadTool {
         resolved: &ResolvedPath,
         canonical_path: &std::path::Path,
         metadata: &TextMetadata,
-        input: &FileReadInput,
+        input: &FileReadRequest,
         ordinal: u64,
     ) -> Result<FileReadOutput, ToolError> {
         let full_auto = input.view == FileReadView::Auto
@@ -270,7 +321,7 @@ impl FileReadTool {
 }
 
 fn resolve_view(
-    input: &FileReadInput,
+    input: &FileReadRequest,
     path: &std::path::Path,
     metadata: &TextMetadata,
 ) -> FileReadView {

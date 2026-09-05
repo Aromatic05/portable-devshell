@@ -258,6 +258,23 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         file_edit_schema["inputSchema"]["properties"]["changes"]["minLength"],
         1
     );
+    let file_read_schema = catalog
+        .iter()
+        .find(|tool| tool["name"] == "file_read")
+        .unwrap();
+    assert_eq!(
+        file_read_schema["inputSchema"]["required"],
+        serde_json::json!(["files"])
+    );
+    assert!(file_read_schema["inputSchema"]["properties"]["files"].is_object());
+    assert!(file_read_schema["inputSchema"]["properties"].get("path").is_none());
+    assert!(file_read_schema["inputSchema"]["properties"].get("view").is_none());
+    assert!(file_read_schema["inputSchema"]["properties"].get("selector").is_none());
+    assert_eq!(
+        file_read_schema["inputSchema"]["properties"]["files"]["minItems"],
+        1
+    );
+    assert!(file_read_schema["outputSchema"]["properties"]["files"].is_object());
     let file_search_schema = catalog
         .iter()
         .find(|tool| tool["name"] == "file_search")
