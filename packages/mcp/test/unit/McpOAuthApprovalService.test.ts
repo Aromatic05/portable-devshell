@@ -206,6 +206,71 @@ test("OAuth approvals enforce a pending registration quota", async () => {
     }
 });
 
+test("OAuth approvals bound terminal authorization history without removing approved registrations or pending requests", async () => {
+    const storageDir = await createTestTempDirectory("oauth-terminal-history");
+    const service = new McpOAuthApprovalService(storageDir, { maxTerminalEntries: 2 });
+
+    try {
+        await service.warmup();
+        const registration = await service.registerClient({
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"]
+        });
+        await service.decide(registration.approvalId, "approve", "tui");
+
+        const terminalIds: string[] = [];
+        for (let index = 0; index < 3; index += 1) {
+            const interactionId = `interaction-${index}`;
+            const authorization = await service.requestAuthorization(interactionId, `transaction-${index}`, {
+                clientId: "chatgpt",
+                clientName: "ChatGPT",
+                redirectUris: ["https://chatgpt.com/callback"],
+                requestedScopes: [`scope-${index}`]
+            });
+            terminalIds.push(authorization.approvalId);
+            await service.decide(authorization.approvalId, "approve", "tui");
+            await service.completeAuthorization(interactionId);
+        }
+
+        const pending = await service.requestAuthorization("interaction-pending", "transaction-pending", {
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"],
+            requestedScopes: ["pending"]
+        });
+        const approvals = await service.list();
+
+        assert.equal(approvals.some((request) => request.approvalId === registration.approvalId), true);
+        assert.equal(approvals.some((request) => request.approvalId === pending.approvalId && request.status === "pending"), true);
+        assert.equal(approvals.some((request) => request.approvalId === terminalIds[0]), false);
+        assert.equal(approvals.some((request) => request.approvalId === terminalIds[1]), true);
+        assert.equal(approvals.some((request) => request.approvalId === terminalIds[2]), true);
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("OAuth approvals reject oversized persisted input before mutating state", async () => {
+    const storageDir = await createTestTempDirectory("oauth-input-limit");
+    const service = new McpOAuthApprovalService(storageDir, { maxInputBytes: 128 });
+
+    try {
+        await service.warmup();
+        await assert.rejects(
+            service.registerClient({
+                clientId: "oversized",
+                clientName: "x".repeat(512),
+                redirectUris: ["https://example.test/callback"]
+            }),
+            /storage limit/u
+        );
+        assert.deepEqual(await service.list(), []);
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
 test("OAuth approval memory rolls back when a decision cannot be persisted", async () => {
     const storageDir = await createTestTempDirectory("oauth-decision-rollback");
     const service = new McpOAuthApprovalService(storageDir);
