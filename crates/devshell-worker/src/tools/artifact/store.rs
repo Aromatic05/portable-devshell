@@ -217,7 +217,6 @@ impl ArtifactStore {
         }
 
         let _guard = self.lock()?;
-        self.gc_locked(0)?;
         let metadata = self.load_metadata(handle)?;
         if metadata.expires_at_ms <= now {
             return Err(ToolError::new(
@@ -259,7 +258,6 @@ impl ArtifactStore {
     pub fn resolve_lease(&self, lease_id: &str) -> Result<ArtifactLease, ToolError> {
         validate_handle(lease_id)?;
         let _guard = self.lock()?;
-        self.gc_locked(0)?;
         let path = self.lease_path(lease_id);
         let bytes = fs::read(path).map_err(|_| {
             ToolError::new("artifact.leaseNotFound", "artifact lease is unavailable")
@@ -305,7 +303,6 @@ impl ArtifactStore {
         let encoding = input.encoding.unwrap_or_default();
 
         let _guard = self.lock()?;
-        self.gc_locked(0)?;
         let metadata = self.load_metadata(&input.handle)?;
         if metadata.expires_at_ms <= unix_time_millis() {
             return Err(ToolError::new(
@@ -377,6 +374,7 @@ impl ArtifactStore {
             .map(|lease| lease.handle.as_str())
             .collect::<std::collections::HashSet<_>>();
         let records = self.records()?;
+        self.remove_orphan_data_files(&records)?;
         for record in &records {
             if record.metadata.expires_at_ms <= now
                 && !leased_handles.contains(record.metadata.handle.as_str())
@@ -394,6 +392,38 @@ impl ArtifactStore {
                 "artifact.quotaExceeded",
                 "artifact exceeds the instance storage quota",
             ));
+        }
+        Ok(())
+    }
+
+    fn remove_orphan_data_files(&self, records: &[ArtifactRecord]) -> Result<(), ToolError> {
+        let known_handles = records
+            .iter()
+            .map(|record| record.metadata.handle.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        for entry in fs::read_dir(&self.root)
+            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?
+        {
+            let entry = entry
+                .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
+            if !entry
+                .file_type()
+                .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?
+                .is_file()
+            {
+                continue;
+            }
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("bin") {
+                continue;
+            }
+            let Some(handle) = path.file_stem().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if validate_handle(handle).is_err() || known_handles.contains(handle) {
+                continue;
+            }
+            storage::remove_file_if_exists(&path)?;
         }
         Ok(())
     }
@@ -506,6 +536,7 @@ fn remove_record(record: &ArtifactRecord) {
 }
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::time::Duration;
 
     use super::{ArtifactPolicy, ArtifactStore, unix_time_millis};
@@ -616,5 +647,68 @@ mod tests {
 
         store.release_lease(&lease.lease_id).unwrap();
         assert!(!store.data_path(&reference.handle).exists());
+    }
+
+    #[test]
+    fn read_does_not_run_unrelated_artifact_gc() {
+        let (_root, store) = store(ArtifactPolicy {
+            stream_limit_bytes: 32,
+            instance_quota_bytes: 128,
+            ttl: Duration::from_secs(60),
+        });
+        let mut expired = store.begin(ArtifactStream::Stdout).unwrap();
+        expired.write_chunk(b"expired").unwrap();
+        let expired = store.persist(expired).unwrap();
+        let mut active = store.begin(ArtifactStream::Stdout).unwrap();
+        active.write_chunk(b"active").unwrap();
+        let active = store.persist(active).unwrap();
+
+        let mut metadata = store.load_metadata(&expired.handle).unwrap();
+        metadata.expires_at_ms = 0;
+        storage::write_json(
+            &store.root,
+            &store.metadata_path(&expired.handle),
+            "metadata-",
+            &metadata,
+        )
+        .unwrap();
+
+        store
+            .read(ArtifactReadInput {
+                handle: active.handle,
+                offset_bytes: None,
+                max_bytes: None,
+                encoding: None,
+            })
+            .unwrap();
+        assert!(store.data_path(&expired.handle).is_file());
+
+        let mut next = store.begin(ArtifactStream::Stdout).unwrap();
+        next.write_chunk(b"next").unwrap();
+        store.persist(next).unwrap();
+        assert!(!store.data_path(&expired.handle).exists());
+    }
+
+    #[test]
+    fn startup_gc_removes_orphan_artifact_data_without_touching_unknown_files() {
+        let root = crate::testing::temp_dir();
+        let artifacts = root.path().join("artifacts");
+        let policy = ArtifactPolicy {
+            stream_limit_bytes: 32,
+            instance_quota_bytes: 128,
+            ttl: Duration::from_secs(60),
+        };
+        let store = ArtifactStore::with_policy(artifacts.clone(), policy).unwrap();
+        drop(store);
+
+        let orphan = uuid::Uuid::new_v4().to_string();
+        let orphan_path = artifacts.join(format!("{orphan}.bin"));
+        let unknown_path = artifacts.join("manual.bin");
+        fs::write(&orphan_path, b"orphan").unwrap();
+        fs::write(&unknown_path, b"keep").unwrap();
+
+        let _store = ArtifactStore::with_policy(artifacts, policy).unwrap();
+        assert!(!orphan_path.exists());
+        assert!(unknown_path.is_file());
     }
 }

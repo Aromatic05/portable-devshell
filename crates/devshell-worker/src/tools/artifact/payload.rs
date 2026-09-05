@@ -336,7 +336,6 @@ impl ArtifactPayloadStore {
             ));
         }
         let _guard = self.lock()?;
-        self.gc_locked()?;
         let metadata = self.load_metadata(payload_id)?;
         if metadata.expires_at_ms <= unix_time_millis() {
             return Err(ToolError::new(
@@ -525,6 +524,40 @@ impl ArtifactPayloadStore {
             {
                 self.remove_payload_locked(&metadata)?;
             }
+        }
+        self.remove_orphan_data_files()?;
+        Ok(())
+    }
+
+    fn remove_orphan_data_files(&self) -> Result<(), ToolError> {
+        let known_ids = storage::json_files(&self.root)?
+            .into_iter()
+            .filter_map(|path| path.file_stem().and_then(|value| value.to_str()).map(str::to_owned))
+            .filter(|payload_id| validate_id(payload_id).is_ok())
+            .collect::<std::collections::HashSet<_>>();
+        for entry in fs::read_dir(&self.root)
+            .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?
+        {
+            let entry = entry
+                .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
+            if !entry
+                .file_type()
+                .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?
+                .is_file()
+            {
+                continue;
+            }
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("bin") {
+                continue;
+            }
+            let Some(payload_id) = path.file_stem().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if validate_id(payload_id).is_err() || known_ids.contains(payload_id) {
+                continue;
+            }
+            storage::remove_file_if_exists(&path)?;
         }
         Ok(())
     }
@@ -1002,6 +1035,39 @@ mod tests {
         assert_eq!(opened.descriptor.payload_bytes, 6);
     }
 
+    #[test]
+    fn payload_read_does_not_run_unrelated_payload_gc() {
+        let root = crate::testing::temp_dir();
+        let workspace = root.path().join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        fs::write(workspace.join("expired.txt"), b"expired").unwrap();
+        fs::write(workspace.join("active.txt"), b"active").unwrap();
+        fs::write(workspace.join("next.txt"), b"next").unwrap();
+        let artifacts = ArtifactStore::new(root.path().join("artifacts")).unwrap();
+        let payloads = ArtifactPayloadStore::new(root.path().join("payloads"), artifacts).unwrap();
+        let policy = DisabledSecurityPolicy;
+
+        let expired = payloads
+            .open_path(&workspace, "./expired.txt", &policy, expires_at_ms())
+            .unwrap();
+        let active = payloads
+            .open_path(&workspace, "./active.txt", &policy, expires_at_ms())
+            .unwrap();
+        let mut metadata = payloads.load_metadata(&expired.payload_id).unwrap();
+        metadata.expires_at_ms = 0;
+        payloads.write_metadata(&metadata).unwrap();
+
+        payloads.read(&active.payload_id, 0, 1024).unwrap();
+        assert!(payloads.metadata_path(&expired.payload_id).is_file());
+        assert!(payloads.data_path(&expired.payload_id).is_file());
+
+        payloads
+            .open_path(&workspace, "./next.txt", &policy, expires_at_ms())
+            .unwrap();
+        assert!(!payloads.metadata_path(&expired.payload_id).exists());
+        assert!(!payloads.data_path(&expired.payload_id).exists());
+    }
+
     #[cfg(unix)]
     #[test]
     fn regular_file_payload_keeps_the_resolved_source_anchored_after_parent_swap() {
@@ -1129,5 +1195,24 @@ mod tests {
         let reopened = ArtifactPayloadStore::new(payload_root, artifacts).unwrap();
         let chunk = reopened.read(&opened.payload_id, 0, 1024).unwrap();
         assert_eq!(STANDARD.decode(chunk.content).unwrap(), b"stable");
+    }
+
+    #[test]
+    fn payload_startup_gc_removes_orphan_data_without_touching_unknown_files() {
+        let root = crate::testing::temp_dir();
+        let artifacts = ArtifactStore::new(root.path().join("artifacts")).unwrap();
+        let payload_root = root.path().join("payloads");
+        let payloads = ArtifactPayloadStore::new(payload_root.clone(), Arc::clone(&artifacts)).unwrap();
+        drop(payloads);
+
+        let orphan = uuid::Uuid::new_v4().to_string();
+        let orphan_path = payload_root.join(format!("{orphan}.bin"));
+        let unknown_path = payload_root.join("manual.bin");
+        fs::write(&orphan_path, b"orphan").unwrap();
+        fs::write(&unknown_path, b"keep").unwrap();
+
+        let _reopened = ArtifactPayloadStore::new(payload_root, artifacts).unwrap();
+        assert!(!orphan_path.exists());
+        assert!(unknown_path.is_file());
     }
 }
