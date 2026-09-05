@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
-import { isControlErrorBody, type Channel, type JsonValue } from "@portable-devshell/shared";
+import { createError, errorCodes, isControlErrorBody, type Channel, type JsonValue } from "@portable-devshell/shared";
+import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
 
 import { readWorkerAbortReason } from "../WorkerAbortReason.js";
 import type { WorkerCommandTransport } from "../command/WorkerCommandTransport.js";
@@ -110,6 +111,7 @@ export class WorkerRpcBridge {
 
     async request(request: WorkerRpcRequestEnvelope, signal?: AbortSignal): Promise<WorkerRpcResponseEnvelope> {
         this.#throwIfCancelled(request, signal);
+        const encodedRequest = this.#encodeRequest(request);
         const channel = await this.#ensureChannel();
         this.#throwIfCancelled(request, signal);
         if (this.#pending.has(request.id)) {
@@ -144,7 +146,7 @@ export class WorkerRpcBridge {
             if (this.#pending.get(request.id) !== pending) {
                 return;
             }
-            void channel.send(encodeWorkerRpcMessage(request as unknown as JsonValue)).catch((error: unknown) => {
+            void channel.send(encodedRequest).catch((error: unknown) => {
                 this.#disconnectChannel(channel, this.#createDisconnectError(error));
             });
         });
@@ -322,8 +324,25 @@ export class WorkerRpcBridge {
             return;
         }
         for (const pending of this.#pending.values()) {
-            await channel.send(encodeWorkerRpcMessage(pending.request as unknown as JsonValue));
+            await channel.send(this.#encodeRequest(pending.request));
         }
+    }
+
+    #encodeRequest(request: WorkerRpcRequestEnvelope): Uint8Array {
+        const encoded = encodeWorkerRpcMessage(request as unknown as JsonValue);
+        if (encoded.byteLength > TRANSPORT_MAX_FRAME_SIZE) {
+            throw createError({
+                code: errorCodes.protocolFrameTooLarge,
+                message: `Worker RPC request exceeds ${TRANSPORT_MAX_FRAME_SIZE} bytes after envelope encoding.`,
+                retryable: false,
+                details: {
+                    actualBytes: encoded.byteLength,
+                    maxBytes: TRANSPORT_MAX_FRAME_SIZE,
+                    method: request.method,
+                },
+            });
+        }
+        return encoded;
     }
 
     #rejectPending(error: WorkerRpcError): void {
@@ -388,7 +407,15 @@ export class WorkerRpcBridge {
             }
             return;
         }
-        void channel.send(encodeWorkerRpcMessage(cancellation as unknown as JsonValue)).catch((error: unknown) => {
+        let encodedCancellation: Uint8Array;
+        try {
+            encodedCancellation = this.#encodeRequest(cancellation);
+        } catch {
+            this.#pending.delete(cancellation.id);
+            pending.cleanup();
+            return;
+        }
+        void channel.send(encodedCancellation).catch((error: unknown) => {
             if (!this.#preservePendingOnDisconnect) {
                 this.#pending.delete(cancellation.id);
                 pending.cleanup();

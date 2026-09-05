@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { Channel, JsonValue } from "@portable-devshell/shared";
+import { errorCodes, type Channel, type JsonValue } from "@portable-devshell/shared";
+import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
 import {
     WorkerRpcBridge,
     WorkerRpcClient,
@@ -276,6 +277,35 @@ test("WorkerRpcBridge rejects a pending request when the initial send fails", as
     await assert.rejects(withTimeout(request), /send failed|disconnected/iu);
     assert.equal(bridge.connected, false);
     assert.equal(channel.closed, true);
+});
+
+test("WorkerRpcBridge rejects an oversized encoded request without disconnecting the channel", async () => {
+    const connector = new DeferredConnector();
+    const channel = new MemoryChannel();
+    connector.channel = channel;
+    const bridge = new WorkerRpcBridge({
+        connector,
+        rpcOptions: { instanceName: "oversized-request" }
+    });
+    await bridge.connect();
+
+    const oversized = "x".repeat(TRANSPORT_MAX_FRAME_SIZE);
+    await assert.rejects(
+        bridge.request({
+            id: "request-too-large",
+            method: "file_edit",
+            params: { changes: oversized },
+            type: "request"
+        }),
+        (error: unknown) => {
+            assert.equal((error as { code?: string }).code, errorCodes.protocolFrameTooLarge);
+            return true;
+        }
+    );
+
+    assert.equal(bridge.connected, true);
+    assert.equal(channel.closed, false);
+    assert.equal(channel.sent.length, 0);
 });
 
 test("WorkerRpcBridge rejects duplicate pending request ids without losing the first request", async () => {

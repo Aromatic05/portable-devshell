@@ -51,6 +51,7 @@ export const errorCodes = {
     mcpContextDisabled: "mcp.contextDisabled",
     mcpContextWorkspaceRequired: "mcp.contextWorkspaceRequired",
     mcpPublicAuthRequired: "mcp.publicAuthRequired",
+    protocolFrameTooLarge: "protocol.frameTooLarge",
     protocolVersionUnsupported: "protocol.versionUnsupported",
     reverseConnectionSuperseded: "reverse.connectionSuperseded",
     reverseDeviceCodeConsumed: "reverse.deviceCodeConsumed",
