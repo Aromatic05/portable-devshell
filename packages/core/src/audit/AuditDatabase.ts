@@ -131,6 +131,7 @@ export class AuditDatabase {
         options: AuditStoreOptions<TRecord>
     ): void {
         this.#assertOpen();
+        this.#ensurePayloadBytes();
         this.#insertRecord(collection, record, options);
         this.#evictForPayloadLimit();
     }

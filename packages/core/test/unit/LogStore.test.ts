@@ -238,7 +238,7 @@ test("AuditDatabase upgrades v1 SQLite rows without rewriting historical log pay
     }
 });
 
-test("AuditDatabase defers payload accounting for an existing database until explicit maintenance", async () => {
+test("AuditDatabase defers existing payload accounting until the first write", async () => {
     const root = await createTestTempDirectory("sqlite-deferred-accounting");
     const databaseFile = join(root, "audit.sqlite3");
     const instanceName = asInstanceName("sqlite-deferred-accounting");
@@ -265,8 +265,17 @@ test("AuditDatabase defers payload accounting for an existing database until exp
         assert.deepEqual(await store.readAll(), [legacy]);
         assert.equal(readAuditMetadataValue(databaseFile, "payloadBytes:v1"), undefined);
 
+        await store.append({
+            ...legacy,
+            at: "2026-09-01T12:00:00.000Z",
+            message: "new history",
+            seq: 2
+        });
+        const accounted = Number(readAuditMetadataValue(databaseFile, "payloadBytes:v1"));
+        assert.equal(Number.isSafeInteger(accounted) && accounted > 0, true);
+
         const stats = database.stats();
-        assert.equal(stats.payloadBytes > 0, true);
+        assert.equal(stats.payloadBytes, accounted);
         assert.equal(readAuditMetadataValue(databaseFile, "payloadBytes:v1"), String(stats.payloadBytes));
         database.close();
     } finally {
