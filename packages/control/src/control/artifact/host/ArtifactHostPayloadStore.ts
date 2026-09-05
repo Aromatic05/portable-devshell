@@ -39,6 +39,7 @@ export class ArtifactHostPayloadStore {
     readonly #homeDirectory: string;
     readonly #root: string;
     readonly #temporaryRoot: string;
+    #maintenanceScheduled = false;
 
     constructor(options: {
         homeDirectory: string;
@@ -54,7 +55,12 @@ export class ArtifactHostPayloadStore {
         await chmod(this.#root, 0o700).catch(() => undefined);
         await chmod(this.#temporaryRoot, 0o700).catch(() => undefined);
         await clearDirectory(this.#temporaryRoot);
-        await this.#collectExpired();
+        if (!this.#maintenanceScheduled) {
+            this.#maintenanceScheduled = true;
+            setImmediate(() => {
+                void this.#collectExpired().catch(() => undefined);
+            });
+        }
     }
 
     async openPath(
