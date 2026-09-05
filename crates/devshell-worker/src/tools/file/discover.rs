@@ -159,12 +159,21 @@ fn prepare_glob(
         &spec[..slash]
     };
     let pattern = spec[slash + 1..].to_string();
-    let (root_requested, root) = resolve_existing(call, root_raw, false)?;
-    if !root
-        .metadata()
-        .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?
-        .is_dir()
-    {
+    let (root_requested, root) = match resolve_existing(call, root_raw, false) {
+        Ok(resolved) => resolved,
+        Err(error) if error.code == "file.notFound" => {
+            return Ok(DiscoverySource::Single(None));
+        }
+        Err(error) => return Err(error),
+    };
+    let metadata = match root.metadata() {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(DiscoverySource::Single(None));
+        }
+        Err(error) => return Err(ToolError::new("file.readFailed", error.to_string())),
+    };
+    if !metadata.is_dir() {
         return Err(ToolError::new(
             "file.notDirectory",
             "glob root is not a directory",
