@@ -12,29 +12,27 @@ export class ContextMessageStore {
     readonly #filePath: string;
     readonly #instanceName: string;
     readonly #state: ContextMessageState;
-    #document: ContextMessageDocument;
+    #document?: ContextMessageDocument;
 
     constructor(options: { filePath: string; instanceName: string; state: ContextMessageState }) {
         this.#filePath = options.filePath;
         this.#instanceName = options.instanceName;
         this.#state = options.state;
-        cleanupStaleAtomicStateTemps(this.#filePath);
-        this.#document = this.#load();
     }
 
     read(): ContextMessageDocument {
-        return structuredClone(this.#document);
+        return structuredClone(this.#current());
     }
 
     list(ctxId?: string): ContextMessageRecord[] {
         return structuredClone(
-            this.#document.messages.filter((message) => ctxId === undefined || message.ctxId === ctxId),
+            this.#current().messages.filter((message) => ctxId === undefined || message.ctxId === ctxId),
         );
     }
 
     pending(ctxId?: string): ContextMessageRecord[] {
         return structuredClone(
-            this.#document.messages.filter((message) =>
+            this.#current().messages.filter((message) =>
                 (message.status === "pending" || message.status === "sent") &&
                 (ctxId === undefined || message.ctxId === ctxId)
             ),
@@ -44,14 +42,14 @@ export class ContextMessageStore {
     async transition<T>(
         operation: (document: ContextMessageDocument) => { document: ContextMessageDocument; result: T },
     ): Promise<T> {
-        const next = operation(this.#document);
+        const next = operation(this.#current());
         await this.#writeAtomic(next.document);
         this.#document = next.document;
         return structuredClone(next.result);
     }
 
     async update(operation: (document: ContextMessageDocument) => ContextMessageDocument): Promise<void> {
-        const next = operation(this.#document);
+        const next = operation(this.#current());
         await this.#writeAtomic(next);
         this.#document = next;
     }
@@ -61,6 +59,14 @@ export class ContextMessageStore {
         await this.#writeAtomic(normalized);
         this.#document = normalized;
         return this.read();
+    }
+
+    #current(): ContextMessageDocument {
+        if (this.#document === undefined) {
+            cleanupStaleAtomicStateTemps(this.#filePath);
+            this.#document = this.#load();
+        }
+        return this.#document;
     }
 
     #load(): ContextMessageDocument {

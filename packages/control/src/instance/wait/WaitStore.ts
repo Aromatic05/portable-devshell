@@ -13,33 +13,31 @@ export class WaitStore {
     readonly #filePath: string;
     readonly #instanceName: string;
     readonly #state: WaitState;
-    #document: WaitDocument;
+    #document?: WaitDocument;
 
     constructor(options: { filePath: string; instanceName: string; state: WaitState }) {
         this.#filePath = options.filePath;
         this.#instanceName = options.instanceName;
         this.#state = options.state;
-        cleanupStaleAtomicStateTemps(this.#filePath);
-        this.#document = this.#load();
     }
 
     read(): WaitDocument {
-        return structuredClone(this.#document);
+        return structuredClone(this.#current());
     }
 
     readRecord(waitId: string): WaitRecord | undefined {
-        const record = this.#document.waits.find((entry) => entry.waitId === waitId);
+        const record = this.#current().waits.find((entry) => entry.waitId === waitId);
         return record === undefined ? undefined : structuredClone(record);
     }
 
     list(taskId?: string): WaitRecord[] {
         return structuredClone(
-            this.#document.waits.filter((record) => taskId === undefined || record.taskId === taskId),
+            this.#current().waits.filter((record) => taskId === undefined || record.taskId === taskId),
         );
     }
 
     async transition(operation: (document: WaitDocument) => { document: WaitDocument; record: WaitRecord }): Promise<WaitRecord> {
-        const next = operation(this.#document);
+        const next = operation(this.#current());
         await this.#writeAtomic(next.document);
         this.#document = next.document;
         return structuredClone(next.record);
@@ -50,6 +48,14 @@ export class WaitStore {
         await this.#writeAtomic(normalized);
         this.#document = normalized;
         return this.read();
+    }
+
+    #current(): WaitDocument {
+        if (this.#document === undefined) {
+            cleanupStaleAtomicStateTemps(this.#filePath);
+            this.#document = this.#load();
+        }
+        return this.#document;
     }
 
     #load(): WaitDocument {

@@ -18,14 +18,12 @@ export class TodoStore {
     readonly #filePath: string;
     readonly #instanceName: string;
     readonly #state: TodoState;
-    #document: TodoDocument;
+    #document?: TodoDocument;
 
     constructor(options: TodoStoreOptions) {
         this.#filePath = options.filePath;
         this.#instanceName = options.instanceName;
         this.#state = options.state;
-        cleanupStaleAtomicStateTemps(this.#filePath);
-        this.#document = this.#loadFromDisk();
     }
 
     get filePath(): string {
@@ -37,11 +35,11 @@ export class TodoStore {
     }
 
     read(): TodoDocument {
-        return structuredClone(this.#document);
+        return structuredClone(this.#current());
     }
 
     readActive(): TodoDocument {
-        return { active: structuredClone(this.#document.active), archived: [], version: 4 };
+        return { active: structuredClone(this.#current().active), archived: [], version: 4 };
     }
 
     reload(): TodoDocument {
@@ -66,13 +64,21 @@ export class TodoStore {
     async transition<T>(
         operation: (document: TodoDocument) => { document: TodoDocument; result: T }
     ): Promise<T> {
-        const current = this.#document;
+        const current = this.#current();
         const next = operation(current);
         if (next.document !== current) {
             await this.#writeAtomic(next.document);
             this.#document = next.document;
         }
         return structuredClone(next.result);
+    }
+
+    #current(): TodoDocument {
+        if (this.#document === undefined) {
+            cleanupStaleAtomicStateTemps(this.#filePath);
+            this.#document = this.#loadFromDisk();
+        }
+        return this.#document;
     }
 
     #loadFromDisk(): TodoDocument {

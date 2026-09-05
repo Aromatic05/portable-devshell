@@ -12,18 +12,16 @@ export class GoalStore {
     readonly #filePath: string;
     readonly #instanceName: string;
     readonly #state: GoalState;
-    #document: GoalDocument;
+    #document?: GoalDocument;
 
     constructor(options: { filePath: string; instanceName: string; state: GoalState }) {
         this.#filePath = options.filePath;
         this.#instanceName = options.instanceName;
         this.#state = options.state;
-        cleanupStaleAtomicStateTemps(this.#filePath);
-        this.#document = this.#load();
     }
 
     read(): GoalDocument {
-        return structuredClone(this.#document);
+        return structuredClone(this.#current());
     }
 
     async write(document: GoalDocument): Promise<GoalDocument> {
@@ -31,6 +29,14 @@ export class GoalStore {
         await this.#writeAtomic(normalized);
         this.#document = normalized;
         return this.read();
+    }
+
+    #current(): GoalDocument {
+        if (this.#document === undefined) {
+            cleanupStaleAtomicStateTemps(this.#filePath);
+            this.#document = this.#load();
+        }
+        return this.#document;
     }
 
     #load(): GoalDocument {
