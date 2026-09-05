@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { closeSync, mkdirSync, openSync } from "node:fs";
 import { appendFile, mkdir, open, readFile, readlink, rm, stat, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { basename, dirname, join, resolve } from "node:path";
@@ -20,6 +21,7 @@ export interface ControlDaemonLaunchOptions {
     env?: NodeJS.ProcessEnv;
     homeDirectory?: string;
     spawnFunction?: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
+    startupLogPath?: string;
     xdgRuntimeDir?: string;
 }
 
@@ -80,11 +82,19 @@ export class ControlDaemonLauncher {
         if (options.xdgRuntimeDir !== undefined) {
             env.XDG_RUNTIME_DIR = options.xdgRuntimeDir;
         }
-        const child = spawnFunction(
-            process.execPath,
-            [...collectNodeBootstrapArgs(process.execArgv), options.daemonModulePath],
-            { detached: true, env, stdio: "ignore" }
-        );
+        const startupLogPath = options.startupLogPath ?? controlStartupLogPath(options.homeDirectory);
+        mkdirSync(dirname(startupLogPath), { recursive: true });
+        const startupLogFd = openSync(startupLogPath, "w", 0o600);
+        let child: ChildProcess;
+        try {
+            child = spawnFunction(
+                process.execPath,
+                [...collectNodeBootstrapArgs(process.execArgv), options.daemonModulePath],
+                { detached: true, env, stdio: ["ignore", startupLogFd, startupLogFd] }
+            );
+        } finally {
+            closeSync(startupLogFd);
+        }
         child.unref();
         return child;
     }
@@ -163,6 +173,7 @@ export class ControlLifecycleManager {
     readonly #processIsRunning: (pid: number) => boolean;
     readonly #rpcClient: ControlLifecycleRpcClient;
     readonly #socketFile: ControlSocketFilePort;
+    readonly #startupLogPath: string;
     readonly #signalProcess: (pid: number, signal: NodeJS.Signals) => void;
     readonly #waitTimeoutMs: number;
 
@@ -170,6 +181,7 @@ export class ControlLifecycleManager {
         this.#logger = options.logger ?? new ControlLogger(options.homeDirectory);
         this.#pidFile = options.pidFile ?? new ControlPidFile(options.homeDirectory);
         this.#socketFile = options.socketFile ?? new ControlSocketFile(options.xdgRuntimeDir);
+        this.#startupLogPath = options.startupLogPath ?? controlStartupLogPath(options.homeDirectory);
         this.#waitTimeoutMs = options.waitTimeoutMs ?? 5_000;
         this.#processIsRunning = options.processIsRunning ?? processIsRunning;
         this.#processIdentity = options.processIdentity ?? ((pid) => identifyControlProcess(pid, {
@@ -183,6 +195,7 @@ export class ControlLifecycleManager {
             env: options.env,
             homeDirectory: options.homeDirectory,
             spawnFunction: options.spawnFunction,
+            startupLogPath: this.#startupLogPath,
             xdgRuntimeDir: options.xdgRuntimeDir
         };
         this.#rpcClient = options.rpcClient ?? createSocketControlLifecycleRpcClient(
@@ -367,8 +380,10 @@ export class ControlLifecycleManager {
 
     async #renderStartFailure(error: unknown): Promise<string> {
         const message = error instanceof Error ? error.message : String(error);
-        const tail = tailLines(await this.logs(), 80);
-        return tail.length === 0 ? message : `${message}\ncontrol log:\n${tail}`;
+        const tail = tailLines(await readOptionalFile(this.#startupLogPath), 80);
+        return tail.length === 0
+            ? `${message}\ncontrol startup log (${this.#startupLogPath}) is empty.`
+            : `${message}\ncontrol startup log (${this.#startupLogPath}):\n${tail}`;
     }
 }
 
@@ -484,6 +499,19 @@ function collectNodeBootstrapArgs(execArgv: readonly string[]): string[] {
         }
     }
     return args;
+}
+
+function controlStartupLogPath(homeDirectory?: string): string {
+    return join(new ControlPathHome(homeDirectory).controlHomeDir, "logs", "control.startup.log");
+}
+
+async function readOptionalFile(path: string): Promise<string> {
+    try {
+        return await readFile(path, "utf8");
+    } catch (error) {
+        if (isFileMissingError(error)) return "";
+        throw error;
+    }
 }
 
 async function fileAgeMs(path: string): Promise<number> {

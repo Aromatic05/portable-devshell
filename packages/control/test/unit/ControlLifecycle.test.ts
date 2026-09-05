@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { writeSync } from "node:fs";
 import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
@@ -37,6 +38,11 @@ test("start creates control directory, socket, pid and status uses rpc", async (
         await assertPathExists(harness.paths.socketFile);
     }
     await assertPathExists(join(harness.paths.controlHomeDir, "control.pid"));
+    const startupLog = await readFile(join(harness.paths.controlHomeDir, "logs", "control.startup.log"), "utf8");
+    assert.match(startupLog, /STARTUP control state load started/u);
+    assert.match(startupLog, /STARTUP control runtime composition started/u);
+    assert.match(startupLog, /STARTUP control runtime start completed/u);
+    assert.match(startupLog, /STARTUP control daemon start completed/u);
 
     const refreshed = await harness.manager.status();
     assert.equal(refreshed.running, true);
@@ -277,43 +283,54 @@ test(
     }
 );
 
-test("start failure includes recent control log output", async () => {
-    const manager = new ControlLifecycleManager({
-        daemonModulePath: controlDaemonModulePath(),
-        logger: {
-            error: async () => undefined,
-            info: async () => undefined,
-            path: "/tmp/control.log",
-            readAll: async () => "[2026-07-09T00:00:00.000Z] ERROR control server failed to start\nControlError: invalid config"
-        },
-        pidFile: {
-            read: async () => undefined,
-            remove: async () => undefined,
-            write: async () => undefined,
-            path: "/tmp/control.pid"
-        },
-        processIsRunning: (pid) => pid === 424_242,
-        rpcClient: {
-            async request() {
-                throw new Error("offline");
-            }
-        },
-        socketFile: {
-            ensureRuntimeDir: async () => undefined,
-            path: "/tmp/control.sock",
-            remove: async () => undefined,
-            runtimeDir: "/tmp"
-        },
-        spawnFunction() {
-            return { pid: 424_242, unref() {} } as never;
-        },
-        waitTimeoutMs: 25
-    });
+test("start failure reports only the current startup attempt", async () => {
+    const root = await createTestTempDirectory("control-startup-attempt");
+    const startupLogPath = join(root, "control.startup.log");
+    try {
+        const manager = new ControlLifecycleManager({
+            daemonModulePath: controlDaemonModulePath(),
+            logger: {
+                error: async () => undefined,
+                info: async () => undefined,
+                path: join(root, "control.log"),
+                readAll: async () => "stale historical failure"
+            },
+            pidFile: {
+                read: async () => undefined,
+                remove: async () => undefined,
+                write: async () => undefined,
+                path: join(root, "control.pid")
+            },
+            processIsRunning: (pid) => pid === 424_242,
+            rpcClient: {
+                async request() {
+                    throw new Error("offline");
+                }
+            },
+            socketFile: {
+                ensureRuntimeDir: async () => undefined,
+                path: join(root, "control.sock"),
+                remove: async () => undefined,
+                runtimeDir: root
+            },
+            spawnFunction(_command, _args, options) {
+                const stdio = options.stdio as [unknown, number, number];
+                writeSync(stdio[2], "current startup failure\n");
+                return { pid: 424_242, unref() {} } as never;
+            },
+            startupLogPath,
+            waitTimeoutMs: 25
+        });
 
-    await assert.rejects(
-        manager.start(),
-        /control server did not become ready\ncontrol log:\n\[2026-07-09T00:00:00.000Z\] ERROR control server failed to start\nControlError: invalid config/u
-    );
+        await assert.rejects(manager.start(), (error: unknown) => {
+            assert.match(String(error), /control server did not become ready/u);
+            assert.match(String(error), /current startup failure/u);
+            assert.doesNotMatch(String(error), /stale historical failure/u);
+            return true;
+        });
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
 });
 
 test("pid publication failure terminates the spawned control process", async (t) => {

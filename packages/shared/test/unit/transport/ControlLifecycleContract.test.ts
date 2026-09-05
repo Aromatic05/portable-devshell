@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { writeSync } from "node:fs";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
 
@@ -39,7 +40,9 @@ test("control logger and pid file persist below the selected home and tolerate m
     }
 });
 
-test("control daemon launcher preserves bootstrap loaders and isolates daemon environment", () => {
+test("control daemon launcher preserves bootstrap loaders and captures this startup attempt", async () => {
+    const root = await createTestTempDirectory("shared-launcher");
+    const startupLogPath = resolve(root, "control.startup.log");
     let recorded:
         | {
               args: string[];
@@ -48,37 +51,43 @@ test("control daemon launcher preserves bootstrap loaders and isolates daemon en
           }
         | undefined;
     let unrefCount = 0;
+    try {
+        await writeFile(startupLogPath, "stale startup output\n", "utf8");
+        const child = ControlDaemonLauncher.spawnDetached({
+            daemonModulePath: "/app/ControlDaemon.js",
+            env: { NODE_TEST_CONTEXT: "child-v8", PORTABLE_DEVSHELL_TEST: "yes" },
+            homeDirectory: "/home/tester",
+            spawnFunction(command, args, options) {
+                recorded = { args, command, options };
+                return Object.assign(new EventEmitter(), {
+                    unref() {
+                        unrefCount += 1;
+                    }
+                }) as never;
+            },
+            startupLogPath,
+            xdgRuntimeDir: "/run/tester"
+        });
 
-    const child = ControlDaemonLauncher.spawnDetached({
-        daemonModulePath: "/app/ControlDaemon.js",
-        env: { NODE_TEST_CONTEXT: "child-v8", PORTABLE_DEVSHELL_TEST: "yes" },
-        homeDirectory: "/home/tester",
-        spawnFunction(command, args, options) {
-            recorded = { args, command, options };
-            return Object.assign(new EventEmitter(), {
-                unref() {
-                    unrefCount += 1;
-                }
-            }) as never;
-        },
-        xdgRuntimeDir: "/run/tester"
-    });
+        assert.notEqual(child, undefined);
+        assert.equal(recorded?.command, process.execPath);
+        assert.equal(recorded?.args.at(-1), "/app/ControlDaemon.js");
+        assert.equal(recorded?.options.detached, true);
+        assert.equal(Array.isArray(recorded?.options.stdio), true);
+        assert.equal(recorded?.options.env?.HOME, "/home/tester");
+        assert.equal(recorded?.options.env?.XDG_RUNTIME_DIR, "/run/tester");
+        assert.equal(recorded?.options.env?.PORTABLE_DEVSHELL_TEST, "yes");
+        assert.equal(recorded?.options.env?.NODE_TEST_CONTEXT, undefined);
+        assert.equal(unrefCount, 1);
+        assert.equal(await readFile(startupLogPath, "utf8"), "");
 
-    assert.notEqual(child, undefined);
-    assert.equal(recorded?.command, process.execPath);
-    assert.equal(recorded?.args.at(-1), "/app/ControlDaemon.js");
-    assert.equal(recorded?.options.detached, true);
-    assert.equal(recorded?.options.stdio, "ignore");
-    assert.equal(recorded?.options.env?.HOME, "/home/tester");
-    assert.equal(recorded?.options.env?.XDG_RUNTIME_DIR, "/run/tester");
-    assert.equal(recorded?.options.env?.PORTABLE_DEVSHELL_TEST, "yes");
-    assert.equal(recorded?.options.env?.NODE_TEST_CONTEXT, undefined);
-    assert.equal(unrefCount, 1);
-
-    const bootstrap = recorded?.args.slice(0, -1) ?? [];
-    assert.equal(bootstrap.includes("--experimental-transform-types"), process.execArgv.includes("--experimental-transform-types"));
-    for (const argument of bootstrap) {
-        assert.match(argument, /^(--experimental-transform-types|--import|--loader)(=|$)|^\.\/?|^file:|^[A-Za-z@][A-Za-z0-9@/._+-]*$/u);
+        const bootstrap = recorded?.args.slice(0, -1) ?? [];
+        assert.equal(bootstrap.includes("--experimental-transform-types"), process.execArgv.includes("--experimental-transform-types"));
+        for (const argument of bootstrap) {
+            assert.match(argument, /^(--experimental-transform-types|--import|--loader)(=|$)|^\.\/?|^file:|^[A-Za-z@][A-Za-z0-9@/._+-]*$/u);
+        }
+    } finally {
+        await rm(root, { force: true, recursive: true });
     }
 });
 
@@ -171,10 +180,11 @@ test("control lifecycle start is idempotent and stop tolerates the shutdown sock
     assert.deepEqual(socketActions, ["remove", "ensure", "remove"]);
 });
 
-test("control lifecycle start failure includes the latest daemon log tail", async () => {
+test("control lifecycle start failure includes only this startup attempt", async () => {
     const root = await createTestTempDirectory("shared-start-failure");
     const pidPath = resolve(root, "control.pid");
     const socketPath = resolve(root, "control.sock");
+    const startupLogPath = resolve(root, "control.startup.log");
     await mkdir(dirname(pidPath), { recursive: true });
 
     try {
@@ -185,7 +195,7 @@ test("control lifecycle start failure includes the latest daemon log tail", asyn
                 async error() {},
                 async info() {},
                 async readAll() {
-                    return "first\nlast diagnostic\n";
+                    return "stale historical diagnostic\n";
                 }
             },
             pidFile: {
@@ -208,15 +218,24 @@ test("control lifecycle start failure includes the latest daemon log tail", asyn
                 async remove() {}
             },
             processIsRunning: () => true,
-            spawnFunction() {
+            spawnFunction(_command, _args, options) {
+                const stdio = options.stdio as [unknown, number, number];
+                writeSync(stdio[1], "current attempt failed before ready\n");
                 return Object.assign(new EventEmitter(), { pid: 999_999_999, unref() {} }) as never;
             },
+            startupLogPath,
             waitTimeoutMs: 100
         });
 
         await assert.rejects(
             lifecycle.start(),
-            /control server did not become ready[\s\S]*control log:[\s\S]*last diagnostic/u
+            (error: unknown) => {
+                assert.match(String(error), /control server did not become ready/u);
+                assert.match(String(error), /control startup log/u);
+                assert.match(String(error), /current attempt failed before ready/u);
+                assert.doesNotMatch(String(error), /stale historical diagnostic/u);
+                return true;
+            }
         );
     } finally {
         await rm(root, { force: true, recursive: true });

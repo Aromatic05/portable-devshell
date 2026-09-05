@@ -238,6 +238,70 @@ test("AuditDatabase upgrades v1 SQLite rows without rewriting historical log pay
     }
 });
 
+test("AuditDatabase defers payload accounting for an existing database until explicit maintenance", async () => {
+    const root = await createTestTempDirectory("sqlite-deferred-accounting");
+    const databaseFile = join(root, "audit.sqlite3");
+    const instanceName = asInstanceName("sqlite-deferred-accounting");
+    const legacy: InstanceLogEntry = {
+        at: "2026-09-01T11:00:00.000Z",
+        instanceName,
+        message: "existing history",
+        seq: 1,
+        stream: "stdout"
+    };
+
+    try {
+        createV1AuditDatabase(databaseFile, legacy);
+        const database = new AuditDatabase(databaseFile, {
+            maxBytes: 16 * MIB,
+            now: () => Date.parse("2026-09-01T12:00:00.000Z"),
+            retentionDays: 30
+        });
+        const store = database.store<InstanceLogEntry>("logs", {
+            sequence: (record) => record.seq,
+            timestamp: (record) => record.at
+        });
+
+        assert.deepEqual(await store.readAll(), [legacy]);
+        assert.equal(readAuditMetadataValue(databaseFile, "payloadBytes:v1"), undefined);
+
+        const stats = database.stats();
+        assert.equal(stats.payloadBytes > 0, true);
+        assert.equal(readAuditMetadataValue(databaseFile, "payloadBytes:v1"), String(stats.payloadBytes));
+        database.close();
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("AuditDatabase append does not run retention or file maintenance on the request path", async () => {
+    const root = await createTestTempDirectory("sqlite-deferred-maintenance");
+    const databaseFile = join(root, "audit.sqlite3");
+    const now = Date.parse("2026-09-01T12:00:00.000Z");
+
+    try {
+        const database = new AuditDatabase(databaseFile, {
+            maxBytes: 16 * MIB,
+            now: () => now,
+            retentionDays: 7
+        });
+        const store = database.store<{ at: string; value: string }>("logs", {
+            timestamp: (record) => record.at
+        });
+
+        await store.append({ at: "2026-08-01T00:00:00.000Z", value: "expired" });
+        await store.append({ at: "2026-09-01T12:00:00.000Z", value: "current" });
+        assert.equal(readAuditRecordCount(databaseFile), 2);
+        assert.deepEqual((await store.readAll()).map((record) => record.value), ["current"]);
+
+        database.cleanup();
+        assert.equal(readAuditRecordCount(databaseFile), 1);
+        database.close();
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test("AuditToolCallHistory uses bounded storage reads for unfiltered limited history", async () => {
     const instanceName = asInstanceName("bounded-history");
     const record = {
@@ -856,6 +920,32 @@ function readStoredAuditRow(filePath: string): { bodyCodec: string | null; paylo
         return database.prepare(
             "SELECT payload, body_codec AS bodyCodec FROM audit_records WHERE collection = 'logs' ORDER BY id DESC LIMIT 1"
         ).get() as { bodyCodec: string | null; payload: string };
+    } finally {
+        database.close();
+    }
+}
+
+function readAuditMetadataValue(filePath: string, key: string): string | undefined {
+    const require = createRequire(import.meta.url);
+    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const database = new DatabaseSync(filePath);
+    try {
+        const row = database.prepare("SELECT value FROM audit_metadata WHERE key = ?").get(key) as
+            | { value: string }
+            | undefined;
+        return row?.value;
+    } finally {
+        database.close();
+    }
+}
+
+function readAuditRecordCount(filePath: string): number {
+    const require = createRequire(import.meta.url);
+    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const database = new DatabaseSync(filePath);
+    try {
+        const row = database.prepare("SELECT COUNT(*) AS count FROM audit_records").get() as { count: number };
+        return row.count;
     } finally {
         database.close();
     }

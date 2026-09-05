@@ -45,6 +45,7 @@ const IDENTITY_BODY_CODEC = "identity";
 const LOG_BODY_COMPRESSION_THRESHOLD_BYTES = 8 * 1024;
 const LOG_BODY_COMPRESSION_SAMPLE_BYTES = 32 * 1024;
 const LOG_BODY_SAMPLE_MAX_RATIO = 0.7;
+const PAYLOAD_BYTES_METADATA_KEY = "payloadBytes:v1";
 const ROUTINE_INCREMENTAL_VACUUM_PAGES = 64;
 const SCHEMA_VERSION = 2;
 const WAL_AUTOCHECKPOINT_PAGES = 1_000;
@@ -65,7 +66,7 @@ export class AuditDatabase {
     readonly #now: () => number;
     readonly #retentionMs: number;
     #closed = false;
-    #payloadBytes = 0;
+    #payloadBytes?: number;
 
     constructor(filePath: string, options: AuditDatabaseOptions) {
         validateOptions(options);
@@ -100,10 +101,11 @@ export class AuditDatabase {
 
     cleanup(): void {
         this.#assertOpen();
+        this.#ensurePayloadBytes();
         const cutoff = this.#now() - this.#retentionMs;
         const expired = this.#database.prepare("DELETE FROM audit_records WHERE occurred_at_ms < ?").run(cutoff);
         if (expired.changes > 0) {
-            this.#payloadBytes = this.#readPayloadBytes();
+            this.#setPayloadBytes(this.#readPayloadBytes());
         }
         this.#evictForPayloadLimit();
         this.#compact();
@@ -118,7 +120,7 @@ export class AuditDatabase {
             .get() as { recordCount: number };
         return {
             fileBytes: this.#fileBytes(),
-            payloadBytes: this.#payloadBytes,
+            payloadBytes: this.#payloadBytes ?? 0,
             recordCount: row.recordCount
         };
     }
@@ -130,7 +132,7 @@ export class AuditDatabase {
     ): void {
         this.#assertOpen();
         this.#insertRecord(collection, record, options);
-        this.cleanup();
+        this.#evictForPayloadLimit();
     }
 
     readRecords<TRecord>(collection: AuditRecordCollection): TRecord[] {
@@ -327,7 +329,7 @@ export class AuditDatabase {
                 }
             }
         }
-        this.cleanup();
+        this.#evictForPayloadLimit();
     }
 
     #initializeSchema(): void {
@@ -384,7 +386,9 @@ export class AuditDatabase {
         this.#database
             .prepare("INSERT INTO audit_records(collection, occurred_at_ms, payload_bytes, payload, body, body_codec) VALUES (?, ?, ?, ?, ?, ?)")
             .run(collection, occurredAtMs, stored.payloadBytes, stored.payload, stored.body, stored.bodyCodec);
-        this.#payloadBytes += stored.payloadBytes;
+        if (this.#payloadBytes !== undefined) {
+            this.#setPayloadBytes(this.#payloadBytes + stored.payloadBytes);
+        }
 
         const sequence = options.sequence?.(record);
         if (sequence !== undefined) {
@@ -430,6 +434,19 @@ export class AuditDatabase {
         return row.payloadBytes;
     }
 
+    #ensurePayloadBytes(): number {
+        const current = this.#payloadBytes;
+        if (current !== undefined) return current;
+        const rebuilt = this.#readPayloadBytes();
+        this.#setPayloadBytes(rebuilt);
+        return rebuilt;
+    }
+
+    #setPayloadBytes(value: number): void {
+        this.#payloadBytes = value;
+        this.#writeMetadata(PAYLOAD_BYTES_METADATA_KEY, String(value));
+    }
+
     #readToolCallId(callId: string): number | undefined {
         const row = this.#database.prepare(
             "SELECT id FROM audit_records WHERE collection = 'toolCalls' AND occurred_at_ms >= ? AND json_extract(payload, '$.callId') = ? ORDER BY id DESC LIMIT 1"
@@ -447,11 +464,12 @@ export class AuditDatabase {
 
     #evictForPayloadLimit(): void {
         let payloadBytes = this.#payloadBytes;
+        if (payloadBytes === undefined) return;
         if (payloadBytes <= this.#maxBytes) {
             return;
         }
         const rows = this.#database
-            .prepare("SELECT id, payload_bytes AS payloadBytes FROM audit_records ORDER BY id ASC")
+            .prepare("SELECT id, payload_bytes AS payloadBytes FROM audit_records ORDER BY id ASC LIMIT 256")
             .all() as Array<{ id: number; payloadBytes: number }>;
         let cutoffId: number | undefined;
         for (const row of rows) {
@@ -463,7 +481,7 @@ export class AuditDatabase {
         }
         if (cutoffId !== undefined) {
             this.#database.prepare("DELETE FROM audit_records WHERE id <= ?").run(cutoffId);
-            this.#payloadBytes = payloadBytes;
+            this.#setPayloadBytes(payloadBytes);
         }
     }
 
@@ -497,10 +515,9 @@ export class AuditDatabase {
                 if (evictedPayloadBytes >= bytesToFree) break;
             }
             this.#database.prepare("DELETE FROM audit_records WHERE id <= ?").run(cutoffId);
-            this.#payloadBytes = Math.max(
-                0,
-                this.#payloadBytes - evictedPayloadBytes,
-            );
+            if (this.#payloadBytes !== undefined) {
+                this.#setPayloadBytes(Math.max(0, this.#payloadBytes - evictedPayloadBytes));
+            }
             this.#compact(true);
             this.#checkpointWal(true);
             const fileBytes = this.#fileBytes();
@@ -551,7 +568,13 @@ export class AuditDatabase {
         this.#databaseHandle = database;
         try {
             this.#initializeSchema();
-            this.#payloadBytes = this.#readPayloadBytes();
+            const storedPayloadBytes = this.#readMetadata(PAYLOAD_BYTES_METADATA_KEY);
+            if (storedPayloadBytes !== undefined && /^\d+$/u.test(storedPayloadBytes)) {
+                this.#payloadBytes = Number(storedPayloadBytes);
+            } else {
+                const hasRecords = this.#database.prepare("SELECT 1 AS present FROM audit_records LIMIT 1").get() !== undefined;
+                if (!hasRecords) this.#setPayloadBytes(0);
+            }
             return database;
         } catch (error) {
             this.#databaseHandle = undefined;

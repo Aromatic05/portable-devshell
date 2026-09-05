@@ -13,12 +13,14 @@ export interface ControlServerOptions {
     instanceRegistryBuilder?: InstanceRegistryFactory;
     mcpWiringService?: McpRuntimeFactory;
     runtimeFactory?: ControlRuntimeFactory;
+    startupDiagnostic?: (message: string) => void;
     xdgRuntimeDir?: string;
 }
 
 export class ControlServer {
     readonly #runtimeFactory: ControlRuntimeFactory;
     readonly #socketFile: ControlSocketFile;
+    readonly #startupDiagnostic: (message: string) => void;
     readonly #state: ControlRuntimeState;
     #operationTail: Promise<void> = Promise.resolve();
     #runtime?: ControlRuntime;
@@ -33,6 +35,7 @@ export class ControlServer {
             mcpFactory: options.mcpWiringService
         });
         this.#socketFile = new ControlSocketFile(options.xdgRuntimeDir);
+        this.#startupDiagnostic = options.startupDiagnostic ?? (() => undefined);
     }
 
     get socketPath(): string {
@@ -60,8 +63,13 @@ export class ControlServer {
 
     async #start(): Promise<void> {
         if (this.#runtime !== undefined) return;
+        this.#startupDiagnostic("control state load started");
         await this.#state.load();
+        this.#startupDiagnostic("control state load completed");
+        this.#startupDiagnostic("control runtime directory initialization started");
         await this.#socketFile.ensureRuntimeDir();
+        this.#startupDiagnostic("control runtime directory initialization completed");
+        this.#startupDiagnostic("control runtime composition started");
         const runtime = await this.#runtimeFactory.create({
             restart: async () => {
                 await this.restart();
@@ -72,9 +80,12 @@ export class ControlServer {
             socketPath: this.#socketFile.path,
             state: this.#state
         });
+        this.#startupDiagnostic("control runtime composition completed");
         try {
+            this.#startupDiagnostic("control runtime start started");
             await runtime.start();
             this.#runtime = runtime;
+            this.#startupDiagnostic("control runtime start completed");
         } catch (error) {
             this.#state.reset();
             throw error;

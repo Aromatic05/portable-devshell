@@ -30,6 +30,7 @@ export class ControlDaemon {
         this.#pidFile = options.pidFile ?? new ControlPidFile(options.homeDirectory);
         this.#server = options.server ?? new ControlServer({
             homeDirectory: options.homeDirectory,
+            startupDiagnostic: writeStartupDiagnostic,
             xdgRuntimeDir: options.xdgRuntimeDir
         });
         this.#socketFile = options.socketFile ?? new ControlSocketFile(options.xdgRuntimeDir);
@@ -41,12 +42,16 @@ export class ControlDaemon {
 
     async #start(): Promise<void> {
         if (this.#started) return;
+        writeStartupDiagnostic("control daemon start started");
         await this.#socketFile.ensureRuntimeDir();
+        writeStartupDiagnostic("control daemon runtime directory ready");
         await this.#server.start();
+        writeStartupDiagnostic("control server ready");
         this.#started = true;
         try {
             await this.#pidFile.write();
             await this.#logger.info("control server started");
+            writeStartupDiagnostic("control daemon start completed");
         } catch (error) {
             await this.#server.stop().catch(() => undefined);
             this.#started = false;
@@ -121,4 +126,8 @@ function renderStartupFailure(error: unknown): string {
         return `control server failed to start\n${error.stack}`;
     }
     return `control server failed to start\n${String(error)}`;
+}
+
+function writeStartupDiagnostic(message: string): void {
+    process.stderr.write(`[${new Date().toISOString()}] STARTUP ${message}\n`);
 }
