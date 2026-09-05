@@ -4,8 +4,13 @@ import { dirname } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { constants as zlibConstants, zstdCompressSync, zstdDecompressSync } from "node:zlib";
 
-import type { ToolCallQuery, ToolCallRecord } from "@portable-devshell/shared";
+import type { ApprovalRequest, ToolCallQuery, ToolCallRecord } from "@portable-devshell/shared";
 
+import {
+    startAuditPayloadBackfill,
+    startAuditWalCheckpoint,
+    type AuditBackgroundTask
+} from "./AuditBackgroundWorker.js";
 import type { AuditRecordStore } from "./AuditRecordStore.js";
 import { minimumAuditStorageBytes } from "./AuditStorageLimits.js";
 
@@ -40,6 +45,10 @@ export interface AuditToolCallRecordStore extends AuditRecordStore<ToolCallRecor
     readQuery(query: ToolCallQuery): Promise<ToolCallRecord[]>;
 }
 
+export interface AuditApprovalRecordStore extends AuditRecordStore<ApprovalRequest> {
+    readLatest(approvalId?: string): Promise<ApprovalRequest[]>;
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const IDENTITY_BODY_CODEC = "identity";
 const LOG_BODY_COMPRESSION_THRESHOLD_BYTES = 8 * 1024;
@@ -48,7 +57,9 @@ const LOG_BODY_SAMPLE_MAX_RATIO = 0.7;
 const PAYLOAD_BYTES_METADATA_KEY = "payloadBytes:v1";
 const ROUTINE_INCREMENTAL_VACUUM_PAGES = 64;
 const SCHEMA_VERSION = 2;
-const WAL_AUTOCHECKPOINT_PAGES = 1_000;
+const WAL_AUTOCHECKPOINT_PAGES = 0;
+const WAL_CHECKPOINT_THRESHOLD_BYTES = 4 * 1024 * 1024;
+const WAL_MINIMUM_WRITE_BYTES = 16 * 1024;
 const WAL_JOURNAL_SIZE_LIMIT_BYTES = 1024 * 1024;
 const ZSTD_BODY_CODEC = "zstd";
 const ZSTD_COMPRESSION_LEVEL = 1;
@@ -66,7 +77,12 @@ export class AuditDatabase {
     readonly #now: () => number;
     readonly #retentionMs: number;
     #closed = false;
+    #payloadBackfill?: AuditBackgroundTask;
+    #payloadBackfillBytes = 0;
+    #payloadBackfillGeneration = 0;
     #payloadBytes?: number;
+    #walCheckpoint?: AuditBackgroundTask;
+    #walPendingBytes = 0;
 
     constructor(filePath: string, options: AuditDatabaseOptions) {
         validateOptions(options);
@@ -81,6 +97,11 @@ export class AuditDatabase {
         return new AuditRecordStoreSqlite(this, collection, options);
     }
 
+    approvalStore(options: AuditStoreOptions<ApprovalRequest>): AuditApprovalRecordStore {
+        this.#assertOpen();
+        return new AuditApprovalRecordStoreSqlite(this, options);
+    }
+
     toolCallStore(options: AuditStoreOptions<ToolCallRecord>): AuditToolCallRecordStore {
         this.#assertOpen();
         return new AuditToolCallRecordStoreSqlite(this, options);
@@ -91,6 +112,8 @@ export class AuditDatabase {
             return;
         }
         this.#closed = true;
+        this.#cancelPayloadBackfill();
+        this.#cancelWalCheckpoint();
         const database = this.#databaseHandle;
         if (database !== undefined) {
             this.#checkpointWal(true, database);
@@ -101,6 +124,7 @@ export class AuditDatabase {
 
     cleanup(): void {
         this.#assertOpen();
+        this.#cancelWalCheckpoint();
         this.#ensurePayloadBytes();
         const cutoff = this.#now() - this.#retentionMs;
         const expired = this.#database.prepare("DELETE FROM audit_records WHERE occurred_at_ms < ?").run(cutoff);
@@ -131,9 +155,10 @@ export class AuditDatabase {
         options: AuditStoreOptions<TRecord>
     ): void {
         this.#assertOpen();
-        this.#ensurePayloadBytes();
+        this.#startPayloadBackfill();
         this.#insertRecord(collection, record, options);
         this.#evictForPayloadLimit();
+        this.#scheduleWalCheckpoint();
     }
 
     readRecords<TRecord>(collection: AuditRecordCollection): TRecord[] {
@@ -273,6 +298,30 @@ export class AuditDatabase {
         return records;
     }
 
+    readLatestApprovalRecords(approvalId?: string): ApprovalRequest[] {
+        this.#assertOpen();
+        const approvalFilter = approvalId === undefined
+            ? ""
+            : " AND json_extract(payload, '$.approvalId') = ?";
+        const parameters: Array<number | string> = [this.#retentionCutoff()];
+        if (approvalId !== undefined) parameters.push(approvalId);
+        const rows = this.#database.prepare(`
+            WITH latest AS (
+                SELECT MAX(id) AS id
+                FROM audit_records
+                WHERE collection = 'approvals' AND occurred_at_ms >= ?${approvalFilter}
+                GROUP BY json_extract(payload, '$.approvalId')
+            )
+            SELECT record.payload, record.body, record.body_codec AS bodyCodec
+            FROM audit_records AS record
+            INNER JOIN latest ON latest.id = record.id
+            ORDER BY record.id ASC
+        `).all(...parameters) as unknown as AuditStoredRow[];
+        return rows
+            .map((row) => decodeStoredRecord<ApprovalRequest>("approvals", row))
+            .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    }
+
     hasToolCallRecord(callId: string): boolean {
         this.#assertOpen();
         return this.#readToolCallId(callId) !== undefined;
@@ -402,7 +451,10 @@ export class AuditDatabase {
             .run(collection, occurredAtMs, stored.payloadBytes, stored.payload, stored.body, stored.bodyCodec);
         if (this.#payloadBytes !== undefined) {
             this.#setPayloadBytes(this.#payloadBytes + stored.payloadBytes);
+        } else if (this.#payloadBackfill !== undefined) {
+            this.#payloadBackfillBytes += stored.payloadBytes;
         }
+        this.#walPendingBytes += Math.max(stored.payloadBytes, WAL_MINIMUM_WRITE_BYTES);
 
         const sequence = options.sequence?.(record);
         if (sequence !== undefined) {
@@ -451,9 +503,94 @@ export class AuditDatabase {
     #ensurePayloadBytes(): number {
         const current = this.#payloadBytes;
         if (current !== undefined) return current;
+        this.#cancelPayloadBackfill();
         const rebuilt = this.#readPayloadBytes();
         this.#setPayloadBytes(rebuilt);
         return rebuilt;
+    }
+
+    #startPayloadBackfill(): void {
+        if (this.#payloadBytes !== undefined || this.#payloadBackfill !== undefined) return;
+        const highWaterRow = this.#database
+            .prepare("SELECT id FROM audit_records ORDER BY id DESC LIMIT 1")
+            .get() as { id: number } | undefined;
+        const highWater = highWaterRow?.id ?? 0;
+        const generation = ++this.#payloadBackfillGeneration;
+        this.#payloadBackfillBytes = 0;
+        try {
+            this.#payloadBackfill = startAuditPayloadBackfill(
+                this.#filePath,
+                highWater,
+                (historicalBytes) => {
+                    if (this.#closed || generation !== this.#payloadBackfillGeneration) return;
+                    const payloadBytes = historicalBytes + this.#payloadBackfillBytes;
+                    this.#payloadBackfill = undefined;
+                    this.#payloadBackfillBytes = 0;
+                    this.#setPayloadBytes(payloadBytes);
+                    this.#evictForPayloadLimit();
+                    this.#scheduleWalCheckpoint();
+                },
+                () => {
+                    if (generation !== this.#payloadBackfillGeneration) return;
+                    this.#payloadBackfill = undefined;
+                    this.#payloadBackfillBytes = 0;
+                    this.#scheduleWalCheckpoint();
+                }
+            );
+        } catch {
+            this.#payloadBackfill = undefined;
+            this.#payloadBackfillBytes = 0;
+        }
+    }
+
+    #cancelPayloadBackfill(): void {
+        const backfill = this.#payloadBackfill;
+        if (backfill === undefined) return;
+        this.#payloadBackfillGeneration += 1;
+        this.#payloadBackfill = undefined;
+        this.#payloadBackfillBytes = 0;
+        backfill.cancel();
+    }
+
+    #scheduleWalCheckpoint(): void {
+        if (
+            this.#closed
+            || this.#payloadBackfill !== undefined
+            || this.#walCheckpoint !== undefined
+            || this.#walPendingBytes <= WAL_CHECKPOINT_THRESHOLD_BYTES
+        ) {
+            return;
+        }
+        const checkpointBytes = this.#walPendingBytes;
+        this.#walPendingBytes = 0;
+        let checkpoint: AuditBackgroundTask | undefined;
+        const completed = (checkpointComplete: boolean): void => {
+            if (this.#walCheckpoint !== checkpoint) return;
+            this.#walCheckpoint = undefined;
+            if (!checkpointComplete) this.#walPendingBytes += checkpointBytes;
+            if (checkpointComplete && this.#walPendingBytes > WAL_CHECKPOINT_THRESHOLD_BYTES) {
+                this.#scheduleWalCheckpoint();
+            }
+        };
+        const failed = (): void => {
+            if (this.#walCheckpoint !== checkpoint) return;
+            this.#walCheckpoint = undefined;
+            this.#walPendingBytes += checkpointBytes;
+        };
+        try {
+            checkpoint = startAuditWalCheckpoint(this.#filePath, completed, failed);
+            this.#walCheckpoint = checkpoint;
+        } catch {
+            this.#walPendingBytes += checkpointBytes;
+            this.#walCheckpoint = undefined;
+        }
+    }
+
+    #cancelWalCheckpoint(): void {
+        const checkpoint = this.#walCheckpoint;
+        if (checkpoint === undefined) return;
+        this.#walCheckpoint = undefined;
+        checkpoint.cancel();
     }
 
     #setPayloadBytes(value: number): void {
@@ -553,6 +690,7 @@ export class AuditDatabase {
 
     #checkpointWal(truncate: boolean, database: DatabaseSync = this.#database): void {
         database.exec(`PRAGMA wal_checkpoint(${truncate ? "TRUNCATE" : "PASSIVE"})`);
+        if (database === this.#databaseHandle) this.#walPendingBytes = 0;
     }
 
     #readMetadata(key: string): string | undefined {
@@ -589,6 +727,7 @@ export class AuditDatabase {
                 const hasRecords = this.#database.prepare("SELECT 1 AS present FROM audit_records LIMIT 1").get() !== undefined;
                 if (!hasRecords) this.#setPayloadBytes(0);
             }
+            this.#walPendingBytes = fileSize(`${this.#filePath}-wal`);
             return database;
         } catch (error) {
             this.#databaseHandle = undefined;
@@ -702,6 +841,43 @@ class AuditToolCallRecordStoreSqlite implements AuditToolCallRecordStore {
     #ensureMigrated(): void {
         if (this.#migrated) return;
         this.#database.migrateLegacy("toolCalls", this.#options);
+        this.#migrated = true;
+    }
+}
+
+class AuditApprovalRecordStoreSqlite implements AuditApprovalRecordStore {
+    readonly #database: AuditDatabase;
+    readonly #options: AuditStoreOptions<ApprovalRequest>;
+    #migrated = false;
+
+    constructor(database: AuditDatabase, options: AuditStoreOptions<ApprovalRequest>) {
+        this.#database = database;
+        this.#options = options;
+    }
+
+    async append(record: ApprovalRequest): Promise<void> {
+        this.#ensureMigrated();
+        this.#database.appendRecord("approvals", record, this.#options);
+    }
+
+    async readAll(): Promise<ApprovalRequest[]> {
+        this.#ensureMigrated();
+        return this.#database.readRecords<ApprovalRequest>("approvals");
+    }
+
+    async readLatest(approvalId?: string): Promise<ApprovalRequest[]> {
+        this.#ensureMigrated();
+        return this.#database.readLatestApprovalRecords(approvalId);
+    }
+
+    async readTail(limit: number): Promise<ApprovalRequest[]> {
+        this.#ensureMigrated();
+        return this.#database.readTailRecords<ApprovalRequest>("approvals", limit);
+    }
+
+    #ensureMigrated(): void {
+        if (this.#migrated) return;
+        this.#database.migrateLegacy("approvals", this.#options);
         this.#migrated = true;
     }
 }

@@ -4,8 +4,15 @@ import { access, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import test from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
 
-import { errorCodes, asInstanceName, type InstanceEvent, type ToolCallRecord } from "@portable-devshell/shared";
+import {
+    errorCodes,
+    asInstanceName,
+    type ApprovalRequest,
+    type InstanceEvent,
+    type ToolCallRecord
+} from "@portable-devshell/shared";
 import {
     InstanceEventBuffer,
     LogStoreInstance,
@@ -238,7 +245,7 @@ test("AuditDatabase upgrades v1 SQLite rows without rewriting historical log pay
     }
 });
 
-test("AuditDatabase defers existing payload accounting until the first write", async () => {
+test("AuditDatabase backfills existing payload accounting off the first-write path", async () => {
     const root = await createTestTempDirectory("sqlite-deferred-accounting");
     const databaseFile = join(root, "audit.sqlite3");
     const instanceName = asInstanceName("sqlite-deferred-accounting");
@@ -271,7 +278,7 @@ test("AuditDatabase defers existing payload accounting until the first write", a
             message: "new history",
             seq: 2
         });
-        const accounted = Number(readAuditMetadataValue(databaseFile, "payloadBytes:v1"));
+        const accounted = Number(await waitForAuditMetadata(databaseFile, "payloadBytes:v1"));
         assert.equal(Number.isSafeInteger(accounted) && accounted > 0, true);
 
         const stats = database.stats();
@@ -305,6 +312,60 @@ test("AuditDatabase append does not run retention or file maintenance on the req
 
         database.cleanup();
         assert.equal(readAuditRecordCount(databaseFile), 1);
+        database.close();
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("AuditDatabase approval store reads only the latest state for each approval", async () => {
+    const root = await createTestTempDirectory("sqlite-latest-approvals");
+    const instance = asInstanceName("sqlite-latest-approvals");
+
+    try {
+        const database = new AuditDatabase(join(root, "audit.sqlite3"), {
+            maxBytes: 16 * MIB,
+            retentionDays: 30
+        });
+        const store = database.approvalStore({
+            timestamp: (record) => record.decision?.decidedAt ?? record.createdAt
+        });
+        const first: ApprovalRequest = {
+            approvalId: "approval-1",
+            callId: "call-1",
+            createdAt: "2026-09-01T12:00:00.000Z",
+            expiresAt: "2026-09-01T12:05:00.000Z",
+            inputSummary: "{}",
+            instance,
+            reason: "test",
+            riskLevel: "medium",
+            source: "cli",
+            status: "pending",
+            toolName: "bash_run"
+        };
+        const second: ApprovalRequest = {
+            ...first,
+            approvalId: "approval-2",
+            callId: "call-2",
+            createdAt: "2026-09-01T12:00:05.000Z"
+        };
+        const approved: ApprovalRequest = {
+            ...first,
+            decision: {
+                approvalId: first.approvalId,
+                decidedAt: "2026-09-01T12:00:10.000Z",
+                decidedBy: "cli",
+                decision: "approve"
+            },
+            status: "approved"
+        };
+
+        await store.append(first);
+        await store.append(second);
+        await store.append(approved);
+
+        assert.deepEqual((await store.readLatest()).map((record) => record.status), ["approved", "pending"]);
+        assert.deepEqual(await store.readLatest(first.approvalId), [approved]);
         database.close();
     } finally {
         await rm(root, { recursive: true, force: true });
@@ -1001,6 +1062,15 @@ function readAuditMetadataValue(filePath: string, key: string): string | undefin
     } finally {
         database.close();
     }
+}
+
+async function waitForAuditMetadata(filePath: string, key: string): Promise<string> {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+        const value = readAuditMetadataValue(filePath, key);
+        if (value !== undefined) return value;
+        await sleep(10);
+    }
+    throw new Error(`Timed out waiting for audit metadata ${key}.`);
 }
 
 function readAuditRecordCount(filePath: string): number {

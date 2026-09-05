@@ -2,10 +2,14 @@ import type { ApprovalRequest } from "@portable-devshell/shared";
 
 import type { AuditRecordStore } from "../audit/AuditRecordStore.js";
 
-export class ApprovalStore {
-    readonly #store: AuditRecordStore<ApprovalRequest>;
+interface ApprovalRecordStore extends AuditRecordStore<ApprovalRequest> {
+    readLatest?(approvalId?: string): Promise<ApprovalRequest[]>;
+}
 
-    constructor(store: AuditRecordStore<ApprovalRequest>) {
+export class ApprovalStore {
+    readonly #store: ApprovalRecordStore;
+
+    constructor(store: ApprovalRecordStore) {
         this.#store = store;
     }
 
@@ -14,10 +18,16 @@ export class ApprovalStore {
     }
 
     async get(approvalId: string): Promise<ApprovalRequest | undefined> {
+        if (this.#store.readLatest !== undefined) {
+            return (await this.#store.readLatest(approvalId))[0];
+        }
         return toLatestRequests(await this.#store.readAll()).find((request) => request.approvalId === approvalId);
     }
 
     async list(): Promise<ApprovalRequest[]> {
+        if (this.#store.readLatest !== undefined) {
+            return await this.#store.readLatest();
+        }
         return toLatestRequests(await this.#store.readAll());
     }
 }
