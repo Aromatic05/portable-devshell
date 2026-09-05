@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
@@ -45,7 +46,11 @@ pub struct ArtifactStore {
     leases_dir: PathBuf,
     temp_dir: PathBuf,
     policy: ArtifactPolicy,
-    guard: Mutex<()>,
+    guard: Mutex<ArtifactStoreState>,
+}
+
+struct ArtifactStoreState {
+    lease_index: Option<HashMap<String, HashMap<String, u128>>>,
 }
 
 pub struct ArtifactDraft {
@@ -117,16 +122,12 @@ impl ArtifactStore {
             leases_dir,
             temp_dir,
             policy,
-            guard: Mutex::new(()),
+            guard: Mutex::new(ArtifactStoreState { lease_index: None }),
         });
-        {
-            let _guard = store.lock()?;
-            store.gc_locked(0)?;
-        }
         Ok(store)
     }
 
-    fn lock(&self) -> Result<std::sync::MutexGuard<'_, ()>, ToolError> {
+    fn lock(&self) -> Result<std::sync::MutexGuard<'_, ArtifactStoreState>, ToolError> {
         self.guard
             .lock()
             .map_err(|_| ToolError::new("artifact.storageFailed", "artifact lock poisoned"))
@@ -216,7 +217,7 @@ impl ArtifactStore {
             ));
         }
 
-        let _guard = self.lock()?;
+        let mut state = self.lock()?;
         let metadata = self.load_metadata(handle)?;
         if metadata.expires_at_ms <= now {
             return Err(ToolError::new(
@@ -238,6 +239,12 @@ impl ArtifactStore {
             "metadata-",
             &lease_metadata,
         )?;
+        if let Some(index) = state.lease_index.as_mut() {
+            index
+                .entry(handle.to_string())
+                .or_default()
+                .insert(lease_id.clone(), expires_at_ms);
+        }
 
         Ok(ArtifactLease {
             blake3: metadata.blake3,
@@ -250,9 +257,39 @@ impl ArtifactStore {
 
     pub fn release_lease(&self, lease_id: &str) -> Result<(), ToolError> {
         validate_handle(lease_id)?;
-        let _guard = self.lock()?;
-        storage::remove_file_if_exists(&self.lease_path(lease_id))?;
-        self.gc_locked(0)
+        let mut state = self.lock()?;
+        let lease_path = self.lease_path(lease_id);
+        let handle = fs::read(&lease_path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<ArtifactLeaseMetadata>(&bytes).ok())
+            .filter(|lease| {
+                lease.version == METADATA_VERSION
+                    && lease.lease_id == lease_id
+                    && validate_handle(&lease.handle).is_ok()
+            })
+            .map(|lease| lease.handle);
+        if let Some(handle) = handle {
+            let now = unix_time_millis();
+            self.ensure_lease_index(&mut state, now)?;
+            storage::remove_file_if_exists(&lease_path)?;
+            let index = state.lease_index.as_mut().expect("lease index initialized");
+            let has_active = if let Some(leases) = index.get_mut(&handle) {
+                leases.remove(lease_id);
+                leases.retain(|candidate, expires_at_ms| {
+                    *expires_at_ms > now && self.lease_path(candidate).is_file()
+                });
+                !leases.is_empty()
+            } else {
+                false
+            };
+            if !has_active {
+                index.remove(&handle);
+                self.cleanup_released_handle(&handle, now)?;
+            }
+        } else {
+            storage::remove_file_if_exists(&lease_path)?;
+        }
+        Ok(())
     }
 
     pub fn resolve_lease(&self, lease_id: &str) -> Result<ArtifactLease, ToolError> {
@@ -424,6 +461,47 @@ impl ArtifactStore {
                 continue;
             }
             storage::remove_file_if_exists(&path)?;
+        }
+        Ok(())
+    }
+
+    fn ensure_lease_index(
+        &self,
+        state: &mut ArtifactStoreState,
+        now: u128,
+    ) -> Result<(), ToolError> {
+        if state.lease_index.is_some() {
+            return Ok(());
+        }
+        let mut index = HashMap::<String, HashMap<String, u128>>::new();
+        for lease in self.leases(now)? {
+            index
+                .entry(lease.handle)
+                .or_default()
+                .insert(lease.lease_id, lease.expires_at_ms);
+        }
+        state.lease_index = Some(index);
+        Ok(())
+    }
+
+    fn cleanup_released_handle(&self, handle: &str, now: u128) -> Result<(), ToolError> {
+        let metadata_path = self.metadata_path(handle);
+        let metadata = fs::read(&metadata_path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<ArtifactMetadata>(&bytes).ok());
+        let Some(metadata) = metadata else {
+            let _ = fs::remove_file(&metadata_path);
+            let _ = fs::remove_file(self.data_path(handle));
+            return Ok(());
+        };
+        if metadata.version != METADATA_VERSION || metadata.handle != handle {
+            let _ = fs::remove_file(&metadata_path);
+            let _ = fs::remove_file(self.data_path(handle));
+            return Ok(());
+        }
+        if metadata.expires_at_ms <= now {
+            let _ = fs::remove_file(self.data_path(handle));
+            let _ = fs::remove_file(metadata_path);
         }
         Ok(())
     }
@@ -650,6 +728,68 @@ mod tests {
     }
 
     #[test]
+    fn expired_artifact_survives_until_its_last_lease_is_released() {
+        let (_root, store) = store(ArtifactPolicy {
+            stream_limit_bytes: 32,
+            instance_quota_bytes: 64,
+            ttl: Duration::from_secs(60),
+        });
+        let mut draft = store.begin(ArtifactStream::Stdout).unwrap();
+        draft.write_chunk(b"shared lease").unwrap();
+        let reference = store.persist(draft).unwrap();
+        let first = store
+            .acquire_lease(&reference.handle, unix_time_millis() + 60_000)
+            .unwrap();
+        let second = store
+            .acquire_lease(&reference.handle, unix_time_millis() + 60_000)
+            .unwrap();
+        let mut metadata = store.load_metadata(&reference.handle).unwrap();
+        metadata.expires_at_ms = 0;
+        storage::write_json(
+            &store.root,
+            &store.metadata_path(&reference.handle),
+            "metadata-",
+            &metadata,
+        )
+        .unwrap();
+
+        store.release_lease(&first.lease_id).unwrap();
+        assert!(store.data_path(&reference.handle).is_file());
+        store.release_lease(&second.lease_id).unwrap();
+        assert!(!store.data_path(&reference.handle).exists());
+    }
+
+    #[test]
+    fn lease_release_does_not_run_unrelated_artifact_gc() {
+        let (_root, store) = store(ArtifactPolicy {
+            stream_limit_bytes: 32,
+            instance_quota_bytes: 128,
+            ttl: Duration::from_secs(60),
+        });
+        let mut expired = store.begin(ArtifactStream::Stdout).unwrap();
+        expired.write_chunk(b"expired").unwrap();
+        let expired = store.persist(expired).unwrap();
+        let mut active = store.begin(ArtifactStream::Stdout).unwrap();
+        active.write_chunk(b"active").unwrap();
+        let active = store.persist(active).unwrap();
+        let lease = store
+            .acquire_lease(&active.handle, unix_time_millis() + 60_000)
+            .unwrap();
+        let mut metadata = store.load_metadata(&expired.handle).unwrap();
+        metadata.expires_at_ms = 0;
+        storage::write_json(
+            &store.root,
+            &store.metadata_path(&expired.handle),
+            "metadata-",
+            &metadata,
+        )
+        .unwrap();
+
+        store.release_lease(&lease.lease_id).unwrap();
+        assert!(store.data_path(&expired.handle).is_file());
+    }
+
+    #[test]
     fn read_does_not_run_unrelated_artifact_gc() {
         let (_root, store) = store(ArtifactPolicy {
             stream_limit_bytes: 32,
@@ -690,7 +830,7 @@ mod tests {
     }
 
     #[test]
-    fn startup_gc_removes_orphan_artifact_data_without_touching_unknown_files() {
+    fn startup_defers_artifact_gc_until_the_next_persist() {
         let root = crate::testing::temp_dir();
         let artifacts = root.path().join("artifacts");
         let policy = ArtifactPolicy {
@@ -707,7 +847,13 @@ mod tests {
         fs::write(&orphan_path, b"orphan").unwrap();
         fs::write(&unknown_path, b"keep").unwrap();
 
-        let _store = ArtifactStore::with_policy(artifacts, policy).unwrap();
+        let store = ArtifactStore::with_policy(artifacts, policy).unwrap();
+        assert!(orphan_path.is_file());
+        assert!(unknown_path.is_file());
+
+        let mut next = store.begin(ArtifactStream::Stdout).unwrap();
+        next.write_chunk(b"next").unwrap();
+        store.persist(next).unwrap();
         assert!(!orphan_path.exists());
         assert!(unknown_path.is_file());
     }

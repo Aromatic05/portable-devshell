@@ -127,10 +127,6 @@ impl ArtifactPayloadStore {
             artifacts,
             guard: Mutex::new(()),
         });
-        {
-            let _guard = store.lock()?;
-            store.gc_locked()?;
-        }
         Ok(store)
     }
 
@@ -1198,9 +1194,12 @@ mod tests {
     }
 
     #[test]
-    fn payload_startup_gc_removes_orphan_data_without_touching_unknown_files() {
+    fn payload_startup_defers_gc_until_the_next_open() {
         let root = crate::testing::temp_dir();
         let artifacts = ArtifactStore::new(root.path().join("artifacts")).unwrap();
+        let mut draft = artifacts.begin(ArtifactStream::Stdout).unwrap();
+        draft.write_chunk(b"source").unwrap();
+        let source = artifacts.persist(draft).unwrap();
         let payload_root = root.path().join("payloads");
         let payloads = ArtifactPayloadStore::new(payload_root.clone(), Arc::clone(&artifacts)).unwrap();
         drop(payloads);
@@ -1211,7 +1210,11 @@ mod tests {
         fs::write(&orphan_path, b"orphan").unwrap();
         fs::write(&unknown_path, b"keep").unwrap();
 
-        let _reopened = ArtifactPayloadStore::new(payload_root, artifacts).unwrap();
+        let reopened = ArtifactPayloadStore::new(payload_root, artifacts).unwrap();
+        assert!(orphan_path.is_file());
+        assert!(unknown_path.is_file());
+
+        reopened.open_handle(&source.handle, expires_at_ms()).unwrap();
         assert!(!orphan_path.exists());
         assert!(unknown_path.is_file());
     }
