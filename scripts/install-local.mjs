@@ -11,6 +11,7 @@ import { captureInstalledRuntimeState, restoreInstalledRuntimeState } from "./in
 import {
     activatePiIntegration,
     capturePiIntegration,
+    persistOriginalPiIntegrationSnapshot,
     restorePiIntegration
 } from "./pi-integration.mjs";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
@@ -55,6 +56,7 @@ const backupDirectory = resolve(installRoot, `.backup-${version}-${process.pid}`
 const currentLink = resolve(installRoot, "current");
 const commandLink = resolve(binDirectory, process.platform === "win32" ? "devshell.cmd" : "devshell");
 const piCommand = resolve(binDirectory, process.platform === "win32" ? "pi.cmd" : "pi");
+const piOriginalSnapshot = resolve(installRoot, "pi-integration-original.json");
 const allTargets = [
     { key: "linux-x64", rustTarget: "x86_64-unknown-linux-musl" },
     { key: "linux-arm64", rustTarget: "aarch64-unknown-linux-musl" },
@@ -80,6 +82,10 @@ try {
     beginStep("构建并验证应用");
     runPnpm(["build"]);
     runPnpm(["--filter", "@portable-devshell/cli", "--prod", "deploy", stagingDirectory]);
+    await copyFile(
+        resolve(repoRoot, "scripts", "pi-integration.mjs"),
+        resolve(stagingDirectory, "portable-devshell-pi-integration.mjs")
+    );
     await writePortableApplicationManifest(stagingDirectory, { minimumNodeMajor: 24, version });
     const stagingCli = await assertPackageBinFile(await readPackageBinPath(stagingDirectory, "devshell"));
     if (process.platform !== "win32") await chmod(stagingCli.absolutePath, 0o755);
@@ -135,6 +141,7 @@ try {
         });
         beginStep("验证安装结果");
         await assertInstalledCommandStarts();
+        await persistOriginalPiIntegrationSnapshot(piOriginalSnapshot, previousPiIntegration, process.platform);
     } catch (error) {
         await rm(versionDirectory, { force: true, recursive: true });
         if (await pathExists(backupDirectory)) {

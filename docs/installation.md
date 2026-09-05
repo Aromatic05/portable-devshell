@@ -88,7 +88,7 @@ pnpm install:local
 3. 对预装 worker 校验 SHA-256 并安装到版本化目录；
 4. 只有某个 Release asset 找不到或下载失败时，才尝试在本地构建该 target；
 5. 在切换版本前后分别执行 CLI 启动验证；
-6. 安装应用，并在 Unix 创建 `~/.local/bin/devshell`，在 Windows 创建 `%USERPROFILE%\.local\bin\devshell.cmd`。
+6. 安装应用，并在 Unix 创建 `~/.local/bin/devshell` 和 `~/.local/bin/pi`，在 Windows 创建对应的 `.cmd` 入口；Pi 默认加载 portable-devshell extension 并关闭 Pi 内置工具。
 7. 如果安装前 Control 正在运行，恢复 Control 以及当时由它管理的运行中实例。
 
 当前主机 worker 用于本地实例。其他远程目标由 control 在首次连接时根据探测结果按需取得，不应在每次安装时下载全部平台。
@@ -99,8 +99,11 @@ pnpm install:local
 
 ```text
 ~/.local/bin/devshell
+~/.local/bin/pi
 ~/.local/share/portable-devshell/current/
 ~/.local/share/portable-devshell/versions/<version>/
+~/.local/share/portable-devshell/pi-integration-original.json
+~/.pi/agent/extensions/devshell.js
 ~/.devshell/bin/devshell-worker
 ~/.devshell/bin/devshell-worker-<host-target>
 ~/.devshell/workers/<target>/<sha256>/devshell-worker
@@ -113,8 +116,11 @@ Windows 对应位置：
 
 ```text
 %USERPROFILE%\.local\bin\devshell.cmd
+%USERPROFILE%\.local\bin\pi.cmd
 %LOCALAPPDATA%\portable-devshell\current\
 %LOCALAPPDATA%\portable-devshell\versions\<version>\
+%LOCALAPPDATA%\portable-devshell\pi-integration-original.json
+%USERPROFILE%\.pi\agent\extensions\devshell.js
 %USERPROFILE%\.devshell\bin\devshell-worker.exe
 %USERPROFILE%\.devshell\workers\<target>\<sha256>\devshell-worker.exe
 %USERPROFILE%\.devshell\release-cache\workers\<tag>\<target>\<sha256>\devshell-worker.exe
@@ -153,11 +159,29 @@ Windows 把 `%USERPROFILE%\.local\bin` 加入用户 PATH。
 devshell stop
 ```
 
-再删除程序文件：
+先恢复安装 portable-devshell 前的 Pi 命令和 `devshell.js` extension，再删除程序文件：
 
 ```bash
+node "$HOME/.local/share/portable-devshell/current/portable-devshell-pi-integration.mjs" \
+  deactivate \
+  "$HOME/.local/share/portable-devshell/pi-integration-original.json" \
+  "$HOME/.local/bin" \
+  "$HOME"
 rm -f ~/.local/bin/devshell
 rm -rf ~/.local/share/portable-devshell
+```
+
+首次接管 Pi 时，安装器会把原有 `pi` 入口和同名 `devshell.js` 的文件/软链状态持久化到 `pi-integration-original.json`；升级不会覆盖这份基线。对于没有该基线的旧安装，`deactivate` 只删除能够识别为 portable-devshell 生成的 Pi 文件，不会删除未知的用户文件。
+
+Windows PowerShell：
+
+```powershell
+$root = Join-Path $env:LOCALAPPDATA "portable-devshell"
+$bin = Join-Path $HOME ".local\bin"
+node (Join-Path $root "current\portable-devshell-pi-integration.mjs") deactivate `
+  (Join-Path $root "pi-integration-original.json") $bin $HOME win32
+Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $bin "devshell.cmd")
+Remove-Item -Recurse -Force $root
 ```
 
 `~/.devshell` 包含配置、实例状态、日志和 worker。只有确认不再需要这些数据时才删除。

@@ -13,6 +13,9 @@ import {
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+const MANAGED_PI_LAUNCHER_MARKER = "portable-devshell managed Pi launcher";
+const MANAGED_PI_EXTENSION_MARKER = "portable-devshell managed Pi extension loader";
+
 export function resolvePiIntegrationPaths({ binDirectory, home, platform = process.platform }) {
     const command = resolve(binDirectory, platform === "win32" ? "pi.cmd" : "pi");
     const launcher = platform === "win32"
@@ -67,6 +70,19 @@ export async function activatePiIntegration(options) {
     const piUrl = pathToFileURL(targets.piTarget).href;
     const launcher = [
         "#!/usr/bin/env node",
+        `// ${MANAGED_PI_LAUNCHER_MARKER}`,
+        'import { createHash } from "node:crypto";',
+        'import { mkdirSync } from "node:fs";',
+        'import { homedir } from "node:os";',
+        'import { resolve } from "node:path";',
+        "const projectWorkspace = process.cwd();",
+        "process.env.PORTABLE_DEVSHELL_PI_WORKSPACE = projectWorkspace;",
+        "const targetIdentity = process.env.DEVSHELL_AGENT_TARGET ?? projectWorkspace;",
+        'const devshellHome = process.env.PORTABLE_DEVSHELL_HOME ?? resolve(homedir(), ".devshell");',
+        'const workspaceIdentity = createHash("sha256").update(targetIdentity).digest("hex").slice(0, 16);',
+        'const runtimeWorkspace = resolve(devshellHome, "pi", "workspaces", workspaceIdentity);',
+        "mkdirSync(runtimeWorkspace, { recursive: true });",
+        "process.chdir(runtimeWorkspace);",
         "if (process.env.DEVSHELL_PI_BUILTIN_TOOLS !== \"1\" && !process.argv.includes(\"--no-builtin-tools\") && !process.argv.includes(\"-nbt\")) {",
         "    process.argv.splice(2, 0, \"--no-builtin-tools\");",
         "}",
@@ -77,13 +93,16 @@ export async function activatePiIntegration(options) {
     if (platform !== "win32") await chmod(paths.launcher, 0o755);
 
     if (platform === "win32") {
-        await writeAtomicFile(paths.command, `@echo off\r\nnode "${paths.launcher}" %*\r\n`);
+        await writeAtomicFile(
+            paths.command,
+            `@echo off\r\nREM ${MANAGED_PI_LAUNCHER_MARKER}\r\nnode "${paths.launcher}" %*\r\n`
+        );
     }
 
     const extensionUrl = pathToFileURL(targets.extensionTarget).href;
     await writeAtomicFile(
         paths.extension,
-        `export { default } from ${JSON.stringify(extensionUrl)};\nexport * from ${JSON.stringify(extensionUrl)};\n`
+        `// ${MANAGED_PI_EXTENSION_MARKER}\nexport { default } from ${JSON.stringify(extensionUrl)};\nexport * from ${JSON.stringify(extensionUrl)};\n`
     );
     return { ...paths, ...targets };
 }
@@ -112,8 +131,79 @@ export async function writePiIntegrationSnapshot(snapshotPath, options) {
 }
 
 export async function restorePiIntegrationSnapshot(snapshotPath) {
+    await restorePiIntegration(await readPiIntegrationSnapshot(snapshotPath));
+}
+
+export async function persistOriginalPiIntegrationSnapshot(snapshotPath, snapshot, platform = process.platform) {
+    const original = normalizeOriginalPiIntegration(snapshot, platform);
+    await mkdir(dirname(snapshotPath), { recursive: true });
+    const content = `${JSON.stringify(encodeSnapshot(original), null, 2)}\n`;
+    try {
+        await writeFile(snapshotPath, content, { encoding: "utf8", flag: "wx", mode: 0o600 });
+        return true;
+    } catch (error) {
+        if (error?.code !== "EEXIST") throw error;
+        await readPiIntegrationSnapshot(snapshotPath);
+        return false;
+    }
+}
+
+export async function persistOriginalPiIntegrationSnapshotFile(
+    sourceSnapshotPath,
+    originalSnapshotPath,
+    platform = process.platform
+) {
+    return await persistOriginalPiIntegrationSnapshot(
+        originalSnapshotPath,
+        await readPiIntegrationSnapshot(sourceSnapshotPath),
+        platform
+    );
+}
+
+export async function deactivatePiIntegration(originalSnapshotPath, options) {
+    const platform = options.platform ?? process.platform;
+    const current = await capturePiIntegration({ ...options, platform });
+    try {
+        const original = await readPiIntegrationSnapshot(originalSnapshotPath);
+        await restoreOriginalPathIfManaged(
+            current.paths.command,
+            current.command,
+            original.command,
+            "command",
+            platform
+        );
+        await restoreOriginalPathIfManaged(
+            current.paths.extension,
+            current.extension,
+            original.extension,
+            "extension",
+            platform
+        );
+        if (current.paths.launcher !== current.paths.command) {
+            await restoreOriginalPathIfManaged(
+                current.paths.launcher,
+                current.launcher,
+                original.launcher,
+                "launcher",
+                platform
+            );
+        }
+        return { restoredOriginal: true };
+    } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+    }
+
+    await removeManagedPath(current.paths.command, current.command, "command", platform);
+    await removeManagedPath(current.paths.extension, current.extension, "extension", platform);
+    if (current.paths.launcher !== current.paths.command) {
+        await removeManagedPath(current.paths.launcher, current.launcher, "launcher", platform);
+    }
+    return { restoredOriginal: false };
+}
+
+async function readPiIntegrationSnapshot(snapshotPath) {
     const encoded = JSON.parse(await readFile(snapshotPath, "utf8"));
-    await restorePiIntegration(decodeSnapshot(encoded));
+    return decodeSnapshot(encoded);
 }
 
 async function capturePath(path) {
@@ -141,6 +231,49 @@ async function restorePath(path, snapshot) {
         return;
     }
     await writeFile(path, snapshot.content, { mode: snapshot.mode });
+}
+
+function normalizeOriginalPiIntegration(snapshot, platform) {
+    return {
+        ...snapshot,
+        command: normalizeOriginalPath(snapshot.command, "command", platform),
+        extension: normalizeOriginalPath(snapshot.extension, "extension", platform),
+        ...(snapshot.launcher === undefined
+            ? {}
+            : { launcher: normalizeOriginalPath(snapshot.launcher, "launcher", platform) })
+    };
+}
+
+function normalizeOriginalPath(snapshot, role, platform) {
+    return isManagedPiPath(snapshot, role, platform) ? { kind: "missing" } : snapshot;
+}
+
+async function removeManagedPath(path, snapshot, role, platform) {
+    if (isManagedPiPath(snapshot, role, platform)) await rm(path, { force: true });
+}
+
+async function restoreOriginalPathIfManaged(path, current, original, role, platform) {
+    if (current?.kind !== "missing" && !isManagedPiPath(current, role, platform)) return;
+    await restorePath(path, original);
+}
+
+function isManagedPiPath(snapshot, role, platform) {
+    if (snapshot?.kind !== "file") return false;
+    const content = snapshot.content.toString("utf8");
+    if (role === "extension") {
+        return content.includes(MANAGED_PI_EXTENSION_MARKER)
+            || (content.includes("export { default } from ")
+                && content.includes("export * from ")
+                && content.includes("pi-extension"));
+    }
+    if (role === "command" && platform === "win32") {
+        return content.includes(MANAGED_PI_LAUNCHER_MARKER)
+            || (content.includes(".portable-devshell-pi.mjs") && content.includes("%*"));
+    }
+    return content.includes(MANAGED_PI_LAUNCHER_MARKER)
+        || (content.includes("DEVSHELL_PI_BUILTIN_TOOLS")
+            && content.includes("--no-builtin-tools")
+            && content.includes("pi-coding-agent"));
 }
 
 async function findDependencyPackageRoot(fromFile, packageName) {
@@ -259,7 +392,27 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.a
         const [snapshotPath] = args;
         if (snapshotPath === undefined) throw new Error("usage: pi-integration.mjs restore <snapshot>");
         await restorePiIntegrationSnapshot(snapshotPath);
+    } else if (mode === "persist-original") {
+        const [sourceSnapshotPath, originalSnapshotPath, platform] = args;
+        if (sourceSnapshotPath === undefined || originalSnapshotPath === undefined) {
+            throw new Error("usage: pi-integration.mjs persist-original <source-snapshot> <original-snapshot> [platform]");
+        }
+        await persistOriginalPiIntegrationSnapshotFile(
+            sourceSnapshotPath,
+            originalSnapshotPath,
+            platform ?? process.platform
+        );
+    } else if (mode === "deactivate") {
+        const [originalSnapshotPath, binDirectory, home, platform] = args;
+        if (originalSnapshotPath === undefined || binDirectory === undefined || home === undefined) {
+            throw new Error("usage: pi-integration.mjs deactivate <original-snapshot> <bin-directory> <home> [platform]");
+        }
+        await deactivatePiIntegration(originalSnapshotPath, {
+            binDirectory,
+            home,
+            ...(platform === undefined ? {} : { platform })
+        });
     } else {
-        throw new Error("usage: pi-integration.mjs <snapshot|activate|restore> ...");
+        throw new Error("usage: pi-integration.mjs <snapshot|activate|restore|persist-original|deactivate> ...");
     }
 }

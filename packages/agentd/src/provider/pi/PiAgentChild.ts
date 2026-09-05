@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import {
+    appendDevshellRemoteWorkspacePrompt,
     openDevshellPiWorkspaceBridge,
     type DevshellPiWorkspaceBridge,
     type PiExtensionApiLike
@@ -121,9 +122,9 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
                 devshell.setActiveSkillNames(merged.remoteSkillNames);
                 return { diagnostics: merged.diagnostics, skills: merged.skills };
             },
-            systemPromptOverride: (basePrompt: string | undefined) => appendRemoteWorkspacePrompt(
-                basePrompt,
-                `${input.target.instance}:${input.target.workspace}`
+            systemPromptOverride: (basePrompt: string | undefined) => appendDevshellRemoteWorkspacePrompt(
+                basePrompt ?? "",
+                input.target
             )
         });
         await resourceLoader.reload();
@@ -239,19 +240,6 @@ function requireMessage(message: PiChildAgentCommandMessage): string {
     throw new Error(`${message.command} requires a message.`);
 }
 
-function appendRemoteWorkspacePrompt(basePrompt: string | undefined, remoteWorkspace: string): string {
-    const devshellPrompt = [
-        "portable-devshell execution environment:",
-        `- The real project workspace is ${remoteWorkspace}.`,
-        "- Your local process cwd is only Pi runtime state. It is not the project workspace.",
-        "- Use the provided devshell tools for every project filesystem, shell, process, and artifact operation.",
-        "- Do not attempt to access the project with local Node.js filesystem/process APIs.",
-        "- Tool results come directly from devshell attached to the real project workspace."
-    ].join("\n");
-    return basePrompt === undefined || basePrompt.length === 0
-        ? devshellPrompt
-        : `${basePrompt}\n\n${devshellPrompt}`;
-}
 
 function sendFailure(message: PiParentMessage, error: unknown): void {
     const text = error instanceof Error ? error.message : String(error);

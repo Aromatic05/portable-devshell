@@ -1,8 +1,11 @@
 import { spawn } from "node:child_process";
 
 import {
+    type BeforeAgentStartEvent,
+    type BeforeAgentStartEventResult,
     type InputEvent,
     type InputEventResult,
+    type SessionStartEvent,
     type SessionShutdownEvent
 } from "@earendil-works/pi-coding-agent";
 import {
@@ -34,8 +37,15 @@ import {
     type DevshellPiContextFile,
     type DevshellPiWorkspaceResources
 } from "./workspace-resources.js";
+import { attachStandaloneWorkspaceResources } from "./standalone-resources.js";
 
 export {
+    appendDevshellRemoteWorkspacePrompt,
+    replacePiProjectContext
+} from "./standalone-resources.js";
+
+export {
+    expandDevshellPiPromptTemplate,
     loadDevshellPiWorkspaceContext,
     loadDevshellPiWorkspaceResources,
     transformDevshellPiSkillInput
@@ -47,9 +57,28 @@ export type {
 } from "./workspace-resources.js";
 
 export interface PiExtensionApiLike {
+    on(
+        event: "before_agent_start",
+        handler: (event: BeforeAgentStartEvent) => BeforeAgentStartEventResult | Promise<BeforeAgentStartEventResult | void> | void
+    ): void;
     on(event: "input", handler: (event: InputEvent) => InputEventResult | Promise<InputEventResult | void> | void): void;
+    on(event: "session_start", handler: (event: SessionStartEvent) => Promise<void> | void): void;
     on(event: "session_shutdown", handler: (event: SessionShutdownEvent) => Promise<void> | void): void;
+    getCommands(): Array<{
+        name: string;
+        source: "extension" | "prompt" | "skill";
+        sourceInfo: { scope?: string };
+    }>;
+    registerCommand(name: string, options: {
+        description?: string;
+        handler: (args: string) => Promise<void> | void;
+    }): void;
     registerTool(tool: PiToolLike): void;
+    sendUserMessage(content: string, options?: { expandPromptTemplates?: boolean }): void;
+}
+
+export interface DevshellPiExtensionAttachOptions {
+    standaloneResources?: boolean;
 }
 
 export interface PiToolLike {
@@ -87,7 +116,7 @@ export interface DevshellPiExtensionOptions {
 
 export interface DevshellPiWorkspaceBridge {
     close(): Promise<void>;
-    extension: (pi: PiExtensionApiLike) => Promise<void>;
+    extension: (pi: PiExtensionApiLike, options?: DevshellPiExtensionAttachOptions) => Promise<void>;
     loadContextFiles(): Promise<DevshellPiContextFile[]>;
     loadResources(): Promise<DevshellPiWorkspaceResources>;
     refreshResources(): Promise<DevshellPiWorkspaceResources>;
@@ -106,7 +135,7 @@ export function createDevshellPiExtension(
     return async (pi) => {
         const bridge = await openDevshellPiWorkspaceBridge(options);
         try {
-            await bridge.extension(pi);
+            await bridge.extension(pi, { standaloneResources: true });
             pi.on("session_shutdown", bridge.close);
         } catch (error) {
             await bridge.close();
@@ -170,11 +199,16 @@ export async function openDevshellPiWorkspaceBridge(
     };
     return {
         close,
-        extension: async (pi) => {
+        extension: async (pi, attachOptions = {}) => {
             for (const definition of catalog.tools) {
                 pi.registerTool(toPiTool(definition, session));
             }
             const loaded = await loadResources();
+            if (attachOptions.standaloneResources === true) {
+                attachStandaloneWorkspaceResources(pi, session.record.target, loaded, (names) => {
+                    activeSkillNames = names;
+                });
+            }
             pi.on("input", (event) => {
                 const active = activeSkillNames;
                 return transformDevshellPiSkillInput(
@@ -257,7 +291,10 @@ export function resolveToolSessionOpenInput(
         return typeof configured === "string" ? parseDevshellAgentTarget(configured) : { ...configured };
     }
     return {
-        workspace: options.cwd ?? process.cwd()
+        workspace: options.cwd
+            ?? options.environment?.PORTABLE_DEVSHELL_PI_WORKSPACE
+            ?? process.env.PORTABLE_DEVSHELL_PI_WORKSPACE
+            ?? process.cwd()
     };
 }
 

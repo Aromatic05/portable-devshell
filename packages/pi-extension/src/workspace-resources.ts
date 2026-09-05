@@ -25,6 +25,10 @@ export interface DevshellPiWorkspaceResources {
     skills: DevshellPiWorkspaceSkill[];
 }
 
+export function expandDevshellPiPromptTemplate(prompt: PromptTemplate, argsString: string): string {
+    return substitutePromptArgs(prompt.content, parsePromptArgs(argsString));
+}
+
 type DevshellPiToolCall = (
     toolName: string,
     input: JsonValue,
@@ -107,6 +111,56 @@ export function transformDevshellPiSkillInput(
         "</skill>"
     ].join("\n");
     return { action: "transform", text: args.length === 0 ? block : `${block}\n\n${args}` };
+}
+
+function parsePromptArgs(argsString: string): string[] {
+    const args: string[] = [];
+    let current = "";
+    let quote: "\"" | "'" | undefined;
+    for (const character of argsString) {
+        if (quote !== undefined) {
+            if (character === quote) quote = undefined;
+            else current += character;
+            continue;
+        }
+        if (character === "\"" || character === "'") {
+            quote = character;
+            continue;
+        }
+        if (/\s/u.test(character)) {
+            if (current.length > 0) {
+                args.push(current);
+                current = "";
+            }
+            continue;
+        }
+        current += character;
+    }
+    if (current.length > 0) args.push(current);
+    return args;
+}
+
+function substitutePromptArgs(content: string, args: readonly string[]): string {
+    const allArgs = args.join(" ");
+    return content.replace(
+        /\$\{(\d+|ARGUMENTS|@):-([^}]*)\}|\$\{@:(\d+)(?::(\d+))?\}|\$(ARGUMENTS|@|\d+)/gu,
+        (_match, defaultTarget, defaultValue, sliceStart, sliceLength, simple) => {
+            if (defaultTarget !== undefined) {
+                const value = defaultTarget === "@" || defaultTarget === "ARGUMENTS"
+                    ? allArgs
+                    : args[Number.parseInt(defaultTarget, 10) - 1];
+                return value ? value : defaultValue;
+            }
+            if (sliceStart !== undefined) {
+                const start = Math.max(Number.parseInt(sliceStart, 10) - 1, 0);
+                return sliceLength === undefined
+                    ? args.slice(start).join(" ")
+                    : args.slice(start, start + Number.parseInt(sliceLength, 10)).join(" ");
+            }
+            if (simple === "ARGUMENTS" || simple === "@") return allArgs;
+            return args[Number.parseInt(simple, 10) - 1] ?? "";
+        }
+    );
 }
 
 export async function loadDevshellPiWorkspaceContext(

@@ -500,6 +500,7 @@ current_link="$install_root/current"
 command_link="$bin_directory/devshell"
 pi_command="$bin_directory/pi"
 pi_snapshot="$temporary/pi-integration-snapshot.json"
+pi_original_snapshot="$install_root/pi-integration-original.json"
 worker_bin_directory="$devshell_home/bin"
 worker_backup_directory="$devshell_home/.install-worker-backup-$$"
 application_transaction_active=0
@@ -615,6 +616,11 @@ fi
 step "验证安装结果"
 if ! smoke_cli "$command_link" "安装结果验证失败"; then
     echo "新版本未通过启动验证，正在恢复原安装。" >&2
+    rollback_installation
+    exit 1
+fi
+if ! node "$pi_helper" persist-original "$pi_snapshot" "$pi_original_snapshot"; then
+    echo "无法持久化安装前 Pi 集成状态，正在恢复原安装。" >&2
     rollback_installation
     exit 1
 fi

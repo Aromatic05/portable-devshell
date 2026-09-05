@@ -5,11 +5,14 @@ import type { Component } from "@earendil-works/pi-tui";
 import type { JsonValue } from "@portable-devshell/shared";
 
 import devshellPiExtension, {
+    appendDevshellRemoteWorkspacePrompt,
+    expandDevshellPiPromptTemplate,
     loadDevshellPiWorkspaceContext,
     loadDevshellPiWorkspaceResources,
     parseDevshellAgentTarget,
     piPromptMetadata,
     prepareToolInput,
+    replacePiProjectContext,
     resolveToolSessionOpenInput,
     transformDevshellPiSkillInput
 } from "../../src/index.ts";
@@ -88,6 +91,10 @@ test("Pi devshell extension leaves unique instance selection to Control", () => 
     assert.deepEqual(
         resolveToolSessionOpenInput({ cwd: "/ignored", environment: {}, target: "worker-a:/srv/project" }),
         { instance: "worker-a", workspace: "/srv/project" }
+    );
+    assert.deepEqual(
+        resolveToolSessionOpenInput({ environment: { PORTABLE_DEVSHELL_PI_WORKSPACE: "/repo" } }),
+        { workspace: "/repo" }
     );
 });
 
@@ -262,6 +269,65 @@ test("Pi devshell remote skill input transform preserves Pi delivery while avoid
         ].join("\n")
     });
     assert.equal(transformDevshellPiSkillInput([], { source: "interactive", text: "/skill:review", type: "input" }), undefined);
+});
+
+test("Pi devshell remote prompt expansion matches Pi positional and aggregate argument semantics", () => {
+    const prompt = {
+        content: "one=$1 all=$ARGUMENTS fallback=${3:-stable} tail=${@:2} pair=${@:2:2}",
+        description: "release",
+        filePath: "/repo/.pi/prompts/release.md",
+        name: "release",
+        sourceInfo: {
+            baseDir: "/repo/.pi/prompts",
+            origin: "top-level" as const,
+            path: "/repo/.pi/prompts/release.md",
+            scope: "project" as const,
+            source: "local"
+        }
+    };
+    assert.equal(
+        expandDevshellPiPromptTemplate(prompt, "v1 'release candidate'"),
+        "one=v1 all=v1 release candidate fallback=stable tail=release candidate pair=release candidate"
+    );
+});
+
+test("Pi devshell standalone context replaces local project instructions but preserves Pi user instructions", () => {
+    const localContext = [
+        { content: "global", path: "/home/test/.pi/agent/AGENTS.md" },
+        { content: "local-project", path: "/repo/AGENTS.md" }
+    ];
+    const localBlock = [
+        "",
+        "",
+        "<project_context>",
+        "",
+        "Project-specific instructions and guidelines:",
+        "",
+        '<project_instructions path="/home/test/.pi/agent/AGENTS.md">',
+        "global",
+        "</project_instructions>",
+        "",
+        '<project_instructions path="/repo/AGENTS.md">',
+        "local-project",
+        "</project_instructions>",
+        "",
+        "</project_context>",
+        ""
+    ].join("\n");
+    const replaced = replacePiProjectContext(
+        `base${localBlock}\nCurrent working directory: /repo`,
+        localContext,
+        [{ content: "remote-project", path: "worker-a:/srv/repo/AGENTS.md" }],
+        "/home/test/.pi/agent"
+    );
+    assert.match(replaced, /global/u);
+    assert.match(replaced, /worker-a:\/srv\/repo\/AGENTS\.md/u);
+    assert.match(replaced, /remote-project/u);
+    assert.doesNotMatch(replaced, /local-project/u);
+    assert.match(
+        appendDevshellRemoteWorkspacePrompt(replaced, { instance: "worker-a", workspace: "/srv/repo" }),
+        /The real project workspace is worker-a:\/srv\/repo\./u
+    );
 });
 
 test("Pi devshell edit tool contributes its Worker preconditions and grammar to the Pi system prompt", () => {

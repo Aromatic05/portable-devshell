@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -8,6 +8,8 @@ import test from "node:test";
 import {
     activatePiIntegration,
     capturePiIntegration,
+    deactivatePiIntegration,
+    persistOriginalPiIntegrationSnapshot,
     resolvePiDeploymentTargets,
     restorePiIntegration
 } from "./pi-integration.mjs";
@@ -37,25 +39,134 @@ test("Pi integration installs a devshell-only launcher and default extension loa
         );
         await writeFile(resolve(piRoot, "package.json"), JSON.stringify({ bin: { pi: "dist/bundle/cli.js" } }), "utf8");
         await writeFile(resolve(extensionRoot, "package.json"), JSON.stringify({ main: "dist/index.js" }), "utf8");
-        await writeFile(piTarget, "console.log(JSON.stringify(process.argv.slice(2)));\n", "utf8");
+        await writeFile(piTarget, [
+            "console.log(JSON.stringify({",
+            "  args: process.argv.slice(2),",
+            "  cwd: process.cwd(),",
+            "  workspace: process.env.PORTABLE_DEVSHELL_PI_WORKSPACE",
+            "}));",
+            ""
+        ].join("\n"), "utf8");
         await writeFile(extensionTarget, "export default () => {}; export const marker = 'devshell';\n", "utf8");
 
         assert.deepEqual(await resolvePiDeploymentTargets(currentLink), { extensionTarget, piTarget });
         const before = await capturePiIntegration({ binDirectory, currentLink, home, platform: "linux" });
         const paths = await activatePiIntegration({ binDirectory, currentLink, home, platform: "linux" });
-        const launched = spawnSync(paths.command, ["hello"], { encoding: "utf8" });
-        assert.equal(launched.status, 0, launched.stderr);
-        assert.deepEqual(JSON.parse(launched.stdout.trim()), ["--no-builtin-tools", "hello"]);
-        const withBuiltins = spawnSync(paths.command, ["hello"], {
+        const devshellHome = resolve(root, "devshell-home");
+        const launcherEnvironment = { ...process.env, PORTABLE_DEVSHELL_HOME: devshellHome };
+        const launched = spawnSync(paths.command, ["hello"], {
+            cwd: root,
             encoding: "utf8",
-            env: { ...process.env, DEVSHELL_PI_BUILTIN_TOOLS: "1" }
+            env: launcherEnvironment
         });
-        assert.deepEqual(JSON.parse(withBuiltins.stdout.trim()), ["hello"]);
+        assert.equal(launched.status, 0, launched.stderr);
+        const launchedState = JSON.parse(launched.stdout.trim());
+        assert.deepEqual(launchedState.args, ["--no-builtin-tools", "hello"]);
+        assert.equal(launchedState.workspace, root);
+        assert.equal(launchedState.cwd.startsWith(resolve(devshellHome, "pi", "workspaces")), true);
+        assert.match(launchedState.cwd, /[\\/][a-f0-9]{16}$/u);
+        const withBuiltins = spawnSync(paths.command, ["hello"], {
+            cwd: root,
+            encoding: "utf8",
+            env: { ...launcherEnvironment, DEVSHELL_PI_BUILTIN_TOOLS: "1" }
+        });
+        const withBuiltinsState = JSON.parse(withBuiltins.stdout.trim());
+        assert.deepEqual(withBuiltinsState.args, ["hello"]);
+        assert.equal(withBuiltinsState.workspace, root);
+        assert.equal(withBuiltinsState.cwd, launchedState.cwd);
+        assert.match(await readFile(paths.command, "utf8"), /portable-devshell managed Pi launcher/u);
+        assert.match(await readFile(paths.extension, "utf8"), /portable-devshell managed Pi extension loader/u);
         assert.match(await readFile(paths.extension, "utf8"), /pi-extension\/dist\/index\.js/u);
 
         await restorePiIntegration(before);
         await assert.rejects(() => readFile(paths.command), /ENOENT/u);
         await assert.rejects(() => readFile(paths.extension), /ENOENT/u);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("Pi integration persists the pre-install user state once and restores it on deactivate", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-pi-original-"));
+    const home = resolve(root, "home");
+    const binDirectory = resolve(root, "bin");
+    const snapshotPath = resolve(root, "install", "pi-integration-original.json");
+    const command = resolve(binDirectory, "pi");
+    const extension = resolve(home, ".pi", "agent", "extensions", "devshell.js");
+    try {
+        await mkdir(binDirectory, { recursive: true });
+        await mkdir(resolve(extension, ".."), { recursive: true });
+        await writeFile(resolve(root, "user-pi"), "user pi\n", "utf8");
+        await symlink(resolve(root, "user-pi"), command);
+        await writeFile(extension, "export default function userExtension() {}\n", "utf8");
+
+        const original = await capturePiIntegration({ binDirectory, home, platform: "linux" });
+        assert.equal(await persistOriginalPiIntegrationSnapshot(snapshotPath, original, "linux"), true);
+        assert.equal(await persistOriginalPiIntegrationSnapshot(snapshotPath, {
+            ...original,
+            extension: { content: Buffer.from("changed\n"), kind: "file", mode: 0o600 }
+        }, "linux"), false);
+
+        await rm(command, { force: true });
+        await writeFile(command, "#!/usr/bin/env node\n// portable-devshell managed Pi launcher\n", { mode: 0o755 });
+        await writeFile(extension, "// portable-devshell managed Pi extension loader\n", "utf8");
+        assert.deepEqual(await deactivatePiIntegration(snapshotPath, { binDirectory, home, platform: "linux" }), {
+            restoredOriginal: true
+        });
+        assert.equal(await readlink(command), resolve(root, "user-pi"));
+        assert.equal(await readFile(extension, "utf8"), "export default function userExtension() {}\n");
+
+        await rm(command, { force: true });
+        await writeFile(command, "#!/bin/sh\necho replacement-pi\n", "utf8");
+        await writeFile(extension, "// portable-devshell managed Pi extension loader\n", "utf8");
+        await deactivatePiIntegration(snapshotPath, { binDirectory, home, platform: "linux" });
+        assert.equal(await readFile(command, "utf8"), "#!/bin/sh\necho replacement-pi\n");
+        assert.equal(await readFile(extension, "utf8"), "export default function userExtension() {}\n");
+
+        await rm(command, { force: true });
+        await writeFile(command, "#!/usr/bin/env node\n// portable-devshell managed Pi launcher\n", "utf8");
+        await writeFile(extension, "export default function replacementExtension() {}\n", "utf8");
+        await deactivatePiIntegration(snapshotPath, { binDirectory, home, platform: "linux" });
+        assert.equal(await readlink(command), resolve(root, "user-pi"));
+        assert.equal(await readFile(extension, "utf8"), "export default function replacementExtension() {}\n");
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("Pi integration old-install fallback removes only managed paths", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-pi-deactivate-"));
+    const home = resolve(root, "home");
+    const binDirectory = resolve(root, "bin");
+    const missingSnapshot = resolve(root, "missing-original.json");
+    const command = resolve(binDirectory, "pi");
+    const extension = resolve(home, ".pi", "agent", "extensions", "devshell.js");
+    try {
+        await mkdir(binDirectory, { recursive: true });
+        await mkdir(resolve(extension, ".."), { recursive: true });
+        await writeFile(command, [
+            "#!/usr/bin/env node",
+            "if (process.env.DEVSHELL_PI_BUILTIN_TOOLS !== \"1\") process.argv.push(\"--no-builtin-tools\");",
+            "await import(\"file:///old/node_modules/@earendil-works/pi-coding-agent/dist/cli.js\");",
+            ""
+        ].join("\n"), "utf8");
+        await writeFile(extension, [
+            "export { default } from \"file:///old/node_modules/@portable-devshell/pi-extension/dist/index.js\";",
+            "export * from \"file:///old/node_modules/@portable-devshell/pi-extension/dist/index.js\";",
+            ""
+        ].join("\n"), "utf8");
+
+        assert.deepEqual(await deactivatePiIntegration(missingSnapshot, { binDirectory, home, platform: "linux" }), {
+            restoredOriginal: false
+        });
+        await assert.rejects(() => readFile(command), /ENOENT/u);
+        await assert.rejects(() => readFile(extension), /ENOENT/u);
+
+        await writeFile(command, "#!/bin/sh\necho user-pi\n", "utf8");
+        await writeFile(extension, "export default function userExtension() {}\n", "utf8");
+        await deactivatePiIntegration(missingSnapshot, { binDirectory, home, platform: "linux" });
+        assert.equal(await readFile(command, "utf8"), "#!/bin/sh\necho user-pi\n");
+        assert.equal(await readFile(extension, "utf8"), "export default function userExtension() {}\n");
     } finally {
         await rm(root, { force: true, recursive: true });
     }

@@ -407,6 +407,7 @@ try {
     $commandPath = Join-Path $binDirectory "devshell.cmd"
     $piCommandPath = Join-Path $binDirectory "pi.cmd"
     $piSnapshot = Join-Path $temporary "pi-integration-snapshot.json"
+    $piOriginalSnapshot = Join-Path $installRoot "pi-integration-original.json"
     $previousVersionPresent = Test-Path -LiteralPath $versionDirectory
     $previousCurrentPresent = Test-Path -LiteralPath $currentDirectory
     New-Item -ItemType Directory -Force -Path $installRoot, $versionsDirectory, $binDirectory, $devshellHome | Out-Null
@@ -458,6 +459,8 @@ try {
 
         Write-InstallStep "验证安装结果"
         Assert-CliStarts $commandPath "安装结果验证失败" $true
+        & node $piHelper persist-original $piSnapshot $piOriginalSnapshot win32
+        if ($LASTEXITCODE -ne 0) { throw "无法持久化安装前 Pi 集成状态。" }
         $activated = $true
     } finally {
         if (-not $activated) {
