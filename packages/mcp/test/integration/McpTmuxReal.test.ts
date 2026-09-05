@@ -214,6 +214,7 @@ interface ToolStructuredContent {
     output?: string[];
     pane?: { id?: string; ownedByCurrentContext?: boolean };
     task?: { id?: string; status?: string };
+    timedOut?: boolean;
 }
 
 interface ToolSummary {
