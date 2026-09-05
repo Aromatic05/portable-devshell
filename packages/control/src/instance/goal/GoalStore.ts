@@ -3,32 +3,120 @@ import { mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createError, errorCodes, type GoalRecord } from "@portable-devshell/shared";
 
 import { cleanupStaleAtomicStateTemps } from "../AtomicStateFile.js";
+import { GoalActivityStore, type GoalActivityRecord } from "./GoalActivityStore.js";
 import { GoalState, type GoalDocument } from "./GoalState.js";
 
 export class GoalStore {
+    readonly #activityHydrated = new Set<string>();
+    readonly #activityStore: GoalActivityStore;
+    #activityAvailable = true;
     readonly #filePath: string;
     readonly #instanceName: string;
     readonly #state: GoalState;
     #document?: GoalDocument;
 
     constructor(options: { filePath: string; instanceName: string; state: GoalState }) {
+        this.#activityStore = new GoalActivityStore(goalActivityFilePath(options.filePath));
         this.#filePath = options.filePath;
         this.#instanceName = options.instanceName;
         this.#state = options.state;
     }
 
-    read(): GoalDocument {
+    read(ctxId?: string): GoalDocument {
+        if (ctxId === undefined) this.#hydrateAllActivity();
+        else this.#hydrateContextActivity(ctxId);
         return structuredClone(this.#current());
+    }
+
+    readStructural(): GoalDocument {
+        return structuredClone(this.#current());
+    }
+
+    readRecord(ctxId: string): GoalRecord | undefined {
+        this.#hydrateContextActivity(ctxId);
+        const record = this.#current().goals.find((goal) => goal.createdByCtxId === ctxId);
+        return record === undefined ? undefined : structuredClone(record);
+    }
+
+    writeActivity(record: GoalRecord): void {
+        if (!this.#activityAvailable) throw new Error("Goal activity sidecar is unavailable.");
+        const current = this.#current();
+        const index = current.goals.findIndex((goal) => goal.goalId === record.goalId);
+        if (index === -1) throw new Error(`Workspace Goal ${record.goalId} is no longer stored.`);
+        try {
+            this.#activityStore.write(record.goalId, goalActivity(record));
+        } catch (error) {
+            this.#activityAvailable = false;
+            throw error;
+        }
+        current.goals[index] = structuredClone(record);
+        this.#activityHydrated.add(record.goalId);
     }
 
     async write(document: GoalDocument): Promise<GoalDocument> {
         const normalized = this.#state.normalizeDocument(document);
         await this.#writeAtomic(normalized);
+        this.#pruneActivity(normalized);
         this.#document = normalized;
-        return this.read();
+        return structuredClone(normalized);
+    }
+
+    #hydrateAllActivity(): void {
+        const document = this.#current();
+        const pending = document.goals.filter((goal) => !this.#activityHydrated.has(goal.goalId));
+        if (pending.length === 0 || !this.#activityAvailable) return;
+        let activities: Map<string, GoalActivityRecord>;
+        try {
+            activities = this.#activityStore.readAll();
+        } catch {
+            this.#activityAvailable = false;
+            return;
+        }
+        for (const goal of pending) {
+            const activity = activities.get(goal.goalId);
+            if (activity !== undefined) applyGoalActivity(goal, activity);
+            this.#activityHydrated.add(goal.goalId);
+        }
+    }
+
+    #hydrateContextActivity(ctxId: string): void {
+        const goal = this.#current().goals.find((entry) => entry.createdByCtxId === ctxId);
+        if (goal === undefined || this.#activityHydrated.has(goal.goalId) || !this.#activityAvailable) return;
+        let activity: GoalActivityRecord | undefined;
+        try {
+            activity = this.#activityStore.read(goal.goalId);
+        } catch {
+            this.#activityAvailable = false;
+            return;
+        }
+        if (activity !== undefined && activity.lastAgentActivityAt > goal.lastAgentActivityAt) {
+            applyGoalActivity(goal, activity);
+        }
+        this.#activityHydrated.add(goal.goalId);
+    }
+
+    #pruneActivity(document: GoalDocument): void {
+        const retained = new Set(document.goals.map((goal) => goal.goalId));
+        const previous = this.#document?.goals ?? [];
+        for (const goal of previous) {
+            if (!retained.has(goal.goalId)) {
+                this.#activityHydrated.delete(goal.goalId);
+                try { this.#activityStore.delete(goal.goalId); } catch {
+                    // Structural Goal state is already durable; stale activity is safe to ignore.
+                }
+            }
+        }
+        for (const goal of document.goals) {
+            if (goal.status === "completed" || goal.status === "stopped") {
+                this.#activityHydrated.delete(goal.goalId);
+                try { this.#activityStore.delete(goal.goalId); } catch {
+                    // Structural Goal state is already durable; stale activity is safe to ignore.
+                }
+            }
+        }
     }
 
     #current(): GoalDocument {
@@ -76,4 +164,25 @@ export class GoalStore {
             try { await handle.sync(); } finally { await handle.close(); }
         }
     }
+}
+
+function applyGoalActivity(record: GoalRecord, activity: GoalActivityRecord): void {
+    record.lastAgentActivityAt = activity.lastAgentActivityAt;
+    if (activity.lastExecutionAt === undefined) delete record.lastExecutionAt;
+    else record.lastExecutionAt = activity.lastExecutionAt;
+    record.noActionStreak = activity.noActionStreak;
+}
+
+function goalActivity(record: GoalRecord): GoalActivityRecord {
+    return {
+        lastAgentActivityAt: record.lastAgentActivityAt,
+        ...(record.lastExecutionAt === undefined ? {} : { lastExecutionAt: record.lastExecutionAt }),
+        noActionStreak: record.noActionStreak,
+    };
+}
+
+function goalActivityFilePath(filePath: string): string {
+    return filePath.endsWith(".json")
+        ? `${filePath.slice(0, -5)}.activity.sqlite3`
+        : `${filePath}.activity.sqlite3`;
 }

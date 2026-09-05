@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
+import { GoalState } from "../../src/instance/goal/GoalState.ts";
 import { GoalService } from "../../src/instance/goal/GoalService.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
@@ -37,4 +39,87 @@ test("GoalService stopAll terminalizes every live Goal while preserving complete
     assert.equal((await service.read("ctx-blocked"))?.status, "stopped");
     assert.equal((await service.read("ctx-completed"))?.status, "completed");
     assert.equal(events.filter((type) => type === "goal.updated").length >= 2, true);
+});
+
+test("GoalService persists ordinary activity outside the structural Goal document", async () => {
+    const root = await createTestTempDirectory("goal-activity-sidecar-");
+    const filePath = join(root, "goals.json");
+    let now = Date.parse("2026-09-05T10:00:00.000Z");
+    const state = new GoalState({ now: () => new Date(now).toISOString() });
+    const service = new GoalService({ appendEvent: async () => undefined, filePath, instanceName: "alpha", state });
+    await service.manage("ctx-goal", {
+        action: "start",
+        objective: "Keep working",
+        steps: [{ id: "work", text: "Work" }],
+    });
+    const structural = await readFile(filePath, "utf8");
+
+    now += 10_000;
+    await service.touch("ctx-goal", "execution");
+    assert.equal(await readFile(filePath, "utf8"), structural);
+    assert.equal((await service.read("ctx-goal"))?.lastExecutionAt, "2026-09-05T10:00:10.000Z");
+
+    const reloaded = new GoalService({
+        appendEvent: async () => undefined,
+        filePath,
+        instanceName: "alpha",
+        state: new GoalState({ now: () => new Date(now).toISOString() }),
+    });
+    assert.equal((await reloaded.read("ctx-goal"))?.lastExecutionAt, "2026-09-05T10:00:10.000Z");
+});
+
+test("GoalService keeps continuation settlement on the structural persistence path", async () => {
+    const root = await createTestTempDirectory("goal-activity-structural-");
+    const filePath = join(root, "goals.json");
+    let now = Date.parse("2026-09-05T11:00:00.000Z");
+    const service = new GoalService({
+        appendEvent: async () => undefined,
+        filePath,
+        instanceName: "alpha",
+        state: new GoalState({ now: () => new Date(now).toISOString() }),
+    });
+    await service.manage("ctx-goal", {
+        action: "start",
+        objective: "Settle continuation",
+        steps: [{ id: "work", text: "Work" }],
+    });
+    await service.continuation("ctx-goal", {
+        action: "claim",
+        available: true,
+        claimId: "claim-1",
+        userInitiated: true,
+    });
+    await service.continuation("ctx-goal", { action: "attempt", available: true, claimId: "claim-1" });
+    const before = await readFile(filePath, "utf8");
+
+    now += 1_000;
+    await service.touch("ctx-goal", "execution");
+    assert.notEqual(await readFile(filePath, "utf8"), before);
+    const goal = await service.read("ctx-goal");
+    assert.equal(goal?.continuationPending, false);
+    assert.equal(goal?.continuationCount, 1);
+});
+
+test("GoalService falls back to structural persistence when the activity sidecar is unavailable", async () => {
+    const root = await createTestTempDirectory("goal-activity-fallback-");
+    const filePath = join(root, "goals.json");
+    let now = Date.parse("2026-09-05T12:00:00.000Z");
+    const service = new GoalService({
+        appendEvent: async () => undefined,
+        filePath,
+        instanceName: "alpha",
+        state: new GoalState({ now: () => new Date(now).toISOString() }),
+    });
+    await service.manage("ctx-goal", {
+        action: "start",
+        objective: "Fallback",
+        steps: [{ id: "work", text: "Work" }],
+    });
+    const before = await readFile(filePath, "utf8");
+    await writeFile(join(root, "goals.activity.sqlite3"), "not-a-sqlite-database", "utf8");
+
+    now += 1_000;
+    await service.touch("ctx-goal", "execution");
+    assert.notEqual(await readFile(filePath, "utf8"), before);
+    assert.equal((await service.read("ctx-goal"))?.lastExecutionAt, "2026-09-05T12:00:01.000Z");
 });
