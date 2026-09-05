@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import test from "node:test";
@@ -27,6 +27,29 @@ test("MCP and Web reuse one listener only when their bind endpoints match", asyn
     const address = runtime.webHost?.address;
     assert.ok(typeof address === "object" && address !== null);
     assert.equal(address.port, (runtime.host?.server.address as { port: number }).port);
+});
+
+test("MCP startup does not parse provenance history before the listener is ready", async (t) => {
+    const homeDirectory = await createTestTempDirectory("runtime-provenance-lazy-start");
+    const config = createDefaultControlConfig();
+    config.mcp.enabled = true;
+    config.mcp.listenHost = "127.0.0.1";
+    config.mcp.listenPort = 0;
+    config.mcp.publicBaseUrl = "http://127.0.0.1";
+    const paths = new ControlPathHome(homeDirectory);
+    await mkdir(join(paths.controlHomeDir, "audit"), { recursive: true });
+    await writeFile(paths.toolProvenanceFile, "{invalid provenance\n", "utf8");
+    const runtime = await createRuntime(config, homeDirectory);
+    t.after(async () => {
+        await cleanupInOrder(
+            () => runtime.stop(),
+            () => rm(homeDirectory, { force: true, recursive: true }),
+        );
+    });
+
+    await runtime.start();
+    const address = runtime.host?.server.address;
+    assert.ok(typeof address === "object" && address !== null);
 });
 
 test("separate Web listener can stop without interrupting MCP", async (t) => {

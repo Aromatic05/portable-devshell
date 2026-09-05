@@ -296,7 +296,6 @@ export class ControlRuntimeMcp {
     }
 
     async start(): Promise<void> {
-        await this.toolProvenance.warmup();
         await this.#host?.start();
         if (this.#webHost !== undefined && this.#webHost !== this.#host?.server) {
             await this.#webHost.start();
