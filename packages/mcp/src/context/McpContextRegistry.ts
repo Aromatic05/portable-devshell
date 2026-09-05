@@ -94,6 +94,7 @@ export class McpContextRegistry {
     readonly #idFactory: () => string;
     readonly #maxTerminalContexts: number;
     readonly #now: () => number;
+    readonly #persistedExpiresAt = new Map<string, number>();
     readonly #ttlMs: number;
     #initialized = false;
     #operation: Promise<void> = Promise.resolve();
@@ -281,10 +282,7 @@ export class McpContextRegistry {
                 }
                 throw expiredContext(record.ctxId, record.expiresAt);
             }
-            await this.#mutateAndPersist(() => {
-                record.lastAccessedAt = new Date(now).toISOString();
-                record.expiresAt = new Date(now + this.#ttlMs).toISOString();
-            });
+            await this.#touchRecord(record, now);
             return cloneRecord(record);
         });
     }
@@ -347,10 +345,7 @@ export class McpContextRegistry {
                 }
                 throw expiredContext(ctxId, record.expiresAt);
             }
-            await this.#mutateAndPersist(() => {
-                record.lastAccessedAt = new Date(now).toISOString();
-                record.expiresAt = new Date(now + this.#ttlMs).toISOString();
-            });
+            await this.#touchRecord(record, now);
             return cloneRecord(record);
         });
     }
@@ -500,7 +495,7 @@ export class McpContextRegistry {
             const record = this.#contexts.get(ctxId);
             if (record === undefined) throw invalidContext(ctxId);
             const now = this.#now();
-            await this.#mutateAndPersist(() => {
+            await this.#mutateRecordAndPersist(record, () => {
                 record.executionEpoch = (record.executionEpoch ?? 0) + 1;
                 record.executionLastActivityAt = new Date(now).toISOString();
                 record.executionLeaseUntil = new Date(now + MCP_CONTEXT_EXECUTION_LEASE_MS).toISOString();
@@ -529,7 +524,7 @@ export class McpContextRegistry {
             if ((record.executionEpoch ?? 0) !== expectedEpoch) {
                 return automaticReentryState(record, now);
             }
-            await this.#mutateAndPersist(() => {
+            await this.#mutateRecordAndPersist(record, () => {
                 record.executionEpoch = expectedEpoch + 1;
                 delete record.executionLeaseUntil;
             });
@@ -1011,6 +1006,32 @@ export class McpContextRegistry {
         }
     }
 
+    async #mutateRecordAndPersist(record: McpContextStoredRecord, mutate: () => void): Promise<void> {
+        const previous = cloneStoredRecord(record);
+        mutate();
+        try {
+            await this.#persist();
+        } catch (error) {
+            this.#contexts.set(previous.ctxId, previous);
+            throw error;
+        }
+    }
+
+    async #touchRecord(record: McpContextStoredRecord, now: number): Promise<void> {
+        const previous = cloneStoredRecord(record);
+        const persistedUntil = this.#persistedExpiresAt.get(record.ctxId) ?? Date.parse(record.expiresAt);
+        this.#persistedExpiresAt.set(record.ctxId, persistedUntil);
+        record.lastAccessedAt = new Date(now).toISOString();
+        record.expiresAt = new Date(now + this.#ttlMs).toISOString();
+        if (persistedUntil - now > this.#ttlMs / 2) return;
+        try {
+            await this.#persist();
+        } catch (error) {
+            this.#contexts.set(previous.ctxId, previous);
+            throw error;
+        }
+    }
+
     async #load(): Promise<void> {
         if (this.#filePath === undefined) {
             return;
@@ -1084,10 +1105,13 @@ export class McpContextRegistry {
         try {
             await writeFile(
                 temporary,
-                `${JSON.stringify(document, null, 2)}\n`,
+                `${JSON.stringify(document)}\n`,
                 { encoding: "utf8", mode: 0o600 },
             );
             await rename(temporary, this.#filePath);
+            for (const record of document.contexts) {
+                this.#persistedExpiresAt.set(record.ctxId, Date.parse(record.expiresAt));
+            }
         } catch (error) {
             await rm(temporary, { force: true }).catch(() => undefined);
             throw error;

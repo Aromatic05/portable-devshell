@@ -76,6 +76,41 @@ test("McpContextRegistry persists active contexts and renews their sliding expir
     }
 });
 
+test("McpContextRegistry batches sliding lease persistence until the durable lease reaches half TTL", async () => {
+    const root = await createTestTempDirectory("context-touch-batch-");
+    const filePath = join(root, "contexts.json");
+    let now = 0;
+    try {
+        const registry = new McpContextRegistry({
+            filePath,
+            idFactory: () => "ctx-touch-batch",
+            now: () => now,
+            ttlMs: 60_000,
+        });
+        await registry.initialize();
+        await registry.create({ instance: "alpha", principal: "subject", workspace: "/workspace" });
+
+        now = 10_000;
+        assert.equal(
+            (await registry.validateAndTouch("ctx-touch-batch", { principal: "subject" })).expiresAt,
+            "1970-01-01T00:01:10.000Z",
+        );
+        assert.equal(
+            JSON.parse(await readFile(filePath, "utf8")).contexts[0].expiresAt,
+            "1970-01-01T00:01:00.000Z",
+        );
+
+        now = 31_000;
+        await registry.validateAndTouch("ctx-touch-batch", { principal: "subject" });
+        assert.equal(
+            JSON.parse(await readFile(filePath, "utf8")).contexts[0].expiresAt,
+            "1970-01-01T00:01:31.000Z",
+        );
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
 test("McpContextRegistry persists detached instance environments across restart", async () => {
     const root = await createTestTempDirectory("context-detach-instance");
     const filePath = join(root, "contexts.json");
