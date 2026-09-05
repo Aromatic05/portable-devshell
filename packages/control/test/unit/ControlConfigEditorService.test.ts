@@ -389,15 +389,14 @@ test("config editor reconfigures and disables a running instance without replaci
         instanceName: "demo-local",
         patch: {
             alerts: { intervalMs: 2_000, maxUncommittedChanges: 5 },
-            approvalPolicy: { mode: "ask" },
-            security: { mode: "workspace" }
+            approvalPolicy: { mode: "ask" }
         }
     });
     await service.disableInstance({ instanceName: "demo-local" });
 
     assert.equal(config.instances[0]?.enabled, false);
     assert.equal(stopCalls, 1);
-    assert.equal(config.instances[0]?.security.mode, "workspace");
+    assert.equal(config.instances[0]?.security.mode, "disabled");
     assert.equal(reconfigureCalls.length, 1);
     const reconfigure = reconfigureCalls[0] as {
         alerts?: { intervalMs?: number; maxUncommittedChanges?: number };
@@ -408,9 +407,9 @@ test("config editor reconfigures and disables a running instance without replaci
     assert.equal(reconfigure.alerts?.intervalMs, 2_000);
     assert.equal(reconfigure.alerts?.maxUncommittedChanges, 5);
     assert.equal(reconfigure.approvalPolicy?.mode, "ask");
-    assert.equal(reconfigure.effectiveSecurityMode, "workspace");
-    assert.equal(reconfigure.env?.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE, "workspace");
-    assert.equal(reconfigure.env?.DEVSHELL_WORKER_SECURITY_MODE, "workspace");
+    assert.equal(reconfigure.effectiveSecurityMode, "disabled");
+    assert.equal(reconfigure.env?.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE, "disabled");
+    assert.equal(reconfigure.env?.DEVSHELL_WORKER_SECURITY_MODE, "disabled");
     assert.equal(registry.get("demo-local")?.enabled, false);
 });
 
@@ -704,13 +703,14 @@ test("instance reconfigure failure restores persisted and runtime configuration"
     await assert.rejects(
         service.updateInstanceConfig({
             instanceName: "demo-local",
-            patch: { security: { mode: "workspace" } }
+            patch: { approvalPolicy: { mode: "ask" } }
         }),
         /worker reconfigure failed/u
     );
 
     assert.equal(writes.length, 2);
     assert.equal(config.instances[0]?.security.mode, "disabled");
+    assert.equal(config.instances[0]?.approvalPolicy, undefined);
     assert.equal(runtimeSecurityMode, "disabled");
 });
 
@@ -988,8 +988,16 @@ test("config editor rejects delete and rebuild patches while an instance is runn
         }),
         hasCode("instance.conflict")
     );
+    await assert.rejects(
+        service.updateInstanceConfig({
+            instanceName: "demo-local",
+            patch: { security: { mode: "workspace" } }
+        }),
+        hasCode("instance.conflict")
+    );
     assert.equal(writes.length, 0);
     assert.equal(config.instances[0]?.tools, undefined);
+    assert.equal(config.instances[0]?.security.mode, "disabled");
 });
 
 test("config editor reconciles instance MCP bindings from patches without restarting control", async () => {

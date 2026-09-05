@@ -99,6 +99,7 @@ export function requiresWorkerRebuild(previous: ControlInstanceConfig, next: Con
         stableStringify(previous.container) !== stableStringify(next.container),
         previous.dockerBinary !== next.dockerBinary,
         previous.podmanBinary !== next.podmanBinary,
+        previous.security.mode !== next.security.mode,
         stableStringify(previous.logs) !== stableStringify(next.logs),
         stableStringify(previous.tools) !== stableStringify(next.tools)
     ].some(Boolean);
