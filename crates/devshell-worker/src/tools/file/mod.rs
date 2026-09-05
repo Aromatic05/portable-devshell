@@ -15,11 +15,11 @@ pub mod types;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use crate::security::path::{
-    FilesystemCapability, PathNamespace, RequestedPath, ResolvedPath, parse_requested_path,
-    resolve_create_target, resolve_existing_target,
+    parse_requested_path, resolve_create_target, resolve_entry, resolve_existing_target,
+    FilesystemCapability, PathNamespace, RequestedPath, ResolvedEntry, ResolvedPath,
 };
 use crate::tools::{ToolCall, ToolError};
 
@@ -28,7 +28,7 @@ pub struct FileToolState {
     pub search_cursors: Mutex<cursor::CursorStore<search::SearchContinuation>>,
     pub context_snapshots: Mutex<state::ContextSnapshotStore>,
     snapshot_ordinal: AtomicU64,
-    write_locks: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
+    write_locks: Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>,
 }
 impl FileToolState {
     pub fn new() -> Arc<Self> {
@@ -47,10 +47,36 @@ impl FileToolState {
 
     pub fn write_lock(&self, path: &Path) -> Arc<Mutex<()>> {
         let mut locks = self.write_locks.lock().unwrap();
-        locks
-            .entry(path.to_path_buf())
-            .or_insert_with(|| Arc::new(Mutex::new(())))
-            .clone()
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        if let Some(lock) = locks.get(path).and_then(Weak::upgrade) {
+            return lock;
+        }
+        let lock = Arc::new(Mutex::new(()));
+        locks.insert(path.to_path_buf(), Arc::downgrade(&lock));
+        lock
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::FileToolState;
+
+    #[test]
+    fn write_lock_registry_reuses_live_locks_and_prunes_released_paths() {
+        let state = FileToolState::new();
+        let first = state.write_lock(std::path::Path::new("/workspace/a"));
+        let same = state.write_lock(std::path::Path::new("/workspace/a"));
+        assert!(Arc::ptr_eq(&first, &same));
+        drop((first, same));
+
+        for index in 0..100 {
+            drop(state.write_lock(std::path::Path::new(&format!("/workspace/stale-{index}"))));
+        }
+        let live = state.write_lock(std::path::Path::new("/workspace/live"));
+        assert_eq!(state.write_locks.lock().unwrap().len(), 1);
+        assert!(Arc::strong_count(&live) >= 1);
     }
 }
 
@@ -77,45 +103,11 @@ pub fn resolve_create(
 pub fn resolve_info(
     call: &ToolCall,
     raw: &str,
-) -> Result<(RequestedPath, std::path::PathBuf), ToolError> {
+) -> Result<(RequestedPath, ResolvedEntry), ToolError> {
     let requested = parse_requested_path(raw)?;
     authorize(call, requested.namespace, false)?;
-    let path = requested.path(&call.workspace);
-    std::fs::symlink_metadata(&path)
-        .map_err(|error| ToolError::new("file.notFound", error.to_string()))?;
-
-    if requested.namespace == PathNamespace::Workspace {
-        if let Ok(target) = path.canonicalize() {
-            let workspace = call
-                .workspace
-                .canonicalize()
-                .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
-            if target.strip_prefix(&workspace).is_err() {
-                return Err(ToolError::new(
-                    "file.pathEscapesWorkspace",
-                    format!("path escapes workspace: {}", target.display()),
-                ));
-            }
-        } else {
-            let parent = path
-                .parent()
-                .ok_or_else(|| ToolError::new("file.invalidPath", "path has no parent"))?
-                .canonicalize()
-                .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
-            let workspace = call
-                .workspace
-                .canonicalize()
-                .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
-            if parent.strip_prefix(&workspace).is_err() {
-                return Err(ToolError::new(
-                    "file.pathEscapesWorkspace",
-                    format!("path escapes workspace: {}", parent.display()),
-                ));
-            }
-        }
-    }
-
-    Ok((requested, path))
+    let entry = resolve_entry(&call.workspace, &requested)?;
+    Ok((requested, entry))
 }
 pub fn authorize(call: &ToolCall, namespace: PathNamespace, write: bool) -> Result<(), ToolError> {
     let capability = match (namespace, write) {

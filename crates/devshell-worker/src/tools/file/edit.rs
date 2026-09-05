@@ -2,18 +2,18 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::security::path::{ResolvedPath, ResolvedTarget, parse_requested_path};
+use crate::security::path::{parse_requested_path, ResolvedPath, ResolvedTarget};
 use crate::tools::file::context_patch;
 use crate::tools::file::diff;
 use crate::tools::file::publish::{self, PublishMode};
 use crate::tools::file::state::{
-    ContextFileSnapshot, FULL_SNAPSHOT_LIMIT, SnapshotContent, TextFile,
+    ContextFileSnapshot, SnapshotContent, TextFile, FULL_SNAPSHOT_LIMIT,
 };
 use crate::tools::file::types::{
     FileChangeAction, FileChangeError, FileChangeOperationOutput, FileChangeResultDetail,
     FileChangeSetInput, FileChangeSetOutput, FileChangeStatus,
 };
-use crate::tools::file::{FileToolState, authorize, resolve_create};
+use crate::tools::file::{authorize, resolve_create, FileToolState};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const MAX_CHANGE_OPERATIONS: usize = 256;
@@ -417,6 +417,7 @@ impl FileEditTool {
             target
                 .open_file()
                 .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+            &call.cancellation,
         )?;
         let snapshot = self.remember_complete(call, &path, &text);
         local_snapshots.insert(path.clone(), snapshot);
@@ -450,10 +451,11 @@ impl FileEditTool {
             resolved
                 .open_file()
                 .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+            &call.cancellation,
         )?;
         require_revision(&base, &current)?;
         let rewritten = TextFile::from_normalized(&current, &content)?;
-        publish_text(&resolved, &rewritten, Some(&current))?;
+        publish_text(&resolved, &rewritten, Some(&current), &call.cancellation)?;
         let snapshot = self.remember_complete(call, &path, &rewritten);
         local_snapshots.insert(path.clone(), snapshot);
         Ok(applied_text_output(
@@ -486,6 +488,7 @@ impl FileEditTool {
             resolved
                 .open_file()
                 .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+            &call.cancellation,
         )?;
         let (original, may_merge) = match &base.content {
             SnapshotContent::Full(content) => (content.clone(), true),
@@ -507,7 +510,7 @@ impl FileEditTool {
             return Err(revision_mismatch());
         };
         let updated = TextFile::from_normalized(&current, &normalized)?;
-        publish_text(&resolved, &updated, Some(&current))?;
+        publish_text(&resolved, &updated, Some(&current), &call.cancellation)?;
 
         let seen = if merged {
             application.resulting_known_lines.clone()
@@ -547,6 +550,7 @@ impl FileEditTool {
             resolved
                 .open_file()
                 .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+            &call.cancellation,
         )?;
         require_revision(&base, &current)?;
         resolved
@@ -604,12 +608,15 @@ impl FileEditTool {
         };
         let _first_guard = first.lock().unwrap();
         let _second_guard = second.lock().unwrap();
-        let current = TextFile::read_file(
+        let current = crate::tools::file::state::TextMetadata::inspect_file(
             source_resolved
                 .open_file()
                 .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+            &call.cancellation,
         )?;
-        require_revision(&base, &current)?;
+        if current.revision != base.revision {
+            return Err(revision_mismatch());
+        }
         let source_target = source_resolved
             .target()
             .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
@@ -1154,6 +1161,7 @@ fn publish_text(
     resolved: &ResolvedPath,
     text: &TextFile,
     source: Option<&TextFile>,
+    cancellation: &crate::tools::ToolCancellation,
 ) -> Result<(), ToolError> {
     let target = resolved
         .target()
@@ -1173,10 +1181,11 @@ fn publish_text(
         permissions,
         || {
             if let Some(source) = source {
-                let current = TextFile::read_file(
+                let current = crate::tools::file::state::TextMetadata::inspect_file(
                     resolved
                         .open_file()
                         .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+                    cancellation,
                 )?;
                 if current.revision != source.revision {
                     return Err(ToolError::retryable(
@@ -1380,7 +1389,7 @@ fn invalid_edit(message: impl Into<String>) -> ToolError {
 mod tests {
     use std::fs;
 
-    use super::{ParsedOperation, atomic_move_no_replace, parse_change_set};
+    use super::{atomic_move_no_replace, parse_change_set, ParsedOperation};
 
     #[test]
     fn parses_all_change_set_operations() {

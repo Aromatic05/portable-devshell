@@ -852,6 +852,97 @@ fn file_info_reports_missing_entries_and_dangling_symlinks_in_one_batch() {
     env.json_command(&["stop", "--instance", instance]);
 }
 
+#[cfg(unix)]
+#[test]
+fn file_info_does_not_follow_a_workspace_symlink_outside_the_workspace() {
+    use std::os::unix::fs::symlink;
+
+    let env = TestEnv::new();
+    let outside = tempfile::tempdir().unwrap();
+    fs::write(outside.path().join("target.txt"), "outside\n").unwrap();
+    symlink(
+        outside.path().join("target.txt"),
+        env.workspace().join("outside-link"),
+    )
+    .unwrap();
+    fs::write(env.workspace().join("inside-target.txt"), "inside\n").unwrap();
+    symlink("inside-target.txt", env.workspace().join("inside-link")).unwrap();
+    let instance = "aromatic-file-info-no-follow-v2";
+    start(&env, instance);
+
+    let response = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_info",
+        json!({ "paths": ["./outside-link", "./inside-link"], "details": true }),
+    );
+
+    assert_eq!(response["ok"], true, "{response}");
+    let entry = &response["result"]["entries"][0];
+    assert_eq!(entry["path"], "./outside-link");
+    assert_eq!(entry["type"], "symlink");
+    assert!(entry["sizeBytes"].is_number(), "{entry}");
+    assert!(entry.get("targetType").is_none(), "{entry}");
+    let inside = &response["result"]["entries"][1];
+    assert_eq!(inside["type"], "symlink");
+    assert_eq!(inside["targetType"], "file", "{inside}");
+
+    fs::create_dir_all(outside.path().join("dir")).unwrap();
+    symlink(
+        outside.path().join("dir"),
+        env.workspace().join("outside-dir"),
+    )
+    .unwrap();
+    let escaped_missing = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_info",
+        json!({ "paths": ["./outside-dir/missing.txt"] }),
+    );
+    assert_eq!(escaped_missing["ok"], false, "{escaped_missing}");
+
+    let missing_tail = call(
+        &env,
+        instance,
+        "3",
+        "ctx-a",
+        "file_info",
+        json!({ "paths": ["./missing-dir/missing.txt"] }),
+    );
+    assert_eq!(missing_tail["ok"], true, "{missing_tail}");
+    assert_eq!(missing_tail["result"]["entries"][0]["exists"], false);
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_search_exact_file_reports_non_text_input() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-search-non-text-v2";
+    fs::write(
+        env.workspace().join("binary.dat"),
+        [0xff, 0xfe, b'B', b'A', b'D'],
+    )
+    .unwrap();
+    start(&env, instance);
+
+    let response = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_search",
+        json!({ "paths": ["./binary.dat"], "pattern": "BAD", "syntax": "literal" }),
+    );
+
+    assert_eq!(response["ok"], false, "{response}");
+    assert_eq!(response["error"]["code"], "file.notText", "{response}");
+    env.json_command(&["stop", "--instance", instance]);
+}
+
 #[test]
 fn file_search_cursor_continuation_rejects_repeated_query_fields() {
     let env = TestEnv::new();

@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use crate::security::path::ResolvedPath;
-use crate::tools::file::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
+use crate::tools::file::state::{TextFile, TextMetadata, FULL_SNAPSHOT_LIMIT};
 use crate::tools::file::structure;
 use crate::tools::file::types::{FileParseStatus, FileReadInput, FileReadOutput, FileReadView};
-use crate::tools::file::{FileToolState, resolve_existing};
+use crate::tools::file::{resolve_existing, FileToolState};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const DEFAULT_LINE_COUNT: usize = 200;
@@ -59,6 +59,7 @@ impl ToolHandler for FileReadTool {
             resolved
                 .open_file()
                 .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+            &call.cancellation,
         )?;
         let resolved_view = resolve_view(&input, &resolved.canonical, &metadata);
 
@@ -98,6 +99,7 @@ impl FileReadTool {
             resolved
                 .open_file()
                 .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+            &call.cancellation,
         )?;
         call.check_cancelled()?;
         if text.revision != metadata.revision {
@@ -164,6 +166,7 @@ impl FileReadTool {
                 .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
             &selector.ranges,
             MAX_CONTENT_BYTES,
+            &call.cancellation,
         )?;
         call.check_cancelled()?;
         if selected.metadata.revision != metadata.revision {
@@ -199,6 +202,7 @@ impl FileReadTool {
                 resolved
                     .open_file()
                     .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+                &call.cancellation,
             )?;
             call.check_cancelled()?;
             if text.revision != metadata.revision {

@@ -1,10 +1,9 @@
-use std::fs;
-use std::time::UNIX_EPOCH;
-
-use crate::security::path::parse_requested_path;
+use crate::security::path::ResolvedEntry;
+use crate::tools::file::resolve_info;
 use crate::tools::file::types::{FileInfoEntry, FileInfoInput, FileInfoOutput};
-use crate::tools::file::{authorize, resolve_info};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
+
+const MAX_SERIALIZED_OUTPUT_BYTES: usize = 1024 * 1024;
 
 pub struct FileInfoTool {
     name: ToolName,
@@ -38,29 +37,30 @@ impl ToolHandler for FileInfoTool {
         }
         let details = input.details.unwrap_or(false);
         let mut entries = Vec::with_capacity(input.paths.len());
+        let mut serialized_bytes = br#"{"entries":[]}"#.len();
         for raw_path in input.paths {
             call.check_cancelled()?;
-            let requested = parse_requested_path(&raw_path)?;
-            authorize(&call, requested.namespace, false)?;
-            let raw = requested.path(&call.workspace);
-            let metadata = match fs::symlink_metadata(&raw) {
-                Ok(metadata) => metadata,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    entries.push(FileInfoEntry {
-                        path: raw_path,
-                        exists: Some(false),
-                        entry_type: None,
-                        size_bytes: None,
-                        modified_at_ms: None,
-                        mode: None,
-                        target_type: None,
-                    });
+            let (requested, resolved) = resolve_info(&call, &raw_path)?;
+            let (target, metadata) = match resolved {
+                ResolvedEntry::Existing { target, metadata } => (target, metadata),
+                ResolvedEntry::Missing => {
+                    push_entry(
+                        &mut entries,
+                        &mut serialized_bytes,
+                        FileInfoEntry {
+                            path: requested.raw,
+                            exists: Some(false),
+                            entry_type: None,
+                            size_bytes: None,
+                            modified_at_ms: None,
+                            mode: None,
+                            target_type: None,
+                        },
+                    )?;
                     continue;
                 }
-                Err(error) => return Err(ToolError::new("file.writeFailed", error.to_string())),
             };
-            let (requested, raw) = resolve_info(&call, &raw_path)?;
-            let entry_type = if metadata.file_type().is_symlink() {
+            let entry_type = if metadata.is_symlink() {
                 "symlink"
             } else if metadata.is_file() {
                 "file"
@@ -70,7 +70,7 @@ impl ToolHandler for FileInfoTool {
                 "other"
             };
             let target_type = if entry_type == "symlink" {
-                fs::metadata(&raw).ok().map(|metadata| {
+                target.metadata(true).ok().flatten().map(|metadata| {
                     if metadata.is_file() {
                         "file".to_string()
                     } else if metadata.is_dir() {
@@ -83,27 +83,70 @@ impl ToolHandler for FileInfoTool {
                 None
             };
             #[cfg(unix)]
-            let mode = {
-                use std::os::unix::fs::MetadataExt;
-                Some(metadata.mode())
-            };
+            let mode = Some(metadata.mode());
             #[cfg(not(unix))]
             let mode = None;
-            let modified_at_ms = metadata
-                .modified()
-                .ok()
-                .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
-                .map(|value| value.as_millis());
-            entries.push(FileInfoEntry {
-                path: requested.raw,
-                exists: None,
-                entry_type: Some(entry_type.to_string()),
-                size_bytes: details.then_some(metadata.len()),
-                modified_at_ms: details.then_some(modified_at_ms).flatten(),
-                mode: details.then_some(mode).flatten(),
-                target_type,
-            });
+            push_entry(
+                &mut entries,
+                &mut serialized_bytes,
+                FileInfoEntry {
+                    path: requested.raw,
+                    exists: None,
+                    entry_type: Some(entry_type.to_string()),
+                    size_bytes: details.then_some(metadata.len()),
+                    modified_at_ms: details.then_some(metadata.modified_at_millis()).flatten(),
+                    mode: details.then_some(mode).flatten(),
+                    target_type,
+                },
+            )?;
         }
         crate::tools::contract::serialize(FileInfoOutput { entries })
+    }
+}
+
+fn push_entry(
+    entries: &mut Vec<FileInfoEntry>,
+    serialized_bytes: &mut usize,
+    entry: FileInfoEntry,
+) -> Result<(), ToolError> {
+    let entry_bytes = serde_json::to_vec(&entry)
+        .map_err(|error| ToolError::new("tool.internalError", error.to_string()))?
+        .len()
+        .saturating_add(usize::from(!entries.is_empty()));
+    if serialized_bytes.saturating_add(entry_bytes) > MAX_SERIALIZED_OUTPUT_BYTES {
+        return Err(ToolError::new(
+            "file.outputTooLarge",
+            "file_info batch exceeds the serialized output budget; split paths into smaller batches",
+        ));
+    }
+    *serialized_bytes = serialized_bytes.saturating_add(entry_bytes);
+    entries.push(entry);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{push_entry, FileInfoEntry, MAX_SERIALIZED_OUTPUT_BYTES};
+
+    #[test]
+    fn file_info_batch_reports_output_budget_before_transport_overflow() {
+        let mut entries = Vec::new();
+        let mut bytes = MAX_SERIALIZED_OUTPUT_BYTES - 8;
+        let error = push_entry(
+            &mut entries,
+            &mut bytes,
+            FileInfoEntry {
+                path: "./some-file".to_string(),
+                exists: Some(false),
+                entry_type: None,
+                size_bytes: None,
+                modified_at_ms: None,
+                mode: None,
+                target_type: None,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "file.outputTooLarge");
+        assert!(entries.is_empty());
     }
 }

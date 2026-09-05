@@ -7,11 +7,11 @@ use std::sync::Arc;
 use regex::RegexBuilder;
 
 use crate::security::path::ResolvedPath;
-use crate::tools::file::FileToolState;
 use crate::tools::file::discover::DiscoveryCursor;
 use crate::tools::file::resolve_existing;
-use crate::tools::file::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
+use crate::tools::file::state::{TextFile, TextMetadata, FULL_SNAPSHOT_LIMIT};
 use crate::tools::file::types::{FileSearchFile, FileSearchInput, FileSearchOutput, SearchSyntax};
+use crate::tools::file::FileToolState;
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const FILES_PER_PAGE: usize = 20;
@@ -52,6 +52,7 @@ pub(crate) struct SearchContinuation {
     next_group: usize,
     seen_candidates: HashSet<PathBuf>,
     pending: Option<PendingFile>,
+    strict_single_file: bool,
     per_file: usize,
     matcher: regex::Regex,
     context: Option<usize>,
@@ -161,6 +162,7 @@ impl ToolHandler for FileSearchTool {
                         next_group: 0,
                         seen_candidates: HashSet::new(),
                         pending: None,
+                        strict_single_file: single_exact_file,
                         per_file,
                         matcher,
                         context,
@@ -219,6 +221,7 @@ impl ToolHandler for FileSearchTool {
                         .resolved
                         .open_file()
                         .map_err(|error| ToolError::new("file.notFound", error.to_string()))?,
+                    &call.cancellation,
                 )?;
                 if text.revision != matched.metadata.revision {
                     return Err(ToolError::retryable(
@@ -238,6 +241,7 @@ impl ToolHandler for FileSearchTool {
                         .resolved
                         .open_file()
                         .map_err(|error| ToolError::new("file.notFound", error.to_string()))?,
+                    &call.cancellation,
                 )?;
                 if metadata.revision != matched.metadata.revision {
                     return Err(ToolError::retryable(
@@ -306,7 +310,7 @@ fn refresh_pending_file(
     pending: PendingFile,
     state: &FileToolState,
 ) -> Result<Option<MatchedFile>, ToolError> {
-    let Ok((metadata, matches, shown, next_line)) = search_stream(
+    let searched = search_stream(
         pending
             .resolved
             .open_file()
@@ -316,8 +320,13 @@ fn refresh_pending_file(
         continuation.context,
         continuation.start_line,
         &call.cancellation,
-    ) else {
-        return Ok(None);
+    );
+    let (metadata, matches, shown, next_line) = match searched {
+        Ok(result) => result,
+        Err(error) if !continuation.strict_single_file && skippable_search_error(&error) => {
+            return Ok(None);
+        }
+        Err(error) => return Err(error),
     };
     if matches.is_empty() {
         return Ok(None);
@@ -396,7 +405,7 @@ fn next_matched_file(
             }
             call.check_cancelled()?;
             let ordinal = state.next_snapshot_ordinal();
-            let Ok((metadata, matches, shown, next_line)) = search_stream(
+            let searched = search_stream(
                 entry
                     .resolved
                     .open_file()
@@ -406,8 +415,15 @@ fn next_matched_file(
                 context,
                 start_line,
                 &call.cancellation,
-            ) else {
-                continue;
+            );
+            let (metadata, matches, shown, next_line) = match searched {
+                Ok(result) => result,
+                Err(error)
+                    if !continuation.strict_single_file && skippable_search_error(&error) =>
+                {
+                    continue;
+                }
+                Err(error) => return Err(error),
             };
             if matches.is_empty() {
                 continue;
@@ -524,6 +540,10 @@ fn search_stream(
     Ok((metadata, matches, shown, next_line))
 }
 
+fn skippable_search_error(error: &ToolError) -> bool {
+    matches!(error.code.as_str(), "file.notText" | "file.readFailed")
+}
+
 fn format_streamed_content(
     matches: &[usize],
     shown: &BTreeMap<usize, String>,
@@ -557,4 +577,26 @@ fn truncate(value: &str) -> (String, bool) {
         end -= 1;
     }
     (format!("{}…", &value[..end]), false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::skippable_search_error;
+    use crate::tools::ToolError;
+
+    #[test]
+    fn directory_search_never_swallows_cancellation() {
+        assert!(skippable_search_error(&ToolError::new(
+            "file.notText",
+            "binary"
+        )));
+        assert!(skippable_search_error(&ToolError::new(
+            "file.readFailed",
+            "unreadable"
+        )));
+        assert!(!skippable_search_error(&ToolError::new(
+            "tool.cancelled",
+            "cancelled"
+        )));
+    }
 }

@@ -11,11 +11,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(windows)]
+use cap_std::ambient_authority;
 use cap_std::fs::{Dir as CapabilityDir, OpenOptions as CapabilityOpenOptions};
 #[cfg(unix)]
 use cap_std::fs::{MetadataExt as _, Permissions as CapabilityPermissions};
-#[cfg(windows)]
-use cap_std::ambient_authority;
 
 use crate::security::path::{PathNamespace, RequestedPath};
 use crate::tools::ToolError;
@@ -43,6 +43,7 @@ pub struct ResolvedMetadata {
     is_symlink: bool,
     len: u64,
     modified_at_seconds: i64,
+    modified_at_millis: Option<u128>,
     #[cfg(unix)]
     mode: u32,
     #[cfg(unix)]
@@ -77,6 +78,10 @@ impl ResolvedMetadata {
         self.modified_at_seconds
     }
 
+    pub fn modified_at_millis(&self) -> Option<u128> {
+        self.modified_at_millis
+    }
+
     #[cfg(unix)]
     pub fn device_and_inode(&self) -> (u64, u64) {
         (self.device, self.inode)
@@ -84,12 +89,14 @@ impl ResolvedMetadata {
 
     fn from_std(metadata: Metadata) -> Self {
         let file_type = metadata.file_type();
+        let (modified_at_seconds, modified_at_millis) = system_time_values(metadata.modified());
         Self {
             is_file: metadata.is_file(),
             is_dir: metadata.is_dir(),
             is_symlink: file_type.is_symlink(),
             len: metadata.len(),
-            modified_at_seconds: system_time_seconds(metadata.modified()),
+            modified_at_seconds,
+            modified_at_millis,
             #[cfg(unix)]
             mode: metadata.mode(),
             #[cfg(unix)]
@@ -101,12 +108,15 @@ impl ResolvedMetadata {
 
     fn from_capability(metadata: cap_std::fs::Metadata) -> Self {
         let file_type = metadata.file_type();
+        let (modified_at_seconds, modified_at_millis) =
+            system_time_values(metadata.modified().map(|time| time.into_std()));
         Self {
             is_file: metadata.is_file(),
             is_dir: metadata.is_dir(),
             is_symlink: file_type.is_symlink(),
             len: metadata.len(),
-            modified_at_seconds: system_time_seconds(metadata.modified().map(|time| time.into_std())),
+            modified_at_seconds,
+            modified_at_millis,
             #[cfg(unix)]
             mode: metadata.mode(),
             #[cfg(unix)]
@@ -279,7 +289,7 @@ impl ResolvedDirectory {
     pub fn sync_all(&self) -> io::Result<()> {
         #[cfg(unix)]
         if let Some(directory) = &self.capability {
-            use nix::fcntl::{OFlag, openat};
+            use nix::fcntl::{openat, OFlag};
             use nix::sys::stat::Mode;
 
             let descriptor = openat(
@@ -340,6 +350,15 @@ impl ResolvedDirectory {
         let time = filetime::FileTime::from_unix_time(seconds, 0);
         filetime::set_file_mtime(self.path.join(relative), time)
     }
+}
+
+#[derive(Clone, Debug)]
+pub enum ResolvedEntry {
+    Missing,
+    Existing {
+        target: ResolvedTarget,
+        metadata: ResolvedMetadata,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -441,13 +460,19 @@ impl ResolvedTarget {
     }
 }
 
-fn system_time_seconds(time: io::Result<SystemTime>) -> i64 {
+fn system_time_values(time: io::Result<SystemTime>) -> (i64, Option<u128>) {
     let Ok(time) = time else {
-        return 0;
+        return (0, None);
     };
     match time.duration_since(UNIX_EPOCH) {
-        Ok(duration) => i64::try_from(duration.as_secs()).unwrap_or(i64::MAX),
-        Err(error) => -i64::try_from(error.duration().as_secs()).unwrap_or(i64::MAX),
+        Ok(duration) => (
+            i64::try_from(duration.as_secs()).unwrap_or(i64::MAX),
+            Some(duration.as_millis()),
+        ),
+        Err(error) => (
+            -i64::try_from(error.duration().as_secs()).unwrap_or(i64::MAX),
+            None,
+        ),
     }
 }
 
@@ -660,6 +685,68 @@ pub fn resolve_existing_target(
     Ok(plain(canonical))
 }
 
+pub fn resolve_entry(
+    workspace: &Path,
+    requested: &RequestedPath,
+) -> Result<ResolvedEntry, ToolError> {
+    if requested.namespace == PathNamespace::Workspace {
+        #[cfg(any(unix, windows))]
+        {
+            return resolve_workspace_entry(workspace, requested);
+        }
+    }
+
+    let candidate = requested.path(workspace);
+    let metadata = match fs::symlink_metadata(&candidate) {
+        Ok(metadata) => ResolvedMetadata::from_std(metadata),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(ResolvedEntry::Missing),
+        Err(error) => return Err(ToolError::new("file.readFailed", error.to_string())),
+    };
+    let target = if candidate.file_name().is_none() {
+        ResolvedTarget {
+            path: candidate.clone(),
+            directory: ResolvedDirectory {
+                path: candidate,
+                capability: None,
+            },
+            relative: PathBuf::new(),
+            #[cfg(windows)]
+            _anchor_guards: Arc::new(Vec::new()),
+        }
+    } else {
+        let parent = candidate
+            .parent()
+            .ok_or_else(|| ToolError::new("file.invalidPath", "path has no parent"))?
+            .to_path_buf();
+        let name = candidate
+            .file_name()
+            .ok_or_else(|| ToolError::new("file.invalidPath", "path has no file name"))?
+            .to_owned();
+        ResolvedTarget {
+            path: candidate,
+            directory: ResolvedDirectory {
+                path: parent,
+                capability: None,
+            },
+            relative: PathBuf::from(name),
+            #[cfg(windows)]
+            _anchor_guards: Arc::new(Vec::new()),
+        }
+    };
+    Ok(ResolvedEntry::Existing { target, metadata })
+}
+
+fn existing_entry(target: ResolvedTarget) -> Result<ResolvedEntry, ToolError> {
+    let metadata = match target
+        .metadata(false)
+        .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?
+    {
+        Some(metadata) => metadata,
+        None => return Ok(ResolvedEntry::Missing),
+    };
+    Ok(ResolvedEntry::Existing { target, metadata })
+}
+
 pub fn resolve_create_target(
     workspace: &Path,
     requested: &RequestedPath,
@@ -715,7 +802,7 @@ fn resolve_workspace_existing(
     workspace: &Path,
     requested: &RequestedPath,
 ) -> Result<ResolvedPath, ToolError> {
-    use nix::fcntl::{OFlag, open, openat};
+    use nix::fcntl::{open, openat, OFlag};
     use nix::sys::stat::Mode;
 
     let root = workspace
@@ -801,7 +888,7 @@ fn resolve_workspace_create(
     workspace: &Path,
     requested: &RequestedPath,
 ) -> Result<ResolvedPath, ToolError> {
-    use nix::fcntl::{OFlag, open, openat};
+    use nix::fcntl::{open, openat, OFlag};
     use nix::sys::stat::Mode;
 
     let root = workspace
@@ -844,6 +931,69 @@ fn resolve_workspace_create(
             path: PathBuf::from(name),
         }),
     })
+}
+
+#[cfg(unix)]
+fn resolve_workspace_entry(
+    workspace: &Path,
+    requested: &RequestedPath,
+) -> Result<ResolvedEntry, ToolError> {
+    use nix::fcntl::{open, openat, OFlag};
+    use nix::sys::stat::Mode;
+
+    let root = workspace
+        .canonicalize()
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    let segments = workspace_segments(requested)?;
+    let canonical = segments
+        .iter()
+        .fold(root.clone(), |path, segment| path.join(segment));
+    let mut parent_fd = open(
+        &root,
+        OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    if segments.is_empty() {
+        let directory = Arc::new(CapabilityDir::from_std_file(File::from(parent_fd)));
+        let target = ResolvedTarget {
+            path: root.clone(),
+            directory: ResolvedDirectory {
+                path: root,
+                capability: Some(directory),
+            },
+            relative: PathBuf::new(),
+        };
+        return existing_entry(target);
+    }
+
+    let mut parent_path = root;
+    for segment in &segments[..segments.len() - 1] {
+        match openat(
+            &parent_fd,
+            segment.as_os_str(),
+            OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+            Mode::empty(),
+        ) {
+            Ok(next) => {
+                parent_fd = next;
+                parent_path.push(segment);
+            }
+            Err(nix::errno::Errno::ENOENT) => return Ok(ResolvedEntry::Missing),
+            Err(error) => return Err(map_resolution_error(error, requested)),
+        }
+    }
+    let name = segments.last().expect("workspace target segment exists");
+    let directory = Arc::new(CapabilityDir::from_std_file(File::from(parent_fd)));
+    let target = ResolvedTarget {
+        path: canonical,
+        directory: ResolvedDirectory {
+            path: parent_path,
+            capability: Some(directory),
+        },
+        relative: PathBuf::from(name),
+    };
+    existing_entry(target)
 }
 
 #[cfg(windows)]
@@ -965,6 +1115,86 @@ fn resolve_workspace_create(
 }
 
 #[cfg(windows)]
+fn resolve_workspace_entry(
+    workspace: &Path,
+    requested: &RequestedPath,
+) -> Result<ResolvedEntry, ToolError> {
+    let root = workspace
+        .canonicalize()
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    let segments = workspace_segments(requested)?;
+    let canonical = segments
+        .iter()
+        .fold(root.clone(), |path, segment| path.join(segment));
+    let root_directory = Arc::new(
+        CapabilityDir::open_ambient_dir(&root, ambient_authority())
+            .map_err(|error| map_capability_resolution_error(error, requested))?,
+    );
+    let mut guards = vec![root_directory.clone()];
+    if segments.is_empty() {
+        let target = ResolvedTarget {
+            path: root.clone(),
+            directory: ResolvedDirectory {
+                path: root,
+                capability: Some(root_directory),
+            },
+            relative: PathBuf::new(),
+            _anchor_guards: Arc::new(guards),
+        };
+        return existing_entry(target);
+    }
+
+    let mut parent = root_directory;
+    let mut parent_path = root;
+    for segment in &segments[..segments.len() - 1] {
+        let metadata = match parent.symlink_metadata(Path::new(segment)) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(ResolvedEntry::Missing);
+            }
+            Err(error) => return Err(map_capability_resolution_error(error, requested)),
+        };
+        if metadata.file_type().is_symlink() {
+            return Err(ToolError::new(
+                "file.pathEscapesWorkspace",
+                format!(
+                    "workspace path contains a symbolic link or reparse point: {}",
+                    requested.raw
+                ),
+            ));
+        }
+        if !metadata.is_dir() {
+            return Err(ToolError::new(
+                "file.notDirectory",
+                format!(
+                    "workspace path parent is not a directory: {}",
+                    requested.raw
+                ),
+            ));
+        }
+        let next = Arc::new(
+            parent
+                .open_dir(Path::new(segment))
+                .map_err(|error| map_capability_resolution_error(error, requested))?,
+        );
+        guards.push(next.clone());
+        parent = next;
+        parent_path.push(segment);
+    }
+    let name = segments.last().expect("workspace target segment exists");
+    let target = ResolvedTarget {
+        path: canonical,
+        directory: ResolvedDirectory {
+            path: parent_path,
+            capability: Some(parent),
+        },
+        relative: PathBuf::from(name),
+        _anchor_guards: Arc::new(guards),
+    };
+    existing_entry(target)
+}
+
+#[cfg(windows)]
 fn reject_workspace_symlink(
     directory: &CapabilityDir,
     path: &Path,
@@ -976,7 +1206,10 @@ fn reject_workspace_symlink(
     if metadata.file_type().is_symlink() {
         return Err(ToolError::new(
             "file.pathEscapesWorkspace",
-            format!("workspace path contains a symbolic link or reparse point: {}", requested.raw),
+            format!(
+                "workspace path contains a symbolic link or reparse point: {}",
+                requested.raw
+            ),
         ));
     }
     Ok(())
@@ -991,7 +1224,10 @@ fn map_capability_resolution_error(error: io::Error, requested: &RequestedPath) 
     };
     ToolError::new(
         code,
-        format!("failed to resolve {} within workspace: {error}", requested.raw),
+        format!(
+            "failed to resolve {} within workspace: {error}",
+            requested.raw
+        ),
     )
 }
 

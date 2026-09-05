@@ -190,14 +190,21 @@ impl ContextSnapshotStore {
 }
 
 impl TextMetadata {
-    pub fn inspect_file(file: fs::File) -> Result<Self, ToolError> {
+    pub fn inspect_file(
+        file: fs::File,
+        cancellation: &crate::tools::ToolCancellation,
+    ) -> Result<Self, ToolError> {
         let mut reader = BufReader::new(file);
         let mut hasher = blake3::Hasher::new();
         let mut buffer = Vec::new();
         let mut total_bytes = 0usize;
         let mut total_lines = 0usize;
         let mut first = true;
+        let mut scanned_lines = 0usize;
         loop {
+            if scanned_lines % 256 == 0 {
+                cancellation.check()?;
+            }
             buffer.clear();
             let count = reader
                 .read_until(b'\n', &mut buffer)
@@ -205,6 +212,7 @@ impl TextMetadata {
             if count == 0 {
                 break;
             }
+            scanned_lines = scanned_lines.saturating_add(1);
             hasher.update(&buffer);
             total_bytes += count;
             if buffer.contains(&0) {
@@ -235,6 +243,7 @@ impl TextMetadata {
         file: fs::File,
         ranges: &[(usize, usize)],
         max_rendered_bytes: usize,
+        cancellation: &crate::tools::ToolCancellation,
     ) -> Result<SelectedLines, ToolError> {
         let mut reader = BufReader::new(file);
         let mut hasher = blake3::Hasher::new();
@@ -248,6 +257,9 @@ impl TextMetadata {
         let mut total_lines = 0usize;
         let mut first = true;
         loop {
+            if line_no % 256 == 0 {
+                cancellation.check()?;
+            }
             buffer.clear();
             let count = reader
                 .read_until(b'\n', &mut buffer)
@@ -313,10 +325,22 @@ impl TextMetadata {
 }
 
 impl TextFile {
-    pub fn read_file(mut file: fs::File) -> Result<Self, ToolError> {
+    pub fn read_file(
+        mut file: fs::File,
+        cancellation: &crate::tools::ToolCancellation,
+    ) -> Result<Self, ToolError> {
         let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)
-            .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            cancellation.check()?;
+            let count = file
+                .read(&mut buffer)
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;
+            if count == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&buffer[..count]);
+        }
         if bytes.contains(&0) {
             return Err(ToolError::new("file.notText", "file contains NUL bytes"));
         }
@@ -406,7 +430,7 @@ impl TextFile {
 mod tests {
     use std::path::Path;
 
-    use super::{ContextSnapshotStore, TextFile};
+    use super::{ContextSnapshotStore, TextFile, TextMetadata};
 
     fn text(revision: &str, line: String) -> TextFile {
         TextFile {
@@ -417,6 +441,29 @@ mod tests {
             revision: revision.to_string(),
             total_bytes: 0,
         }
+    }
+
+    #[test]
+    fn streaming_metadata_and_selected_reads_honor_cancellation() {
+        let directory = crate::testing::temp_dir();
+        let path = directory.path().join("document.txt");
+        std::fs::write(&path, "line one\nline two\n").unwrap();
+        let cancellation = crate::tools::ToolCancellation::default();
+        cancellation.cancel();
+
+        let metadata_error =
+            TextMetadata::inspect_file(std::fs::File::open(&path).unwrap(), &cancellation)
+                .unwrap_err();
+        assert_eq!(metadata_error.code, "tool.cancelled");
+
+        let selected_error = TextMetadata::read_selected_file(
+            std::fs::File::open(&path).unwrap(),
+            &[(1, 2)],
+            1024,
+            &cancellation,
+        )
+        .unwrap_err();
+        assert_eq!(selected_error.code, "tool.cancelled");
     }
 
     #[test]
