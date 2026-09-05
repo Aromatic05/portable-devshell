@@ -3,6 +3,7 @@ import { lstat, mkdir, readdir, rm, symlink } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 
 import { assertPackageBinFile, readPackageBinPath } from "./application-layout.mjs";
+import { activatePiIntegration } from "./pi-integration.mjs";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const archiveArgument = process.argv.slice(2).find((argument) => argument !== "--");
@@ -35,6 +36,15 @@ try {
 
     const cli = await assertPackageBinFile(await readPackageBinPath(app, "devshell"));
     command = await createInstalledCommand(root, cli.absolutePath);
+    const pi = await activatePiIntegration({
+        binDirectory: resolve(root, "bin"),
+        currentLink: app,
+        home
+    });
+    assertCommandVersion(
+        runInstalled({ executable: pi.command, args: [] }, ["--version"], environment),
+        "packaged Pi runtime"
+    );
 
     assertCommandOutput(
         runInstalled(command, ["status"], environment),
@@ -132,6 +142,14 @@ function assertCommandOutput(result, expected, stage) {
     if (result.status !== 0 || !result.stdout.includes(expected)) {
         throw new Error(
             `${stage} did not contain ${JSON.stringify(expected)} (${result.status ?? "unknown"})\n${result.stdout}${result.stderr}`
+        );
+    }
+}
+
+function assertCommandVersion(result, stage) {
+    if (result.status !== 0 || !/^\d+\.\d+\.\d+(?:[-+].*)?$/u.test(result.stdout.trim())) {
+        throw new Error(
+            `${stage} did not report a semantic version (${result.status ?? "unknown"})\n${result.stdout}${result.stderr}`
         );
     }
 }
