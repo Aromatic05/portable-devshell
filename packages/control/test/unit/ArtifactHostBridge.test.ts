@@ -71,6 +71,24 @@ test("host source snapshots arbitrary paths when security is disabled and persis
     await reopenedEndpoint.closeArtifactPayload(opened.payloadId);
 });
 
+test("host receive initialization cleans only its private staging directory", async (t) => {
+    const root = await createTestTempDirectory("artifact-host-receive-init-");
+    const homeDirectory = join(root, "home");
+    const downloadDirectory = join(homeDirectory, "Download");
+    const storageDir = join(root, "storage");
+    const stagingDirectory = join(downloadDirectory, ".devshell-receive");
+    await mkdir(stagingDirectory, { recursive: true });
+    await writeFile(join(downloadDirectory, "unrelated.txt"), "keep");
+    await writeFile(join(stagingDirectory, "orphan.payload"), "remove");
+
+    const bridge = new ArtifactHostBridge({ homeDirectory, storageDir });
+    await bridge.initialize();
+
+    assert.equal(await readFile(join(downloadDirectory, "unrelated.txt"), "utf8"), "keep");
+    await assert.rejects(readFile(join(stagingDirectory, "orphan.payload"), "utf8"), { code: "ENOENT" });
+    t.after(() => rm(root, { force: true, recursive: true }));
+});
+
 test("host source workspace mode permits only a local provider workspace and rejects link escapes", async (t) => {
     const { bridge, root } = await fixture(t);
     const workspace = join(root, "workspace");

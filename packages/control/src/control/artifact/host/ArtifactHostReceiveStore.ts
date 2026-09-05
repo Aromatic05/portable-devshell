@@ -43,16 +43,20 @@ interface StoredReceive {
 export class ArtifactHostReceiveStore {
     readonly #downloadDirectory: string;
     readonly #root: string;
+    readonly #temporaryDirectory: string;
 
     constructor(options: { downloadDirectory: string; root: string }) {
         this.#downloadDirectory = options.downloadDirectory;
         this.#root = options.root;
+        this.#temporaryDirectory = join(options.downloadDirectory, ".devshell-receive");
     }
 
     async initialize(): Promise<void> {
         await mkdir(this.#downloadDirectory, { mode: 0o700, recursive: true });
         await mkdir(this.#root, { mode: 0o700, recursive: true });
+        await mkdir(this.#temporaryDirectory, { mode: 0o700, recursive: true });
         await chmod(this.#root, 0o700).catch(() => undefined);
+        await chmod(this.#temporaryDirectory, 0o700).catch(() => undefined);
         for (const file of await readdir(this.#root).catch(() => [] as string[])) {
             if (!file.endsWith(".json")) {
                 continue;
@@ -65,13 +69,11 @@ export class ArtifactHostReceiveStore {
                 await rm(join(this.#root, file), { force: true });
             }
         }
-        for (const name of await readdir(this.#downloadDirectory)) {
-            if (name.startsWith(".devshell-receive-")) {
-                await rm(join(this.#downloadDirectory, name), {
-                    force: true,
-                    recursive: true
-                });
-            }
+        for (const name of await readdir(this.#temporaryDirectory)) {
+            await rm(join(this.#temporaryDirectory, name), {
+                force: true,
+                recursive: true
+            });
         }
     }
 
@@ -91,7 +93,7 @@ export class ArtifactHostReceiveStore {
         }
 
         const receiveId = randomUUID();
-        const temporaryPath = join(this.#downloadDirectory, `.devshell-receive-${receiveId}.payload`);
+        const temporaryPath = join(this.#temporaryDirectory, `${receiveId}.payload`);
         const temporary = await open(
             temporaryPath,
             constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
@@ -200,10 +202,7 @@ export class ArtifactHostReceiveStore {
 
         let sourcePath = stored.temporaryPath;
         if (stored.descriptor.type === "directoryArchive") {
-            const stagedPath = join(
-                this.#downloadDirectory,
-                `.devshell-receive-${receiveId}.directory`
-            );
+            const stagedPath = join(this.#temporaryDirectory, `${receiveId}.directory`);
             await rm(stagedPath, { force: true, recursive: true });
             await mkdir(stagedPath, { mode: 0o700 });
             stored.stagedPath = stagedPath;
@@ -263,14 +262,15 @@ export class ArtifactHostReceiveStore {
             throw artifactError("artifact.targetExists", "Host Download target already exists.");
         }
         if (targetMetadata !== undefined) {
-            const backupPath = join(
-                this.#downloadDirectory,
-                `.devshell-receive-${stored.receiveId}.backup`
-            );
+            const backupPath = join(this.#temporaryDirectory, `${stored.receiveId}.backup`);
             await rm(backupPath, { force: true, recursive: true });
             stored.backupPath = backupPath;
             await this.#persist(stored);
             await rename(stored.targetPath, backupPath);
+            await Promise.all([
+                syncDirectory(this.#downloadDirectory),
+                syncDirectory(this.#temporaryDirectory)
+            ]);
             try {
                 await rename(sourcePath, stored.targetPath);
             } catch (error) {
@@ -279,11 +279,17 @@ export class ArtifactHostReceiveStore {
             }
             await rm(backupPath, { force: true, recursive: true });
             stored.backupPath = undefined;
-            await syncDirectory(this.#downloadDirectory);
+            await Promise.all([
+                syncDirectory(this.#downloadDirectory),
+                syncDirectory(this.#temporaryDirectory)
+            ]);
             return;
         }
         await rename(sourcePath, stored.targetPath);
-        await syncDirectory(this.#downloadDirectory);
+        await Promise.all([
+            syncDirectory(this.#downloadDirectory),
+            syncDirectory(this.#temporaryDirectory)
+        ]);
     }
 
     async #recover(stored: StoredReceive): Promise<void> {
