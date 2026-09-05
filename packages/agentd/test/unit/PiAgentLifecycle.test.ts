@@ -17,7 +17,8 @@ function fakeSession(events: string[], abortError?: Error): PiSessionLike {
             events.push("dispose");
         },
         async followUp() {},
-        async prompt() {}
+        async prompt() {},
+        async reload() {}
     };
 }
 
@@ -29,7 +30,14 @@ function fakeBridge(events: string[]): DevshellPiWorkspaceBridge {
         async extension() {},
         async loadContextFiles() {
             return [];
-        }
+        },
+        async loadResources() {
+            return { contextFiles: [], prompts: [], skills: [] };
+        },
+        async refreshResources() {
+            return { contextFiles: [], prompts: [], skills: [] };
+        },
+        setActiveSkillNames() {}
     };
 }
 

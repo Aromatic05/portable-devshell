@@ -37,6 +37,7 @@ test("Pi process factory shares one child across live Agents and stops it only a
         assert.equal(first.web?.upstream.toString(), "http://127.0.0.1:43199/");
         assert.equal(second.web?.upstream.toString(), first.web?.upstream.toString());
         await first.prompt("first");
+        await first.reload?.();
         await second.steer?.("second");
         await first.stop();
 
@@ -44,6 +45,7 @@ test("Pi process factory shares one child across live Agents and stops it only a
         assert.equal(new Set(entries.map((entry) => entry.pid)).size, 1);
         assert.equal(entries.filter((entry) => entry.type === "init").length, 1);
         assert.equal(entries.filter((entry) => entry.type === "agent.start").length, 2);
+        assert.equal(entries.filter((entry) => entry.command === "reload").length, 1);
         assert.equal(entries.some((entry) => entry.type === "shutdown"), false);
         assert.ok(entries.every((entry) => entry.agentDir === piAgentDir));
 
@@ -159,15 +161,17 @@ function rejectAfter(milliseconds: number, message: string): Promise<never> {
 async function readEntries(runtimeDirectory: string): Promise<Array<{
     agentDir: string;
     agentId: string;
+    command: string;
     pid: string;
     type: string;
 }>> {
     const text = await readFile(join(runtimeDirectory, "fake-pi-child.log"), "utf8");
     return text.trim().split("\n").filter(Boolean).map((line) => {
-        const [pid, stateDir, type, agentId] = line.split("\t");
+        const [pid, stateDir, type, agentId, command] = line.split("\t");
         return {
             agentDir: stateDir ?? "",
             agentId: agentId ?? "",
+            command: command ?? "",
             pid: pid ?? "",
             type: type ?? ""
         };

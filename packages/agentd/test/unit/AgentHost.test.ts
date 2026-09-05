@@ -18,6 +18,7 @@ test("AgentHost binds provider lifecycle, target, runtime prefix, and one shared
     const steers: string[] = [];
     const followUps: string[] = [];
     let aborts = 0;
+    let reloads = 0;
     const provider: AgentProvider = {
         id: "pi",
         version: "0.84.4",
@@ -28,6 +29,7 @@ test("AgentHost binds provider lifecycle, target, runtime prefix, and one shared
                 async abort() { aborts += 1; },
                 async followUp(message) { followUps.push(message); },
                 async prompt(message) { prompts.push(message); },
+                async reload() { reloads += 1; },
                 async steer(message) { steers.push(message); },
                 async stop() { stopped.push(context.agentId); },
                 web: { upstream: new URL("http://127.0.0.1:43123/") }
@@ -69,16 +71,41 @@ test("AgentHost binds provider lifecycle, target, runtime prefix, and one shared
     await host.steer(record.agentId, "focus tests");
     await host.followUp(record.agentId, "review after");
     await host.abort(record.agentId);
+    await host.reload(record.agentId);
     assert.deepEqual(prompts, ["implement"]);
     assert.deepEqual(steers, ["focus tests"]);
     assert.deepEqual(followUps, ["review after"]);
     assert.equal(aborts, 1);
+    assert.equal(reloads, 1);
 
     const stoppedRecord = await host.stop(record.agentId);
     assert.equal(stoppedRecord.state, "stopped");
     assert.deepEqual(stopped, [record.agentId]);
     assert.deepEqual(host.list(), []);
     assert.equal(host.webEndpoint(), undefined);
+});
+
+test("AgentHost rejects reload when the provider does not expose that capability", async () => {
+    const host = new AgentHost({
+        idFactory: () => "ag-no-reload",
+        providers: [{
+            id: "minimal",
+            version: "1",
+            async start() {
+                return { closed: neverClosed, async prompt() {}, async stop() {} };
+            }
+        }]
+    });
+    const record = await host.start({
+        provider: "minimal",
+        target: parseAgentWorkerTarget("worker-a:/repo")
+    });
+
+    await assert.rejects(
+        () => host.reload(record.agentId),
+        /does not support reload/u
+    );
+    await host.stop(record.agentId);
 });
 
 test("AgentHost requires one shared provider Web endpoint", async () => {

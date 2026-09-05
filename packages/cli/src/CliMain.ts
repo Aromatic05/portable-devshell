@@ -280,6 +280,12 @@ export class CliMain {
                 this.#writeJson({ accepted: true, ...web });
                 return;
             }
+            case "agent.reload": {
+                const web = agentWebView(await this.#clients.config.get());
+                await this.#clients.agent.reload(command.agentId);
+                this.#writeJson({ reloaded: true, ...web });
+                return;
+            }
             case "agent.stop":
                 this.#writeJson(await this.#clients.agent.stop(command.agentId));
                 return;

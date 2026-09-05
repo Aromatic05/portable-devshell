@@ -40,7 +40,7 @@ export type CliParsedCommand =
     | { kind: "agent.web" }
     | { agentId: string; kind: "agent.show" }
     | { agentId: string; kind: "agent.send" | "agent.steer" | "agent.followUp"; message: string }
-    | { agentId: string; kind: "agent.abort" | "agent.stop" }
+    | { agentId: string; kind: "agent.abort" | "agent.reload" | "agent.stop" }
     | { kind: "agent.start"; provider?: string; target: string }
     | { input: JsonValue; instance: string; kind: "instance.call"; toolName: string; workspace: string }
     | { kind: "instance.create" }
@@ -150,6 +150,8 @@ export class CliParser {
                 return this.#expectAgentIdCommand(argv, "agent.show");
             case "abort":
                 return this.#expectAgentIdCommand(argv, "agent.abort");
+            case "reload":
+                return this.#expectAgentIdCommand(argv, "agent.reload");
             case "stop":
                 return this.#expectAgentIdCommand(argv, "agent.stop");
             case "send":
@@ -198,7 +200,7 @@ export class CliParser {
 
     #expectAgentIdCommand(
         argv: readonly string[],
-        kind: "agent.show" | "agent.abort" | "agent.stop"
+        kind: "agent.show" | "agent.abort" | "agent.reload" | "agent.stop"
     ): CliParsedCommand {
         if (argv.length !== 2) {
             throw CliRenderError.usage(`${argv[0]} requires <agentId>`);

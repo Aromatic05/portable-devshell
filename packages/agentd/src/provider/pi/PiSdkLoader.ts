@@ -68,6 +68,7 @@ export interface PiSessionLike {
         preflightResult?: (success: boolean) => void;
         streamingBehavior?: "steer" | "followUp";
     }): Promise<void>;
+    reload(): Promise<void>;
     setModel?(model: PiModelLike): Promise<void>;
     setSessionName?(name: string): void;
     setThinkingLevel?(level: string): void;

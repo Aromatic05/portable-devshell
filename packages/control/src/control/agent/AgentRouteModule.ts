@@ -30,6 +30,7 @@ export interface AgentControlPort {
     list(): AgentRecord[];
     openToolSession(input: AgentToolSessionOpenInput, connectionId: string): Promise<AgentToolSessionRecord>;
     prompt(input: AgentMessageInput): Promise<void>;
+    reload(agentId: string): Promise<void>;
     start(input: AgentStartInput): Promise<AgentRecord>;
     steer(input: AgentMessageInput): Promise<void>;
     stop(agentId: string): Promise<AgentRecord>;
@@ -54,6 +55,10 @@ export function createAgentRouteModule(agent: AgentControlPort) {
         },
         abort: async (request) => {
             await agent.abort(readAgentId(request.payload));
+            return {};
+        },
+        reload: async (request) => {
+            await agent.reload(readAgentId(request.payload));
             return {};
         },
         toolSessionOpen: async (request, context) => {

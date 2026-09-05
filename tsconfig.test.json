@@ -20,7 +20,8 @@
             "@portable-devshell/mcp/testing": ["./packages/mcp/src/testing.ts"],
             "@portable-devshell/cli": ["./packages/cli/src/index.ts"],
             "@portable-devshell/tui": ["./packages/tui/src/index.ts"],
-            "@portable-devshell/tui/testing": ["./packages/tui/src/testing.ts"]
+            "@portable-devshell/tui/testing": ["./packages/tui/src/testing.ts"],
+            "@portable-devshell/pi-extension": ["./packages/pi-extension/src/index.ts"]
         },
         "rootDir": "."
     },

@@ -71,6 +71,9 @@ test("Agent CLI exposes the shared provider WebUI after start and prompt accepta
                 },
                 async prompt() {
                     calls.push("agent.prompt");
+                },
+                async reload() {
+                    calls.push("agent.reload");
                 }
             }
         } as never),
@@ -91,6 +94,13 @@ test("Agent CLI exposes the shared provider WebUI after start and prompt accepta
         webUrl: "https://control.example/devshell/web/agent/"
     });
     assert.deepEqual(calls, ["config.get", "agent.start", "config.get", "agent.prompt"]);
+
+    assert.equal(await cli.run(["agent", "reload", "ag-1"]), 0);
+    assert.deepEqual(JSON.parse(stdout.flush()), {
+        reloaded: true,
+        webUrl: "https://control.example/devshell/web/agent/"
+    });
+    assert.deepEqual(calls, ["config.get", "agent.start", "config.get", "agent.prompt", "config.get", "agent.reload"]);
     assert.equal(stderr.flush(), "");
 });
 

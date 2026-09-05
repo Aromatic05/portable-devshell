@@ -103,6 +103,14 @@ export class AgentHost {
         await runtime.handle.followUp(message);
     }
 
+    async reload(agentId: string): Promise<void> {
+        const runtime = this.#requireRuntime(agentId);
+        if (runtime.handle.reload === undefined) {
+            throw new Error(`Agent provider ${runtime.record.provider} does not support reload.`);
+        }
+        await runtime.handle.reload();
+    }
+
     async abort(agentId: string): Promise<void> {
         const runtime = this.#requireRuntime(agentId);
         if (runtime.handle.abort === undefined) {

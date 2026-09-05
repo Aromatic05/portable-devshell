@@ -17,7 +17,7 @@ process.on("message", (message) => {
 async function handle(message) {
     await appendFile(
         logPath,
-        `${process.pid}\t${process.env.PI_CODING_AGENT_DIR ?? ""}\t${message.type}\t${message.agentId ?? ""}\n`,
+        `${process.pid}\t${process.env.PI_CODING_AGENT_DIR ?? ""}\t${message.type}\t${message.agentId ?? ""}\t${message.command ?? ""}\n`,
         "utf8"
     );
     if (message.type === "init") {

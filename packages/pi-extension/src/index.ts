@@ -1,6 +1,11 @@
 import { spawn } from "node:child_process";
 
 import {
+    type InputEvent,
+    type InputEventResult,
+    type SessionShutdownEvent
+} from "@earendil-works/pi-coding-agent";
+import {
     CONTROL_PROTOCOL_VERSION,
     ClientConnection,
     connectControlClientChannel,
@@ -23,8 +28,27 @@ import {
     type PiToolRenderResultOptionsLike
 } from "./renderer.js";
 
+import {
+    loadDevshellPiWorkspaceResources,
+    transformDevshellPiSkillInput,
+    type DevshellPiContextFile,
+    type DevshellPiWorkspaceResources
+} from "./workspace-resources.js";
+
+export {
+    loadDevshellPiWorkspaceContext,
+    loadDevshellPiWorkspaceResources,
+    transformDevshellPiSkillInput
+} from "./workspace-resources.js";
+export type {
+    DevshellPiContextFile,
+    DevshellPiWorkspaceResources,
+    DevshellPiWorkspaceSkill
+} from "./workspace-resources.js";
+
 export interface PiExtensionApiLike {
-    on(event: "session_shutdown", handler: () => Promise<void> | void): void;
+    on(event: "input", handler: (event: InputEvent) => InputEventResult | Promise<InputEventResult | void> | void): void;
+    on(event: "session_shutdown", handler: (event: SessionShutdownEvent) => Promise<void> | void): void;
     registerTool(tool: PiToolLike): void;
 }
 
@@ -61,15 +85,13 @@ export interface DevshellPiExtensionOptions {
     target?: AgentTarget | string;
 }
 
-export interface DevshellPiContextFile {
-    content: string;
-    path: string;
-}
-
 export interface DevshellPiWorkspaceBridge {
     close(): Promise<void>;
     extension: (pi: PiExtensionApiLike) => Promise<void>;
     loadContextFiles(): Promise<DevshellPiContextFile[]>;
+    loadResources(): Promise<DevshellPiWorkspaceResources>;
+    refreshResources(): Promise<DevshellPiWorkspaceResources>;
+    setActiveSkillNames(names: ReadonlySet<string>): void;
 }
 
 interface AgentControlSession {
@@ -77,20 +99,6 @@ interface AgentControlSession {
     close(): void;
     record: AgentToolSessionRecord;
 }
-
-const PI_CONTEXT_FILE_NAMES = [
-    "AGENTS.override.md",
-    "AGENTS.md",
-    "AGENTS.MD",
-    "CLAUDE.md",
-    "CLAUDE.MD"
-] as const;
-
-type DevshellPiToolCall = (
-    toolName: string,
-    input: JsonValue,
-    operationId: string
-) => Promise<JsonValue>;
 
 export function createDevshellPiExtension(
     options: DevshellPiExtensionOptions = {}
@@ -120,6 +128,41 @@ export async function openDevshellPiWorkspaceBridge(
         throw error;
     }
     const toolNames = new Set(catalog.tools.map((tool) => tool.name));
+    let resources: DevshellPiWorkspaceResources | undefined;
+    let resourcesPromise: Promise<DevshellPiWorkspaceResources> | undefined;
+    let resourceGeneration = 0;
+    let activeSkillNames: ReadonlySet<string> | undefined;
+    const fetchResources = async () => {
+        const generation = ++resourceGeneration;
+        const loaded = await loadDevshellPiWorkspaceResources(
+            session.record.target,
+            toolNames,
+            async (toolName, input, operationId) => await session.clients.agent.callToolSession({
+                input,
+                operationId: `pi-resource-generation-${generation}-${operationId}`,
+                sessionId: session.record.sessionId,
+                toolName
+            })
+        );
+        if (resources === undefined) {
+            resources = loaded;
+        } else {
+            resources.contextFiles = loaded.contextFiles;
+            resources.prompts = loaded.prompts;
+            resources.skills = loaded.skills;
+        }
+        return resources;
+    };
+    const loadResources = async () => {
+        if (resources !== undefined) return resources;
+        resourcesPromise ??= fetchResources();
+        try {
+            return await resourcesPromise;
+        } finally {
+            resourcesPromise = undefined;
+        }
+    };
+    const refreshResources = async () => await fetchResources();
     const close = async () => {
         if (closed) return;
         closed = true;
@@ -131,89 +174,25 @@ export async function openDevshellPiWorkspaceBridge(
             for (const definition of catalog.tools) {
                 pi.registerTool(toPiTool(definition, session));
             }
+            const loaded = await loadResources();
+            pi.on("input", (event) => {
+                const active = activeSkillNames;
+                return transformDevshellPiSkillInput(
+                    active === undefined
+                    ? loaded.skills
+                    : loaded.skills.filter((skill) => active.has(skill.resource.name)),
+                    event
+                );
+            });
         },
-        loadContextFiles: async () => await loadDevshellPiWorkspaceContext(
-            session.record.target,
-            toolNames,
-            async (toolName, input, operationId) => await session.clients.agent.callToolSession({
-                input,
-                operationId,
-                sessionId: session.record.sessionId,
-                toolName
-            })
-        )
+        loadContextFiles: async () => (await loadResources()).contextFiles,
+        loadResources,
+        refreshResources,
+        setActiveSkillNames: (names) => {
+            activeSkillNames = new Set(names);
+        }
     };
 }
-
-export async function loadDevshellPiWorkspaceContext(
-    target: AgentTarget,
-    toolNames: ReadonlySet<string>,
-    callTool: DevshellPiToolCall
-): Promise<DevshellPiContextFile[]> {
-    if (!toolNames.has("file_find") || !toolNames.has("file_read")) return [];
-    const found = asRecord(await callTool("file_find", {
-        gitignore: false,
-        hidden: true,
-        paths: ["./AGENTS*", "./CLAUDE*"],
-        type: "file"
-    }, "pi-context-find"));
-    const entries = Array.isArray(found?.entries) ? found.entries : [];
-    const existing = new Map<string, string>();
-    for (const value of entries) {
-        const entry = asRecord(value);
-        if (entry === undefined || typeof entry.path !== "string" || entry.type !== "file") continue;
-        const name = contextFileName(entry.path);
-        if (name !== undefined && !existing.has(name)) existing.set(name, entry.path);
-    }
-    const name = PI_CONTEXT_FILE_NAMES.find((candidate) => existing.has(candidate));
-    if (name === undefined) return [];
-    const path = existing.get(name)!;
-    return [{
-        content: await readCompleteTextFile(path, callTool),
-        path: remoteContextPath(target, name)
-    }];
-}
-
-async function readCompleteTextFile(path: string, callTool: DevshellPiToolCall): Promise<string> {
-    const lines = new Map<number, string>();
-    let selector: string | undefined;
-    let page = 0;
-    do {
-        const result = asRecord(await callTool(
-            "file_read",
-            { path, view: "content", ...(selector === undefined ? {} : { selector }) },
-            `pi-context-read-${++page}`
-        ));
-        const content = typeof result?.content === "string" ? result.content : "";
-        for (const line of content.split("\n")) {
-            if (line.length === 0) continue;
-            const match = /^(\d+):(.*)$/u.exec(line);
-            if (match === null) throw new Error(`file_read returned malformed context content for ${path}.`);
-            lines.set(Number(match[1]), match[2] ?? "");
-        }
-        const next = typeof result?.nextSelector === "string" ? result.nextSelector : undefined;
-        selector = next !== undefined && /^\d+$/u.test(next) ? `${next}:raw` : next;
-    } while (selector !== undefined);
-    return [...lines.entries()]
-        .sort(([left], [right]) => left - right)
-        .map(([, line]) => line)
-        .join("\n")
-        .replace(/^\uFEFF/u, "");
-}
-
-function contextFileName(path: string): typeof PI_CONTEXT_FILE_NAMES[number] | undefined {
-    const normalized = path.replaceAll("\\", "/");
-    const basename = normalized.slice(normalized.lastIndexOf("/") + 1);
-    return PI_CONTEXT_FILE_NAMES.find((candidate) => candidate === basename);
-}
-
-function remoteContextPath(target: AgentTarget, name: string): string {
-    const separator = target.workspace.includes("\\") && !target.workspace.includes("/") ? "\\" : "/";
-    const workspace = target.workspace.replace(/[\\/]+$/u, "");
-    return `${target.instance}:${workspace}${separator}${name}`;
-}
-
-export default createDevshellPiExtension();
 
 async function openAgentControlSession(
     options: DevshellPiExtensionOptions
@@ -442,11 +421,6 @@ function asJsonValue(value: unknown): JsonValue {
     return value;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-    return typeof value === "object" && value !== null && !Array.isArray(value)
-        ? value as Record<string, unknown>
-        : undefined;
-}
 
 function isJsonValue(value: unknown): value is JsonValue {
     if (value === null || typeof value === "string" || typeof value === "boolean") return true;

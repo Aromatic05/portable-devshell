@@ -110,6 +110,7 @@ export interface ControlClients {
         list(): Promise<AgentRecord[]>;
         openToolSession(input: AgentToolSessionOpenInput): Promise<AgentToolSessionRecord>;
         prompt(input: AgentMessageInput): Promise<void>;
+        reload(agentId: string): Promise<void>;
         start(input: AgentStartInput): Promise<AgentRecord>;
         steer(input: AgentMessageInput): Promise<void>;
         stop(agentId: string): Promise<AgentRecord>;
@@ -270,6 +271,9 @@ export function createControlClients(
             openToolSession: (input) => agent.request("toolSessionOpen", input),
             prompt: async (input) => {
                 await agent.request("prompt", input);
+            },
+            reload: async (agentId) => {
+                await agent.request("reload", { agentId });
             },
             start: (input) => agent.request("start", input),
             steer: async (input) => {

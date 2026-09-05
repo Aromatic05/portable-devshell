@@ -24,6 +24,7 @@ export interface AgentProviderHandle {
     abort?(): Promise<void>;
     followUp?(message: string): Promise<void>;
     prompt(message: string): Promise<void>;
+    reload?(): Promise<void>;
     steer?(message: string): Promise<void>;
     stop(): Promise<void>;
 }

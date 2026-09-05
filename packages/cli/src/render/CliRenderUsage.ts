@@ -93,6 +93,7 @@ export function renderAgentUsage(): string {
         "  devshell agent steer <agentId> <message>",
         "  devshell agent follow-up <agentId> <message>",
         "  devshell agent abort <agentId>",
+        "  devshell agent reload <agentId>",
         "  devshell agent stop <agentId>",
     ].join("\n");
 }

@@ -3,11 +3,13 @@ import { dirname, join, resolve } from "node:path";
 
 import {
     openDevshellPiWorkspaceBridge,
-    type DevshellPiWorkspaceBridge
+    type DevshellPiWorkspaceBridge,
+    type PiExtensionApiLike
 } from "@portable-devshell/pi-extension";
 import type { AgentTarget } from "@portable-devshell/shared";
 
 import { PiGuiWeb } from "./PiGuiWeb.js";
+import { mergeManagedPiProjectPrompts, mergeManagedPiProjectSkills } from "./PiAgentResources.js";
 import { PiSdkLoader, type PiModelRuntimeLike, type PiSdkModule, type PiSessionLike } from "./PiSdkLoader.js";
 import type {
     PiChildAgentCommandMessage,
@@ -90,19 +92,35 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
         target: input.target
     });
     try {
-        const remoteContextFiles = await devshell.loadContextFiles();
+        const remoteResources = await devshell.loadResources();
+        const managedExtension = async (pi: PiExtensionApiLike) => {
+            await devshell.extension(pi);
+            pi.on("session_shutdown", async (event) => {
+                if (event.reason === "reload") await devshell.refreshResources();
+            });
+        };
         const resourceLoader = new activeSdk.DefaultResourceLoader({
             agentDir: activeAgentDir,
             agentsFilesOverride: (current: { agentsFiles: Array<{ content: string; path: string }> }) => ({
                 agentsFiles: [
                     ...piUserContextFiles(current.agentsFiles, activeAgentDir),
-                    ...remoteContextFiles
+                    ...remoteResources.contextFiles
                 ]
             }),
             cwd: input.localCwd,
-            extensionFactories: [devshell.extension],
+            extensionFactories: [managedExtension],
             noExtensions: true,
+            promptsOverride: (current: { diagnostics: unknown[]; prompts: Array<{ name: string; sourceInfo?: { scope?: string } }> }) =>
+                mergeManagedPiProjectPrompts(current, remoteResources.prompts),
             settingsManager,
+            skillsOverride: (current: { diagnostics: unknown[]; skills: Array<{ name: string; sourceInfo?: { scope?: string } }> }) => {
+                const merged = mergeManagedPiProjectSkills(
+                    current,
+                    remoteResources.skills.map((skill) => skill.resource)
+                );
+                devshell.setActiveSkillNames(merged.remoteSkillNames);
+                return { diagnostics: merged.diagnostics, skills: merged.skills };
+            },
             systemPromptOverride: (basePrompt: string | undefined) => appendRemoteWorkspacePrompt(
                 basePrompt,
                 `${input.target.instance}:${input.target.workspace}`
@@ -165,6 +183,10 @@ async function commandAgent(message: PiChildAgentCommandMessage): Promise<void> 
             return;
         case "abort":
             await active.abort();
+            return;
+        case "reload":
+            if (active.isStreaming === true) throw new Error("Cannot reload a Pi Agent while a turn is active.");
+            await active.reload();
             return;
     }
 }

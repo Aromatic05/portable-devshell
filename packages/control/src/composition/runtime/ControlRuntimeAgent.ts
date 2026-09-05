@@ -112,6 +112,10 @@ export class ControlRuntimeAgent {
         await this.#host.abort(agentId);
     }
 
+    async reload(agentId: string): Promise<void> {
+        await this.#host.reload(agentId);
+    }
+
     async openToolSession(
         input: AgentToolSessionOpenInput,
         connectionId: string

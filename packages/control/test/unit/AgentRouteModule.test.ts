@@ -33,6 +33,7 @@ test("agent routes expose provider lifecycle without transcript history", async 
     await invoke("steer", { agentId: "ag-1", message: "focus" });
     await invoke("followUp", { agentId: "ag-1", message: "continue" });
     await invoke("abort", { agentId: "ag-1" });
+    await invoke("reload", { agentId: "ag-1" });
     assert.equal((await invoke("stop", { agentId: "ag-1" }) as unknown as AgentRecord).state, "stopped");
 
     assert.deepEqual(calls, [
@@ -42,6 +43,7 @@ test("agent routes expose provider lifecycle without transcript history", async 
         "steer:ag-1:focus",
         "followUp:ag-1:continue",
         "abort:ag-1",
+        "reload:ag-1",
         "stop:ag-1"
     ]);
 });
@@ -140,6 +142,7 @@ function createPort(calls: string[]): AgentControlPort {
             };
         },
         async prompt(input) { calls.push(`prompt:${input.agentId}:${input.message}`); },
+        async reload(agentId) { calls.push(`reload:${agentId}`); },
         async start(input) { calls.push(`start:${input.target}`); return record; },
         async steer(input) { calls.push(`steer:${input.agentId}:${input.message}`); },
         async stop(agentId) { calls.push(`stop:${agentId}`); return { ...record, state: "stopped" }; }

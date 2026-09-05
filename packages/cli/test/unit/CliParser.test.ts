@@ -69,6 +69,7 @@ test("CliParser treats agent as a top-level command surface", () => {
         kind: "agent.send",
         message: "continue review"
     });
+    assert.deepEqual(parser.parse(["agent", "reload", "ag-1"]), { agentId: "ag-1", kind: "agent.reload" });
     assert.deepEqual(parser.parse(["agent", "stop", "ag-1"]), { agentId: "ag-1", kind: "agent.stop" });
     assert.deepEqual(parser.parse(["agent", "--help"]), { kind: "agent.help" });
 });

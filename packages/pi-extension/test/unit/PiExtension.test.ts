@@ -6,10 +6,12 @@ import type { JsonValue } from "@portable-devshell/shared";
 
 import {
     loadDevshellPiWorkspaceContext,
+    loadDevshellPiWorkspaceResources,
     parseDevshellAgentTarget,
     piPromptMetadata,
     prepareToolInput,
-    resolveToolSessionOpenInput
+    resolveToolSessionOpenInput,
+    transformDevshellPiSkillInput
 } from "../../src/index.ts";
 import {
     formatPiToolCall,
@@ -143,6 +145,119 @@ test("Pi devshell workspace context respects tool capability restrictions", asyn
     );
     assert.deepEqual(contextFiles, []);
     assert.equal(calls, 0);
+});
+
+test("Pi devshell workspace resources load native project skills and prompt templates from the remote target", async () => {
+    const files = new Map<string, string>([
+        ["./AGENTS.md", "# Project rules"],
+        ["./.pi/skills/review/SKILL.md", [
+            "---",
+            "name: review",
+            "description: Review the current change",
+            "---",
+            "Check tests before implementation."
+        ].join("\n")],
+        ["./.pi/prompts/release.md", [
+            "---",
+            "description: Prepare a release",
+            "argument-hint: '[version]'",
+            "---",
+            "Release $1 only after the gate is green."
+        ].join("\n")]
+    ]);
+    const resources = await loadDevshellPiWorkspaceResources(
+        { instance: "worker-a", workspace: "/repo" },
+        new Set(["file_find", "file_read"]),
+        async (toolName, input): Promise<JsonValue> => {
+            if (toolName === "file_find") {
+                return {
+                    entries: [...files.keys()].map((path) => ({ path, type: "file" }))
+                };
+            }
+            const path = (input as { path: string }).path;
+            const content = files.get(path);
+            assert.notEqual(content, undefined, path);
+            return {
+                content: content!.split("\n").map((line, index) => `${index + 1}:${line}`).join("\n")
+            };
+        }
+    );
+
+    assert.deepEqual(resources.contextFiles, [{
+        content: "# Project rules",
+        path: "worker-a:/repo/AGENTS.md"
+    }]);
+    assert.equal(resources.skills.length, 1);
+    assert.deepEqual(resources.skills[0]?.resource, {
+        baseDir: "/repo/.pi/skills/review",
+        description: "Review the current change",
+        disableModelInvocation: false,
+        filePath: "/repo/.pi/skills/review/SKILL.md",
+        name: "review",
+        sourceInfo: {
+            baseDir: "/repo/.pi/skills/review",
+            origin: "top-level",
+            path: "/repo/.pi/skills/review/SKILL.md",
+            scope: "project",
+            source: "local"
+        }
+    });
+    assert.equal(resources.skills[0]?.content.includes("Check tests before implementation."), true);
+    assert.deepEqual(resources.prompts, [{
+        argumentHint: "[version]",
+        content: "Release $1 only after the gate is green.",
+        description: "Prepare a release",
+        filePath: "/repo/.pi/prompts/release.md",
+        name: "release",
+        sourceInfo: {
+            baseDir: "/repo/.pi/prompts",
+            origin: "top-level",
+            path: "/repo/.pi/prompts/release.md",
+            scope: "project",
+            source: "local"
+        }
+    }]);
+});
+
+test("Pi devshell remote skill input transform preserves Pi delivery while avoiding local file reads", () => {
+    const transformed = transformDevshellPiSkillInput([
+        {
+            content: "---\ndescription: Review\n---\nReview carefully.",
+            resource: {
+                baseDir: "/repo/.pi/skills/review",
+                description: "Review",
+                disableModelInvocation: false,
+                filePath: "/repo/.pi/skills/review/SKILL.md",
+                name: "review",
+                sourceInfo: {
+                    baseDir: "/repo/.pi/skills/review",
+                    origin: "top-level",
+                    path: "/repo/.pi/skills/review/SKILL.md",
+                    scope: "project",
+                    source: "local"
+                }
+            }
+        }
+    ], {
+        source: "interactive",
+        streamingBehavior: "followUp",
+        text: "/skill:review focus tests",
+        type: "input"
+    });
+
+    assert.deepEqual(transformed, {
+        action: "transform",
+        text: [
+            '<skill name="review" location="/repo/.pi/skills/review/SKILL.md">',
+            "References are relative to /repo/.pi/skills/review.",
+            "",
+            "Review carefully.",
+            "</skill>",
+            "",
+            "focus tests"
+        ].join("\n")
+    });
+    assert.equal(transformDevshellPiSkillInput([], { source: "interactive", text: "/skill:review", type: "input" }), undefined);
 });
 
 test("Pi devshell edit tool contributes its Worker preconditions and grammar to the Pi system prompt", () => {
