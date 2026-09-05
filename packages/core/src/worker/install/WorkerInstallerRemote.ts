@@ -14,6 +14,7 @@ import { waitForCommandResult } from "../command/WorkerCommandTransport.js";
 import { resolveWorkerHomeDirectory } from "../platform/WorkerHomeDirectory.js";
 import { WorkerAssetResolver } from "../WorkerAssetResolver.js";
 import type { WorkerTarget } from "../target/WorkerTarget.js";
+import { WORKER_GENERATION_RETENTION_DAYS } from "./WorkerGenerationPolicy.js";
 import { createWorkerSkillArchive } from "./WorkerSkillArchive.js";
 
 export interface WorkerInstallerRemoteOptions {
@@ -366,9 +367,11 @@ function buildInspectScript(
     const shaPath = `${installDirectory}/devshell-worker.sha256`;
     const symlinkPath = buildRemoteExecutablePath(homeDirectory);
     const symlinkTarget = `../workers/${targetKey}/${sha256}/devshell-worker`;
+    const workerRoot = `${homeDirectory}/.devshell/workers/${targetKey}`;
 
     return [
         "set -eu",
+        `install_dir=${shellEscape(installDirectory)}`,
         `binary_path=${shellEscape(binaryPath)}`,
         `sha_path=${shellEscape(shaPath)}`,
         `symlink_path=${shellEscape(symlinkPath)}`,
@@ -380,12 +383,14 @@ function buildInspectScript(
         'if [ -f "$sha_path" ]; then installed_sha="$(cat "$sha_path")"; fi',
         'if [ -f "$binary_path" ]; then actual_sha="$(sha256_file "$binary_path")"; fi',
         'if [ "$installed_sha" = "$expected_sha" ] && [ "$actual_sha" = "$expected_sha" ]; then',
+        '  touch "$install_dir" 2>/dev/null || true',
         '  mkdir -p "$(dirname "$symlink_path")"',
         '  alias_tmp="${symlink_path}.next.$$"',
         '  cleanup_alias() { rm -f "$alias_tmp"; }',
         "  trap cleanup_alias EXIT HUP INT TERM",
         '  ln -s "$symlink_target" "$alias_tmp"',
         '  mv -f "$alias_tmp" "$symlink_path"',
+        ...workerGenerationGcScript(workerRoot),
         "  trap - EXIT HUP INT TERM",
         "  printf '%s' ready",
         "else",
@@ -404,6 +409,7 @@ function buildInstallScript(
     const shaPath = `${installDirectory}/devshell-worker.sha256`;
     const symlinkPath = buildRemoteExecutablePath(homeDirectory);
     const symlinkTarget = `../workers/${targetKey}/${sha256}/devshell-worker`;
+    const workerRoot = `${homeDirectory}/.devshell/workers/${targetKey}`;
 
     return [
         "set -eu",
@@ -430,10 +436,31 @@ function buildInstallScript(
         'printf \'%s\\n\' "$expected_sha" > "$tmp_sha_path"',
         'mv "$tmp_binary_path" "$binary_path"',
         'mv "$tmp_sha_path" "$sha_path"',
+        'touch "$install_dir" 2>/dev/null || true',
         'ln -s "$symlink_target" "$alias_tmp"',
         'mv -f "$alias_tmp" "$symlink_path"',
+        ...workerGenerationGcScript(workerRoot),
         "trap - EXIT HUP INT TERM",
     ].join("\n");
+}
+
+function workerGenerationGcScript(workerRoot: string): string[] {
+    return [
+        `worker_root=${shellEscape(workerRoot)}`,
+        'if [ -d "$worker_root" ]; then',
+        '  for generation in "$worker_root"/*; do',
+        '    [ -L "$generation" ] && continue',
+        '    [ -d "$generation" ] || continue',
+        '    generation_name="${generation##*/}"',
+        '    [ "$generation_name" = "$expected_sha" ] && continue',
+        '    [ "${#generation_name}" -eq 64 ] || continue',
+        '    case "$generation_name" in *[!0-9a-f]*) continue ;; esac',
+        `    if [ -n "$(find "$generation" -prune -mtime +${WORKER_GENERATION_RETENTION_DAYS - 1} -print 2>/dev/null)" ]; then`,
+        '      rm -rf "$generation" 2>/dev/null || true',
+        "    fi",
+        "  done",
+        "fi",
+    ];
 }
 
 function hashFunctionScript(): string {

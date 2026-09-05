@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile, readlink, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readlink, rename, rm, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -65,6 +65,50 @@ test("WorkerInstallerLocal pins each concurrent Unix install to its requested as
     assert.equal(await readFile(secondExecutable, "utf8"), second.toString("utf8"));
 });
 
+test("WorkerInstallerLocal prunes stale worker generations only after successful activation", { skip: process.platform === "win32" ? "requires Unix symlink semantics" : false }, async (t) => {
+    const devshellHomeDirectory = await createTestTempDirectory("home-generation-gc");
+    const workerDirectory = await createTestTempDirectory("worker-generation-gc");
+    t.after(async () => {
+        await rm(devshellHomeDirectory, { recursive: true, force: true });
+        await rm(workerDirectory, { recursive: true, force: true });
+    });
+
+    const target = getWorkerTargetByKey("linux-x64");
+    const generations = join(devshellHomeDirectory, "workers", target.key);
+    const stale = join(generations, "a".repeat(64));
+    const recent = join(generations, "b".repeat(64));
+    const unknown = join(generations, "manual-backup");
+    await Promise.all([
+        mkdir(stale, { recursive: true }),
+        mkdir(recent, { recursive: true }),
+        mkdir(unknown, { recursive: true }),
+    ]);
+    const old = new Date(Date.now() - 10 * 24 * 60 * 60 * 1_000);
+    await Promise.all([utimes(stale, old, old), utimes(unknown, old, old)]);
+
+    const binaryPath = join(workerDirectory, "worker-current");
+    const contents = Buffer.from("worker-current", "utf8");
+    const sha256 = createHash("sha256").update(contents).digest("hex");
+    await writeFile(binaryPath, contents, { mode: 0o755 });
+    const installer = new WorkerInstallerLocal();
+    await installer.ensure(devshellHomeDirectory, createAsset(binaryPath, sha256, target), target);
+
+    await assert.rejects(access(stale));
+    await assert.doesNotReject(access(recent));
+    await assert.doesNotReject(access(unknown));
+    const currentGeneration = join(generations, sha256);
+    await assert.doesNotReject(access(currentGeneration));
+
+    await utimes(currentGeneration, old, old);
+    await installer.ensure(devshellHomeDirectory, createAsset(binaryPath, sha256, target), target);
+    const nextPath = join(workerDirectory, "worker-next");
+    const nextContents = Buffer.from("worker-next", "utf8");
+    const nextSha256 = createHash("sha256").update(nextContents).digest("hex");
+    await writeFile(nextPath, nextContents, { mode: 0o755 });
+    await installer.ensure(devshellHomeDirectory, createAsset(nextPath, nextSha256, target), target);
+    await assert.doesNotReject(access(currentGeneration));
+});
+
 test("WorkerInstallerLocal repairs corrupted content and preserves the old alias when activation fails", { skip: process.platform === "win32" ? "requires Unix symlink semantics" : false }, async (t) => {
     const devshellHomeDirectory = await createTestTempDirectory("home-repair");
     const workerDirectory = await createTestTempDirectory("worker-repair");
@@ -92,6 +136,10 @@ test("WorkerInstallerLocal repairs corrupted content and preserves the old alias
     const second = Buffer.from("worker-v2", "utf8");
     const secondSha = createHash("sha256").update(second).digest("hex");
     await writeFile(secondPath, second, { mode: 0o755 });
+    const stale = join(devshellHomeDirectory, "workers", target.key, "c".repeat(64));
+    await mkdir(stale, { recursive: true });
+    const old = new Date(Date.now() - 10 * 24 * 60 * 60 * 1_000);
+    await utimes(stale, old, old);
     const failing = new WorkerInstallerLocal({
         fileSystem: {
             rename: async (source, destination) => {
@@ -108,6 +156,7 @@ test("WorkerInstallerLocal repairs corrupted content and preserves the old alias
         /injected alias activation failure/u,
     );
     assert.equal(await readlink(alias), previousTarget);
+    await assert.doesNotReject(access(stale));
 });
 
 test("WorkerInstallerLocal rejects a bundle whose declared checksum does not match its bytes", async (t) => {

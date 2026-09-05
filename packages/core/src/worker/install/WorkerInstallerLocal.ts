@@ -7,6 +7,7 @@ import { createError, errorCodes } from "@portable-devshell/shared";
 import type { WorkerAsset } from "../WorkerAssetResolver.js";
 import type { WorkerTarget } from "../target/WorkerTarget.js";
 import { workerBinaryFileName, workerInstalledAliasFileName } from "../target/WorkerTargetBinary.js";
+import { isWorkerGenerationName, WORKER_GENERATION_RETENTION_MS } from "./WorkerGenerationPolicy.js";
 
 export interface WorkerInstallerLocalResult {
     executablePath: string;
@@ -27,9 +28,12 @@ export interface WorkerInstallerLocalFileSystem {
     copyFile: typeof nodeFs.copyFile;
     mkdir: typeof nodeFs.mkdir;
     readFile: typeof nodeFs.readFile;
+    readdir: typeof nodeFs.readdir;
     rename: typeof nodeFs.rename;
     rm: typeof nodeFs.rm;
+    stat: typeof nodeFs.stat;
     symlink: typeof nodeFs.symlink;
+    utimes: typeof nodeFs.utimes;
     writeFile: typeof nodeFs.writeFile;
 }
 
@@ -42,9 +46,12 @@ export class WorkerInstallerLocal {
             copyFile: nodeFs.copyFile,
             mkdir: nodeFs.mkdir,
             readFile: nodeFs.readFile,
+            readdir: nodeFs.readdir,
             rename: nodeFs.rename,
             rm: nodeFs.rm,
+            stat: nodeFs.stat,
             symlink: nodeFs.symlink,
+            utimes: nodeFs.utimes,
             writeFile: nodeFs.writeFile,
             ...options.fileSystem,
         };
@@ -98,10 +105,14 @@ export class WorkerInstallerLocal {
                 retryable: true,
             });
         }
+        const activatedAt = new Date();
+        await this.#fs.utimes(layout.installDir, activatedAt, activatedAt).catch(() => undefined);
 
-        return target.os === "windows"
+        const installed = target.os === "windows"
             ? await this.#finishWindows(layout, asset)
             : await this.#finishUnix(layout, asset, target);
+        await this.#pruneOldGenerations(devshellHomeDirectory, target, asset.sha256).catch(() => undefined);
+        return installed;
     }
 
     async #installAsset(
@@ -158,6 +169,23 @@ export class WorkerInstallerLocal {
 
     async #replaceFile(source: string, destination: string): Promise<void> {
         await this.#fs.rename(source, destination);
+    }
+
+    async #pruneOldGenerations(
+        devshellHomeDirectory: string,
+        target: WorkerTarget,
+        activeSha256: string,
+    ): Promise<void> {
+        const targetDirectory = resolve(devshellHomeDirectory, "workers", target.key);
+        const entries = await this.#fs.readdir(targetDirectory, { withFileTypes: true });
+        const cutoff = Date.now() - WORKER_GENERATION_RETENTION_MS;
+        await Promise.all(entries.map(async (entry) => {
+            if (!entry.isDirectory() || entry.name === activeSha256 || !isWorkerGenerationName(entry.name)) return;
+            const path = resolve(targetDirectory, entry.name);
+            const metadata = await this.#fs.stat(path).catch(() => undefined);
+            if (metadata === undefined || metadata.mtimeMs >= cutoff) return;
+            await this.#fs.rm(path, { force: true, recursive: true }).catch(() => undefined);
+        }));
     }
 }
 
