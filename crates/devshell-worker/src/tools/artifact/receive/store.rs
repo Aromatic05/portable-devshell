@@ -19,6 +19,7 @@ use crate::tools::artifact::payload::{ArtifactPayloadDescriptor, ArtifactPayload
 use crate::tools::artifact::storage;
 
 const METADATA_VERSION: u32 = 1;
+const MAX_ACTIVE_RECEIVES: usize = 256;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -101,7 +102,11 @@ enum RestoredEntryType {
 
 pub struct ArtifactReceiveStore {
     root: PathBuf,
-    guard: Mutex<()>,
+    guard: Mutex<ArtifactReceiveStoreState>,
+}
+
+struct ArtifactReceiveStoreState {
+    active_receives: usize,
 }
 
 impl ArtifactReceiveStore {
@@ -110,7 +115,7 @@ impl ArtifactReceiveStore {
             .map_err(|error| ToolError::new("artifact.storageFailed", error))?;
         let store = Arc::new(Self {
             root,
-            guard: Mutex::new(()),
+            guard: Mutex::new(ArtifactReceiveStoreState { active_receives: 0 }),
         });
         {
             let _guard = store.lock()?;
@@ -119,7 +124,7 @@ impl ArtifactReceiveStore {
         Ok(store)
     }
 
-    fn lock(&self) -> Result<std::sync::MutexGuard<'_, ()>, ToolError> {
+    fn lock(&self) -> Result<std::sync::MutexGuard<'_, ArtifactReceiveStoreState>, ToolError> {
         self.guard
             .lock()
             .map_err(|_| ToolError::new("artifact.storageFailed", "receive lock poisoned"))
@@ -160,7 +165,13 @@ impl ArtifactReceiveStore {
             .canonicalize()
             .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
 
-        let _guard = self.lock()?;
+        let mut state = self.lock()?;
+        if state.active_receives >= MAX_ACTIVE_RECEIVES {
+            return Err(ToolError::new(
+                "artifact.quotaExceeded",
+                "artifact receive count limit exceeded",
+            ));
+        }
         let receive_id = Uuid::new_v4().to_string();
         let temporary = Builder::new()
             .prefix(&format!(".devshell-receive-{receive_id}-"))
@@ -188,6 +199,7 @@ impl ArtifactReceiveStore {
             let _ = fs::remove_file(&temporary_path);
             return Err(error);
         }
+        state.active_receives = state.active_receives.saturating_add(1);
         Ok(ArtifactReceiveBeginResult {
             receive_id,
             next_offset_bytes: 0,
@@ -275,7 +287,7 @@ impl ArtifactReceiveStore {
 
     pub fn finish(&self, receive_id: &str) -> Result<ArtifactReceiveFinishResult, ToolError> {
         validate_id(receive_id)?;
-        let _guard = self.lock()?;
+        let mut state = self.lock()?;
         let mut metadata = self.load_metadata(receive_id)?;
         if metadata.phase != ArtifactReceivePhase::Receiving {
             return Err(ToolError::new(
@@ -341,6 +353,7 @@ impl ArtifactReceiveStore {
         let target_path = metadata.target_path.display().to_string();
         let _ = fs::remove_file(&metadata.temporary_path);
         let _ = fs::remove_file(self.metadata_path(receive_id));
+        state.active_receives = state.active_receives.saturating_sub(1);
         Ok(ArtifactReceiveFinishResult {
             receive_id: receive_id.to_string(),
             target_path,
@@ -351,13 +364,15 @@ impl ArtifactReceiveStore {
 
     pub fn abort(&self, receive_id: &str) -> Result<(), ToolError> {
         validate_id(receive_id)?;
-        let _guard = self.lock()?;
+        let mut state = self.lock()?;
         let metadata = match self.load_metadata(receive_id) {
             Ok(metadata) => metadata,
             Err(error) if error.code == "artifact.receiveNotFound" => return Ok(()),
             Err(error) => return Err(error),
         };
-        self.rollback_and_remove_locked(&metadata)
+        self.rollback_and_remove_locked(&metadata)?;
+        state.active_receives = state.active_receives.saturating_sub(1);
+        Ok(())
     }
 
     fn commit_locked(
@@ -1010,10 +1025,48 @@ mod recovery_tests {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
 
     use super::{
-        ArtifactReceiveBeginInput, ArtifactReceivePhase, ArtifactReceiveStore, sibling_path,
+        ArtifactReceiveBeginInput, ArtifactReceivePhase, ArtifactReceiveStore, MAX_ACTIVE_RECEIVES,
+        sibling_path,
     };
     use crate::security::policy::DisabledSecurityPolicy;
     use crate::tools::artifact::payload::{ArtifactPayloadDescriptor, ArtifactPayloadType};
+
+    #[test]
+    fn active_receive_count_is_bounded_and_abort_releases_capacity() {
+        let root = crate::testing::temp_dir();
+        let workspace = root.path().join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        let store = ArtifactReceiveStore::new(root.path().join("receives")).unwrap();
+        store.lock().unwrap().active_receives = MAX_ACTIVE_RECEIVES - 1;
+        let input = |target_path: &str| ArtifactReceiveBeginInput {
+            descriptor: ArtifactPayloadDescriptor {
+                payload_type: ArtifactPayloadType::File,
+                name: "empty.bin".to_string(),
+                media_type: "application/octet-stream".to_string(),
+                payload_bytes: 0,
+                payload_blake3: blake3::hash(b"").to_hex().to_string(),
+                logical_bytes: None,
+                entry_count: None,
+                manifest_blake3: None,
+            },
+            overwrite: false,
+            target_path: target_path.to_string(),
+        };
+
+        let admitted = store
+            .begin(&workspace, &DisabledSecurityPolicy, input("./admitted.bin"))
+            .unwrap();
+        let error = store
+            .begin(&workspace, &DisabledSecurityPolicy, input("./rejected.bin"))
+            .unwrap_err();
+        assert_eq!(error.code, "artifact.quotaExceeded");
+
+        store.abort(&admitted.receive_id).unwrap();
+        let reopened = store
+            .begin(&workspace, &DisabledSecurityPolicy, input("./reopened.bin"))
+            .unwrap();
+        store.abort(&reopened.receive_id).unwrap();
+    }
 
     #[test]
     fn startup_restores_backup_when_commit_was_interrupted() {

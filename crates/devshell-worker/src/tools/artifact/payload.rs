@@ -26,6 +26,8 @@ use crate::tools::artifact::types::ArtifactStream;
 
 const METADATA_VERSION: u32 = 1;
 const MAX_READ_BYTES: usize = 1024 * 1024;
+const MAX_ACTIVE_PAYLOADS: usize = 4096;
+const MAX_PAYLOAD_TTL_MS: u128 = 7 * 24 * 60 * 60 * 1000;
 const ZSTD_LEVEL: i32 = 3;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -112,7 +114,11 @@ pub struct ArtifactPayloadStore {
     root: PathBuf,
     temp_dir: PathBuf,
     artifacts: Arc<ArtifactStore>,
-    guard: Mutex<()>,
+    guard: Mutex<ArtifactPayloadStoreState>,
+}
+
+struct ArtifactPayloadStoreState {
+    payload_count: Option<usize>,
 }
 
 impl ArtifactPayloadStore {
@@ -127,7 +133,7 @@ impl ArtifactPayloadStore {
             root,
             temp_dir,
             artifacts,
-            guard: Mutex::new(()),
+            guard: Mutex::new(ArtifactPayloadStoreState { payload_count: None }),
         });
         Ok(store)
     }
@@ -142,10 +148,39 @@ impl ArtifactPayloadStore {
         });
     }
 
-    fn lock(&self) -> Result<std::sync::MutexGuard<'_, ()>, ToolError> {
+    fn lock(&self) -> Result<std::sync::MutexGuard<'_, ArtifactPayloadStoreState>, ToolError> {
         self.guard
             .lock()
             .map_err(|_| ToolError::new("artifact.storageFailed", "payload lock poisoned"))
+    }
+
+    fn ensure_payload_capacity_locked(
+        &self,
+        state: &mut ArtifactPayloadStoreState,
+    ) -> Result<(), ToolError> {
+        let count = match state.payload_count {
+            Some(count) => count,
+            None => {
+                let count = self.payload_record_count()?;
+                state.payload_count = Some(count);
+                count
+            }
+        };
+        if count >= MAX_ACTIVE_PAYLOADS {
+            return Err(ToolError::new(
+                "artifact.quotaExceeded",
+                "artifact payload count limit exceeded",
+            ));
+        }
+        Ok(())
+    }
+
+    fn payload_record_count(&self) -> Result<usize, ToolError> {
+        Ok(storage::json_files(&self.root)?
+            .into_iter()
+            .filter_map(|path| path.file_stem().and_then(|value| value.to_str()).map(str::to_owned))
+            .filter(|payload_id| validate_id(payload_id).is_ok())
+            .count())
     }
 
     pub fn open_handle(
@@ -154,7 +189,8 @@ impl ArtifactPayloadStore {
         expires_at_ms: u128,
     ) -> Result<ArtifactPayloadOpenResult, ToolError> {
         validate_expiration(expires_at_ms)?;
-        let _guard = self.lock()?;
+        let mut state = self.lock()?;
+        self.ensure_payload_capacity_locked(&mut state)?;
 
         let payload_id = Uuid::new_v4().to_string();
         let lease = self.artifacts.acquire_lease(handle, expires_at_ms)?;
@@ -171,6 +207,9 @@ impl ArtifactPayloadStore {
         if let Err(error) = self.write_metadata(&metadata) {
             let _ = self.artifacts.release_lease(&lease.lease_id);
             return Err(error);
+        }
+        if let Some(count) = state.payload_count.as_mut() {
+            *count = count.saturating_add(1);
         }
 
         Ok(ArtifactPayloadOpenResult {
@@ -260,7 +299,8 @@ impl ArtifactPayloadStore {
             .metadata()
             .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
 
-        let _guard = self.lock()?;
+        let mut state = self.lock()?;
+        self.ensure_payload_capacity_locked(&mut state)?;
 
         let payload_id = Uuid::new_v4().to_string();
         let descriptor = if metadata.is_file() {
@@ -298,6 +338,9 @@ impl ArtifactPayloadStore {
         if let Err(error) = self.write_metadata(&payload_metadata) {
             let _ = fs::remove_file(self.data_path(&payload_id));
             return Err(error);
+        }
+        if let Some(count) = state.payload_count.as_mut() {
+            *count = count.saturating_add(1);
         }
 
         Ok(ArtifactPayloadOpenResult {
@@ -372,13 +415,13 @@ impl ArtifactPayloadStore {
 
     pub fn close(&self, payload_id: &str) -> Result<(), ToolError> {
         validate_id(payload_id)?;
-        let _guard = self.lock()?;
+        let mut state = self.lock()?;
         let metadata = match self.load_metadata(payload_id) {
             Ok(metadata) => metadata,
             Err(error) if error.code == "artifact.payloadNotFound" => return Ok(()),
             Err(error) => return Err(error),
         };
-        self.remove_payload_locked(&metadata)
+        self.remove_payload_locked(&mut state, &metadata)
     }
 
     fn create_file_payload(
@@ -537,8 +580,9 @@ impl ArtifactPayloadStore {
     }
 
     fn remove_stale_candidate(&self, payload_id: &str, now: u128) -> Result<(), ToolError> {
-        let _guard = self.lock()?;
+        let mut state = self.lock()?;
         let metadata_path = self.metadata_path(payload_id);
+        let had_metadata = metadata_path.is_file();
         let metadata = fs::read(&metadata_path)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<ArtifactPayloadMetadata>(&bytes).ok());
@@ -554,11 +598,16 @@ impl ArtifactPayloadStore {
                 if metadata.version == METADATA_VERSION
                     && metadata.payload_id == payload_id =>
             {
-                self.remove_payload_locked(&metadata)
+                self.remove_payload_locked(&mut state, &metadata)
             }
             Some(metadata) => {
                 storage::remove_file_if_exists(&metadata_path)?;
                 storage::remove_file_if_exists(&self.data_path(payload_id))?;
+                if had_metadata {
+                    if let Some(count) = state.payload_count.as_mut() {
+                        *count = count.saturating_sub(1);
+                    }
+                }
                 if let ArtifactPayloadBacking::ArtifactLease { lease_id } = metadata.backing {
                     let _ = self.artifacts.release_lease(&lease_id);
                 }
@@ -566,7 +615,13 @@ impl ArtifactPayloadStore {
             }
             None => {
                 storage::remove_file_if_exists(&metadata_path)?;
-                storage::remove_file_if_exists(&self.data_path(payload_id))
+                storage::remove_file_if_exists(&self.data_path(payload_id))?;
+                if had_metadata {
+                    if let Some(count) = state.payload_count.as_mut() {
+                        *count = count.saturating_sub(1);
+                    }
+                }
+                Ok(())
             }
         }
     }
@@ -602,8 +657,19 @@ impl ArtifactPayloadStore {
         Ok(())
     }
 
-    fn remove_payload_locked(&self, metadata: &ArtifactPayloadMetadata) -> Result<(), ToolError> {
-        storage::remove_file_if_exists(&self.metadata_path(&metadata.payload_id))?;
+    fn remove_payload_locked(
+        &self,
+        state: &mut ArtifactPayloadStoreState,
+        metadata: &ArtifactPayloadMetadata,
+    ) -> Result<(), ToolError> {
+        let metadata_path = self.metadata_path(&metadata.payload_id);
+        let had_metadata = metadata_path.is_file();
+        storage::remove_file_if_exists(&metadata_path)?;
+        if had_metadata {
+            if let Some(count) = state.payload_count.as_mut() {
+                *count = count.saturating_sub(1);
+            }
+        }
         match &metadata.backing {
             ArtifactPayloadBacking::ArtifactLease { lease_id } => {
                 self.artifacts.release_lease(lease_id)?;
@@ -927,10 +993,11 @@ impl Read for CancellableHashingReader<'_> {
 }
 
 fn validate_expiration(expires_at_ms: u128) -> Result<(), ToolError> {
-    if expires_at_ms <= unix_time_millis() {
+    let now = unix_time_millis();
+    if expires_at_ms <= now || expires_at_ms.saturating_sub(now) > MAX_PAYLOAD_TTL_MS {
         return Err(ToolError::new(
             "artifact.invalidLease",
-            "artifact payload must expire in the future",
+            "artifact payload expiry must be within the next 7 days",
         ));
     }
     Ok(())
@@ -1014,7 +1081,10 @@ mod tests {
 
     use base64::{Engine as _, engine::general_purpose::STANDARD};
 
-    use super::{ArtifactPayloadStore, ArtifactPayloadType};
+    use super::{
+        ArtifactPayloadStore, ArtifactPayloadType, MAX_ACTIVE_PAYLOADS, MAX_PAYLOAD_TTL_MS,
+        validate_expiration,
+    };
     use crate::security::policy::DisabledSecurityPolicy;
     use crate::tools::artifact::store::ArtifactStore;
     use crate::tools::artifact::types::ArtifactStream;
@@ -1025,6 +1095,53 @@ mod tests {
             .unwrap()
             .as_millis()
             + 60_000
+    }
+
+    #[test]
+    fn payload_expiry_is_bounded_to_the_share_protocol_horizon() {
+        let error = validate_expiration(expires_at_ms() + MAX_PAYLOAD_TTL_MS).unwrap_err();
+        assert_eq!(error.code, "artifact.invalidLease");
+        assert!(error.message.contains("7 days"));
+    }
+
+    #[test]
+    fn payload_count_limit_is_released_by_targeted_close() {
+        let root = crate::testing::temp_dir();
+        let workspace = root.path().join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        fs::write(workspace.join("payload.txt"), b"payload").unwrap();
+        let artifacts = ArtifactStore::new(root.path().join("artifacts")).unwrap();
+        let payloads = ArtifactPayloadStore::new(root.path().join("payloads"), artifacts).unwrap();
+        payloads.lock().unwrap().payload_count = Some(MAX_ACTIVE_PAYLOADS - 1);
+
+        let opened = payloads
+            .open_path(
+                &workspace,
+                "./payload.txt",
+                &DisabledSecurityPolicy,
+                expires_at_ms(),
+            )
+            .unwrap();
+        let error = payloads
+            .open_path(
+                &workspace,
+                "./payload.txt",
+                &DisabledSecurityPolicy,
+                expires_at_ms(),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "artifact.quotaExceeded");
+
+        payloads.close(&opened.payload_id).unwrap();
+        let reopened = payloads
+            .open_path(
+                &workspace,
+                "./payload.txt",
+                &DisabledSecurityPolicy,
+                expires_at_ms(),
+            )
+            .unwrap();
+        payloads.close(&reopened.payload_id).unwrap();
     }
 
     #[test]

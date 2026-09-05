@@ -19,6 +19,7 @@ use crate::tools::artifact::types::{
 
 const DEFAULT_STREAM_LIMIT_BYTES: usize = 256 * 1024 * 1024;
 const DEFAULT_INSTANCE_QUOTA_BYTES: usize = 1024 * 1024 * 1024;
+const DEFAULT_INSTANCE_ARTIFACT_LIMIT: usize = 4096;
 const DEFAULT_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const DEFAULT_READ_BYTES: usize = 64 * 1024;
 const MAX_READ_BYTES: usize = 1024 * 1024;
@@ -28,6 +29,7 @@ const METADATA_VERSION: u32 = 1;
 struct ArtifactPolicy {
     stream_limit_bytes: usize,
     instance_quota_bytes: usize,
+    artifact_limit: usize,
     ttl: Duration,
 }
 
@@ -36,6 +38,7 @@ impl Default for ArtifactPolicy {
         Self {
             stream_limit_bytes: DEFAULT_STREAM_LIMIT_BYTES,
             instance_quota_bytes: DEFAULT_INSTANCE_QUOTA_BYTES,
+            artifact_limit: DEFAULT_INSTANCE_ARTIFACT_LIMIT,
             ttl: DEFAULT_TTL,
         }
     }
@@ -50,8 +53,14 @@ pub struct ArtifactStore {
 }
 
 struct ArtifactStoreState {
-    artifact_bytes: Option<usize>,
+    artifact_usage: Option<ArtifactUsage>,
     lease_index: Option<HashMap<String, HashMap<String, u128>>>,
+}
+
+#[derive(Clone, Copy)]
+struct ArtifactUsage {
+    bytes: usize,
+    records: usize,
 }
 
 pub struct ArtifactDraft {
@@ -124,7 +133,7 @@ impl ArtifactStore {
             temp_dir,
             policy,
             guard: Mutex::new(ArtifactStoreState {
-                artifact_bytes: None,
+                artifact_usage: None,
                 lease_index: None,
             }),
         });
@@ -166,7 +175,7 @@ impl ArtifactStore {
             .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
 
         let mut state = self.lock()?;
-        self.ensure_quota_locked(&mut state, draft.stored_bytes)?;
+        self.ensure_capacity_locked(&mut state, draft.stored_bytes)?;
 
         let handle = Uuid::new_v4().to_string();
         let created_at_ms = unix_time_millis();
@@ -195,8 +204,9 @@ impl ArtifactStore {
             let _ = fs::remove_file(&data_path);
             return Err(error);
         }
-        if let Some(total) = state.artifact_bytes.as_mut() {
-            *total = total.saturating_add(draft.stored_bytes);
+        if let Some(usage) = state.artifact_usage.as_mut() {
+            usage.bytes = usage.bytes.saturating_add(draft.stored_bytes);
+            usage.records = usage.records.saturating_add(1);
         }
 
         Ok(ArtifactReference {
@@ -415,20 +425,22 @@ impl ArtifactStore {
         )
     }
 
-    fn ensure_quota_locked(
+    fn ensure_capacity_locked(
         &self,
         state: &mut ArtifactStoreState,
         incoming_bytes: usize,
     ) -> Result<(), ToolError> {
-        let total = match state.artifact_bytes {
-            Some(total) => total,
+        let usage = match state.artifact_usage {
+            Some(usage) => usage,
             None => {
-                let total = self.artifact_data_bytes()?;
-                state.artifact_bytes = Some(total);
-                total
+                let usage = self.artifact_data_usage()?;
+                state.artifact_usage = Some(usage);
+                usage
             }
         };
-        if total.saturating_add(incoming_bytes) <= self.policy.instance_quota_bytes {
+        if usage.bytes.saturating_add(incoming_bytes) <= self.policy.instance_quota_bytes
+            && usage.records.saturating_add(1) <= self.policy.artifact_limit
+        {
             return Ok(());
         }
         self.gc_locked(state, incoming_bytes)
@@ -454,25 +466,45 @@ impl ArtifactStore {
                 remove_record(record);
             }
         }
-        let total = records
+        let usage = records
             .iter()
             .filter(|record| record.data_path.is_file())
-            .filter_map(|record| fs::metadata(&record.data_path).ok())
-            .fold(0usize, |total, metadata| {
-                total.saturating_add(usize::try_from(metadata.len()).unwrap_or(usize::MAX))
-            });
-        state.artifact_bytes = Some(total);
-        if total.saturating_add(incoming_bytes) > self.policy.instance_quota_bytes {
+            .fold(
+                ArtifactUsage {
+                    bytes: 0,
+                    records: 0,
+                },
+                |mut usage, record| {
+                    if let Ok(metadata) = fs::metadata(&record.data_path) {
+                        usage.bytes = usage
+                            .bytes
+                            .saturating_add(usize::try_from(metadata.len()).unwrap_or(usize::MAX));
+                        usage.records = usage.records.saturating_add(1);
+                    }
+                    usage
+                },
+            );
+        state.artifact_usage = Some(usage);
+        if usage.bytes.saturating_add(incoming_bytes) > self.policy.instance_quota_bytes {
             return Err(ToolError::new(
                 "artifact.quotaExceeded",
                 "artifact exceeds the instance storage quota",
             ));
         }
+        if usage.records.saturating_add(1) > self.policy.artifact_limit {
+            return Err(ToolError::new(
+                "artifact.quotaExceeded",
+                "artifact exceeds the instance artifact-count limit",
+            ));
+        }
         Ok(())
     }
 
-    fn artifact_data_bytes(&self) -> Result<usize, ToolError> {
-        let mut total = 0usize;
+    fn artifact_data_usage(&self) -> Result<ArtifactUsage, ToolError> {
+        let mut usage = ArtifactUsage {
+            bytes: 0,
+            records: 0,
+        };
         for entry in fs::read_dir(&self.root)
             .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?
         {
@@ -499,9 +531,12 @@ impl ArtifactStore {
                 .metadata()
                 .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?
                 .len();
-            total = total.saturating_add(usize::try_from(bytes).unwrap_or(usize::MAX));
+            usage.bytes = usage
+                .bytes
+                .saturating_add(usize::try_from(bytes).unwrap_or(usize::MAX));
+            usage.records = usage.records.saturating_add(1);
         }
-        Ok(total)
+        Ok(usage)
     }
 
     fn remove_orphan_data_files(&self, records: &[ArtifactRecord]) -> Result<(), ToolError> {
@@ -563,34 +598,45 @@ impl ArtifactStore {
     ) -> Result<(), ToolError> {
         let metadata_path = self.metadata_path(handle);
         let data_path = self.data_path(handle);
-        let data_bytes = fs::metadata(&data_path)
-            .ok()
+        let data_metadata = fs::metadata(&data_path).ok();
+        let data_bytes = data_metadata
+            .as_ref()
             .and_then(|metadata| usize::try_from(metadata.len()).ok())
             .unwrap_or(0);
+        let had_data = data_metadata.is_some();
         let metadata = fs::read(&metadata_path)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<ArtifactMetadata>(&bytes).ok());
         let Some(metadata) = metadata else {
             let _ = fs::remove_file(&metadata_path);
             let _ = fs::remove_file(&data_path);
-            if let Some(total) = state.artifact_bytes.as_mut() {
-                *total = total.saturating_sub(data_bytes);
+            if let Some(usage) = state.artifact_usage.as_mut() {
+                usage.bytes = usage.bytes.saturating_sub(data_bytes);
+                if had_data {
+                    usage.records = usage.records.saturating_sub(1);
+                }
             }
             return Ok(());
         };
         if metadata.version != METADATA_VERSION || metadata.handle != handle {
             let _ = fs::remove_file(&metadata_path);
             let _ = fs::remove_file(&data_path);
-            if let Some(total) = state.artifact_bytes.as_mut() {
-                *total = total.saturating_sub(data_bytes);
+            if let Some(usage) = state.artifact_usage.as_mut() {
+                usage.bytes = usage.bytes.saturating_sub(data_bytes);
+                if had_data {
+                    usage.records = usage.records.saturating_sub(1);
+                }
             }
             return Ok(());
         }
         if metadata.expires_at_ms <= now {
             let _ = fs::remove_file(data_path);
             let _ = fs::remove_file(metadata_path);
-            if let Some(total) = state.artifact_bytes.as_mut() {
-                *total = total.saturating_sub(data_bytes);
+            if let Some(usage) = state.artifact_usage.as_mut() {
+                usage.bytes = usage.bytes.saturating_sub(data_bytes);
+                if had_data {
+                    usage.records = usage.records.saturating_sub(1);
+                }
             }
         }
         Ok(())
@@ -722,6 +768,7 @@ mod tests {
         let (_root, store) = store(ArtifactPolicy {
             stream_limit_bytes: 8,
             instance_quota_bytes: 32,
+            artifact_limit: 64,
             ttl: Duration::from_secs(60),
         });
         let mut draft = store.begin(ArtifactStream::Stdout).unwrap();
@@ -755,6 +802,7 @@ mod tests {
         let (_root, store) = store(ArtifactPolicy {
             stream_limit_bytes: 8,
             instance_quota_bytes: 12,
+            artifact_limit: 64,
             ttl: Duration::from_secs(60),
         });
         let mut first = store.begin(ArtifactStream::Stdout).unwrap();
@@ -780,10 +828,47 @@ mod tests {
     }
 
     #[test]
+    fn artifact_count_limit_reclaims_expired_records_before_rejecting_new_artifacts() {
+        let (_root, store) = store(ArtifactPolicy {
+            stream_limit_bytes: 32,
+            instance_quota_bytes: 1024,
+            artifact_limit: 2,
+            ttl: Duration::from_secs(60),
+        });
+        let mut first = store.begin(ArtifactStream::Stdout).unwrap();
+        first.write_chunk(b"first").unwrap();
+        let first = store.persist(first).unwrap();
+        let mut second = store.begin(ArtifactStream::Stdout).unwrap();
+        second.write_chunk(b"second").unwrap();
+        store.persist(second).unwrap();
+
+        let mut rejected = store.begin(ArtifactStream::Stdout).unwrap();
+        rejected.write_chunk(b"third").unwrap();
+        let error = store.persist(rejected).unwrap_err();
+        assert_eq!(error.code, "artifact.quotaExceeded");
+        assert!(error.message.contains("artifact-count"));
+
+        let mut metadata = store.load_metadata(&first.handle).unwrap();
+        metadata.expires_at_ms = 0;
+        storage::write_json(
+            &store.root,
+            &store.metadata_path(&first.handle),
+            "metadata-",
+            &metadata,
+        )
+        .unwrap();
+        let mut replacement = store.begin(ArtifactStream::Stdout).unwrap();
+        replacement.write_chunk(b"replacement").unwrap();
+        store.persist(replacement).unwrap();
+        assert!(!store.data_path(&first.handle).exists());
+    }
+
+    #[test]
     fn expired_reference_is_unreadable_while_payload_lease_keeps_content() {
         let (_root, store) = store(ArtifactPolicy {
             stream_limit_bytes: 32,
             instance_quota_bytes: 64,
+            artifact_limit: 64,
             ttl: Duration::from_secs(60),
         });
         let mut draft = store.begin(ArtifactStream::Stdout).unwrap();
@@ -822,6 +907,7 @@ mod tests {
         let (_root, store) = store(ArtifactPolicy {
             stream_limit_bytes: 32,
             instance_quota_bytes: 64,
+            artifact_limit: 64,
             ttl: Duration::from_secs(60),
         });
         let mut draft = store.begin(ArtifactStream::Stdout).unwrap();
@@ -854,6 +940,7 @@ mod tests {
         let (_root, store) = store(ArtifactPolicy {
             stream_limit_bytes: 32,
             instance_quota_bytes: 128,
+            artifact_limit: 64,
             ttl: Duration::from_secs(60),
         });
         let mut expired = store.begin(ArtifactStream::Stdout).unwrap();
@@ -884,6 +971,7 @@ mod tests {
         let (_root, store) = store(ArtifactPolicy {
             stream_limit_bytes: 32,
             instance_quota_bytes: 40,
+            artifact_limit: 64,
             ttl: Duration::from_secs(60),
         });
         let mut expired = store.begin(ArtifactStream::Stdout).unwrap();
@@ -926,6 +1014,7 @@ mod tests {
         let policy = ArtifactPolicy {
             stream_limit_bytes: 32,
             instance_quota_bytes: 8,
+            artifact_limit: 64,
             ttl: Duration::from_secs(60),
         };
         let store = ArtifactStore::with_policy(artifacts.clone(), policy).unwrap();

@@ -27,6 +27,8 @@ import type { ArtifactHostAccessContext } from "./ArtifactHostModel.js";
 
 const RECORD_VERSION = 1;
 const MAX_READ_BYTES = 1024 * 1024;
+const DEFAULT_MAX_ACTIVE_PAYLOADS = 4096;
+const MAX_PAYLOAD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 interface StoredPayload {
     descriptor: ArtifactPayloadDescriptor;
@@ -37,15 +39,20 @@ interface StoredPayload {
 
 export class ArtifactHostPayloadStore {
     readonly #homeDirectory: string;
+    readonly #maxActivePayloads: number;
     readonly #root: string;
     readonly #temporaryRoot: string;
+    #activePayloadCount?: number;
+    #countOperation: Promise<void> = Promise.resolve();
     #maintenanceScheduled = false;
 
     constructor(options: {
         homeDirectory: string;
+        maxActivePayloads?: number;
         root: string;
     }) {
         this.#homeDirectory = options.homeDirectory;
+        this.#maxActivePayloads = options.maxActivePayloads ?? DEFAULT_MAX_ACTIVE_PAYLOADS;
         this.#root = options.root;
         this.#temporaryRoot = join(options.root, "tmp");
     }
@@ -69,8 +76,16 @@ export class ArtifactHostPayloadStore {
         workspace: string,
         context: ArtifactHostAccessContext
     ): Promise<WorkerArtifactPayloadOpenResult> {
-        if (!Number.isSafeInteger(expiresAtMs) || expiresAtMs <= Date.now()) {
-            throw artifactError("artifact.invalidLease", "Host payload expiration must be in the future.");
+        const now = Date.now();
+        if (
+            !Number.isSafeInteger(expiresAtMs) ||
+            expiresAtMs <= now ||
+            expiresAtMs - now > MAX_PAYLOAD_TTL_MS
+        ) {
+            throw artifactError(
+                "artifact.invalidLease",
+                "Host payload expiration must be within the next 7 days."
+            );
         }
         const sourcePath = await resolveSourcePath(
             rawPath,
@@ -82,6 +97,7 @@ export class ArtifactHostPayloadStore {
         if (sourceMetadata.isSymbolicLink()) {
             throw artifactError("artifact.directoryUnsafe", "Host source must not be a symbolic link.");
         }
+        await this.#reservePayloadSlot();
         const payloadId = randomUUID();
         const temporaryPath = join(this.#temporaryRoot, `${payloadId}.tmp`);
         const dataPath = this.#dataPath(payloadId);
@@ -128,6 +144,7 @@ export class ArtifactHostPayloadStore {
         } catch (error) {
             await rm(temporaryPath, { force: true }).catch(() => undefined);
             await rm(dataPath, { force: true }).catch(() => undefined);
+            await this.#releasePayloadSlot();
             throw error;
         }
     }
@@ -179,8 +196,7 @@ export class ArtifactHostPayloadStore {
 
     async close(payloadId: string): Promise<void> {
         validateId(payloadId);
-        await rm(this.#metadataPath(payloadId), { force: true });
-        await rm(this.#dataPath(payloadId), { force: true });
+        await this.#removePayloadFiles(payloadId);
     }
 
     async #collectExpired(): Promise<void> {
@@ -196,9 +212,57 @@ export class ArtifactHostPayloadStore {
                     await this.close(payloadId);
                 }
             } catch {
-                await rm(join(this.#root, file), { force: true });
-                await rm(this.#dataPath(payloadId), { force: true });
+                await this.#removePayloadFiles(payloadId);
             }
+        }
+    }
+
+    async #reservePayloadSlot(): Promise<void> {
+        await this.#runCountExclusive(async () => {
+            this.#activePayloadCount ??= await this.#countPayloadRecords();
+            if (this.#activePayloadCount >= this.#maxActivePayloads) {
+                throw artifactError("artifact.quotaExceeded", "Host payload count limit exceeded.");
+            }
+            this.#activePayloadCount += 1;
+        });
+    }
+
+    async #releasePayloadSlot(): Promise<void> {
+        await this.#runCountExclusive(() => {
+            if (this.#activePayloadCount !== undefined) {
+                this.#activePayloadCount = Math.max(0, this.#activePayloadCount - 1);
+            }
+        });
+    }
+
+    async #removePayloadFiles(payloadId: string): Promise<void> {
+        await this.#runCountExclusive(async () => {
+            const metadataPath = this.#metadataPath(payloadId);
+            const existed = (await stat(metadataPath).catch(() => undefined))?.isFile() === true;
+            await rm(metadataPath, { force: true });
+            await rm(this.#dataPath(payloadId), { force: true });
+            if (existed && this.#activePayloadCount !== undefined) {
+                this.#activePayloadCount = Math.max(0, this.#activePayloadCount - 1);
+            }
+        });
+    }
+
+    async #countPayloadRecords(): Promise<number> {
+        const files = await readdir(this.#root).catch(() => [] as string[]);
+        return files.filter((file) => /^[0-9a-f-]{36}\.json$/u.test(file)).length;
+    }
+
+    async #runCountExclusive<T>(operation: () => T | Promise<T>): Promise<T> {
+        const previous = this.#countOperation;
+        let release!: () => void;
+        this.#countOperation = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        await previous;
+        try {
+            return await operation();
+        } finally {
+            release();
         }
     }
 

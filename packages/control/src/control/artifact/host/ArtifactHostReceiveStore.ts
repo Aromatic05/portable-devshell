@@ -26,6 +26,7 @@ import { extractArtifactDirectoryArchive } from "./ArtifactHostArchive.js";
 import { artifactHashFile } from "./ArtifactHostHash.js";
 
 const RECORD_VERSION = 1;
+const DEFAULT_MAX_ACTIVE_RECEIVES = 256;
 
 interface StoredReceive {
     backupPath?: string;
@@ -41,12 +42,15 @@ interface StoredReceive {
 }
 
 export class ArtifactHostReceiveStore {
+    readonly #activeReceives = new Set<string>();
     readonly #downloadDirectory: string;
+    readonly #maxActiveReceives: number;
     readonly #root: string;
     readonly #temporaryDirectory: string;
 
-    constructor(options: { downloadDirectory: string; root: string }) {
+    constructor(options: { downloadDirectory: string; maxActiveReceives?: number; root: string }) {
         this.#downloadDirectory = options.downloadDirectory;
+        this.#maxActiveReceives = options.maxActiveReceives ?? DEFAULT_MAX_ACTIVE_RECEIVES;
         this.#root = options.root;
         this.#temporaryDirectory = join(options.downloadDirectory, ".devshell-receive");
     }
@@ -92,31 +96,36 @@ export class ArtifactHostReceiveStore {
             throw artifactError("artifact.targetExists", "Host Download target already exists.");
         }
 
+        if (this.#activeReceives.size >= this.#maxActiveReceives) {
+            throw artifactError("artifact.quotaExceeded", "Host receive count limit exceeded.");
+        }
         const receiveId = randomUUID();
+        this.#activeReceives.add(receiveId);
         const temporaryPath = join(this.#temporaryDirectory, `${receiveId}.payload`);
-        const temporary = await open(
-            temporaryPath,
-            constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
-            0o600
-        );
-        await temporary.close();
-        const stored: StoredReceive = {
-            descriptor: input.descriptor,
-            overwrite: input.overwrite,
-            phase: "receiving",
-            receiveId,
-            receivedBytes: 0,
-            targetPath,
-            temporaryPath,
-            version: RECORD_VERSION
-        };
         try {
+            const temporary = await open(
+                temporaryPath,
+                constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
+                0o600
+            );
+            await temporary.close();
+            const stored: StoredReceive = {
+                descriptor: input.descriptor,
+                overwrite: input.overwrite,
+                phase: "receiving",
+                receiveId,
+                receivedBytes: 0,
+                targetPath,
+                temporaryPath,
+                version: RECORD_VERSION
+            };
             await this.#persist(stored);
+            return { nextOffsetBytes: 0, receiveId };
         } catch (error) {
+            this.#activeReceives.delete(receiveId);
             await rm(temporaryPath, { force: true });
             throw error;
         }
-        return { nextOffsetBytes: 0, receiveId };
     }
 
     async write(input: WorkerArtifactReceiveWriteInput): Promise<WorkerArtifactReceiveWriteResult> {
@@ -233,6 +242,7 @@ export class ArtifactHostReceiveStore {
         await this.#commit(stored, sourcePath);
         await rm(stored.temporaryPath, { force: true });
         await rm(this.#metadataPath(receiveId), { force: true });
+        this.#activeReceives.delete(receiveId);
         return {
             blake3: payload.blake3,
             bytes: payload.bytes,
@@ -245,9 +255,11 @@ export class ArtifactHostReceiveStore {
         validateId(receiveId);
         const stored = await this.#load(receiveId).catch(() => undefined);
         if (stored === undefined) {
+            this.#activeReceives.delete(receiveId);
             return;
         }
         await this.#recover(stored);
+        this.#activeReceives.delete(receiveId);
     }
 
     async #commit(stored: StoredReceive, sourcePath: string): Promise<void> {
