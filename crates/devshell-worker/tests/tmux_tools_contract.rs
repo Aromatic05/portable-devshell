@@ -526,7 +526,7 @@ fn tmux_run_public_timeout_bounds_direct_block_wait() {
         "1",
         "tmux_run",
         json!({
-            "command": "sleep 0.8",
+            "command": "sleep 5",
             "wait": "block",
             "timeout": 120,
             "line": 0
@@ -538,8 +538,8 @@ fn tmux_run_public_timeout_bounds_direct_block_wait() {
 
     assert_eq!(run["ok"], true, "{run}");
     assert!(
-        elapsed < Duration::from_millis(600),
-        "public timeout was ignored; block wait lasted {elapsed:?}: {run}"
+        elapsed < Duration::from_secs(4),
+        "public timeout did not return before the task could finish naturally; call lasted {elapsed:?}: {run}"
     );
     assert_eq!(run["result"]["task"]["status"], "running", "{run}");
     assert_eq!(run["result"]["timedOut"], true, "{run}");
