@@ -12,9 +12,9 @@ import {
 
 import { McpToolSchemaUnavailableError } from "../tool/McpToolSchemaAdapter.js";
 
-export function withMcpContextId(tool: ToolDefinition): ToolDefinition {
+export function withMcpContextId(tool: ToolDefinition, description = "Context ID returned by environ_info in explicit Context mode."): ToolDefinition {
     return withInputProperty(tool, "ctxId", {
-        description: "Context ID returned by environ_info in explicit Context mode.",
+        description,
         minLength: 1,
         type: "string"
     }, true);

@@ -916,6 +916,68 @@ test("OpenAI session binding resolves one internal ctxId without making models c
     assert.equal(harness.calls.length, 1);
 });
 
+test("OpenAI session mode keeps ctxId out of model inputs but declares it for app-only Workspace tools", async () => {
+    const harness = createWorkerHarness();
+    const registry = new McpContextRegistry({ idFactory: () => "ctx-openai-workspace-app" });
+    await registry.initialize();
+    const unused = async () => { throw new Error("unused"); };
+    const gateway = {
+        consumeWait: unused,
+        createWait: unused,
+        decideApproval: unused,
+        detachWait: unused,
+        listApprovals: async () => [],
+        listTools: () => [],
+        listWaits: async () => [],
+        readTodo: async () => ({ items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks: [] }),
+        resolveWait: unused,
+        waitForWait: unused,
+    } as unknown as McpInstanceGateway;
+    const endpoint = new McpEndpointWorker({
+        contextMode: "openai-session",
+        contextRegistry: registry,
+        gateway,
+        instanceName: "demo",
+        policy: { capabilities: ["execute"], groups: ["bash", "workspace"] },
+        worker: harness.worker,
+    });
+    const tools = endpoint.listTools();
+    const inputSchema = (name: string) => tools.find((tool) => tool.name === name)?.inputSchema as {
+        properties?: Record<string, unknown>;
+        required?: string[];
+    } | undefined;
+
+    for (const name of ["environ_info", "bash_run", "workspace_open"]) {
+        const schema = inputSchema(name);
+        assert.equal(schema?.properties?.ctxId, undefined, name);
+        assert.equal(schema?.required?.includes("ctxId") ?? false, false, name);
+    }
+    for (const name of ["workspace_snapshot", "workspace_watch", "workspace_answer"]) {
+        const schema = inputSchema(name);
+        assert.notEqual(schema?.properties?.ctxId, undefined, name);
+        assert.equal(schema?.required?.includes("ctxId") ?? false, true, name);
+    }
+
+    const requestContext = {
+        principal: "subject-1",
+        requestMeta: { "openai/session": "chat-workspace-app" },
+        requestId: "request-workspace-app",
+    };
+    const environment = await endpoint.callTool("environ_info", { workspace: "/workspace" }, requestContext);
+    assert.ok(environment instanceof McpNativeToolResult);
+    const token = (environment._meta?.["portable-devshell/workspace"] as { token?: unknown } | undefined)?.token;
+    assert.equal(typeof token, "string");
+    const ctxId = (await registry.list())[0]?.ctxId;
+    assert.equal(ctxId, "ctx-openai-workspace-app");
+
+    const snapshot = structuredResult<{ ctxId?: string }>(await endpoint.callTool(
+        "workspace_snapshot",
+        { ctxId, token: token as string },
+        { principal: "subject-1", requestId: "request-workspace-app-snapshot" },
+    ));
+    assert.equal(snapshot.ctxId, ctxId);
+});
+
 test("expired OpenAI session binding renews the same internal Context on ordinary activity", async () => {
     let now = 1_000;
     const harness = createWorkerHarness();

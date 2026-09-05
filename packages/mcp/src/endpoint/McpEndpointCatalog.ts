@@ -128,8 +128,14 @@ export class McpEndpointCatalog {
         const provenanceTool = isMcpEnvironmentToolName(modelTool.name) || !isModelFacingTool(modelTool)
             ? modelTool
             : withMcpProvenance(modelTool);
-        const contextualTool = this.#contextSelector.requiresExplicitContextId
-            ? withMcpContextId(provenanceTool)
+        const modelFacing = isModelFacingTool(provenanceTool);
+        const contextualTool = this.#contextSelector.requiresExplicitContextId || !modelFacing
+            ? withMcpContextId(
+                  provenanceTool,
+                  modelFacing
+                      ? undefined
+                      : "Internal Context ID carried by the Workspace App.",
+              )
             : provenanceTool;
         const exposed = isMcpEnvironmentToolName(contextualTool.name)
             ? contextualTool
