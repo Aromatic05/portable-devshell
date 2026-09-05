@@ -7,7 +7,7 @@ import {
     type ContextMessageRecord,
 } from "@portable-devshell/shared";
 
-const MAX_TERMINAL_MESSAGES = 1_000;
+const MAX_TERMINAL_MESSAGES = 256;
 
 export interface ContextMessageDocument {
     messages: ContextMessageRecord[];

@@ -1,9 +1,9 @@
-import { closeSync, existsSync, fsyncSync, openSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, open, rename, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createError, errorCodes, type ContextMessageRecord } from "@portable-devshell/shared";
 
 import { ContextMessageState, type ContextMessageDocument } from "./ContextMessageState.js";
 
@@ -22,6 +22,36 @@ export class ContextMessageStore {
 
     read(): ContextMessageDocument {
         return structuredClone(this.#document);
+    }
+
+    list(ctxId?: string): ContextMessageRecord[] {
+        return structuredClone(
+            this.#document.messages.filter((message) => ctxId === undefined || message.ctxId === ctxId),
+        );
+    }
+
+    pending(ctxId?: string): ContextMessageRecord[] {
+        return structuredClone(
+            this.#document.messages.filter((message) =>
+                (message.status === "pending" || message.status === "sent") &&
+                (ctxId === undefined || message.ctxId === ctxId)
+            ),
+        );
+    }
+
+    async transition<T>(
+        operation: (document: ContextMessageDocument) => { document: ContextMessageDocument; result: T },
+    ): Promise<T> {
+        const next = operation(this.#document);
+        await this.#writeAtomic(next.document);
+        this.#document = next.document;
+        return structuredClone(next.result);
+    }
+
+    async update(operation: (document: ContextMessageDocument) => ContextMessageDocument): Promise<void> {
+        const next = operation(this.#document);
+        await this.#writeAtomic(next);
+        this.#document = next;
     }
 
     async write(document: ContextMessageDocument): Promise<ContextMessageDocument> {
@@ -53,7 +83,7 @@ export class ContextMessageStore {
         try {
             const handle = await open(temporary, "wx", 0o600);
             try {
-                await handle.writeFile(`${JSON.stringify(document, null, 2)}\n`, "utf8");
+                await handle.writeFile(`${JSON.stringify(document)}\n`, "utf8");
                 await handle.sync();
             } finally {
                 await handle.close();
@@ -64,8 +94,8 @@ export class ContextMessageStore {
             throw error;
         }
         if (process.platform !== "win32") {
-            const fd = openSync(directory, "r");
-            try { fsyncSync(fd); } finally { closeSync(fd); }
+            const handle = await open(directory, "r");
+            try { await handle.sync(); } finally { await handle.close(); }
         }
     }
 }

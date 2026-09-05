@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { closeSync, existsSync, fsyncSync, openSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { createError, errorCodes } from "@portable-devshell/shared";
 
 import { WaitState, type WaitDocument } from "./WaitState.js";
+import type { WaitRecord } from "@portable-devshell/shared";
 
 export class WaitStore {
     readonly #filePath: string;
@@ -22,6 +23,24 @@ export class WaitStore {
 
     read(): WaitDocument {
         return structuredClone(this.#document);
+    }
+
+    readRecord(waitId: string): WaitRecord | undefined {
+        const record = this.#document.waits.find((entry) => entry.waitId === waitId);
+        return record === undefined ? undefined : structuredClone(record);
+    }
+
+    list(taskId?: string): WaitRecord[] {
+        return structuredClone(
+            this.#document.waits.filter((record) => taskId === undefined || record.taskId === taskId),
+        );
+    }
+
+    async transition(operation: (document: WaitDocument) => { document: WaitDocument; record: WaitRecord }): Promise<WaitRecord> {
+        const next = operation(this.#document);
+        await this.#writeAtomic(next.document);
+        this.#document = next.document;
+        return structuredClone(next.record);
     }
 
     async write(document: WaitDocument): Promise<WaitDocument> {
@@ -68,7 +87,7 @@ export class WaitStore {
         try {
             const handle = await open(temporary, "wx", 0o600);
             try {
-                await handle.writeFile(`${JSON.stringify(document, null, 2)}\n`, "utf8");
+                await handle.writeFile(`${JSON.stringify(document)}\n`, "utf8");
                 await handle.sync();
             } finally {
                 await handle.close();
@@ -79,8 +98,8 @@ export class WaitStore {
             throw error;
         }
         if (process.platform !== "win32") {
-            const fd = openSync(directory, "r");
-            try { fsyncSync(fd); } finally { closeSync(fd); }
+            const handle = await open(directory, "r");
+            try { await handle.sync(); } finally { await handle.close(); }
         }
     }
 }

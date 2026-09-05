@@ -55,14 +55,19 @@ export class TodoService {
         ctxId: string
     ): Promise<TodoReadResult> {
         return await this.#runExclusive(async () => {
-            const transition = this.#createTransition(input, ctxId);
-            await this.#persistTransition(transition);
-            await this.#emitTransition(transition);
-            const { tasks: _tasks, ...result } = this.#readDocument(transition.document, {
-                ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
-                title: input.title
+            const committed = await this.#store.transition((document) => {
+                const transition = this.#state.transition(document, input, ctxId);
+                const { tasks: _tasks, ...result } = this.#readDocument(transition.document, {
+                    ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
+                    title: input.title
+                });
+                return {
+                    document: transition.document,
+                    result: { events: transition.events, value: result }
+                };
             });
-            return result;
+            await this.#emitEvents(committed.events);
+            return committed.value;
         });
     }
 
@@ -73,59 +78,49 @@ export class TodoService {
         expectedRevision?: number,
     ): Promise<TodoReadResult> {
         return await this.#runExclusive(async () => {
-            const transition = this.#state.control(this.#store.read(), taskId, action, ctxId, expectedRevision);
-            if (transition.events.length > 0) {
-                await this.#persistTransition(transition);
-                await this.#emitTransition(transition);
-            }
-            const { tasks: _tasks, ...result } = this.#readDocument(transition.document, { taskId });
-            return result;
+            const committed = await this.#store.transition((document) => {
+                const transition = this.#state.control(document, taskId, action, ctxId, expectedRevision);
+                const { tasks: _tasks, ...result } = this.#readDocument(transition.document, { taskId });
+                return {
+                    document: transition.document,
+                    result: { events: transition.events, value: result }
+                };
+            });
+            await this.#emitEvents(committed.events);
+            return committed.value;
         });
     }
 
     async cancelAll(): Promise<void> {
         await this.#runExclusive(async () => {
-            let document = this.#store.read();
-            for (const task of [...document.active]) {
-                const transition = this.#state.control(
-                    document,
-                    task.taskId,
-                    "cancel",
-                    task.activeCtxId ?? task.createdByCtxId,
-                    task.revision,
-                );
-                await this.#persistTransition(transition);
-                await this.#emitTransition(transition);
-                document = transition.document;
+            for (const task of this.#store.readActive().active) {
+                const events = await this.#store.transition((document) => {
+                    const transition = this.#state.control(
+                        document,
+                        task.taskId,
+                        "cancel",
+                        task.activeCtxId ?? task.createdByCtxId,
+                        task.revision,
+                    );
+                    return { document: transition.document, result: transition.events };
+                });
+                await this.#emitEvents(events);
             }
         });
     }
 
     async delete(taskId: string): Promise<void> {
         await this.#runExclusive(async () => {
-            const transition = this.#state.delete(this.#store.read(), taskId);
-            await this.#persistTransition(transition);
-            await this.#emitTransition(transition);
+            const events = await this.#store.transition((document) => {
+                const transition = this.#state.delete(document, taskId);
+                return { document: transition.document, result: transition.events };
+            });
+            await this.#emitEvents(events);
         });
     }
 
-    #createTransition(
-        input: TodoWriteInput,
-        ctxId: string
-    ): TodoTransition {
-        return this.#state.transition(
-            this.#store.read(),
-            input,
-            ctxId
-        );
-    }
-
-    async #persistTransition(transition: TodoTransition): Promise<void> {
-        await this.#store.write(transition.document);
-    }
-
-    async #emitTransition(transition: TodoTransition): Promise<void> {
-        for (const event of transition.events) {
+    async #emitEvents(events: TodoTransition["events"]): Promise<void> {
+        for (const event of events) {
             await this.#appendEvent(event.type, event.data).catch(() => undefined);
         }
     }

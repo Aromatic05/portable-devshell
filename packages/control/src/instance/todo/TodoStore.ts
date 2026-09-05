@@ -1,4 +1,4 @@
-import { closeSync, existsSync, fsyncSync, openSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -61,6 +61,18 @@ export class TodoStore {
         return await this.write(next);
     }
 
+    async transition<T>(
+        operation: (document: TodoDocument) => { document: TodoDocument; result: T }
+    ): Promise<T> {
+        const current = this.#document;
+        const next = operation(current);
+        if (next.document !== current) {
+            await this.#writeAtomic(next.document);
+            this.#document = next.document;
+        }
+        return structuredClone(next.result);
+    }
+
     #loadFromDisk(): TodoDocument {
         if (!existsSync(this.#filePath)) {
             return this.#state.emptyDocument();
@@ -89,7 +101,7 @@ export class TodoStore {
             const handle = await open(temporary, "wx", 0o600);
             try {
                 await handle.writeFile(
-                    `${JSON.stringify(document, null, 2)}\n`,
+                    `${JSON.stringify(document)}\n`,
                     "utf8"
                 );
                 await handle.sync();
@@ -102,18 +114,18 @@ export class TodoStore {
             throw error;
         }
 
-        this.#syncDirectory(directory);
+        await this.#syncDirectory(directory);
     }
 
-    #syncDirectory(directory: string): void {
+    async #syncDirectory(directory: string): Promise<void> {
         if (process.platform === "win32") {
             return;
         }
-        const directoryFd = openSync(directory, "r");
+        const handle = await open(directory, "r");
         try {
-            fsyncSync(directoryFd);
+            await handle.sync();
         } finally {
-            closeSync(directoryFd);
+            await handle.close();
         }
     }
 }

@@ -122,17 +122,17 @@ export class WaitService {
 
     async get(waitId: string): Promise<WaitRecord | undefined> {
         await this.#operation;
-        return this.#store.read().waits.find((record) => record.waitId === waitId);
+        return this.#store.readRecord(waitId);
     }
 
     async list(taskId?: string): Promise<WaitRecord[]> {
         await this.#operation;
-        return this.#store.read().waits.filter((record) => taskId === undefined || record.taskId === taskId);
+        return this.#store.list(taskId);
     }
 
     async waitForResolution(waitId: string): Promise<WaitRecord> {
         await this.#operation;
-        const record = this.#store.read().waits.find((entry) => entry.waitId === waitId);
+        const record = this.#store.readRecord(waitId);
         if (record === undefined) throw new Error(`Wait ${waitId} was not found.`);
         if (record.status === "resolved") return record;
         if (record.status !== "waiting" && record.status !== "detached") {
@@ -167,10 +167,7 @@ export class WaitService {
         transition: (document: WaitDocument) => WaitTransition,
     ): Promise<WaitRecord> {
         return await this.#runExclusive(async () => {
-            const next = transition(this.#store.read());
-            const stored = await this.#store.write(next.document);
-            const record = stored.waits.find((entry) => entry.waitId === next.record.waitId);
-            if (record === undefined) throw new Error(`Wait ${next.record.waitId} disappeared during persistence.`);
+            const record = await this.#store.transition(transition);
             const type = typeof eventType === "function" ? eventType(record) : eventType;
             await this.#appendEvent(type, eventData(record)).catch(() => undefined);
             return record;

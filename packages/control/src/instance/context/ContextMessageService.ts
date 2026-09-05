@@ -40,20 +40,18 @@ export class ContextMessageService {
         input: ContextMessageQueueInput,
     ): Promise<ContextMessageRecord> {
         return await this.#runExclusive(async () => {
-            const transition = this.#state.queue(
-                this.#store.read(),
-                this.#instanceName,
-                input,
-            );
-            await this.#store.write(transition.document);
+            const record = await this.#store.transition((document) => {
+                const transition = this.#state.queue(document, this.#instanceName, input);
+                return { document: transition.document, result: transition.record };
+            });
             try {
                 await this.#appendEvent(
                     "context.message.queued",
-                    eventData(transition.record),
+                    eventData(record),
                 );
-                return transition.record;
+                return record;
             } catch (error) {
-                await this.#markFailed([transition.record], error);
+                await this.#markFailed([record], error);
                 throw error;
             }
         });
@@ -62,11 +60,7 @@ export class ContextMessageService {
     async list(input: ContextMessageListInput | string = {}): Promise<ContextMessageRecord[]> {
         await this.#operation;
         const query = typeof input === "string" ? { ctxId: input } : input;
-        let messages = this.#store
-            .read()
-            .messages.filter(
-                (message) => query.ctxId === undefined || message.ctxId === query.ctxId,
-            );
+        let messages = this.#store.list(query.ctxId);
         if (query.before !== undefined) {
             const index = messages.findIndex((message) => message.id === query.before);
             if (index >= 0) messages = messages.slice(0, index);
@@ -86,37 +80,31 @@ export class ContextMessageService {
 
     async failAllPending(reason: string): Promise<ContextMessageRecord[]> {
         return await this.#runExclusive(async () => {
-            const records = this.#store
-                .read()
-                .messages.filter((message) => message.status === "pending" || message.status === "sent");
+            const records = this.#store.pending();
             if (records.length === 0) return [];
             await this.#markFailed(records, reason);
             const ids = new Set(records.map((record) => record.id));
-            return this.#store.read().messages.filter((message) => ids.has(message.id));
+            return this.#store.list().filter((message) => ids.has(message.id));
         });
     }
 
     async failPending(ctxId: string, reason: string): Promise<ContextMessageRecord[]> {
         return await this.#runExclusive(async () => {
-            const records = this.#store
-                .read()
-                .messages.filter((message) =>
-                    message.ctxId === ctxId &&
-                    (message.status === "pending" || message.status === "sent")
-                );
+            const records = this.#store.pending(ctxId);
             if (records.length === 0) return [];
             await this.#markFailed(records, reason);
             const ids = new Set(records.map((record) => record.id));
-            return this.#store.read().messages.filter((message) => ids.has(message.id));
+            return this.#store.list(ctxId).filter((message) => ids.has(message.id));
         });
     }
 
     async consumePending(ctxId: string, callId: string): Promise<ContextMessageReadResult> {
         const delivered = await this.#runExclusive(async () => {
-            const transition = this.#state.deliver(this.#store.read(), ctxId, callId);
-            if (transition.delivered.length === 0) return [];
-            await this.#store.write(transition.document);
-            return transition.delivered;
+            if (this.#store.pending(ctxId).length === 0) return [];
+            return await this.#store.transition((document) => {
+                const transition = this.#state.deliver(document, ctxId, callId);
+                return { document: transition.document, result: transition.delivered };
+            });
         });
         const comment = delivered.map((message) => message.text).join("\n\n");
         if (delivered.length > 0) {
@@ -142,8 +130,7 @@ export class ContextMessageService {
     ): Promise<void> {
         const message = error instanceof Error ? error.message : String(error);
         const ids = new Set(records.map((record) => record.id));
-        const failed = this.#state.fail(this.#store.read(), ids, message);
-        await this.#store.write(failed);
+        await this.#store.update((document) => this.#state.fail(document, ids, message));
         for (const record of records) {
             await this.#appendEvent("context.message.failed", {
                 ...eventData(record),

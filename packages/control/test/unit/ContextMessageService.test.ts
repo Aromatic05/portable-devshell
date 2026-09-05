@@ -236,7 +236,7 @@ test("ContextMessageState retains all pending messages while bounding terminal h
     assert.equal(
         compacted.messages.filter((message) => message.status !== "pending")
             .length,
-        1_000,
+        256,
     );
     assert.equal(
         compacted.messages.some((message) => message.id === "delivered-1099"),

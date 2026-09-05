@@ -83,6 +83,45 @@ test("WaitState atomically consumes a detached completion without consuming a sy
     assert.equal(resolved.record.consumedAt, undefined);
 });
 
+test("WaitState bounds terminal history and drops transient terminal payloads without truncating recoverable waits", () => {
+    const state = new WaitState();
+    const terminal = Array.from({ length: 300 }, (_, index) => ({
+        consumedAt: new Date(index + 1_000).toISOString(),
+        createdAt: new Date(index).toISOString(),
+        createdByCtxId: "ctx-terminal",
+        kind: "tmux" as const,
+        payload: { line: 80 },
+        resolvedAt: new Date(index + 500).toISOString(),
+        result: { output: `terminal-${index}` },
+        status: "consumed" as const,
+        targetId: `task-terminal-${index}`,
+        updatedAt: new Date(index + 1_000).toISOString(),
+        waitId: `wait-terminal-${index}`,
+    }));
+    const recoverable = {
+        createdAt: new Date(10_000).toISOString(),
+        createdByCtxId: "ctx-recoverable",
+        detachedAt: new Date(10_001).toISOString(),
+        kind: "tmux" as const,
+        payload: { line: 120 },
+        resolvedAt: new Date(10_002).toISOString(),
+        result: { output: "recover me" },
+        status: "resolved" as const,
+        targetId: "task-recoverable",
+        updatedAt: new Date(10_002).toISOString(),
+        waitId: "wait-recoverable",
+    };
+
+    const compacted = state.compact({ version: 1, waits: [...terminal, recoverable] });
+    const retainedTerminal = compacted.waits.filter((record) => record.status === "consumed");
+    const retainedRecoverable = compacted.waits.find((record) => record.waitId === recoverable.waitId);
+
+    assert.equal(retainedTerminal.length, 256);
+    assert.equal(retainedTerminal.every((record) => record.payload === undefined && record.result === undefined), true);
+    assert.deepEqual(retainedRecoverable?.payload, recoverable.payload);
+    assert.deepEqual(retainedRecoverable?.result, recoverable.result);
+});
+
 test("WaitState can detach a resolved result when its owner disappears after resolution", () => {
     const timestamps = [
         "2026-08-18T00:00:00.000Z",
