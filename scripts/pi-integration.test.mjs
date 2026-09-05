@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
     activatePiIntegration,
@@ -13,6 +14,66 @@ import {
     resolvePiDeploymentTargets,
     restorePiIntegration
 } from "./pi-integration.mjs";
+
+const repoRoot = fileURLToPath(new URL("../", import.meta.url));
+
+test("bundled Pi keeps launch cwd while ignoring project-local resources", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-pi-compatibility-"));
+    const agentDir = resolve(root, "agent");
+    const project = resolve(root, "project");
+    const sessionFile = resolve(root, "session", "probe.jsonl");
+    const piTarget = resolve(
+        repoRoot,
+        "packages",
+        "pi-extension",
+        "node_modules",
+        "@earendil-works",
+        "pi-coding-agent",
+        "dist",
+        "bundle",
+        "cli.js"
+    );
+    try {
+        await mkdir(resolve(agentDir, "prompts"), { recursive: true });
+        await mkdir(resolve(project, ".pi", "prompts"), { recursive: true });
+        await mkdir(resolve(sessionFile, ".."), { recursive: true });
+        await writeFile(resolve(agentDir, "prompts", "global-only.md"), "global prompt\n", "utf8");
+        await writeFile(resolve(project, ".pi", "prompts", "local-only.md"), "local prompt\n", "utf8");
+        await writeFile(sessionFile, "", "utf8");
+
+        const pi = spawnSync(process.execPath, [
+            piTarget,
+            "--offline",
+            "--mode",
+            "rpc",
+            "--no-extensions",
+            "--no-builtin-tools",
+            "--no-approve",
+            "--session",
+            sessionFile
+        ], {
+            cwd: project,
+            encoding: "utf8",
+            env: {
+                ...process.env,
+                PI_CODING_AGENT_DIR: agentDir,
+                PI_OFFLINE: "1"
+            },
+            input: '{"type":"get_commands","id":"commands-1"}\n'
+        });
+        assert.equal(pi.status, 0, pi.stderr);
+        const response = JSON.parse(pi.stdout.trim());
+        assert.equal(response.success, true);
+        const commandNames = response.data.commands.map((command) => command.name);
+        assert.equal(commandNames.includes("global-only"), true);
+        assert.equal(commandNames.includes("local-only"), false);
+
+        const header = JSON.parse((await readFile(sessionFile, "utf8")).split("\n")[0]);
+        assert.equal(resolve(header.cwd), project);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
 
 test("Pi integration installs a devshell-only launcher and default extension loader", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "portable-devshell-pi-integration-"));
