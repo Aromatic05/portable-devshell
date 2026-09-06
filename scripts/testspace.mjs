@@ -34,6 +34,7 @@ import {
 import { runTestspaceTerminalSmoke } from "./testspace/TestspaceTerminalSmoke.mjs";
 import { runTestspaceCommentSmoke } from "./testspace/TestspaceCommentSmoke.mjs";
 import { runTestspaceWebSmoke } from "./testspace/TestspaceWebSmoke.mjs";
+import { runTestspaceWorkspaceSmoke } from "./testspace/TestspaceWorkspaceSmoke.mjs";
 import {
     assertTestspaceRootOwned,
     createTestspaceProcessEnvironment,
@@ -441,8 +442,13 @@ async function smoke() {
         runtimeDirectory,
         workspace: paths.workspace,
     });
+    const workspace = await runTestspaceWorkspaceSmoke({
+        endpoint: testspaceUrls(state).mcp,
+        instance: TESTSPACE_INSTANCE,
+        workspace: paths.workspace,
+    });
     const web = await runTestspaceWebSmoke({ webPort: state.webPort });
-    process.stdout.write(`${JSON.stringify({ comment, reverse, terminals, web }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ comment, reverse, terminals, web, workspace }, null, 2)}\n`);
 }
 
 async function stop() {

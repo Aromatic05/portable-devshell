@@ -57,7 +57,7 @@ Testspace instance 故意启用较宽的开发策略：
 MCP auth        none
 approval        allow
 security.mode   workspace
-groups          file,bash,artifact,tmux,todo,instance
+groups          file,bash,artifact,tmux,todo,workspace,instance
 capabilities    read,write,execute,manage
 ```
 
@@ -190,6 +190,7 @@ Smoke 是自动诊断，不等于最终 acceptance。根据入口还可以分别
 terminal smoke
 web smoke
 comment smoke
+workspace resource + live snapshot smoke
 ```
 
 项目正式门禁见 [验收与发布门禁](acceptance.md)。

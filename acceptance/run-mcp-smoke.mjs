@@ -95,7 +95,26 @@ async function postJson(url, body, headers = {}) {
     const response = await post(url, body, headers);
     const text = await response.text();
     assert.equal(response.status, 200, text);
-    return { body: JSON.parse(text), headers: response.headers };
+    return { body: parseMcpResponseBody(response, text), headers: response.headers };
+}
+
+function parseMcpResponseBody(response, text) {
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    if (!contentType.includes("text/event-stream")) return JSON.parse(text);
+
+    const payloads = [];
+    for (const block of text.split(/\r?\n\r?\n/u)) {
+        const data = block
+            .split(/\r?\n/u)
+            .flatMap((line) => {
+                const match = /^data:(?: )?(.*)$/u.exec(line);
+                return match === null ? [] : [match[1]];
+            })
+            .join("\n");
+        if (data.length > 0) payloads.push(JSON.parse(data));
+    }
+    assert.equal(payloads.length, 1, `Expected one MCP SSE message, received ${payloads.length}.\n${text}`);
+    return payloads[0];
 }
 
 async function post(url, body, headers = {}) {
