@@ -1,4 +1,4 @@
-import { lstat, readFile, writeFile } from "node:fs/promises";
+import { cp, lstat, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 export class ApplicationLayoutError extends Error {
@@ -14,6 +14,19 @@ export function normalizeCliArguments(argumentsList) {
         normalized.shift();
     }
     return normalized;
+}
+
+export async function materializeApplicationTree(sourceRoot, targetRoot) {
+    const source = resolve(sourceRoot);
+    const target = resolve(targetRoot);
+    if (source === target) {
+        throw new ApplicationLayoutError("Application materialization source and target must differ.");
+    }
+    await cp(source, target, {
+        dereference: true,
+        preserveTimestamps: true,
+        recursive: true,
+    });
 }
 
 export async function readPackageBinPath(packageRoot, command) {

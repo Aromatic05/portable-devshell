@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
 
 import {
     assertPackageBinFile,
+    materializeApplicationTree,
     normalizeCliArguments,
     readPackageBinPath,
     resolvePackageBinPath,
@@ -28,6 +29,35 @@ test("CLI argument normalization removes only the pnpm separator", () => {
     assert.deepEqual(normalizeCliArguments(["status"]), ["status"]);
     assert.deepEqual(normalizeCliArguments(["instance", "status", "alpha"]), ["instance", "status", "alpha"]);
     assert.deepEqual(normalizeCliArguments([]), []);
+});
+
+test("application materialization breaks deploy hardlinks and dereferences symlinks", async () => {
+    const root = await createTestTempDirectory("materialize-app-test");
+    try {
+        const external = resolve(root, "workspace-dist.js");
+        const deploy = resolve(root, "deploy");
+        const target = resolve(root, "target");
+        await mkdir(resolve(deploy, "node_modules", "pkg"), { recursive: true });
+        await writeFile(external, "original\n", "utf8");
+        const deployed = resolve(deploy, "node_modules", "pkg", "index.js");
+        await link(external, deployed);
+        if (process.platform !== "win32") {
+            await symlink("index.js", resolve(deploy, "node_modules", "pkg", "alias.js"));
+        }
+
+        await materializeApplicationTree(deploy, target);
+        const materialized = resolve(target, "node_modules", "pkg", "index.js");
+        await writeFile(external, "mutated\n", "utf8");
+
+        assert.equal(await readFile(materialized, "utf8"), "original\n");
+        if (process.platform !== "win32") {
+            const alias = resolve(target, "node_modules", "pkg", "alias.js");
+            assert.equal((await lstat(alias)).isSymbolicLink(), false);
+            assert.equal(await readFile(alias, "utf8"), "original\n");
+        }
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
 });
 
 

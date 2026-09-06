@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { assertPackageBinFile, readPackageBinPath, writePortableApplicationManifest, tryReadPackageBinPath } from "./application-layout.mjs";
+import { assertPackageBinFile, materializeApplicationTree, readPackageBinPath, writePortableApplicationManifest, tryReadPackageBinPath } from "./application-layout.mjs";
 import { resolveInstallHome } from "./install-home.mjs";
 import { captureInstalledRuntimeState, restoreInstalledControl, restoreInstalledInstances, restoreInstalledRuntimeState } from "./install-runtime-state.mjs";
 import { assertRunningControlMatchesApplication } from "./install-runtime-identity.mjs";
@@ -46,6 +46,7 @@ const binDirectory = process.env.PORTABLE_DEVSHELL_BIN_DIR || resolve(home, ".lo
 const devshellHome = process.env.PORTABLE_DEVSHELL_HOME || resolve(home, ".devshell");
 const versionsDirectory = resolve(installRoot, "versions");
 const versionDirectory = resolve(versionsDirectory, version);
+const deployDirectory = resolve(installRoot, `.deploy-${version}-${process.pid}`);
 const stagingDirectory = resolve(installRoot, `.staging-${version}-${process.pid}`);
 const backupDirectory = resolve(installRoot, `.backup-${version}-${process.pid}`);
 const workerBackupDirectory = resolve(installRoot, `.worker-activation-backup-${process.pid}`);
@@ -62,6 +63,7 @@ const allTargets = [
 const hostTarget = resolveHostTarget();
 const targets = allTargets.filter((target) => target.key === hostTarget);
 
+await rm(deployDirectory, { force: true, recursive: true });
 await rm(stagingDirectory, { force: true, recursive: true });
 await rm(backupDirectory, { force: true, recursive: true });
 await rm(workerBackupDirectory, { force: true, recursive: true });
@@ -76,7 +78,12 @@ try {
 
     beginStep("构建并验证应用");
     runPnpm(["build"]);
-    runPnpm(["--filter", "@portable-devshell/cli", "--prod", "deploy", stagingDirectory]);
+    try {
+        runPnpm(["--filter", "@portable-devshell/cli", "--prod", "deploy", deployDirectory]);
+        await materializeApplicationTree(deployDirectory, stagingDirectory);
+    } finally {
+        await rm(deployDirectory, { force: true, recursive: true });
+    }
     await writePortableApplicationManifest(stagingDirectory, { minimumNodeMajor: 24, version });
     const stagingCli = await assertPackageBinFile(await readPackageBinPath(stagingDirectory, "devshell"));
     if (process.platform !== "win32") await chmod(stagingCli.absolutePath, 0o755);
@@ -245,6 +252,7 @@ try {
             .join("\n") + "\n"
     );
 } catch (error) {
+    await rm(deployDirectory, { force: true, recursive: true });
     await rm(stagingDirectory, { force: true, recursive: true });
     throw error;
 }
