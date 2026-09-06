@@ -1,6 +1,8 @@
-# 通过 FRP 或 Cloudflare Tunnel 接入 ChatGPT
+# 通过 FRP 或 Cloudflare Tunnel 暴露 ChatGPT MCP endpoint
 
-ChatGPT 开发者模式应用只能连接公网 HTTPS MCP endpoint。旧资料中的 ChatGPT Connector 指同一类接入能力。本项目的每个 instance 使用独立路径：
+这份文档只讨论“自己提供公网 HTTPS endpoint”的部署方式。ChatGPT 也可以在支持的组织/产品环境中通过 OpenAI Secure MCP Tunnel 连接 private/on-prem MCP server；如果已经使用 Secure MCP Tunnel，就不需要照本文额外暴露公网入口。
+
+直接远程 endpoint 的每个 instance 使用独立路径：
 
 ```text
 https://<public-host>/<instance>/mcp
@@ -17,12 +19,13 @@ https://<public-host>/<instance>/mcp
 
 ## ChatGPT 兼容性范围
 
-当前实现已覆盖 ChatGPT 开发者模式连接远程 MCP server 所需的核心流程：
+当前 compatibility path 覆盖 ChatGPT 连接远程 MCP server 所需的核心流程：
 
-- Streamable HTTP MCP endpoint；
+- MCP v2 request handling + 2025-era Streamable HTTP stateless fallback；
+- request-scoped SSE 与 15 秒 keepalive；
 - `401` Bearer challenge 与 `resource_metadata`；
 - OAuth protected-resource metadata 和 authorization-server discovery；
-- Dynamic Client Registration；
+- Dynamic Client Registration compatibility；
 - public client、PKCE `S256` 和 ChatGPT 动态 callback URI；
 - authorization request 与 token request 中的 RFC 8707 `resource`；
 - 按 instance 校验 token audience 和 scope；
@@ -32,7 +35,7 @@ https://<public-host>/<instance>/mcp
 
 Access token 默认有效期为 1 小时；refresh token、grant 和登录 session 默认保留 90 天。用户无需在 control 重启后重新注册 Web 内置 OAuth client。
 
-当前仍使用 DCR，不提供 Client ID Metadata Document。ChatGPT 当前兼容 DCR，因此这不阻塞连接；CIMD 可作为大规模、预注册客户端部署的后续增强。工具 schema 已提供名称、描述、输入和输出 schema，但尚未对全部 worker/control 工具建立经过审计的 MCP `annotations`。在完成显式工具语义建模前，不通过工具名或 capability 猜测 destructive/read-only 标记。
+MCP 2026-07-28 已把 client identity/registration 继续向新模型推进，但现有 Host 仍大量使用 DCR。portable-devshell 继续保留 DCR compatibility，而 v2 MCP transport 不依赖它。工具 schema 已提供名称、描述、输入和输出 schema；安全语义仍以实际 capability、approval policy 和工具实现为准，不能仅根据名称推断 destructive/read-only 行为。
 
 ## 公共前提
 
@@ -55,7 +58,7 @@ resourceName = "demo-local"
 requiredScopes = ["mcp"]
 
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo"]
+groups = ["file", "bash", "artifact", "tmux", "todo", "workspace"]
 capabilities = ["read", "write", "execute"]
 ```
 
@@ -70,15 +73,14 @@ listenPort = 17890
 publicBaseUrl = "https://dev.example.com"
 ```
 
-修改全局配置后重启 control 并启动目标 instance：
+修改配置后确认 runtime 已应用，并检查目标 instance：
 
 ```bash
-devshell stop
-devshell start
-devshell instance start <instance>
+devshell config get
+devshell instance status <instance>
 ```
 
-OAuth 审批不在 Connector 配置页处理。运行 `devshell tui`，进入 `OAuth` 面板：先批准动态注册请求，再批准授权请求。每个待审批请求 5 分钟后过期。
+OAuth 审批不在 ChatGPT 配置页代替 portable-devshell 自身审批。运行 `devshell tui`，进入 `OAuth` 面板处理客户端实际发出的 registration / authorization 请求；审批都有生命周期，不应长期悬挂。
 
 ## 方式一：FRP + VPS + Nginx
 
@@ -148,13 +150,16 @@ server {
         proxy_set_header X-Forwarded-Proto https;
         proxy_buffering off;
         proxy_request_buffering off;
+        proxy_cache off;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
     }
 }
 ```
 
-`portable-devshell` 在只监听回环地址时会信任反向代理提供的 `X-Forwarded-Host` 和 `X-Forwarded-Proto`，因此上面的通用 location 会直接生成正确的 HTTPS OIDC endpoint，不需要 `sub_filter` 改写响应。
+`proxy_buffering off` 对当前版本是功能要求而不只是性能优化：MCP handler 每 15 秒发送 SSE keepalive。如果代理把这些 frame 缓冲到很久以后才转发，Host 仍可能把一个正常的长 `tools/call` 当成 idle connection 关闭。
+
+`portable-devshell` 在只监听回环地址时会信任反向代理提供的 `X-Forwarded-Host` 和 `X-Forwarded-Proto`，因此上面的通用 location 会直接生成正确的 HTTPS OAuth endpoint，不需要 `sub_filter` 改写响应。
 
 使用 Certbot 或现有证书管理方式为域名签发证书。每次修改后执行 `nginx -t`，再 reload Nginx。
 
@@ -197,7 +202,7 @@ sudo systemctl enable --now cloudflared
 
 不要给这个 MCP hostname 叠加需要浏览器登录的 Cloudflare Access 策略：ChatGPT 无法完成 Cloudflare 的交互式 Access 登录。这里的访问控制应由项目自身的 OAuth 和 OAuth 面板审批承担。
 
-## 验证并在 ChatGPT 中创建应用
+## 验证并在 ChatGPT 中创建 App
 
 先验证公开发现与认证挑战：
 
@@ -209,13 +214,13 @@ curl -i https://dev.example.com/<instance>/mcp
 
 前两条应返回 JSON；最后一条应返回 `401`，并带有包含 `resource_metadata` 的 `WWW-Authenticate` 头。OIDC discovery 中所有 endpoint 都必须是 `https://dev.example.com/...`。
 
-然后在 ChatGPT 的开发者模式中创建应用，填入：
+然后在当前 ChatGPT 的 Apps/developer mode 入口创建自定义 MCP App，填入：
 
 ```text
 https://dev.example.com/<instance>/mcp
 ```
 
-ChatGPT 发起注册和授权后，在本机 TUI 的 `OAuth` 面板依次批准两条请求。完成授权后，再让 ChatGPT 刷新工具元数据。
+ChatGPT 发起注册和授权后，在本机 TUI 的 `OAuth` 面板处理对应请求。完成授权后执行 tool scan/refresh。具体 UI 会随 OpenAI 产品版本变化，见 [客户端接入](../getting-started/clients.md)。
 
 ## 故障排查
 
@@ -224,3 +229,4 @@ ChatGPT 发起注册和授权后，在本机 TUI 的 `OAuth` 面板依次批准�
 - ChatGPT 一直等待授权：打开 TUI 的 `OAuth` 面板，检查注册或授权请求是否待批准、被拒绝或已过期。
 - TUI 没有新请求：确认目标 instance 的 `[mcp] auth = "oauth2"`，并等待最多一秒让审批轮询刷新。
 - 工具调用被拒绝：OAuth 授权与 instance 的 `approvalPolicy` 独立；后者控制 MCP 工具实际执行。
+- 约两分钟后长工具出现 `5xx`，但 task 仍在运行：优先检查 Nginx/Cloudflare/其他中间层是否缓冲或吞掉 SSE keepalive。当前 portable-devshell 自身可以让同一个 `tools/call` 阻塞到 180 秒后再 handoff。

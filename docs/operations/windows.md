@@ -73,4 +73,6 @@ windows-x64      x86_64-pc-windows-msvc
 windows-arm64    aarch64-pc-windows-msvc
 ```
 
-Windows x64 在 CI 中执行真实 daemon、RPC、`tools.list` 和 PowerShell `bash_run` smoke。Windows ARM64 在 Windows runner 上执行交叉编译和发布资产构建。
+当前 CI/Release 对 Windows x64 与 ARM64 都保证应用包和原生 Worker target 的构建/打包。通用 TypeScript/Rust 正确性由 common gate 证明；Windows runner **不再宣称覆盖与 Unix 等价的 PowerShell/ConPTY runtime smoke**，因为这些交互与终端语义目前缺少足够稳定、有证明力的自动化测试。
+
+因此“Windows target 构建成功”不能被解释成所有 Windows runtime 交互都已经过真实验收。发布门禁的准确范围见 [验收与发布门禁](../development/acceptance.md)。

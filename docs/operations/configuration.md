@@ -1,4 +1,6 @@
-# 参考信息
+# 配置与运行目录
+
+这份文档记录当前 `0.6.x` 的持久配置、运行路径和运维入口。命令参数以当前 `devshell <command> --help` 为准；配置结构以 Control 的 normalize/validate 结果为准。
 
 ## 支持平台
 
@@ -51,7 +53,7 @@ worker 和 tmux 在 Unix 上仍维护各 instance 的独立运行目录与 socke
 
 ## Control 管理命令
 
-除 `instance`、`watch` 和 `artifact` 外，CLI 还直接提供 Control 管理面：
+CLI 的主要 Control 管理面包括：
 
 ```text
 devshell overview
@@ -62,9 +64,27 @@ devshell context --help
 devshell debug --help
 devshell tool --help
 devshell todo --help
+devshell instance --help
+devshell watch --help
+devshell artifact --help
+devshell secret --help
+devshell skill --help
 ```
 
 这些命令都通过 Control RPC 执行。各命令的完整参数以对应的 `--help` 输出为准。
+
+配置修改优先使用 Control 自己的配置 API：
+
+```text
+devshell config get
+devshell config validate <jsonDraft>
+devshell config update <jsonUpdate>
+devshell config instance patch <instance> <jsonPatch>
+devshell config mcp patch <jsonPatch>
+devshell config web patch <jsonPatch>
+```
+
+Control 会先 normalize、validate、preflight，再对支持的变更执行 runtime apply；返回结果会说明是否仍需要 Control restart。不要把“修改配置”固定等价成 `stop` + `start`。
 
 ## 全局配置
 
@@ -86,10 +106,19 @@ publicBaseUrl = "http://127.0.0.1:17890"
 [web]
 enabled = false
 listenHost = "127.0.0.1"
-listenPort = 17891
-publicBaseUrl = "http://127.0.0.1:17891/web"
+listenPort = 17890
+publicBaseUrl = "http://127.0.0.1:17890"
 auth = "none"
 ```
+
+Web 的默认 `listenHost` / `listenPort` 继承 MCP listener，因此两者默认都落在 `127.0.0.1:17890`。当 MCP 与 Web 同时启用且 endpoint 完全相同时，Control 复用同一个 HTTP host；只有显式把 Web 改到例如 `17891` 时才创建独立 listener。
+
+`publicBaseUrl` 的 patch 语义区分“省略”和 `null`：
+
+* MCP patch 省略该字段时保留现值；显式 `null` 会清除显式公网基址；
+* Web patch 省略时保留现值；显式 `null` 会回到基于当前 `listenHost` / `listenPort` 推导的本地基址。
+
+这对于临时撤掉反向代理/公网域名很重要，不需要为了“恢复默认”伪造一个 loopback URL 覆盖旧公网值。
 
 Web 认证支持 `none`、`token` 和 `oauth2`。`token` 模式直接在 `[web]` 中配置至少 32 字节的随机 token：
 
@@ -172,7 +201,7 @@ auth = "none"
 path = "/demo-local/mcp"
 
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo"]
+groups = ["file", "bash", "artifact", "tmux", "todo", "workspace"]
 capabilities = ["read", "write", "execute"]
 
 [security]
@@ -197,7 +226,7 @@ timeoutMs = 5000
 - instance 配置不包含 `workspace`。worker 启动与实例生命周期不绑定项目目录；CLI 工具调用显式传绝对 workspace，MCP Context 通过 `environ_info` 选择初始 worker 绝对目录，并通过 `instance_connect` 为同一 `ctxId` 附加其他 instance 的绝对 workspace；
 - `[mcp].enabled`：是否注册该 instance 的 MCP endpoint；
 - `[mcp].auth`：该 instance 独立使用 `none`、`token` 或 `oauth2`；
-- `[mcp].contextMode`：选择 MCP Context selector。`explicit`（默认）要求模型显式传 `ctxId`；`openai-session` 使用 ChatGPT model-facing tool call `_meta["openai/session"]` 解析到内部 Context，`environ_info` 不向模型返回 `ctxId`，model-facing 输入 schema 也不要求它。Workspace App 的 app-only helper 仍携带内部 `ctxId` 与 app capability。两种模式内部都继续使用 `ctxId` 作为 runtime key；
+- `[mcp].contextMode`：选择 MCP 边界如何解析 portable-devshell Context。`explicit`（默认）允许 model-facing 工具显式携带 `ctxId`；`openai-session` 使用稳定 Host metadata 绑定内部 Context，并把 `ctxId` 留在模型 schema 之外。两种模式内部都继续使用 `ctxId` 作为 runtime key；完整语义见 [Context](../concepts/context.md)；
 - `[mcp].token`：仅在 `auth = "token"` 时使用，至少 32 UTF-8 字节；
 - `[mcp].path`：固定为 `/<instance>/mcp`，不可自定义；
 - `[mcp.tools].groups`：启用的工具组；
@@ -227,7 +256,7 @@ command = "ssh user@example-host"
 enabled = true
 
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo"]
+groups = ["file", "bash", "artifact", "tmux", "todo", "workspace"]
 capabilities = ["read", "write", "execute"]
 ```
 
@@ -249,7 +278,7 @@ Compose
 
 ## 工具调度
 
-实例可在 `[tools.scheduler]` 下配置全局和按 session 的并发、队列限制。当前实现支持排队，不再采用旧设计中的固定单并发无队列模型。
+实例可在 `[tools.scheduler]` 下配置全局和按 execution session 的并发、队列限制。当前实现支持排队，不再采用旧设计中的固定单并发无队列模型。这里的 scheduler session 不是 MCP protocol session，也不是 portable-devshell Context。
 
 ## 审计存储
 
@@ -331,8 +360,9 @@ PORTABLE_DEVSHELL_RELEASE_BASE_URL
 
 ## 进一步阅读
 
-- [installation.md](installation.md)
-- [architecture.md](architecture.md)
-- [mcp.md](mcp.md)
-- [oauth.md](oauth.md)
-- [reverse-connections.md](reverse-connections.md)
+* [安装与升级](../getting-started/installation.md)
+* [系统架构](../concepts/architecture.md)
+* [MCP](../concepts/mcp.md)
+* [Context](../concepts/context.md)
+* [OAuth](oauth.md)
+* [Reverse Worker](reverse-connections.md)

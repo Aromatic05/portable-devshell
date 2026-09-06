@@ -53,7 +53,7 @@ requiredScopes = ["mcp"]
 documentationUrl = "https://devshell.example.com/docs"
 
 [mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo"]
+groups = ["file", "bash", "artifact", "tmux", "todo", "workspace"]
 capabilities = ["read", "write", "execute"]
 ```
 
@@ -67,16 +67,19 @@ capabilities = ["read", "write", "execute"]
 
 `documentationUrl` 可选。不同 instance 可以配置不同 OAuth scope；也可以让其他 instance 使用 `none` 或独立 token。MCP `tools/list` 会把 instance 的认证策略显式投影到每个 tool：`none` 广告 `securitySchemes = [{ type = "noauth" }]`，`oauth2` 广告配置的 OAuth scopes，并同步写入兼容 `_meta.securitySchemes`。这样 ChatGPT 能把 protected-resource discovery、tool metadata 与运行时认证 challenge 关联起来。
 
-## 重启与审批
+## 应用配置与审批
 
 ```bash
-devshell stop
-devshell start
-devshell instance start demo-local
+devshell config get
+devshell instance status demo-local
 devshell tui
 ```
 
-进入 TUI 的 `OAuth` 页面处理动态客户端注册和授权请求。待审批请求有过期时间；不要把审批留在后台长期无人处理。
+Control 配置 API 会热应用支持的 listener/endpoint 变化，并在确实需要时报告 restart requirement；不要把所有 OAuth 配置变更都固定写成一次完整 Control restart。
+
+进入 TUI 的 `OAuth` 页面处理当前客户端发起的注册和授权请求。待审批请求有过期时间；不要把审批留在后台长期无人处理。
+
+当前 compatibility flow 仍支持很多 Host 正在使用的 Dynamic Client Registration。MCP 2026-07-28 上游已经开始把 client registration/identity 迁向新的模型；portable-devshell 的 OAuth compatibility path 与 v2 MCP transport 解耦，因此现有客户端可以继续使用，而不要求一次性迁移全部 OAuth client。
 
 ## URL
 
@@ -120,9 +123,11 @@ OAuth 客户端、授权状态、token 数据和签名密钥保存在：
 - 正确转发 method、query 和 request body；
 - 不缓存 OAuth 与 MCP 响应；
 - 保持 `publicBaseUrl` 对应的 scheme、host 和 path；
-- 支持 MCP 的流式 HTTP 响应。
+- 支持 MCP 的 request-scoped SSE 流式响应；
+- 关闭 response buffering，确保 15 秒 keepalive frame 能及时到达 Host；
+- 对长 `tools/call` 配置足够的 read/send timeout。
 
-具体示例见 [chatgpt-connector-tunnels.md](chatgpt-connector-tunnels.md)。
+具体示例见 [ChatGPT 公网隧道](chatgpt-tunnels.md)。
 
 ## 安全边界
 

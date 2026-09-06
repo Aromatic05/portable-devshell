@@ -2,7 +2,7 @@
 
 ## `file_read`
 
-`file_read` 读取 UTF-8 文本，并在当前 worker instance 与 contextId 内建立隐式编辑快照。调用方不需要复制 snapshot ID、tag 或 revision。
+`file_read` 读取 UTF-8 文本，并在当前 worker instance 与 `ctxId` 内建立隐式编辑快照。调用方不需要复制 snapshot ID、tag 或 revision。
 
 输入：
 
@@ -47,7 +47,7 @@ outline 返回符号的起止行、层级、语言和 `parseStatus`。outline �
 
 每页最多返回 200 个 entry。出现 `nextCursor` 时，cursor 保存实际 traversal continuation，包括目录 DFS 栈、当前 entry index、ignore 规则、类型过滤条件和去重状态。下一页只传 `cursor`，不再重复 `paths`、`type`、`hidden` 或 `gitignore`；它会从上次停止的位置继续，而不是重新遍历根目录。
 
-Cursor 绑定当前 `contextId + workspace + worker process`，并受 LRU 容量限制。续页响应如果丢失，原 cursor 仍可重试；只有当调用方实际使用由它派生出的后续 `nextCursor` 时，旧 cursor 才会被回收。跨 context/workspace 使用、worker restart 或 cursor 被淘汰后返回 `file.invalidCursor`；此时重新发起原始查询即可。
+Cursor 绑定当前 `ctxId + workspace + worker process`，并受 LRU 容量限制。续页响应如果丢失，原 cursor 仍可重试；只有当调用方实际使用由它派生出的后续 `nextCursor` 时，旧 cursor 才会被回收。跨 Context/workspace 使用、worker restart 或 cursor 被淘汰后返回 `file.invalidCursor`；此时重新发起原始查询即可。
 
 所有输入 path / glob root 会在第一页先完成解析、权限和基础合法性检查；continuation 只延迟递归 traversal 本身，不延迟输入错误。
 
@@ -95,7 +95,7 @@ directory/glob search       20 matches per file
 快照按以下边界隔离：
 
 ```text
-worker instance + contextId + normalized path
+worker instance + ctxId + normalized path
 ```
 
 以下调用会建立或更新快照：
@@ -106,7 +106,7 @@ file_search
 成功的 file_edit 子操作
 ```
 
-MCP/RPC transport session 关闭不会清理 context 快照；重连后继续携带同一个 contextId 即可使用。`file_search` 只为本次实际返回在 `files` 数组中的结果建立或更新快照，分页之外或因输出预算未返回的匹配文件不会获得快照。没有快照时，修改已有文件返回 `file.snapshotRequired`。Patch 使用未读取的源码行时返回 `file.unreadRange`。
+MCP/RPC transport session 关闭不会清理 Context 快照；重连后只要仍解析到同一个内部 `ctxId` 就可以继续使用。`file_search` 只为本次实际返回在 `files` 数组中的结果建立或更新快照，分页之外或因输出预算未返回的匹配文件不会获得快照。没有快照时，修改已有文件返回 `file.snapshotRequired`。Patch 使用未读取的源码行时返回 `file.unreadRange`。
 
 ## `file_edit`
 

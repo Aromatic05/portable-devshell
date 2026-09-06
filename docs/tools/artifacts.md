@@ -1,6 +1,4 @@
-# Artifact 分享与传输契约
-
-版本：1
+# Artifact 分享与传输
 
 ## MCP 工具面
 
@@ -66,7 +64,7 @@ path
 - 普通文件：优先创建 reflink 快照，不支持时复制；
 - 目录：生成一个确定性的 `.tar.zst` payload。
 
-分享支持 TTL 和显式撤销。版本 1 不限制下载次数。
+分享支持 TTL、显式撤销和可选的成功下载次数上限 `maxDownloads`。成功 GET/Range 下载会增加 `downloadCount`；HEAD、认证失败和无效 Range 不消耗次数。达到上限后 share 进入 `exhausted`，后续下载返回 HTTP 410。
 
 现有 MCP/OAuth HTTP listener 同时提供：
 

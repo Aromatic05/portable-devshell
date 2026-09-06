@@ -52,7 +52,7 @@ powershell -ExecutionPolicy Bypass -File .\install-release.ps1
 安装指定版本：
 
 ```bash
-PORTABLE_DEVSHELL_VERSION=0.4.2 sh install-release.sh
+PORTABLE_DEVSHELL_VERSION=<version> sh install-release.sh
 ```
 
 安装其他仓库的构建：
@@ -64,7 +64,14 @@ PORTABLE_DEVSHELL_RELEASE_REPOSITORY=owner/repository sh install-release.sh
 使用镜像或自建 Release 资产目录：
 
 ```bash
-PORTABLE_DEVSHELL_RELEASE_BASE_URL=https://mirror.example.com/portable-devshell/v0.4.2 sh install-release.sh
+PORTABLE_DEVSHELL_RELEASE_BASE_URL=https://mirror.example.com/portable-devshell/v<version> sh install-release.sh
+```
+
+安装完成后先确认 CLI 与 Control：
+
+```bash
+devshell --version
+devshell status
 ```
 
 ## 从源码安装
@@ -143,7 +150,9 @@ Windows 把 `%USERPROFILE%\.local\bin` 加入用户 PATH。
 
 ## 升级
 
-重新运行相同安装方式即可。安装器会先停止现有 control daemon，再原子切换到新版本。
+重新运行相同安装方式即可。安装器会先记录当前 Control/instance 运行态，再构建或下载候选版本、完成候选 CLI 验证，之后才切换版本。若安装前 Control 正在运行，切换后会恢复 Control 与原本由它管理的运行中实例；失败时会尝试回滚旧版本并恢复原运行态。
+
+Reverse instance 是 self-managed，不由本机安装器主动启动；升级后由远端 worker 自行重连。
 
 ## 卸载
 
