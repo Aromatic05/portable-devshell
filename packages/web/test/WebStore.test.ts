@@ -437,6 +437,7 @@ function fakeClients(
                 throw new Error("Not used.");
             },
         },
+        debug: {} as WebClients["debug"],
         reverse: {} as WebClients["reverse"],
         service: {
             hello: async () => ({

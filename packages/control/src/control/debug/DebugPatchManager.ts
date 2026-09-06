@@ -210,9 +210,9 @@ export class DebugPatchManager {
         }
         const original = originalValue as (...args: unknown[]) => unknown;
         const ownDescriptor = Object.getOwnPropertyDescriptor(active.target.object, method);
-        const manager = this;
+        const invoke = this.#invoke.bind(this);
         const wrapper = function (this: unknown, ...args: unknown[]): unknown {
-            return manager.#invoke(active.summary.patchId, method, original, this, args);
+            return invoke(active.summary.patchId, method, original, this, args);
         };
         Object.defineProperty(active.target.object, method, {
             configurable: true,
