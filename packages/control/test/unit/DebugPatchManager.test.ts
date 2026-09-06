@@ -89,3 +89,36 @@ test("DebugPatchManager holds only the matched invocation and records host cance
     await manager.unload(patch.patchId);
     await manager.dispose();
 });
+
+test("DebugPatchManager bypasses non-matching scopes before projection or invocation tracking", async () => {
+    const manager = new DebugPatchManager();
+    const target = new DemoTarget();
+    let projections = 0;
+    manager.registerTarget("scoped", target, {
+        run: {
+            project: (args) => {
+                projections += 1;
+                return { value: String(args[0]) };
+            },
+            scope: (args) => ({ ctxId: String(args[0]), toolName: String(args[1] ?? "run") }),
+        },
+    });
+    const patch = await manager.load({
+        scope: { ctxId: "ctx-own", toolName: "probe" },
+        source: `() => ({ action: "return", value: "patched" })`,
+        target: "scoped",
+    });
+
+    assert.equal(await target.run("ctx-other"), "original:ctx-other");
+    assert.equal(projections, 0);
+    assert.equal(manager.listPatches()[0]?.invocationCount, 0);
+    assert.equal(await Reflect.apply(target.run, target, ["ctx-own", "other"]), "original:ctx-own");
+    assert.equal(projections, 0);
+    assert.equal(manager.listPatches()[0]?.invocationCount, 0);
+    assert.equal(await Reflect.apply(target.run, target, ["ctx-own", "probe"]), "patched");
+    assert.equal(projections, 1);
+    assert.equal(manager.listPatches()[0]?.invocationCount, 1);
+
+    await manager.unload(patch.patchId);
+    await manager.dispose();
+});

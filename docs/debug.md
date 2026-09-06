@@ -9,7 +9,7 @@ Debug Patch 只接受本机 owner 的 CLI Control socket 请求：
 ```text
 devshell debug targets
 devshell debug list
-devshell debug load <target> <file>
+devshell debug load <target> <file> --ctx <ctxId> [--tool <toolName>]
 devshell debug release <patchId>
 devshell debug unload <patchId>
 ```
@@ -24,13 +24,14 @@ worker:<instance>
 
 ## Patch 程序
 
-文件内容必须是一个 JavaScript 函数表达式。函数接收只读的 JSON 投影，不接收 Control 或 Worker 的真实对象：
+当前 `worker:*` target 强制要求 `--ctx <ctxId>`，并可用 `--tool <toolName>` 把 scope 进一步限定到一个工具。Scope 在 Control 主线程的 wrapper 中、创建 invocation 之前匹配；Context 或 toolName 不匹配的调用直接执行原方法，不做参数投影、不进入 Debug Worker、不增加 `invocationCount`，也不会覆盖 `lastInvocation`。
+
+文件内容必须是一个 JavaScript 函数表达式。函数只会收到已经通过 scope 的调用的只读 JSON 投影，不接收 Control 或 Worker 的真实对象：
 
 ```js
 (event) => {
     if (
         event.method === "callTool" &&
-        event.args.context.ctxId === "ctx-example" &&
         event.args.toolName === "file_info"
     ) {
         return { action: "hold", label: "host-timeout-probe" };
@@ -88,4 +89,4 @@ Control 进程不直接执行 Patch JS。每个 Patch 在独立 Worker Thread �
 
 `devshell debug list` 返回 active 与最近 terminal Patch。每条记录包括 `loadedAt`、`unloadedAt`、`fault`、调用次数，以及最近一次 invocation 的开始/结束时间和 outcome。
 
-对于 Host timeout 实验，可先通过已有 audit/context 信息确认目标 internal `ctxId`，再让 Patch 同时匹配 `ctxId` 与 `toolName`。这样同一 instance 上其他 Context 的相同工具调用仍直接走原方法。
+对于 Host timeout 实验，先通过已有 audit/context metadata 确认目标 internal `ctxId`，再用 `--ctx <ctxId> --tool <toolName>` 加载 Patch。其他 Context，以及同一 Context 的其他工具，都会在 Manager scope gate 处直接绕过 Patch，连 invocation 统计和参数 projection 都不会发生。

@@ -76,7 +76,7 @@ export function renderCliTopicUsage(topic: CliHelpTopic): string {
                 "Usage:",
                 "  devshell debug targets",
                 "  devshell debug list",
-                "  devshell debug load <target> <file>",
+                "  devshell debug load <target> <file> --ctx <ctxId> [--tool <toolName>]",
                 "  devshell debug release <patchId>",
                 "  devshell debug unload <patchId>",
                 "",

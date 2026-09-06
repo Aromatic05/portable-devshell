@@ -1,10 +1,12 @@
 import type { WorkerInstance } from "@portable-devshell/core";
-import type {
-    DebugPatchLoadRequest,
-    DebugPatchSummary,
-    DebugTargetSummary,
-    JsonValue,
-    ToolCallContext,
+import {
+    createError,
+    errorCodes,
+    type DebugPatchLoadRequest,
+    type DebugPatchSummary,
+    type DebugTargetSummary,
+    type JsonValue,
+    type ToolCallContext,
 } from "@portable-devshell/shared";
 
 import type { InstanceRegistry } from "../instance/registry/InstanceRegistry.js";
@@ -40,6 +42,13 @@ export class DebugPatchService {
 
     async load(request: DebugPatchLoadRequest): Promise<DebugPatchSummary> {
         await this.#syncTail;
+        if (request.target.startsWith("worker:") && request.scope?.ctxId === undefined) {
+            throw createError({
+                code: errorCodes.controlDebugPatchInvalid,
+                message: "Worker debug patches require a ctxId scope.",
+                retryable: false,
+            });
+        }
         return await this.#manager.load(request);
     }
 
@@ -117,6 +126,15 @@ const workerCallToolAdapter: DebugMethodAdapter = {
             signalAborted: readAbortSignal(args[3])?.aborted ?? false,
             toolName: typeof args[0] === "string" ? args[0] : String(args[0]),
         };
+    },
+    scope: (args) => {
+        const context = args[2] as ToolCallContext | undefined;
+        return context?.ctxId === undefined
+            ? undefined
+            : {
+                  ctxId: context.ctxId,
+                  toolName: typeof args[0] === "string" ? args[0] : String(args[0]),
+              };
     },
     signal: (args) => readAbortSignal(args[3]),
 };

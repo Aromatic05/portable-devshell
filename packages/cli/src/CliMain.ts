@@ -231,6 +231,10 @@ export class CliMain {
                 return;
             case "debug.load":
                 this.#writeJson(await this.#clients.debug.load({
+                    scope: {
+                        ctxId: command.ctxId,
+                        ...(command.toolName === undefined ? {} : { toolName: command.toolName }),
+                    },
                     source: await readFile(command.file, "utf8"),
                     target: command.target,
                 }));

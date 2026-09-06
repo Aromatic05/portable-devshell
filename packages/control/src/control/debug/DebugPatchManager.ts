@@ -5,6 +5,7 @@ import {
     errorCodes,
     type DebugInvocationSummary,
     type DebugPatchLoadRequest,
+    type DebugPatchScope,
     type DebugPatchSummary,
     type DebugTargetSummary,
     type JsonValue,
@@ -14,6 +15,7 @@ import { DebugPatchProgram } from "./DebugPatchProgram.js";
 
 export interface DebugMethodAdapter {
     project(args: readonly unknown[]): JsonValue;
+    scope?(args: readonly unknown[]): DebugPatchScope | undefined;
     signal?(args: readonly unknown[]): AbortSignal | undefined;
 }
 
@@ -116,6 +118,21 @@ export class DebugPatchManager {
         if (Buffer.byteLength(request.source, "utf8") > 64 * 1024) {
             throw invalidPatch("Debug patch source must not exceed 64 KiB.");
         }
+        if (request.scope !== undefined) {
+            if (request.scope.ctxId.length === 0) {
+                throw invalidPatch("Debug patch scope ctxId must be non-empty.");
+            }
+            if (request.scope.toolName !== undefined && request.scope.toolName.length === 0) {
+                throw invalidPatch("Debug patch scope toolName must be non-empty when supplied.");
+            }
+            const unsupported = Object.entries(target.methods)
+                .find(([, adapter]) => adapter.scope === undefined);
+            if (unsupported !== undefined) {
+                throw invalidPatch(
+                    `Debug target ${request.target} method ${unsupported[0]} does not support scoped patches.`,
+                );
+            }
+        }
 
         const patchId = `debug-${randomUUID()}`;
         const summary: DebugPatchSummary = {
@@ -123,6 +140,7 @@ export class DebugPatchManager {
             loadedAt: new Date().toISOString(),
             ...(request.name === undefined ? {} : { name: request.name }),
             patchId,
+            ...(request.scope === undefined ? {} : { scope: { ...request.scope } }),
             state: "active",
             target: request.target,
         };
@@ -216,6 +234,12 @@ export class DebugPatchManager {
         if (active === undefined) return await Reflect.apply(original, receiver, args);
         const adapter = active.target.methods[method];
         if (adapter === undefined) return await Reflect.apply(original, receiver, args);
+        if (active.summary.scope !== undefined) {
+            const actualScope = adapter.scope?.(args);
+            if (!matchesScope(active.summary.scope, actualScope)) {
+                return await Reflect.apply(original, receiver, args);
+            }
+        }
         const invocation: DebugInvocationSummary = {
             invocationId: `debug-call-${randomUUID()}`,
             method,
@@ -412,9 +436,18 @@ function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
 }
 
+function matchesScope(
+    expected: DebugPatchScope,
+    actual: DebugPatchScope | undefined,
+): boolean {
+    if (actual?.ctxId !== expected.ctxId) return false;
+    return expected.toolName === undefined || actual.toolName === expected.toolName;
+}
+
 function cloneSummary(summary: DebugPatchSummary): DebugPatchSummary {
     return {
         ...summary,
+        ...(summary.scope === undefined ? {} : { scope: { ...summary.scope } }),
         ...(summary.lastInvocation === undefined
             ? {}
             : { lastInvocation: { ...summary.lastInvocation } }),

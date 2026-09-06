@@ -38,8 +38,9 @@ test("DebugPatchService can hold one Context without intercepting the same tool 
     ]);
     const service = new DebugPatchService(registry);
     const patch = await service.load({
+        scope: { ctxId: "ctx-own", toolName: "file_info" },
         source: `(event) =>
-            event.args.context.ctxId === "ctx-own" && event.args.toolName === "file_info"
+            event.args.toolName === "file_info"
                 ? { action: "hold", label: "own-context-probe" }
                 : { action: "continue" }`,
         target: "worker:demo-local",
@@ -63,15 +64,39 @@ test("DebugPatchService can hold one Context without intercepting the same tool 
         { ctxId: "ctx-other", toolName: "file_info" },
     );
     assert.deepEqual(calls, ["ctx-other:file_info"]);
+    assert.equal(service.listPatches()[0]?.invocationCount, 1);
+
+    assert.deepEqual(
+        await worker.callTool("tmux_read", {}, context("ctx-own")),
+        { ctxId: "ctx-own", toolName: "tmux_read" },
+    );
+    assert.deepEqual(calls, ["ctx-other:file_info", "ctx-own:tmux_read"]);
+    assert.equal(service.listPatches()[0]?.invocationCount, 1);
 
     controller.abort(new Error("host cancelled own Context"));
     await assert.rejects(ownCall, /host cancelled own Context/iu);
-    assert.deepEqual(calls, ["ctx-other:file_info"]);
+    assert.deepEqual(calls, ["ctx-other:file_info", "ctx-own:tmux_read"]);
 
     const record = service.listPatches().find((entry) => entry.patchId === patch.patchId);
     assert.equal(record?.lastInvocation?.outcome, "aborted");
     assert.equal(record?.lastInvocation?.label, "own-context-probe");
 
     await service.unload(patch.patchId);
+    await service.dispose();
+});
+
+test("DebugPatchService rejects worker patches without an explicit Context scope", async () => {
+    const worker = { async callTool() { return {}; } } as unknown as WorkerInstance;
+    const registry = new InstanceRegistry([{ name: "demo-local", worker } as never]);
+    const service = new DebugPatchService(registry);
+
+    await assert.rejects(
+        service.load({
+            source: `() => ({ action: "continue" })`,
+            target: "worker:demo-local",
+        }),
+        /require a ctxId scope/iu,
+    );
+
     await service.dispose();
 });

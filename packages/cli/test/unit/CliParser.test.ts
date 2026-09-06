@@ -54,11 +54,22 @@ test("CliParser parses protected debug patch lifecycle commands", () => {
 
     assert.deepEqual(parser.parse(["debug", "targets"]), { kind: "debug.targets" });
     assert.deepEqual(parser.parse(["debug", "list"]), { kind: "debug.list" });
-    assert.deepEqual(parser.parse(["debug", "load", "worker:demo-local", "./probe.js"]), {
+    assert.deepEqual(parser.parse(["debug", "load", "worker:demo-local", "./probe.js", "--ctx", "ctx-own"]), {
+        ctxId: "ctx-own",
         file: "./probe.js",
         kind: "debug.load",
         target: "worker:demo-local",
     });
+    assert.deepEqual(parser.parse([
+        "debug", "load", "worker:demo-local", "./probe.js", "--ctx", "ctx-own", "--tool", "bash_run",
+    ]), {
+        ctxId: "ctx-own",
+        file: "./probe.js",
+        kind: "debug.load",
+        target: "worker:demo-local",
+        toolName: "bash_run",
+    });
+    assert.throws(() => parser.parse(["debug", "load", "worker:demo-local", "./probe.js"]));
     assert.deepEqual(parser.parse(["debug", "release", "debug-1"]), {
         kind: "debug.release",
         patchId: "debug-1",

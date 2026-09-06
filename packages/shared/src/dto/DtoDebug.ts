@@ -9,8 +9,14 @@ export interface DebugInvocationSummary {
 
 export interface DebugPatchLoadRequest {
     name?: string;
+    scope?: DebugPatchScope;
     source: string;
     target: string;
+}
+
+export interface DebugPatchScope {
+    ctxId: string;
+    toolName?: string;
 }
 
 export interface DebugPatchReleaseRequest {
@@ -24,6 +30,7 @@ export interface DebugPatchSummary {
     loadedAt: string;
     name?: string;
     patchId: string;
+    scope?: DebugPatchScope;
     state: "active" | "faulted" | "unloaded";
     target: string;
     unloadedAt?: string;

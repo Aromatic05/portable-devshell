@@ -211,9 +211,8 @@ test("local Control socket loads and rolls back a protected debug patch on a liv
         [{ methods: ["callTool"], target: "worker:alpha" }],
     );
     const loaded = (await request(socketPath, "@control", "debug.load", {
-        source: `(event) => event.args.context.ctxId === "ctx-own"
-            ? { action: "return", value: { patched: true } }
-            : { action: "continue" }`,
+        scope: { ctxId: "ctx-own", toolName: "file_info" },
+        source: `() => ({ action: "return", value: { patched: true } })`,
         target: "worker:alpha",
     })).payload as { patchId: string; state: string };
     assert.equal(loaded.state, "active");

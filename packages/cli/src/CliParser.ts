@@ -30,7 +30,7 @@ export type CliParsedCommand =
     | { ctxId: string; kind: "context.renew" }
     | { kind: "debug.targets" }
     | { kind: "debug.list" }
-    | { file: string; kind: "debug.load"; target: string }
+    | { ctxId: string; file: string; kind: "debug.load"; target: string; toolName?: string }
     | { kind: "debug.release"; patchId: string }
     | { kind: "debug.unload"; patchId: string }
     | { instance: string; kind: "todo.delete"; taskId: string }
@@ -396,13 +396,23 @@ export class CliParser {
             case "list":
                 return this.#expectNoExtra(argv, { kind: "debug.list" });
             case "load":
-                if (argv.length !== 3) {
-                    throw CliRenderError.usage("debug load requires <target> <file>");
+                if (
+                    (argv.length !== 5 && argv.length !== 7) ||
+                    argv[3] !== "--ctx" ||
+                    (argv.length === 7 && argv[5] !== "--tool")
+                ) {
+                    throw CliRenderError.usage(
+                        "debug load requires <target> <file> --ctx <ctxId> [--tool <toolName>]",
+                    );
                 }
                 return {
+                    ctxId: this.#required(argv[4], "debug ctxId is required"),
                     file: this.#required(argv[2], "debug patch file is required"),
                     kind: "debug.load",
                     target: this.#required(argv[1], "debug target is required"),
+                    ...(argv[6] === undefined
+                        ? {}
+                        : { toolName: this.#required(argv[6], "debug toolName is required") }),
                 };
             case "release":
             case "unload":

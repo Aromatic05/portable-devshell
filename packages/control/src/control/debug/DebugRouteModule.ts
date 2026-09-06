@@ -67,8 +67,28 @@ function readLoadRequest(payload: JsonValue | undefined): DebugPatchLoadRequest 
     ) {
         throw invalid("debug.load name must be a non-empty string when supplied.");
     }
+    const scope = value.scope === undefined
+        ? undefined
+        : readRecord(value.scope, "debug.load scope");
+    if (scope !== undefined && (typeof scope.ctxId !== "string" || scope.ctxId.length === 0)) {
+        throw invalid("debug.load scope ctxId must be a non-empty string.");
+    }
+    if (
+        scope?.toolName !== undefined &&
+        (typeof scope.toolName !== "string" || scope.toolName.length === 0)
+    ) {
+        throw invalid("debug.load scope toolName must be a non-empty string when supplied.");
+    }
     return {
         ...(value.name === undefined ? {} : { name: value.name }),
+        ...(scope === undefined
+            ? {}
+            : {
+                  scope: {
+                      ctxId: scope.ctxId as string,
+                      ...(scope.toolName === undefined ? {} : { toolName: scope.toolName as string }),
+                  },
+              }),
         source: value.source,
         target: value.target,
     };
