@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { ConfigBatchUpdateRequest, ConfigDraft } from "@portable-devshell/shared";
 
@@ -111,6 +114,9 @@ export class CliMain {
             await negotiateCliControl(this.#clients);
         }
         switch (command.kind) {
+            case "version":
+                this.#stdout.write(`devshell ${resolvePortableDevshellApplicationVersion()}\n`);
+                return;
             case "help":
                 this.#stdout.write(`${command.topic === undefined ? renderCliUsage() : renderCliTopicUsage(command.topic)}\n`);
                 return;
@@ -472,4 +478,29 @@ function commandUsesControlClient(command: CliParsedCommand): boolean {
     return (command.kind.startsWith("instance.") &&
             command.kind !== "instance.help") ||
         (command.kind.startsWith("watch.") && command.kind !== "watch.help");
+}
+
+function resolvePortableDevshellApplicationVersion(startUrl = import.meta.url): string {
+    let directory = dirname(fileURLToPath(startUrl));
+    while (true) {
+        const manifestPath = join(directory, "package.json");
+        try {
+            const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+                name?: unknown;
+                version?: unknown;
+            };
+            if (manifest.name === "portable-devshell") {
+                if (typeof manifest.version !== "string" || manifest.version.length === 0) {
+                    throw new Error(`Application package version is invalid: ${manifestPath}`);
+                }
+                return manifest.version;
+            }
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        const parent = dirname(directory);
+        if (parent === directory) break;
+        directory = parent;
+    }
+    throw new Error("Cannot locate portable-devshell application package manifest.");
 }

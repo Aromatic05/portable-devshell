@@ -4,6 +4,26 @@ import test from "node:test";
 
 import { CliMain } from "../../src/CliMain.ts";
 
+test("CliMain prints the application version without contacting Control", async () => {
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    let closeCalls = 0;
+    const cli = new CliMain({
+        createCliClients: () => ({
+            close() {
+                closeCalls += 1;
+            },
+        } as never),
+        stderr,
+        stdout,
+    });
+
+    assert.equal(await cli.run(["--version"]), 0);
+    assert.match(stdout.flush(), /^devshell \d+\.\d+\.\d+(?:[-+].+)?\n$/u);
+    assert.equal(stderr.flush(), "");
+    assert.equal(closeCalls, 1);
+});
+
 test("CliMain handles control lifecycle commands and exit code mapping", async () => {
     const stdout = createBuffer();
     const stderr = createBuffer();

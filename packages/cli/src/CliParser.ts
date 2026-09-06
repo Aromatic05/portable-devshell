@@ -11,6 +11,7 @@ import {
 
 export type CliParsedCommand =
     | { kind: "help"; topic?: CliHelpTopic }
+    | { kind: "version" }
     | { kind: "overview" }
     | { kind: "config.get" }
     | { draft: JsonValue; kind: "config.validate" }
@@ -70,6 +71,9 @@ export class CliParser {
         if (trailingHelp !== undefined) return trailingHelp;
 
         switch (argv[0]) {
+            case "--version":
+            case "-V":
+                return this.#expectNoExtra(argv, { kind: "version" });
             case "help":
             case "--help":
             case "-h":

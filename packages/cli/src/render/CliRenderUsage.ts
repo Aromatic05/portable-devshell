@@ -6,6 +6,7 @@ export function renderCliUsage(): string {
         "",
         "Usage:",
         "  devshell [--verbose|--debug] <command>",
+        "  devshell --version",
         "",
         "Commands:",
         "  status                         Show Control status (default)",

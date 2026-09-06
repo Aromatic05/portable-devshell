@@ -41,6 +41,14 @@ test("CliParser accepts trailing help consistently across command levels", () =>
     assert.deepEqual(parser.parse(["approval", "approve", "-h"]), { kind: "help", topic: "approval" });
 });
 
+test("CliParser accepts standard version flags", () => {
+    const parser = new CliParser();
+
+    assert.deepEqual(parser.parse(["--version"]), { kind: "version" });
+    assert.deepEqual(parser.parse(["-V"]), { kind: "version" });
+    assert.throws(() => parser.parse(["--version", "extra"]));
+});
+
 test("CliParser parses protected debug patch lifecycle commands", () => {
     const parser = new CliParser();
 
