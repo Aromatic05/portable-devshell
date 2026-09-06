@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { readFile } from "node:fs/promises";
+
 import type { ConfigBatchUpdateRequest, ConfigDraft } from "@portable-devshell/shared";
 
 import { isCliEntrypoint } from "./CliEntrypoint.js";
@@ -214,6 +216,24 @@ export class CliMain {
                 return;
             case "context.renew":
                 this.#writeJson(await this.#clients.context.renew(command.ctxId));
+                return;
+            case "debug.targets":
+                this.#writeJson(await this.#clients.debug.targets());
+                return;
+            case "debug.list":
+                this.#writeJson(await this.#clients.debug.list());
+                return;
+            case "debug.load":
+                this.#writeJson(await this.#clients.debug.load({
+                    source: await readFile(command.file, "utf8"),
+                    target: command.target,
+                }));
+                return;
+            case "debug.release":
+                this.#writeJson(await this.#clients.debug.release(command.patchId));
+                return;
+            case "debug.unload":
+                this.#writeJson(await this.#clients.debug.unload(command.patchId));
                 return;
             case "tool.calls":
                 this.#writeJson(
@@ -443,6 +463,7 @@ function commandUsesControlClient(command: CliParsedCommand): boolean {
         command.kind.startsWith("approval.") ||
         command.kind.startsWith("oauth.") ||
         command.kind.startsWith("context.") ||
+        command.kind.startsWith("debug.") ||
         command.kind.startsWith("tool.") ||
         command.kind.startsWith("todo.")
     ) {

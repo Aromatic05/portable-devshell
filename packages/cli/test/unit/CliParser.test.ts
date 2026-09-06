@@ -24,6 +24,7 @@ test("CliParser rejects invalid command shapes", () => {
     assert.throws(() => parser.parse(["instance", "call", "demo-local", "bash_run", "{bad"]));
     assert.throws(() => parser.parse(["instance", "create", "demo-local"]));
     assert.throws(() => parser.parse(["instance", "logs", "demo-local", "--bad"]));
+    assert.throws(() => parser.parse(["debug", "load", "worker:demo-local"]));
     assert.throws(() => parser.parse(["watch", "status"]));
     assert.throws(() => parser.parse(["unknown"]));
     assert.throws(() => parser.parse(["instance", "unknown"]));
@@ -36,7 +37,28 @@ test("CliParser accepts trailing help consistently across command levels", () =>
     assert.deepEqual(parser.parse(["instance", "status", "--help"]), { kind: "instance.help" });
     assert.deepEqual(parser.parse(["artifact", "share", "--help"]), { args: ["--help"], kind: "artifact" });
     assert.deepEqual(parser.parse(["config", "update", "--help"]), { kind: "help", topic: "config" });
+    assert.deepEqual(parser.parse(["debug", "load", "--help"]), { kind: "help", topic: "debug" });
     assert.deepEqual(parser.parse(["approval", "approve", "-h"]), { kind: "help", topic: "approval" });
+});
+
+test("CliParser parses protected debug patch lifecycle commands", () => {
+    const parser = new CliParser();
+
+    assert.deepEqual(parser.parse(["debug", "targets"]), { kind: "debug.targets" });
+    assert.deepEqual(parser.parse(["debug", "list"]), { kind: "debug.list" });
+    assert.deepEqual(parser.parse(["debug", "load", "worker:demo-local", "./probe.js"]), {
+        file: "./probe.js",
+        kind: "debug.load",
+        target: "worker:demo-local",
+    });
+    assert.deepEqual(parser.parse(["debug", "release", "debug-1"]), {
+        kind: "debug.release",
+        patchId: "debug-1",
+    });
+    assert.deepEqual(parser.parse(["debug", "unload", "debug-1"]), {
+        kind: "debug.unload",
+        patchId: "debug-1",
+    });
 });
 
 

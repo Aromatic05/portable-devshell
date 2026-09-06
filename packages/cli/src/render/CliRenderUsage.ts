@@ -1,4 +1,4 @@
-export type CliHelpTopic = "approval" | "config" | "context" | "oauth" | "todo" | "tool";
+export type CliHelpTopic = "approval" | "config" | "context" | "debug" | "oauth" | "todo" | "tool";
 
 export function renderCliUsage(): string {
     return [
@@ -18,6 +18,7 @@ export function renderCliUsage(): string {
         "  approval <command>             Review or decide tool approvals",
         "  oauth <command>                Inspect MCP OAuth and decide approvals",
         "  context <command>              Manage MCP contexts and messages",
+        "  debug <command>                Apply protected local runtime debug patches",
         "  tool <command>                 Inspect tool calls",
         "  todo <command>                 Manage Todo projects",
         "  tui                            Open the terminal UI",
@@ -68,6 +69,17 @@ export function renderCliTopicUsage(topic: CliHelpTopic): string {
                 "  devshell context send <instance> <ctxId> <text>",
                 "  devshell context disable <ctxId>",
                 "  devshell context renew <ctxId>",
+            ].join("\n");
+        case "debug":
+            return [
+                "Usage:",
+                "  devshell debug targets",
+                "  devshell debug list",
+                "  devshell debug load <target> <file>",
+                "  devshell debug release <patchId>",
+                "  devshell debug unload <patchId>",
+                "",
+                "Debug patch operations are accepted only through the local owner Control socket.",
             ].join("\n");
         case "tool":
             return [

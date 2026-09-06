@@ -59,6 +59,7 @@ devshell config --help
 devshell approval --help
 devshell oauth --help
 devshell context --help
+devshell debug --help
 devshell tool --help
 devshell todo --help
 ```

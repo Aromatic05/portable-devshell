@@ -27,6 +27,11 @@ export type CliParsedCommand =
     | { ctxId: string; instance: string; kind: "context.send"; text: string }
     | { ctxId: string; kind: "context.disable" }
     | { ctxId: string; kind: "context.renew" }
+    | { kind: "debug.targets" }
+    | { kind: "debug.list" }
+    | { file: string; kind: "debug.load"; target: string }
+    | { kind: "debug.release"; patchId: string }
+    | { kind: "debug.unload"; patchId: string }
     | { instance: string; kind: "todo.delete"; taskId: string }
     | { kind: "control.logs" }
     | { kind: "control.restart" }
@@ -93,6 +98,8 @@ export class CliParser {
                 return this.#parseOAuth(argv.slice(1));
             case "context":
                 return this.#parseContext(argv.slice(1));
+            case "debug":
+                return this.#parseDebug(argv.slice(1));
             case "artifact":
                 return { args: [...argv.slice(1)], kind: "artifact" };
             case "secret":
@@ -128,6 +135,7 @@ export class CliParser {
             case "approval":
             case "oauth":
             case "context":
+            case "debug":
             case "tool":
             case "todo":
                 return { kind: "help", topic: argv[0] };
@@ -371,6 +379,41 @@ export class CliParser {
             kind: "tool.calls",
             ...options,
         };
+    }
+
+    #parseDebug(argv: readonly string[]): CliParsedCommand {
+        switch (argv[0]) {
+            case "help":
+            case "--help":
+            case "-h":
+                return this.#expectNoExtra(argv, { kind: "help", topic: "debug" });
+            case "targets":
+                return this.#expectNoExtra(argv, { kind: "debug.targets" });
+            case "list":
+                return this.#expectNoExtra(argv, { kind: "debug.list" });
+            case "load":
+                if (argv.length !== 3) {
+                    throw CliRenderError.usage("debug load requires <target> <file>");
+                }
+                return {
+                    file: this.#required(argv[2], "debug patch file is required"),
+                    kind: "debug.load",
+                    target: this.#required(argv[1], "debug target is required"),
+                };
+            case "release":
+            case "unload":
+                if (argv.length !== 2) {
+                    throw CliRenderError.usage(`debug ${argv[0]} requires <patchId>`);
+                }
+                return {
+                    kind: argv[0] === "release" ? "debug.release" : "debug.unload",
+                    patchId: this.#required(argv[1], "debug patchId is required"),
+                };
+            default:
+                throw CliRenderError.usage(
+                    `${`Unknown debug command: ${argv[0] ?? ""}`.trim()}\n\n${renderCliTopicUsage("debug")}`,
+                );
+        }
     }
 
     #parseToolCallOptions(argv: readonly string[]): { after?: string; before?: string; limit?: number } {

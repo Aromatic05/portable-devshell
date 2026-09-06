@@ -11,6 +11,7 @@ import type { ArtifactService } from "../control/artifact/ArtifactService.js";
 import { createArtifactRouteModule } from "../control/artifact/route/ArtifactRouteModule.js";
 import type { ConfigEditorPort } from "../control/config/ConfigRouteModule.js";
 import { createConfigRouteModule } from "../control/config/ConfigRouteModule.js";
+import { createDebugRouteModule, type DebugPatchPort } from "../control/debug/DebugRouteModule.js";
 import type { InstanceCreatePort } from "../control/instance/InstanceRouteModule.js";
 import { createInstanceRouteModule } from "../control/instance/InstanceRouteModule.js";
 import type { InstanceRegistry } from "../control/instance/registry/InstanceRegistry.js";
@@ -37,6 +38,7 @@ export interface ControlRouteCompositionOptions {
     artifact?: ArtifactService;
     config?: ConfigEditorPort;
     contextAdmin?: () => ContextAdminPort | undefined;
+    debug?: DebugPatchPort;
     instanceCreate?: InstanceCreatePort;
     instances: InstanceRegistry;
     mcpStatus?: () => JsonValue;
@@ -99,6 +101,9 @@ export class ControlRouteComposition {
                         restart: this.#options.restart,
                         shutdown: this.#options.shutdown
                     }),
+                    ...(this.#options.debug === undefined
+                        ? []
+                        : [createDebugRouteModule(this.#options.debug)]),
                     createMcpRouteModule({
                         approvals: this.#options.oauthApprovals ?? (() => undefined),
                         status: this.#options.mcpStatus ?? (() => ({

@@ -26,6 +26,7 @@ import {
 import { ControlRouteComposition } from "../../src/composition/ControlRouteComposition.ts";
 import { ConfigEditorCoordinator } from "../../src/control/config/editor/ConfigEditorCoordinator.ts";
 import { ControlConfigStore } from "../../src/control/config/ControlConfigStore.ts";
+import { DebugPatchService } from "../../src/control/debug/DebugPatchService.ts";
 import { InstanceRegistry } from "../../src/control/instance/registry/InstanceRegistry.ts";
 import { InstanceRegistryFactory } from "../../src/control/instance/registry/InstanceRegistryFactory.ts";
 import { ControlSocketServer } from "../../src/server/socket/ControlSocketServer.ts";
@@ -181,6 +182,68 @@ test("ControlSocketServer routes canonical control and instance operations over 
         "runtime.missing"
     );
     assert.equal(missingOperation.error?.code, "control.methodNotFound");
+});
+
+test("local Control socket loads and rolls back a protected debug patch on a live worker object", async (t) => {
+    const directory = await createTestTempDirectory("control-debug-rpc");
+    const socketPath = createTestIpcPath("control-debug-rpc", directory);
+    const worker = new FakeWorker("alpha");
+    const registry = new InstanceRegistry([createDescriptor(worker)]);
+    const debug = new DebugPatchService(registry);
+    const routes = new ControlRouteComposition({
+        debug,
+        instances: registry,
+        shutdown() {},
+    });
+    const server = new ControlSocketServer({ routes, socketPath });
+    await server.start();
+    t.after(async () => {
+        await cleanupInOrder(
+            () => server.stop(),
+            () => debug.dispose(),
+            () => routes.dispose(),
+            () => rm(directory, { force: true, recursive: true }),
+        );
+    });
+
+    assert.deepEqual(
+        (await request(socketPath, "@control", "debug.targets")).payload,
+        [{ methods: ["callTool"], target: "worker:alpha" }],
+    );
+    const loaded = (await request(socketPath, "@control", "debug.load", {
+        source: `(event) => event.args.context.ctxId === "ctx-own"
+            ? { action: "return", value: { patched: true } }
+            : { action: "continue" }`,
+        target: "worker:alpha",
+    })).payload as { patchId: string; state: string };
+    assert.equal(loaded.state, "active");
+
+    assert.deepEqual(
+        await worker.callTool("file_info", {}, { ctxId: "ctx-own", source: "mcp" }),
+        { patched: true },
+    );
+    assert.deepEqual(
+        await worker.callTool("file_info", {}, { ctxId: "ctx-other", source: "mcp" }),
+        { exitCode: 0 },
+    );
+    assert.equal(worker.lastToolCall?.ctxId, "ctx-other");
+
+    const listed = (await request(socketPath, "@control", "debug.list")).payload as Array<{
+        patchId: string;
+        state: string;
+    }>;
+    assert.equal(listed[0]?.patchId, loaded.patchId);
+    assert.equal(listed[0]?.state, "active");
+
+    const unloaded = (await request(socketPath, "@control", "debug.unload", {
+        patchId: loaded.patchId,
+    })).payload as { state: string };
+    assert.equal(unloaded.state, "unloaded");
+    assert.deepEqual(
+        await worker.callTool("file_info", {}, { ctxId: "ctx-own", source: "mcp" }),
+        { exitCode: 0 },
+    );
+    assert.equal(worker.lastToolCall?.ctxId, "ctx-own");
 });
 
 test("config RPC masks the Web token across get, validate, and update responses", async (t) => {

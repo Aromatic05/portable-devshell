@@ -20,6 +20,7 @@
 - [file-tools.md](file-tools.md)：文件读取视图、隐式快照和有序 change set 编辑。
 - [tmux.md](tmux.md)：长任务、交互式进程和多 pane 工作流。
 - [artifacts.md](artifacts.md)：Artifact 读取、分享和跨实例传输。
+- [debug.md](debug.md)：本地运行时 Debug Patch、保护模式和可回滚注入。
 - [todo.md](todo.md)：Agent Todo 状态、revision 和事件。
 - [reverse-connections.md](reverse-connections.md)：反向 worker 的注册、WSS 与 SSE 回退协议。
 

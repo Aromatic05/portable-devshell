@@ -27,6 +27,11 @@ import {
     type ControlProtocolHelloResponse,
 } from "../dto/DtoControlProtocol.js";
 import type {
+    DebugPatchLoadRequest,
+    DebugPatchSummary,
+    DebugTargetSummary,
+} from "../dto/DtoDebug.js";
+import type {
     InstanceCreateDraft,
     InstanceCreateResult,
     InstanceCreateSchema,
@@ -125,6 +130,13 @@ export interface ControlClients {
         list(instance: string, input?: ContextMessageListInput | string): Promise<ContextMessageRecord[]>;
         queue(instance: string, input: ContextMessageQueueInput): Promise<ContextMessageRecord>;
     };
+    debug: {
+        list(): Promise<DebugPatchSummary[]>;
+        load(request: DebugPatchLoadRequest): Promise<DebugPatchSummary>;
+        release(patchId: string): Promise<DebugPatchSummary>;
+        targets(): Promise<DebugTargetSummary[]>;
+        unload(patchId: string): Promise<DebugPatchSummary>;
+    };
     goal: {
         get(instance: string): Promise<GoalRpcEnvelope>;
     };
@@ -208,6 +220,7 @@ export function createControlClients(
     const artifact = controlClientModule(connection, "artifact");
     const config = controlClientModule(connection, "config");
     const context = controlClientModule(connection, "context");
+    const debug = controlClientModule(connection, "debug");
     const instance = controlClientModule(connection, "instance");
     const mcp = controlClientModule(connection, "mcp");
     const overview = controlClientModule(connection, "overview");
@@ -259,6 +272,13 @@ export function createControlClients(
                     typeof input === "string" ? { ctxId: input } : (input ?? {}),
                 ),
             queue: (name, input) => contextMessage.request(name, "queue", input),
+        },
+        debug: {
+            list: () => debug.request("list"),
+            load: (request) => debug.request("load", request),
+            release: (patchId) => debug.request("release", { patchId }),
+            targets: () => debug.request("targets"),
+            unload: (patchId) => debug.request("unload", { patchId }),
         },
         goal: {
             get: (name) => goal.request(name, "get"),

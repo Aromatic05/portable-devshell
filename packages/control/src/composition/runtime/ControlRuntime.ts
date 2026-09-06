@@ -4,6 +4,7 @@ import { controlRemoteRpcPath, controlWebBasePath } from "@portable-devshell/sha
 
 import { McpOAuthProtectedResource, type HttpHost } from "@portable-devshell/mcp";
 import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
+import { DebugPatchService } from "../../control/debug/DebugPatchService.js";
 import { OperationalOverviewService } from "../../control/overview/OperationalOverviewService.js";
 import { ControlChannelServer, type ControlChannelListener } from "../../server/channel/ControlChannelServer.js";
 import { ControlSocketListener } from "../../server/socket/ControlSocketListener.js";
@@ -36,6 +37,7 @@ interface ControlWebRuntime {
 export class ControlRuntime {
     readonly #artifact: ControlRuntimeArtifact;
     readonly #channels: ControlChannelServer;
+    readonly #debug: DebugPatchService;
     readonly #instances: InstanceRegistry;
     readonly #mcp: ControlRuntimeMcp;
     readonly #reverse: ControlRuntimeReverse;
@@ -50,10 +52,12 @@ export class ControlRuntime {
         this.#instances = options.instances;
         this.#mcp = options.mcp;
         this.#reverse = options.reverse;
+        this.#debug = new DebugPatchService(options.instances);
         this.#routes = new ControlRouteComposition({
             artifact: options.artifact.service,
             config: options.mcp.configEditor,
             contextAdmin: () => options.mcp.host?.contextAdmin,
+            debug: this.#debug,
             instanceCreate: options.mcp.instanceCreate,
             instances: options.instances,
             mcpStatus: () => options.mcp.status(),
@@ -66,6 +70,9 @@ export class ControlRuntime {
             reverse: options.reverse.service,
             shutdown: options.shutdown,
             toolProvenance: options.mcp.toolProvenance
+        });
+        this.#mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
+            await this.#debug.retireInstance(instance.name);
         });
         this.#mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
             await this.#routes.retireInstance(instance.name);
@@ -124,6 +131,7 @@ export class ControlRuntime {
     async stop(): Promise<void> {
         const failures: unknown[] = [];
         await this.#channels.close().catch((error) => failures.push(error));
+        await this.#debug.dispose().catch((error) => failures.push(error));
         this.#webFlowUninstall?.();
         this.#webFlow = undefined;
         this.#webFlowUninstall = undefined;
