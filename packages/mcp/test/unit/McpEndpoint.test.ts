@@ -1216,7 +1216,8 @@ test("closing the HTTP request aborts an in-flight tools/call handler", async ()
         requestController.abort("gateway timeout");
         await pendingCall;
         await waitFor(() => observedSignal?.aborted === true);
-        assert.equal(observedSignal?.reason, "MCP HTTP connection closed before completion");
+        assert.equal(observedSignal?.reason instanceof Error, true);
+        assert.match((observedSignal?.reason as Error).message, /connection closed/iu);
     } finally {
         await server.close();
     }

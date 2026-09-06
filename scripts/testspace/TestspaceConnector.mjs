@@ -1,7 +1,5 @@
 import { appendFile, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
 export const SAFE_ACTIONS = ["bash_run", "file_read", "todo_read", "todo_write", "tmux_run"];
 const TODO_TITLE = "testspace connector activity";

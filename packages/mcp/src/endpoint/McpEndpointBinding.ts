@@ -1,16 +1,15 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { EXTENSION_ID, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { toNodeHandler, type NodeMcpRequestHandler } from "@modelcontextprotocol/node";
 import {
-    CallToolRequestSchema,
-    ErrorCode,
-    ListResourcesRequestSchema,
-    ListToolsRequestSchema,
-    McpError,
-    ReadResourceRequestSchema
-} from "@modelcontextprotocol/sdk/types.js";
+    createMcpHandler,
+    ProtocolError,
+    ProtocolErrorCode,
+    Server,
+    type McpHttpHandler,
+    type Tool
+} from "@modelcontextprotocol/server";
 import { mergeComments, resolveErrorHints, toControlErrorBody, type ControlErrorBody, type JsonValue } from "@portable-devshell/shared";
 
 import { McpToolSchemaUnavailableError } from "../tool/McpToolSchemaAdapter.js";
@@ -19,6 +18,8 @@ import { McpEndpointWorker } from "./McpEndpointWorker.js";
 import { McpNativeToolResult, type McpEndpointResult } from "./McpEndpointResult.js";
 
 export class McpEndpointBinding {
+    readonly #handler: McpHttpHandler;
+    readonly #nodeHandler: NodeMcpRequestHandler;
     readonly #serverVersion: string;
     readonly #worker: McpEndpointWorker;
     readonly #workspaceResourceMeta: ReturnType<typeof workspaceAppResourceMetaForPublicBaseUrl>;
@@ -27,6 +28,15 @@ export class McpEndpointBinding {
         this.#serverVersion = serverVersion;
         this.#worker = worker;
         this.#workspaceResourceMeta = workspaceAppResourceMetaForPublicBaseUrl(publicBaseUrl);
+        this.#handler = createMcpHandler(
+            () => this.#createServer(),
+            {
+                keepAliveMs: 15_000,
+                legacy: "stateless",
+                responseMode: "sse"
+            }
+        );
+        this.#nodeHandler = toNodeHandler(this.#handler);
     }
 
     get instanceName(): string {
@@ -38,28 +48,10 @@ export class McpEndpointBinding {
     }
 
     async handleRequest(request: IncomingMessage, response: ServerResponse, body: JsonValue): Promise<void> {
-        const disconnect = new AbortController();
-        const abortOnDisconnect = () => {
-            if (!response.writableEnded) {
-                disconnect.abort("MCP HTTP connection closed before completion");
-            }
-        };
-        request.once("aborted", abortOnDisconnect);
-        response.once("close", abortOnDisconnect);
-
-        const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
-        const server = this.#createServer(disconnect.signal);
-        try {
-            await server.connect(transport);
-            await transport.handleRequest(request, response, body);
-        } finally {
-            request.off("aborted", abortOnDisconnect);
-            response.off("close", abortOnDisconnect);
-            await Promise.allSettled([server.close(), transport.close()]);
-        }
+        await this.#nodeHandler(request, response, body);
     }
 
-    #createServer(disconnectSignal: AbortSignal): Server {
+    #createServer(): Server {
         const workspaceApp = this.#worker.hasWorkspaceApp();
         const server = new Server(
             {
@@ -76,7 +68,7 @@ export class McpEndpointBinding {
         );
 
         if (workspaceApp) {
-            server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+            server.setRequestHandler('resources/list', async () => ({
                 resources: [{
                     mimeType: RESOURCE_MIME_TYPE,
                     name: "portable-devshell Workspace",
@@ -84,9 +76,9 @@ export class McpEndpointBinding {
                 }]
             }));
 
-            server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+            server.setRequestHandler('resources/read', async (request) => {
                 if (!workspaceAppResourceUris.includes(request.params.uri as typeof workspaceAppResourceUris[number])) {
-                    throw new McpError(ErrorCode.InvalidParams, `Unknown resource: ${request.params.uri}`);
+                    throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Unknown resource: ${request.params.uri}`);
                 }
                 return {
                     contents: [{
@@ -99,36 +91,31 @@ export class McpEndpointBinding {
             });
         }
 
-        server.setRequestHandler(ListToolsRequestSchema, async () => {
+        server.setRequestHandler('tools/list', async () => {
             try {
                 return {
-                    tools: this.#worker.listTools()
+                    tools: this.#worker.listTools().map(toProtocolTool)
                 };
             } catch (error) {
                 throw toMcpError(error, undefined);
             }
         });
 
-        server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+        server.setRequestHandler('tools/call', async (request, ctx) => {
             try {
                 const requestMeta = readRequestMeta(request.params._meta);
                 const context = {
-                    principal: readPrincipal(extra.authInfo),
+                    principal: readPrincipal(ctx.http?.authInfo),
                     ...(requestMeta === undefined ? {} : { requestMeta }),
-                    requestId: toRequestId(extra.requestId)
+                    requestId: toRequestId(ctx.mcpReq.id)
                 };
-                const combined = combineAbortSignals(extra.signal, disconnectSignal);
-                try {
-                    const result = await this.#worker.callTool(
-                        request.params.name,
-                        (request.params.arguments ?? {}) as JsonValue,
-                        context,
-                        combined.signal
-                    );
-                    return toCallToolResult(result);
-                } finally {
-                    combined.cleanup();
-                }
+                const result = await this.#worker.callTool(
+                    request.params.name,
+                    (request.params.arguments ?? {}) as JsonValue,
+                    context,
+                    ctx.mcpReq.signal
+                );
+                return toCallToolResult(result);
             } catch (error) {
                 throw toMcpError(error, request.params.name);
             }
@@ -149,35 +136,6 @@ function readPrincipal(authInfo: { clientId: string; extra?: Record<string, unkn
 function readRequestMeta(meta: unknown): Record<string, unknown> | undefined {
     if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return undefined;
     return meta as Record<string, unknown>;
-}
-
-function combineAbortSignals(primary: AbortSignal, secondary: AbortSignal | undefined): {
-    cleanup(): void;
-    signal: AbortSignal;
-} {
-    if (secondary === undefined) {
-        return { cleanup: () => undefined, signal: primary };
-    }
-
-    const controller = new AbortController();
-    const abortFromPrimary = () => controller.abort(primary.reason);
-    const abortFromSecondary = () => controller.abort(secondary.reason);
-    primary.addEventListener("abort", abortFromPrimary, { once: true });
-    secondary.addEventListener("abort", abortFromSecondary, { once: true });
-
-    if (primary.aborted) {
-        abortFromPrimary();
-    } else if (secondary.aborted) {
-        abortFromSecondary();
-    }
-
-    return {
-        cleanup() {
-            primary.removeEventListener("abort", abortFromPrimary);
-            secondary.removeEventListener("abort", abortFromSecondary);
-        },
-        signal: controller.signal
-    };
 }
 
 function toRequestId(value: unknown): string | undefined {
@@ -208,17 +166,17 @@ function toCallToolResult(result: McpEndpointResult) {
     };
 }
 
-function toMcpError(error: unknown, toolName: string | undefined): McpError {
+function toMcpError(error: unknown, toolName: string | undefined): ProtocolError {
     const body = toControlErrorBody(error);
     const comment = mergeErrorComment(error, body, toolName);
     if (error instanceof McpToolSchemaUnavailableError) {
-        return new McpError(-32002, error.message, { code: error.code, ...(comment === undefined ? {} : { comment }) });
+        return new ProtocolError(-32002, error.message, { code: error.code, ...(comment === undefined ? {} : { comment }) });
     }
 
     if (body?.code === "core.instanceNotReady") {
         const sanitized = sanitizeErrorBody(body);
 
-        return new McpError(-32001, "Instance not ready.", {
+        return new ProtocolError(-32001, "Instance not ready.", {
             ...sanitized,
             code: "mcp.instanceNotReady",
             ...(comment === undefined ? {} : { comment })
@@ -226,25 +184,37 @@ function toMcpError(error: unknown, toolName: string | undefined): McpError {
     }
 
     if (body !== undefined) {
-        return new McpError(ErrorCode.InternalError, body.message, {
+        return new ProtocolError(ProtocolErrorCode.InternalError, body.message, {
             ...sanitizeErrorBody(body),
             ...(comment === undefined ? {} : { comment })
         });
     }
 
     if (error instanceof Error) {
-        return new McpError(
-            ErrorCode.ConnectionClosed,
+        return new ProtocolError(
+            ProtocolErrorCode.InternalError,
             error.message,
             comment === undefined ? undefined : { comment }
         );
     }
 
-    return new McpError(
-        ErrorCode.ConnectionClosed,
+    return new ProtocolError(
+        ProtocolErrorCode.InternalError,
         "Unknown MCP error.",
         comment === undefined ? undefined : { comment }
     );
+}
+
+function toProtocolTool(tool: ReturnType<McpEndpointWorker["listTools"]>[number]): Tool {
+    if (
+        typeof tool.inputSchema !== "object" ||
+        tool.inputSchema === null ||
+        Array.isArray(tool.inputSchema) ||
+        tool.inputSchema.type !== "object"
+    ) {
+        throw new McpToolSchemaUnavailableError(tool.name);
+    }
+    return tool as unknown as Tool;
 }
 
 function mergeErrorComment(

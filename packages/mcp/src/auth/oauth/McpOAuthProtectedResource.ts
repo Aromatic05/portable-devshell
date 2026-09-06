@@ -2,8 +2,7 @@ import type {
     Express,
     RequestHandler
 } from "express";
-import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
-
+import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/server";
 import type { McpOAuth2Config } from "../McpAuthConfig.js";
 import { McpOAuthApprovalService } from "./McpOAuthApprovalService.js";
 import { McpOAuthInteraction } from "./McpOAuthInteraction.js";

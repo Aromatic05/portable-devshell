@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { Duplex } from "node:stream";
 
 import express, { type NextFunction, type Request, type RequestHandler, type Response } from "express";
-import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import type { AuthInfo } from "@modelcontextprotocol/server";
 import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
 
 import type { McpAuthConfig } from "../auth/McpAuthConfig.js";

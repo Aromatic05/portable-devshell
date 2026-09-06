@@ -11,22 +11,14 @@ import {
     realWorkerTestOptions,
     resolveTestWorkerBinary,
 } from "../../../../test/TestPlatformSupport.ts";
-
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import {
-    auth,
-    discoverOAuthServerInfo,
-    refreshAuthorization,
-    UnauthorizedError
-} from "@modelcontextprotocol/sdk/client/auth.js";
-import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
+import { Client, StreamableHTTPClientTransport, auth, discoverOAuthServerInfo, refreshAuthorization, UnauthorizedError } from "@modelcontextprotocol/client";
 import type {
+    OAuthClientProvider,
     OAuthClientInformationMixed,
     OAuthClientMetadata,
+    OAuthDiscoveryState,
     OAuthTokens
-} from "@modelcontextprotocol/sdk/shared/auth.js";
-
+} from "@modelcontextprotocol/client";
 import { asInstanceName, asWorkspacePath, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
 import { WorkerBinary, WorkerInstanceFactory, WorkerTransportDriverLocal } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
@@ -354,7 +346,7 @@ test("a real MCP SDK OAuth consumer completes registration, PKCE authorization, 
         assert.notEqual(authorizationUrl.searchParams.get("code_challenge"), null);
         assert.match(` ${authorizationUrl.searchParams.get("scope") ?? ""} `, /offline_access/u);
 
-        const code = await completeAuthorizationInBrowser(
+        const callback = await completeAuthorizationInBrowser(
             authorizationUrl,
             provider.redirectUrl,
             async () => {
@@ -367,7 +359,12 @@ test("a real MCP SDK OAuth consumer completes registration, PKCE authorization, 
         const decidedKinds = (await approvals!.list()).map((request) => request.kind).sort();
         assert.deepEqual(decidedKinds, ["authorization", "registration"]);
 
-        assert.equal(await auth(provider, { authorizationCode: code, scope, serverUrl: endpoint }), "AUTHORIZED");
+        assert.equal(await auth(provider, {
+            authorizationCode: callback.code,
+            iss: callback.iss,
+            scope,
+            serverUrl: endpoint
+        }), "AUTHORIZED");
         const tokens = provider.tokens();
         assert.equal(typeof tokens?.access_token, "string");
         assert.equal(typeof tokens?.refresh_token, "string");
@@ -479,6 +476,7 @@ class InMemoryOAuthClientProvider implements OAuthClientProvider {
     };
     #clientInformation?: OAuthClientInformationMixed;
     #codeVerifier?: string;
+    #discoveryState?: OAuthDiscoveryState;
     #tokens?: OAuthTokens;
     lastAuthorizationUrl?: URL;
 
@@ -513,10 +511,19 @@ class InMemoryOAuthClientProvider implements OAuthClientProvider {
         return this.#codeVerifier;
     }
 
+    saveDiscoveryState(state: OAuthDiscoveryState): void {
+        this.#discoveryState = state;
+    }
+
+    discoveryState(): OAuthDiscoveryState | undefined {
+        return this.#discoveryState;
+    }
+
     invalidateCredentials(scope: "all" | "client" | "discovery" | "tokens" | "verifier"): void {
         if (scope === "all" || scope === "tokens") this.#tokens = undefined;
         if (scope === "all" || scope === "client") this.#clientInformation = undefined;
         if (scope === "all" || scope === "verifier") this.#codeVerifier = undefined;
+        if (scope === "all" || scope === "discovery") this.#discoveryState = undefined;
     }
 }
 
@@ -536,7 +543,12 @@ class RevokedTokenProvider implements OAuthClientProvider {
     }
 
     tokens(): OAuthTokens {
-        return { access_token: this.accessToken, token_type: "Bearer" };
+        const issuer = (this.source.tokens() as (OAuthTokens & { issuer?: string }) | undefined)?.issuer;
+        return {
+            access_token: this.accessToken,
+            token_type: "Bearer",
+            ...(issuer === undefined ? {} : { issuer })
+        };
     }
 
     saveTokens(): void {}
@@ -570,7 +582,7 @@ async function completeAuthorizationInBrowser(
     authorizationUrl: URL,
     redirectUri: string,
     approvePending: () => Promise<"authorization" | "registration">
-): Promise<string> {
+): Promise<{ code: string; iss?: string }> {
     let currentUrl = authorizationUrl.href;
     let method: "GET" | "POST" = "GET";
     let cookieHeader = "";
@@ -595,7 +607,8 @@ async function completeAuthorizationInBrowser(
             if (`${nextUrl.origin}${nextUrl.pathname}` === redirectUri) {
                 const code = nextUrl.searchParams.get("code");
                 assert.notEqual(code, null);
-                return code!;
+                const iss = nextUrl.searchParams.get("iss") ?? undefined;
+                return { code: code!, ...(iss === undefined ? {} : { iss }) };
             }
             currentUrl = nextUrl.href;
             method = "GET";

@@ -681,7 +681,7 @@ async function initializeAndListTools(endpoint: string): Promise<string[]> {
         })
     });
     assert.equal(listed.status, 200);
-    const payload = await listed.json() as { result?: { tools?: Array<{ name: string }> } };
+    const payload = parseMcpHttpResponse<{ result?: { tools?: Array<{ name: string }> } }>(await listed.text());
     return payload.result?.tools?.map((tool) => tool.name) ?? [];
 }
 

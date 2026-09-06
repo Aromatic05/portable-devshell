@@ -2,19 +2,15 @@ import { randomUUID } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join } from "node:path";
-
-import {
-    InvalidTokenError,
-    ServerError
-} from "@modelcontextprotocol/sdk/server/auth/errors.js";
-import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
-import type { OAuthTokenVerifier } from "@modelcontextprotocol/sdk/server/auth/provider.js";
-import { getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import {
     checkResourceAllowed,
+    OAuthError,
+    OAuthErrorCode,
     resourceUrlFromServerUrl
-} from "@modelcontextprotocol/sdk/shared/auth-utils.js";
-import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
+} from "@modelcontextprotocol/server";
+import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/server";
+import { getOAuthProtectedResourceMetadataUrl, requireBearerAuth } from "@modelcontextprotocol/express";
+import type { OAuthTokenVerifier } from "@modelcontextprotocol/express";
 import type {
     Request,
     RequestHandler,
@@ -494,12 +490,12 @@ class McpOAuthResourceVerifier implements OAuthTokenVerifier {
     async verifyAccessToken(token: string) {
         const accessToken = await this.#provider.AccessToken.find(token);
         if (accessToken === undefined || accessToken.isValid !== true) {
-            throw new InvalidTokenError("Token is invalid or expired.");
+            throw new OAuthError(OAuthErrorCode.InvalidToken, "Token is invalid or expired.");
         }
 
         const resources = readTokenResources(accessToken.aud);
         if (resources === undefined) {
-            throw new InvalidTokenError("Token resource audience is missing or invalid.");
+            throw new OAuthError(OAuthErrorCode.InvalidToken, "Token resource audience is missing or invalid.");
         }
         const resource = resources.find((candidate) =>
             checkResourceAllowed({
@@ -508,7 +504,8 @@ class McpOAuthResourceVerifier implements OAuthTokenVerifier {
             })
         );
         if (resource === undefined) {
-            throw new InvalidTokenError(
+            throw new OAuthError(
+                OAuthErrorCode.InvalidToken,
                 `Token resource audience is not valid for ${this.#expectedResourceUrl.href}.`
             );
         }
@@ -518,7 +515,8 @@ class McpOAuthResourceVerifier implements OAuthTokenVerifier {
             (scope) => !grantedScopes.has(scope)
         );
         if (missingScope !== undefined) {
-            throw new InvalidTokenError(
+            throw new OAuthError(
+                OAuthErrorCode.InvalidToken,
                 `Token is missing required resource scope: ${missingScope}.`
             );
         }
@@ -527,12 +525,14 @@ class McpOAuthResourceVerifier implements OAuthTokenVerifier {
             typeof accessToken.clientId !== "string" ||
             accessToken.clientId.length === 0
         ) {
-            throw new ServerError(
+            throw new OAuthError(
+                OAuthErrorCode.ServerError,
                 "Issued access token does not include a client identifier."
             );
         }
         if (typeof accessToken.exp !== "number") {
-            throw new ServerError(
+            throw new OAuthError(
+                OAuthErrorCode.ServerError,
                 "Issued access token does not include an expiration."
             );
         }
@@ -540,7 +540,8 @@ class McpOAuthResourceVerifier implements OAuthTokenVerifier {
             typeof accessToken.grantId !== "string" ||
             accessToken.grantId.length === 0
         ) {
-            throw new ServerError(
+            throw new OAuthError(
+                OAuthErrorCode.ServerError,
                 "Issued access token does not include a grant identifier."
             );
         }
