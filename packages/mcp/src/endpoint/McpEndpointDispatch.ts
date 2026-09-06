@@ -67,15 +67,11 @@ export interface McpEndpointDispatchOptions {
 }
 
 const MCP_TMUX_WAIT_POLL_MS = 1_000;
-// Direct MCP clients keep the original 3-minute handoff margin below a 5-minute host budget.
+// Keep one product-visible synchronous handoff window across all MCP context modes.
 const MCP_TMUX_BLOCK_SYNC_MS = 3 * 60_000;
-// Host-bound OpenAI sessions have an observed ~120-second intermediate transport lifetime.
-const MCP_OPENAI_SESSION_TMUX_BLOCK_SYNC_MS = 90_000;
 
-export function mcpTmuxBlockSyncMsForContextMode(mode: McpContextSelector["id"]): number {
-    return mode === "openai-session"
-        ? MCP_OPENAI_SESSION_TMUX_BLOCK_SYNC_MS
-        : MCP_TMUX_BLOCK_SYNC_MS;
+export function mcpTmuxBlockSyncMsForContextMode(_mode: McpContextSelector["id"]): number {
+    return MCP_TMUX_BLOCK_SYNC_MS;
 }
 
 export class McpEndpointDispatch {

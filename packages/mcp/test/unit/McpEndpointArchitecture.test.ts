@@ -626,9 +626,9 @@ test("legacy aliases still obey the current MCP policy", async () => {
     );
 });
 
-test("tmux block sync windows preserve explicit clients while handing host-bound sessions off early", () => {
+test("tmux block sync window stays at three minutes for every Context mode", () => {
     assert.equal(mcpTmuxBlockSyncMsForContextMode("explicit"), 180_000);
-    assert.equal(mcpTmuxBlockSyncMsForContextMode("openai-session"), 90_000);
+    assert.equal(mcpTmuxBlockSyncMsForContextMode("openai-session"), 180_000);
 });
 
 test("tmux_run block waits are interruptible before handoff and detach after the sync window", async () => {
