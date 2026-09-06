@@ -5,6 +5,7 @@ import type { JsonValue } from "@portable-devshell/shared";
 
 interface DebugPatchProgramOptions {
     evaluationTimeoutMs: number;
+    initializationTimeoutMs: number;
     onFault?(error: Error): void;
 }
 
@@ -67,6 +68,7 @@ const DEBUG_WORKER_TERMINATE_WAIT_MS = 1_000;
 
 export class DebugPatchProgram {
     readonly #evaluationTimeoutMs: number;
+    readonly #initializationTimeoutMs: number;
     readonly #onFault?: (error: Error) => void;
     readonly #pending = new Map<string, PendingEvaluation>();
     readonly #ready: Promise<void>;
@@ -76,6 +78,7 @@ export class DebugPatchProgram {
 
     constructor(source: string, options: DebugPatchProgramOptions) {
         this.#evaluationTimeoutMs = options.evaluationTimeoutMs;
+        this.#initializationTimeoutMs = options.initializationTimeoutMs;
         this.#onFault = options.onFault;
         this.#worker = new Worker(DEBUG_WORKER_SOURCE, {
             eval: true,
@@ -92,11 +95,11 @@ export class DebugPatchProgram {
         this.#ready = new Promise<void>((resolve, reject) => {
             const timer = setTimeout(() => {
                 const error = new Error(
-                    `Debug patch initialization timed out after ${this.#evaluationTimeoutMs}ms.`,
+                    `Debug patch initialization timed out after ${this.#initializationTimeoutMs}ms.`,
                 );
                 reject(error);
                 this.#fault(error);
-            }, this.#evaluationTimeoutMs);
+            }, this.#initializationTimeoutMs);
             const ready = (message: WorkerMessage) => {
                 if (message.type === "ready") {
                     clearTimeout(timer);

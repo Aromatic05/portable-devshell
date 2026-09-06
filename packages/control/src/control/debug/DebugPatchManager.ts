@@ -52,6 +52,7 @@ type DebugDirective =
 export interface DebugPatchManagerOptions {
     evaluationTimeoutMs?: number;
     historyLimit?: number;
+    initializationTimeoutMs?: number;
 }
 
 export class DebugPatchManager {
@@ -60,12 +61,14 @@ export class DebugPatchManager {
     readonly #evaluationTimeoutMs: number;
     readonly #history: DebugPatchSummary[] = [];
     readonly #historyLimit: number;
+    readonly #initializationTimeoutMs: number;
     readonly #targetPatch = new Map<string, string>();
     readonly #targets = new Map<string, DebugTarget>();
 
     constructor(options: DebugPatchManagerOptions = {}) {
         this.#evaluationTimeoutMs = options.evaluationTimeoutMs ?? 1_000;
         this.#historyLimit = options.historyLimit ?? 32;
+        this.#initializationTimeoutMs = options.initializationTimeoutMs ?? 1_000;
     }
 
     registerTarget(
@@ -146,6 +149,7 @@ export class DebugPatchManager {
         };
         const program = new DebugPatchProgram(request.source, {
             evaluationTimeoutMs: this.#evaluationTimeoutMs,
+            initializationTimeoutMs: this.#initializationTimeoutMs,
             onFault: (error) => {
                 void this.#fault(patchId, error);
             },
