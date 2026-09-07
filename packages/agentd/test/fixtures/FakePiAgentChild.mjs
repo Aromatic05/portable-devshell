@@ -3,8 +3,18 @@ import { join } from "node:path";
 
 const logPath = join(process.cwd(), "fake-pi-child.log");
 const agents = new Set();
+const pendingTools = new Map();
+let nextToolCall = 0;
 
 process.on("message", (message) => {
+    if (message.type === "tool.result") {
+        const pending = pendingTools.get(message.callId);
+        if (pending === undefined) return;
+        pendingTools.delete(message.callId);
+        if (message.ok) pending.resolve(message.result ?? null);
+        else pending.reject(new Error(message.error ?? "tool request failed"));
+        return;
+    }
     void handle(message).catch((error) => {
         if (message.type === "init") {
             process.send?.({ error: error.message, ok: false, type: "ready" });
@@ -39,7 +49,23 @@ async function handle(message) {
             process.disconnect();
             return;
         }
-        if (message.command === "stop") agents.delete(message.agentId);
+        if (message.command === "prompt" && message.message === "__tool__") {
+            await callTool(message.agentId, "echo_tool", { value: "from-child" }, "fake-operation");
+        }
+        if (message.command === "prompt" && message.message === "__tool-cancel__") {
+            const request = beginToolCall(
+                message.agentId,
+                "slow_tool",
+                { value: "cancel-me" },
+                "fake-cancel-operation"
+            );
+            process.send?.({ agentId: message.agentId, callId: request.callId, type: "tool.cancel" });
+            await request.result.catch(() => undefined);
+        }
+        if (message.command === "stop") {
+            await closeTools(message.agentId);
+            agents.delete(message.agentId);
+        }
         process.send?.({ id: message.id, ok: true, type: "result" });
         return;
     }
@@ -47,4 +73,26 @@ async function handle(message) {
         process.send?.({ id: message.id, ok: true, type: "result" });
         setImmediate(() => process.exit(0));
     }
+}
+
+async function callTool(agentId, toolName, input, operationId) {
+    return await beginToolCall(agentId, toolName, input, operationId).result;
+}
+
+function beginToolCall(agentId, toolName, input, operationId) {
+    const callId = `fake-tool-${++nextToolCall}`;
+    const result = new Promise((resolve, reject) => {
+        pendingTools.set(callId, { reject, resolve });
+    });
+    process.send?.({ agentId, callId, input, operationId, toolName, type: "tool.call" });
+    return { callId, result };
+}
+
+async function closeTools(agentId) {
+    const callId = `fake-tool-close-${++nextToolCall}`;
+    const result = new Promise((resolve, reject) => {
+        pendingTools.set(callId, { reject, resolve });
+    });
+    process.send?.({ agentId, callId, type: "tool.close" });
+    await result;
 }

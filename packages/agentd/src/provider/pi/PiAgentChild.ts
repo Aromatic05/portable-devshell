@@ -1,7 +1,10 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
+import { createDevshellPiExtension } from "@portable-devshell/pi-extension";
+
 import type { AgentWorkerTarget } from "../../target/AgentWorkerTarget.js";
+import { PiChildToolSession } from "./PiChildToolSession.js";
 import { PiGuiWeb } from "./PiGuiWeb.js";
 import { PiSdkLoader, type PiModelRuntimeLike, type PiSdkModule, type PiSessionLike } from "./PiSdkLoader.js";
 import type {
@@ -17,19 +20,27 @@ interface ManagedPiAgent {
     localCwd: string;
     session: PiSessionLike;
     target: AgentWorkerTarget;
+    tools: PiChildToolSession;
 }
 
 let agentDir: string | undefined;
 const agents = new Map<string, ManagedPiAgent>();
+const toolSessions = new Map<string, PiChildToolSession>();
 let gui: PiGuiWeb | undefined;
 let modelRuntime: PiModelRuntimeLike | undefined;
 let sdk: PiSdkModule | undefined;
 
 process.on("message", (value: unknown) => {
     const message = value as PiParentMessage;
+    if (message?.type === "tool.result") {
+        toolSessions.get(message.agentId)?.accept(message);
+        return;
+    }
     void handleMessage(message).catch((error) => sendFailure(message, error));
 });
 process.once("disconnect", () => {
+    const error = new Error("Pi provider parent IPC disconnected.");
+    for (const session of toolSessions.values()) session.disconnect(error);
     void shutdown().finally(() => process.exit(0));
 });
 
@@ -76,36 +87,52 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
     const activeModelRuntime = requireModelRuntime();
     const activeGui = requireGui();
     await mkdir(input.localCwd, { recursive: true });
+    const tools = new PiChildToolSession({
+        agentId: input.agentId,
+        send,
+        target: input.target,
+        tools: input.tools
+    });
+    toolSessions.set(input.agentId, tools);
 
     const settingsManager = activeSdk.SettingsManager.create(input.localCwd, activeAgentDir);
     const resourceLoader = new activeSdk.DefaultResourceLoader({
         agentDir: activeAgentDir,
         cwd: input.localCwd,
+        extensionFactories: [{
+            factory: createDevshellPiExtension(tools),
+            hidden: true,
+            name: "portable-devshell"
+        }],
         noExtensions: true,
         settingsManager
     });
-    await resourceLoader.reload();
-    const sessionManager = activeSdk.SessionManager.create(input.localCwd);
-    const created = await activeSdk.createAgentSession({
-        agentDir: activeAgentDir,
-        cwd: input.localCwd,
-        modelRuntime: activeModelRuntime,
-        noTools: "builtin",
-        resourceLoader,
-        sessionManager,
-        settingsManager
-    });
-    const session = created.session;
+    let session: PiSessionLike | undefined;
     try {
+        await resourceLoader.reload();
+        const sessionManager = activeSdk.SessionManager.create(input.localCwd);
+        const created = await activeSdk.createAgentSession({
+            agentDir: activeAgentDir,
+            cwd: input.localCwd,
+            modelRuntime: activeModelRuntime,
+            noTools: "builtin",
+            resourceLoader,
+            sessionManager,
+            settingsManager
+        });
+        session = created.session;
         session.setSessionName?.(`${input.agentId} · ${input.target.instance}:${input.target.workspace}`);
         activeGui.attach(session, input.localCwd);
         agents.set(input.agentId, {
             localCwd: input.localCwd,
             session,
-            target: { ...input.target }
+            target: { ...input.target },
+            tools
         });
     } catch (error) {
-        session.dispose();
+        session?.dispose();
+        toolSessions.delete(input.agentId);
+        await tools.close().catch(() => undefined);
         throw error;
     }
 }
@@ -140,7 +167,12 @@ async function stopAgent(agentId: string): Promise<void> {
     const active = agents.get(agentId);
     if (active === undefined) return;
     agents.delete(agentId);
-    await disposeManagedPiAgent(active, requireGui());
+    try {
+        await disposeManagedPiAgent(active, requireGui());
+    } finally {
+        toolSessions.delete(agentId);
+        await active.tools.close();
+    }
 }
 
 async function shutdown(): Promise<void> {
@@ -151,6 +183,7 @@ async function shutdown(): Promise<void> {
     gui = undefined;
     modelRuntime = undefined;
     sdk = undefined;
+    toolSessions.clear();
 }
 
 function requireAgent(agentId: string): ManagedPiAgent {
@@ -190,6 +223,7 @@ function sendFailure(message: PiParentMessage, error: unknown): void {
         send({ error: text, ok: false, type: "ready" });
         return;
     }
+    if (message.type === "tool.result") return;
     send({ error: text, id: message.id, ok: false, type: "result" });
 }
 

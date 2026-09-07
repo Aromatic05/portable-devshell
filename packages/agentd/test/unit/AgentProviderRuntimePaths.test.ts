@@ -5,25 +5,25 @@ import { AgentProviderRuntimePaths } from "../../src/runtime/AgentProviderRuntim
 
 test("Agent provider runtime uses a private versioned prefix and stable state directory", () => {
     const paths = new AgentProviderRuntimePaths({
-        homeDirectory: "/home/tester",
         provider: "pi",
+        rootDirectory: "/extension-state/agent",
         version: "1.2.3"
     });
 
-    assert.equal(paths.agentdDirectory, "/home/tester/.devshell/agentd");
-    assert.equal(paths.providerDirectory, "/home/tester/.devshell/agentd/providers/pi");
-    assert.equal(paths.prefixDirectory, "/home/tester/.devshell/agentd/providers/pi/prefix/1.2.3");
-    assert.equal(paths.stateDirectory, "/home/tester/.devshell/agentd/providers/pi/state");
-    assert.equal(paths.cacheDirectory, "/home/tester/.devshell/agentd/providers/pi/cache");
+    assert.equal(paths.agentdDirectory, "/extension-state/agent");
+    assert.equal(paths.providerDirectory, "/extension-state/agent/providers/pi");
+    assert.equal(paths.prefixDirectory, "/extension-state/agent/providers/pi/prefix/1.2.3");
+    assert.equal(paths.stateDirectory, "/extension-state/agent/providers/pi/state");
+    assert.equal(paths.cacheDirectory, "/extension-state/agent/providers/pi/cache");
 });
 
 test("Agent provider path segments cannot escape the managed prefix", () => {
     assert.throws(
-        () => new AgentProviderRuntimePaths({ homeDirectory: "/home/tester", provider: "../pi", version: "1" }),
+        () => new AgentProviderRuntimePaths({ provider: "../pi", rootDirectory: "/state", version: "1" }),
         TypeError
     );
     assert.throws(
-        () => new AgentProviderRuntimePaths({ homeDirectory: "/home/tester", provider: "pi", version: "../1" }),
+        () => new AgentProviderRuntimePaths({ provider: "pi", rootDirectory: "/state", version: "../1" }),
         TypeError
     );
 });

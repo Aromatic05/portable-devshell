@@ -4,6 +4,7 @@ import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import type { AgentProviderHandle } from "../AgentProvider.js";
+import type { AgentToolSession } from "../AgentToolSession.js";
 import type { AgentWorkerTarget } from "../../target/AgentWorkerTarget.js";
 import type {
     PiChildAgentCommandMessage,
@@ -17,6 +18,7 @@ export interface PiAgentProcessStartOptions {
     localCwd: string;
     runtimeDirectory: string;
     target: AgentWorkerTarget;
+    tools: AgentToolSession;
     webBasePath: string;
 }
 
@@ -175,6 +177,8 @@ class PiSharedProcess {
     }>();
     readonly #identity: Pick<PiAgentProcessStartOptions, "entrypoint" | "runtimeDirectory" | "webBasePath">;
     readonly #agents = new Set<string>();
+    readonly #toolCalls = new Map<string, AbortController>();
+    readonly #toolSessions = new Map<string, AgentToolSession>();
     #stderr = "";
     #readyReject?: (error: Error) => void;
     #readyResolve?: () => void;
@@ -204,7 +208,11 @@ class PiSharedProcess {
         this.#child.stderr?.on("data", (chunk: string) => {
             this.#stderr = `${this.#stderr}${chunk}`.slice(-16_384);
         });
-        this.#child.on("message", (message) => this.#onMessage(message));
+        this.#child.on("message", (message) => {
+            void this.#onMessage(message).catch((error) => this.#fail(
+                error instanceof Error ? error : new Error(String(error))
+            ));
+        });
         this.#child.once("disconnect", () => {
             if (!this.#stopped) {
                 this.#fail(new Error("Pi provider child IPC disconnected unexpectedly."));
@@ -254,13 +262,21 @@ class PiSharedProcess {
     async startAgent(options: PiAgentProcessStartOptions): Promise<void> {
         if (this.#agents.has(options.agentId)) throw new Error(`Pi Agent already exists: ${options.agentId}`);
         this.assertCompatible(options);
-        await this.#request({
-            agentId: options.agentId,
-            id: randomUUID(),
-            localCwd: options.localCwd,
-            target: options.target,
-            type: "agent.start"
-        });
+        assertToolTarget(options.target, options.tools);
+        this.#toolSessions.set(options.agentId, options.tools);
+        try {
+            await this.#request({
+                agentId: options.agentId,
+                id: randomUUID(),
+                localCwd: options.localCwd,
+                target: options.target,
+                tools: options.tools.tools.map((tool) => ({ ...tool })),
+                type: "agent.start"
+            });
+        } catch (error) {
+            this.#toolSessions.delete(options.agentId);
+            throw error;
+        }
         this.#agents.add(options.agentId);
     }
 
@@ -285,6 +301,7 @@ class PiSharedProcess {
             await this.command(agentId, "stop");
         } finally {
             this.#agents.delete(agentId);
+            this.#toolSessions.delete(agentId);
         }
     }
 
@@ -300,8 +317,13 @@ class PiSharedProcess {
 
     terminate(): void {
         this.#stopped = true;
+        for (const controller of this.#toolCalls.values()) {
+            controller.abort(new Error("Pi provider child was terminated."));
+        }
+        this.#toolCalls.clear();
         this.#rejectPending(new Error("Pi provider child was terminated."));
         this.#agents.clear();
+        this.#toolSessions.clear();
         this.#close();
         if (this.#child.connected) this.#child.disconnect();
         if (this.#child.exitCode === null && this.#child.signalCode === null) {
@@ -309,7 +331,10 @@ class PiSharedProcess {
         }
     }
 
-    async #request(message: Exclude<PiParentMessage, { type: "init" }>, allowStopped = false): Promise<void> {
+    async #request(
+        message: Exclude<PiParentMessage, { type: "init" } | { type: "tool.result" }>,
+        allowStopped = false
+    ): Promise<void> {
         if (this.#stopped && !allowStopped) throw new Error("Pi provider child is already stopped.");
         const response = new Promise<void>((resolve, reject) => {
             this.#commands.set(message.id, { resolve, reject });
@@ -323,7 +348,7 @@ class PiSharedProcess {
         }
     }
 
-    #onMessage(value: unknown): void {
+    async #onMessage(value: unknown): Promise<void> {
         const message = value as PiChildMessage;
         if (message?.type === "ready") {
             if (!message.ok) {
@@ -348,6 +373,75 @@ class PiSharedProcess {
             this.#commands.delete(message.id);
             if (message.ok) pending.resolve();
             else pending.reject(new Error(message.error ?? "Pi provider command failed."));
+            return;
+        }
+        if (message?.type === "tool.cancel") {
+            this.#toolCalls.get(message.callId)?.abort(new Error(`Pi tool call ${message.callId} was cancelled.`));
+            return;
+        }
+        if (message?.type === "tool.close") {
+            await this.#handleToolClose(message.agentId, message.callId);
+            return;
+        }
+        if (message?.type === "tool.call") {
+            await this.#handleToolCall(message);
+        }
+    }
+
+    async #handleToolCall(message: Extract<PiChildMessage, { type: "tool.call" }>): Promise<void> {
+        const session = this.#toolSessions.get(message.agentId);
+        if (session === undefined) {
+            await this.#send({
+                agentId: message.agentId,
+                callId: message.callId,
+                error: `Unknown Pi Agent tool session: ${message.agentId}`,
+                ok: false,
+                type: "tool.result"
+            });
+            return;
+        }
+        const controller = new AbortController();
+        this.#toolCalls.set(message.callId, controller);
+        try {
+            const result = await session.callTool(
+                message.toolName,
+                message.input,
+                message.operationId,
+                controller.signal
+            );
+            await this.#send({
+                agentId: message.agentId,
+                callId: message.callId,
+                ok: true,
+                result,
+                type: "tool.result"
+            });
+        } catch (error) {
+            await this.#send({
+                agentId: message.agentId,
+                callId: message.callId,
+                error: error instanceof Error ? error.message : String(error),
+                ok: false,
+                type: "tool.result"
+            });
+        } finally {
+            this.#toolCalls.delete(message.callId);
+        }
+    }
+
+    async #handleToolClose(agentId: string, callId: string): Promise<void> {
+        const session = this.#toolSessions.get(agentId);
+        try {
+            await session?.close();
+            await this.#send({ agentId, callId, ok: true, result: null, type: "tool.result" });
+        } catch (error) {
+            await this.#send({
+                agentId,
+                callId,
+                error: error instanceof Error ? error.message : String(error),
+                ok: false,
+                type: "tool.result"
+            });
         }
     }
 
@@ -362,8 +456,11 @@ class PiSharedProcess {
 
     #fail(error: Error): void {
         this.#stopped = true;
+        for (const controller of this.#toolCalls.values()) controller.abort(error);
+        this.#toolCalls.clear();
         this.#rejectPending(error);
         this.#agents.clear();
+        this.#toolSessions.clear();
         this.#close();
         if (this.#child.exitCode === null && this.#child.signalCode === null) {
             this.#child.kill("SIGTERM");
@@ -376,6 +473,12 @@ class PiSharedProcess {
         this.#readyResolve = undefined;
         for (const pending of this.#commands.values()) pending.reject(error);
         this.#commands.clear();
+    }
+}
+
+function assertToolTarget(target: AgentWorkerTarget, session: AgentToolSession): void {
+    if (session.target.instance !== target.instance || session.target.workspace !== target.workspace) {
+        throw new Error("Pi Agent tool session target does not match the Agent target.");
     }
 }
 

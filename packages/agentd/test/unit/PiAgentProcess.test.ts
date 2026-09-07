@@ -5,35 +5,25 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import type { AgentToolSession } from "../../src/provider/AgentToolSession.ts";
 import { PiAgentProcessFactory } from "../../src/provider/pi/PiAgentProcess.ts";
-import { parseAgentWorkerTarget } from "../../src/target/AgentWorkerTarget.ts";
+import { parseAgentWorkerTarget, type AgentWorkerTarget } from "../../src/target/AgentWorkerTarget.ts";
+
+const childModulePath = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/FakePiAgentChild.mjs");
 
 test("Pi process factory shares one child across live Agents and stops it only after the last Agent", async () => {
     const runtimeDirectory = await mkdtemp(join(tmpdir(), "devshell-pi-shared-"));
     const piAgentDir = join(runtimeDirectory, "user-pi-state");
     const previousPiAgentDir = process.env.PI_CODING_AGENT_DIR;
     process.env.PI_CODING_AGENT_DIR = piAgentDir;
-    const childModulePath = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/FakePiAgentChild.mjs");
     const factory = new PiAgentProcessFactory({ childModulePath });
-    const base = {
-        entrypoint: "/managed/pi/dist/index.js",
-        runtimeDirectory,
-        webBasePath: "/web/agent/"
-    };
+    const base = { entrypoint: "/managed/pi/dist/index.js", runtimeDirectory, webBasePath: "/web/agent/" };
 
     try {
-        const first = await factory.start({
-            ...base,
-            agentId: "ag-one",
-            localCwd: join(runtimeDirectory, "agents", "ag-one", "cwd"),
-            target: parseAgentWorkerTarget("worker-a:/repo/a")
-        });
-        const second = await factory.start({
-            ...base,
-            agentId: "ag-two",
-            localCwd: join(runtimeDirectory, "agents", "ag-two", "cwd"),
-            target: parseAgentWorkerTarget("worker-a:/repo/b")
-        });
+        const firstTarget = parseAgentWorkerTarget("worker-a:/repo/a");
+        const secondTarget = parseAgentWorkerTarget("worker-a:/repo/b");
+        const first = await factory.start(startOptions(base, "ag-one", firstTarget));
+        const second = await factory.start(startOptions(base, "ag-two", secondTarget));
 
         assert.equal(first.web?.upstream.toString(), "http://127.0.0.1:43199/");
         assert.equal(second.web?.upstream.toString(), first.web?.upstream.toString());
@@ -61,36 +51,69 @@ test("Pi process factory shares one child across live Agents and stops it only a
     }
 });
 
+test("Pi process forwards child tool calls, cancellation, and close to the parent-held session", async () => {
+    const runtimeDirectory = await mkdtemp(join(tmpdir(), "devshell-pi-tools-"));
+    const factory = new PiAgentProcessFactory({ childModulePath });
+    const base = { entrypoint: "/managed/pi/dist/index.js", runtimeDirectory, webBasePath: "/web/agent/" };
+    const target = parseAgentWorkerTarget("worker-a:/repo/tools");
+    const calls: Array<{ input: unknown; operationId: string; toolName: string }> = [];
+    let closes = 0;
+    let cancellationObserved = false;
+    const tools = toolSession(target, {
+        async callTool(toolName, input, operationId, signal) {
+            calls.push({ input, operationId, toolName });
+            if (toolName === "slow_tool") {
+                await new Promise<void>((resolve, reject) => {
+                    const aborted = () => {
+                        cancellationObserved = true;
+                        reject(signal?.reason instanceof Error ? signal.reason : new Error("cancelled"));
+                    };
+                    if (signal?.aborted) aborted();
+                    else signal?.addEventListener("abort", aborted, { once: true });
+                });
+            }
+            return { echoed: input };
+        },
+        close() { closes += 1; }
+    });
+
+    try {
+        const handle = await factory.start(startOptions(base, "ag-tools", target, tools));
+        await handle.prompt("__tool__");
+        assert.deepEqual(calls[0], {
+            input: { value: "from-child" },
+            operationId: "fake-operation",
+            toolName: "echo_tool"
+        });
+
+        await handle.prompt("__tool-cancel__");
+        assert.equal(cancellationObserved, true);
+        assert.equal(calls[1]?.toolName, "slow_tool");
+
+        await handle.stop();
+        assert.equal(closes, 1);
+    } finally {
+        await rm(runtimeDirectory, { force: true, recursive: true });
+    }
+});
+
 test("Pi process factory retires a crashed shared child and starts a replacement", async () => {
     const runtimeDirectory = await mkdtemp(join(tmpdir(), "devshell-pi-crash-"));
     const piAgentDir = join(runtimeDirectory, "user-pi-state");
     const previousPiAgentDir = process.env.PI_CODING_AGENT_DIR;
     process.env.PI_CODING_AGENT_DIR = piAgentDir;
-    const childModulePath = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/FakePiAgentChild.mjs");
     const factory = new PiAgentProcessFactory({ childModulePath });
-    const base = {
-        entrypoint: "/managed/pi/dist/index.js",
-        runtimeDirectory,
-        webBasePath: "/web/agent/"
-    };
+    const base = { entrypoint: "/managed/pi/dist/index.js", runtimeDirectory, webBasePath: "/web/agent/" };
 
     try {
-        const first = await factory.start({
-            ...base,
-            agentId: "ag-crash",
-            localCwd: join(runtimeDirectory, "agents", "ag-crash", "cwd"),
-            target: parseAgentWorkerTarget("worker-a:/repo/a")
-        });
+        const firstTarget = parseAgentWorkerTarget("worker-a:/repo/a");
+        const first = await factory.start(startOptions(base, "ag-crash", firstTarget));
 
         await assert.rejects(() => first.prompt("__crash__"), /(exited unexpectedly|IPC disconnected unexpectedly)/u);
         await first.closed;
 
-        const second = await factory.start({
-            ...base,
-            agentId: "ag-replacement",
-            localCwd: join(runtimeDirectory, "agents", "ag-replacement", "cwd"),
-            target: parseAgentWorkerTarget("worker-a:/repo/b")
-        });
+        const secondTarget = parseAgentWorkerTarget("worker-a:/repo/b");
+        const second = await factory.start(startOptions(base, "ag-replacement", secondTarget));
         await second.prompt("replacement works");
 
         const entries = await readEntries(runtimeDirectory);
@@ -111,22 +134,13 @@ test("Pi process factory retires a child whose IPC disconnects without process e
     const piAgentDir = join(runtimeDirectory, "user-pi-state");
     const previousPiAgentDir = process.env.PI_CODING_AGENT_DIR;
     process.env.PI_CODING_AGENT_DIR = piAgentDir;
-    const childModulePath = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/FakePiAgentChild.mjs");
     const factory = new PiAgentProcessFactory({ childModulePath });
-    const base = {
-        entrypoint: "/managed/pi/dist/index.js",
-        runtimeDirectory,
-        webBasePath: "/web/agent/"
-    };
+    const base = { entrypoint: "/managed/pi/dist/index.js", runtimeDirectory, webBasePath: "/web/agent/" };
     let first;
 
     try {
-        first = await factory.start({
-            ...base,
-            agentId: "ag-disconnect",
-            localCwd: join(runtimeDirectory, "agents", "ag-disconnect", "cwd"),
-            target: parseAgentWorkerTarget("worker-a:/repo/a")
-        });
+        const firstTarget = parseAgentWorkerTarget("worker-a:/repo/a");
+        first = await factory.start(startOptions(base, "ag-disconnect", firstTarget));
 
         await assert.rejects(
             Promise.race([first.prompt("__disconnect__"), rejectAfter(200, "IPC disconnect was not observed")]),
@@ -134,12 +148,8 @@ test("Pi process factory retires a child whose IPC disconnects without process e
         );
         await first.closed;
 
-        const replacement = await factory.start({
-            ...base,
-            agentId: "ag-after-disconnect",
-            localCwd: join(runtimeDirectory, "agents", "ag-after-disconnect", "cwd"),
-            target: parseAgentWorkerTarget("worker-a:/repo/b")
-        });
+        const replacementTarget = parseAgentWorkerTarget("worker-a:/repo/b");
+        const replacement = await factory.start(startOptions(base, "ag-after-disconnect", replacementTarget));
         await replacement.prompt("replacement works");
         await replacement.stop();
 
@@ -152,6 +162,49 @@ test("Pi process factory retires a child whose IPC disconnects without process e
         await rm(runtimeDirectory, { force: true, recursive: true });
     }
 });
+
+function startOptions(
+    base: { entrypoint: string; runtimeDirectory: string; webBasePath: string },
+    agentId: string,
+    target: AgentWorkerTarget,
+    tools: AgentToolSession = toolSession(target)
+) {
+    return {
+        ...base,
+        agentId,
+        localCwd: join(base.runtimeDirectory, "agents", agentId, "cwd"),
+        target,
+        tools
+    };
+}
+
+function toolSession(
+    target: AgentWorkerTarget,
+    overrides: Partial<Pick<AgentToolSession, "callTool" | "close">> = {}
+): AgentToolSession {
+    let closed = false;
+    return {
+        target,
+        tools: [
+            {
+                description: "Echo a value",
+                inputSchema: { type: "object" },
+                name: "echo_tool"
+            },
+            {
+                description: "Wait for cancellation",
+                inputSchema: { type: "object" },
+                name: "slow_tool"
+            }
+        ],
+        callTool: overrides.callTool ?? (async (_toolName, input) => input),
+        async close() {
+            if (closed) return;
+            closed = true;
+            await overrides.close?.();
+        }
+    };
+}
 
 function rejectAfter(milliseconds: number, message: string): Promise<never> {
     return new Promise((_, reject) => {

@@ -6,7 +6,7 @@ import type {
     SessionStartEvent,
     SessionShutdownEvent
 } from "@earendil-works/pi-coding-agent";
-import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
+import type { JsonValue } from "@portable-devshell/shared";
 
 import {
     renderPiToolCall,
@@ -73,7 +73,7 @@ export interface PiToolLike {
 
 export interface DevshellPiToolSession {
     readonly target: DevshellPiTarget;
-    readonly tools: readonly ToolDefinition[];
+    readonly tools: readonly DevshellPiToolDefinition[];
     callTool(
         toolName: string,
         input: JsonValue,
@@ -81,6 +81,12 @@ export interface DevshellPiToolSession {
         signal?: AbortSignal
     ): Promise<JsonValue>;
     close(): Promise<void> | void;
+}
+
+export interface DevshellPiToolDefinition {
+    description: string;
+    inputSchema: JsonValue;
+    name: string;
 }
 
 export interface DevshellPiExtensionAttachOptions {
@@ -189,7 +195,7 @@ export function createDevshellPiWorkspaceBridge(
     };
 }
 
-function toPiTool(definition: ToolDefinition, session: DevshellPiToolSession): PiToolLike {
+function toPiTool(definition: DevshellPiToolDefinition, session: DevshellPiToolSession): PiToolLike {
     const prompt = piPromptMetadata(definition.name);
     return {
         description: definition.description,

@@ -4,6 +4,7 @@ import type {
     AgentProvider,
     AgentProviderHandle
 } from "../provider/AgentProvider.js";
+import type { AgentToolSession } from "../provider/AgentToolSession.js";
 import { AgentProviderRuntimePaths } from "../runtime/AgentProviderRuntimePaths.js";
 import type { AgentWorkerTarget } from "../target/AgentWorkerTarget.js";
 import { AgentProviderRegistry } from "./AgentProviderRegistry.js";
@@ -26,32 +27,34 @@ export interface AgentHostWebEndpoint {
 export interface AgentHostStartOptions {
     provider: string;
     target: AgentWorkerTarget;
+    tools: AgentToolSession;
 }
 
 export interface AgentHostOptions {
-    homeDirectory?: string;
     idFactory?: () => string;
     providers?: readonly AgentProvider[];
     registry?: AgentProviderRegistry;
+    runtimeRootDirectory: string;
     webBasePath?: string;
 }
 
 interface AgentHostRuntime {
     handle: AgentProviderHandle;
     record: AgentHostRecord;
+    tools: AgentToolSession;
 }
 
 export class AgentHost {
-    readonly #homeDirectory?: string;
     readonly #idFactory: () => string;
     readonly #registry: AgentProviderRegistry;
+    readonly #runtimeRootDirectory: string;
     readonly #runtimes = new Map<string, AgentHostRuntime>();
     readonly #webBasePath: string;
 
     constructor(options: AgentHostOptions) {
-        this.#homeDirectory = options.homeDirectory;
         this.#idFactory = options.idFactory ?? (() => `ag-${randomUUID()}`);
         this.#registry = options.registry ?? new AgentProviderRegistry(options.providers);
+        this.#runtimeRootDirectory = options.runtimeRootDirectory;
         this.#webBasePath = normalizeBasePath(options.webBasePath ?? "/agent");
     }
 
@@ -126,16 +129,26 @@ export class AgentHost {
             throw new Error(`Agent id already exists: ${agentId}`);
         }
 
-        const handle = await provider.start({
-            agentId,
-            runtime: new AgentProviderRuntimePaths({
-                homeDirectory: this.#homeDirectory,
-                provider: provider.id,
-                version: provider.version
-            }),
-            target: options.target,
-            web: { basePath: `${this.#webBasePath}/` }
-        });
+        let handle: AgentProviderHandle;
+        try {
+            handle = await provider.start({
+                agentId,
+                runtime: new AgentProviderRuntimePaths({
+                    provider: provider.id,
+                    rootDirectory: this.#runtimeRootDirectory,
+                    version: provider.version
+                }),
+                target: options.target,
+                tools: options.tools,
+                web: { basePath: `${this.#webBasePath}/` }
+            });
+        } catch (error) {
+            const cleanup = await settleCleanup(options.tools);
+            if (cleanup !== undefined) {
+                throw new AggregateError([error, cleanup], `Agent ${agentId} failed to start and release its tool session.`);
+            }
+            throw error;
+        }
         const record: AgentHostRecord = {
             agentId,
             provider: provider.id,
@@ -143,13 +156,14 @@ export class AgentHost {
             state: "running",
             target: { ...options.target }
         };
-        const runtime = { handle, record };
+        const runtime = { handle, record, tools: options.tools };
         this.#runtimes.set(agentId, runtime);
-        void handle.closed.then(() => {
+        void handle.closed.then(async () => {
             if (this.#runtimes.get(agentId) !== runtime) return;
             runtime.record.state = "stopped";
             this.#runtimes.delete(agentId);
-        });
+            await runtime.tools.close();
+        }).catch(() => undefined);
         return cloneRecord(record);
     }
 
@@ -165,10 +179,15 @@ export class AgentHost {
         } catch (error) {
             failure = error;
         }
+        const toolFailure = await settleCleanup(runtime.tools);
         runtime.record.state = "stopped";
         const stopped = cloneRecord(runtime.record);
         this.#runtimes.delete(agentId);
+        if (failure !== undefined && toolFailure !== undefined) {
+            throw new AggregateError([failure, toolFailure], `Agent ${agentId} failed to stop cleanly.`);
+        }
         if (failure !== undefined) throw failure;
+        if (toolFailure !== undefined) throw toolFailure;
         return stopped;
     }
 
@@ -205,4 +224,13 @@ function cloneRecord(record: AgentHostRecord): AgentHostRecord {
         ...record,
         target: { ...record.target }
     };
+}
+
+async function settleCleanup(session: AgentToolSession): Promise<unknown | undefined> {
+    try {
+        await session.close();
+        return undefined;
+    } catch (error) {
+        return error;
+    }
 }

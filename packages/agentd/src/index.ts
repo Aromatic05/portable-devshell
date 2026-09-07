@@ -5,6 +5,7 @@ export type {
     AgentProviderWebContext,
     AgentProviderWebEndpoint
 } from "./provider/AgentProvider.js";
+export type { AgentToolSession } from "./provider/AgentToolSession.js";
 export {
     PI_PROVIDER_ID,
     PI_PROVIDER_VERSION,

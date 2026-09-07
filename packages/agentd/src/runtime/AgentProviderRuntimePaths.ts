@@ -1,9 +1,8 @@
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 export interface AgentProviderRuntimePathsOptions {
-    homeDirectory?: string;
     provider: string;
+    rootDirectory: string;
     version: string;
 }
 
@@ -25,8 +24,10 @@ export class AgentProviderRuntimePaths {
         assertPathSegment(options.provider, "provider");
         assertPathSegment(options.version, "version");
 
-        const devshellDirectory = join(options.homeDirectory ?? homedir(), ".devshell");
-        this.agentdDirectory = join(devshellDirectory, "agentd");
+        if (options.rootDirectory.length === 0) {
+            throw new TypeError("Agent provider runtime root must not be empty.");
+        }
+        this.agentdDirectory = options.rootDirectory;
         this.providerDirectory = join(this.agentdDirectory, "providers", options.provider);
         this.prefixDirectory = join(this.providerDirectory, "prefix", options.version);
         this.stateDirectory = join(this.providerDirectory, "state");

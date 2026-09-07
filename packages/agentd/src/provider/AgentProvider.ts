@@ -1,5 +1,6 @@
 import type { AgentProviderRuntimePaths } from "../runtime/AgentProviderRuntimePaths.js";
 import type { AgentWorkerTarget } from "../target/AgentWorkerTarget.js";
+import type { AgentToolSession } from "./AgentToolSession.js";
 
 export interface AgentProviderWebContext {
     /** Authenticated shared public route assigned by devshell, for example /agent/. */
@@ -10,6 +11,7 @@ export interface AgentProviderStartContext {
     agentId: string;
     runtime: AgentProviderRuntimePaths;
     target: AgentWorkerTarget;
+    tools: AgentToolSession;
     web?: AgentProviderWebContext;
 }
 

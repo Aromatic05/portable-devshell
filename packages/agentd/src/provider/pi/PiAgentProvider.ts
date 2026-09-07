@@ -48,6 +48,7 @@ export class PiAgentProvider implements AgentProvider {
             localCwd: paths.localCwd,
             runtimeDirectory: context.runtime.stateDirectory,
             target: context.target,
+            tools: context.tools,
             webBasePath: context.web?.basePath ?? "/agent/"
         });
     }

@@ -5,13 +5,15 @@ import type {
     AgentProvider,
     AgentProviderStartContext
 } from "../../src/provider/AgentProvider.ts";
+import type { AgentToolSession } from "../../src/provider/AgentToolSession.ts";
 import { AgentHost } from "../../src/host/AgentHost.ts";
 import { AgentProviderRegistry } from "../../src/host/AgentProviderRegistry.ts";
-import { parseAgentWorkerTarget } from "../../src/target/AgentWorkerTarget.ts";
+import { parseAgentWorkerTarget, type AgentWorkerTarget } from "../../src/target/AgentWorkerTarget.ts";
 
 const neverClosed = new Promise<void>(() => undefined);
+const runtimeRootDirectory = "/extension-state/agent";
 
-test("AgentHost binds provider lifecycle, target, runtime prefix, and one shared Web endpoint", async () => {
+test("AgentHost binds provider lifecycle, target, runtime prefix, tools, and one shared Web endpoint", async () => {
     const starts: AgentProviderStartContext[] = [];
     const stopped: string[] = [];
     const prompts: string[] = [];
@@ -19,6 +21,7 @@ test("AgentHost binds provider lifecycle, target, runtime prefix, and one shared
     const followUps: string[] = [];
     let aborts = 0;
     let reloads = 0;
+    let toolCloses = 0;
     const provider: AgentProvider = {
         id: "pi",
         version: "0.84.4",
@@ -37,13 +40,14 @@ test("AgentHost binds provider lifecycle, target, runtime prefix, and one shared
         }
     };
     const target = parseAgentWorkerTarget("worker-a:/repo");
+    const tools = toolSession(target, () => { toolCloses += 1; });
     const host = new AgentHost({
-        homeDirectory: "/home/tester",
         idFactory: () => "ag-1234567890abcdef",
-        providers: [provider]
+        providers: [provider],
+        runtimeRootDirectory
     });
 
-    const record = await host.start({ provider: "pi", target });
+    const record = await host.start({ provider: "pi", target, tools });
 
     assert.deepEqual(record, {
         agentId: "ag-1234567890abcdef",
@@ -55,12 +59,12 @@ test("AgentHost binds provider lifecycle, target, runtime prefix, and one shared
     assert.equal(starts.length, 1);
     assert.equal(starts[0]?.agentId, record.agentId);
     assert.deepEqual(starts[0]?.target, target);
+    assert.equal(starts[0]?.tools, tools);
     assert.equal(starts[0]?.web?.basePath, "/agent/");
     assert.equal(
         starts[0]?.runtime.prefixDirectory,
-        "/home/tester/.devshell/agentd/providers/pi/prefix/0.84.4"
+        "/extension-state/agent/providers/pi/prefix/0.84.4"
     );
-    assert.equal("worker" in starts[0]!, false);
     assert.deepEqual(host.list(), [record]);
     assert.deepEqual(host.webEndpoint(), {
         basePath: "/agent/",
@@ -81,11 +85,34 @@ test("AgentHost binds provider lifecycle, target, runtime prefix, and one shared
     const stoppedRecord = await host.stop(record.agentId);
     assert.equal(stoppedRecord.state, "stopped");
     assert.deepEqual(stopped, [record.agentId]);
+    assert.equal(toolCloses, 1);
     assert.deepEqual(host.list(), []);
     assert.equal(host.webEndpoint(), undefined);
 });
 
+test("AgentHost closes the tool session when provider startup fails", async () => {
+    let closes = 0;
+    const target = parseAgentWorkerTarget("worker-a:/repo");
+    const host = new AgentHost({
+        idFactory: () => "ag-start-failure",
+        providers: [{
+            id: "broken",
+            version: "1",
+            async start() { throw new Error("provider start failed"); }
+        }],
+        runtimeRootDirectory
+    });
+
+    await assert.rejects(
+        () => host.start({ provider: "broken", target, tools: toolSession(target, () => { closes += 1; }) }),
+        /provider start failed/u
+    );
+    assert.equal(closes, 1);
+    assert.deepEqual(host.list(), []);
+});
+
 test("AgentHost rejects reload when the provider does not expose that capability", async () => {
+    const target = parseAgentWorkerTarget("worker-a:/repo");
     const host = new AgentHost({
         idFactory: () => "ag-no-reload",
         providers: [{
@@ -94,11 +121,13 @@ test("AgentHost rejects reload when the provider does not expose that capability
             async start() {
                 return { closed: neverClosed, async prompt() {}, async stop() {} };
             }
-        }]
+        }],
+        runtimeRootDirectory
     });
     const record = await host.start({
         provider: "minimal",
-        target: parseAgentWorkerTarget("worker-a:/repo")
+        target,
+        tools: toolSession(target)
     });
 
     await assert.rejects(
@@ -124,13 +153,17 @@ test("AgentHost requires one shared provider Web endpoint", async () => {
     };
     const host = new AgentHost({
         idFactory: () => `ag-${++nextId}`,
-        providers: [provider]
+        providers: [provider],
+        runtimeRootDirectory
     });
     const target = parseAgentWorkerTarget("worker-a:/repo");
 
-    await assert.rejects(() => host.start({ provider: "missing", target }), /Unknown Agent provider/u);
-    await host.start({ provider: "pi", target });
-    await host.start({ provider: "pi", target });
+    await assert.rejects(
+        () => host.start({ provider: "missing", target, tools: toolSession(target) }),
+        /Unknown Agent provider/u
+    );
+    await host.start({ provider: "pi", target, tools: toolSession(target) });
+    await host.start({ provider: "pi", target, tools: toolSession(target) });
     assert.throws(() => host.webEndpoint(), /one \/agent hub/u);
     await host.stopAll();
 });
@@ -146,7 +179,8 @@ test("AgentProviderRegistry rejects duplicate provider ids", () => {
     assert.throws(() => new AgentProviderRegistry([provider, provider]), /already registered/u);
 });
 
-test("AgentHost removes a stopped runtime when provider cleanup fails", async () => {
+test("AgentHost removes a stopped runtime and closes tools when provider cleanup fails", async () => {
+    let toolCloses = 0;
     const provider: AgentProvider = {
         id: "pi",
         version: "1",
@@ -163,16 +197,23 @@ test("AgentHost removes a stopped runtime when provider cleanup fails", async ()
     const target = parseAgentWorkerTarget("worker-a:/repo");
     const host = new AgentHost({
         idFactory: () => "ag-failing-cleanup",
-        providers: [provider]
+        providers: [provider],
+        runtimeRootDirectory
     });
-    const record = await host.start({ provider: "pi", target });
+    const record = await host.start({
+        provider: "pi",
+        target,
+        tools: toolSession(target, () => { toolCloses += 1; })
+    });
 
     await assert.rejects(() => host.stop(record.agentId), /provider stop failed/u);
+    assert.equal(toolCloses, 1);
     assert.deepEqual(host.list(), []);
 });
 
-test("AgentHost removes a runtime when its provider terminates independently", async () => {
+test("AgentHost removes a runtime and closes tools when its provider terminates independently", async () => {
     let close!: () => void;
+    let toolCloses = 0;
     const closed = new Promise<void>((resolve) => {
         close = resolve;
     });
@@ -189,19 +230,23 @@ test("AgentHost removes a runtime when its provider terminates independently", a
     };
     const host = new AgentHost({
         idFactory: () => "ag-provider-exit",
-        providers: [provider]
+        providers: [provider],
+        runtimeRootDirectory
     });
+    const target = parseAgentWorkerTarget("worker-a:/repo");
     const record = await host.start({
         provider: "pi",
-        target: parseAgentWorkerTarget("worker-a:/repo")
+        target,
+        tools: toolSession(target, () => { toolCloses += 1; })
     });
 
     assert.equal(host.get(record.agentId)?.state, "running");
     close();
     await closed;
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     assert.equal(host.get(record.agentId), undefined);
+    assert.equal(toolCloses, 1);
     assert.deepEqual(host.list(), []);
     await assert.rejects(() => host.prompt(record.agentId, "after exit"), /Unknown Agent/u);
 });
@@ -234,13 +279,31 @@ test("AgentHost stopAll ignores runtimes that terminate while another Agent is s
     };
     const host = new AgentHost({
         idFactory: () => `ag-${++nextId}`,
-        providers: [provider]
+        providers: [provider],
+        runtimeRootDirectory
     });
     const target = parseAgentWorkerTarget("worker-a:/repo");
-    await host.start({ provider: "pi", target });
-    await host.start({ provider: "pi", target });
+    await host.start({ provider: "pi", target, tools: toolSession(target) });
+    await host.start({ provider: "pi", target, tools: toolSession(target) });
 
     await host.stopAll();
 
     assert.deepEqual(host.list(), []);
 });
+
+function toolSession(
+    target: AgentWorkerTarget,
+    onClose: () => void = () => undefined
+): AgentToolSession {
+    let closed = false;
+    return {
+        target,
+        tools: [],
+        async callTool() { return null; },
+        async close() {
+            if (closed) return;
+            closed = true;
+            onClose();
+        }
+    };
+}

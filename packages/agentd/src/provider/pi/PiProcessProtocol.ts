@@ -1,3 +1,6 @@
+import type { DevshellPiToolDefinition } from "@portable-devshell/pi-extension";
+import type { JsonValue } from "@portable-devshell/shared";
+
 import type { AgentWorkerTarget } from "../../target/AgentWorkerTarget.js";
 
 export interface PiChildInitMessage {
@@ -11,6 +14,7 @@ export interface PiChildAgentStartMessage {
     id: string;
     localCwd: string;
     target: AgentWorkerTarget;
+    tools: readonly DevshellPiToolDefinition[];
     type: "agent.start";
 }
 
@@ -29,10 +33,20 @@ export interface PiChildShutdownMessage {
     type: "shutdown";
 }
 
+export interface PiParentToolResultMessage {
+    agentId: string;
+    callId: string;
+    error?: string;
+    ok: boolean;
+    result?: JsonValue;
+    type: "tool.result";
+}
+
 export type PiParentMessage = PiChildInitMessage
     | PiChildAgentStartMessage
     | PiChildAgentCommandMessage
-    | PiChildShutdownMessage;
+    | PiChildShutdownMessage
+    | PiParentToolResultMessage;
 
 export interface PiChildReadyMessage {
     error?: string;
@@ -48,4 +62,29 @@ export interface PiChildResultMessage {
     type: "result";
 }
 
-export type PiChildMessage = PiChildReadyMessage | PiChildResultMessage;
+export interface PiChildToolCallMessage {
+    agentId: string;
+    callId: string;
+    input: JsonValue;
+    operationId: string;
+    toolName: string;
+    type: "tool.call";
+}
+
+export interface PiChildToolCancelMessage {
+    agentId: string;
+    callId: string;
+    type: "tool.cancel";
+}
+
+export interface PiChildToolCloseMessage {
+    agentId: string;
+    callId: string;
+    type: "tool.close";
+}
+
+export type PiChildMessage = PiChildReadyMessage
+    | PiChildResultMessage
+    | PiChildToolCallMessage
+    | PiChildToolCancelMessage
+    | PiChildToolCloseMessage;

@@ -6,6 +6,7 @@ export {
 } from "./DevshellPiBridge.js";
 export type {
     DevshellPiExtensionAttachOptions,
+    DevshellPiToolDefinition,
     DevshellPiToolSession,
     DevshellPiWorkspaceBridge,
     PiExtensionApiLike,

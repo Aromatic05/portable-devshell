@@ -25,14 +25,14 @@ import { AgentProviderRuntimePaths } from "../../src/runtime/AgentProviderRuntim
 import { parseAgentWorkerTarget } from "../../src/target/AgentWorkerTarget.ts";
 
 test("Pi runtime resolves from portable-devshell's bundled dependency without host npm", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "devshell-agentd-pi-"));
+    const rootDirectory = await mkdtemp(join(tmpdir(), "devshell-agentd-pi-"));
     try {
         const runtime = new AgentProviderRuntimePaths({
-            homeDirectory,
             provider: "pi",
+            rootDirectory,
             version: PI_PROVIDER_VERSION
         });
-        const packageRoot = join(homeDirectory, "application", "node_modules", "@earendil-works", "pi-coding-agent");
+        const packageRoot = join(rootDirectory, "application", "node_modules", "@earendil-works", "pi-coding-agent");
         const entrypoint = join(packageRoot, "dist", "index.js");
         await mkdir(join(packageRoot, "dist"), { recursive: true });
         await writeFile(
@@ -59,16 +59,16 @@ test("Pi runtime resolves from portable-devshell's bundled dependency without ho
         assert.equal(first.version, PI_PROVIDER_VERSION);
         assert.equal(resolves, 1);
     } finally {
-        await rm(homeDirectory, { force: true, recursive: true });
+        await rm(rootDirectory, { force: true, recursive: true });
     }
 });
 
-test("Pi provider maps each Agent into the shared managed runtime without owning Pi user state", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "devshell-agentd-pi-session-"));
+test("Pi provider maps each Agent into the shared managed runtime with its injected tool session", async () => {
+    const rootDirectory = await mkdtemp(join(tmpdir(), "devshell-agentd-pi-session-"));
     try {
         const runtime = new AgentProviderRuntimePaths({
-            homeDirectory,
             provider: "pi",
+            rootDirectory,
             version: PI_PROVIDER_VERSION
         });
         const target = parseAgentWorkerTarget("worker-a:/remote/project");
@@ -76,6 +76,7 @@ test("Pi provider maps each Agent into the shared managed runtime without owning
             agentId: "ag-pi-test",
             runtime,
             target,
+            tools: toolSession(target),
             web: { basePath: "/agent/" }
         };
         const starts: PiAgentProcessStartOptions[] = [];
@@ -107,12 +108,11 @@ test("Pi provider maps each Agent into the shared managed runtime without owning
         assert.equal(starts[0]?.agentId, "ag-pi-test");
         assert.equal(starts[0]?.entrypoint, "/managed/pi/dist/index.js");
         assert.deepEqual(starts[0]?.target, target);
+        assert.equal(starts[0]?.tools, context.tools);
         assert.match(starts[0]!.localCwd, /agents\/ag-pi-test\/cwd$/u);
         assert.equal(starts[0]?.webBasePath, "/agent/");
-        assert.equal("tools" in starts[0]!, false);
-        assert.equal("callTool" in starts[0]!, false);
     } finally {
-        await rm(homeDirectory, { force: true, recursive: true });
+        await rm(rootDirectory, { force: true, recursive: true });
     }
 });
 
@@ -124,5 +124,14 @@ function createProviderHandle(): AgentProviderHandle {
         async prompt() {},
         async steer() {},
         async stop() {}
+    };
+}
+
+function toolSession(target: ReturnType<typeof parseAgentWorkerTarget>) {
+    return {
+        target,
+        tools: [],
+        async callTool() { return null; },
+        async close() {}
     };
 }

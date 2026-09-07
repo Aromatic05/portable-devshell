@@ -49,9 +49,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.4
         version: 0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(ws@8.21.0)(zod@4.5.4)
-      '@portable-devshell/core':
+      '@portable-devshell/pi-extension':
         specifier: workspace:*
-        version: link:../core
+        version: link:../pi-extension
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
