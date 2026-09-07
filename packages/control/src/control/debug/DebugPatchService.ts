@@ -118,6 +118,7 @@ const workerCallToolAdapter: DebugMethodAdapter = {
         return {
             context: {
                 ...(context?.ctxId === undefined ? {} : { ctxId: context.ctxId }),
+                ...(context?.extensionId === undefined ? {} : { extensionId: context.extensionId }),
                 ...(context?.requestId === undefined ? {} : { requestId: context.requestId }),
                 ...(context?.source === undefined ? {} : { source: context.source }),
                 ...(context?.workspace === undefined ? {} : { workspace: context.workspace }),

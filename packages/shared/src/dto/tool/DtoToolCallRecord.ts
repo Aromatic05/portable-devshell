@@ -1,7 +1,7 @@
 import type { InstanceName } from "../../type/identity/TypeIdentityInstanceName.js";
 import type { JsonValue } from "../../type/TypeJsonValue.js";
 
-export type ToolCallSource = "cli" | "tui" | "web" | "mcp" | "agent";
+export type ToolCallSource = "cli" | "tui" | "web" | "mcp" | "extension";
 
 export interface ToolCallAssociation {
     taskId: string;
@@ -11,6 +11,7 @@ export interface ToolCallAssociation {
 export interface ToolCallContext {
     requestId?: string;
     ctxId?: string;
+    extensionId?: string;
     workspace?: string;
     source: ToolCallSource;
 }
@@ -29,6 +30,7 @@ export interface ToolCallQuery {
     before?: string;
     callIds?: string[];
     ctxId?: string;
+    extensionId?: string;
     includeInput?: boolean;
     includeOutput?: boolean;
     limit?: number;
@@ -51,6 +53,7 @@ export interface ToolCallRecord extends ToolCallProvenance {
     approvalId?: string;
     requestId?: string;
     ctxId?: string;
+    extensionId?: string;
     source: ToolCallSource;
     taskId?: string;
     todoItemId?: string;

@@ -124,7 +124,12 @@ test("WorkerRpcClient keeps context identity while assigning each call a distinc
     await client.request("tools.list", {});
     await client.request("worker.status", {}, { ctxId: "ctx-mcp", requestId: "shared-mcp-request", source: "mcp" });
     await client.request("worker.ping", {}, { ctxId: "ctx-mcp", requestId: "shared-mcp-request", source: "mcp" });
-    await client.request("worker.ping", {}, { ctxId: "ctx-agent", operationId: "pi-operation", source: "agent" });
+    await client.request("worker.ping", {}, {
+        ctxId: "ctx-extension",
+        extensionId: "agent",
+        operationId: "pi-operation",
+        source: "extension"
+    });
 
     const implicit = harness.requestContexts.slice(0, 2).map((context) => context?.ctxId);
     assert.equal(typeof implicit[0], "string");

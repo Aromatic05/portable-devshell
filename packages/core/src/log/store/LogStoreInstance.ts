@@ -11,6 +11,7 @@ export interface InstanceLogEntry {
     requestId?: string;
     seq: number;
     ctxId?: string;
+    extensionId?: string;
     source?: ToolCallSource;
     stream: "stderr" | "stdout";
     toolName?: string;
@@ -32,7 +33,7 @@ export class LogStoreInstance {
         stream: InstanceLogEntry["stream"],
         message: string,
         at: string,
-        context: Pick<InstanceLogEntry, "callId" | "requestId" | "ctxId" | "source" | "toolName"> = {}
+        context: Pick<InstanceLogEntry, "callId" | "requestId" | "ctxId" | "extensionId" | "source" | "toolName"> = {}
     ): Promise<InstanceLogEntry> {
         const operation = this.#appendTail.then(async () => {
             await this.#initialize();

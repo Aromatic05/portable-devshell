@@ -13,6 +13,7 @@ export interface WorkerInstanceToolCallScope {
         inputSummary: string;
         requestId?: string;
         ctxId?: string;
+        extensionId?: string;
         source: ToolCallContext["source"];
         taskId?: string;
         todoItemId?: string;
@@ -44,6 +45,7 @@ export function createWorkerInstanceToolCallScope(
             inputSummary,
             requestId: context.requestId,
             ctxId: context.ctxId,
+            extensionId: context.extensionId,
             source: context.source,
             taskId: association?.taskId,
             todoItemId: association?.todoItemId,

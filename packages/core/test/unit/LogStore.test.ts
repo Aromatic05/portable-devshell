@@ -573,6 +573,18 @@ test("AuditDatabase queries bounded tool-call history and failure summaries with
                 status: "queueTimeout",
                 toolName: "tmux_run",
             },
+            {
+                callId: "extension-call",
+                completedAt: "2026-09-01T11:30:00.000Z",
+                ctxId: "ctx-extension",
+                extensionId: "example",
+                inputSummary: "{}",
+                instance: instanceName,
+                source: "extension",
+                startedAt: "2026-09-01T11:29:00.000Z",
+                status: "completed",
+                toolName: "file_read",
+            },
         ];
         for (const record of records) await store.append(record);
 
@@ -584,6 +596,10 @@ test("AuditDatabase queries bounded tool-call history and failure summaries with
             (await store.readQuery({ source: "mcp", status: "completed", toolName: "bash_run" }))
                 .map((record) => record.callId),
             ["ctx-b"],
+        );
+        assert.deepEqual(
+            (await store.readQuery({ extensionId: "example" })).map((record) => record.callId),
+            ["extension-call"],
         );
         const compact = await store.readQuery({
             includeInput: false,

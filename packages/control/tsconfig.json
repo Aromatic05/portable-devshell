@@ -10,6 +10,9 @@
     ],
     "references": [
         {
+            "path": "../extension"
+        },
+        {
             "path": "../shared"
         },
         {

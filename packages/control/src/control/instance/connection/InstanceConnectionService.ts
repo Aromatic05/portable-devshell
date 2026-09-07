@@ -7,12 +7,13 @@ import type { InstanceRegistry } from "../registry/InstanceRegistry.js";
 export interface InstanceConnectionLease {
     handle: WorkerHandle;
     snapshot: ReturnType<InstanceDescriptor["worker"]["snapshot"]>;
+    worker: InstanceDescriptor["worker"];
 }
 
 /**
  * Shared lifecycle boundary for consumers of one managed Worker instance.
  *
- * MCP, Agent and future consumers acquire the same WorkerInstance connection
+ * MCP, Extensions and future consumers acquire the same WorkerInstance connection
  * by reference. Provider transport details and reverse inbound endpoints remain
  * encapsulated below WorkerInstance.
  */
@@ -58,7 +59,8 @@ export class InstanceConnectionService {
         }
         return {
             handle: descriptor.worker.handle,
-            snapshot
+            snapshot,
+            worker: descriptor.worker
         };
     }
 

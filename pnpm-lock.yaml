@@ -79,6 +79,9 @@ importers:
       '@portable-devshell/core':
         specifier: workspace:*
         version: link:../core
+      '@portable-devshell/extension':
+        specifier: workspace:*
+        version: link:../extension
       '@portable-devshell/mcp':
         specifier: workspace:*
         version: file:packages/mcp(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -848,6 +851,9 @@ packages:
 
   '@portable-devshell/core@file:packages/core':
     resolution: {directory: packages/core, type: directory}
+
+  '@portable-devshell/extension@file:packages/extension':
+    resolution: {directory: packages/extension, type: directory}
 
   '@portable-devshell/mcp@file:packages/mcp':
     resolution: {directory: packages/mcp, type: directory}
@@ -3551,6 +3557,7 @@ snapshots:
   '@portable-devshell/control@file:packages/control(react@18.3.1)':
     dependencies:
       '@portable-devshell/core': file:packages/core
+      '@portable-devshell/extension': file:packages/extension
       '@portable-devshell/mcp': file:packages/mcp(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@portable-devshell/shared': file:packages/shared
       '@portable-devshell/web': file:packages/web
@@ -3578,6 +3585,8 @@ snapshots:
       - bare-abort-controller
       - bare-buffer
       - react-native-b4a
+
+  '@portable-devshell/extension@file:packages/extension': {}
 
   '@portable-devshell/mcp@file:packages/mcp(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
     dependencies:

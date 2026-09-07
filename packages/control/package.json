@@ -19,6 +19,7 @@
         "dist"
     ],
     "dependencies": {
+        "@portable-devshell/extension": "workspace:*",
         "@portable-devshell/core": "workspace:*",
         "@portable-devshell/mcp": "workspace:*",
         "@portable-devshell/shared": "workspace:*",

@@ -4,6 +4,7 @@ export interface WorkerRpcRequestContext {
     requestId?: string;
     operationId?: string;
     ctxId?: string;
+    extensionId?: string;
     source?: string;
     workspace?: string;
 }

@@ -23,6 +23,7 @@ export function toApprovalEventData(request: ApprovalRequest, decision?: Approva
         remember: decision?.remember,
         riskLevel: request.riskLevel,
         ctxId: request.ctxId,
+        extensionId: request.extensionId,
         source: request.source,
         status: request.status,
         toolName: request.toolName,

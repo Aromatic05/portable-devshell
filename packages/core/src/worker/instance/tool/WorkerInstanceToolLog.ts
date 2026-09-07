@@ -31,6 +31,7 @@ export class WorkerInstanceToolLog {
             callId: string;
             requestId?: string;
             ctxId?: string;
+            extensionId?: string;
             source: ToolCallContext["source"];
             toolName: string;
         }
@@ -70,7 +71,7 @@ export class WorkerInstanceToolLog {
         stream: InstanceLogEntry["stream"],
         message: string,
         at: string,
-        context: Pick<InstanceLogEntry, "callId" | "requestId" | "ctxId" | "source" | "toolName">,
+        context: Pick<InstanceLogEntry, "callId" | "requestId" | "ctxId" | "extensionId" | "source" | "toolName">,
     ): Promise<number> {
         let bytes = 0;
         for (const chunk of logChunks(message)) {

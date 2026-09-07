@@ -25,6 +25,7 @@ interface ActiveToolCall {
     input?: JsonValue;
     requestId?: string;
     ctxId?: string;
+    extensionId?: string;
     source: ToolCallContext["source"];
     startedAt: string;
     status: ToolCallRecord["status"];
@@ -71,6 +72,7 @@ export class AuditToolCallHistory {
             input,
             requestId: context.requestId,
             ctxId: context.ctxId,
+            extensionId: context.extensionId,
             source: context.source,
             startedAt,
             status,
@@ -288,6 +290,10 @@ function sliceByFilters(records: ToolCallRecord[], query: ToolCallQuery): ToolCa
             return false;
         }
 
+        if (query.extensionId !== undefined && record.extensionId !== query.extensionId) {
+            return false;
+        }
+
         if (query.source !== undefined && record.source !== query.source) {
             return false;
         }
@@ -370,6 +376,7 @@ function canReadTail(query: ToolCallQuery): query is ToolCallQuery & { limit: nu
         query.before === undefined &&
         query.callIds === undefined &&
         query.ctxId === undefined &&
+        query.extensionId === undefined &&
         query.includeInput === undefined &&
         query.includeOutput === undefined &&
         query.maxBytes === undefined &&
@@ -383,6 +390,7 @@ function canReadQuery(query: ToolCallQuery): boolean {
         query.limit !== undefined ||
         query.callIds !== undefined ||
         query.ctxId !== undefined ||
+        query.extensionId !== undefined ||
         query.source !== undefined ||
         query.status !== undefined ||
         query.toolName !== undefined

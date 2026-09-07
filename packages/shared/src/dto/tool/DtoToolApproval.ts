@@ -22,6 +22,7 @@ export interface ApprovalRequest {
     requestId?: string;
     riskLevel: ApprovalRiskLevel;
     ctxId?: string;
+    extensionId?: string;
     source: ToolCallSource;
     status: ApprovalStatus;
     toolName: string;
