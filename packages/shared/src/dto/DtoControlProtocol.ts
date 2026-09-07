@@ -23,7 +23,7 @@ export function controlWebBasePath(publicBaseUrl?: string): string {
     return `${prefix}${CONTROL_WEB_BASE_PATH}`;
 }
 
-export type ControlClientKind = "cli" | "tui" | "web";
+export type ControlClientKind = "agent" | "cli" | "tui" | "web";
 export type ControlProtocolCapability = "request" | "stream" | "streamResume";
 
 export interface ControlProtocolHelloRequest {

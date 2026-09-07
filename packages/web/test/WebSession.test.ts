@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { BrowserWebSession, oauthStartPath, sessionPath } from "../src/session/WebSession.js";
+import { BrowserWebSession, oauthStartPath, sessionPath, webReturnTo } from "../src/session/WebSession.js";
 
 describe("BrowserWebSession", () => {
     it("uses same-origin cookies and only adds Authorization for token exchange", async () => {
@@ -95,5 +95,38 @@ describe("BrowserWebSession", () => {
         session.startOAuth();
 
         expect(navigate).toHaveBeenCalledWith("/devshell/web/oauth/start");
+    });
+
+    it("preserves a safe Agent return target through token and OAuth authentication", async () => {
+        const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+        const navigate = vi.fn();
+        const location = {
+            pathname: "/devshell/web/",
+            search: "?returnTo=%2Fdevshell%2Fweb%2Fagent%2F%3Fsession%3Dag-1"
+        } as Location;
+        const returnTo = webReturnTo(location);
+        const session = new BrowserWebSession(
+            request,
+            sessionPath(location),
+            oauthStartPath(location),
+            navigate,
+            returnTo
+        );
+
+        expect(returnTo).toBe("/devshell/web/agent/?session=ag-1");
+        expect(await session.establish("token")).toBe(true);
+        expect(navigate).toHaveBeenCalledWith("/devshell/web/agent/?session=ag-1");
+
+        navigate.mockClear();
+        session.startOAuth();
+        expect(navigate).toHaveBeenCalledWith(
+            "/devshell/web/oauth/start?returnTo=%2Fdevshell%2Fweb%2Fagent%2F%3Fsession%3Dag-1"
+        );
+    });
+
+    it("rejects external and out-of-scope return targets", () => {
+        expect(webReturnTo({ pathname: "/web/", search: "?returnTo=https%3A%2F%2Fevil.test%2F" } as Location)).toBeUndefined();
+        expect(webReturnTo({ pathname: "/web/", search: "?returnTo=%2F%2Fevil.test%2F" } as Location)).toBeUndefined();
+        expect(webReturnTo({ pathname: "/devshell/web/", search: "?returnTo=%2Fother%2F" } as Location)).toBeUndefined();
     });
 });

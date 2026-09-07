@@ -1,4 +1,4 @@
-import type { InstanceName } from "@portable-devshell/shared";
+import type { InstanceName, ToolCallSource } from "@portable-devshell/shared";
 
 import type { AuditRecordStore } from "../../audit/AuditRecordStore.js";
 import type { LogQuery } from "../LogQuery.js";
@@ -11,7 +11,7 @@ export interface InstanceLogEntry {
     requestId?: string;
     seq: number;
     ctxId?: string;
-    source?: "cli" | "mcp" | "tui" | "web";
+    source?: ToolCallSource;
     stream: "stderr" | "stdout";
     toolName?: string;
 }

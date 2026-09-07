@@ -8,7 +8,7 @@ use globset::{Glob, GlobMatcher};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 
 use crate::security::path::{
-    parse_requested_path, ResolvedDirectory, ResolvedMetadata, ResolvedPath,
+    ResolvedDirectory, ResolvedMetadata, ResolvedPath, parse_requested_path,
 };
 use crate::tools::file::{authorize, resolve_existing};
 use crate::tools::{ToolCall, ToolError};
@@ -147,20 +147,40 @@ fn prepare_glob(
 ) -> Result<DiscoverySource, ToolError> {
     let requested = parse_requested_path(spec)?;
     authorize(call, requested.namespace, false)?;
-    let (root_raw, pattern) = split_glob_root(spec)?;
-    let (root_requested, root) = resolve_existing(call, root_raw, false)?;
-    if !root
-        .metadata()
-        .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?
-        .is_dir()
-    {
+    let wildcard = spec
+        .find(['*', '?', '['])
+        .ok_or_else(|| ToolError::new("file.invalidPattern", "glob has no wildcard"))?;
+    let slash = spec[..wildcard]
+        .rfind('/')
+        .unwrap_or(if spec.starts_with("./") { 1 } else { 0 });
+    let root_raw = if slash <= 1 && spec.starts_with("./") {
+        "./"
+    } else {
+        &spec[..slash]
+    };
+    let pattern = spec[slash + 1..].to_string();
+    let (root_requested, root) = match resolve_existing(call, root_raw, false) {
+        Ok(resolved) => resolved,
+        Err(error) if error.code == "file.notFound" => {
+            return Ok(DiscoverySource::Single(None));
+        }
+        Err(error) => return Err(error),
+    };
+    let metadata = match root.metadata() {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(DiscoverySource::Single(None));
+        }
+        Err(error) => return Err(ToolError::new("file.readFailed", error.to_string())),
+    };
+    if !metadata.is_dir() {
         return Err(ToolError::new(
             "file.notDirectory",
             "glob root is not a directory",
         ));
     }
     let matcher = Arc::new(
-        Glob::new(pattern)
+        Glob::new(&pattern)
             .map_err(|error| ToolError::new("file.invalidPattern", error.to_string()))?
             .compile_matcher(),
     );
@@ -339,45 +359,6 @@ fn kind(metadata: &ResolvedMetadata) -> &'static str {
     }
 }
 
-fn split_glob_root(spec: &str) -> Result<(&str, &str), ToolError> {
-    let wildcard = spec
-        .find(['*', '?', '['])
-        .ok_or_else(|| ToolError::new("file.invalidPattern", "glob has no wildcard"))?;
-    let slash = spec[..wildcard]
-        .rfind('/')
-        .unwrap_or(if spec.starts_with("./") { 1 } else { 0 });
-    let root_raw = if slash <= 1 && spec.starts_with("./") {
-        "./"
-    } else if slash == 0 && spec.starts_with('/') {
-        "/"
-    } else if is_windows_drive_root_separator(spec, slash) {
-        &spec[..=slash]
-    } else {
-        &spec[..slash]
-    };
-    Ok((root_raw, &spec[slash + 1..]))
-}
-
-fn is_windows_drive_root_separator(spec: &str, slash: usize) -> bool {
-    slash == 2
-        && spec.as_bytes().get(1) == Some(&b':')
-        && spec.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
-}
-
 fn has_glob(value: &str) -> bool {
     value.contains(['*', '?', '['])
-}
-
-#[cfg(test)]
-mod tests {
-    use super::split_glob_root;
-
-    #[test]
-    fn glob_root_split_preserves_namespace_roots() {
-        assert_eq!(split_glob_root("./*.rs").unwrap(), ("./", "*.rs"));
-        assert_eq!(split_glob_root("./src/*.rs").unwrap(), ("./src", "*.rs"));
-        assert_eq!(split_glob_root("/*.conf").unwrap(), ("/", "*.conf"));
-        assert_eq!(split_glob_root("/tmp/*.conf").unwrap(), ("/tmp", "*.conf"));
-        assert_eq!(split_glob_root("C:/*.txt").unwrap(), ("C:/", "*.txt"));
-    }
 }

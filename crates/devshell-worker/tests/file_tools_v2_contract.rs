@@ -880,6 +880,48 @@ fn file_tools_omit_absent_pagination_fields() {
 }
 
 #[test]
+fn file_find_treats_missing_glob_roots_as_empty_without_masking_exact_missing_paths() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-find-missing-glob-root";
+    fs::create_dir_all(env.workspace().join(".pi/prompts")).unwrap();
+    fs::write(env.workspace().join(".pi/prompts/release.md"), "release\n").unwrap();
+    start(&env, instance);
+
+    let found = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_find",
+        json!({
+            "paths": [
+                "./.pi/skills/**/SKILL.md",
+                "./.pi/prompts/*.md"
+            ],
+            "type": "file"
+        }),
+    );
+    assert_eq!(found["ok"], true, "{found}");
+    assert_eq!(
+        found["result"]["entries"],
+        json!([{ "path": "./.pi/prompts/release.md", "type": "file" }])
+    );
+
+    let exact_missing = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_find",
+        json!({ "paths": ["./.pi/skills/SKILL.md"] }),
+    );
+    assert_eq!(exact_missing["ok"], false, "{exact_missing}");
+    assert_eq!(exact_missing["error"]["code"], "file.notFound");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
 fn file_find_respects_gitignore_and_can_explicitly_include_ignored_files() {
     let env = TestEnv::new();
     let instance = "aromatic-file-find-ignore-v2";

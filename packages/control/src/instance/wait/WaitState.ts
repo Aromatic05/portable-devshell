@@ -8,7 +8,7 @@ import type {
     WaitStatus,
 } from "@portable-devshell/shared";
 
-const MAX_TERMINAL_WAITS = 256;
+const MAX_TERMINAL_WAITS = 1_000;
 const RECOVERY_CLAIM_TTL_MS = 5 * 60_000;
 
 export interface WaitDocument {
@@ -237,21 +237,9 @@ export class WaitState {
     disableRecovery(document: WaitDocument, waitId: string): WaitTransition {
         return this.#update(document, waitId, (record) => {
             if (record.status === "consumed" || record.status === "cancelled") return record;
+            if (record.recoveryDisabledAt !== undefined) return record;
             const now = this.#now();
-            const {
-                recoveryClaimedAt: _claimedAt,
-                recoveryClaimId: _claimId,
-                recoveryGoalProgressEpoch: _goalProgressEpoch,
-                recoveryMessageAttemptedAt: _attemptedAt,
-                recoveryMessageId: _messageId,
-                ...rest
-            } = record;
-            return {
-                ...rest,
-                automaticRecovery: false,
-                recoveryDisabledAt: record.recoveryDisabledAt ?? now,
-                updatedAt: now,
-            };
+            return { ...record, automaticRecovery: false, recoveryDisabledAt: now, updatedAt: now };
         });
     }
 
@@ -324,8 +312,7 @@ export class WaitState {
         const terminal = document.waits
             .filter((record) => isTerminal(record.status))
             .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-            .slice(0, Math.max(0, maxTerminalWaits))
-            .map(compactTerminalRecord);
+            .slice(0, Math.max(0, maxTerminalWaits));
         return {
             version: 1,
             waits: [...active, ...terminal].sort((left, right) => left.createdAt.localeCompare(right.createdAt)),
@@ -429,11 +416,6 @@ function normalizeRecord(value: unknown): WaitRecord {
 
 function isTerminal(status: WaitStatus): boolean {
     return status === "consumed" || status === "cancelled";
-}
-
-function compactTerminalRecord(record: WaitRecord): WaitRecord {
-    const { payload: _payload, result: _result, ...retained } = record;
-    return retained;
 }
 
 function migrateDeliveredRecovery(record: WaitRecord): WaitRecord {

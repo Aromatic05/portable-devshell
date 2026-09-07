@@ -1,17 +1,11 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
 import type { ConfigBatchUpdateRequest, ConfigDraft } from "@portable-devshell/shared";
 
 import { isCliEntrypoint } from "./CliEntrypoint.js";
 import { CliParser, type CliParsedCommand } from "./CliParser.js";
+import { agentWebView } from "./command/agent/CliCommandAgentWeb.js";
 import { executeArtifactCommand } from "./command/artifact/CliCommandArtifact.js";
-import { executeSecretCommand } from "./command/secret/CliCommandSecretScan.js";
-import { executeSkillCommand } from "./command/skill/CliCommandSkill.js";
 import {
     createCliClients as createControlClients,
     negotiateCliControl,
@@ -24,7 +18,7 @@ import { CliCommandWatchStatus } from "./command/watch/CliCommandWatchStatus.js"
 import { cliExitCodes } from "./exit/CliExitCode.js";
 import { CliExitMapper } from "./exit/CliExitMapper.js";
 import { renderCliError } from "./render/CliRenderError.js";
-import { renderCliTopicUsage, renderCliUsage, renderInstanceUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
+import { renderAgentUsage, renderCliTopicUsage, renderCliUsage, renderInstanceUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
 import { renderControlLogs } from "./render/control/CliRenderControlLogs.js";
 import { renderControlStatus } from "./render/control/CliRenderControlStatus.js";
 import { renderInstanceList } from "./render/instance/CliRenderInstanceList.js";
@@ -114,9 +108,6 @@ export class CliMain {
             await negotiateCliControl(this.#clients);
         }
         switch (command.kind) {
-            case "version":
-                this.#stdout.write(`devshell ${resolvePortableDevshellApplicationVersion()}\n`);
-                return;
             case "help":
                 this.#stdout.write(`${command.topic === undefined ? renderCliUsage() : renderCliTopicUsage(command.topic)}\n`);
                 return;
@@ -223,28 +214,6 @@ export class CliMain {
             case "context.renew":
                 this.#writeJson(await this.#clients.context.renew(command.ctxId));
                 return;
-            case "debug.targets":
-                this.#writeJson(await this.#clients.debug.targets());
-                return;
-            case "debug.list":
-                this.#writeJson(await this.#clients.debug.list());
-                return;
-            case "debug.load":
-                this.#writeJson(await this.#clients.debug.load({
-                    scope: {
-                        ctxId: command.ctxId,
-                        ...(command.toolName === undefined ? {} : { toolName: command.toolName }),
-                    },
-                    source: await readFile(command.file, "utf8"),
-                    target: command.target,
-                }));
-                return;
-            case "debug.release":
-                this.#writeJson(await this.#clients.debug.release(command.patchId));
-                return;
-            case "debug.unload":
-                this.#writeJson(await this.#clients.debug.unload(command.patchId));
-                return;
             case "tool.calls":
                 this.#writeJson(
                     await this.#clients.tool.listCalls(
@@ -265,11 +234,60 @@ export class CliMain {
             case "artifact":
                 await executeArtifactCommand(command.args, this.#clients.artifact, this.#stdout);
                 return;
-            case "secret":
-                await executeSecretCommand(command.args, this.#stdout);
+            case "agent.help":
+                this.#stdout.write(`${renderAgentUsage()}\n`);
                 return;
-            case "skill":
-                await executeSkillCommand(command.args, this.#stdout, { home: this.#homeDirectory });
+            case "agent.list":
+                this.#writeJson(await this.#clients.agent.list());
+                return;
+            case "agent.web":
+                this.#writeJson(agentWebView(await this.#clients.config.get()));
+                return;
+            case "agent.show": {
+                const web = agentWebView(await this.#clients.config.get());
+                this.#writeJson({ ...await this.#clients.agent.get(command.agentId), ...web });
+                return;
+            }
+            case "agent.start": {
+                const web = agentWebView(await this.#clients.config.get());
+                this.#writeJson({ ...await this.#clients.agent.start({
+                    target: command.target,
+                    ...(command.provider === undefined ? {} : { provider: command.provider })
+                }), ...web });
+                return;
+            }
+            case "agent.send": {
+                const web = agentWebView(await this.#clients.config.get());
+                await this.#clients.agent.prompt({ agentId: command.agentId, message: command.message });
+                this.#writeJson({ accepted: true, ...web });
+                return;
+            }
+            case "agent.steer": {
+                const web = agentWebView(await this.#clients.config.get());
+                await this.#clients.agent.steer({ agentId: command.agentId, message: command.message });
+                this.#writeJson({ accepted: true, ...web });
+                return;
+            }
+            case "agent.followUp": {
+                const web = agentWebView(await this.#clients.config.get());
+                await this.#clients.agent.followUp({ agentId: command.agentId, message: command.message });
+                this.#writeJson({ accepted: true, ...web });
+                return;
+            }
+            case "agent.abort": {
+                const web = agentWebView(await this.#clients.config.get());
+                await this.#clients.agent.abort(command.agentId);
+                this.#writeJson({ accepted: true, ...web });
+                return;
+            }
+            case "agent.reload": {
+                const web = agentWebView(await this.#clients.config.get());
+                await this.#clients.agent.reload(command.agentId);
+                this.#writeJson({ reloaded: true, ...web });
+                return;
+            }
+            case "agent.stop":
+                this.#writeJson(await this.#clients.agent.stop(command.agentId));
                 return;
             case "tui":
                 await this.#startTui();
@@ -473,7 +491,7 @@ function commandUsesControlClient(command: CliParsedCommand): boolean {
         command.kind.startsWith("approval.") ||
         command.kind.startsWith("oauth.") ||
         command.kind.startsWith("context.") ||
-        command.kind.startsWith("debug.") ||
+        command.kind.startsWith("agent.") ||
         command.kind.startsWith("tool.") ||
         command.kind.startsWith("todo.")
     ) {
@@ -482,29 +500,4 @@ function commandUsesControlClient(command: CliParsedCommand): boolean {
     return (command.kind.startsWith("instance.") &&
             command.kind !== "instance.help") ||
         (command.kind.startsWith("watch.") && command.kind !== "watch.help");
-}
-
-function resolvePortableDevshellApplicationVersion(startUrl = import.meta.url): string {
-    let directory = dirname(fileURLToPath(startUrl));
-    while (true) {
-        const manifestPath = join(directory, "package.json");
-        try {
-            const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
-                name?: unknown;
-                version?: unknown;
-            };
-            if (manifest.name === "portable-devshell") {
-                if (typeof manifest.version !== "string" || manifest.version.length === 0) {
-                    throw new Error(`Application package version is invalid: ${manifestPath}`);
-                }
-                return manifest.version;
-            }
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        }
-        const parent = dirname(directory);
-        if (parent === directory) break;
-        directory = parent;
-    }
-    throw new Error("Cannot locate portable-devshell application package manifest.");
 }

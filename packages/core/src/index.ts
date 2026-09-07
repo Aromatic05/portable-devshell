@@ -1,5 +1,6 @@
 export { InstancePaths } from "./instance/InstancePaths.js";
 export type { WorkerCommandInteractiveSession } from "./worker/command/WorkerCommandTransport.js";
+export { WorkerHandle } from "./worker/handle/WorkerHandle.js";
 export { WorkerInstance } from "./worker/instance/WorkerInstance.js";
 export type { WorkerInstanceConfig } from "./worker/instance/WorkerInstanceConfig.js";
 export { WorkerInstanceFactory } from "./worker/instance/WorkerInstanceFactory.js";

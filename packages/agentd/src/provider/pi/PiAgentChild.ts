@@ -1,0 +1,255 @@
+import { mkdir } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+
+import {
+    appendDevshellRemoteWorkspacePrompt,
+    openDevshellPiWorkspaceBridge,
+    type DevshellPiWorkspaceBridge,
+    type PiExtensionApiLike
+} from "@portable-devshell/pi-extension";
+import type { AgentTarget } from "@portable-devshell/shared";
+
+import { PiGuiWeb } from "./PiGuiWeb.js";
+import { mergeManagedPiProjectPrompts, mergeManagedPiProjectSkills } from "./PiAgentResources.js";
+import { PiSdkLoader, type PiModelRuntimeLike, type PiSdkModule, type PiSessionLike } from "./PiSdkLoader.js";
+import type {
+    PiChildAgentCommandMessage,
+    PiChildAgentStartMessage,
+    PiChildInitMessage,
+    PiParentMessage
+} from "./PiProcessProtocol.js";
+import { deliverPiAgentMessage } from "./PiAgentCommands.js";
+import { disposeManagedPiAgent } from "./PiAgentLifecycle.js";
+
+interface ManagedPiAgent {
+    devshell: DevshellPiWorkspaceBridge;
+    localCwd: string;
+    session: PiSessionLike;
+    target: AgentTarget;
+}
+
+let agentDir: string | undefined;
+const agents = new Map<string, ManagedPiAgent>();
+let gui: PiGuiWeb | undefined;
+let modelRuntime: PiModelRuntimeLike | undefined;
+let sdk: PiSdkModule | undefined;
+
+process.on("message", (value: unknown) => {
+    const message = value as PiParentMessage;
+    void handleMessage(message).catch((error) => sendFailure(message, error));
+});
+process.once("disconnect", () => {
+    void shutdown().finally(() => process.exit(0));
+});
+
+async function handleMessage(message: PiParentMessage): Promise<void> {
+    switch (message.type) {
+        case "init": {
+            const upstream = await initialize(message);
+            send({ ok: true, type: "ready", webUpstream: upstream.toString() });
+            return;
+        }
+        case "agent.start":
+            await startAgent(message);
+            send({ id: message.id, ok: true, type: "result" });
+            return;
+        case "agent.command":
+            await commandAgent(message);
+            send({ id: message.id, ok: true, type: "result" });
+            return;
+        case "shutdown":
+            await shutdown();
+            send({ id: message.id, ok: true, type: "result" });
+            setImmediate(() => process.exit(0));
+            return;
+    }
+}
+
+async function initialize(input: PiChildInitMessage): Promise<URL> {
+    if (sdk !== undefined) throw new Error("Pi provider child is already initialized.");
+    sdk = await new PiSdkLoader().load(input.entrypoint);
+    agentDir = sdk.getAgentDir();
+    await mkdir(agentDir, { recursive: true });
+    modelRuntime = await sdk.ModelRuntime.create({
+        authPath: join(agentDir, "auth.json"),
+        modelsPath: join(agentDir, "models.json")
+    });
+    gui = await PiGuiWeb.start(input.webBasePath);
+    return gui.upstream;
+}
+
+async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
+    if (agents.has(input.agentId)) throw new Error(`Pi Agent already exists: ${input.agentId}`);
+    const activeSdk = requireSdk();
+    const activeAgentDir = requireAgentDir();
+    const activeModelRuntime = requireModelRuntime();
+    const activeGui = requireGui();
+    await mkdir(input.localCwd, { recursive: true });
+
+    const settingsManager = activeSdk.SettingsManager.create(input.localCwd, activeAgentDir);
+    const devshell = await openDevshellPiWorkspaceBridge({
+        autoStartControl: false,
+        cwd: input.localCwd,
+        target: input.target
+    });
+    try {
+        const remoteResources = await devshell.loadResources();
+        const managedExtension = async (pi: PiExtensionApiLike) => {
+            await devshell.extension(pi);
+            pi.on("session_shutdown", async (event) => {
+                if (event.reason === "reload") await devshell.refreshResources();
+            });
+        };
+        const resourceLoader = new activeSdk.DefaultResourceLoader({
+            agentDir: activeAgentDir,
+            agentsFilesOverride: (current: { agentsFiles: Array<{ content: string; path: string }> }) => ({
+                agentsFiles: [
+                    ...piUserContextFiles(current.agentsFiles, activeAgentDir),
+                    ...remoteResources.contextFiles
+                ]
+            }),
+            cwd: input.localCwd,
+            extensionFactories: [managedExtension],
+            noExtensions: true,
+            promptsOverride: (current: { diagnostics: unknown[]; prompts: Array<{ name: string; sourceInfo?: { scope?: string } }> }) =>
+                mergeManagedPiProjectPrompts(current, remoteResources.prompts),
+            settingsManager,
+            skillsOverride: (current: { diagnostics: unknown[]; skills: Array<{ name: string; sourceInfo?: { scope?: string } }> }) => {
+                const merged = mergeManagedPiProjectSkills(
+                    current,
+                    remoteResources.skills.map((skill) => skill.resource)
+                );
+                devshell.setActiveSkillNames(merged.remoteSkillNames);
+                return { diagnostics: merged.diagnostics, skills: merged.skills };
+            },
+            systemPromptOverride: (basePrompt: string | undefined) => appendDevshellRemoteWorkspacePrompt(
+                basePrompt ?? "",
+                input.target
+            )
+        });
+        await resourceLoader.reload();
+        const sessionManager = activeSdk.SessionManager.create(input.localCwd);
+        const created = await activeSdk.createAgentSession({
+            agentDir: activeAgentDir,
+            cwd: input.localCwd,
+            modelRuntime: activeModelRuntime,
+            noTools: "builtin",
+            resourceLoader,
+            sessionManager,
+            settingsManager
+        });
+        const session = created.session;
+        try {
+            session.setSessionName?.(`${input.agentId} · ${input.target.instance}:${input.target.workspace}`);
+            activeGui.attach(session, input.localCwd);
+            agents.set(input.agentId, {
+                devshell,
+                localCwd: input.localCwd,
+                session,
+                target: { ...input.target }
+            });
+        } catch (error) {
+            session.dispose();
+            throw error;
+        }
+    } catch (error) {
+        await devshell.close().catch(() => undefined);
+        throw error;
+    }
+}
+
+function piUserContextFiles(
+    files: Array<{ content: string; path: string }>,
+    activeAgentDir: string
+): Array<{ content: string; path: string }> {
+    const root = resolve(activeAgentDir);
+    return files.filter((file) => dirname(resolve(file.path)) === root);
+}
+
+async function commandAgent(message: PiChildAgentCommandMessage): Promise<void> {
+    if (message.command === "stop") {
+        await stopAgent(message.agentId);
+        return;
+    }
+    const active = requireAgent(message.agentId).session;
+    switch (message.command) {
+        case "prompt":
+            await deliverPiAgentMessage(active, "prompt", requireMessage(message));
+            return;
+        case "steer":
+            await deliverPiAgentMessage(active, "steer", requireMessage(message));
+            return;
+        case "followUp":
+            await deliverPiAgentMessage(active, "followUp", requireMessage(message));
+            return;
+        case "abort":
+            await active.abort();
+            return;
+        case "reload":
+            if (active.isStreaming === true) throw new Error("Cannot reload a Pi Agent while a turn is active.");
+            await active.reload();
+            return;
+    }
+}
+
+async function stopAgent(agentId: string): Promise<void> {
+    const active = agents.get(agentId);
+    if (active === undefined) return;
+    agents.delete(agentId);
+    await disposeManagedPiAgent(active, requireGui());
+}
+
+async function shutdown(): Promise<void> {
+    for (const agentId of [...agents.keys()]) {
+        await stopAgent(agentId).catch(() => undefined);
+    }
+    await gui?.stop();
+    gui = undefined;
+    modelRuntime = undefined;
+    sdk = undefined;
+}
+
+function requireAgent(agentId: string): ManagedPiAgent {
+    const active = agents.get(agentId);
+    if (active !== undefined) return active;
+    throw new Error(`Unknown Pi Agent: ${agentId}`);
+}
+
+function requireSdk(): PiSdkModule {
+    if (sdk !== undefined) return sdk;
+    throw new Error("Pi provider child is not initialized.");
+}
+
+function requireAgentDir(): string {
+    if (agentDir !== undefined) return agentDir;
+    throw new Error("Pi provider child has no state directory.");
+}
+
+function requireModelRuntime(): PiModelRuntimeLike {
+    if (modelRuntime !== undefined) return modelRuntime;
+    throw new Error("Pi provider child model runtime is not initialized.");
+}
+
+function requireGui(): PiGuiWeb {
+    if (gui !== undefined) return gui;
+    throw new Error("Pi provider child WebUI is not initialized.");
+}
+
+function requireMessage(message: PiChildAgentCommandMessage): string {
+    if (typeof message.message === "string" && message.message.length > 0) return message.message;
+    throw new Error(`${message.command} requires a message.`);
+}
+
+
+function sendFailure(message: PiParentMessage, error: unknown): void {
+    const text = error instanceof Error ? error.message : String(error);
+    if (message.type === "init") {
+        send({ error: text, ok: false, type: "ready" });
+        return;
+    }
+    send({ error: text, id: message.id, ok: false, type: "result" });
+}
+
+function send(message: object): void {
+    process.send?.(message);
+}

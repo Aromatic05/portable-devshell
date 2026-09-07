@@ -4,7 +4,6 @@ import { controlRemoteRpcPath, controlWebBasePath } from "@portable-devshell/sha
 
 import { McpOAuthProtectedResource, type HttpHost } from "@portable-devshell/mcp";
 import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
-import { DebugPatchService } from "../../control/debug/DebugPatchService.js";
 import { OperationalOverviewService } from "../../control/overview/OperationalOverviewService.js";
 import { ControlChannelServer, type ControlChannelListener } from "../../server/channel/ControlChannelServer.js";
 import { ControlSocketListener } from "../../server/socket/ControlSocketListener.js";
@@ -13,12 +12,15 @@ import { ControlWebOAuthFlow } from "../../server/web/ControlWebOAuthFlow.js";
 import { ControlWebSessionService } from "../../server/web/ControlWebSessionService.js";
 import { ControlWebSocketAccessService } from "../../server/web/ControlWebSocketAccessService.js";
 import { ControlWebSocketListener } from "../../server/web/ControlWebSocketListener.js";
+import { AgentWebProxy } from "../../server/web/agent/AgentWebProxy.js";
 import { ControlRouteComposition } from "../ControlRouteComposition.js";
 import type { ControlRuntimeArtifact } from "./ControlRuntimeArtifact.js";
 import type { ControlRuntimeMcp } from "./ControlRuntimeMcp.js";
 import type { ControlRuntimeReverse } from "./ControlRuntimeReverse.js";
+import type { ControlRuntimeAgent } from "./ControlRuntimeAgent.js";
 
 export interface ControlRuntimeOptions {
+    agent?: ControlRuntimeAgent;
     artifact: ControlRuntimeArtifact;
     instances: InstanceRegistry;
     mcp: ControlRuntimeMcp;
@@ -35,9 +37,9 @@ interface ControlWebRuntime {
 }
 
 export class ControlRuntime {
+    readonly #agent?: ControlRuntimeAgent;
     readonly #artifact: ControlRuntimeArtifact;
     readonly #channels: ControlChannelServer;
-    readonly #debug: DebugPatchService;
     readonly #instances: InstanceRegistry;
     readonly #mcp: ControlRuntimeMcp;
     readonly #reverse: ControlRuntimeReverse;
@@ -48,16 +50,16 @@ export class ControlRuntime {
     #webFlowUninstall?: () => void;
 
     constructor(options: ControlRuntimeOptions) {
+        this.#agent = options.agent;
         this.#artifact = options.artifact;
         this.#instances = options.instances;
         this.#mcp = options.mcp;
         this.#reverse = options.reverse;
-        this.#debug = new DebugPatchService(options.instances);
         this.#routes = new ControlRouteComposition({
+            ...(options.agent === undefined ? {} : { agent: options.agent }),
             artifact: options.artifact.service,
             config: options.mcp.configEditor,
             contextAdmin: () => options.mcp.host?.contextAdmin,
-            debug: this.#debug,
             instanceCreate: options.mcp.instanceCreate,
             instances: options.instances,
             mcpStatus: () => options.mcp.status(),
@@ -68,11 +70,13 @@ export class ControlRuntime {
             }),
             restart: options.restart,
             reverse: options.reverse.service,
-            shutdown: options.shutdown,
-            toolProvenance: options.mcp.toolProvenance
+            shutdown: options.shutdown
         });
         this.#mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
-            await this.#debug.retireInstance(instance.name);
+            await this.#agent?.retireInstance(instance.name);
+        });
+        this.#mcp.configEditor.registerInstanceDisableRetirement?.(async (instance) => {
+            await this.#agent?.retireInstance(instance.name);
         });
         this.#mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
             await this.#routes.retireInstance(instance.name);
@@ -131,7 +135,7 @@ export class ControlRuntime {
     async stop(): Promise<void> {
         const failures: unknown[] = [];
         await this.#channels.close().catch((error) => failures.push(error));
-        await this.#debug.dispose().catch((error) => failures.push(error));
+        await this.#agent?.stopAll().catch((error) => failures.push(error));
         this.#webFlowUninstall?.();
         this.#webFlow = undefined;
         this.#webFlowUninstall = undefined;
@@ -174,6 +178,13 @@ export class ControlRuntime {
                       verifyBearer: async (token: string) => await flow.verifyAccessToken(token)
                   })
         });
+        const agentWebProxy = this.#agent === undefined
+            ? undefined
+            : new AgentWebProxy({
+                  agent: this.#agent,
+                  basePath: `${basePath}/agent`,
+                  loginPath: `${basePath}/`
+              });
         return {
             ...(flow === undefined ? {} : { flow }),
             host: http,
@@ -183,6 +194,9 @@ export class ControlRuntime {
                 basePath,
                 http,
                 remotePath: controlRemoteRpcPath(this.#mcp.webPublicBaseUrl),
+                ...(agentWebProxy === undefined
+                    ? {}
+                    : { routeInstaller: (host, webSessions) => agentWebProxy.install(host, webSessions) }),
                 sessions
             })
         };

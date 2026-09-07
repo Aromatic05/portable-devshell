@@ -13,13 +13,15 @@
             "@portable-devshell/shared/transport/frame": ["./packages/shared/src/transport/protocol/Frame.ts"],
             "@portable-devshell/core": ["./packages/core/src/index.ts"],
             "@portable-devshell/core/testing": ["./packages/core/src/testing.ts"],
+            "@portable-devshell/agentd": ["./packages/agentd/src/index.ts"],
             "@portable-devshell/control": ["./packages/control/src/index.ts"],
             "@portable-devshell/control/testing": ["./packages/control/src/testing.ts"],
             "@portable-devshell/mcp": ["./packages/mcp/src/index.ts"],
             "@portable-devshell/mcp/testing": ["./packages/mcp/src/testing.ts"],
             "@portable-devshell/cli": ["./packages/cli/src/index.ts"],
             "@portable-devshell/tui": ["./packages/tui/src/index.ts"],
-            "@portable-devshell/tui/testing": ["./packages/tui/src/testing.ts"]
+            "@portable-devshell/tui/testing": ["./packages/tui/src/testing.ts"],
+            "@portable-devshell/pi-extension": ["./packages/pi-extension/src/index.ts"]
         },
         "rootDir": "."
     },

@@ -386,38 +386,29 @@ export const workspaceGoalResultOutputSchema = objectSchema({
     goal: { anyOf: [{ type: "null" }, workspaceGoalOutputSchema] },
 }, ["goal"]);
 
-const workspaceReentryDeliveryOutputSchema = objectSchema({
-    kind: { enum: ["explicit", "goal", "wait"], type: "string" },
-    message: nonEmptyString,
+export const workspaceGoalContinuationOutputSchema = objectSchema({
+    attempted: booleanValue,
+    claimed: booleanValue,
+    claimId: nonEmptyString,
+    continuationCount: nonNegativeInteger,
     messageId: nonEmptyString,
-    modelContext: anyValue,
-    sourceId: nonEmptyString,
-}, ["kind", "message", "modelContext", "sourceId"]);
+    goal: { anyOf: [{ type: "null" }, workspaceGoalOutputSchema] },
+    valid: booleanValue,
+}, ["goal"]);
 
 export const workspaceReentryOutputSchema = objectSchema({
-    attempted: booleanValue,
     claimId: nonEmptyString,
     claimed: booleanValue,
-    delivery: workspaceReentryDeliveryOutputSchema,
     epoch: nonNegativeInteger,
-    executionActive: booleanValue,
-    executionEpoch: nonNegativeInteger,
-    executionLastActivityAt: stringValue,
-    executionLeaseUntil: stringValue,
     mode: { enum: ["automatic", "user_owned", "paused"], type: "string" },
-    nextAt: stringValue,
-    outcome: { enum: ["accepted", "rejected", "uncertain"], type: "string" },
     pending: booleanValue,
-    reported: booleanValue,
     reason: stringValue,
     released: booleanValue,
     resumed: booleanValue,
-    sourceId: nonEmptyString,
-    sourceKind: { enum: ["goal", "goal-resume", "goal-retry", "task-resume", "wait"], type: "string" },
     suppressed: booleanValue,
     suppressedAt: stringValue,
     valid: booleanValue,
-}, ["epoch", "executionActive", "executionEpoch", "pending"]);
+}, ["epoch", "pending"]);
 
 const workspaceQuestionWaitOutputSchema = objectSchema({
     automaticRecovery: booleanValue,
@@ -502,8 +493,19 @@ export const workspaceWaitInterruptOutputSchema = objectSchema({
 }, ["detached", "interrupted", "status", "tmuxTaskId", "waitId"]);
 
 export const workspaceWaitRecoveryOutputSchema = objectSchema({
+    attempted: { const: true, type: "boolean" },
+    claimId: nonEmptyString,
+    completed: { const: true, type: "boolean" },
     dismissed: { const: true, type: "boolean" },
+    goalId: nonEmptyString,
     kind: { enum: ["question", "tmux"], type: "string" },
+    recoveryGoalProgressEpoch: nonNegativeInteger,
+    recoveryMessageAttemptedAt: stringValue,
+    recoveryMessageId: nonEmptyString,
+    rejected: { const: true, type: "boolean" },
+    released: { const: true, type: "boolean" },
+    result: anyValue,
+    taskId: nonEmptyString,
     targetId: stringValue,
     waitId: nonEmptyString,
-}, ["dismissed", "kind", "targetId", "waitId"]);
+}, ["waitId"]);

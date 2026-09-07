@@ -49,6 +49,10 @@ export class HttpHost {
         string,
         (request: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>
     >();
+    readonly #upgradePrefixHandlers = new Map<
+        string,
+        (request: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>
+    >();
     #server?: Server;
 
     constructor(options: HttpHostOptions) {
@@ -80,7 +84,9 @@ export class HttpHost {
         });
         this.#server.on("upgrade", (request, socket, head) => {
             const pathname = readRequestPathname(request);
-            const handler = pathname === undefined ? undefined : this.#upgradeHandlers.get(pathname);
+            const handler = pathname === undefined
+                ? undefined
+                : this.#upgradeHandlers.get(pathname) ?? this.#findUpgradePrefixHandler(pathname);
             if (handler === undefined) {
                 socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
                 return;
@@ -157,6 +163,34 @@ export class HttpHost {
     ): () => void {
         let active = true;
         this.#app[method](path, (request: Request, response: Response, next: NextFunction) => {
+            if (!active) {
+                next();
+                return;
+            }
+            void Promise.resolve(handler(request as IncomingMessage, response as unknown as ServerResponse)).catch(
+                (error: unknown) => {
+                    if (!response.headersSent) {
+                        response.status(500).json({
+                            error: error instanceof Error ? error.message : "Internal server error"
+                        });
+                        return;
+                    }
+                    response.end();
+                }
+            );
+        });
+        return () => {
+            active = false;
+        };
+    }
+
+    registerRawPrefix(
+        path: string,
+        handler: (request: IncomingMessage, response: ServerResponse) => void | Promise<void>
+    ): () => void {
+        const prefix = normalizeRoutePrefix(path);
+        let active = true;
+        this.#app.use(prefix, (request: Request, response: Response, next: NextFunction) => {
             if (!active) {
                 next();
                 return;
@@ -261,6 +295,19 @@ export class HttpHost {
         return () => {
             if (this.#upgradeHandlers.get(path) === handler) {
                 this.#upgradeHandlers.delete(path);
+            }
+        };
+    }
+
+    registerUpgradePrefix(
+        path: string,
+        handler: (request: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>
+    ): () => void {
+        const prefix = normalizeRoutePrefix(path);
+        this.#upgradePrefixHandlers.set(prefix, handler);
+        return () => {
+            if (this.#upgradePrefixHandlers.get(prefix) === handler) {
+                this.#upgradePrefixHandlers.delete(prefix);
             }
         };
     }
@@ -447,6 +494,22 @@ export class HttpHost {
         url.hash = "";
         return url;
     }
+
+    #findUpgradePrefixHandler(
+        pathname: string
+    ): ((request: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>) | undefined {
+        let match: {
+            handler: (request: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>;
+            length: number;
+        } | undefined;
+        for (const [prefix, handler] of this.#upgradePrefixHandlers) {
+            if (!routePrefixMatches(pathname, prefix)) continue;
+            if (match === undefined || prefix.length > match.length) {
+                match = { handler, length: prefix.length };
+            }
+        }
+        return match?.handler;
+    }
 }
 
 class McpHttpInputError extends Error {
@@ -480,6 +543,15 @@ function readRequestPathname(request: IncomingMessage): string | undefined {
     } catch {
         return undefined;
     }
+}
+
+function normalizeRoutePrefix(path: string): string {
+    if (!path.startsWith("/")) throw new TypeError("HTTP route prefix must start with '/'.");
+    return path === "/" ? "/" : path.replace(/\/+$/u, "");
+}
+
+function routePrefixMatches(pathname: string, prefix: string): boolean {
+    return prefix === "/" || pathname === prefix || pathname.startsWith(`${prefix}/`);
 }
 
 function joinUrlPaths(basePathname: string, nextPathname: string): string {

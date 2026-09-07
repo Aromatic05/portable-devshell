@@ -6,7 +6,6 @@ export function renderCliUsage(): string {
         "",
         "Usage:",
         "  devshell [--verbose|--debug] <command>",
-        "  devshell --version",
         "",
         "Commands:",
         "  status                         Show Control status (default)",
@@ -19,7 +18,6 @@ export function renderCliUsage(): string {
         "  approval <command>             Review or decide tool approvals",
         "  oauth <command>                Inspect MCP OAuth and decide approvals",
         "  context <command>              Manage MCP contexts and messages",
-        "  debug <command>                Apply protected local runtime debug patches",
         "  tool <command>                 Inspect tool calls",
         "  todo <command>                 Manage Todo projects",
         "  tui                            Open the terminal UI",
@@ -28,6 +26,7 @@ export function renderCliUsage(): string {
         "  artifact <command>             Manage artifact shares and transfers",
         "  secret <command>               Scan local files for likely secrets",
         "  skill <command>                Discover and read layered Agent Skills",
+        "  agent <target|command>          Run and manage Agent providers",
         "  help                           Show this help",
         "",
         "Run `devshell <command> --help` for related usage.",
@@ -94,6 +93,22 @@ export function renderCliTopicUsage(topic: CliHelpTopic): string {
                 "  devshell todo delete <instance> <taskId>",
             ].join("\n");
     }
+}
+
+export function renderAgentUsage(): string {
+    return [
+        "Usage:",
+        "  devshell agent [--provider <id>] <instance:/workspace>",
+        "  devshell agent list",
+        "  devshell agent web",
+        "  devshell agent show <agentId>",
+        "  devshell agent send <agentId> <message>",
+        "  devshell agent steer <agentId> <message>",
+        "  devshell agent follow-up <agentId> <message>",
+        "  devshell agent abort <agentId>",
+        "  devshell agent reload <agentId>",
+        "  devshell agent stop <agentId>",
+    ].join("\n");
 }
 
 export function renderInstanceUsage(): string {

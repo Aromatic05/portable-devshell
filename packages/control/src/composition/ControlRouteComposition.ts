@@ -33,8 +33,10 @@ import { createTerminalRouteModule } from "../control/terminal/TerminalRouteModu
 import type { TerminalBackend } from "../control/terminal/TerminalProcess.js";
 import { TerminalSessionService } from "../control/terminal/TerminalSessionService.js";
 import { createToolRouteModule } from "../instance/tool/ToolRouteModule.js";
+import { createAgentRouteModule, type AgentControlPort } from "../control/agent/AgentRouteModule.js";
 
 export interface ControlRouteCompositionOptions {
+    agent?: AgentControlPort;
     artifact?: ArtifactService;
     config?: ConfigEditorPort;
     contextAdmin?: () => ContextAdminPort | undefined;
@@ -78,6 +80,7 @@ export class ControlRouteComposition {
 
     connectionClosed(connectionId: string): void {
         this.#subscriptions.unsubscribeConnection(connectionId);
+        void Promise.resolve(this.#options.agent?.connectionClosed?.(connectionId)).catch(() => undefined);
     }
 
     async retireInstance(instance: string): Promise<void> {
@@ -96,6 +99,7 @@ export class ControlRouteComposition {
             {
                 destination: "@control",
                 modules: [
+                    ...(this.#options.agent === undefined ? [] : [createAgentRouteModule(this.#options.agent)]),
                     createServiceRouteModule({
                         instanceCount: () => this.#options.instances.list().length,
                         restart: this.#options.restart,

@@ -112,103 +112,15 @@ test("Live Workspace reclaims PiP presentation after its iframe is refreshed", B
     await page.evaluate((html) => {
         const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
         if (iframe === null) throw new Error("Workspace iframe is missing.");
-        (window as unknown as Record<string, unknown>).__presentationWidgetState = {
-            modelContent: null,
-            privateContent: {},
-            imageIds: [],
-        };
-        iframe.srcdoc = html
-            .replace("var DISPLAY_MODE_TRANSITION_LEASE_MS = 2000;", "var DISPLAY_MODE_TRANSITION_LEASE_MS = 20;")
-            .replace("<script>", `<script>
-                window.openai = {
-                    get widgetState() { return window.parent.__presentationWidgetState; },
-                    setWidgetState: function (state) { window.parent.__presentationWidgetState = state; }
-                };
-            <\/script><script>`);
+        iframe.srcdoc = html;
     }, workspaceAppHtml);
 
     await page.waitForFunction("(window.__liveDisplayModeRequests || []).length === 1");
-    await page.waitForTimeout(40);
     const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
     if (frame === undefined) throw new Error("Workspace frame is missing.");
     await frame.evaluate(() => window.location.reload());
 
     await page.waitForFunction("(window.__liveDisplayModeRequests || []).length === 2");
-    assert.equal(await page.evaluate("window.__liveHostDisplayMode"), "pip");
-});
-
-test("Live Workspace consumes its own PiP remount once and only reclaims if Host settles inline", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
-
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT
-        .replace(
-            "window.__liveDisplayModeRequests = [];",
-            'window.__liveDisplayModeRequests = []; window.__liveHostDisplayMode = "inline"; window.__liveInitializeCount = 0;',
-        )
-        .replace('displayMode: "inline"', "displayMode: window.__liveHostDisplayMode")
-        .replace(
-            'if (message.method === "ui/initialize") {',
-            'if (message.method === "ui/initialize") { window.__liveInitializeCount += 1;',
-        )
-        .replace(
-            `source.postMessage({
-            jsonrpc: "2.0",
-            method: "ui/notifications/tool-result",`,
-            `if (false) source.postMessage({
-            jsonrpc: "2.0",
-            method: "ui/notifications/tool-result",`,
-        )
-        .replace(
-            `window.__liveDisplayModeRequests.push(message.params);
-        reply({ mode: "pip" });
-        return;`,
-            `window.__liveDisplayModeRequests.push(message.params);
-        window.__liveHostDisplayMode = "pip";
-        if (window.__liveDisplayModeRequests.length === 1) {
-            source.location.reload();
-            return;
-        }
-        reply({ mode: "pip" });
-        return;`,
-        );
-    await page.evaluate(bridge);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        (window as unknown as Record<string, unknown>).__presentationWidgetState = {
-            modelContent: null,
-            privateContent: {},
-            imageIds: [],
-        };
-        iframe.srcdoc = html.replace("<script>", `<script>
-            window.openai = {
-                get widgetState() { return window.parent.__presentationWidgetState; },
-                setWidgetState: function (state) { window.parent.__presentationWidgetState = state; }
-            };
-        <\/script><script>`);
-    }, workspaceAppHtml);
-
-    await page.waitForFunction("window.__liveInitializeCount >= 2");
-    await page.frameLocator("#workspace").getByText("Waiting for Workspace authorization", { exact: true }).waitFor({ state: "visible" });
-    await page.waitForTimeout(150);
-    assert.equal(await page.evaluate("window.__liveDisplayModeRequests.length"), 1);
-    assert.equal(await page.evaluate("window.__liveInitializeCount"), 2);
-    assert.equal(await page.evaluate("window.__liveHostDisplayMode"), "pip");
-
-    await page.evaluate(() => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe?.contentWindow === null || iframe?.contentWindow === undefined) throw new Error("Workspace frame is missing.");
-        iframe.contentWindow.postMessage({
-            jsonrpc: "2.0",
-            method: "ui/notifications/host-context-changed",
-            params: { displayMode: "inline" },
-        }, "*");
-    });
-    await page.waitForFunction("window.__liveDisplayModeRequests.length === 2");
-    assert.equal(await page.evaluate("window.__liveInitializeCount"), 2);
     assert.equal(await page.evaluate("window.__liveHostDisplayMode"), "pip");
 });
 
@@ -218,15 +130,10 @@ test("Live Workspace completes its initial PiP claim when Host capabilities arri
 
     const page = await browser.newPage();
     await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT
-        .replace(
-            'hostContext: { availableDisplayModes: ["inline", "pip"], displayMode: "inline" },',
-            'hostContext: { displayMode: "inline" },',
-        )
-        .replace(
-            'if (message.method === "ui/initialize") {',
-            'if (message.method === "ui/initialize") { window.__lateCapabilityInitializeCount = (window.__lateCapabilityInitializeCount || 0) + 1;',
-        );
+    const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT.replace(
+        'hostContext: { availableDisplayModes: ["inline", "pip"], displayMode: "inline" },',
+        'hostContext: { displayMode: "inline" },',
+    );
     await page.evaluate(bridge);
     await page.evaluate((html) => {
         const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
@@ -234,7 +141,7 @@ test("Live Workspace completes its initial PiP claim when Host capabilities arri
         iframe.srcdoc = html;
     }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__lateCapabilityInitializeCount || 0) === 1");
+    await page.waitForTimeout(100);
     assert.equal(await page.evaluate("(window.__liveDisplayModeRequests || []).length"), 0);
     await page.evaluate(() => {
         const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
@@ -532,7 +439,7 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (call.name === "workspace_watch") return;
-    if (call.name === "workspace_task") {
+    if (call.name === "workspace_task_control") {
         var taskId = String(call.arguments.taskId);
         var task = window.__orderingTasks[taskId];
         task.status = call.arguments.action === "pause" ? "paused" : task.status;
@@ -941,11 +848,11 @@ test("Workspace refreshes authoritative state after a stale Goal action is fence
         arguments?: Record<string, unknown>;
         name?: string;
     }>;
-    const stop = calls.find((call) => call.name === "workspace_stop");
+    const stop = calls.find((call) => call.name === "workspace_goal_stop");
     assert.equal(stop?.arguments?.goalId, "goal-A");
     assert.equal(stop?.arguments?.revision, 1);
     assert.equal(stop?.arguments?.token, "stale-goal-token");
-    assert.equal(calls.filter((call) => call.name === "workspace_stop").length, 1);
+    assert.equal(calls.filter((call) => call.name === "workspace_goal_stop").length, 1);
 });
 
 test("Workspace clears task cancel confirmation when the authoritative task revision changes", BROWSER_TEST_OPTIONS, async (t) => {
@@ -968,7 +875,7 @@ test("Workspace clears task cancel confirmation when the authoritative task revi
     await app.getByText("Task · Updated work", { exact: true }).waitFor({ state: "visible" });
     await app.getByRole("button", { name: "Cancel task", exact: true }).waitFor({ state: "visible" });
     assert.equal(await app.getByRole("button", { name: "Confirm cancel", exact: true }).count(), 0);
-    assert.equal(await page.evaluate("(window.__staleTaskConfirmCalls || []).some(call => call.name === 'workspace_task')"), false);
+    assert.equal(await page.evaluate("(window.__staleTaskConfirmCalls || []).some(call => call.name === 'workspace_task_control')"), false);
 });
 
 const STALE_TASK_CONFIRM_BRIDGE_SCRIPT = String.raw`
@@ -1036,7 +943,7 @@ window.addEventListener("message", function (event) {
         window.__staleTaskConfirmWatch = { id: message.id, source: source };
         return;
     }
-    if (call.name === "workspace_task") {
+    if (call.name === "workspace_task_control") {
         reply({ structuredContent: { taskId: call.arguments.taskId } });
     }
 });
@@ -1099,7 +1006,7 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (call.name === "workspace_watch") return;
-    if (call.name === "workspace_stop") {
+    if (call.name === "workspace_goal_stop") {
         window.__staleGoalVersion = 2;
         reject("Workspace Goal changed from goal-A to goal-B; refresh before retrying.");
     }
@@ -1120,23 +1027,28 @@ test("Workspace fences an ambiguous detached-wait resume instead of replaying it
     }, workspaceAppHtml);
 
     await mount();
-    await page.waitForFunction("(window.__waitAmbiguousMessages || []).length === 1");
-    await page.waitForFunction("(window.__waitAmbiguousReports || []).length === 1");
-    assert.equal(await page.evaluate("window.__waitAmbiguousReports[0].outcome"), "uncertain");
-    assert.equal(await page.evaluate("window.__waitAmbiguousConsumed"), true);
-    assert.deepEqual(
-        await page.evaluate("(window.__waitAmbiguousCalls || []).filter(call => call.name === 'workspace_reentry').slice(-4).map(call => call.arguments.action)"),
-        ["claim", "validate", "attempt", "report"],
-    );
-    assert.equal(
-        await page.evaluate("(window.__waitAmbiguousCalls || []).filter(call => call.name === 'workspace_recover').length"),
-        0,
-    );
+    const app = page.frameLocator("#workspace");
+    await app.getByText("Delivery uncertain", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("Automatic retry stopped to avoid duplicate agent execution.", { exact: true }).waitFor({ state: "visible" });
+    assert.equal(await page.evaluate("(window.__waitAmbiguousMessages || []).length"), 1);
 
     await mount();
+    await app.getByText("Delivery uncertain", { exact: true }).waitFor({ state: "visible" });
     await page.waitForTimeout(250);
     assert.equal(await page.evaluate("(window.__waitAmbiguousMessages || []).length"), 1);
-    assert.equal(await page.evaluate("(window.__waitAmbiguousReports || []).length"), 1);
+    const beforeDismiss = await page.evaluate(
+        "(window.__waitAmbiguousCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)",
+    );
+    assert.deepEqual(beforeDismiss, ["claim", "attempt"]);
+
+    await app.getByRole("button", { name: "Dismiss automatic resume", exact: true }).click();
+    await page.waitForFunction("window.__waitAmbiguousDismissed === true");
+    await app.getByText("Delivery uncertain", { exact: true }).waitFor({ state: "detached" });
+    const actions = await page.evaluate(
+        "(window.__waitAmbiguousCalls || []).filter(call => call.name === 'workspace_wait_recover').map(call => call.arguments.action)",
+    );
+    assert.deepEqual(actions, ["claim", "attempt", "dismiss"]);
+    assert.equal(await page.evaluate("(window.__waitAmbiguousMessages || []).length"), 1);
 });
 
 test("Workspace fences an ambiguous Goal continuation instead of replaying it", BROWSER_TEST_OPTIONS, async (t) => {
@@ -1154,65 +1066,37 @@ test("Workspace fences an ambiguous Goal continuation instead of replaying it", 
 
     await mount();
     const app = page.frameLocator("#workspace");
-    await page.waitForFunction("(window.__goalAmbiguousMessages || []).length === 1");
-    await page.waitForFunction("(window.__goalAmbiguousReports || []).length === 1");
-    assert.equal(await page.evaluate("window.__goalAmbiguousReports[0].outcome"), "uncertain");
     await app.getByText("Delivery uncertain", { exact: true }).waitFor({ state: "visible" });
     await app.getByText("Continuation delivery uncertain", { exact: true }).waitFor({ state: "visible" });
-    const goalReportClaimId = await page.evaluate("window.__goalAmbiguousReports[0].claimId") as string;
+    assert.equal(await page.evaluate("(window.__goalAmbiguousMessages || []).length"), 1);
     assert.deepEqual(
-        await page.evaluate((claimId) => {
-            const state = window as typeof window & {
-                __goalAmbiguousCalls?: Array<{ arguments: Record<string, unknown>; name: string }>;
-            };
-            return (state.__goalAmbiguousCalls || [])
-                .filter((call) => call.name === "workspace_reentry" && call.arguments.claimId === claimId)
-                .map((call) => call.arguments.action);
-        }, goalReportClaimId),
-        ["claim", "validate", "attempt", "report"],
-    );
-    assert.equal(
-        await page.evaluate("(window.__goalAmbiguousCalls || []).filter(call => call.name === 'workspace_goal_continue').length"),
-        0,
+        await page.evaluate("(window.__goalAmbiguousCalls || []).filter(call => call.name === 'workspace_goal_continue').map(call => call.arguments.action)"),
+        ["claim", "validate", "attempt"],
     );
 
     await mount();
     await app.getByText("Delivery uncertain", { exact: true }).waitFor({ state: "visible" });
     await page.waitForTimeout(250);
     assert.equal(await page.evaluate("(window.__goalAmbiguousMessages || []).length"), 1);
-    assert.equal(await page.evaluate("(window.__goalAmbiguousReports || []).length"), 1);
+    assert.deepEqual(
+        await page.evaluate("(window.__goalAmbiguousCalls || []).filter(call => call.name === 'workspace_goal_continue').map(call => call.arguments.action)"),
+        ["claim", "validate", "attempt"],
+    );
 });
 
 const WAIT_AMBIGUOUS_BRIDGE_SCRIPT = String.raw`
 window.__waitAmbiguousReentryClaimId = "";
 window.__waitAmbiguousCalls = [];
 window.__waitAmbiguousMessages = [];
-window.__waitAmbiguousReports = [];
 window.__waitAmbiguousAttempted = false;
-window.__waitAmbiguousConsumed = false;
+window.__waitAmbiguousDismissed = false;
+window.__waitAmbiguousPendingWatch = null;
+window.__waitAmbiguousSnapshotDelivered = false;
 
-function waitAmbiguousContinuation() {
-    return {
-        kind: "wait",
-        reason: "tmux-finished",
-        wait: { kind: "tmux", taskId: "task-ambiguous", waitId: "wait-ambiguous" },
-        result: { task: { id: "tmux-ambiguous", status: "0" } },
-        suspendedOperation: { kind: "tmux-wait", taskId: "tmux-ambiguous" },
-        nextOperation: { kind: "tool", taskId: "tmux-ambiguous", tool: "tmux_read" },
-        constraints: { restartTask: false }
-    };
-}
-function waitAmbiguousModelContext() {
-    var state = { ctxId: "ctx-wait-ambiguous", continuation: waitAmbiguousContinuation() };
-    return {
-        content: [{ type: "text", text: "portable-devshell durable Workspace state:\n" + JSON.stringify(state, null, 2) }],
-        structuredContent: { portableDevshellWorkspace: state }
-    };
-}
 function waitAmbiguousSnapshot() {
     return {
         approvals: [],
-        background: window.__waitAmbiguousConsumed ? [] : [{
+        background: window.__waitAmbiguousDismissed ? [] : [{
             detachedAt: "2026-08-29T12:00:00.000Z",
             recoveryMessageAttemptedAt: window.__waitAmbiguousAttempted ? "2026-08-29T12:00:01.000Z" : undefined,
             recoveryMessageId: window.__waitAmbiguousAttempted ? "resume-message-ambiguous" : undefined,
@@ -1224,20 +1108,10 @@ function waitAmbiguousSnapshot() {
         }],
         ctxId: "ctx-wait-ambiguous",
         currentEvent: null,
-        cursor: window.__waitAmbiguousConsumed ? 2 : 1,
+        cursor: window.__waitAmbiguousAttempted ? 2 : 1,
         goal: null,
         instance: "browser-instance",
         questions: [],
-        reentry: {
-            attempted: window.__waitAmbiguousAttempted,
-            claimId: window.__waitAmbiguousReentryClaimId || undefined,
-            epoch: 0,
-            executionActive: false,
-            executionEpoch: 0,
-            pending: !!window.__waitAmbiguousReentryClaimId,
-            sourceId: window.__waitAmbiguousReentryClaimId ? "wait-ambiguous" : undefined,
-            sourceKind: window.__waitAmbiguousReentryClaimId ? "wait" : undefined
-        },
         tasks: [{
             completed: 1,
             currentItem: "Continue work manually",
@@ -1250,6 +1124,7 @@ function waitAmbiguousSnapshot() {
         }]
     };
 }
+
 window.addEventListener("message", function (event) {
     if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
     var source = event.source;
@@ -1263,7 +1138,11 @@ window.addEventListener("message", function (event) {
         source.postMessage({ error: { code: -32001, message: messageText }, id: message.id, jsonrpc: "2.0" }, "*");
     }
     if (message.method === "ui/initialize") {
-        source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-input", params: { arguments: { ctxId: "ctx-wait-ambiguous" } } }, "*");
+        source.postMessage({
+            jsonrpc: "2.0",
+            method: "ui/notifications/tool-input",
+            params: { arguments: { ctxId: "ctx-wait-ambiguous" } }
+        }, "*");
         source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: {
             _meta: { "portable-devshell/workspace": { token: "wait-ambiguous-token" } },
             structuredContent: { ctxId: "ctx-wait-ambiguous", instance: "browser-instance" }
@@ -1284,54 +1163,67 @@ window.addEventListener("message", function (event) {
         reply({ _meta: { "portable-devshell/workspace": { token: "wait-ambiguous-token" } }, structuredContent: waitAmbiguousSnapshot() });
         return;
     }
-    if (call.name === "workspace_watch") return;
-    if (call.name === "workspace_reentry") {
-        var action = call.arguments.action;
-        if (action === "claim") {
-            var claimed = !window.__waitAmbiguousConsumed && !window.__waitAmbiguousAttempted && !window.__waitAmbiguousReentryClaimId;
-            if (claimed) window.__waitAmbiguousReentryClaimId = call.arguments.claimId;
-            reply({ structuredContent: Object.assign(waitAmbiguousSnapshot().reentry, {
-                claimId: call.arguments.claimId,
-                claimed: claimed,
-                delivery: claimed ? {
-                    kind: "wait",
-                    message: "Resume the existing execution from the Workspace continuation context.\n\nPerform the continuation operation, then continue the suspended work from its result.",
-                    messageId: "resume-message-ambiguous",
-                    modelContext: waitAmbiguousModelContext(),
-                    sourceId: "wait-ambiguous"
-                } : undefined
-            }) });
+    if (call.name === "workspace_watch") {
+        window.__waitAmbiguousPendingWatch = { id: message.id, source: source };
+        return;
+    }
+    if (call.name === "workspace_reentry_control") {
+        if (call.arguments.action === "claim") {
+            window.__waitAmbiguousReentryClaimId = call.arguments.claimId;
+            reply({ structuredContent: { claimId: window.__waitAmbiguousReentryClaimId, claimed: true, epoch: 0, pending: true } });
             return;
         }
-        if (action === "validate") {
-            reply({ structuredContent: Object.assign(waitAmbiguousSnapshot().reentry, {
-                valid: !window.__waitAmbiguousConsumed && window.__waitAmbiguousReentryClaimId === call.arguments.claimId
-            }) });
+        if (call.arguments.action === "validate") {
+            reply({ structuredContent: { claimId: window.__waitAmbiguousReentryClaimId, epoch: 0, pending: true, valid: window.__waitAmbiguousReentryClaimId === call.arguments.claimId } });
             return;
         }
-        if (action === "attempt") {
-            window.__waitAmbiguousAttempted = window.__waitAmbiguousReentryClaimId === call.arguments.claimId;
-            reply({ structuredContent: Object.assign(waitAmbiguousSnapshot().reentry, { attempted: window.__waitAmbiguousAttempted }) });
-            return;
-        }
-        if (action === "report") {
-            window.__waitAmbiguousReports.push(call.arguments);
-            window.__waitAmbiguousConsumed = true;
-            window.__waitAmbiguousAttempted = false;
+        if (call.arguments.action === "release") {
             window.__waitAmbiguousReentryClaimId = "";
+            reply({ structuredContent: { epoch: 0, pending: false, released: true } });
+            return;
+        }
+        reply({ structuredContent: { epoch: 0, pending: !!window.__waitAmbiguousReentryClaimId } });
+        return;
+    }
+    if (call.name === "workspace_wait_recover") {
+        if (call.arguments.action === "claim") {
             reply({ structuredContent: {
-                attempted: false, epoch: 0, executionActive: true, executionEpoch: 1,
-                outcome: call.arguments.outcome, pending: false, reported: true
+                claimId: "wait-ambiguous-claim",
+                kind: "tmux",
+                recoveryMessageId: "resume-message-ambiguous",
+                result: { task: { status: "0" } },
+                taskId: "task-ambiguous",
+                targetId: "tmux-ambiguous",
+                waitId: "wait-ambiguous"
             } });
             return;
         }
-        if (action === "release") {
-            if (!window.__waitAmbiguousAttempted && window.__waitAmbiguousReentryClaimId === call.arguments.claimId) window.__waitAmbiguousReentryClaimId = "";
-            reply({ structuredContent: { attempted: false, epoch: 0, executionActive: false, executionEpoch: 0, pending: false, released: true } });
+        if (call.arguments.action === "attempt") {
+            window.__waitAmbiguousAttempted = true;
+            reply({ structuredContent: {
+                attempted: true,
+                recoveryMessageAttemptedAt: "2026-08-29T12:00:01.000Z",
+                recoveryMessageId: "resume-message-ambiguous",
+                waitId: "wait-ambiguous"
+            } });
+            var pending = window.__waitAmbiguousPendingWatch;
+            if (pending && !window.__waitAmbiguousSnapshotDelivered) {
+                window.__waitAmbiguousPendingWatch = null;
+                window.__waitAmbiguousSnapshotDelivered = true;
+                pending.source.postMessage({
+                    id: pending.id,
+                    jsonrpc: "2.0",
+                    result: { structuredContent: { changed: true, cursor: 2, snapshot: waitAmbiguousSnapshot() } }
+                }, "*");
+            }
             return;
         }
-        reply({ structuredContent: waitAmbiguousSnapshot().reentry });
-        return;
+        if (call.arguments.action === "dismiss") {
+            window.__waitAmbiguousDismissed = true;
+            reply({ structuredContent: { dismissed: true, kind: "tmux", targetId: "tmux-ambiguous", waitId: "wait-ambiguous" } });
+            return;
+        }
+        reject("unsafe recovery action after ambiguous delivery: " + call.arguments.action);
     }
 });
 `;
@@ -1340,7 +1232,6 @@ const GOAL_AMBIGUOUS_BRIDGE_SCRIPT = String.raw`
 window.__goalAmbiguousReentryClaimId = "";
 window.__goalAmbiguousCalls = [];
 window.__goalAmbiguousMessages = [];
-window.__goalAmbiguousReports = [];
 window.__goalAmbiguousAttempted = false;
 
 function goalAmbiguousGoal() {
@@ -1356,7 +1247,6 @@ function goalAmbiguousGoal() {
         createdAt: "2026-08-29T12:00:00.000Z",
         goalId: "goal-ambiguous",
         lastAgentActivityAt: "2026-08-29T12:00:00.000Z",
-        lastProgressAt: "2026-08-29T12:00:00.000Z",
         maxContinuations: 10,
         objective: "Continue without duplicate dispatch",
         revision: 1,
@@ -1365,34 +1255,10 @@ function goalAmbiguousGoal() {
         updatedAt: "2026-08-29T12:00:00.000Z"
     };
 }
-function goalAmbiguousContinuation() {
-    var terminal = { id: "finish-goal", kind: "goal-terminal", status: "pending", text: "Complete the Goal." };
-    return {
-        kind: "goal", goalId: "goal-ambiguous", objective: "Continue without duplicate dispatch",
-        orderedItems: [{ id: "work", status: "active", text: "Continue work" }, terminal],
-        currentItem: { id: "work", status: "active", text: "Continue work" }, nextItem: terminal, attempt: 1
-    };
-}
-function goalAmbiguousModelContext() {
-    var state = { ctxId: "ctx-goal-ambiguous", continuation: goalAmbiguousContinuation(), goal: goalAmbiguousGoal() };
-    return {
-        content: [{ type: "text", text: "portable-devshell durable Workspace state:\n" + JSON.stringify(state, null, 2) }],
-        structuredContent: { portableDevshellWorkspace: state }
-    };
-}
 function goalAmbiguousSnapshot() {
     return {
         approvals: [], background: [], ctxId: "ctx-goal-ambiguous", currentEvent: null,
-        cursor: 1, goal: goalAmbiguousGoal(), instance: "browser-instance", questions: [],
-        reentry: {
-            attempted: window.__goalAmbiguousAttempted,
-            claimId: window.__goalAmbiguousReentryClaimId || undefined,
-            epoch: 0, executionActive: false, executionEpoch: 0,
-            pending: !!window.__goalAmbiguousReentryClaimId,
-            sourceId: window.__goalAmbiguousReentryClaimId ? "goal-ambiguous" : undefined,
-            sourceKind: window.__goalAmbiguousReentryClaimId ? "goal" : undefined
-        },
-        tasks: []
+        cursor: 1, goal: goalAmbiguousGoal(), instance: "browser-instance", questions: [], tasks: []
     };
 }
 window.addEventListener("message", function (event) {
@@ -1429,57 +1295,51 @@ window.addEventListener("message", function (event) {
         reply({ _meta: { "portable-devshell/workspace": { token: "goal-ambiguous-token" } }, structuredContent: goalAmbiguousSnapshot() });
         return;
     }
-    if (call.name === "workspace_watch") return;
-    if (call.name === "workspace_reentry") {
-        var action = call.arguments.action;
-        if (action === "claim") {
-            var claimed = !window.__goalAmbiguousAttempted && !window.__goalAmbiguousReentryClaimId;
-            if (claimed) window.__goalAmbiguousReentryClaimId = call.arguments.claimId;
-            reply({ structuredContent: Object.assign(goalAmbiguousSnapshot().reentry, {
-                claimId: call.arguments.claimId,
-                claimed: claimed,
-                delivery: claimed ? {
-                    kind: "goal",
-                    message: "Finish the current Goal item shown in the Workspace context.\n\nThen immediately continue with the next Goal item.\n\nDo not stop after completing or reporting the current item.",
-                    messageId: "goal-message-ambiguous",
-                    modelContext: goalAmbiguousModelContext(),
-                    sourceId: "goal-ambiguous"
-                } : undefined
-            }) });
+    if (call.name === "workspace_watch") {
+        window.__goalAmbiguousPendingWatch = { id: message.id, source: source };
+        return;
+    }
+    if (call.name === "workspace_reentry_control") {
+        if (call.arguments.action === "claim") {
+            window.__goalAmbiguousReentryClaimId = call.arguments.claimId;
+            reply({ structuredContent: { claimId: window.__goalAmbiguousReentryClaimId, claimed: true, epoch: 0, pending: true } });
             return;
         }
-        if (action === "validate") {
-            reply({ structuredContent: Object.assign(goalAmbiguousSnapshot().reentry, {
-                valid: window.__goalAmbiguousReentryClaimId === call.arguments.claimId && !window.__goalAmbiguousAttempted
-            }) });
+        if (call.arguments.action === "validate") {
+            reply({ structuredContent: { claimId: window.__goalAmbiguousReentryClaimId, epoch: 0, pending: true, valid: window.__goalAmbiguousReentryClaimId === call.arguments.claimId } });
             return;
         }
-        if (action === "attempt") {
-            window.__goalAmbiguousAttempted = window.__goalAmbiguousReentryClaimId === call.arguments.claimId;
-            reply({ structuredContent: Object.assign(goalAmbiguousSnapshot().reentry, { attempted: window.__goalAmbiguousAttempted }) });
-            return;
-        }
-        if (action === "report") {
-            window.__goalAmbiguousReports.push(call.arguments);
+        if (call.arguments.action === "release") {
             window.__goalAmbiguousReentryClaimId = "";
+            reply({ structuredContent: { epoch: 0, pending: false, released: true } });
+            return;
+        }
+        reply({ structuredContent: { epoch: 0, pending: !!window.__goalAmbiguousReentryClaimId } });
+        return;
+    }
+    if (call.name === "workspace_goal_continue") {
+        if (call.arguments.action === "claim") {
             reply({ structuredContent: {
-                attempted: false, epoch: 0, executionActive: true, executionEpoch: 1,
-                outcome: call.arguments.outcome, pending: false, reported: true
+                claimed: true, claimId: call.arguments.claimId, continuationCount: 1,
+                goal: Object.assign({}, goalAmbiguousGoal(), { continuationDue: false, continuationMessageId: "goal-message-ambiguous", continuationPending: true })
             } });
             return;
         }
-        if (action === "release") {
-            if (!window.__goalAmbiguousAttempted && window.__goalAmbiguousReentryClaimId === call.arguments.claimId) window.__goalAmbiguousReentryClaimId = "";
-            reply({ structuredContent: { attempted: false, epoch: 0, executionActive: false, executionEpoch: 0, pending: false, released: true } });
+        if (call.arguments.action === "validate") {
+            reply({ structuredContent: { valid: true, goal: Object.assign({}, goalAmbiguousGoal(), { continuationDue: false, continuationMessageId: "goal-message-ambiguous", continuationPending: true }) } });
             return;
         }
-        reply({ structuredContent: goalAmbiguousSnapshot().reentry });
-        return;
+        if (call.arguments.action === "attempt") {
+            window.__goalAmbiguousAttempted = true;
+            reply({ structuredContent: { attempted: true, messageId: "goal-message-ambiguous", goal: goalAmbiguousGoal() } });
+            return;
+        }
+        reject("unsafe goal continuation replay: " + call.arguments.action);
     }
 });
 `;
 
-test("Workspace releases re-entry before dispatch when model context injection fails", BROWSER_TEST_OPTIONS, async (t) => {
+test("Workspace does not dispatch automatic recovery when model context injection fails", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
 
@@ -1497,31 +1357,21 @@ test("Workspace releases re-entry before dispatch when model context injection f
     const app = page.frameLocator("#workspace");
     await app.getByText("Resume after answer?", { exact: true }).waitFor({ state: "visible" });
     await app.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.waitForFunction("(window.__modelContextFailureActions || []).includes('release')");
-    const releaseClaimId = await page.evaluate(`
-        (window.__modelContextFailureCalls || [])
-            .find(call => call.name === "workspace_reentry" && call.arguments.action === "release")
-            ?.arguments.claimId
-    `) as string;
+    await page.waitForFunction("(window.__modelContextFailureActions || []).length >= 3");
     assert.deepEqual(
-        await page.evaluate((claimId) => {
-            const state = window as typeof window & {
-                __modelContextFailureCalls?: Array<{ arguments: Record<string, unknown>; name: string }>;
-            };
-            return (state.__modelContextFailureCalls || [])
-                .filter((call) => call.name === "workspace_reentry" && call.arguments.claimId === claimId)
-                .map((call) => call.arguments.action);
-        }, releaseClaimId),
-        ["claim", "validate", "release"],
+        await page.evaluate("window.__modelContextFailureActions || []"),
+        ["claim", "attempt", "reject"],
     );
     assert.equal(await page.evaluate("(window.__modelContextFailureMessages || []).length"), 0);
-    assert.equal(await page.evaluate("(window.__modelContextFailureActions || []).includes('attempt')"), false);
-    assert.equal(await page.evaluate("(window.__modelContextFailureActions || []).includes('report')"), false);
     await page.waitForTimeout(250);
+    assert.deepEqual(
+        await page.evaluate("window.__modelContextFailureActions || []"),
+        ["claim", "attempt", "reject"],
+    );
     assert.deepEqual(pageFailures, []);
 });
 
-test("Workspace records uncertain delivery before resetting a failed Host message bridge", BROWSER_TEST_OPTIONS, async (t) => {
+test("Workspace records a safe recovery rejection before resetting a timed-out Host bridge", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
 
@@ -1529,25 +1379,10 @@ test("Workspace records uncertain delivery before resetting a failed Host messag
     const pageFailures: string[] = [];
     page.on("pageerror", (error) => pageFailures.push(error.message));
     await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    const bridge = MODEL_CONTEXT_FAILURE_BRIDGE_SCRIPT
-        .replace('reject("model context unavailable");', 'reply({});')
-        .replace(
-            `if (message.method === "ui/message") {
-        window.__modelContextFailureMessages.push(message.params || {});
-        reply({});
-        return;
-    }`,
-            `if (message.method === "ui/message") {
-        window.__modelContextFailureMessages.push(message.params || {});
-        if (!window.__modelContextTransportFailed) {
-            window.__modelContextTransportFailed = true;
-            source.postMessage({ error: { code: -32001, message: "message delivery timed out" }, id: message.id, jsonrpc: "2.0" }, "*");
-        } else {
-            reply({});
-        }
-        return;
-    }`,
-        );
+    const bridge = MODEL_CONTEXT_FAILURE_BRIDGE_SCRIPT.replace(
+        'reject("model context unavailable");',
+        'if ((window.__modelContextFailureActions || []).includes("attempt") && !window.__modelContextTransportFailed) { window.__modelContextTransportFailed = true; source.postMessage({ error: { code: -32001, message: "model context timed out" }, id: message.id, jsonrpc: "2.0" }, "*"); } else { reply({}); }',
+    );
     await page.evaluate(bridge);
     await page.evaluate((html) => {
         const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
@@ -1558,53 +1393,25 @@ test("Workspace records uncertain delivery before resetting a failed Host messag
     const app = page.frameLocator("#workspace");
     await app.getByText("Resume after answer?", { exact: true }).waitFor({ state: "visible" });
     await app.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.waitForFunction("(window.__modelContextFailureReports || []).length === 1");
-    assert.equal(await page.evaluate("window.__modelContextFailureReports[0].outcome"), "uncertain");
+    await page.waitForFunction("(window.__modelContextFailureActions || []).includes('reject')");
     await page.waitForFunction("(window.__modelContextFailureInitializeCount || 0) >= 2");
-    await page.waitForTimeout(250);
-    const reportClaimId = await page.evaluate("window.__modelContextFailureReports[0].claimId") as string;
+    await page.waitForFunction("(window.__modelContextFailureActions || []).includes('complete')");
     assert.deepEqual(
-        await page.evaluate((claimId) => {
-            const state = window as typeof window & {
-                __modelContextFailureCalls?: Array<{ arguments: Record<string, unknown>; name: string }>;
-            };
-            return (state.__modelContextFailureCalls || [])
-                .filter((call) => call.name === "workspace_reentry" && call.arguments.claimId === claimId)
-                .map((call) => call.arguments.action);
-        }, reportClaimId),
-        ["claim", "validate", "attempt", "report"],
+        await page.evaluate("window.__modelContextFailureActions || []"),
+        ["claim", "attempt", "reject", "claim", "attempt", "complete"],
     );
     assert.equal(await page.evaluate("(window.__modelContextFailureMessages || []).length"), 1);
-    assert.equal(await page.evaluate("window.__modelContextFailureConsumed"), true);
+    await page.waitForTimeout(250);
+    assert.equal(await page.evaluate("(window.__modelContextFailureMessages || []).length"), 1);
     assert.deepEqual(pageFailures, []);
 });
 
 const MODEL_CONTEXT_FAILURE_BRIDGE_SCRIPT = String.raw`
 window.__modelContextFailureReentryClaimId = "";
-window.__modelContextFailureCalls = [];
 window.__modelContextFailureActions = [];
 window.__modelContextFailureMessages = [];
-window.__modelContextFailureReports = [];
 window.__modelContextFailureAnswered = false;
-window.__modelContextFailureAttempted = false;
-window.__modelContextFailureConsumed = false;
 window.__modelContextFailureInitializeCount = 0;
-function modelContextFailureContinuation() {
-    return {
-        kind: "wait", reason: "question-answered",
-        wait: { kind: "question", waitId: "wait-model-context" },
-        result: { answer: "Continue" },
-        suspendedOperation: { kind: "workspace-question", waitId: "wait-model-context" },
-        nextOperation: { kind: "resume-with-answer" }
-    };
-}
-function modelContextFailureModelContext() {
-    var state = { ctxId: "ctx-model-context", continuation: modelContextFailureContinuation() };
-    return {
-        content: [{ type: "text", text: "portable-devshell durable Workspace state:\n" + JSON.stringify(state, null, 2) }],
-        structuredContent: { portableDevshellWorkspace: state }
-    };
-}
 function modelContextFailureSnapshot() {
     var question = {
         detachedAt: "2026-08-30T00:00:00.000Z",
@@ -1619,29 +1426,19 @@ function modelContextFailureSnapshot() {
     };
     return {
         approvals: [],
-        background: window.__modelContextFailureAnswered && !window.__modelContextFailureConsumed ? [{
+        background: window.__modelContextFailureAnswered ? [{
             detachedAt: question.detachedAt,
             kind: "question",
-            recoveryMessageAttemptedAt: window.__modelContextFailureAttempted ? "2026-08-30T00:00:02.000Z" : undefined,
-            recoveryMessageId: window.__modelContextFailureAttempted ? "model-context-message" : undefined,
             status: "resolved",
             updatedAt: "2026-08-30T00:00:02.000Z",
             waitId: question.waitId
         }] : [],
         ctxId: "ctx-model-context",
         currentEvent: window.__modelContextFailureAnswered ? null : question,
-        cursor: window.__modelContextFailureConsumed ? 2 : 1,
+        cursor: 1,
         goal: null,
         instance: "browser-instance",
         questions: window.__modelContextFailureAnswered ? [] : [question],
-        reentry: {
-            attempted: window.__modelContextFailureAttempted,
-            claimId: window.__modelContextFailureReentryClaimId || undefined,
-            epoch: 0, executionActive: false, executionEpoch: 0,
-            pending: !!window.__modelContextFailureReentryClaimId,
-            sourceId: window.__modelContextFailureReentryClaimId ? "wait-model-context" : undefined,
-            sourceKind: window.__modelContextFailureReentryClaimId ? "wait" : undefined
-        },
         tasks: []
     };
 }
@@ -1678,64 +1475,30 @@ window.addEventListener("message", function (event) {
     }
     if (message.method !== "tools/call") return;
     var call = message.params || {};
-    window.__modelContextFailureCalls.push(call);
     if (call.name === "workspace_snapshot" || call.name === "workspace_reconnect") {
         reply({ _meta: { "portable-devshell/workspace": { token: "model-context-token" } }, structuredContent: modelContextFailureSnapshot() });
         return;
     }
     if (call.name === "workspace_watch") return;
-    if (call.name === "workspace_reentry") {
-        var action = call.arguments.action;
-        window.__modelContextFailureActions.push(action);
-        if (action === "claim") {
-            var claimed = window.__modelContextFailureAnswered && !window.__modelContextFailureConsumed && !window.__modelContextFailureAttempted && !window.__modelContextFailureReentryClaimId;
-            if (claimed) window.__modelContextFailureReentryClaimId = call.arguments.claimId;
-            reply({ structuredContent: Object.assign(modelContextFailureSnapshot().reentry, {
-                claimId: call.arguments.claimId,
-                claimed: claimed,
-                delivery: claimed ? {
-                    kind: "wait",
-                    message: "Resume the existing execution from the Workspace continuation context.\n\nPerform the continuation operation, then continue the suspended work from its result.",
-                    messageId: "model-context-message",
-                    modelContext: modelContextFailureModelContext(),
-                    sourceId: "wait-model-context"
-                } : undefined
-            }) });
+    if (call.name === "workspace_reentry_control") {
+        if (call.arguments.action === "claim") {
+            window.__modelContextFailureReentryClaimId = call.arguments.claimId;
+            reply({ structuredContent: { claimId: window.__modelContextFailureReentryClaimId, claimed: true, epoch: 0, pending: true } });
             return;
         }
-        if (action === "validate") {
-            reply({ structuredContent: Object.assign(modelContextFailureSnapshot().reentry, {
-                valid: window.__modelContextFailureReentryClaimId === call.arguments.claimId && !window.__modelContextFailureConsumed
-            }) });
+        if (call.arguments.action === "validate") {
+            reply({ structuredContent: { claimId: window.__modelContextFailureReentryClaimId, epoch: 0, pending: true, valid: window.__modelContextFailureReentryClaimId === call.arguments.claimId } });
             return;
         }
-        if (action === "attempt") {
-            window.__modelContextFailureAttempted = window.__modelContextFailureReentryClaimId === call.arguments.claimId;
-            reply({ structuredContent: Object.assign(modelContextFailureSnapshot().reentry, { attempted: window.__modelContextFailureAttempted }) });
-            return;
-        }
-        if (action === "report") {
-            window.__modelContextFailureReports.push(call.arguments);
-            window.__modelContextFailureConsumed = true;
-            window.__modelContextFailureAttempted = false;
+        if (call.arguments.action === "release") {
             window.__modelContextFailureReentryClaimId = "";
-            reply({ structuredContent: {
-                attempted: false, epoch: 0, executionActive: true, executionEpoch: 1,
-                outcome: call.arguments.outcome, pending: false, reported: true
-            } });
+            reply({ structuredContent: { epoch: 0, pending: false, released: true } });
             return;
         }
-        if (action === "release") {
-            if (!window.__modelContextFailureAttempted && window.__modelContextFailureReentryClaimId === call.arguments.claimId) {
-                window.__modelContextFailureReentryClaimId = "";
-            }
-            reply({ structuredContent: { attempted: false, epoch: 0, executionActive: false, executionEpoch: 0, pending: false, released: true } });
-            return;
-        }
-        reply({ structuredContent: modelContextFailureSnapshot().reentry });
+        reply({ structuredContent: { epoch: 0, pending: !!window.__modelContextFailureReentryClaimId } });
         return;
     }
-    if (call.name === "workspace_answer") {
+    if (call.name === "workspace_question_answer") {
         window.__modelContextFailureAnswered = true;
         reply({ structuredContent: {
             answer: call.arguments.answer,
@@ -1744,6 +1507,40 @@ window.addEventListener("message", function (event) {
             waitId: "wait-model-context"
         } });
         return;
+    }
+    if (call.name === "workspace_wait_recover") {
+        window.__modelContextFailureActions.push(call.arguments.action);
+        if (call.arguments.action === "claim") {
+            reply({ structuredContent: {
+                claimId: "model-context-claim",
+                kind: "question",
+                recoveryMessageId: "model-context-message",
+                result: { answer: "Continue" },
+                targetId: "question-model-context",
+                waitId: "wait-model-context"
+            } });
+            return;
+        }
+        if (call.arguments.action === "attempt") {
+            reply({ structuredContent: {
+                attempted: true,
+                recoveryMessageAttemptedAt: "2026-08-30T00:00:02.000Z",
+                recoveryMessageId: "model-context-message",
+                waitId: "wait-model-context"
+            } });
+            return;
+        }
+        if (call.arguments.action === "release") {
+            reply({ structuredContent: { released: true, waitId: "wait-model-context" } });
+            return;
+        }
+        if (call.arguments.action === "reject") {
+            reply({ structuredContent: { rejected: true, waitId: "wait-model-context" } });
+            return;
+        }
+        if (call.arguments.action === "complete") {
+            reply({ structuredContent: { completed: true, kind: "question", targetId: "question-model-context", waitId: "wait-model-context" } });
+        }
     }
 });
 `;
@@ -2102,10 +1899,10 @@ test("Workspace waits for a delayed initial capability instead of minting reconn
     await page.waitForFunction("(window.__lateInitialCalls || []).some(call => call.name === 'workspace_reconnect' && call.arguments.token === 'token-initial')");
     await app.getByText("Continue after reconnect?", { exact: true }).waitFor({ state: "visible" });
     await app.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.waitForFunction("(window.__lateInitialCalls || []).some(call => call.name === 'workspace_answer')");
+    await page.waitForFunction("(window.__lateInitialCalls || []).some(call => call.name === 'workspace_question_answer')");
 
     const answerToken = await page.evaluate(
-        "(window.__lateInitialCalls || []).find(call => call.name === 'workspace_answer')?.arguments?.token",
+        "(window.__lateInitialCalls || []).find(call => call.name === 'workspace_question_answer')?.arguments?.token",
     );
     assert.equal(answerToken, "token-initial");
     await app.getByText("Continue after reconnect?", { exact: true }).waitFor({ state: "hidden" });
@@ -2180,7 +1977,7 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (call.name === "workspace_watch") return;
-    if (call.name === "workspace_answer") {
+    if (call.name === "workspace_question_answer") {
         if (call.arguments.token !== "token-initial") {
             reject("Workspace App authorization is invalid for the current Context.");
             return;

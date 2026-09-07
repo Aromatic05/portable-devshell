@@ -1,12 +1,13 @@
 import { homedir } from "node:os";
 
-import { ControlPathHome } from "@portable-devshell/shared";
+import { ControlPathHome, controlWebBasePath } from "@portable-devshell/shared";
 import { McpRuntimeFactory } from "../McpRuntimeFactory.js";
 import { ControlRuntimeArtifact } from "./ControlRuntimeArtifact.js";
 import { ControlRuntime } from "./ControlRuntime.js";
 import type { ControlRuntimeState } from "./ControlRuntimeState.js";
 import { ControlRuntimeMcp } from "./ControlRuntimeMcp.js";
 import { ControlRuntimeReverse } from "./ControlRuntimeReverse.js";
+import { ControlRuntimeAgent } from "./ControlRuntimeAgent.js";
 
 export interface ControlRuntimeFactoryOptions {
     mcpFactory?: McpRuntimeFactory;
@@ -34,6 +35,12 @@ export class ControlRuntimeFactory {
         });
         await artifact.start();
         try {
+            const config = options.state.requireConfig();
+            const agent = new ControlRuntimeAgent({
+                homeDirectory: options.state.homeDirectory,
+                instances: options.state.instances,
+                webBasePath: `${controlWebBasePath(config.web.publicBaseUrl)}/agent`
+            });
             const mcp = new ControlRuntimeMcp({
                 artifact,
                 controlPaths,
@@ -45,6 +52,7 @@ export class ControlRuntimeFactory {
                 await artifact.service.retireInstance(instance.name);
             });
             return new ControlRuntime({
+                agent,
                 artifact,
                 instances: options.state.instances,
                 mcp,

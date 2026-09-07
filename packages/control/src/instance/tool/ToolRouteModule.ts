@@ -8,6 +8,7 @@ import {
     resolveResultHints,
     toControlErrorBody,
     type JsonValue,
+    type PrefixRouteContext,
     type PrefixRouteModuleDefinition
 } from "@portable-devshell/shared";
 
@@ -82,8 +83,17 @@ export function createToolRouteModule(
         ) as unknown as JsonValue,
         decideApproval: async (request, context) => await instance.worker.decideApproval(
             readToolApprovalId(request.payload, "tool.decideApproval"),
-            { ...readToolApprovalDecision(request.payload), decidedBy: context.peer }
+            { ...readToolApprovalDecision(request.payload), decidedBy: readApprovalPeer(context) }
         ) as unknown as JsonValue
+    });
+}
+
+function readApprovalPeer(context: PrefixRouteContext): "cli" | "tui" | "web" {
+    if (context.peer !== "agent") return context.peer;
+    throw createError({
+        code: errorCodes.controlClientIdentityInvalid,
+        message: "Agent peers cannot decide tool approvals.",
+        retryable: false
     });
 }
 

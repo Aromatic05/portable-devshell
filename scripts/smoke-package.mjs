@@ -1,8 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { lstat, mkdir, readdir, rm, symlink } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, isAbsolute, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { assertPackageBinFile, readPackageBinPath } from "./application-layout.mjs";
+import { activatePiIntegration } from "./pi-integration.mjs";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const archiveArgument = process.argv.slice(2).find((argument) => argument !== "--");
@@ -35,6 +38,16 @@ try {
 
     const cli = await assertPackageBinFile(await readPackageBinPath(app, "devshell"));
     command = await createInstalledCommand(root, cli.absolutePath);
+    const pi = await activatePiIntegration({
+        binDirectory: resolve(root, "bin"),
+        currentLink: app,
+        home
+    });
+    assertCommandVersion(
+        runInstalled({ executable: pi.command, args: [] }, ["--version"], environment),
+        "packaged Pi runtime"
+    );
+    await assertPiExtensionFactory(pi);
 
     assertCommandOutput(
         runInstalled(command, ["status"], environment),
@@ -53,6 +66,11 @@ try {
         runInstalled(command, ["status"], environment),
         "control: running",
         "running packaged status"
+    );
+    assertCommandOutput(
+        runInstalled(command, ["agent", "list"], environment),
+        "[]",
+        "packaged agent runtime"
     );
     assertCommandOutput(
         runInstalled(command, ["logs"], environment),
@@ -101,6 +119,18 @@ async function assertNoSymlinks(directory) {
     }
 }
 
+async function assertPiExtensionFactory(pi) {
+    const requireFromPi = createRequire(pi.piTarget);
+    const jitiPackage = requireFromPi.resolve("jiti/package.json");
+    const jitiEntry = resolve(dirname(jitiPackage), "lib", "jiti-static.mjs");
+    const { createJiti } = await import(pathToFileURL(jitiEntry).href);
+    const jiti = createJiti(import.meta.url, { moduleCache: false });
+    const factory = await jiti.import(pi.extension, { default: true });
+    if (typeof factory !== "function") {
+        throw new Error("packaged Pi extension does not export a valid default factory function");
+    }
+}
+
 function runInstalled(command, args, env, ignoreFailure = false) {
     const result = spawnSync(command.executable, [...command.args, ...args], {
         encoding: "utf8",
@@ -127,6 +157,14 @@ function assertCommandOutput(result, expected, stage) {
     if (result.status !== 0 || !result.stdout.includes(expected)) {
         throw new Error(
             `${stage} did not contain ${JSON.stringify(expected)} (${result.status ?? "unknown"})\n${result.stdout}${result.stderr}`
+        );
+    }
+}
+
+function assertCommandVersion(result, stage) {
+    if (result.status !== 0 || !/^\d+\.\d+\.\d+(?:[-+].*)?$/u.test(result.stdout.trim())) {
+        throw new Error(
+            `${stage} did not report a semantic version (${result.status ?? "unknown"})\n${result.stdout}${result.stderr}`
         );
     }
 }

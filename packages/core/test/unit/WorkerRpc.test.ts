@@ -124,6 +124,7 @@ test("WorkerRpcClient keeps context identity while assigning each call a distinc
     await client.request("tools.list", {});
     await client.request("worker.status", {}, { ctxId: "ctx-mcp", requestId: "shared-mcp-request", source: "mcp" });
     await client.request("worker.ping", {}, { ctxId: "ctx-mcp", requestId: "shared-mcp-request", source: "mcp" });
+    await client.request("worker.ping", {}, { ctxId: "ctx-agent", operationId: "pi-operation", source: "agent" });
 
     const implicit = harness.requestContexts.slice(0, 2).map((context) => context?.ctxId);
     assert.equal(typeof implicit[0], "string");
@@ -132,9 +133,10 @@ test("WorkerRpcClient keeps context identity while assigning each call a distinc
     assert.equal(harness.requestContexts[2]?.source, "mcp");
     assert.equal(harness.requestContexts[2]?.requestId, "shared-mcp-request");
     assert.equal(harness.requestContexts[3]?.requestId, "shared-mcp-request");
-    const operationIds = harness.requestContexts.map((context) => context?.operationId);
-    assert.equal(operationIds.every((operationId) => typeof operationId === "string"), true);
-    assert.equal(new Set(operationIds).size, operationIds.length);
+    assert.equal(harness.requestContexts[4]?.operationId, "pi-operation");
+    const generatedOperationIds = harness.requestContexts.slice(0, 4).map((context) => context?.operationId);
+    assert.equal(generatedOperationIds.every((operationId) => typeof operationId === "string"), true);
+    assert.equal(new Set(generatedOperationIds).size, generatedOperationIds.length);
     bridge.close();
 });
 

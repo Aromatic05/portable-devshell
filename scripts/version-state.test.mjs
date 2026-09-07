@@ -11,18 +11,13 @@ const script = fileURLToPath(new URL("./version-state.mjs", import.meta.url));
 async function createRepository(version, releaseTag) {
     const root = await createTestTempDirectory("version");
     await mkdir(join(root, "crates/devshell-worker"), { recursive: true });
-    await mkdir(join(root, "scripts"), { recursive: true });
     await writeFile(join(root, "package.json"), `${JSON.stringify({ name: "portable-devshell", version }, null, 4)}\n`);
     await writeFile(join(root, "crates/devshell-worker/Cargo.toml"), `[package]\nname = "devshell-worker"\nversion = "${version}"\nedition = "2024"\n`);
     await writeFile(join(root, "Cargo.lock"), `[[package]]\nname = "devshell-worker"\nversion = "${version}"\n`);
-    await writeFile(
-        join(root, "scripts/install-local.test.mjs"),
-        `const CURRENT_DEVELOPMENT_VERSION = "${version}"; // version-state:current-development\n`
-    );
     execFileSync("git", ["init", "-q"], { cwd: root });
-    const hooksPath = join(root, ".git-hooks-empty");
-    await mkdir(hooksPath);
-    execFileSync("git", ["config", "core.hooksPath", hooksPath], { cwd: root });
+    const hooksDirectory = join(root, ".git-hooks-disabled");
+    await mkdir(hooksDirectory, { recursive: true });
+    execFileSync("git", ["config", "core.hooksPath", hooksDirectory], { cwd: root });
     execFileSync("git", ["config", "user.email", "version-test@example.invalid"], { cwd: root });
     execFileSync("git", ["config", "user.name", "Version Test"], { cwd: root });
     execFileSync("git", ["add", "."], { cwd: root });
@@ -60,7 +55,6 @@ test("set keeps app and worker versions synchronized", async () => {
         assert.equal(JSON.parse(await readFile(join(root, "package.json"), "utf8")).version, "0.4.3");
         assert.match(await readFile(join(root, "crates/devshell-worker/Cargo.toml"), "utf8"), /version = "0\.4\.3"/u);
         assert.match(await readFile(join(root, "Cargo.lock"), "utf8"), /version = "0\.4\.3"/u);
-        assert.match(await readFile(join(root, "scripts/install-local.test.mjs"), "utf8"), /CURRENT_DEVELOPMENT_VERSION = "0\.4\.3"/u);
     } finally {
         await rm(root, { force: true, recursive: true });
     }

@@ -1,3 +1,5 @@
+import type { ToolCallSource } from "../tool/DtoToolCallRecord.js";
+
 export interface InstanceLogEntry {
     at: string;
     callId?: string;
@@ -6,7 +8,7 @@ export interface InstanceLogEntry {
     message: string;
     requestId?: string;
     seq: number;
-    source?: "cli" | "mcp" | "tui" | "web";
+    source?: ToolCallSource;
     stream: "stderr" | "stdout";
     toolName?: string;
 }

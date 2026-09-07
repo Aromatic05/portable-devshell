@@ -426,6 +426,7 @@ function fakeClients(
             return () => transportListeners.delete(listener);
         },
         reconnect: vi.fn(async () => undefined),
+        agent: {} as WebClients["agent"],
         artifact: {} as WebClients["artifact"],
         config: {} as WebClients["config"],
         context: {

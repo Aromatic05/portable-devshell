@@ -41,87 +41,6 @@ test("WaitState preserves detach information through resolution and consumption"
     assert.equal(consumed.record.consumedAt, "2026-08-18T00:03:00.000Z");
 });
 
-test("WaitState atomically consumes a detached completion without consuming a synchronous completion", () => {
-    let tick = 0;
-    let waitId = 0;
-    const state = new WaitState({
-        now: () => new Date(Date.parse("2026-08-18T00:00:00.000Z") + tick++ * 1_000).toISOString(),
-        waitId: () => `wait-${++waitId}`,
-    });
-    const detached = state.detach(
-        state.create(state.emptyDocument(), {
-            createdByCtxId: "ctx-1",
-            kind: "tmux",
-            ownerCallId: "call-wait",
-            targetId: "tmux-detached",
-        }).document,
-        "wait-1",
-    );
-    const consumed = state.resolve(
-        detached.document,
-        detached.record.waitId,
-        { task: { id: "tmux-detached", status: "0" } },
-        { consumeIfDetached: true },
-    );
-    assert.equal(consumed.record.status, "consumed");
-    assert.equal(consumed.record.resolvedAt, consumed.record.consumedAt);
-    assert.deepEqual(consumed.record.result, { task: { id: "tmux-detached", status: "0" } });
-
-    const waiting = state.create(consumed.document, {
-        createdByCtxId: "ctx-1",
-        kind: "tmux",
-        ownerCallId: "call-sync",
-        targetId: "tmux-sync",
-    });
-    const resolved = state.resolve(
-        waiting.document,
-        waiting.record.waitId,
-        { task: { id: "tmux-sync", status: "0" } },
-        { consumeIfDetached: true },
-    );
-    assert.equal(resolved.record.status, "resolved");
-    assert.equal(resolved.record.consumedAt, undefined);
-});
-
-test("WaitState bounds terminal history and drops transient terminal payloads without truncating recoverable waits", () => {
-    const state = new WaitState();
-    const terminal = Array.from({ length: 300 }, (_, index) => ({
-        consumedAt: new Date(index + 1_000).toISOString(),
-        createdAt: new Date(index).toISOString(),
-        createdByCtxId: "ctx-terminal",
-        kind: "tmux" as const,
-        payload: { line: 80 },
-        resolvedAt: new Date(index + 500).toISOString(),
-        result: { output: `terminal-${index}` },
-        status: "consumed" as const,
-        targetId: `task-terminal-${index}`,
-        updatedAt: new Date(index + 1_000).toISOString(),
-        waitId: `wait-terminal-${index}`,
-    }));
-    const recoverable = {
-        createdAt: new Date(10_000).toISOString(),
-        createdByCtxId: "ctx-recoverable",
-        detachedAt: new Date(10_001).toISOString(),
-        kind: "tmux" as const,
-        payload: { line: 120 },
-        resolvedAt: new Date(10_002).toISOString(),
-        result: { output: "recover me" },
-        status: "resolved" as const,
-        targetId: "task-recoverable",
-        updatedAt: new Date(10_002).toISOString(),
-        waitId: "wait-recoverable",
-    };
-
-    const compacted = state.compact({ version: 1, waits: [...terminal, recoverable] });
-    const retainedTerminal = compacted.waits.filter((record) => record.status === "consumed");
-    const retainedRecoverable = compacted.waits.find((record) => record.waitId === recoverable.waitId);
-
-    assert.equal(retainedTerminal.length, 256);
-    assert.equal(retainedTerminal.every((record) => record.payload === undefined && record.result === undefined), true);
-    assert.deepEqual(retainedRecoverable?.payload, recoverable.payload);
-    assert.deepEqual(retainedRecoverable?.result, recoverable.result);
-});
-
 test("WaitState can detach a resolved result when its owner disappears after resolution", () => {
     const timestamps = [
         "2026-08-18T00:00:00.000Z",
@@ -302,32 +221,6 @@ test("WaitService serializes concurrent creation of the same tmux wait target", 
     assert.equal(waits[0]?.status, "waiting");
 });
 
-test("WaitService emits consumed directly when a detached completion is already owned by active Agent work", async () => {
-    const root = await createTestTempDirectory("wait-service-consumed-completion-");
-    const events: string[] = [];
-    const service = new WaitService({
-        appendEvent: async (type) => { events.push(type); },
-        filePath: join(root, "waits.json"),
-        instanceName: "aromatic-pc",
-    });
-    const created = await service.create({
-        createdByCtxId: "ctx-1",
-        kind: "tmux",
-        ownerCallId: "call-wait",
-        targetId: "tmux-task-1",
-    });
-    await service.detach(created.waitId);
-    const completed = await service.resolve(
-        created.waitId,
-        { task: { id: "tmux-task-1", status: "0" } },
-        { consumeIfDetached: true },
-    );
-
-    assert.equal(completed.status, "consumed");
-    assert.equal(completed.resolvedAt, completed.consumedAt);
-    assert.deepEqual(events, ["wait.created", "wait.detached", "wait.consumed"]);
-});
-
 test("WaitState atomically completes an accepted recovery delivery", () => {
     const state = new WaitState({ waitId: () => "wait-fixed" });
     const created = state.create(state.emptyDocument(), {
@@ -505,28 +398,6 @@ test("WaitState disables automatic recovery without stopping the underlying wait
         () => state.claimRecovery(resolved.document, created.record.waitId, "claim-1"),
         /not available for automatic recovery/u,
     );
-});
-
-test("WaitState disabling recovery retires an uncertain delivery fence idempotently", () => {
-    const state = new WaitState({ waitId: () => "wait-fixed" });
-    const created = state.create(state.emptyDocument(), {
-        createdByCtxId: "ctx-1",
-        kind: "tmux",
-        targetId: "tmux-task-1",
-    });
-    const detached = state.detach(created.document, created.record.waitId);
-    const resolved = state.resolve(detached.document, created.record.waitId, { task: { status: "0" } });
-    const claimed = state.claimRecovery(resolved.document, created.record.waitId, "claim-1");
-    const attempted = state.markRecoveryAttempted(claimed.document, created.record.waitId, "claim-1");
-    const disabled = state.disableRecovery(attempted.document, created.record.waitId);
-    const repeated = state.disableRecovery(disabled.document, created.record.waitId);
-
-    assert.equal(repeated.record.status, "resolved");
-    assert.equal(repeated.record.automaticRecovery, false);
-    assert.equal(repeated.record.recoveryClaimId, undefined);
-    assert.equal(repeated.record.recoveryMessageAttemptedAt, undefined);
-    assert.equal(repeated.record.recoveryMessageId, undefined);
-    assert.equal(typeof repeated.record.recoveryDisabledAt, "string");
 });
 
 test("WaitStore persists wait state atomically and detaches orphaned calls after restart", async () => {

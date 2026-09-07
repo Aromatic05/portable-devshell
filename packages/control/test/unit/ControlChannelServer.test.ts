@@ -320,6 +320,31 @@ test("ControlChannelServer rejects a self-asserted peer outside transport admiss
     );
 });
 
+test("ControlChannelServer negotiates an admitted agent peer", async (t) => {
+    const provider = new MemoryControlChannelListener({
+        allowedPeers: ["agent"],
+        subject: { id: "uid:test", kind: "local-owner" },
+    });
+    const server = new ControlChannelServer({
+        listeners: [provider],
+        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+    });
+    await server.start();
+    t.after(async () => await server.close());
+    const connection = createClient(provider, "agent");
+    t.after(() => connection.close());
+
+    await negotiate(connection, "agent");
+    assert.deepEqual(
+        await connection.request<JsonValue>("@control", "service", "ping"),
+        {
+            pong: true,
+            protocolVersion: CONTROL_PROTOCOL_VERSION,
+            subject: { id: "uid:test", kind: "local-owner" },
+        },
+    );
+});
+
 test("ControlChannelServer rejects unsupported protocol ranges during first request", async (t) => {
     const provider = new MemoryControlChannelListener();
     const server = new ControlChannelServer({
@@ -556,7 +581,7 @@ test("ControlChannelServer rolls back a replacement when the previous provider f
 
 function createClient(
     provider: MemoryControlChannelListener,
-    peer: "tui" | "web"
+    peer: "agent" | "tui" | "web"
 ): ClientConnection {
     return new ClientConnection({
         connectChannel: async () => provider.connect(),
@@ -609,7 +634,7 @@ function createRouteSnapshot(): PrefixRouteSnapshot {
 
 async function negotiate(
     connection: ClientConnection,
-    clientKind: "cli" | "tui" | "web",
+    clientKind: "agent" | "cli" | "tui" | "web",
 ): Promise<void> {
     await connection.request("@control", "service", "hello", {
         clientKind,

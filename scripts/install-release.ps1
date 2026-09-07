@@ -189,7 +189,7 @@ function Stop-InstalledControl([string]$CurrentCli, [string]$DevshellHome) {
 }
 
 function Get-InstalledRuntimeState([string]$CurrentCli) {
-    $stopped = [PSCustomObject]@{ ControlRunning = $false; Pid = $null; Instances = @() }
+    $stopped = [PSCustomObject]@{ ControlRunning = $false; Instances = @() }
     if ([string]::IsNullOrWhiteSpace($CurrentCli) -or -not (Test-Path -LiteralPath $CurrentCli -PathType Leaf)) {
         return $stopped
     }
@@ -198,12 +198,8 @@ function Get-InstalledRuntimeState([string]$CurrentCli) {
     if ($LASTEXITCODE -ne 0) {
         throw "无法读取安装前的 control 状态；为避免丢失运行实例，安装已取消。`n$statusOutput"
     }
-    $runtimePid = $null
-    if ($statusOutput -match '(?m)^pid:\s+([1-9][0-9]*)\s*$') {
-        $runtimePid = [int]$Matches[1]
-    }
     if ($statusOutput -notmatch '(?m)^control:\s+running\s*$') {
-        return [PSCustomObject]@{ ControlRunning = $false; Pid = $runtimePid; Instances = @() }
+        return $stopped
     }
 
     $overviewOutput = (& node $CurrentCli overview 2>&1 | Out-String)
@@ -228,36 +224,15 @@ function Get-InstalledRuntimeState([string]$CurrentCli) {
             -not $hasReverse -and $restorableStates -contains [string]$snapshot.daemonState
         } | ForEach-Object { [string]$_.name }
     )
-    return [PSCustomObject]@{ ControlRunning = $true; Pid = $runtimePid; Instances = $instances }
+    return [PSCustomObject]@{ ControlRunning = $true; Instances = $instances }
 }
 
-function Assert-RunningControlMatchesApplication([string]$ApplicationDirectory, $RuntimeState) {
-    if (-not $RuntimeState.ControlRunning) { return }
-    if ($null -eq $RuntimeState.Pid -or $RuntimeState.Pid -le 0) {
-        throw "无法验证正在运行的 Control PID；安装在停机前取消。"
-    }
-    $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $($RuntimeState.Pid)" -ErrorAction SilentlyContinue
-    if ($null -eq $processInfo) {
-        throw "安装前 Control PID $($RuntimeState.Pid) 已不存在；安装在停机前取消。"
-    }
-    $commandLine = [string]$processInfo.CommandLine
-    $root = [IO.Path]::GetFullPath($ApplicationDirectory).TrimEnd('\').Replace('\', '/')
-    $normalized = $commandLine.Replace('\', '/')
-    if (-not $normalized.Contains("ControlDaemon.js") -or -not $normalized.Contains("$root/")) {
-        throw "正在运行的 Control PID $($RuntimeState.Pid) 不属于当前激活的 application generation；安装在停机前取消。"
-    }
-}
-
-function Restore-InstalledControl([string]$Cli, $RuntimeState) {
+function Restore-InstalledRuntimeState([string]$Cli, $RuntimeState) {
     if (-not $RuntimeState.ControlRunning) { return }
     & node $Cli start *> $null
     if ($LASTEXITCODE -ne 0) {
         throw "新版本已安装，但无法恢复安装前运行的 control。"
     }
-}
-
-function Restore-InstalledInstances([string]$Cli, $RuntimeState) {
-    if (-not $RuntimeState.ControlRunning) { return }
     $failedInstances = @()
     foreach ($instance in $RuntimeState.Instances) {
         & node $Cli instance start $instance *> $null
@@ -268,11 +243,6 @@ function Restore-InstalledInstances([string]$Cli, $RuntimeState) {
     if ($failedInstances.Count -gt 0) {
         throw "无法恢复以下实例：$($failedInstances -join ', ')"
     }
-}
-
-function Restore-InstalledRuntimeState([string]$Cli, $RuntimeState) {
-    Restore-InstalledControl $Cli $RuntimeState
-    Restore-InstalledInstances $Cli $RuntimeState
 }
 
 function Get-WorkerAssetName([string]$Target) {
@@ -413,6 +383,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "无法解压 portable-devshell 应用包。" }
     $manifestPath = Join-Path $appDirectory "portable-devshell-install.json"
     if (-not (Test-Path -LiteralPath $manifestPath)) { throw "发布包缺少 portable-devshell-install.json。" }
+    $piHelper = Join-Path $appDirectory "portable-devshell-pi-integration.mjs"
+    if (-not (Test-Path -LiteralPath $piHelper -PathType Leaf)) { throw "发布包缺少 portable-devshell-pi-integration.mjs。" }
     $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
     $version = [string]$manifest.version
     if ([string]::IsNullOrWhiteSpace($version)) { throw "应用包版本无效。" }
@@ -433,6 +405,9 @@ try {
     $currentBackupDirectory = Join-Path $installRoot ".current-backup-$PID"
     $workerBackupDirectory = Join-Path $devshellHome ".install-worker-backup-$PID"
     $commandPath = Join-Path $binDirectory "devshell.cmd"
+    $piCommandPath = Join-Path $binDirectory "pi.cmd"
+    $piSnapshot = Join-Path $temporary "pi-integration-snapshot.json"
+    $piOriginalSnapshot = Join-Path $installRoot "pi-integration-original.json"
     $previousVersionPresent = Test-Path -LiteralPath $versionDirectory
     $previousCurrentPresent = Test-Path -LiteralPath $currentDirectory
     New-Item -ItemType Directory -Force -Path $installRoot, $versionsDirectory, $binDirectory, $devshellHome | Out-Null
@@ -445,46 +420,27 @@ try {
     }
     Assert-CliStarts $stagingCli "安装前验证失败"
     Write-InstallDetail "CLI 入口和运行时依赖验证通过"
+    & node $piHelper snapshot $piSnapshot $binDirectory $homeDirectory win32
+    if ($LASTEXITCODE -ne 0) { throw "无法捕获安装前 Pi 集成状态，安装已取消。" }
 
     Write-InstallStep "停止旧版本并切换安装"
     $currentCli = ""
-    $activatedApplicationDirectory = ""
     if (Test-Path -LiteralPath (Join-Path $currentDirectory "package.json") -PathType Leaf) {
         $currentCliRelativePath = Get-ApplicationCliRelativePath $currentDirectory
-        $currentCli = (Resolve-Path -LiteralPath (Join-Path $currentDirectory $currentCliRelativePath)).Path
-        $activatedApplicationDirectory = (Resolve-Path -LiteralPath $currentDirectory).Path
+        $currentCli = Join-Path $currentDirectory $currentCliRelativePath
     }
     $runtimeState = Get-InstalledRuntimeState $currentCli
-    if ($null -eq $runtimeState.Pid) {
-        $pidFile = Join-Path $devshellHome "control\control.pid"
-        if (Test-Path -LiteralPath $pidFile -PathType Leaf) {
-            $pidValue = 0
-            $pidSource = (Get-Content -Raw -LiteralPath $pidFile).Trim()
-            if (-not [int]::TryParse($pidSource, [ref]$pidValue) -or $pidValue -le 0) {
-                throw "control PID 文件无效：$pidFile"
-            }
-            $runtimeState.Pid = $pidValue
-        }
-    }
-    if ($runtimeState.ControlRunning) {
-        if ([string]::IsNullOrWhiteSpace($activatedApplicationDirectory)) {
-            throw "无法验证正在运行 Control 的激活 application generation；安装在停机前取消。"
-        }
-        Assert-RunningControlMatchesApplication $activatedApplicationDirectory $runtimeState
-    } elseif ($null -ne $runtimeState.Pid -and (Test-ControlProcessRunning $runtimeState.Pid)) {
-        throw "Control PID $($runtimeState.Pid) 仍在运行但 RPC 不可用；安装在停机前取消。"
-    }
+    Stop-InstalledControl $currentCli $devshellHome
+    $runtimeWasStopped = [bool]$runtimeState.ControlRunning
+
     $previousCommandContent = if (Test-Path -LiteralPath $commandPath -PathType Leaf) {
         Get-Content -Raw -LiteralPath $commandPath
     } else {
         $null
     }
-    Backup-WorkerAliases $targets $devshellHome $workerBackupDirectory
-    $runtimeWasStopped = [bool]$runtimeState.ControlRunning
-    $candidateControlRestoreAttempted = $false
     $activated = $false
+    Backup-WorkerAliases $targets $devshellHome $workerBackupDirectory
     try {
-        Stop-InstalledControl $currentCli $devshellHome
         foreach ($target in $targets) {
             Write-InstallDetail "安装 $target Worker"
             Install-Worker $target $temporary $devshellHome
@@ -498,22 +454,21 @@ try {
         Copy-Item -Recurse -Force -LiteralPath $versionDirectory -Destination $currentDirectory
         $cliPath = Join-Path $currentDirectory $cliRelativePath
         Set-Content -Encoding ASCII -LiteralPath $commandPath -Value "@echo off`r`nnode `"$cliPath`" %*`r`n"
+        & node $piHelper activate $binDirectory $currentDirectory $homeDirectory win32
+        if ($LASTEXITCODE -ne 0) { throw "无法激活 Pi devshell extension。" }
 
         Write-InstallStep "验证安装结果"
         Assert-CliStarts $commandPath "安装结果验证失败" $true
-        $candidateControlRestoreAttempted = [bool]$runtimeState.ControlRunning
-        Restore-InstalledControl $cliPath $runtimeState
+        & node $piHelper persist-original $piSnapshot $piOriginalSnapshot win32
+        if ($LASTEXITCODE -ne 0) { throw "无法持久化安装前 Pi 集成状态。" }
         $activated = $true
     } finally {
         if (-not $activated) {
-            if ($candidateControlRestoreAttempted) {
-                try {
-                    Stop-InstalledControl $commandPath $devshellHome
-                } catch {
-                    throw "候选 Control 无法安全停止；为避免让运行进程与磁盘 generation 不一致，拒绝自动回滚。 $($_.Exception.Message)"
-                }
-            }
             try {
+                & node $piHelper restore $piSnapshot
+                if ($LASTEXITCODE -ne 0) { throw "无法恢复安装前 Pi 集成状态。" }
+            } finally {
+                try {
                 if (Test-Path -LiteralPath $currentBackupDirectory) {
                     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $currentDirectory
                     Move-Item -Force $currentBackupDirectory $currentDirectory
@@ -531,8 +486,9 @@ try {
                 } else {
                     Set-Content -Encoding ASCII -LiteralPath $commandPath -Value $previousCommandContent
                 }
-            } finally {
-                Restore-WorkerAliases $targets $devshellHome $workerBackupDirectory
+                } finally {
+                    Restore-WorkerAliases $targets $devshellHome $workerBackupDirectory
+                }
             }
             if ($runtimeWasStopped) {
                 Restore-InstalledRuntimeState $currentCli $runtimeState
@@ -540,14 +496,10 @@ try {
             }
         }
     }
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $backupDirectory, $currentBackupDirectory, $workerBackupDirectory
     Write-InstallDetail "已安装命令可以正常启动"
     $runtimeWasStopped = $false
-    try {
-        Restore-InstalledInstances $cliPath $runtimeState
-    } catch {
-        throw "新 Control 已恢复，但一个或多个安装前运行的实例无法恢复；候选实例可能已访问持久状态，禁止自动降级。恢复材料已保留在 $installRoot。 $($_.Exception.Message)"
-    }
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $backupDirectory, $currentBackupDirectory, $workerBackupDirectory
+    Restore-InstalledRuntimeState $cliPath $runtimeState
     if ($runtimeState.ControlRunning) {
         Write-InstallDetail "已恢复 Control 和 $($runtimeState.Instances.Count) 个安装前运行的实例"
     }
@@ -555,6 +507,7 @@ try {
     Write-Host ""
     Write-Host "已安装 portable-devshell $version。"
     Write-Host "命令：$commandPath"
+    Write-Host "Pi：$piCommandPath（默认仅使用 devshell 工具）"
     Write-Host "已预装 Worker：$($targets -join ', ')"
     Write-Host "其他 Worker：首次连接对应平台时按需下载并校验"
     Write-Host "下一步："
