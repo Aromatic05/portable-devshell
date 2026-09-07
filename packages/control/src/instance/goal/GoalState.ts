@@ -15,7 +15,7 @@ export const GOAL_EXECUTION_LEASE_MS = 60 * 1_000;
 export const GOAL_MAX_CONTINUATIONS = 0;
 const GOAL_CONTINUATION_CLAIM_TTL_MS = 5 * 60 * 1_000;
 const GOAL_CONTINUATION_RETRY_MS = 5 * 60 * 1_000;
-const MAX_TERMINAL_GOALS = 1_000;
+const MAX_TERMINAL_GOALS = 256;
 const GOAL_MAX_STEPS = 100;
 const GOAL_OBJECTIVE_LIMIT = 4_000;
 const GOAL_STEP_ID_LIMIT = 128;
@@ -237,6 +237,7 @@ export class GoalState {
         if (index === -1) {
             if (input.action === "claim") return { document, result: { claimed: false, goal: null } };
             if (input.action === "validate") return { document, result: { goal: null, valid: false } };
+            if (input.action === "retire") return { document, result: { goal: null, retired: false } };
             throw new Error("No Workspace Goal is attached to the current Context.");
         }
         const now = this.#now();
@@ -245,12 +246,16 @@ export class GoalState {
             const goal = snapshot(current, now);
             if (input.action === "claim") return { document, result: { claimed: false, goal } };
             if (input.action === "validate") return { document, result: { goal, valid: false } };
+            if (input.action === "retire") return { document, result: { goal, retired: false } };
             throw new Error(`Workspace Goal changed from ${input.goalId} to ${current.goalId}; refresh before retrying.`);
         }
         let next = current;
         let result: Record<string, unknown>;
 
-        if (input.action === "reset") {
+        if (input.action === "retire") {
+            next = clearContinuation(current);
+            result = { goal: snapshot(next, now), retired: true };
+        } else if (input.action === "reset") {
             next = {
                 ...clearContinuation(current),
                 continuationCount: 0,
@@ -331,6 +336,14 @@ export class GoalState {
                     : { continuationRetryAfter: new Date(Date.parse(now) + GOAL_CONTINUATION_RETRY_MS).toISOString() }),
             };
             result = { goal: snapshot(next, now) };
+        } else if (input.action === "release") {
+            const claimId = requiredText(input.claimId, "claimId", 128);
+            if (!claimMatches(current, claimId)) throw new Error("Workspace Goal continuation claim is no longer active.");
+            if (current.continuationAttemptedAt !== undefined) {
+                throw new Error("Attempted Workspace Goal continuation cannot be released.");
+            }
+            next = clearContinuation(current);
+            result = { goal: snapshot(next, now), released: true };
         } else {
             throw new Error(`Unsupported Workspace Goal continuation action: ${String(input.action)}.`);
         }

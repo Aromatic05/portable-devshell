@@ -2,6 +2,7 @@ import type {
     GoalActivityKind,
     GoalContinuationInput,
     GoalManageInput,
+    GoalRecord,
     GoalSnapshot,
     InstanceEventType,
     JsonValue,
@@ -33,7 +34,7 @@ export class GoalService {
 
     async read(ctxId: string): Promise<GoalSnapshot | undefined> {
         await this.#operation;
-        return this.#state.read(this.#store.read(), ctxId);
+        return this.#state.read(this.#store.read(ctxId), ctxId);
     }
 
     async list(): Promise<GoalSnapshot[]> {
@@ -43,7 +44,7 @@ export class GoalService {
 
     async manage(ctxId: string, input: GoalManageInput): Promise<GoalSnapshot | undefined> {
         return await this.#runExclusive(async () => {
-            const before = this.#store.read();
+            const before = this.#store.read(ctxId);
             const transition = this.#state.manage(before, input, ctxId);
             await this.#persist(before, transition, ctxId);
             return transition.result;
@@ -67,7 +68,7 @@ export class GoalService {
 
     async recordReentry(ctxId: string, progressEpoch?: number): Promise<void> {
         await this.#runExclusive(async () => {
-            const before = this.#store.read();
+            const before = this.#store.read(ctxId);
             const transition = this.#state.reentry(before, ctxId, progressEpoch);
             await this.#persist(before, transition, ctxId);
         });
@@ -75,15 +76,33 @@ export class GoalService {
 
     async touch(ctxId: string, kind: GoalActivityKind = "execution"): Promise<void> {
         await this.#runExclusive(async () => {
-            const before = this.#store.read();
-            const transition = this.#state.touch(before, ctxId, kind);
-            await this.#persist(before, transition, ctxId);
+            let current: GoalRecord | undefined;
+            try {
+                current = this.#store.readRecord(ctxId);
+            } catch {
+                await this.#persistStructuralTouch(ctxId, kind, this.#store.readStructural());
+                return;
+            }
+            if (current === undefined || current.status !== "active") return;
+            if (requiresStructuralTouch(current)) {
+                await this.#persistStructuralTouch(ctxId, kind, this.#store.read(ctxId));
+                return;
+            }
+            const transition = this.#state.touch({ goals: [current], version: 1 }, ctxId, kind);
+            const next = transition.document.goals[0];
+            if (next === undefined) return;
+            try {
+                this.#store.writeActivity(next);
+                await this.#appendGoalEvent(ctxId, next.goalId, next.status);
+            } catch {
+                await this.#persistStructuralTouch(ctxId, kind, this.#store.readStructural());
+            }
         });
     }
 
     async continuation(ctxId: string, input: GoalContinuationInput): Promise<JsonValue> {
         return await this.#runExclusive(async () => {
-            const before = this.#store.read();
+            const before = this.#store.read(ctxId);
             const transition = this.#state.continuation(before, input, ctxId);
             await this.#persist(before, transition, ctxId);
             return transition.result as JsonValue;
@@ -94,9 +113,18 @@ export class GoalService {
         if (transition.document === before) return;
         await this.#store.write(transition.document);
         const goal = this.#state.read(transition.document, ctxId);
+        await this.#appendGoalEvent(ctxId, goal?.goalId, goal?.status);
+    }
+
+    async #persistStructuralTouch(ctxId: string, kind: GoalActivityKind, before: GoalDocument): Promise<void> {
+        const transition = this.#state.touch(before, ctxId, kind);
+        await this.#persist(before, transition, ctxId);
+    }
+
+    async #appendGoalEvent(ctxId: string, goalId?: string, status?: GoalRecord["status"]): Promise<void> {
         await this.#appendEvent("goal.updated", {
             ctxId,
-            ...(goal === undefined ? {} : { goalId: goal.goalId, status: goal.status }),
+            ...(goalId === undefined || status === undefined ? {} : { goalId, status }),
         }).catch(() => undefined);
     }
 
@@ -111,4 +139,11 @@ export class GoalService {
             release();
         }
     }
+}
+
+function requiresStructuralTouch(goal: GoalRecord): boolean {
+    return goal.continuationPending ||
+        goal.continuationAttemptedAt !== undefined ||
+        goal.continuationClaimedAt !== undefined ||
+        goal.continuationClaimId !== undefined;
 }
