@@ -28,6 +28,8 @@ export function renderCliUsage(): string {
         "  artifact <command>             Manage artifact shares and transfers",
         "  secret <command>               Scan local files for likely secrets",
         "  skill <command>                Discover and read layered Agent Skills",
+        "  extension <command>            Manage installed Extensions",
+        "  <extension-id> [args...]        Invoke an installed Extension command",
         "  help                           Show this help",
         "",
         "Run `devshell <command> --help` for related usage.",
@@ -94,6 +96,19 @@ export function renderCliTopicUsage(topic: CliHelpTopic): string {
                 "  devshell todo delete <instance> <taskId>",
             ].join("\n");
     }
+}
+
+export function renderExtensionUsage(): string {
+    return [
+        "Usage:",
+        "  devshell extension list",
+        "  devshell extension inspect <extensionId>",
+        "  devshell extension enable <extensionId>",
+        "  devshell extension disable <extensionId>",
+        "  devshell extension reload <extensionId>",
+        "",
+        "Installed Extension commands use `devshell <extension-id> [args...]`."
+    ].join("\n");
 }
 
 export function renderInstanceUsage(): string {

@@ -428,6 +428,7 @@ function fakeClients(
         reconnect: vi.fn(async () => undefined),
         artifact: {} as WebClients["artifact"],
         config: {} as WebClients["config"],
+        extension: {} as WebClients["extension"],
         context: {
             disable: async () => {
                 throw new Error("Not used.");

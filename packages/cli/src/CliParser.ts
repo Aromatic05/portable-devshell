@@ -3,7 +3,6 @@ import type { JsonValue } from "@portable-devshell/shared";
 import { CliRenderError } from "./render/CliRenderError.js";
 import {
     renderCliTopicUsage,
-    renderCliUsage,
     renderInstanceUsage,
     renderWatchUsage,
     type CliHelpTopic,
@@ -43,6 +42,11 @@ export type CliParsedCommand =
     | { args: string[]; kind: "secret" }
     | { args: string[]; kind: "skill" }
     | { kind: "tui" }
+    | { kind: "extension.help" }
+    | { kind: "extension.list" }
+    | { extensionId: string; kind: "extension.inspect" }
+    | { extensionId: string; kind: "extension.enable" | "extension.disable" | "extension.reload" }
+    | { args: string[]; extensionId: string; kind: "extension.command" }
     | { input: JsonValue; instance: string; kind: "instance.call"; toolName: string; workspace: string }
     | { kind: "instance.create" }
     | { instance: string; kind: "instance.delete" }
@@ -112,12 +116,14 @@ export class CliParser {
                 return { args: [...argv.slice(1)], kind: "skill" };
             case "tui":
                 return this.#expectNoExtra(argv, { kind: "tui" });
+            case "extension":
+                return this.#parseExtension(argv.slice(1));
             case "instance":
                 return this.#parseInstance(argv.slice(1));
             case "watch":
                 return this.#parseWatch(argv.slice(1));
             default:
-                throw CliRenderError.usage(`Unknown command: ${argv[0]}\n\n${renderCliUsage()}`);
+                return this.#parseExtensionCommand(argv);
         }
     }
 
@@ -125,6 +131,8 @@ export class CliParser {
         const last = argv.at(-1);
         if (argv.length < 2 || (last !== "--help" && last !== "-h")) return undefined;
         switch (argv[0]) {
+            case "extension":
+                return { kind: "extension.help" };
             case "instance":
                 return { kind: "instance.help" };
             case "watch":
@@ -143,9 +151,61 @@ export class CliParser {
             case "tool":
             case "todo":
                 return { kind: "help", topic: argv[0] };
-            default:
+            case "start":
+            case "restart":
+            case "stop":
+            case "status":
+            case "logs":
+            case "overview":
+            case "tui":
                 return { kind: "help" };
+            default:
+                return undefined;
         }
+    }
+
+    #parseExtension(argv: readonly string[]): CliParsedCommand {
+        if (argv.length === 0) return { kind: "extension.help" };
+        if (argv[0] === "help" || argv[0] === "--help" || argv[0] === "-h") {
+            return this.#expectNoExtra(argv, { kind: "extension.help" });
+        }
+        switch (argv[0]) {
+            case "list":
+                return this.#expectNoExtra(argv, { kind: "extension.list" });
+            case "inspect":
+                if (argv.length !== 2) throw CliRenderError.usage("extension inspect requires <extensionId>");
+                return {
+                    extensionId: this.#extensionId(argv[1]),
+                    kind: "extension.inspect"
+                };
+            case "enable":
+            case "disable":
+            case "reload":
+                if (argv.length !== 2) {
+                    throw CliRenderError.usage(`extension ${argv[0]} requires <extensionId>`);
+                }
+                return {
+                    extensionId: this.#extensionId(argv[1]),
+                    kind: `extension.${argv[0]}`
+                } as CliParsedCommand;
+            default:
+                throw CliRenderError.usage(`Unknown extension command: ${argv[0] ?? ""}`.trim());
+        }
+    }
+
+    #parseExtensionCommand(argv: readonly string[]): CliParsedCommand {
+        const extensionId = this.#extensionId(argv[0]);
+        return {
+            args: [...argv.slice(1)],
+            extensionId,
+            kind: "extension.command"
+        };
+    }
+
+    #extensionId(value: string | undefined): string {
+        const extensionId = this.#required(value, "extension id is required");
+        if (/^[a-z][a-z0-9-]*$/u.test(extensionId)) return extensionId;
+        throw CliRenderError.usage("extension id must match [a-z][a-z0-9-]*");
     }
 
     #parseInstance(argv: readonly string[]): CliParsedCommand {

@@ -32,6 +32,10 @@ import type {
     DebugTargetSummary,
 } from "../dto/DtoDebug.js";
 import type {
+    ExtensionCommandWireResult,
+    ExtensionRuntimeRecord,
+} from "../dto/DtoExtension.js";
+import type {
     InstanceCreateDraft,
     InstanceCreateResult,
     InstanceCreateSchema,
@@ -75,6 +79,7 @@ import {
     type OpenedClientStream,
 } from "../transport/ClientConnection.js";
 import { InstanceEventStream } from "./InstanceEventStream.js";
+import { getRequestCanceller } from "./RequestTimeout.js";
 
 export interface ControlServiceStatus {
     instanceCount: number;
@@ -136,6 +141,15 @@ export interface ControlClients {
         release(patchId: string): Promise<DebugPatchSummary>;
         targets(): Promise<DebugTargetSummary[]>;
         unload(patchId: string): Promise<DebugPatchSummary>;
+    };
+    extension: {
+        call(extensionId: string, operation: string, input?: JsonValue, signal?: AbortSignal): Promise<JsonValue>;
+        command(extensionId: string, argv: readonly string[], signal?: AbortSignal): Promise<ExtensionCommandWireResult>;
+        disable(extensionId: string): Promise<ExtensionRuntimeRecord>;
+        enable(extensionId: string): Promise<ExtensionRuntimeRecord>;
+        get(extensionId: string): Promise<ExtensionRuntimeRecord>;
+        list(): Promise<ExtensionRuntimeRecord[]>;
+        reload(extensionId: string): Promise<ExtensionRuntimeRecord>;
     };
     goal: {
         get(instance: string): Promise<GoalRpcEnvelope>;
@@ -221,6 +235,7 @@ export function createControlClients(
     const config = controlClientModule(connection, "config");
     const context = controlClientModule(connection, "context");
     const debug = controlClientModule(connection, "debug");
+    const extension = controlClientModule(connection, "extension");
     const instance = controlClientModule(connection, "instance");
     const mcp = controlClientModule(connection, "mcp");
     const overview = controlClientModule(connection, "overview");
@@ -279,6 +294,27 @@ export function createControlClients(
             release: (patchId) => debug.request("release", { patchId }),
             targets: () => debug.request("targets"),
             unload: (patchId) => debug.request("unload", { patchId }),
+        },
+        extension: {
+            call: async (extensionId, operation, input, signal) => await requestWithAbort(
+                connection.request("@control", "extension", "call", {
+                    extensionId,
+                    operation,
+                    ...(input === undefined ? {} : { input })
+                }),
+                signal,
+                "Extension call was aborted."
+            ),
+            command: async (extensionId, argv, signal) => await requestWithAbort(
+                connection.request("@control", "extension", "command", { extensionId, argv: [...argv] }),
+                signal,
+                "Extension command was aborted."
+            ),
+            disable: (extensionId) => extension.request("disable", { extensionId }),
+            enable: (extensionId) => extension.request("enable", { extensionId }),
+            get: (extensionId) => extension.request("get", { extensionId }),
+            list: () => extension.request("list"),
+            reload: (extensionId) => extension.request("reload", { extensionId }),
         },
         goal: {
             get: (name) => goal.request(name, "get"),
@@ -464,4 +500,26 @@ function abortError(signal: AbortSignal): Error {
     return signal.reason instanceof Error
         ? signal.reason
         : new Error("Runtime start was aborted.");
+}
+async function requestWithAbort<T>(
+    request: Promise<T>,
+    signal: AbortSignal | undefined,
+    fallbackMessage: string
+): Promise<T> {
+    if (signal === undefined) return await request;
+    if (signal.aborted) {
+        const reason = signal.reason instanceof Error ? signal.reason : new Error(fallbackMessage);
+        getRequestCanceller(request)?.(reason);
+        throw reason;
+    }
+    const cancel = getRequestCanceller(request);
+    const aborted = () => cancel?.(
+        signal.reason instanceof Error ? signal.reason : new Error(fallbackMessage)
+    );
+    signal.addEventListener("abort", aborted, { once: true });
+    try {
+        return await request;
+    } finally {
+        signal.removeEventListener("abort", aborted);
+    }
 }

@@ -24,7 +24,7 @@ import { CliCommandWatchStatus } from "./command/watch/CliCommandWatchStatus.js"
 import { cliExitCodes } from "./exit/CliExitCode.js";
 import { CliExitMapper } from "./exit/CliExitMapper.js";
 import { renderCliError } from "./render/CliRenderError.js";
-import { renderCliTopicUsage, renderCliUsage, renderInstanceUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
+import { renderCliTopicUsage, renderCliUsage, renderExtensionUsage, renderInstanceUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
 import { renderControlLogs } from "./render/control/CliRenderControlLogs.js";
 import { renderControlStatus } from "./render/control/CliRenderControlStatus.js";
 import { renderInstanceList } from "./render/instance/CliRenderInstanceList.js";
@@ -274,6 +274,34 @@ export class CliMain {
             case "tui":
                 await this.#startTui();
                 return;
+            case "extension.help":
+                this.#stdout.write(`${renderExtensionUsage()}\n`);
+                return;
+            case "extension.list":
+                this.#writeJson(await this.#clients.extension.list());
+                return;
+            case "extension.inspect":
+                this.#writeJson(await this.#clients.extension.get(command.extensionId));
+                return;
+            case "extension.enable":
+                this.#writeJson(await this.#clients.extension.enable(command.extensionId));
+                return;
+            case "extension.disable":
+                this.#writeJson(await this.#clients.extension.disable(command.extensionId));
+                return;
+            case "extension.reload":
+                this.#writeJson(await this.#clients.extension.reload(command.extensionId));
+                return;
+            case "extension.command": {
+                const result = await this.#clients.extension.command(command.extensionId, command.args);
+                if (result.kind === "text") {
+                    const text = result.text ?? "";
+                    this.#stdout.write(text.endsWith("\n") ? text : `${text}\n`);
+                } else {
+                    this.#writeJson(result.value ?? null);
+                }
+                return;
+            }
             case "instance.list":
                 this.#stdout.write(renderInstanceList(await this.#clients.instance.list()));
                 return;
@@ -474,6 +502,7 @@ function commandUsesControlClient(command: CliParsedCommand): boolean {
         command.kind.startsWith("oauth.") ||
         command.kind.startsWith("context.") ||
         command.kind.startsWith("debug.") ||
+        (command.kind.startsWith("extension.") && command.kind !== "extension.help") ||
         command.kind.startsWith("tool.") ||
         command.kind.startsWith("todo.")
     ) {

@@ -197,14 +197,89 @@ test("CliMain resolves help locally without contacting Control", async () => {
     assert.notEqual(stdout.flush().length, 0);
     assert.equal(await cli.run(["watch", "help"]), 0);
     assert.notEqual(stdout.flush().length, 0);
+    assert.equal(await cli.run(["extension", "--help"]), 0);
+    assert.match(stdout.flush(), /extension list/iu);
     for (const topic of ["config", "approval", "oauth", "context", "tool", "todo"]) {
         assert.equal(await cli.run([topic, "--help"]), 0);
         assert.match(stdout.flush(), new RegExp(topic, "iu"));
     }
     assert.equal(stderr.flush(), "");
 
-    assert.equal(await cli.run(["unknown"]), 2);
+    assert.equal(await cli.run(["Bad_Command"]), 2);
     assert.notEqual(stderr.flush().length, 0);
+});
+
+test("CliMain dispatches Extension management and namespaced commands through the generic client", async () => {
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const calls: string[] = [];
+    const record = {
+        activeGeneration: "0.1.0-a",
+        enabled: true,
+        id: "agent",
+        retired: [],
+        selectedGeneration: "0.1.0-a",
+        state: "active" as const,
+        version: "0.1.0"
+    };
+    const cli = new CliMain({
+        createCliClients: () => testClients({
+            async extensionCommand(extensionId: string, argv: readonly string[]) {
+                calls.push(`command:${extensionId}:${argv.join("|")}`);
+                return argv[0] === "json"
+                    ? { kind: "json", value: { extensionId } }
+                    : { kind: "text", text: "agent help" };
+            },
+            async extensionDisable(extensionId: string) {
+                calls.push(`disable:${extensionId}`);
+                return { ...record, enabled: false, state: "disabled" as const };
+            },
+            async extensionEnable(extensionId: string) {
+                calls.push(`enable:${extensionId}`);
+                return record;
+            },
+            async extensionGet(extensionId: string) {
+                calls.push(`get:${extensionId}`);
+                return record;
+            },
+            async extensionList() {
+                calls.push("list");
+                return [record];
+            },
+            async extensionReload(extensionId: string) {
+                calls.push(`reload:${extensionId}`);
+                return record;
+            }
+        }),
+        stderr,
+        stdout
+    });
+
+    assert.equal(await cli.run(["extension", "list"]), 0);
+    assert.match(stdout.flush(), /"id": "agent"/u);
+    assert.equal(await cli.run(["extension", "inspect", "agent"]), 0);
+    stdout.flush();
+    assert.equal(await cli.run(["extension", "enable", "agent"]), 0);
+    stdout.flush();
+    assert.equal(await cli.run(["extension", "disable", "agent"]), 0);
+    stdout.flush();
+    assert.equal(await cli.run(["extension", "reload", "agent"]), 0);
+    stdout.flush();
+    assert.equal(await cli.run(["agent", "--help"]), 0);
+    assert.equal(stdout.flush(), "agent help\n");
+    assert.equal(await cli.run(["agent", "json"]), 0);
+    assert.match(stdout.flush(), /"extensionId": "agent"/u);
+
+    assert.deepEqual(calls, [
+        "list",
+        "get:agent",
+        "enable:agent",
+        "disable:agent",
+        "reload:agent",
+        "command:agent:--help",
+        "command:agent:json"
+    ]);
+    assert.equal(stderr.flush(), "");
 });
 
 test("CliMain routes the tui command through the injected runtime", async () => {
@@ -1225,6 +1300,14 @@ function testClients(client: Record<string, unknown>) {
         contextMessage: {
             list: (...args: unknown[]) => invoke("listContextMessages", args),
             queue: (...args: unknown[]) => invoke("createContextMessage", args),
+        },
+        extension: {
+            command: (...args: unknown[]) => invoke("extensionCommand", args),
+            disable: (...args: unknown[]) => invoke("extensionDisable", args),
+            enable: (...args: unknown[]) => invoke("extensionEnable", args),
+            get: (...args: unknown[]) => invoke("extensionGet", args),
+            list: (...args: unknown[]) => invoke("extensionList", args),
+            reload: (...args: unknown[]) => invoke("extensionReload", args),
         },
         instance: {
             create: (...args: unknown[]) => invoke("createInstance", args),

@@ -1,6 +1,10 @@
 import { homedir } from "node:os";
 
 import { ControlPathHome } from "@portable-devshell/shared";
+import { ExtensionHost } from "../../control/extension/ExtensionHost.js";
+import { ExtensionLoader } from "../../control/extension/ExtensionLoader.js";
+import { ExtensionPathLayout } from "../../control/extension/ExtensionPathLayout.js";
+import { ExtensionRegistryStore } from "../../control/extension/ExtensionRegistryStore.js";
 import { McpRuntimeFactory } from "../McpRuntimeFactory.js";
 import { ControlRuntimeArtifact } from "./ControlRuntimeArtifact.js";
 import { ControlRuntime } from "./ControlRuntime.js";
@@ -34,6 +38,14 @@ export class ControlRuntimeFactory {
         });
         await artifact.start();
         try {
+            const extensionPaths = new ExtensionPathLayout({ homeDirectory: options.state.homeDirectory });
+            const extensions = new ExtensionHost({
+                loader: new ExtensionLoader({
+                    instances: options.state.instances,
+                    paths: extensionPaths
+                }),
+                registry: new ExtensionRegistryStore(extensionPaths.registryFile)
+            });
             const mcp = new ControlRuntimeMcp({
                 artifact,
                 controlPaths,
@@ -46,6 +58,8 @@ export class ControlRuntimeFactory {
             });
             return new ControlRuntime({
                 artifact,
+                extensionPaths,
+                extensions,
                 instances: options.state.instances,
                 mcp,
                 restart: options.restart,

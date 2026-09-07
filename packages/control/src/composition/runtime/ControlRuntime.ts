@@ -5,6 +5,8 @@ import { controlRemoteRpcPath, controlWebBasePath } from "@portable-devshell/sha
 import { McpOAuthProtectedResource, type HttpHost } from "@portable-devshell/mcp";
 import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
 import { DebugPatchService } from "../../control/debug/DebugPatchService.js";
+import type { ExtensionHost } from "../../control/extension/ExtensionHost.js";
+import type { ExtensionPathLayout } from "../../control/extension/ExtensionPathLayout.js";
 import { OperationalOverviewService } from "../../control/overview/OperationalOverviewService.js";
 import { ControlChannelServer, type ControlChannelListener } from "../../server/channel/ControlChannelServer.js";
 import { ControlSocketListener } from "../../server/socket/ControlSocketListener.js";
@@ -13,6 +15,7 @@ import { ControlWebOAuthFlow } from "../../server/web/ControlWebOAuthFlow.js";
 import { ControlWebSessionService } from "../../server/web/ControlWebSessionService.js";
 import { ControlWebSocketAccessService } from "../../server/web/ControlWebSocketAccessService.js";
 import { ControlWebSocketListener } from "../../server/web/ControlWebSocketListener.js";
+import { ExtensionWebGateway } from "../../server/web/extension/ExtensionWebGateway.js";
 import { ControlRouteComposition } from "../ControlRouteComposition.js";
 import type { ControlRuntimeArtifact } from "./ControlRuntimeArtifact.js";
 import type { ControlRuntimeMcp } from "./ControlRuntimeMcp.js";
@@ -20,6 +23,8 @@ import type { ControlRuntimeReverse } from "./ControlRuntimeReverse.js";
 
 export interface ControlRuntimeOptions {
     artifact: ControlRuntimeArtifact;
+    extensionPaths: ExtensionPathLayout;
+    extensions: ExtensionHost;
     instances: InstanceRegistry;
     mcp: ControlRuntimeMcp;
     restart: () => Promise<void>;
@@ -38,6 +43,8 @@ export class ControlRuntime {
     readonly #artifact: ControlRuntimeArtifact;
     readonly #channels: ControlChannelServer;
     readonly #debug: DebugPatchService;
+    readonly #extensionPaths: ExtensionPathLayout;
+    readonly #extensions: ExtensionHost;
     readonly #instances: InstanceRegistry;
     readonly #mcp: ControlRuntimeMcp;
     readonly #reverse: ControlRuntimeReverse;
@@ -49,6 +56,8 @@ export class ControlRuntime {
 
     constructor(options: ControlRuntimeOptions) {
         this.#artifact = options.artifact;
+        this.#extensionPaths = options.extensionPaths;
+        this.#extensions = options.extensions;
         this.#instances = options.instances;
         this.#mcp = options.mcp;
         this.#reverse = options.reverse;
@@ -58,6 +67,7 @@ export class ControlRuntime {
             config: options.mcp.configEditor,
             contextAdmin: () => options.mcp.host?.contextAdmin,
             debug: this.#debug,
+            extension: this.#extensions,
             instanceCreate: options.mcp.instanceCreate,
             instances: options.instances,
             mcpStatus: () => options.mcp.status(),
@@ -70,6 +80,12 @@ export class ControlRuntime {
             reverse: options.reverse.service,
             shutdown: options.shutdown,
             toolProvenance: options.mcp.toolProvenance
+        });
+        this.#mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
+            await this.#extensions.retireInstance({ instance: instance.name, reason: "deleted" });
+        });
+        this.#mcp.configEditor.registerInstanceDisableRetirement(async (instance) => {
+            await this.#extensions.retireInstance({ instance: instance.name, reason: "disabled" });
         });
         this.#mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
             await this.#debug.retireInstance(instance.name);
@@ -121,6 +137,7 @@ export class ControlRuntime {
                 this.#webFlowUninstall = this.#webFlow.install(webHost);
             }
             await this.#mcp.start();
+            await this.#extensions.start();
             await this.#channels.start();
         } catch (error) {
             await this.stop().catch(() => undefined);
@@ -131,6 +148,7 @@ export class ControlRuntime {
     async stop(): Promise<void> {
         const failures: unknown[] = [];
         await this.#channels.close().catch((error) => failures.push(error));
+        await this.#extensions.stop().catch((error) => failures.push(error));
         await this.#debug.dispose().catch((error) => failures.push(error));
         this.#webFlowUninstall?.();
         this.#webFlow = undefined;
@@ -183,6 +201,12 @@ export class ControlRuntime {
                 basePath,
                 http,
                 remotePath: controlRemoteRpcPath(this.#mcp.webPublicBaseUrl),
+                routeInstaller: (host, webSessions) => new ExtensionWebGateway({
+                    basePath: `${basePath}/extensions`,
+                    extensions: this.#extensions,
+                    loginPath: `${basePath}/`,
+                    paths: this.#extensionPaths
+                }).install(host, webSessions),
                 sessions
             })
         };

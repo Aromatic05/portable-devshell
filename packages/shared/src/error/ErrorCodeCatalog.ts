@@ -1,5 +1,4 @@
 export const errorCodes = {
-    agentToolSessionMissing: "agent.toolSessionNotFound",
     artifactContentUnavailable: "artifact.contentUnavailable",
     artifactDirectoryUnsafe: "artifact.directoryUnsafe",
     artifactHostPathDenied: "artifact.hostPathDenied",
@@ -23,6 +22,11 @@ export const errorCodes = {
     controlDebugPatchInvalid: "control.debugPatchInvalid",
     controlDebugPatchNotFound: "control.debugPatchNotFound",
     controlDebugTargetNotFound: "control.debugTargetNotFound",
+    controlExtensionAccessDenied: "control.extensionAccessDenied",
+    controlExtensionFailed: "control.extensionFailed",
+    controlExtensionInvalid: "control.extensionInvalid",
+    controlExtensionNotActive: "control.extensionNotActive",
+    controlExtensionNotFound: "control.extensionNotFound",
     controlRestartFailed: "control.restartFailed",
     coreApprovalAlreadyDecided: "core.approvalAlreadyDecided",
     coreApprovalDenied: "core.approvalDenied",

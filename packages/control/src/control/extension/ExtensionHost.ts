@@ -3,6 +3,12 @@ import type {
     ExtensionInstanceRetireEvent,
     ExtensionJsonValue
 } from "@portable-devshell/extension";
+import {
+    createError,
+    errorCodes,
+    toControlErrorBody,
+    type ExtensionRuntimeRecord
+} from "@portable-devshell/shared";
 
 import { ExtensionGeneration, type ExtensionGenerationLease } from "./ExtensionGeneration.js";
 import {
@@ -14,28 +20,6 @@ import type { ExtensionRegistryPort } from "./ExtensionRegistryStore.js";
 
 export interface ExtensionGenerationLoader {
     load(id: string, generation: string): Promise<ExtensionGeneration>;
-}
-
-export interface ExtensionRuntimeRetiredRecord {
-    generation: string;
-    inFlight: number;
-    state: ExtensionGeneration["state"];
-}
-
-export interface ExtensionRuntimeRecord {
-    activeGeneration?: string;
-    enabled: boolean;
-    failure?: {
-        generation?: string;
-        message: string;
-    };
-    id: string;
-    lastKnownGoodGeneration?: string;
-    name?: string;
-    retired: ExtensionRuntimeRetiredRecord[];
-    selectedGeneration?: string;
-    state: "active" | "disabled" | "failed" | "installed";
-    version?: string;
 }
 
 interface ExtensionFailure {
@@ -76,9 +60,13 @@ export class ExtensionHost {
     }
 
     acquire(id: string): ExtensionGenerationLease {
-        if (this.#stopping) throw new Error("Extension host is stopping.");
+        if (this.#stopping) throw extensionFailure(id, undefined, new Error("Extension host is stopping."));
         const active = this.#active.get(id);
-        if (active === undefined) throw new Error(`Extension ${id} is not active.`);
+        if (active === undefined) {
+            const entry = this.#registrySnapshot?.extensions[id];
+            if (entry === undefined) throw extensionNotFound(id);
+            throw extensionNotActive(id);
+        }
         return active.acquire();
     }
 
@@ -91,7 +79,7 @@ export class ExtensionHost {
         const lease = this.acquire(id);
         try {
             const handler = lease.activation.rpc?.[operation];
-            if (handler === undefined) throw new Error(`Extension ${id} does not expose RPC operation ${operation}.`);
+            if (handler === undefined) throw extensionInvalid(id, `does not expose RPC operation ${operation}`);
             return await handler(input, context);
         } finally {
             lease.release();
@@ -106,7 +94,7 @@ export class ExtensionHost {
         const lease = this.acquire(id);
         try {
             const handler = lease.activation.command;
-            if (handler === undefined) throw new Error(`Extension ${id} does not expose a CLI command.`);
+            if (handler === undefined) throw extensionInvalid(id, "does not expose a CLI command");
             return await handler(argv, context);
         } finally {
             lease.release();
@@ -116,7 +104,12 @@ export class ExtensionHost {
     async activateGeneration(id: string, generation: string): Promise<void> {
         await this.#exclusive(async () => {
             this.#assertRunning();
-            const candidate = await this.#loadCandidate(id, generation);
+            let candidate: ExtensionGeneration;
+            try {
+                candidate = await this.#loadCandidate(id, generation);
+            } catch (error) {
+                throw extensionFailure(id, generation, error);
+            }
             const snapshot = this.#requireRegistry();
             const next = cloneExtensionRegistry(snapshot);
             next.extensions[id] = {
@@ -141,16 +134,16 @@ export class ExtensionHost {
             this.#assertRunning();
             const snapshot = this.#requireRegistry();
             const entry = snapshot.extensions[id];
-            if (entry === undefined) throw new Error(`Extension ${id} is not installed.`);
-            if (!entry.enabled) throw new Error(`Extension ${id} is disabled.`);
+            if (entry === undefined) throw extensionNotFound(id);
+            if (!entry.enabled) throw extensionNotActive(id, "disabled");
             const generation = entry.selectedGeneration;
-            if (generation === undefined) throw new Error(`Extension ${id} has no selected generation.`);
+            if (generation === undefined) throw extensionInvalid(id, "has no selected generation");
             let candidate: ExtensionGeneration;
             try {
                 candidate = await this.#loadCandidate(id, generation);
             } catch (error) {
                 this.#recordFailure(id, generation, error);
-                throw error;
+                throw extensionFailure(id, generation, error);
             }
             const next = cloneExtensionRegistry(snapshot);
             next.extensions[id] = { ...entry, lastKnownGoodGeneration: generation };
@@ -171,7 +164,7 @@ export class ExtensionHost {
             this.#assertRunning();
             const snapshot = this.#requireRegistry();
             const entry = snapshot.extensions[id];
-            if (entry === undefined) throw new Error(`Extension ${id} is not installed.`);
+            if (entry === undefined) throw extensionNotFound(id);
             if (!entry.enabled) {
                 const next = cloneExtensionRegistry(snapshot);
                 next.extensions[id] = { ...entry, enabled: true };
@@ -187,7 +180,7 @@ export class ExtensionHost {
             this.#assertRunning();
             const snapshot = this.#requireRegistry();
             const entry = snapshot.extensions[id];
-            if (entry === undefined) throw new Error(`Extension ${id} is not installed.`);
+            if (entry === undefined) throw extensionNotFound(id);
             if (entry.enabled) {
                 const next = cloneExtensionRegistry(snapshot);
                 next.extensions[id] = { ...entry, enabled: false };
@@ -358,8 +351,8 @@ export class ExtensionHost {
     }
 
     #assertRunning(): void {
-        if (!this.#started) throw new Error("Extension host has not started.");
-        if (this.#stopping) throw new Error("Extension host is stopping.");
+        if (!this.#started) throw extensionFailure("host", undefined, new Error("Extension host has not started."));
+        if (this.#stopping) throw extensionFailure("host", undefined, new Error("Extension host is stopping."));
     }
 
     async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
@@ -375,4 +368,41 @@ export class ExtensionHost {
             release();
         }
     }
+}
+function extensionNotFound(id: string): Error {
+    return createError({
+        code: errorCodes.controlExtensionNotFound,
+        details: { extensionId: id },
+        message: `Extension ${id} is not installed.`,
+        retryable: false
+    });
+}
+
+function extensionNotActive(id: string, reason?: string): Error {
+    return createError({
+        code: errorCodes.controlExtensionNotActive,
+        details: { extensionId: id, ...(reason === undefined ? {} : { reason }) },
+        message: `Extension ${id} is not active${reason === undefined ? "." : `: ${reason}.`}`,
+        retryable: false
+    });
+}
+
+function extensionInvalid(id: string, reason: string): Error {
+    return createError({
+        code: errorCodes.controlExtensionInvalid,
+        details: { extensionId: id, reason },
+        message: `Extension ${id} ${reason}.`,
+        retryable: false
+    });
+}
+
+function extensionFailure(id: string, generation: string | undefined, error: unknown): Error {
+    if (toControlErrorBody(error) !== undefined) return error as Error;
+    return createError({
+        code: errorCodes.controlExtensionFailed,
+        cause: error,
+        details: { extensionId: id, ...(generation === undefined ? {} : { generation }) },
+        message: error instanceof Error ? error.message : String(error),
+        retryable: false
+    });
 }

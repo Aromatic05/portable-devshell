@@ -26,8 +26,41 @@ test("CliParser rejects invalid command shapes", () => {
     assert.throws(() => parser.parse(["instance", "logs", "demo-local", "--bad"]));
     assert.throws(() => parser.parse(["debug", "load", "worker:demo-local"]));
     assert.throws(() => parser.parse(["watch", "status"]));
-    assert.throws(() => parser.parse(["unknown"]));
+    assert.throws(() => parser.parse(["Bad_Command"]));
     assert.throws(() => parser.parse(["instance", "unknown"]));
+});
+
+test("CliParser keeps Extension namespaces generic", () => {
+    const parser = new CliParser();
+
+    assert.deepEqual(parser.parse(["agent", "start", "worker-a:/repo"]), {
+        args: ["start", "worker-a:/repo"],
+        extensionId: "agent",
+        kind: "extension.command"
+    });
+    assert.deepEqual(parser.parse(["agent", "--help"]), {
+        args: ["--help"],
+        extensionId: "agent",
+        kind: "extension.command"
+    });
+    assert.deepEqual(parser.parse(["extension"]), { kind: "extension.help" });
+    assert.deepEqual(parser.parse(["extension", "list"]), { kind: "extension.list" });
+    assert.deepEqual(parser.parse(["extension", "inspect", "agent"]), {
+        extensionId: "agent",
+        kind: "extension.inspect"
+    });
+    assert.deepEqual(parser.parse(["extension", "enable", "agent"]), {
+        extensionId: "agent",
+        kind: "extension.enable"
+    });
+    assert.deepEqual(parser.parse(["extension", "disable", "agent"]), {
+        extensionId: "agent",
+        kind: "extension.disable"
+    });
+    assert.deepEqual(parser.parse(["extension", "reload", "agent"]), {
+        extensionId: "agent",
+        kind: "extension.reload"
+    });
 });
 
 test("CliParser accepts trailing help consistently across command levels", () => {
@@ -39,6 +72,7 @@ test("CliParser accepts trailing help consistently across command levels", () =>
     assert.deepEqual(parser.parse(["config", "update", "--help"]), { kind: "help", topic: "config" });
     assert.deepEqual(parser.parse(["debug", "load", "--help"]), { kind: "help", topic: "debug" });
     assert.deepEqual(parser.parse(["approval", "approve", "-h"]), { kind: "help", topic: "approval" });
+    assert.deepEqual(parser.parse(["extension", "--help"]), { kind: "extension.help" });
 });
 
 test("CliParser accepts standard version flags", () => {

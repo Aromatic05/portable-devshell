@@ -29,6 +29,8 @@ test("runtime stop does not settle until owned cleanup completes", async (t) => 
     });
     let artifactStopping = false;
     const runtime = new ControlRuntime({
+        extensionPaths: testExtensionPaths(),
+        extensions: testExtensions(),
         artifact: {
             service: undefined,
             async stop() {
@@ -90,10 +92,33 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 
 function testConfigEditor() {
     return {
+        registerInstanceDisableRetirement() {
+            return () => undefined;
+        },
         registerInstanceDeleteRetirement() {
             return () => undefined;
         },
     };
+}
+
+function testExtensions() {
+    return {
+        async disable() {},
+        async dispatchCommand() { return { kind: "text", text: "" }; },
+        async dispatchRpc() { return {}; },
+        async enable() {},
+        async list() { return []; },
+        async reload() {},
+        async retireInstance() {},
+        async start() {},
+        async stop() {},
+    } as never;
+}
+
+function testExtensionPaths() {
+    return {
+        generationDirectory: (id: string, generation: string) => `/extensions/${id}/${generation}`
+    } as never;
 }
 
 test("runtime stop attempts every cleanup step after failures", async (t) => {
@@ -101,6 +126,8 @@ test("runtime stop attempts every cleanup step after failures", async (t) => {
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     const calls: string[] = [];
     const runtime = new ControlRuntime({
+        extensionPaths: testExtensionPaths(),
+        extensions: testExtensions(),
         artifact: {
             service: undefined,
             async stop() {
@@ -178,6 +205,8 @@ test("MCP hot replacement preserves the original failure when runtime rollback a
         async stop() {}
     };
     new ControlRuntime({
+        extensionPaths: testExtensionPaths(),
+        extensions: testExtensions(),
         artifact: { service: undefined, async stop() {} } as never,
         instances: {
             list: () => [],
@@ -236,6 +265,8 @@ test("Web hot replacement preserves the original failure when host rollback also
         async stop() {}
     };
     new ControlRuntime({
+        extensionPaths: testExtensionPaths(),
+        extensions: testExtensions(),
         artifact: { service: undefined, async stop() {} } as never,
         instances: {
             list: () => [],
@@ -292,6 +323,8 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
         }
     };
     const runtime = new ControlRuntime({
+        extensionPaths: testExtensionPaths(),
+        extensions: testExtensions(),
         artifact: {
             service: undefined,
             async stop() {}
@@ -346,6 +379,8 @@ test("runtime does not mount WebUI routes when web.enabled is false", async (t) 
     const runtimeDir = await createTestTempDirectory("runtime-no-web");
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     const runtime = new ControlRuntime({
+        extensionPaths: testExtensionPaths(),
+        extensions: testExtensions(),
         artifact: { service: undefined, async stop() {} } as never,
         instances: {
             list: () => [],
@@ -424,6 +459,8 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
         state
     });
     const runtime = new ControlRuntime({
+        extensionPaths: testExtensionPaths(),
+        extensions: testExtensions(),
         artifact,
         instances: state.instances,
         mcp,
