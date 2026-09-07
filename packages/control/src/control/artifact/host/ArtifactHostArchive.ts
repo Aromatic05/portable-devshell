@@ -250,7 +250,10 @@ async function appendFile(archive: Pack, entry: SourceEntry): Promise<string> {
             if (bytesRead <= 0) {
                 throw artifactError("artifact.directoryChanged", `Directory member changed: ${entry.relativePath}`);
             }
-            const bytes = buffer.subarray(0, bytesRead);
+            // tar-stream may retain a written Buffer until downstream backpressure
+            // drains. The read buffer is reused on the next iteration, so hand the
+            // archive an owned copy rather than a mutable view into that buffer.
+            const bytes = Buffer.from(buffer.subarray(0, bytesRead));
             hasher.update(bytes);
             if (!tarEntry.write(bytes)) {
                 await once(tarEntry, "drain");

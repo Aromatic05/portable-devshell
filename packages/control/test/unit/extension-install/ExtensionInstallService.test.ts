@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdir, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -107,6 +107,28 @@ test("Extension install accepts the hardened .dsext archive and ignores mtime in
 
     assert.equal(second.activeGeneration, first.activeGeneration);
     assert.deepEqual(await readdir(join(h.paths.codeRoot, "example")), [first.activeGeneration]);
+});
+
+test("Extension .dsext round-trips multi-chunk file bytes exactly", async (t) => {
+    const h = await harness(t);
+    const source = await h.source("archive-multichunk");
+    const chunkSize = 64 * 1024;
+    const payload = Buffer.alloc(chunkSize * 3 + 123);
+    payload.fill(0x11, 0, chunkSize);
+    payload.fill(0x22, chunkSize, chunkSize * 2);
+    payload.fill(0x33, chunkSize * 2, chunkSize * 3);
+    payload.fill(0x44, chunkSize * 3);
+    await writeFile(join(source, "payload.bin"), payload);
+    const bundle = join(h.root, "multichunk.dsext");
+    await createArtifactDirectoryArchive(source, bundle);
+
+    const installed = await h.service.install(bundle);
+    const installedPayload = await readFile(join(
+        h.paths.generationDirectory("example", installed.activeGeneration!),
+        "payload.bin"
+    ));
+
+    assert.deepEqual(installedPayload, payload);
 });
 
 test("Extension candidate activation failure removes only the new generation and preserves the active one", async (t) => {
