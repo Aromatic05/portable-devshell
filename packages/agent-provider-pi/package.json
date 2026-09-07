@@ -1,6 +1,6 @@
 {
-    "name": "@portable-devshell/agentd",
-    "version": "0.0.0",
+    "name": "@portable-devshell/agent-provider-pi",
+    "version": "0.1.0",
     "private": true,
     "type": "module",
     "main": "./dist/index.js",
@@ -12,10 +12,15 @@
         }
     },
     "files": [
-        "dist"
+        "dist",
+        "devshell-agent-provider.json"
     ],
     "dependencies": {
-        "@portable-devshell/shared": "workspace:*"
+        "@earendil-works/pi-coding-agent": "0.84.4",
+        "@portable-devshell/agentd": "workspace:*",
+        "@portable-devshell/pi-extension": "workspace:*",
+        "@portable-devshell/shared": "workspace:*",
+        "pi-gui-extension": "0.4.1"
     },
     "scripts": {
         "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b --force",

@@ -1,7 +1,12 @@
-import type { DevshellPiToolDefinition } from "@portable-devshell/pi-extension";
 import type { JsonValue } from "@portable-devshell/shared";
 
 import type { AgentWorkerTarget } from "../target/AgentWorkerTarget.js";
+
+export interface AgentToolDefinition {
+    description: string;
+    inputSchema: JsonValue;
+    name: string;
+}
 
 /**
  * Agent-owned view of one devshell Worker tool session.
@@ -12,7 +17,7 @@ import type { AgentWorkerTarget } from "../target/AgentWorkerTarget.js";
  */
 export interface AgentToolSession {
     readonly target: AgentWorkerTarget;
-    readonly tools: readonly DevshellPiToolDefinition[];
+    readonly tools: readonly AgentToolDefinition[];
     callTool(
         toolName: string,
         input: JsonValue,

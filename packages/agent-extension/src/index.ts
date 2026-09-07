@@ -7,10 +7,12 @@ import type {
 
 import { executeAgentCommand } from "./AgentCommand.js";
 import { readAgentId } from "./AgentInput.js";
+import { AgentProviderLoader } from "./AgentProviderLoader.js";
 import { AgentExtensionRuntime } from "./AgentRuntime.js";
 
 export async function activate(context: ExtensionContext): Promise<ExtensionActivation> {
-    const runtime = new AgentExtensionRuntime(context);
+    const providers = await new AgentProviderLoader(context).loadSelected();
+    const runtime = new AgentExtensionRuntime(context, { providers });
     const rpc: Record<string, ExtensionRpcHandler> = {
         list: () => runtime.list().map(recordToJson),
         get: (input) => {

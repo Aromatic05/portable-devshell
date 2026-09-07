@@ -24,6 +24,8 @@ export interface ExtensionManifest {
 export interface ExtensionPaths {
     /** Immutable directory containing the selected generation. */
     codeDirectory: string;
+    /** Persistent extension-owned data shared across generations. */
+    dataDirectory: string;
     /** Ephemeral per-generation directory owned by Control. */
     runtimeDirectory: string;
     /** Mutable extension state shared across generations. */

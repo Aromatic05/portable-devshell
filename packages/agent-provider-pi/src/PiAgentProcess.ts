@@ -3,9 +3,11 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-import type { AgentProviderHandle } from "../AgentProvider.js";
-import type { AgentToolSession } from "../AgentToolSession.js";
-import type { AgentWorkerTarget } from "../../target/AgentWorkerTarget.js";
+import type {
+    AgentProviderHandle,
+    AgentToolSession,
+    AgentWorkerTarget
+} from "@portable-devshell/agentd";
 import type {
     PiChildAgentCommandMessage,
     PiChildMessage,

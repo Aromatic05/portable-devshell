@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { AgentProviderRuntimePaths } from "../../runtime/AgentProviderRuntimePaths.js";
+import type { AgentProviderRuntimePaths } from "@portable-devshell/agentd";
 
 export const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 

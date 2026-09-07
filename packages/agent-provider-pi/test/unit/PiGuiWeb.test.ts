@@ -5,7 +5,7 @@ import {
     PiGuiWeb,
     isManagedPiGuiRequest,
     rewritePiGuiAsset
-} from "../../src/provider/pi/PiGuiWeb.ts";
+} from "../../src/PiGuiWeb.ts";
 
 test("Pi GUI asset rebasing follows the current forwarded Agent mount path", async (t) => {
     const gui = await PiGuiWeb.start("/old/web/agent/");

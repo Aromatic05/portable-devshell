@@ -5,26 +5,13 @@ export type {
     AgentProviderWebContext,
     AgentProviderWebEndpoint
 } from "./provider/AgentProvider.js";
-export type { AgentToolSession } from "./provider/AgentToolSession.js";
+export type { AgentToolDefinition, AgentToolSession } from "./provider/AgentToolSession.js";
 export {
-    PI_PROVIDER_ID,
-    PI_PROVIDER_VERSION,
-    PiAgentProvider,
-    type PiAgentProviderOptions,
-    type PiProviderInstallerLike
-} from "./provider/pi/PiAgentProvider.js";
-export {
-    PiAgentProcessFactory,
-    type PiAgentProcessStartOptions,
-    type PiAgentRuntimeFactory
-} from "./provider/pi/PiAgentProcess.js";
-export {
-    PI_PACKAGE_NAME,
-    PiProviderInstaller,
-    type PiProviderInstallation,
-    type PiProviderInstallerOptions,
-    type PiProviderPackageResolver
-} from "./provider/pi/PiProviderInstaller.js";
+    AGENT_PROVIDER_API_VERSION,
+    parseAgentProviderManifest,
+    type AgentProviderManifest,
+    type AgentProviderModule
+} from "./provider/AgentProviderModule.js";
 export {
     AgentHost,
     type AgentHostOptions,

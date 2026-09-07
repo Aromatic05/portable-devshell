@@ -187,6 +187,7 @@ function extensionContext(options: {
         },
         paths: {
             codeDirectory: "/code/extensions/agent",
+            dataDirectory: "/data/extensions/agent",
             runtimeDirectory: "/runtime/extensions/agent",
             stateDirectory: "/state/extensions/agent"
         },

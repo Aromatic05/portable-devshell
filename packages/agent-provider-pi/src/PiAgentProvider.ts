@@ -4,7 +4,7 @@ import type {
     AgentProvider,
     AgentProviderHandle,
     AgentProviderStartContext
-} from "../AgentProvider.js";
+} from "@portable-devshell/agentd";
 import {
     PiProviderInstaller,
     type PiProviderInstallation
@@ -15,7 +15,8 @@ import {
 } from "./PiAgentProcess.js";
 
 export const PI_PROVIDER_ID = "pi";
-export const PI_PROVIDER_VERSION = "0.84.4";
+export const PI_PROVIDER_VERSION = "0.1.0";
+export const PI_RUNTIME_VERSION = "0.84.4";
 
 export interface PiProviderInstallerLike {
     ensureInstalled(runtime: AgentProviderStartContext["runtime"]): Promise<PiProviderInstallation>;
@@ -23,6 +24,7 @@ export interface PiProviderInstallerLike {
 
 export interface PiAgentProviderOptions {
     installer?: PiProviderInstallerLike;
+    piRuntimeVersion?: string;
     runtimeFactory?: PiAgentRuntimeFactory;
     version?: string;
 }
@@ -35,7 +37,7 @@ export class PiAgentProvider implements AgentProvider {
 
     constructor(options: PiAgentProviderOptions = {}) {
         this.version = options.version ?? PI_PROVIDER_VERSION;
-        this.#installer = options.installer ?? new PiProviderInstaller({ version: this.version });
+        this.#installer = options.installer ?? new PiProviderInstaller({ version: options.piRuntimeVersion ?? PI_RUNTIME_VERSION });
         this.#runtimeFactory = options.runtimeFactory ?? new PiAgentProcessFactory();
     }
 

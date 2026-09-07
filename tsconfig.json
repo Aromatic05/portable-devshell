@@ -14,6 +14,9 @@
             "path": "./packages/agentd"
         },
         {
+            "path": "./packages/agent-provider-pi"
+        },
+        {
             "path": "./packages/agent-extension"
         },
         {

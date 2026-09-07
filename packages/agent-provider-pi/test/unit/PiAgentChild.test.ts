@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import type { PiChildMessage } from "../../src/provider/pi/PiProcessProtocol.ts";
+import type { PiChildMessage } from "../../src/PiProcessProtocol.ts";
 
 function nextMessage(child: ChildProcess): Promise<PiChildMessage> {
     return new Promise((resolve, reject) => {
@@ -52,7 +52,7 @@ function waitForExit(child: ChildProcess): Promise<{ code: number | null; signal
 
 test("Pi provider child exits when its parent IPC channel disconnects", async () => {
     const stateDirectory = await mkdtemp(join(tmpdir(), "devshell-pi-child-disconnect-"));
-    const childPath = fileURLToPath(new URL("../../src/provider/pi/PiAgentChild.ts", import.meta.url));
+    const childPath = fileURLToPath(new URL("../../src/PiAgentChild.ts", import.meta.url));
     const workspaceLoader = new URL("../RegisterWorkspacePackages.mjs", import.meta.url).href;
     const child = fork(childPath, [], {
         cwd: process.cwd(),

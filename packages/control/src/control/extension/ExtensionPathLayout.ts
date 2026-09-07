@@ -16,6 +16,7 @@ export interface ExtensionPathLayoutOptions {
 
 export class ExtensionPathLayout {
     readonly codeRoot: string;
+    readonly dataRoot: string;
     readonly registryFile: string;
     readonly runtimeRoot: string;
     readonly stateRoot: string;
@@ -30,6 +31,7 @@ export class ExtensionPathLayout {
                 ? environment.LOCALAPPDATA ?? join(home, "AppData", "Local")
                 : join(home, ".local", "share"));
         this.codeRoot = join(dataHome, "portable-devshell", "extensions");
+        this.dataRoot = join(dataHome, "portable-devshell", "extension-data");
         this.stateRoot = join(home, ".devshell", "control", "extensions");
         this.registryFile = join(this.stateRoot, "registry.json");
         this.runtimeRoot = options.runtimeRoot
@@ -47,6 +49,11 @@ export class ExtensionPathLayout {
 
     manifestFile(id: string, generation: string): string {
         return join(this.generationDirectory(id, generation), "devshell-extension.json");
+    }
+
+    dataDirectory(id: string): string {
+        assertExtensionId(id);
+        return join(this.dataRoot, id);
     }
 
     runtimeDirectory(id: string, generation: string): string {

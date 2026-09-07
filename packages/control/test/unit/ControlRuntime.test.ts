@@ -301,9 +301,11 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
     const runtimeDir = await createTestTempDirectory("runtime-web");
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     const rawRoutes: Array<{ method: string; path: string }> = [];
+    const rawPrefixes: string[] = [];
     const authenticatedRoutes: Array<{ method: string; path: string }> = [];
     const staticRoutes: Array<{ directory: string; path: string }> = [];
     const upgradeRoutes: string[] = [];
+    const upgradePrefixes: string[] = [];
     const http = {
         registerAuthenticatedRawRoute(method: string, path: string) {
             authenticatedRoutes.push({ method, path });
@@ -313,12 +315,20 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
             rawRoutes.push({ method, path });
             return () => undefined;
         },
+        registerRawPrefix(path: string) {
+            rawPrefixes.push(path);
+            return () => undefined;
+        },
         registerStaticDirectory(path: string, directory: string) {
             staticRoutes.push({ directory, path });
             return () => undefined;
         },
         registerUpgradeHandler(path: string) {
             upgradeRoutes.push(path);
+            return () => undefined;
+        },
+        registerUpgradePrefix(path: string) {
+            upgradePrefixes.push(path);
             return () => undefined;
         }
     };
@@ -370,6 +380,8 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
         { method: "delete", path: CONTROL_WEB_SESSION_PATH }
     ]);
     assert.deepEqual(upgradeRoutes, [CONTROL_WEB_RPC_PATH, "/control/v1/connect"]);
+    assert.deepEqual(rawPrefixes, ["/web/extensions"]);
+    assert.deepEqual(upgradePrefixes, ["/web/extensions"]);
     assert.equal(staticRoutes.length, 1);
     assert.equal(staticRoutes[0]?.path, "/web");
     assert.match(staticRoutes[0]?.directory ?? "", /[/\\]web[/\\]dist[/\\]?$/u);

@@ -2,8 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import { createDevshellPiExtension } from "@portable-devshell/pi-extension";
-
-import type { AgentWorkerTarget } from "../../target/AgentWorkerTarget.js";
+import type { AgentWorkerTarget } from "@portable-devshell/agentd";
 import { PiChildToolSession } from "./PiChildToolSession.js";
 import { PiGuiWeb } from "./PiGuiWeb.js";
 import { PiSdkLoader, type PiModelRuntimeLike, type PiSdkModule, type PiSessionLike } from "./PiSdkLoader.js";
@@ -100,7 +99,7 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
         agentDir: activeAgentDir,
         cwd: input.localCwd,
         extensionFactories: [{
-            factory: createDevshellPiExtension(tools),
+            factory: createDevshellPiExtension(tools, { closeSessionOnShutdown: false }),
             hidden: true,
             name: "portable-devshell"
         }],
@@ -131,8 +130,11 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
         });
     } catch (error) {
         session?.dispose();
-        toolSessions.delete(input.agentId);
-        await tools.close().catch(() => undefined);
+        try {
+            await tools.close().catch(() => undefined);
+        } finally {
+            toolSessions.delete(input.agentId);
+        }
         throw error;
     }
 }
@@ -170,8 +172,11 @@ async function stopAgent(agentId: string): Promise<void> {
     try {
         await disposeManagedPiAgent(active, requireGui());
     } finally {
-        toolSessions.delete(agentId);
-        await active.tools.close();
+        try {
+            await active.tools.close();
+        } finally {
+            toolSessions.delete(agentId);
+        }
     }
 }
 

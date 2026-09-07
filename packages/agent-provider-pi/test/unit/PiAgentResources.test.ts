@@ -4,7 +4,7 @@ import test from "node:test";
 import {
     mergeManagedPiProjectPrompts,
     mergeManagedPiProjectSkills
-} from "../../src/provider/pi/PiAgentResources.ts";
+} from "../../src/PiAgentResources.ts";
 
 const userSource = { path: "/user", source: "local", scope: "user" as const, origin: "top-level" as const };
 const projectSource = { path: "/runtime", source: "local", scope: "project" as const, origin: "top-level" as const };

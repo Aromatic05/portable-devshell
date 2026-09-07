@@ -48,16 +48,19 @@ importers:
     dependencies:
       '@portable-devshell/agentd':
         specifier: workspace:*
-        version: file:packages/agentd
+        version: link:../agentd
       '@portable-devshell/extension':
         specifier: workspace:*
         version: link:../extension
 
-  packages/agentd:
+  packages/agent-provider-pi:
     dependencies:
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.4
         version: 0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(ws@8.21.0)(zod@4.5.4)
+      '@portable-devshell/agentd':
+        specifier: workspace:*
+        version: link:../agentd
       '@portable-devshell/pi-extension':
         specifier: workspace:*
         version: link:../pi-extension
@@ -67,6 +70,12 @@ importers:
       pi-gui-extension:
         specifier: 0.4.1
         version: 0.4.1(@earendil-works/pi-coding-agent@0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(ws@8.21.0)(zod@4.5.4))
+
+  packages/agentd:
+    dependencies:
+      '@portable-devshell/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/cli:
     dependencies:
@@ -855,9 +864,6 @@ packages:
   '@oxc-project/types@0.142.0':
     resolution: {integrity: sha512-7W+2q5AKQVU36fkaryontrHn3YDt1RyUYXatw9i5H8ocYe2sPKSFB6eS8WNPeRKiN1qAWWZUPm7gwFzJGrccqQ==}
 
-  '@portable-devshell/agentd@file:packages/agentd':
-    resolution: {directory: packages/agentd, type: directory}
-
   '@portable-devshell/control@file:packages/control':
     resolution: {directory: packages/control, type: directory}
 
@@ -869,9 +875,6 @@ packages:
 
   '@portable-devshell/mcp@file:packages/mcp':
     resolution: {directory: packages/mcp, type: directory}
-
-  '@portable-devshell/pi-extension@file:packages/pi-extension':
-    resolution: {directory: packages/pi-extension, type: directory}
 
   '@portable-devshell/shared@file:packages/shared':
     resolution: {directory: packages/shared, type: directory}
@@ -3569,20 +3572,6 @@ snapshots:
 
   '@oxc-project/types@0.142.0': {}
 
-  '@portable-devshell/agentd@file:packages/agentd':
-    dependencies:
-      '@earendil-works/pi-coding-agent': 0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(ws@8.21.0)(zod@4.5.4)
-      '@portable-devshell/pi-extension': file:packages/pi-extension(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(ws@8.21.0)(zod@4.5.4)
-      '@portable-devshell/shared': file:packages/shared
-      pi-gui-extension: 0.4.1(@earendil-works/pi-coding-agent@0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(ws@8.21.0)(zod@4.5.4))
-    transitivePeerDependencies:
-      - '@modelcontextprotocol/sdk'
-      - bufferutil
-      - supports-color
-      - utf-8-validate
-      - ws
-      - zod
-
   '@portable-devshell/control@file:packages/control(react@18.3.1)':
     dependencies:
       '@portable-devshell/core': file:packages/core
@@ -3636,20 +3625,6 @@ snapshots:
       - react
       - react-dom
       - supports-color
-
-  '@portable-devshell/pi-extension@file:packages/pi-extension(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(ws@8.21.0)(zod@4.5.4)':
-    dependencies:
-      '@earendil-works/pi-coding-agent': 0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(ws@8.21.0)(zod@4.5.4)
-      '@earendil-works/pi-tui': 0.84.4
-      '@portable-devshell/shared': file:packages/shared
-      diff: 8.0.4
-    transitivePeerDependencies:
-      - '@modelcontextprotocol/sdk'
-      - bufferutil
-      - supports-color
-      - utf-8-validate
-      - ws
-      - zod
 
   '@portable-devshell/shared@file:packages/shared': {}
 

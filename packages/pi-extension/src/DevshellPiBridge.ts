@@ -93,6 +93,10 @@ export interface DevshellPiExtensionAttachOptions {
     standaloneResources?: boolean;
 }
 
+export interface DevshellPiExtensionOptions {
+    closeSessionOnShutdown?: boolean;
+}
+
 export interface DevshellPiWorkspaceBridge {
     close(): Promise<void>;
     extension(pi: PiExtensionApiLike, options?: DevshellPiExtensionAttachOptions): Promise<void>;
@@ -103,13 +107,16 @@ export interface DevshellPiWorkspaceBridge {
 }
 
 export function createDevshellPiExtension(
-    session: DevshellPiToolSession
+    session: DevshellPiToolSession,
+    options: DevshellPiExtensionOptions = {}
 ): (pi: PiExtensionApiLike) => Promise<void> {
     return async (pi) => {
         const bridge = createDevshellPiWorkspaceBridge(session);
         try {
             await bridge.extension(pi, { standaloneResources: true });
-            pi.on("session_shutdown", bridge.close);
+            if (options.closeSessionOnShutdown !== false) {
+                pi.on("session_shutdown", bridge.close);
+            }
         } catch (error) {
             await bridge.close();
             throw error;

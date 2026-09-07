@@ -8,23 +8,29 @@ import test from "node:test";
 import type {
     AgentProviderHandle,
     AgentProviderStartContext
-} from "../../src/provider/AgentProvider.ts";
+} from "@portable-devshell/agentd";
+import { AgentProviderRuntimePaths, parseAgentWorkerTarget } from "@portable-devshell/agentd";
 import {
     PI_PROVIDER_VERSION,
+    PI_RUNTIME_VERSION,
     PiAgentProvider
-} from "../../src/provider/pi/PiAgentProvider.ts";
+} from "../../src/PiAgentProvider.ts";
 import type {
     PiAgentProcessStartOptions,
     PiAgentRuntimeFactory
-} from "../../src/provider/pi/PiAgentProcess.ts";
+} from "../../src/PiAgentProcess.ts";
 import {
     PI_PACKAGE_NAME,
     PiProviderInstaller
-} from "../../src/provider/pi/PiProviderInstaller.ts";
-import { AgentProviderRuntimePaths } from "../../src/runtime/AgentProviderRuntimePaths.ts";
-import { parseAgentWorkerTarget } from "../../src/target/AgentWorkerTarget.ts";
+} from "../../src/PiProviderInstaller.ts";
 
-test("Pi runtime resolves from portable-devshell's bundled dependency without host npm", async () => {
+test("Pi provider implementation version is independent from the Pi runtime version", () => {
+    assert.equal(PI_PROVIDER_VERSION, "0.1.0");
+    assert.equal(PI_RUNTIME_VERSION, "0.84.4");
+    assert.notEqual(PI_PROVIDER_VERSION, PI_RUNTIME_VERSION);
+});
+
+test("Pi runtime resolves from the provider bundle without host npm", async () => {
     const rootDirectory = await mkdtemp(join(tmpdir(), "devshell-agentd-pi-"));
     try {
         const runtime = new AgentProviderRuntimePaths({
@@ -37,7 +43,7 @@ test("Pi runtime resolves from portable-devshell's bundled dependency without ho
         await mkdir(join(packageRoot, "dist"), { recursive: true });
         await writeFile(
             join(packageRoot, "package.json"),
-            JSON.stringify({ name: PI_PACKAGE_NAME, version: PI_PROVIDER_VERSION }),
+            JSON.stringify({ name: PI_PACKAGE_NAME, version: PI_RUNTIME_VERSION }),
             "utf8"
         );
         await writeFile(entrypoint, "export {};\n", "utf8");
@@ -47,7 +53,7 @@ test("Pi runtime resolves from portable-devshell's bundled dependency without ho
                 resolves += 1;
                 return pathToFileURL(entrypoint).href;
             },
-            version: PI_PROVIDER_VERSION
+            version: PI_RUNTIME_VERSION
         });
 
         const first = await installer.ensureInstalled(runtime);
@@ -56,7 +62,7 @@ test("Pi runtime resolves from portable-devshell's bundled dependency without ho
         assert.equal(first.entrypoint, second.entrypoint);
         assert.equal(first.entrypoint, entrypoint);
         assert.equal(first.packageRoot, packageRoot);
-        assert.equal(first.version, PI_PROVIDER_VERSION);
+        assert.equal(first.version, PI_RUNTIME_VERSION);
         assert.equal(resolves, 1);
     } finally {
         await rm(rootDirectory, { force: true, recursive: true });

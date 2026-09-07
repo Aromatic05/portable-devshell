@@ -47,6 +47,33 @@ test("Pi devshell adapter requires an injected tool session instead of opening C
     assert.equal(closes, 1);
 });
 
+test("managed Pi adapter leaves tool-session shutdown to its embedding owner", async () => {
+    let closes = 0;
+    const registeredEvents: string[] = [];
+    const extension = createDevshellPiExtension({
+        target: { instance: "worker-a", workspace: "/repo" },
+        tools: [],
+        async callTool() {
+            throw new Error("tool call not expected");
+        },
+        close() {
+            closes += 1;
+        }
+    }, { closeSessionOnShutdown: false });
+    await extension({
+        getCommands: () => [],
+        on(event) {
+            registeredEvents.push(event);
+        },
+        registerCommand() {},
+        registerTool() {},
+        sendUserMessage() {}
+    });
+
+    assert.equal(registeredEvents.includes("session_shutdown"), false);
+    assert.equal(closes, 0);
+});
+
 const identityTheme: PiThemeLike = {
     bg: (_role, text) => text,
     bold: (text) => text,

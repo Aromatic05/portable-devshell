@@ -1,6 +1,5 @@
 import {
     AgentHost,
-    PiAgentProvider,
     parseAgentWorkerTarget,
     type AgentHostRecord,
     type AgentProvider
@@ -23,7 +22,7 @@ export class AgentExtensionRuntime {
     constructor(context: ExtensionContext, options: AgentExtensionRuntimeOptions = {}) {
         this.#context = context;
         this.#host = new AgentHost({
-            providers: options.providers ?? [new PiAgentProvider()],
+            providers: options.providers ?? [],
             runtimeRootDirectory: context.paths.stateDirectory,
             webBasePath: "/"
         });

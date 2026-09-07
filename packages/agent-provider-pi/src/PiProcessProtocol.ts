@@ -1,7 +1,5 @@
-import type { DevshellPiToolDefinition } from "@portable-devshell/pi-extension";
 import type { JsonValue } from "@portable-devshell/shared";
-
-import type { AgentWorkerTarget } from "../../target/AgentWorkerTarget.js";
+import type { AgentToolDefinition, AgentWorkerTarget } from "@portable-devshell/agentd";
 
 export interface PiChildInitMessage {
     entrypoint: string;
@@ -14,7 +12,7 @@ export interface PiChildAgentStartMessage {
     id: string;
     localCwd: string;
     target: AgentWorkerTarget;
-    tools: readonly DevshellPiToolDefinition[];
+    tools: readonly AgentToolDefinition[];
     type: "agent.start";
 }
 

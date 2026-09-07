@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
 
-import type { DevshellPiToolDefinition, DevshellPiToolSession } from "@portable-devshell/pi-extension";
+import type { DevshellPiToolSession } from "@portable-devshell/pi-extension";
 import type { JsonValue } from "@portable-devshell/shared";
-
-import type { AgentWorkerTarget } from "../../target/AgentWorkerTarget.js";
+import type { AgentToolDefinition, AgentWorkerTarget } from "@portable-devshell/agentd";
 import type {
     PiChildMessage,
     PiParentMessage,
@@ -17,7 +16,7 @@ interface PendingToolRequest {
 
 export class PiChildToolSession implements DevshellPiToolSession {
     readonly target: AgentWorkerTarget;
-    readonly tools: readonly DevshellPiToolDefinition[];
+    readonly tools: readonly AgentToolDefinition[];
     readonly #agentId: string;
     readonly #pending = new Map<string, PendingToolRequest>();
     readonly #send: (message: PiChildMessage) => Promise<void> | void;
@@ -27,7 +26,7 @@ export class PiChildToolSession implements DevshellPiToolSession {
         agentId: string;
         send(message: PiChildMessage): Promise<void> | void;
         target: AgentWorkerTarget;
-        tools: readonly DevshellPiToolDefinition[];
+        tools: readonly AgentToolDefinition[];
     }) {
         this.#agentId = options.agentId;
         this.#send = options.send;

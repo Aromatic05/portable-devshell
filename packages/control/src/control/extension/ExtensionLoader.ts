@@ -85,6 +85,7 @@ export class ExtensionLoader {
             throw new Error(`Extension id ${id} is reserved by portable-devshell.`);
         }
         const codeDirectory = this.#paths.generationDirectory(id, generation);
+        const dataDirectory = this.#paths.dataDirectory(id);
         const runtimeDirectory = this.#paths.runtimeDirectory(id, generation);
         const stateDirectory = this.#paths.stateDirectory(id);
         await assertPlainDirectory(codeDirectory, `Extension generation directory for ${id}`);
@@ -103,6 +104,7 @@ export class ExtensionLoader {
         await assertPlainFile(entryPath, `Extension entry for ${id}`);
         await rm(runtimeDirectory, { force: true, recursive: true });
         await Promise.all([
+            mkdir(dataDirectory, { mode: 0o700, recursive: true }),
             mkdir(runtimeDirectory, { mode: 0o700, recursive: true }),
             mkdir(stateDirectory, { mode: 0o700, recursive: true })
         ]);
@@ -121,7 +123,7 @@ export class ExtensionLoader {
             generation,
             id,
             logger: this.#loggerFactory(id, generation),
-            paths: Object.freeze({ codeDirectory, runtimeDirectory, stateDirectory }),
+            paths: Object.freeze({ codeDirectory, dataDirectory, runtimeDirectory, stateDirectory }),
             version: manifest.version,
             worker
         });

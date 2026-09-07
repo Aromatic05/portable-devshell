@@ -5,9 +5,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import type { AgentToolSession } from "../../src/provider/AgentToolSession.ts";
-import { PiAgentProcessFactory } from "../../src/provider/pi/PiAgentProcess.ts";
-import { parseAgentWorkerTarget, type AgentWorkerTarget } from "../../src/target/AgentWorkerTarget.ts";
+import type { AgentToolSession, AgentWorkerTarget } from "@portable-devshell/agentd";
+import { parseAgentWorkerTarget } from "@portable-devshell/agentd";
+import { PiAgentProcessFactory } from "../../src/PiAgentProcess.ts";
 
 const childModulePath = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/FakePiAgentChild.mjs");
 
