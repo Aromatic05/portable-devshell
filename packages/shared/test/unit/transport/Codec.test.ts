@@ -21,7 +21,7 @@ interface CodecPair {
     server: Codec;
 }
 
-async function pair(clientPeer: "agent" | "tui" | "web" = "tui"): Promise<CodecPair> {
+async function pair(clientPeer: "tui" | "web" = "tui"): Promise<CodecPair> {
     const directory = await createTestTempDirectory("codec");
     const socketPath = createTestIpcPath("codec", directory);
     const listener = createServer();
@@ -116,17 +116,6 @@ test("Codec accepts web as a server-bound client peer", async (t) => {
 
     assert.equal((await incoming).from, "web");
     assert.equal(value.server.remotePeer, "web");
-});
-
-test("Codec accepts agent as a server-bound client peer", async (t) => {
-    const value = await pair("agent");
-    t.after(() => closePair(value));
-
-    const incoming = onceEvent(value.server);
-    await value.client.send({ id: "agent-1", destination: "@control", name: "service.ping" });
-
-    assert.equal((await incoming).from, "agent");
-    assert.equal(value.server.remotePeer, "agent");
 });
 
 test("Codec preserves replyTo, streamId, error, and seq", async (t) => {

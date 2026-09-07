@@ -43,13 +43,6 @@ export type CliParsedCommand =
     | { args: string[]; kind: "secret" }
     | { args: string[]; kind: "skill" }
     | { kind: "tui" }
-    | { kind: "agent.help" }
-    | { kind: "agent.list" }
-    | { kind: "agent.web" }
-    | { agentId: string; kind: "agent.show" }
-    | { agentId: string; kind: "agent.send" | "agent.steer" | "agent.followUp"; message: string }
-    | { agentId: string; kind: "agent.abort" | "agent.reload" | "agent.stop" }
-    | { kind: "agent.start"; provider?: string; target: string }
     | { input: JsonValue; instance: string; kind: "instance.call"; toolName: string; workspace: string }
     | { kind: "instance.create" }
     | { instance: string; kind: "instance.delete" }
@@ -119,8 +112,6 @@ export class CliParser {
                 return { args: [...argv.slice(1)], kind: "skill" };
             case "tui":
                 return this.#expectNoExtra(argv, { kind: "tui" });
-            case "agent":
-                return this.#parseAgent(argv.slice(1));
             case "instance":
                 return this.#parseInstance(argv.slice(1));
             case "watch":
@@ -134,8 +125,6 @@ export class CliParser {
         const last = argv.at(-1);
         if (argv.length < 2 || (last !== "--help" && last !== "-h")) return undefined;
         switch (argv[0]) {
-            case "agent":
-                return { kind: "agent.help" };
             case "instance":
                 return { kind: "instance.help" };
             case "watch":
@@ -157,77 +146,6 @@ export class CliParser {
             default:
                 return { kind: "help" };
         }
-    }
-
-    #parseAgent(argv: readonly string[]): CliParsedCommand {
-        if (argv.length === 0 || argv[0] === "help" || argv[0] === "--help" || argv[0] === "-h") {
-            return this.#expectNoExtra(argv.length === 0 ? [] : argv, { kind: "agent.help" });
-        }
-        switch (argv[0]) {
-            case "list":
-                return this.#expectNoExtra(argv, { kind: "agent.list" });
-            case "web":
-                return this.#expectNoExtra(argv, { kind: "agent.web" });
-            case "show":
-                return this.#expectAgentIdCommand(argv, "agent.show");
-            case "abort":
-                return this.#expectAgentIdCommand(argv, "agent.abort");
-            case "reload":
-                return this.#expectAgentIdCommand(argv, "agent.reload");
-            case "stop":
-                return this.#expectAgentIdCommand(argv, "agent.stop");
-            case "send":
-            case "steer":
-            case "follow-up": {
-                if (argv.length < 3) {
-                    throw CliRenderError.usage(`agent ${argv[0]} requires <agentId> <message>`);
-                }
-                const kind = argv[0] === "send"
-                    ? "agent.send"
-                    : argv[0] === "steer"
-                        ? "agent.steer"
-                        : "agent.followUp";
-                return {
-                    agentId: this.#required(argv[1], "agent id is required"),
-                    kind,
-                    message: argv.slice(2).join(" ")
-                };
-            }
-            default:
-                break;
-        }
-
-        let provider: string | undefined;
-        let target: string | undefined;
-        for (let index = 0; index < argv.length; index += 1) {
-            const value = argv[index];
-            if (value === "--provider") {
-                provider = this.#required(argv[++index], "--provider requires a value");
-                continue;
-            }
-            if (value?.startsWith("-")) {
-                throw CliRenderError.usage(`Unknown agent option: ${value}`);
-            }
-            if (target !== undefined) {
-                throw CliRenderError.usage("agent start accepts one <instance:/workspace> target");
-            }
-            target = value;
-        }
-        return {
-            kind: "agent.start",
-            ...(provider === undefined ? {} : { provider }),
-            target: this.#required(target, "agent requires <instance:/workspace>")
-        };
-    }
-
-    #expectAgentIdCommand(
-        argv: readonly string[],
-        kind: "agent.show" | "agent.abort" | "agent.reload" | "agent.stop"
-    ): CliParsedCommand {
-        if (argv.length !== 2) {
-            throw CliRenderError.usage(`${argv[0]} requires <agentId>`);
-        }
-        return { agentId: this.#required(argv[1], "agent id is required"), kind };
     }
 
     #parseInstance(argv: readonly string[]): CliParsedCommand {

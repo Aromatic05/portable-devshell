@@ -34,6 +34,7 @@ import {
 import { runTestspaceTerminalSmoke } from "./testspace/TestspaceTerminalSmoke.mjs";
 import { runTestspaceCommentSmoke } from "./testspace/TestspaceCommentSmoke.mjs";
 import { runTestspaceWebSmoke } from "./testspace/TestspaceWebSmoke.mjs";
+import { runTestspaceWorkspaceSmoke } from "./testspace/TestspaceWorkspaceSmoke.mjs";
 import {
     assertTestspaceRootOwned,
     createTestspaceProcessEnvironment,
@@ -99,9 +100,6 @@ switch (command) {
         break;
     case "comment-smoke":
         await commentSmoke();
-        break;
-    case "pi-smoke":
-        await piSmoke();
         break;
     case "exec":
         await execInTestspace(args);
@@ -372,22 +370,6 @@ async function commentSmoke() {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
-async function piSmoke() {
-    const state = await requireRunningState();
-    const result = spawnSync(process.execPath, [
-        resolve(repoRoot, "scripts", "testspace", "PiStandaloneSmoke.mjs"),
-        paths.home,
-        paths.workspace,
-        paths.reverseWorkspace,
-    ], {
-        cwd: paths.workspace,
-        env: testspaceEnvironment(stateRuntimeDirectory(state)),
-        stdio: "inherit",
-    });
-    if (result.error !== undefined) throw result.error;
-    if (result.status !== 0) throw new Error(`testspace Pi smoke exited with ${String(result.status)}`);
-}
-
 async function execInTestspace(argv) {
     const state = await requireRunningState();
     const command = argv[0] === "--" ? argv.slice(1) : argv;
@@ -460,8 +442,13 @@ async function smoke() {
         runtimeDirectory,
         workspace: paths.workspace,
     });
+    const workspace = await runTestspaceWorkspaceSmoke({
+        endpoint: testspaceUrls(state).mcp,
+        instance: TESTSPACE_INSTANCE,
+        workspace: paths.workspace,
+    });
     const web = await runTestspaceWebSmoke({ webPort: state.webPort });
-    process.stdout.write(`${JSON.stringify({ comment, reverse, terminals, web }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ comment, reverse, terminals, web, workspace }, null, 2)}\n`);
 }
 
 async function stop() {
@@ -862,7 +849,6 @@ function printCommands(state) {
         "Open Web:     pnpm testspace web",
         "Smoke Web:    pnpm testspace web-smoke",
         "Smoke Comment: pnpm testspace comment-smoke",
-        "Smoke Pi:     pnpm testspace pi-smoke",
         "Status:       pnpm testspace status",
         "Protocol probes: pnpm testspace smoke",
         "Stop/remove:   pnpm testspace stop",
@@ -879,6 +865,6 @@ function printUrls(state) {
 
 function usage(message) {
     process.stderr.write(`${message}\n`);
-    process.stderr.write("Usage: pnpm testspace [start|comment-smoke|exec|pi-smoke|status|smoke|tui|web|web-smoke|stop] [options]\n");
+    process.stderr.write("Usage: pnpm testspace [start|comment-smoke|exec|status|smoke|tui|web|web-smoke|stop] [options]\n");
     process.exit(2);
 }

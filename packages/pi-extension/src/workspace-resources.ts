@@ -7,7 +7,9 @@ import {
     type PromptTemplate,
     type Skill
 } from "@earendil-works/pi-coding-agent";
-import type { AgentTarget, JsonValue } from "@portable-devshell/shared";
+import type { JsonValue } from "@portable-devshell/shared";
+
+import type { DevshellPiTarget } from "./DevshellPiTarget.js";
 
 export interface DevshellPiContextFile {
     content: string;
@@ -49,7 +51,7 @@ const PI_PROJECT_SKILLS_DIRECTORY = "./.pi/skills";
 const PI_PROJECT_PROMPTS_DIRECTORY = "./.pi/prompts";
 
 export async function loadDevshellPiWorkspaceResources(
-    target: AgentTarget,
+    target: DevshellPiTarget,
     toolNames: ReadonlySet<string>,
     callTool: DevshellPiToolCall
 ): Promise<DevshellPiWorkspaceResources> {
@@ -186,7 +188,7 @@ function substitutePromptArgs(content: string, args: readonly string[]): string 
 }
 
 export async function loadDevshellPiWorkspaceContext(
-    target: AgentTarget,
+    target: DevshellPiTarget,
     toolNames: ReadonlySet<string>,
     callTool: DevshellPiToolCall
 ): Promise<DevshellPiContextFile[]> {
@@ -288,7 +290,7 @@ function pathDepth(path: string): number {
 }
 
 function toProjectSkill(
-    target: AgentTarget,
+    target: DevshellPiTarget,
     path: string,
     content: string
 ): DevshellPiWorkspaceSkill | undefined {
@@ -320,7 +322,7 @@ function toProjectSkill(
 }
 
 function toProjectPrompt(
-    target: AgentTarget,
+    target: DevshellPiTarget,
     path: string,
     content: string
 ): PromptTemplate | undefined {
@@ -362,7 +364,7 @@ function resourceBasename(path: string): string {
     return normalized.slice(normalized.lastIndexOf("/") + 1);
 }
 
-function remoteProjectPath(target: AgentTarget, path: string): string {
+function remoteProjectPath(target: DevshellPiTarget, path: string): string {
     const separator = remoteSeparator(target.workspace);
     const relative = normalizeResourcePath(path).slice(2).replaceAll("/", separator);
     const workspace = target.workspace.replace(/[\\/]+$/u, "");
@@ -390,7 +392,7 @@ function contextFileName(path: string): typeof PI_CONTEXT_FILE_NAMES[number] | u
     return PI_CONTEXT_FILE_NAMES.find((candidate) => candidate === basename);
 }
 
-function remoteContextPath(target: AgentTarget, name: string): string {
+function remoteContextPath(target: DevshellPiTarget, name: string): string {
     const separator = remoteSeparator(target.workspace);
     const workspace = target.workspace.replace(/[\\/]+$/u, "");
     return `${target.instance}:${workspace}${separator}${name}`;

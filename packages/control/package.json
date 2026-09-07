@@ -19,7 +19,6 @@
         "dist"
     ],
     "dependencies": {
-        "@portable-devshell/agentd": "workspace:*",
         "@portable-devshell/core": "workspace:*",
         "@portable-devshell/mcp": "workspace:*",
         "@portable-devshell/shared": "workspace:*",

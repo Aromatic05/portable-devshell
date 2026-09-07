@@ -138,6 +138,7 @@ capture_installed_runtime() {
         printf '%s\n' "$control_status" >&2
         return 1
     fi
+    runtime_control_pid=$(printf '%s\n' "$control_status" | awk '/^pid:[[:space:]]+[1-9][0-9]*[[:space:]]*$/ { print $2; exit }')
     case "$control_status" in
         *"control: running"*) runtime_restore_control=1 ;;
         *) return 0 ;;
@@ -168,7 +169,35 @@ NODE
     fi
 }
 
-restore_installed_runtime() {
+assert_running_control_matches_application() {
+    application_directory=$1
+    if [ "${runtime_restore_control:-0}" -ne 1 ]; then
+        return 0
+    fi
+    case "${runtime_control_pid:-}" in
+        ''|*[!0-9]*)
+            echo "无法验证正在运行的 Control PID；安装在停机前取消。" >&2
+            return 1
+            ;;
+    esac
+    if ! control_process_running "$runtime_control_pid"; then
+        echo "安装前 Control PID $runtime_control_pid 已不存在；安装在停机前取消。" >&2
+        return 1
+    fi
+    command_line=$(ps -p "$runtime_control_pid" -o command= 2>/dev/null || true)
+    if ! node - "$application_directory" "$command_line" <<'NODE'
+const path = require("path");
+const root = path.resolve(process.argv[2]).replaceAll("\\", "/").replace(/\/+$/u, "");
+const command = String(process.argv[3] ?? "").replaceAll("\\", "/");
+if (!command.includes("ControlDaemon.js") || !command.includes(`${root}/`)) process.exit(1);
+NODE
+    then
+        echo "正在运行的 Control PID $runtime_control_pid 不属于当前激活的 application generation；安装在停机前取消。" >&2
+        return 1
+    fi
+}
+
+restore_installed_control() {
     cli=$1
     if [ "${runtime_restore_control:-0}" -ne 1 ]; then
         return 0
@@ -176,6 +205,13 @@ restore_installed_runtime() {
     if ! node "$cli" start >/dev/null; then
         echo "新版本已安装，但无法恢复安装前运行的 control。" >&2
         return 1
+    fi
+}
+
+restore_installed_instances() {
+    cli=$1
+    if [ "${runtime_restore_control:-0}" -ne 1 ]; then
+        return 0
     fi
     restore_failed=0
     while IFS= read -r instance; do
@@ -186,6 +222,12 @@ restore_installed_runtime() {
         fi
     done < "$runtime_restore_instances"
     return "$restore_failed"
+}
+
+restore_installed_runtime() {
+    cli=$1
+    restore_installed_control "$cli" || return 1
+    restore_installed_instances "$cli"
 }
 
 cleanup_control_runtime() {
@@ -366,13 +408,6 @@ rollback_application() {
 
 rollback_installation() {
     rollback_install_failed=0
-    if [ "${pi_transaction_active:-0}" -eq 1 ]; then
-        if node "$pi_helper" restore "$pi_snapshot"; then
-            pi_transaction_active=0
-        else
-            rollback_install_failed=1
-        fi
-    fi
     if [ "$application_transaction_active" -eq 1 ]; then
         if rollback_application; then
             application_transaction_active=0
@@ -479,11 +514,6 @@ if [ ! -f "$manifest" ]; then
     echo "发布包缺少 portable-devshell-install.json。" >&2
     exit 1
 fi
-pi_helper="$temporary/app/portable-devshell-pi-integration.mjs"
-if [ ! -f "$pi_helper" ]; then
-    echo "发布包缺少 portable-devshell-pi-integration.mjs。" >&2
-    exit 1
-fi
 
 version=$(node -e 'const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(typeof value.version!=="string"||!value.version) process.exit(1); process.stdout.write(value.version)' "$manifest")
 if [ -n "$explicit_release_base" ]; then
@@ -498,17 +528,15 @@ staging_directory="$install_root/.staging-$version-$$"
 backup_directory="$install_root/.backup-$version-$$"
 current_link="$install_root/current"
 command_link="$bin_directory/devshell"
-pi_command="$bin_directory/pi"
-pi_snapshot="$temporary/pi-integration-snapshot.json"
-pi_original_snapshot="$install_root/pi-integration-original.json"
 worker_bin_directory="$devshell_home/bin"
 worker_backup_directory="$devshell_home/.install-worker-backup-$$"
 application_transaction_active=0
 worker_transaction_active=0
-pi_transaction_active=0
 runtime_restore_control=0
+runtime_control_pid=
 runtime_restore_instances="$temporary/runtime-restore-instances"
 runtime_was_stopped=0
+candidate_control_restore_attempted=0
 previous_version_present=0
 if [ -e "$version_directory" ] || [ -L "$version_directory" ]; then
     previous_version_present=1
@@ -517,13 +545,21 @@ fi
 cleanup_installation() {
     status=$?
     trap - EXIT HUP INT TERM
-    if [ "$application_transaction_active" -eq 1 ] || [ "$worker_transaction_active" -eq 1 ] || [ "$pi_transaction_active" -eq 1 ]; then
-        if ! rollback_installation; then
+    rollback_blocked=0
+    if [ "$status" -ne 0 ] && [ "$candidate_control_restore_attempted" -eq 1 ] && { [ "$application_transaction_active" -eq 1 ] || [ "$worker_transaction_active" -eq 1 ]; }; then
+        if ! stop_installed_control "$command_link"; then
+            echo "候选 Control 无法安全停止；为避免让运行进程与磁盘 generation 不一致，拒绝自动回滚。" >&2
+            rollback_blocked=1
+            status=1
+        fi
+    fi
+    if [ "$application_transaction_active" -eq 1 ] || [ "$worker_transaction_active" -eq 1 ]; then
+        if [ "$rollback_blocked" -eq 0 ] && ! rollback_installation; then
             echo "安装回滚未完整完成；备份目录已保留以便人工恢复。" >&2
             status=1
         fi
     fi
-    if [ "$status" -ne 0 ] && [ "${runtime_was_stopped:-0}" -eq 1 ] && [ "${runtime_restore_control:-0}" -eq 1 ]; then
+    if [ "$status" -ne 0 ] && [ "${runtime_was_stopped:-0}" -eq 1 ] && [ "${runtime_restore_control:-0}" -eq 1 ] && [ "$application_transaction_active" -eq 0 ] && [ "$worker_transaction_active" -eq 0 ]; then
         if ! restore_installed_runtime "$current_cli"; then
             echo "安装失败后未能恢复原 control/instance 运行态。" >&2
             status=1
@@ -553,18 +589,27 @@ if ! smoke_cli "$staging_cli" "安装前验证失败"; then
     exit 1
 fi
 detail "CLI 入口和运行时依赖验证通过"
-if ! node "$pi_helper" snapshot "$pi_snapshot" "$bin_directory" "$home"; then
-    echo "无法捕获安装前 Pi 集成状态，安装已取消。" >&2
-    exit 1
-fi
 
 step "停止旧版本并切换安装"
 current_cli=
+activated_application_directory=
 if [ -f "$current_link/package.json" ]; then
     current_cli_relative_path=$(resolve_cli_relative_path "$current_link")
-    current_cli="$current_link/$current_cli_relative_path"
+    current_cli=$(node -e 'process.stdout.write(require("fs").realpathSync(process.argv[1]))' "$current_link/$current_cli_relative_path")
+    activated_application_directory=$(node -e 'process.stdout.write(require("fs").realpathSync(process.argv[1]))' "$current_link")
 fi
 if ! capture_installed_runtime "$current_cli"; then
+    exit 1
+fi
+if [ -z "${runtime_control_pid:-}" ] && [ -f "$devshell_home/control/control.pid" ]; then
+    IFS= read -r runtime_control_pid < "$devshell_home/control/control.pid" || runtime_control_pid=
+fi
+if [ "$runtime_restore_control" -eq 1 ]; then
+    if [ -z "$activated_application_directory" ] || ! assert_running_control_matches_application "$activated_application_directory"; then
+        exit 1
+    fi
+elif [ -n "${runtime_control_pid:-}" ] && control_process_running "$runtime_control_pid"; then
+    echo "Control PID $runtime_control_pid 仍在运行但 RPC 不可用；安装在停机前取消。" >&2
     exit 1
 fi
 if ! stop_installed_control "$current_cli"; then
@@ -606,12 +651,6 @@ if ! ln -sfn "versions/$version" "$current_link" || ! ln -sfn "$current_link/$cl
     rollback_installation
     exit 1
 fi
-pi_transaction_active=1
-if ! node "$pi_helper" activate "$bin_directory" "$current_link" "$home"; then
-    echo "无法激活 Pi devshell extension，正在恢复原安装。" >&2
-    rollback_installation
-    exit 1
-fi
 
 step "验证安装结果"
 if ! smoke_cli "$command_link" "安装结果验证失败"; then
@@ -619,20 +658,24 @@ if ! smoke_cli "$command_link" "安装结果验证失败"; then
     rollback_installation
     exit 1
 fi
-if ! node "$pi_helper" persist-original "$pi_snapshot" "$pi_original_snapshot"; then
-    echo "无法持久化安装前 Pi 集成状态，正在恢复原安装。" >&2
-    rollback_installation
+if [ "$runtime_restore_control" -eq 1 ]; then
+    candidate_control_restore_attempted=1
+fi
+if ! restore_installed_control "$command_link"; then
+    echo "候选 Control 无法恢复真实运行态，正在恢复原安装。" >&2
+    exit 1
+fi
+application_transaction_active=0
+worker_transaction_active=0
+detail "已安装命令可以正常启动"
+runtime_was_stopped=0
+if ! restore_installed_instances "$command_link"; then
+    echo "新 Control 已恢复，但一个或多个安装前运行的实例无法恢复。" >&2
+    echo "候选实例可能已访问持久状态，禁止自动降级。" >&2
+    echo "恢复材料已保留：$backup_directory $worker_backup_directory" >&2
     exit 1
 fi
 rm -rf "$backup_directory" "$worker_backup_directory"
-application_transaction_active=0
-worker_transaction_active=0
-pi_transaction_active=0
-detail "已安装命令可以正常启动"
-runtime_was_stopped=0
-if ! restore_installed_runtime "$command_link"; then
-    exit 1
-fi
 if [ "$runtime_restore_control" -eq 1 ]; then
     restored_instance_count=$(grep -c . "$runtime_restore_instances" || true)
     detail "已恢复 Control 和 ${restored_instance_count} 个安装前运行的实例"
@@ -640,7 +683,6 @@ fi
 
 printf '\n已安装 portable-devshell %s。\n' "$version"
 echo "命令：$command_link"
-echo "Pi：$pi_command（默认仅使用 devshell 工具）"
 echo "已预装 Worker：$targets"
 echo "其他 Worker：首次连接对应平台时按需下载并校验"
 echo "下一步："

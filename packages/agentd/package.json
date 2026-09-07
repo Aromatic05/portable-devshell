@@ -17,7 +17,6 @@
     "dependencies": {
         "@earendil-works/pi-coding-agent": "0.84.4",
         "@portable-devshell/core": "workspace:*",
-        "@portable-devshell/pi-extension": "workspace:*",
         "@portable-devshell/shared": "workspace:*",
         "pi-gui-extension": "0.4.1"
     },

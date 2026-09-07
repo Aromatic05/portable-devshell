@@ -27,7 +27,7 @@ export class ControlSocketListener implements ControlChannelListener {
     #server?: Server;
 
     constructor(options: ControlSocketListenerOptions) {
-        this.#allowedPeers = options.allowedPeers ?? ["agent", "cli", "tui"];
+        this.#allowedPeers = options.allowedPeers ?? ["cli", "tui"];
         this.#socketPath = options.socketPath;
         this.#subject = options.subject ?? localControlSubject();
     }

@@ -10,7 +10,7 @@ interface TransportIdCrypto {
     randomUUID?: () => string;
 }
 
-export type Peer = "agent" | "cli" | "tui" | "web" | "server";
+export type Peer = "cli" | "tui" | "web" | "server";
 export type Destination = "@control" | InstanceName;
 
 export interface Event {
@@ -177,14 +177,8 @@ export class Codec {
             throw protocolError("protocol.invalidDirection", "Event source and destination peers must differ.");
         }
         if (this.#remote === undefined) {
-            if (
-                this.#local === "server" &&
-                event.from !== "agent" &&
-                event.from !== "cli" &&
-                event.from !== "tui" &&
-                event.from !== "web"
-            ) {
-                throw protocolError("protocol.invalidDirection", "Server connections only accept agent, cli, tui, or web peers.");
+            if (this.#local === "server" && event.from !== "cli" && event.from !== "tui" && event.from !== "web") {
+                throw protocolError("protocol.invalidDirection", "Server connections only accept cli, tui, or web peers.");
             }
             this.#remote = event.from;
             return;
@@ -263,10 +257,10 @@ export function validateEvent(value: unknown): Event {
 }
 
 function readPeer(value: unknown, field: string): Peer {
-    if (value === "agent" || value === "cli" || value === "tui" || value === "web" || value === "server") {
+    if (value === "cli" || value === "tui" || value === "web" || value === "server") {
         return value;
     }
-    throw protocolError("protocol.invalidDirection", `Event ${field} must be agent, cli, tui, web, or server.`);
+    throw protocolError("protocol.invalidDirection", `Event ${field} must be cli, tui, web, or server.`);
 }
 
 function readNonEmptyString(value: unknown, field: string): string {

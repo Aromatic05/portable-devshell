@@ -231,19 +231,6 @@ export class ControlChannelServer {
                             retryable: false,
                         });
                     }
-                    if (
-                        negotiated.peer === "agent" &&
-                        !(
-                            incoming.destination === "@control" &&
-                            (incoming.module === "agent" || incoming.module === "service")
-                        )
-                    ) {
-                        throw createError({
-                            code: errorCodes.controlClientIdentityInvalid,
-                            message: "Agent Control peers may only access service and agent modules.",
-                            retryable: false,
-                        });
-                    }
                 },
                 eventIdPrefix: "server",
                 getConnectionContext: () => ({
@@ -335,7 +322,7 @@ function isHelloRequest(incoming: PrefixRouteIncoming): boolean {
 }
 
 function readClientPeer(peer: PrefixRouteIncoming["peer"]): ControlClientKind {
-    if (peer === "agent" || peer === "cli" || peer === "tui" || peer === "web") return peer;
+    if (peer === "cli" || peer === "tui" || peer === "web") return peer;
     throw createError({
         code: errorCodes.controlClientIdentityInvalid,
         message: "Server peer cannot initiate a Control client connection.",

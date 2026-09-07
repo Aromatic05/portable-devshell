@@ -6,14 +6,13 @@ import {
     getAgentDir,
     type SessionStartEvent
 } from "@earendil-works/pi-coding-agent";
-import type { AgentTarget } from "@portable-devshell/shared";
-
 import {
     expandDevshellPiPromptTemplate,
     transformDevshellPiSkillInput,
     type DevshellPiContextFile,
     type DevshellPiWorkspaceResources
 } from "./workspace-resources.js";
+import type { DevshellPiTarget } from "./DevshellPiTarget.js";
 
 interface StandalonePiResourcesApiLike {
     on(
@@ -33,7 +32,7 @@ interface StandalonePiResourcesApiLike {
     sendUserMessage(content: string, options?: { expandPromptTemplates?: boolean }): void;
 }
 
-export function appendDevshellRemoteWorkspacePrompt(basePrompt: string, target: AgentTarget): string {
+export function appendDevshellRemoteWorkspacePrompt(basePrompt: string, target: DevshellPiTarget): string {
     const remoteWorkspace = `${target.instance}:${target.workspace}`;
     const devshellPrompt = [
         "portable-devshell execution environment:",
@@ -68,7 +67,7 @@ export function replacePiProjectContext(
 
 export function attachStandaloneWorkspaceResources(
     pi: StandalonePiResourcesApiLike,
-    target: AgentTarget,
+    target: DevshellPiTarget,
     resources: DevshellPiWorkspaceResources,
     setActiveSkillNames: (names: ReadonlySet<string>) => void
 ): void {

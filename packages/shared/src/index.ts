@@ -12,7 +12,6 @@ export * from "./config/ConfigValidate.js";
 export * from "./dto/DtoCommandResult.js";
 export * from "./dto/DtoControlProtocol.js";
 export * from "./dto/DtoDebug.js";
-export * from "./dto/agent/DtoAgent.js";
 export * from "./dto/context/DtoContextMessage.js";
 export * from "./dto/context/DtoContextRecord.js";
 export * from "./dto/artifact/DtoArtifact.js";

@@ -4,16 +4,16 @@ import test from "node:test";
 import type { Component } from "@earendil-works/pi-tui";
 import type { JsonValue } from "@portable-devshell/shared";
 
-import devshellPiExtension, {
+import {
     appendDevshellRemoteWorkspacePrompt,
+    createDevshellPiExtension,
+    createDevshellPiWorkspaceBridge,
     expandDevshellPiPromptTemplate,
     loadDevshellPiWorkspaceContext,
     loadDevshellPiWorkspaceResources,
-    parseDevshellAgentTarget,
     piPromptMetadata,
     prepareToolInput,
     replacePiProjectContext,
-    resolveToolSessionOpenInput,
     transformDevshellPiSkillInput
 } from "../../src/index.ts";
 import {
@@ -27,8 +27,24 @@ import {
     type PiToolRenderContextLike
 } from "../../src/renderer.ts";
 
-test("Pi devshell package default export is a Pi extension factory", () => {
-    assert.equal(typeof devshellPiExtension, "function");
+test("Pi devshell adapter requires an injected tool session instead of opening Control itself", async () => {
+    let closes = 0;
+    const session = {
+        target: { instance: "worker-a", workspace: "/repo" },
+        tools: [],
+        async callTool() {
+            throw new Error("tool call not expected");
+        },
+        close() {
+            closes += 1;
+        }
+    };
+    assert.equal(typeof createDevshellPiExtension(session), "function");
+    const bridge = createDevshellPiWorkspaceBridge(session);
+    assert.deepEqual(await bridge.loadResources(), { contextFiles: [], prompts: [], skills: [] });
+    await bridge.close();
+    await bridge.close();
+    assert.equal(closes, 1);
 });
 
 const identityTheme: PiThemeLike = {
@@ -65,38 +81,6 @@ function visibleSelfLines(component: Component): string[] {
         .map((line) => line.trimEnd())
         .filter((line, index, lines) => line.length > 0 || (index > 0 && index < lines.length - 1));
 }
-
-test("Pi devshell target parser preserves remote workspace syntax", () => {
-    assert.deepEqual(
-        parseDevshellAgentTarget("worker-a:/srv/project"),
-        { instance: "worker-a", workspace: "/srv/project" }
-    );
-    assert.deepEqual(
-        parseDevshellAgentTarget("windows-worker:C:\\repo"),
-        { instance: "windows-worker", workspace: "C:\\repo" }
-    );
-});
-
-test("Pi devshell target parser rejects ambiguous bindings", () => {
-    for (const value of ["", " worker:/repo", "worker", ":/repo", "bad name:/repo", "worker:"]) {
-        assert.throws(() => parseDevshellAgentTarget(value));
-    }
-});
-
-test("Pi devshell extension leaves unique instance selection to Control", () => {
-    assert.deepEqual(
-        resolveToolSessionOpenInput({ cwd: "/repo", environment: {} }),
-        { workspace: "/repo" }
-    );
-    assert.deepEqual(
-        resolveToolSessionOpenInput({ cwd: "/ignored", environment: {}, target: "worker-a:/srv/project" }),
-        { instance: "worker-a", workspace: "/srv/project" }
-    );
-    assert.deepEqual(
-        resolveToolSessionOpenInput({ environment: { PORTABLE_DEVSHELL_PI_WORKSPACE: "/repo" } }),
-        { workspace: "/repo" }
-    );
-});
 
 test("Pi devshell workspace context follows native Pi file priority and reconstructs paged text", async () => {
     const calls: Array<{ input: unknown; operationId: string; toolName: string }> = [];

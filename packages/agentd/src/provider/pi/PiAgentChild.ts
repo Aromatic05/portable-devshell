@@ -1,16 +1,8 @@
 import { mkdir } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { join } from "node:path";
 
-import {
-    appendDevshellRemoteWorkspacePrompt,
-    openDevshellPiWorkspaceBridge,
-    type DevshellPiWorkspaceBridge,
-    type PiExtensionApiLike
-} from "@portable-devshell/pi-extension";
-import type { AgentTarget } from "@portable-devshell/shared";
-
+import type { AgentWorkerTarget } from "../../target/AgentWorkerTarget.js";
 import { PiGuiWeb } from "./PiGuiWeb.js";
-import { mergeManagedPiProjectPrompts, mergeManagedPiProjectSkills } from "./PiAgentResources.js";
 import { PiSdkLoader, type PiModelRuntimeLike, type PiSdkModule, type PiSessionLike } from "./PiSdkLoader.js";
 import type {
     PiChildAgentCommandMessage,
@@ -22,10 +14,9 @@ import { deliverPiAgentMessage } from "./PiAgentCommands.js";
 import { disposeManagedPiAgent } from "./PiAgentLifecycle.js";
 
 interface ManagedPiAgent {
-    devshell: DevshellPiWorkspaceBridge;
     localCwd: string;
     session: PiSessionLike;
-    target: AgentTarget;
+    target: AgentWorkerTarget;
 }
 
 let agentDir: string | undefined;
@@ -87,83 +78,36 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
     await mkdir(input.localCwd, { recursive: true });
 
     const settingsManager = activeSdk.SettingsManager.create(input.localCwd, activeAgentDir);
-    const devshell = await openDevshellPiWorkspaceBridge({
-        autoStartControl: false,
+    const resourceLoader = new activeSdk.DefaultResourceLoader({
+        agentDir: activeAgentDir,
         cwd: input.localCwd,
-        target: input.target
+        noExtensions: true,
+        settingsManager
     });
+    await resourceLoader.reload();
+    const sessionManager = activeSdk.SessionManager.create(input.localCwd);
+    const created = await activeSdk.createAgentSession({
+        agentDir: activeAgentDir,
+        cwd: input.localCwd,
+        modelRuntime: activeModelRuntime,
+        noTools: "builtin",
+        resourceLoader,
+        sessionManager,
+        settingsManager
+    });
+    const session = created.session;
     try {
-        const remoteResources = await devshell.loadResources();
-        const managedExtension = async (pi: PiExtensionApiLike) => {
-            await devshell.extension(pi);
-            pi.on("session_shutdown", async (event) => {
-                if (event.reason === "reload") await devshell.refreshResources();
-            });
-        };
-        const resourceLoader = new activeSdk.DefaultResourceLoader({
-            agentDir: activeAgentDir,
-            agentsFilesOverride: (current: { agentsFiles: Array<{ content: string; path: string }> }) => ({
-                agentsFiles: [
-                    ...piUserContextFiles(current.agentsFiles, activeAgentDir),
-                    ...remoteResources.contextFiles
-                ]
-            }),
-            cwd: input.localCwd,
-            extensionFactories: [managedExtension],
-            noExtensions: true,
-            promptsOverride: (current: { diagnostics: unknown[]; prompts: Array<{ name: string; sourceInfo?: { scope?: string } }> }) =>
-                mergeManagedPiProjectPrompts(current, remoteResources.prompts),
-            settingsManager,
-            skillsOverride: (current: { diagnostics: unknown[]; skills: Array<{ name: string; sourceInfo?: { scope?: string } }> }) => {
-                const merged = mergeManagedPiProjectSkills(
-                    current,
-                    remoteResources.skills.map((skill) => skill.resource)
-                );
-                devshell.setActiveSkillNames(merged.remoteSkillNames);
-                return { diagnostics: merged.diagnostics, skills: merged.skills };
-            },
-            systemPromptOverride: (basePrompt: string | undefined) => appendDevshellRemoteWorkspacePrompt(
-                basePrompt ?? "",
-                input.target
-            )
+        session.setSessionName?.(`${input.agentId} · ${input.target.instance}:${input.target.workspace}`);
+        activeGui.attach(session, input.localCwd);
+        agents.set(input.agentId, {
+            localCwd: input.localCwd,
+            session,
+            target: { ...input.target }
         });
-        await resourceLoader.reload();
-        const sessionManager = activeSdk.SessionManager.create(input.localCwd);
-        const created = await activeSdk.createAgentSession({
-            agentDir: activeAgentDir,
-            cwd: input.localCwd,
-            modelRuntime: activeModelRuntime,
-            noTools: "builtin",
-            resourceLoader,
-            sessionManager,
-            settingsManager
-        });
-        const session = created.session;
-        try {
-            session.setSessionName?.(`${input.agentId} · ${input.target.instance}:${input.target.workspace}`);
-            activeGui.attach(session, input.localCwd);
-            agents.set(input.agentId, {
-                devshell,
-                localCwd: input.localCwd,
-                session,
-                target: { ...input.target }
-            });
-        } catch (error) {
-            session.dispose();
-            throw error;
-        }
     } catch (error) {
-        await devshell.close().catch(() => undefined);
+        session.dispose();
         throw error;
     }
-}
-
-function piUserContextFiles(
-    files: Array<{ content: string; path: string }>,
-    activeAgentDir: string
-): Array<{ content: string; path: string }> {
-    const root = resolve(activeAgentDir);
-    return files.filter((file) => dirname(resolve(file.path)) === root);
 }
 
 async function commandAgent(message: PiChildAgentCommandMessage): Promise<void> {
@@ -239,7 +183,6 @@ function requireMessage(message: PiChildAgentCommandMessage): string {
     if (typeof message.message === "string" && message.message.length > 0) return message.message;
     throw new Error(`${message.command} requires a message.`);
 }
-
 
 function sendFailure(message: PiParentMessage, error: unknown): void {
     const text = error instanceof Error ? error.message : String(error);

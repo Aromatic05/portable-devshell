@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { PiAgentProcessFactory } from "../../src/provider/pi/PiAgentProcess.ts";
+import { parseAgentWorkerTarget } from "../../src/target/AgentWorkerTarget.ts";
 
 test("Pi process factory shares one child across live Agents and stops it only after the last Agent", async () => {
     const runtimeDirectory = await mkdtemp(join(tmpdir(), "devshell-pi-shared-"));
@@ -25,13 +26,13 @@ test("Pi process factory shares one child across live Agents and stops it only a
             ...base,
             agentId: "ag-one",
             localCwd: join(runtimeDirectory, "agents", "ag-one", "cwd"),
-            target: { instance: "worker-a", workspace: "/repo/a" }
+            target: parseAgentWorkerTarget("worker-a:/repo/a")
         });
         const second = await factory.start({
             ...base,
             agentId: "ag-two",
             localCwd: join(runtimeDirectory, "agents", "ag-two", "cwd"),
-            target: { instance: "worker-a", workspace: "/repo/b" }
+            target: parseAgentWorkerTarget("worker-a:/repo/b")
         });
 
         assert.equal(first.web?.upstream.toString(), "http://127.0.0.1:43199/");
@@ -78,7 +79,7 @@ test("Pi process factory retires a crashed shared child and starts a replacement
             ...base,
             agentId: "ag-crash",
             localCwd: join(runtimeDirectory, "agents", "ag-crash", "cwd"),
-            target: { instance: "worker-a", workspace: "/repo/a" }
+            target: parseAgentWorkerTarget("worker-a:/repo/a")
         });
 
         await assert.rejects(() => first.prompt("__crash__"), /(exited unexpectedly|IPC disconnected unexpectedly)/u);
@@ -88,7 +89,7 @@ test("Pi process factory retires a crashed shared child and starts a replacement
             ...base,
             agentId: "ag-replacement",
             localCwd: join(runtimeDirectory, "agents", "ag-replacement", "cwd"),
-            target: { instance: "worker-a", workspace: "/repo/b" }
+            target: parseAgentWorkerTarget("worker-a:/repo/b")
         });
         await second.prompt("replacement works");
 
@@ -124,7 +125,7 @@ test("Pi process factory retires a child whose IPC disconnects without process e
             ...base,
             agentId: "ag-disconnect",
             localCwd: join(runtimeDirectory, "agents", "ag-disconnect", "cwd"),
-            target: { instance: "worker-a", workspace: "/repo/a" }
+            target: parseAgentWorkerTarget("worker-a:/repo/a")
         });
 
         await assert.rejects(
@@ -137,7 +138,7 @@ test("Pi process factory retires a child whose IPC disconnects without process e
             ...base,
             agentId: "ag-after-disconnect",
             localCwd: join(runtimeDirectory, "agents", "ag-after-disconnect", "cwd"),
-            target: { instance: "worker-a", workspace: "/repo/b" }
+            target: parseAgentWorkerTarget("worker-a:/repo/b")
         });
         await replacement.prompt("replacement works");
         await replacement.stop();

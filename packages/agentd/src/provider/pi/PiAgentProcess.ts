@@ -3,9 +3,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-import type { AgentTarget } from "@portable-devshell/shared";
-
 import type { AgentProviderHandle } from "../AgentProvider.js";
+import type { AgentWorkerTarget } from "../../target/AgentWorkerTarget.js";
 import type {
     PiChildAgentCommandMessage,
     PiChildMessage,
@@ -17,7 +16,7 @@ export interface PiAgentProcessStartOptions {
     entrypoint: string;
     localCwd: string;
     runtimeDirectory: string;
-    target: AgentTarget;
+    target: AgentWorkerTarget;
     webBasePath: string;
 }
 

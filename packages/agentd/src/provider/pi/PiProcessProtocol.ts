@@ -1,4 +1,4 @@
-import type { AgentTarget } from "@portable-devshell/shared";
+import type { AgentWorkerTarget } from "../../target/AgentWorkerTarget.js";
 
 export interface PiChildInitMessage {
     entrypoint: string;
@@ -10,7 +10,7 @@ export interface PiChildAgentStartMessage {
     agentId: string;
     id: string;
     localCwd: string;
-    target: AgentTarget;
+    target: AgentWorkerTarget;
     type: "agent.start";
 }
 
