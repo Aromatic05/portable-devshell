@@ -1,0 +1,16 @@
+import { registerHooks } from "node:module";
+
+const workspacePackages = new Map([
+    ["@portable-devshell/agentd", new URL("../../agentd/src/index.ts", import.meta.url).href],
+    ["@portable-devshell/extension", new URL("../../extension/src/index.ts", import.meta.url).href],
+    ["@portable-devshell/pi-extension", new URL("../../pi-extension/src/index.ts", import.meta.url).href],
+    ["@portable-devshell/shared", new URL("../../shared/src/index.ts", import.meta.url).href]
+]);
+
+registerHooks({
+    resolve(specifier, context, nextResolve) {
+        const resolved = workspacePackages.get(specifier);
+        if (resolved !== undefined) return { shortCircuit: true, url: resolved };
+        return nextResolve(specifier, context);
+    }
+});

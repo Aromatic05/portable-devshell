@@ -1,0 +1,27 @@
+{
+    "name": "@portable-devshell/agent-extension",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "default": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "devshell-extension.json"
+    ],
+    "dependencies": {
+        "@portable-devshell/agentd": "workspace:*",
+        "@portable-devshell/extension": "workspace:*"
+    },
+    "scripts": {
+        "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b --force",
+        "typecheck": "tsc --noEmit -p ../../tsconfig.typecheck.json",
+        "test": "node ../../test/RunPackageTests.mjs --loader ./test/RegisterWorkspacePackages.mjs --concurrency 1 \"test/unit/*.test.ts\""
+    }
+}

@@ -44,6 +44,15 @@ importers:
         specifier: ^8.37.0
         version: 8.62.1(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3)
 
+  packages/agent-extension:
+    dependencies:
+      '@portable-devshell/agentd':
+        specifier: workspace:*
+        version: file:packages/agentd
+      '@portable-devshell/extension':
+        specifier: workspace:*
+        version: link:../extension
+
   packages/agentd:
     dependencies:
       '@earendil-works/pi-coding-agent':
@@ -846,6 +855,9 @@ packages:
   '@oxc-project/types@0.142.0':
     resolution: {integrity: sha512-7W+2q5AKQVU36fkaryontrHn3YDt1RyUYXatw9i5H8ocYe2sPKSFB6eS8WNPeRKiN1qAWWZUPm7gwFzJGrccqQ==}
 
+  '@portable-devshell/agentd@file:packages/agentd':
+    resolution: {directory: packages/agentd, type: directory}
+
   '@portable-devshell/control@file:packages/control':
     resolution: {directory: packages/control, type: directory}
 
@@ -857,6 +869,9 @@ packages:
 
   '@portable-devshell/mcp@file:packages/mcp':
     resolution: {directory: packages/mcp, type: directory}
+
+  '@portable-devshell/pi-extension@file:packages/pi-extension':
+    resolution: {directory: packages/pi-extension, type: directory}
 
   '@portable-devshell/shared@file:packages/shared':
     resolution: {directory: packages/shared, type: directory}
@@ -3554,6 +3569,20 @@ snapshots:
 
   '@oxc-project/types@0.142.0': {}
 
+  '@portable-devshell/agentd@file:packages/agentd':
+    dependencies:
+      '@earendil-works/pi-coding-agent': 0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(ws@8.21.0)(zod@4.5.4)
+      '@portable-devshell/pi-extension': file:packages/pi-extension(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(ws@8.21.0)(zod@4.5.4)
+      '@portable-devshell/shared': file:packages/shared
+      pi-gui-extension: 0.4.1(@earendil-works/pi-coding-agent@0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(ws@8.21.0)(zod@4.5.4))
+    transitivePeerDependencies:
+      - '@modelcontextprotocol/sdk'
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+      - ws
+      - zod
+
   '@portable-devshell/control@file:packages/control(react@18.3.1)':
     dependencies:
       '@portable-devshell/core': file:packages/core
@@ -3607,6 +3636,20 @@ snapshots:
       - react
       - react-dom
       - supports-color
+
+  '@portable-devshell/pi-extension@file:packages/pi-extension(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(ws@8.21.0)(zod@4.5.4)':
+    dependencies:
+      '@earendil-works/pi-coding-agent': 0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(ws@8.21.0)(zod@4.5.4)
+      '@earendil-works/pi-tui': 0.84.4
+      '@portable-devshell/shared': file:packages/shared
+      diff: 8.0.4
+    transitivePeerDependencies:
+      - '@modelcontextprotocol/sdk'
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+      - ws
+      - zod
 
   '@portable-devshell/shared@file:packages/shared': {}
 
