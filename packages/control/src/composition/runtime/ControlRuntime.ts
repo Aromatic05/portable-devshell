@@ -5,7 +5,9 @@ import { controlRemoteRpcPath, controlWebBasePath } from "@portable-devshell/sha
 import { McpOAuthProtectedResource, type HttpHost } from "@portable-devshell/mcp";
 import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
 import { DebugPatchService } from "../../control/debug/DebugPatchService.js";
+import { ExtensionControlService } from "../../control/extension/ExtensionControlService.js";
 import type { ExtensionHost } from "../../control/extension/ExtensionHost.js";
+import { ExtensionInstallService } from "../../control/extension/ExtensionInstallService.js";
 import type { ExtensionPathLayout } from "../../control/extension/ExtensionPathLayout.js";
 import { OperationalOverviewService } from "../../control/overview/OperationalOverviewService.js";
 import { ControlChannelServer, type ControlChannelListener } from "../../server/channel/ControlChannelServer.js";
@@ -43,6 +45,7 @@ export class ControlRuntime {
     readonly #artifact: ControlRuntimeArtifact;
     readonly #channels: ControlChannelServer;
     readonly #debug: DebugPatchService;
+    readonly #extensionControl: ExtensionControlService;
     readonly #extensionPaths: ExtensionPathLayout;
     readonly #extensions: ExtensionHost;
     readonly #instances: InstanceRegistry;
@@ -58,6 +61,13 @@ export class ControlRuntime {
         this.#artifact = options.artifact;
         this.#extensionPaths = options.extensionPaths;
         this.#extensions = options.extensions;
+        this.#extensionControl = new ExtensionControlService({
+            host: this.#extensions,
+            installer: new ExtensionInstallService({
+                host: this.#extensions,
+                paths: this.#extensionPaths
+            })
+        });
         this.#instances = options.instances;
         this.#mcp = options.mcp;
         this.#reverse = options.reverse;
@@ -67,7 +77,7 @@ export class ControlRuntime {
             config: options.mcp.configEditor,
             contextAdmin: () => options.mcp.host?.contextAdmin,
             debug: this.#debug,
-            extension: this.#extensions,
+            extension: this.#extensionControl,
             instanceCreate: options.mcp.instanceCreate,
             instances: options.instances,
             mcpStatus: () => options.mcp.status(),

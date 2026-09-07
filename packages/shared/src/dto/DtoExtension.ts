@@ -32,3 +32,9 @@ export interface ExtensionCommandWireResult {
     text?: string;
     value?: JsonValue;
 }
+
+export interface ExtensionRemoveResult {
+    id: string;
+    purged: boolean;
+    removed: true;
+}

@@ -45,6 +45,20 @@ test("CliParser keeps Extension namespaces generic", () => {
     });
     assert.deepEqual(parser.parse(["extension"]), { kind: "extension.help" });
     assert.deepEqual(parser.parse(["extension", "list"]), { kind: "extension.list" });
+    assert.deepEqual(parser.parse(["extension", "install", "./example.dsext"]), {
+        kind: "extension.install",
+        source: "./example.dsext"
+    });
+    assert.deepEqual(parser.parse(["extension", "remove", "agent"]), {
+        extensionId: "agent",
+        kind: "extension.remove",
+        purge: false
+    });
+    assert.deepEqual(parser.parse(["extension", "remove", "agent", "--purge"]), {
+        extensionId: "agent",
+        kind: "extension.remove",
+        purge: true
+    });
     assert.deepEqual(parser.parse(["extension", "inspect", "agent"]), {
         extensionId: "agent",
         kind: "extension.inspect"
@@ -61,6 +75,7 @@ test("CliParser keeps Extension namespaces generic", () => {
         extensionId: "agent",
         kind: "extension.reload"
     });
+    assert.throws(() => parser.parse(["extension", "remove", "agent", "--unknown"]), /Unknown extension remove option/u);
 });
 
 test("CliParser accepts trailing help consistently across command levels", () => {

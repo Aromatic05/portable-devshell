@@ -33,6 +33,7 @@ import type {
 } from "../dto/DtoDebug.js";
 import type {
     ExtensionCommandWireResult,
+    ExtensionRemoveResult,
     ExtensionRuntimeRecord,
 } from "../dto/DtoExtension.js";
 import type {
@@ -148,8 +149,10 @@ export interface ControlClients {
         disable(extensionId: string): Promise<ExtensionRuntimeRecord>;
         enable(extensionId: string): Promise<ExtensionRuntimeRecord>;
         get(extensionId: string): Promise<ExtensionRuntimeRecord>;
+        install(sourcePath: string): Promise<ExtensionRuntimeRecord>;
         list(): Promise<ExtensionRuntimeRecord[]>;
         reload(extensionId: string): Promise<ExtensionRuntimeRecord>;
+        remove(extensionId: string, purge?: boolean): Promise<ExtensionRemoveResult>;
     };
     goal: {
         get(instance: string): Promise<GoalRpcEnvelope>;
@@ -313,8 +316,10 @@ export function createControlClients(
             disable: (extensionId) => extension.request("disable", { extensionId }),
             enable: (extensionId) => extension.request("enable", { extensionId }),
             get: (extensionId) => extension.request("get", { extensionId }),
+            install: (sourcePath) => extension.request("install", { sourcePath }),
             list: () => extension.request("list"),
             reload: (extensionId) => extension.request("reload", { extensionId }),
+            remove: (extensionId, purge = false) => extension.request("remove", { extensionId, purge }),
         },
         goal: {
             get: (name) => goal.request(name, "get"),

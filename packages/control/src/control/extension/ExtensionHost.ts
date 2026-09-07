@@ -196,6 +196,32 @@ export class ExtensionHost {
         });
     }
 
+    async waitForDrain(id: string): Promise<void> {
+        const retired = [...(this.#retired.get(id) ?? [])];
+        if (retired.length === 0) return;
+        const settled = await Promise.allSettled(retired.map(async (generation) => await generation.retire()));
+        const failures = settled.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+        if (failures.length > 0) {
+            throw new AggregateError(failures, `Extension ${id} failed to drain cleanly.`);
+        }
+    }
+
+    async forget(id: string): Promise<void> {
+        await this.#exclusive(async () => {
+            this.#assertRunning();
+            const snapshot = this.#requireRegistry();
+            if (snapshot.extensions[id] === undefined) throw extensionNotFound(id);
+            if (this.#active.has(id) || (this.#retired.get(id)?.size ?? 0) > 0) {
+                throw extensionInvalid(id, "still has active or draining generations");
+            }
+            const next = cloneExtensionRegistry(snapshot);
+            delete next.extensions[id];
+            await this.#registry.write(next);
+            this.#registrySnapshot = next;
+            this.#failures.delete(id);
+        });
+    }
+
     async retireInstance(event: ExtensionInstanceRetireEvent): Promise<void> {
         const failures: unknown[] = [];
         await Promise.all([...this.#active.entries()].map(async ([id, generation]) => {

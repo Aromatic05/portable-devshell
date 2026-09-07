@@ -37,21 +37,25 @@ function record(enabled = true): ExtensionRuntimeRecord {
 function port(events: string[] = []): ExtensionControlPort {
     let enabled = true;
     return {
+        async call(id, operation, input, invocation): Promise<JsonValue> {
+            events.push(`call:${id}:${operation}:${invocation.requestId}`);
+            return { input: input ?? null };
+        },
+        async command(id, argv, invocation) {
+            events.push(`command:${id}:${argv.join("|")}:${invocation.requestId}`);
+            return { kind: "text", text: "ok" };
+        },
         async disable(id) {
             events.push(`disable:${id}`);
             enabled = false;
         },
-        async dispatchCommand(id, argv, invocation) {
-            events.push(`command:${id}:${argv.join("|")}:${invocation.requestId}`);
-            return { kind: "text", text: "ok" };
-        },
-        async dispatchRpc(id, operation, input, invocation): Promise<JsonValue> {
-            events.push(`call:${id}:${operation}:${invocation.requestId}`);
-            return { input: input ?? null };
-        },
         async enable(id) {
             events.push(`enable:${id}`);
             enabled = true;
+        },
+        async install(sourcePath) {
+            events.push(`install:${sourcePath}`);
+            return record();
         },
         async list() {
             events.push("list");
@@ -59,6 +63,10 @@ function port(events: string[] = []): ExtensionControlPort {
         },
         async reload(id) {
             events.push(`reload:${id}`);
+        },
+        async remove(id, purge) {
+            events.push(`remove:${id}:${purge}`);
+            return { id, purged: purge, removed: true };
         }
     };
 }
@@ -92,7 +100,9 @@ test("Extension command dispatch is CLI-only while lifecycle mutations require l
     const events: string[] = [];
     const module = createExtensionRouteModule(port(events));
     const command = operation(module, "command");
+    const install = operation(module, "install");
     const reload = operation(module, "reload");
+    const remove = operation(module, "remove");
 
     assert.deepEqual(await command.handle({
         id: "1",
@@ -115,11 +125,29 @@ test("Extension command dispatch is CLI-only while lifecycle mutations require l
         async () => await reload.handle({ id: "4", name: "reload", payload: { extensionId: "example" } }, context("web", "local-owner")),
         /restricted to the local owner CLI/iu
     );
+    await assert.rejects(
+        async () => await install.handle({ id: "4a", name: "install", payload: { sourcePath: "/tmp/example.dsext" } }, context("cli", "bearer")),
+        /restricted to the local owner CLI/iu
+    );
     assert.deepEqual(
         await reload.handle({ id: "5", name: "reload", payload: { extensionId: "example" } }, context("cli", "local-owner")),
         record()
     );
-    assert.deepEqual(events, ["command:example:--help:req-1", "reload:example", "list"]);
+    assert.deepEqual(
+        await install.handle({ id: "6", name: "install", payload: { sourcePath: "/tmp/example.dsext" } }, context("cli", "local-owner")),
+        record()
+    );
+    assert.deepEqual(
+        await remove.handle({ id: "7", name: "remove", payload: { extensionId: "example", purge: true } }, context("cli", "local-owner")),
+        { id: "example", purged: true, removed: true }
+    );
+    assert.deepEqual(events, [
+        "command:example:--help:req-1",
+        "reload:example",
+        "list",
+        "install:/tmp/example.dsext",
+        "remove:example:true"
+    ]);
 });
 
 test("Extension route parser rejects invalid namespaces, operations and command payloads before dispatch", async () => {

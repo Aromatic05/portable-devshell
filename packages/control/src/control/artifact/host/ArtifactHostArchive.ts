@@ -48,6 +48,12 @@ export interface ArtifactDirectoryManifestResult {
     manifestBlake3: string;
 }
 
+export interface ArtifactDirectoryArchiveLimits {
+    maxEntries?: number;
+    maxFileBytes?: number;
+    maxLogicalBytes?: number;
+}
+
 export async function createArtifactDirectoryArchive(
     sourcePath: string,
     targetPath: string
@@ -86,7 +92,8 @@ export async function createArtifactDirectoryArchive(
 
 export async function extractArtifactDirectoryArchive(
     archivePath: string,
-    targetDirectory: string
+    targetDirectory: string,
+    limits: ArtifactDirectoryArchiveLimits = {}
 ): Promise<ArtifactDirectoryManifestResult> {
     const parser = extract();
     const manifestEntries: ManifestEntry[] = [];
@@ -96,7 +103,33 @@ export async function extractArtifactDirectoryArchive(
     let entryFailure: unknown;
 
     parser.on("entry", (header, stream, next) => {
-        void extractEntry(header, stream, targetDirectory, seen, directories)
+        const nextEntryCount = manifestEntries.length + 1;
+        if (limits.maxEntries !== undefined && nextEntryCount > limits.maxEntries) {
+            entryFailure = artifactError("artifact.payloadInvalid", "Directory archive exceeds the entry limit.");
+            abortArchiveEntry(stream, parser, entryFailure as Error);
+            return;
+        }
+        if (
+            header.type === "file" &&
+            header.size !== undefined &&
+            limits.maxFileBytes !== undefined &&
+            header.size > limits.maxFileBytes
+        ) {
+            entryFailure = artifactError("artifact.payloadInvalid", `Archive member exceeds the file limit: ${header.name}`);
+            abortArchiveEntry(stream, parser, entryFailure as Error);
+            return;
+        }
+        if (
+            header.type === "file" &&
+            header.size !== undefined &&
+            limits.maxLogicalBytes !== undefined &&
+            logicalBytes + header.size > limits.maxLogicalBytes
+        ) {
+            entryFailure = artifactError("artifact.payloadInvalid", "Directory archive exceeds the logical byte limit.");
+            abortArchiveEntry(stream, parser, entryFailure as Error);
+            return;
+        }
+        void extractEntry(header, stream, targetDirectory, seen, directories, limits, logicalBytes)
             .then((entry) => {
                 manifestEntries.push(entry);
                 if (entry.entryType === "file") {
@@ -251,7 +284,9 @@ async function extractEntry(
     stream: Readable,
     targetDirectory: string,
     seen: Set<string>,
-    directories: Array<{ mode: number; modifiedAtSeconds: number; path: string; relativePath: string }>
+    directories: Array<{ mode: number; modifiedAtSeconds: number; path: string; relativePath: string }>,
+    limits: ArtifactDirectoryArchiveLimits,
+    logicalBytesBefore: number
 ): Promise<ManifestEntry> {
     const relativePath =
         header.type === "directory" && header.name.endsWith("/")
@@ -282,8 +317,20 @@ async function extractEntry(
     let size = 0;
     const hashing = new Transform({
         transform(chunk: Buffer, _encoding, callback) {
+            const nextSize = size + chunk.length;
+            if (limits.maxFileBytes !== undefined && nextSize > limits.maxFileBytes) {
+                callback(artifactError("artifact.payloadInvalid", `Archive member exceeds the file limit: ${relativePath}`));
+                return;
+            }
+            if (
+                limits.maxLogicalBytes !== undefined &&
+                logicalBytesBefore + nextSize > limits.maxLogicalBytes
+            ) {
+                callback(artifactError("artifact.payloadInvalid", "Directory archive exceeds the logical byte limit."));
+                return;
+            }
             hasher.update(chunk);
-            size += chunk.length;
+            size = nextSize;
             callback(null, chunk);
         }
     });
@@ -307,6 +354,14 @@ async function extractEntry(
 async function drain(stream: Readable): Promise<void> {
     stream.resume();
     await once(stream, "end");
+}
+
+function abortArchiveEntry(stream: Readable, parser: ReturnType<typeof extract>, error: Error): void {
+    // tar-stream exposes the current member as a child stream. Destroy it
+    // without an error first so aborting the parent parser cannot leave an
+    // unhandled member-stream error after the extraction promise rejects.
+    stream.destroy();
+    parser.destroy(error);
 }
 
 function validateRelativePath(path: string): void {

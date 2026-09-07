@@ -101,6 +101,8 @@ export function renderCliTopicUsage(topic: CliHelpTopic): string {
 export function renderExtensionUsage(): string {
     return [
         "Usage:",
+        "  devshell extension install <bundle-or-directory>",
+        "  devshell extension remove <extensionId> [--purge]",
         "  devshell extension list",
         "  devshell extension inspect <extensionId>",
         "  devshell extension enable <extensionId>",

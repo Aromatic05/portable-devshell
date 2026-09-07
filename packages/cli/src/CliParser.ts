@@ -46,6 +46,8 @@ export type CliParsedCommand =
     | { kind: "extension.list" }
     | { extensionId: string; kind: "extension.inspect" }
     | { extensionId: string; kind: "extension.enable" | "extension.disable" | "extension.reload" }
+    | { kind: "extension.install"; source: string }
+    | { extensionId: string; kind: "extension.remove"; purge: boolean }
     | { args: string[]; extensionId: string; kind: "extension.command" }
     | { input: JsonValue; instance: string; kind: "instance.call"; toolName: string; workspace: string }
     | { kind: "instance.create" }
@@ -172,6 +174,26 @@ export class CliParser {
         switch (argv[0]) {
             case "list":
                 return this.#expectNoExtra(argv, { kind: "extension.list" });
+            case "install":
+                if (argv.length !== 2) throw CliRenderError.usage("extension install requires <bundle-or-directory>");
+                return {
+                    kind: "extension.install",
+                    source: this.#required(argv[1], "extension install source is required")
+                };
+            case "remove": {
+                if (argv.length < 2 || argv.length > 3) {
+                    throw CliRenderError.usage("extension remove requires <extensionId> [--purge]");
+                }
+                const purge = argv[2] === "--purge";
+                if (argv[2] !== undefined && !purge) {
+                    throw CliRenderError.usage(`Unknown extension remove option: ${argv[2]}`);
+                }
+                return {
+                    extensionId: this.#extensionId(argv[1]),
+                    kind: "extension.remove",
+                    purge
+                };
+            }
             case "inspect":
                 if (argv.length !== 2) throw CliRenderError.usage("extension inspect requires <extensionId>");
                 return {

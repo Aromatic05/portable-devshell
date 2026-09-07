@@ -2,7 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ConfigBatchUpdateRequest, ConfigDraft } from "@portable-devshell/shared";
@@ -279,6 +279,12 @@ export class CliMain {
                 return;
             case "extension.list":
                 this.#writeJson(await this.#clients.extension.list());
+                return;
+            case "extension.install":
+                this.#writeJson(await this.#clients.extension.install(resolve(command.source)));
+                return;
+            case "extension.remove":
+                this.#writeJson(await this.#clients.extension.remove(command.extensionId, command.purge));
                 return;
             case "extension.inspect":
                 this.#writeJson(await this.#clients.extension.get(command.extensionId));

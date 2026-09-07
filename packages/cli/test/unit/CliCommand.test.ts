@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
 
@@ -242,6 +243,10 @@ test("CliMain dispatches Extension management and namespaced commands through th
                 calls.push(`get:${extensionId}`);
                 return record;
             },
+            async extensionInstall(sourcePath: string) {
+                calls.push(`install:${sourcePath}`);
+                return record;
+            },
             async extensionList() {
                 calls.push("list");
                 return [record];
@@ -249,6 +254,10 @@ test("CliMain dispatches Extension management and namespaced commands through th
             async extensionReload(extensionId: string) {
                 calls.push(`reload:${extensionId}`);
                 return record;
+            },
+            async extensionRemove(extensionId: string, purge: boolean) {
+                calls.push(`remove:${extensionId}:${purge}`);
+                return { id: extensionId, purged: purge, removed: true };
             }
         }),
         stderr,
@@ -257,6 +266,10 @@ test("CliMain dispatches Extension management and namespaced commands through th
 
     assert.equal(await cli.run(["extension", "list"]), 0);
     assert.match(stdout.flush(), /"id": "agent"/u);
+    assert.equal(await cli.run(["extension", "install", "./bundle.dsext"]), 0);
+    stdout.flush();
+    assert.equal(await cli.run(["extension", "remove", "agent", "--purge"]), 0);
+    stdout.flush();
     assert.equal(await cli.run(["extension", "inspect", "agent"]), 0);
     stdout.flush();
     assert.equal(await cli.run(["extension", "enable", "agent"]), 0);
@@ -272,6 +285,8 @@ test("CliMain dispatches Extension management and namespaced commands through th
 
     assert.deepEqual(calls, [
         "list",
+        `install:${resolve("./bundle.dsext")}`,
+        "remove:agent:true",
         "get:agent",
         "enable:agent",
         "disable:agent",
@@ -1306,8 +1321,10 @@ function testClients(client: Record<string, unknown>) {
             disable: (...args: unknown[]) => invoke("extensionDisable", args),
             enable: (...args: unknown[]) => invoke("extensionEnable", args),
             get: (...args: unknown[]) => invoke("extensionGet", args),
+            install: (...args: unknown[]) => invoke("extensionInstall", args),
             list: (...args: unknown[]) => invoke("extensionList", args),
             reload: (...args: unknown[]) => invoke("extensionReload", args),
+            remove: (...args: unknown[]) => invoke("extensionRemove", args),
         },
         instance: {
             create: (...args: unknown[]) => invoke("createInstance", args),

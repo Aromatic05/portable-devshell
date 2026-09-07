@@ -2,6 +2,7 @@ import {
     createError,
     errorCodes,
     type ExtensionCommandWireResult,
+    type ExtensionRemoveResult,
     type ExtensionRuntimeRecord,
     type JsonValue,
     type PrefixRouteContext,
@@ -12,20 +13,22 @@ import { routeModule } from "../../route/ControlRouteFactory.js";
 
 export interface ExtensionControlPort {
     disable(id: string): Promise<void>;
-    dispatchCommand(
+    command(
         id: string,
         argv: readonly string[],
         context: { requestId: string; signal: AbortSignal }
     ): Promise<ExtensionCommandWireResult>;
-    dispatchRpc(
+    call(
         id: string,
         operation: string,
         input: JsonValue | undefined,
         context: { requestId: string; signal: AbortSignal }
     ): Promise<JsonValue>;
     enable(id: string): Promise<void>;
+    install(sourcePath: string): Promise<ExtensionRuntimeRecord>;
     list(): Promise<ExtensionRuntimeRecord[]>;
     reload(id: string): Promise<void>;
+    remove(id: string, purge: boolean): Promise<ExtensionRemoveResult>;
 }
 
 export function createExtensionRouteModule(port: ExtensionControlPort): PrefixRouteModuleDefinition {
@@ -34,7 +37,7 @@ export function createExtensionRouteModule(port: ExtensionControlPort): PrefixRo
         get: async (request) => await requireRecord(port, readExtensionId(request.payload)) as unknown as JsonValue,
         call: async (request, context) => {
             const input = readCall(request.payload);
-            const result = await port.dispatchRpc(
+            const result = await port.call(
                 input.extensionId,
                 input.operation,
                 input.input,
@@ -45,7 +48,7 @@ export function createExtensionRouteModule(port: ExtensionControlPort): PrefixRo
         command: async (request, context) => {
             requireCliCommand(context);
             const input = readCommand(request.payload);
-            return assertCommandResult(await port.dispatchCommand(
+            return assertCommandResult(await port.command(
                 input.extensionId,
                 input.argv,
                 { requestId: context.requestId, signal: context.signal }
@@ -68,6 +71,15 @@ export function createExtensionRouteModule(port: ExtensionControlPort): PrefixRo
             const id = readExtensionId(request.payload);
             await port.disable(id);
             return await requireRecord(port, id) as unknown as JsonValue;
+        },
+        install: async (request, context) => {
+            requireLocalManagement(context);
+            return await port.install(readInstallSource(request.payload)) as unknown as JsonValue;
+        },
+        remove: async (request, context) => {
+            requireLocalManagement(context);
+            const input = readRemove(request.payload);
+            return await port.remove(input.extensionId, input.purge) as unknown as JsonValue;
         }
     });
 }
@@ -128,6 +140,25 @@ function readExtensionId(payload: JsonValue | undefined): string {
     const value = readRecord(payload, "Extension request");
     assertOnlyKeys(value, ["extensionId"], "Extension request");
     return readId(value.extensionId);
+}
+
+function readInstallSource(payload: JsonValue | undefined): string {
+    const value = readRecord(payload, "extension.install");
+    assertOnlyKeys(value, ["sourcePath"], "extension.install");
+    if (typeof value.sourcePath === "string" && value.sourcePath.length > 0) return value.sourcePath;
+    throw invalid("extension.install sourcePath must be a non-empty string.");
+}
+
+function readRemove(payload: JsonValue | undefined): { extensionId: string; purge: boolean } {
+    const value = readRecord(payload, "extension.remove");
+    assertOnlyKeys(value, ["extensionId", "purge"], "extension.remove");
+    if (value.purge !== undefined && typeof value.purge !== "boolean") {
+        throw invalid("extension.remove purge must be boolean.");
+    }
+    return {
+        extensionId: readId(value.extensionId),
+        purge: value.purge === true
+    };
 }
 
 function readId(value: JsonValue | undefined): string {
