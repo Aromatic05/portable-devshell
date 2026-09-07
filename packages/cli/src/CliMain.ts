@@ -1,11 +1,18 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import type { ConfigBatchUpdateRequest, ConfigDraft } from "@portable-devshell/shared";
 
 import { isCliEntrypoint } from "./CliEntrypoint.js";
 import { CliParser, type CliParsedCommand } from "./CliParser.js";
 import { agentWebView } from "./command/agent/CliCommandAgentWeb.js";
 import { executeArtifactCommand } from "./command/artifact/CliCommandArtifact.js";
+import { executeSecretCommand } from "./command/secret/CliCommandSecretScan.js";
+import { executeSkillCommand } from "./command/skill/CliCommandSkill.js";
 import {
     createCliClients as createControlClients,
     negotiateCliControl,
@@ -108,6 +115,9 @@ export class CliMain {
             await negotiateCliControl(this.#clients);
         }
         switch (command.kind) {
+            case "version":
+                this.#stdout.write(`devshell ${resolvePortableDevshellApplicationVersion()}\n`);
+                return;
             case "help":
                 this.#stdout.write(`${command.topic === undefined ? renderCliUsage() : renderCliTopicUsage(command.topic)}\n`);
                 return;
@@ -214,6 +224,28 @@ export class CliMain {
             case "context.renew":
                 this.#writeJson(await this.#clients.context.renew(command.ctxId));
                 return;
+            case "debug.targets":
+                this.#writeJson(await this.#clients.debug.targets());
+                return;
+            case "debug.list":
+                this.#writeJson(await this.#clients.debug.list());
+                return;
+            case "debug.load":
+                this.#writeJson(await this.#clients.debug.load({
+                    scope: {
+                        ctxId: command.ctxId,
+                        ...(command.toolName === undefined ? {} : { toolName: command.toolName }),
+                    },
+                    source: await readFile(command.file, "utf8"),
+                    target: command.target,
+                }));
+                return;
+            case "debug.release":
+                this.#writeJson(await this.#clients.debug.release(command.patchId));
+                return;
+            case "debug.unload":
+                this.#writeJson(await this.#clients.debug.unload(command.patchId));
+                return;
             case "tool.calls":
                 this.#writeJson(
                     await this.#clients.tool.listCalls(
@@ -250,10 +282,13 @@ export class CliMain {
             }
             case "agent.start": {
                 const web = agentWebView(await this.#clients.config.get());
-                this.#writeJson({ ...await this.#clients.agent.start({
-                    target: command.target,
-                    ...(command.provider === undefined ? {} : { provider: command.provider })
-                }), ...web });
+                this.#writeJson({
+                    ...await this.#clients.agent.start({
+                        target: command.target,
+                        ...(command.provider === undefined ? {} : { provider: command.provider }),
+                    }),
+                    ...web,
+                });
                 return;
             }
             case "agent.send": {
@@ -288,6 +323,12 @@ export class CliMain {
             }
             case "agent.stop":
                 this.#writeJson(await this.#clients.agent.stop(command.agentId));
+                return;
+            case "secret":
+                await executeSecretCommand(command.args, this.#stdout);
+                return;
+            case "skill":
+                await executeSkillCommand(command.args, this.#stdout, { home: this.#homeDirectory });
                 return;
             case "tui":
                 await this.#startTui();
@@ -491,6 +532,7 @@ function commandUsesControlClient(command: CliParsedCommand): boolean {
         command.kind.startsWith("approval.") ||
         command.kind.startsWith("oauth.") ||
         command.kind.startsWith("context.") ||
+        command.kind.startsWith("debug.") ||
         command.kind.startsWith("agent.") ||
         command.kind.startsWith("tool.") ||
         command.kind.startsWith("todo.")
@@ -500,4 +542,29 @@ function commandUsesControlClient(command: CliParsedCommand): boolean {
     return (command.kind.startsWith("instance.") &&
             command.kind !== "instance.help") ||
         (command.kind.startsWith("watch.") && command.kind !== "watch.help");
+}
+
+function resolvePortableDevshellApplicationVersion(startUrl = import.meta.url): string {
+    let directory = dirname(fileURLToPath(startUrl));
+    while (true) {
+        const manifestPath = join(directory, "package.json");
+        try {
+            const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+                name?: unknown;
+                version?: unknown;
+            };
+            if (manifest.name === "portable-devshell") {
+                if (typeof manifest.version !== "string" || manifest.version.length === 0) {
+                    throw new Error(`Application package version is invalid: ${manifestPath}`);
+                }
+                return manifest.version;
+            }
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        const parent = dirname(directory);
+        if (parent === directory) break;
+        directory = parent;
+    }
+    throw new Error("Cannot locate portable-devshell application package manifest.");
 }
