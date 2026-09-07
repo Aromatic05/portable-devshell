@@ -8,6 +8,7 @@
         "jsx": "react-jsx",
         "noEmit": true,
         "paths": {
+            "@portable-devshell/extension": ["./packages/extension/src/index.ts"],
             "@portable-devshell/shared": ["./packages/shared/src/index.ts"],
             "@portable-devshell/shared/browser": ["./packages/shared/src/browser.ts"],
             "@portable-devshell/shared/transport/frame": ["./packages/shared/src/transport/protocol/Frame.ts"],
