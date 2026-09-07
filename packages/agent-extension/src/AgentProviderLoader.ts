@@ -6,58 +6,96 @@ import {
     AGENT_PROVIDER_API_VERSION,
     parseAgentProviderManifest,
     type AgentProvider,
+    type AgentProviderManifest,
     type AgentProviderModule
 } from "@portable-devshell/agentd";
 import type { ExtensionContext } from "@portable-devshell/extension";
 
-interface AgentProviderRegistryEntry {
-    enabled: boolean;
-    generation: string;
-}
+import {
+    AgentProviderRegistryStore,
+    assertProviderSegment
+} from "./AgentProviderRegistryStore.js";
 
-interface AgentProviderRegistrySnapshot {
-    providers: Record<string, AgentProviderRegistryEntry>;
-    schemaVersion: 1;
+export interface LoadedAgentProvider {
+    generation: string;
+    manifest: AgentProviderManifest;
+    provider: AgentProvider;
 }
 
 export class AgentProviderLoader {
     readonly #context: ExtensionContext;
     readonly #importer: (url: string) => Promise<unknown>;
+    readonly #registry: AgentProviderRegistryStore;
 
     constructor(
         context: ExtensionContext,
-        importer: (url: string) => Promise<unknown> = async (url) => await import(url) as unknown
+        importer: (url: string) => Promise<unknown> = async (url) => await import(url) as unknown,
+        registry = new AgentProviderRegistryStore(join(context.paths.stateDirectory, "providers.json"))
     ) {
         this.#context = context;
         this.#importer = importer;
+        this.#registry = registry;
     }
 
     async loadSelected(): Promise<AgentProvider[]> {
-        const registry = await readProviderRegistry(join(this.#context.paths.stateDirectory, "providers.json"));
+        const registry = await this.#registry.read();
         const providers: AgentProvider[] = [];
         for (const [id, entry] of Object.entries(registry.providers).sort(([left], [right]) => left.localeCompare(right))) {
             if (!entry.enabled) continue;
-            providers.push(await this.#loadGeneration(id, entry.generation));
+            const candidates = [...new Set([
+                entry.selectedGeneration,
+                entry.lastKnownGoodGeneration
+            ].filter((generation): generation is string => generation !== undefined))];
+            let loaded: LoadedAgentProvider | undefined;
+            let lastFailure: unknown;
+            for (const generation of candidates) {
+                try {
+                    loaded = await this.loadGeneration(id, generation);
+                    break;
+                } catch (error) {
+                    lastFailure = error;
+                    this.#context.logger.warn(`Agent provider ${id} generation ${generation} failed to load.`, {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                }
+            }
+            if (loaded !== undefined) providers.push(loaded.provider);
+            else if (candidates.length > 0) {
+                this.#context.logger.error(`Agent provider ${id} has no loadable generation.`, {
+                    error: lastFailure instanceof Error ? lastFailure.message : String(lastFailure)
+                });
+            }
         }
         return providers;
     }
 
-    async #loadGeneration(id: string, generation: string): Promise<AgentProvider> {
-        assertSafeSegment(id, "id");
-        assertSafeSegment(generation, "generation");
-        const generationDirectory = join(this.#context.paths.dataDirectory, "providers", id, generation);
-        await assertPlainDirectory(generationDirectory, `Agent provider generation ${id}/${generation}`);
-        const manifestPath = join(generationDirectory, "devshell-agent-provider.json");
-        await assertPlainFile(manifestPath, `Agent provider manifest ${id}/${generation}`);
-        const manifest = parseAgentProviderManifest(JSON.parse(await readFile(manifestPath, "utf8")) as unknown);
+    async inspectGeneration(id: string, generation: string): Promise<AgentProviderManifest> {
+        assertProviderSegment(id, "id");
+        const manifest = await this.inspectBundle(generation);
         if (manifest.id !== id) {
             throw new Error(`Agent provider generation ${generation} declares id ${manifest.id}, expected ${id}.`);
         }
+        return manifest;
+    }
+
+    async inspectBundle(generation: string): Promise<AgentProviderManifest> {
+        assertProviderSegment(generation, "generation");
+        const generationDirectory = this.generationDirectory(generation);
+        await assertPlainDirectory(generationDirectory, `Agent provider generation ${generation}`);
+        const manifestPath = join(generationDirectory, "devshell-agent-provider.json");
+        await assertPlainFile(manifestPath, `Agent provider manifest ${generation}`);
+        const manifest = parseAgentProviderManifest(JSON.parse(await readFile(manifestPath, "utf8")) as unknown);
         if (manifest.apiVersion !== AGENT_PROVIDER_API_VERSION) {
             throw new Error(
-                `Agent provider ${id} requires API version ${manifest.apiVersion}, but Agent Extension supports ${AGENT_PROVIDER_API_VERSION}.`
+                `Agent provider ${manifest.id} requires API version ${manifest.apiVersion}, but Agent Extension supports ${AGENT_PROVIDER_API_VERSION}.`
             );
         }
+        return manifest;
+    }
+
+    async loadGeneration(id: string, generation: string): Promise<LoadedAgentProvider> {
+        const manifest = await this.inspectGeneration(id, generation);
+        const generationDirectory = this.generationDirectory(generation);
         const entryPath = resolveContainedPath(generationDirectory, manifest.entry);
         await assertPlainFile(entryPath, `Agent provider entry ${id}/${generation}`);
         const module = readProviderModule(await this.#importer(pathToFileURL(entryPath).href), id);
@@ -70,30 +108,13 @@ export class AgentProviderLoader {
                 `Agent provider ${id} runtime version ${provider.version} does not match manifest ${manifest.version}.`
             );
         }
-        return provider;
+        return { generation, manifest, provider };
     }
-}
 
-async function readProviderRegistry(path: string): Promise<AgentProviderRegistrySnapshot> {
-    const source = await readFile(path, "utf8").catch((error: unknown) => {
-        if (isMissing(error)) return undefined;
-        throw error;
-    });
-    if (source === undefined) return { providers: {}, schemaVersion: 1 };
-    const value = JSON.parse(source) as unknown;
-    if (!isRecord(value) || value.schemaVersion !== 1 || !isRecord(value.providers)) {
-        throw new TypeError("Agent provider registry is invalid.");
+    generationDirectory(generation: string): string {
+        assertProviderSegment(generation, "generation");
+        return join(this.#context.paths.dataDirectory, "bundles", generation);
     }
-    const providers: Record<string, AgentProviderRegistryEntry> = {};
-    for (const [id, raw] of Object.entries(value.providers)) {
-        assertSafeSegment(id, "id");
-        if (!isRecord(raw) || typeof raw.enabled !== "boolean" || typeof raw.generation !== "string") {
-            throw new TypeError(`Agent provider registry entry is invalid: ${id}.`);
-        }
-        assertSafeSegment(raw.generation, "generation");
-        providers[id] = { enabled: raw.enabled, generation: raw.generation };
-    }
-    return { providers, schemaVersion: 1 };
 }
 
 function readProviderModule(value: unknown, id: string): AgentProviderModule {
@@ -111,12 +132,6 @@ function resolveContainedPath(root: string, candidate: string): string {
     throw new TypeError("Agent provider entry must stay inside its generation.");
 }
 
-function assertSafeSegment(value: string, label: string): void {
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(value)) {
-        throw new TypeError(`Invalid Agent provider ${label}: ${value}`);
-    }
-}
-
 async function assertPlainDirectory(path: string, label: string): Promise<void> {
     const metadata = await lstat(path);
     if (metadata.isSymbolicLink() || !metadata.isDirectory()) throw new TypeError(`${label} must be a plain directory.`);
@@ -125,13 +140,6 @@ async function assertPlainDirectory(path: string, label: string): Promise<void> 
 async function assertPlainFile(path: string, label: string): Promise<void> {
     const metadata = await lstat(path);
     if (metadata.isSymbolicLink() || !metadata.isFile()) throw new TypeError(`${label} must be a plain file.`);
-}
-
-function isMissing(error: unknown): boolean {
-    return typeof error === "object"
-        && error !== null
-        && "code" in error
-        && (error as NodeJS.ErrnoException).code === "ENOENT";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

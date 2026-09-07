@@ -18,11 +18,20 @@ export class ExtensionControlService implements ExtensionControlPort {
         this.#installer = options.installer;
     }
 
-    async call(id: string, operation: string, input: JsonValue | undefined, context: { requestId: string; signal: AbortSignal }): Promise<JsonValue> {
+    async call(
+        id: string,
+        operation: string,
+        input: JsonValue | undefined,
+        context: { localOwner: boolean; requestId: string; signal: AbortSignal }
+    ): Promise<JsonValue> {
         return await this.#host.dispatchRpc(id, operation, input, context) as JsonValue;
     }
 
-    async command(id: string, argv: readonly string[], context: { requestId: string; signal: AbortSignal }): Promise<ExtensionCommandWireResult> {
+    async command(
+        id: string,
+        argv: readonly string[],
+        context: { localOwner: boolean; requestId: string; signal: AbortSignal }
+    ): Promise<ExtensionCommandWireResult> {
         return await this.#host.dispatchCommand(id, argv, context) as ExtensionCommandWireResult;
     }
 

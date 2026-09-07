@@ -5,6 +5,7 @@ export const EXTENSION_MANIFEST_SCHEMA_VERSION = 1;
 
 const capabilities = new Set<ExtensionCapability>([
     "command",
+    "data",
     "instance-lifecycle",
     "rpc",
     "web",

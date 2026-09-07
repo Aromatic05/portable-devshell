@@ -10,7 +10,7 @@ import {
 test("Extension manifest parser accepts the v1 contract", () => {
     assert.deepEqual(parseExtensionManifest({
         apiVersion: EXTENSION_API_VERSION,
-        capabilities: ["rpc", "worker", "web"],
+        capabilities: ["rpc", "worker", "web", "data"],
         entry: "./extension.mjs",
         id: "agent",
         name: "Agent",
@@ -18,7 +18,7 @@ test("Extension manifest parser accepts the v1 contract", () => {
         version: "0.1.0"
     }), {
         apiVersion: 1,
-        capabilities: ["rpc", "worker", "web"],
+        capabilities: ["rpc", "worker", "web", "data"],
         entry: "./extension.mjs",
         id: "agent",
         name: "Agent",

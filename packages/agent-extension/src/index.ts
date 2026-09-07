@@ -1,3 +1,6 @@
+import { join } from "node:path";
+
+import { AgentProviderRegistry } from "@portable-devshell/agentd";
 import type {
     ExtensionActivation,
     ExtensionContext,
@@ -8,11 +11,23 @@ import type {
 import { executeAgentCommand } from "./AgentCommand.js";
 import { readAgentId } from "./AgentInput.js";
 import { AgentProviderLoader } from "./AgentProviderLoader.js";
+import { AgentProviderManager } from "./AgentProviderManager.js";
+import { AgentProviderRegistryStore } from "./AgentProviderRegistryStore.js";
 import { AgentExtensionRuntime } from "./AgentRuntime.js";
 
 export async function activate(context: ExtensionContext): Promise<ExtensionActivation> {
-    const providers = await new AgentProviderLoader(context).loadSelected();
-    const runtime = new AgentExtensionRuntime(context, { providers });
+    const providerStore = new AgentProviderRegistryStore(join(context.paths.stateDirectory, "providers.json"));
+    const providerLoader = new AgentProviderLoader(context, undefined, providerStore);
+    const providers = await providerLoader.loadSelected();
+    const providerRegistry = new AgentProviderRegistry(providers);
+    const runtime = new AgentExtensionRuntime(context, { registry: providerRegistry });
+    const providerManager = new AgentProviderManager({
+        context,
+        isProviderInUse: (id) => runtime.list().some((record) => record.provider === id),
+        loader: providerLoader,
+        registry: providerRegistry,
+        store: providerStore
+    });
     const rpc: Record<string, ExtensionRpcHandler> = {
         list: () => runtime.list().map(recordToJson),
         get: (input) => {
@@ -43,7 +58,7 @@ export async function activate(context: ExtensionContext): Promise<ExtensionActi
         stop: async (input) => recordToJson(await runtime.stop(input))
     };
     return {
-        command: async (argv, invocation) => await executeAgentCommand(runtime, argv, invocation),
+        command: async (argv, invocation) => await executeAgentCommand(runtime, providerManager, argv, invocation),
         dispose: async () => await runtime.dispose(),
         lifecycle: {
             onInstanceRetire: async (event) => await runtime.retireInstance(event.instance)

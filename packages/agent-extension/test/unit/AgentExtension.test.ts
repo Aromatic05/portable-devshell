@@ -14,7 +14,7 @@ import {
     type ExtensionWorkerSession
 } from "@portable-devshell/extension";
 
-import { executeAgentCommand } from "../../src/AgentCommand.ts";
+import { executeAgentCommand, type AgentProviderCommandPort } from "../../src/AgentCommand.ts";
 import { AgentExtensionRuntime } from "../../src/AgentRuntime.ts";
 import { activate } from "../../src/index.ts";
 
@@ -26,7 +26,7 @@ test("Agent Extension manifest declares only the generic capabilities it contrib
     ));
     assert.equal(manifest.id, "agent");
     assert.equal(manifest.entry, "dist/index.js");
-    assert.deepEqual(manifest.capabilities, ["command", "instance-lifecycle", "rpc", "web", "worker"]);
+    assert.deepEqual(manifest.capabilities, ["command", "data", "instance-lifecycle", "rpc", "web", "worker"]);
 });
 
 test("Agent Extension start opens one canonical Worker session and owns it until stop", async () => {
@@ -114,13 +114,14 @@ test("Agent Extension command owns the legacy devshell agent grammar", async () 
     const runtime = new AgentExtensionRuntime(extensionContext({ events }), {
         providers: [providerFixture([], events)]
     });
+    const providers = providerCommandFixture(events);
     const invocation = invocationContext();
 
-    const help = await executeAgentCommand(runtime, ["--help"], invocation);
+    const help = await executeAgentCommand(runtime, providers, ["--help"], invocation);
     assert.equal(help.kind, "text");
     if (help.kind === "text") assert.match(help.text, /devshell agent .*<instance:\/workspace>/u);
 
-    const started = await executeAgentCommand(runtime, ["--provider", "test", "worker-a:/repo"], invocation);
+    const started = await executeAgentCommand(runtime, providers, ["--provider", "test", "worker-a:/repo"], invocation);
     assert.equal(started.kind, "json");
     if (started.kind !== "json" || typeof started.value !== "object" || started.value === null || Array.isArray(started.value)) {
         throw new Error("Agent start command did not return a JSON object.");
@@ -128,16 +129,16 @@ test("Agent Extension command owns the legacy devshell agent grammar", async () 
     const agentId = String(started.value.agentId);
     assert.equal(started.value.webPath, "extensions/agent/");
 
-    await executeAgentCommand(runtime, ["send", agentId, "continue", "review"], invocation);
-    await executeAgentCommand(runtime, ["steer", agentId, "focus"], invocation);
-    await executeAgentCommand(runtime, ["follow-up", agentId, "finish"], invocation);
-    await executeAgentCommand(runtime, ["abort", agentId], invocation);
-    await executeAgentCommand(runtime, ["reload", agentId], invocation);
-    const listed = await executeAgentCommand(runtime, ["list"], invocation);
+    await executeAgentCommand(runtime, providers, ["send", agentId, "continue", "review"], invocation);
+    await executeAgentCommand(runtime, providers, ["steer", agentId, "focus"], invocation);
+    await executeAgentCommand(runtime, providers, ["follow-up", agentId, "finish"], invocation);
+    await executeAgentCommand(runtime, providers, ["abort", agentId], invocation);
+    await executeAgentCommand(runtime, providers, ["reload", agentId], invocation);
+    const listed = await executeAgentCommand(runtime, providers, ["list"], invocation);
     assert.equal(listed.kind, "json");
-    const web = await executeAgentCommand(runtime, ["web"], invocation);
+    const web = await executeAgentCommand(runtime, providers, ["web"], invocation);
     assert.deepEqual(web, { kind: "json", value: { available: true, webPath: "extensions/agent/" } });
-    await executeAgentCommand(runtime, ["stop", agentId], invocation);
+    await executeAgentCommand(runtime, providers, ["stop", agentId], invocation);
 
     assert.equal(events.includes("provider.prompt:continue review"), true);
     assert.equal(events.includes("provider.steer:focus"), true);
@@ -145,9 +146,28 @@ test("Agent Extension command owns the legacy devshell agent grammar", async () 
     assert.equal(events.includes("provider.abort"), true);
     assert.equal(events.includes("provider.reload"), true);
     await assert.rejects(
-        () => executeAgentCommand(runtime, ["--unknown", "worker-a:/repo"], invocation),
+        () => executeAgentCommand(runtime, providers, ["--unknown", "worker-a:/repo"], invocation),
         /Unknown agent option/u
     );
+});
+
+test("Agent provider mutations require local-owner Extension command authority", async () => {
+    const events: string[] = [];
+    const runtime = new AgentExtensionRuntime(extensionContext({ events }));
+    const providers = providerCommandFixture(events);
+
+    await assert.rejects(
+        () => executeAgentCommand(runtime, providers, ["provider", "install", "/provider.dsprovider"], invocationContext(false)),
+        /local owner/u
+    );
+    const installed = await executeAgentCommand(
+        runtime,
+        providers,
+        ["provider", "install", "/provider.dsprovider"],
+        invocationContext(true)
+    );
+    assert.equal(installed.kind, "json");
+    assert.equal(events.includes("provider.install:/provider.dsprovider"), true);
 });
 
 test("Agent Extension activation exposes business RPC but no internal toolSession operations", async () => {
@@ -177,6 +197,18 @@ function extensionContext(options: {
     events: string[];
 }): ExtensionContext {
     return {
+        data: {
+            async installBundle(sourcePath) {
+                options.events.push(`data.install:${sourcePath}`);
+                return {
+                    directory: "/data/extensions/agent/bundles/sha256-test",
+                    generation: `sha256-${"a".repeat(64)}`
+                };
+            },
+            async removeBundle(generation) {
+                options.events.push(`data.remove:${generation}`);
+            }
+        },
         generation: "0.1.0-test",
         id: "agent",
         logger: {
@@ -250,6 +282,25 @@ function handleFixture(agentId: string, events: string[], _ordinal = 0): AgentPr
     };
 }
 
-function invocationContext(): ExtensionInvocationContext {
-    return { requestId: "req-1", signal: new AbortController().signal };
+function invocationContext(localOwner = true): ExtensionInvocationContext {
+    return { localOwner, requestId: "req-1", signal: new AbortController().signal };
+}
+
+function providerCommandFixture(events: string[]): AgentProviderCommandPort {
+    const record = {
+        enabled: true,
+        id: "pi",
+        lastKnownGoodGeneration: "sha256-test",
+        name: "Pi",
+        selectedGeneration: "sha256-test",
+        state: "ready" as const,
+        version: "0.1.0"
+    };
+    return {
+        async disable(id) { events.push(`provider.disable:${id}`); return { ...record, enabled: false, state: "disabled" }; },
+        async enable(id) { events.push(`provider.enable:${id}`); return record; },
+        async install(sourcePath) { events.push(`provider.install:${sourcePath}`); return record; },
+        async list() { return [record]; },
+        async remove(id) { events.push(`provider.remove:${id}`); return { id, removed: true }; }
+    };
 }

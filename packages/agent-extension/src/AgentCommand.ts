@@ -5,12 +5,26 @@ import type {
     ExtensionJsonValue
 } from "@portable-devshell/extension";
 
+import type { AgentProviderManagementRecord } from "./AgentProviderManager.js";
 import { AgentExtensionRuntime, AGENT_WEB_RELATIVE_PATH } from "./AgentRuntime.js";
+
+export interface AgentProviderCommandPort {
+    disable(id: string): Promise<AgentProviderManagementRecord>;
+    enable(id: string): Promise<AgentProviderManagementRecord>;
+    install(sourcePath: string): Promise<AgentProviderManagementRecord>;
+    list(): Promise<AgentProviderManagementRecord[]>;
+    remove(id: string): Promise<{ id: string; removed: true }>;
+}
 
 const usage = [
     "Usage:",
     "  devshell agent [--provider <id>] <instance:/workspace>",
     "  devshell agent list",
+    "  devshell agent provider list",
+    "  devshell agent provider install <absolute-bundle-path>",
+    "  devshell agent provider enable <id>",
+    "  devshell agent provider disable <id>",
+    "  devshell agent provider remove <id>",
     "  devshell agent web",
     "  devshell agent show <agentId>",
     "  devshell agent send <agentId> <message>",
@@ -23,6 +37,7 @@ const usage = [
 
 export async function executeAgentCommand(
     runtime: AgentExtensionRuntime,
+    providers: AgentProviderCommandPort,
     argv: readonly string[],
     context: ExtensionInvocationContext
 ): Promise<ExtensionCommandResult> {
@@ -36,6 +51,8 @@ export async function executeAgentCommand(
         case "list":
             expectLength(argv, 1, "agent list");
             return json(runtime.list().map(recordToJson));
+        case "provider":
+            return await providerCommand(providers, argv.slice(1), context);
         case "web":
             expectLength(argv, 1, "agent web");
             return json({ available: runtime.webUpstream() !== undefined, webPath: AGENT_WEB_RELATIVE_PATH });
@@ -71,6 +88,37 @@ export async function executeAgentCommand(
         }
         default:
             return await start(runtime, argv);
+    }
+}
+
+async function providerCommand(
+    providers: AgentProviderCommandPort,
+    argv: readonly string[],
+    context: ExtensionInvocationContext
+): Promise<ExtensionCommandResult> {
+    if (argv.length === 0 || argv[0] === "list") {
+        expectLength(argv, argv.length === 0 ? 0 : 1, "agent provider list");
+        return json((await providers.list()).map(providerRecordToJson));
+    }
+    switch (argv[0]) {
+        case "install":
+            requireLocalOwner(context);
+            expectLength(argv, 2, "agent provider install <absolute-bundle-path>");
+            return json(providerRecordToJson(await providers.install(required(argv[1], "provider bundle path is required"))));
+        case "enable":
+        case "disable": {
+            requireLocalOwner(context);
+            expectLength(argv, 2, `agent provider ${argv[0]} <id>`);
+            const id = required(argv[1], "provider id is required");
+            const record = argv[0] === "enable" ? await providers.enable(id) : await providers.disable(id);
+            return json(providerRecordToJson(record));
+        }
+        case "remove":
+            requireLocalOwner(context);
+            expectLength(argv, 2, "agent provider remove <id>");
+            return json(await providers.remove(required(argv[1], "provider id is required")));
+        default:
+            throw usageError(`Unknown agent provider command: ${argv[0]}`);
     }
 }
 
@@ -112,6 +160,19 @@ function recordToJson(record: AgentHostRecord): ExtensionJsonValue {
     };
 }
 
+function providerRecordToJson(record: AgentProviderManagementRecord): ExtensionJsonValue {
+    return {
+        enabled: record.enabled,
+        ...(record.error === undefined ? {} : { error: record.error }),
+        id: record.id,
+        ...(record.lastKnownGoodGeneration === undefined ? {} : { lastKnownGoodGeneration: record.lastKnownGoodGeneration }),
+        ...(record.name === undefined ? {} : { name: record.name }),
+        ...(record.selectedGeneration === undefined ? {} : { selectedGeneration: record.selectedGeneration }),
+        state: record.state,
+        ...(record.version === undefined ? {} : { version: record.version })
+    };
+}
+
 function json(value: ExtensionJsonValue): ExtensionCommandResult {
     return { kind: "json", value };
 }
@@ -123,6 +184,11 @@ function expectLength(argv: readonly string[], length: number, usageLine: string
 function required(value: string | undefined, message: string): string {
     if (value !== undefined && value.trim().length > 0) return value.trim();
     throw usageError(message);
+}
+
+function requireLocalOwner(context: ExtensionInvocationContext): void {
+    if (context.localOwner) return;
+    throw new Error("Agent provider mutations are restricted to the local owner CLI.");
 }
 
 function usageError(message: string): Error {

@@ -6,6 +6,7 @@ export type ExtensionJsonValue =
 
 export type ExtensionCapability =
     | "command"
+    | "data"
     | "instance-lifecycle"
     | "rpc"
     | "web"
@@ -71,7 +72,20 @@ export interface ExtensionWorkerCapability {
     openSession(input: ExtensionWorkerOpenInput): Promise<ExtensionWorkerSession>;
 }
 
+export interface ExtensionDataBundle {
+    /** Immutable content-addressed directory owned by Control. */
+    readonly directory: string;
+    /** Stable generation identifier for the installed bundle. */
+    readonly generation: string;
+}
+
+export interface ExtensionDataCapability {
+    installBundle(sourcePath: string): Promise<ExtensionDataBundle>;
+    removeBundle(generation: string): Promise<void>;
+}
+
 export interface ExtensionContext {
+    readonly data: ExtensionDataCapability;
     readonly generation: string;
     readonly id: string;
     readonly logger: ExtensionLogger;
@@ -81,6 +95,8 @@ export interface ExtensionContext {
 }
 
 export interface ExtensionInvocationContext {
+    /** True only for a request authenticated as the local Control owner. */
+    readonly localOwner: boolean;
     readonly requestId: string;
     readonly signal: AbortSignal;
 }

@@ -109,6 +109,7 @@ test("Extension loader returns a ready invisible candidate with narrow immutable
     candidate.activate();
     const lease = candidate.acquire();
     assert.deepEqual(await lease.activation.rpc?.ping(undefined, {
+        localOwner: false,
         requestId: "request-1",
         signal: new AbortController().signal
     }), { pong: true });

@@ -17,6 +17,18 @@ export class AgentProviderRegistry {
         this.#providers.set(provider.id, provider);
     }
 
+    replace(provider: AgentProvider): void {
+        assertProviderId(provider.id);
+        this.#providers.set(provider.id, provider);
+    }
+
+    unregister(id: string): AgentProvider | undefined {
+        assertProviderId(id);
+        const provider = this.#providers.get(id);
+        this.#providers.delete(id);
+        return provider;
+    }
+
     get(id: string): AgentProvider | undefined {
         return this.#providers.get(id);
     }

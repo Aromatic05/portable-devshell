@@ -84,12 +84,14 @@ test("Extension host swaps atomically while an old in-flight request drains on i
 
     const controller = new AbortController();
     const oldRequest = host.dispatchRpc("example", "read", undefined, {
+        localOwner: false,
         requestId: "old-request",
         signal: controller.signal
     });
     await host.activateGeneration("example", "b");
 
     assert.equal(await host.dispatchRpc("example", "read", undefined, {
+        localOwner: false,
         requestId: "new-request",
         signal: controller.signal
     }), "new");
@@ -121,6 +123,7 @@ test("Extension candidate failure leaves the active generation and registry sele
     await host.start();
     await assert.rejects(host.activateGeneration("example", "bad"), /candidate failed/u);
     assert.equal(await host.dispatchRpc("example", "read", undefined, {
+        localOwner: false,
         requestId: "still-old",
         signal: new AbortController().signal
     }), "a");
@@ -177,6 +180,7 @@ test("Extension disable removes new routing immediately while a leased old gener
     });
     await host.start();
     const active = host.dispatchRpc("example", "read", undefined, {
+        localOwner: false,
         requestId: "leased",
         signal: new AbortController().signal
     });
@@ -184,6 +188,7 @@ test("Extension disable removes new routing immediately while a leased old gener
     await host.disable("example");
     await assert.rejects(
         host.dispatchRpc("example", "read", undefined, {
+            localOwner: false,
             requestId: "new",
             signal: new AbortController().signal
         }),

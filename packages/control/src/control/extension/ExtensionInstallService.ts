@@ -25,10 +25,13 @@ import {
 
 import {
     createArtifactDirectoryArchive,
-    extractArtifactDirectoryArchive,
-    type ArtifactDirectoryArchiveLimits
+    extractArtifactDirectoryArchive
 } from "../artifact/host/ArtifactHostArchive.js";
 import { CORE_EXTENSION_RESERVED_IDS } from "./ExtensionLoader.js";
+import {
+    resolveExtensionInstallLimits,
+    type ExtensionInstallLimits
+} from "./ExtensionInstallPolicy.js";
 import type { ExtensionPathLayout } from "./ExtensionPathLayout.js";
 
 export interface ExtensionInstallHost {
@@ -39,22 +42,11 @@ export interface ExtensionInstallHost {
     waitForDrain(id: string): Promise<void>;
 }
 
-export interface ExtensionInstallLimits extends ArtifactDirectoryArchiveLimits {
-    maxCompressedBytes: number;
-}
-
 export interface ExtensionInstallServiceOptions {
     host: ExtensionInstallHost;
     limits?: Partial<ExtensionInstallLimits>;
     paths: ExtensionPathLayout;
 }
-
-export const DEFAULT_EXTENSION_INSTALL_LIMITS: ExtensionInstallLimits = {
-    maxCompressedBytes: 64 * 1024 * 1024,
-    maxEntries: 20_000,
-    maxFileBytes: 64 * 1024 * 1024,
-    maxLogicalBytes: 256 * 1024 * 1024
-};
 
 export class ExtensionInstallService {
     readonly #host: ExtensionInstallHost;
@@ -64,11 +56,7 @@ export class ExtensionInstallService {
     constructor(options: ExtensionInstallServiceOptions) {
         this.#host = options.host;
         this.#paths = options.paths;
-        this.#limits = {
-            ...DEFAULT_EXTENSION_INSTALL_LIMITS,
-            ...options.limits
-        };
-        validateLimits(this.#limits);
+        this.#limits = resolveExtensionInstallLimits(options.limits);
     }
 
     async install(sourcePath: string): Promise<ExtensionRuntimeRecord> {
@@ -163,6 +151,7 @@ export class ExtensionInstallService {
         await rm(join(this.#paths.runtimeRoot, id), { force: true, recursive: true }).catch((error) => failures.push(error));
         if (purge) {
             await rm(this.#paths.stateDirectory(id), { force: true, recursive: true }).catch((error) => failures.push(error));
+            await rm(this.#paths.dataDirectory(id), { force: true, recursive: true }).catch((error) => failures.push(error));
         }
         if (failures.length === 1) throw failures[0];
         if (failures.length > 1) {
@@ -278,14 +267,6 @@ async function assertPlainDirectory(path: string, label: string): Promise<void> 
     const metadata = await lstat(path);
     if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
         throw extensionInstallError(`${label} must be a real directory, not a symlink.`);
-    }
-}
-
-function validateLimits(limits: ExtensionInstallLimits): void {
-    for (const [name, value] of Object.entries(limits)) {
-        if (!Number.isSafeInteger(value) || value <= 0) {
-            throw new TypeError(`Extension install limit ${name} must be a positive safe integer.`);
-        }
     }
 }
 

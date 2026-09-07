@@ -1,5 +1,6 @@
 import {
     AgentHost,
+    AgentProviderRegistry,
     parseAgentWorkerTarget,
     type AgentHostRecord,
     type AgentProvider
@@ -13,6 +14,7 @@ export const AGENT_WEB_RELATIVE_PATH = "extensions/agent/";
 
 export interface AgentExtensionRuntimeOptions {
     providers?: readonly AgentProvider[];
+    registry?: AgentProviderRegistry;
 }
 
 export class AgentExtensionRuntime {
@@ -23,6 +25,7 @@ export class AgentExtensionRuntime {
         this.#context = context;
         this.#host = new AgentHost({
             providers: options.providers ?? [],
+            ...(options.registry === undefined ? {} : { registry: options.registry }),
             runtimeRootDirectory: context.paths.stateDirectory,
             webBasePath: "/"
         });

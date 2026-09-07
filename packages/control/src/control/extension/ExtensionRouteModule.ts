@@ -16,13 +16,13 @@ export interface ExtensionControlPort {
     command(
         id: string,
         argv: readonly string[],
-        context: { requestId: string; signal: AbortSignal }
+        context: { localOwner: boolean; requestId: string; signal: AbortSignal }
     ): Promise<ExtensionCommandWireResult>;
     call(
         id: string,
         operation: string,
         input: JsonValue | undefined,
-        context: { requestId: string; signal: AbortSignal }
+        context: { localOwner: boolean; requestId: string; signal: AbortSignal }
     ): Promise<JsonValue>;
     enable(id: string): Promise<void>;
     install(sourcePath: string): Promise<ExtensionRuntimeRecord>;
@@ -41,7 +41,11 @@ export function createExtensionRouteModule(port: ExtensionControlPort): PrefixRo
                 input.extensionId,
                 input.operation,
                 input.input,
-                { requestId: context.requestId, signal: context.signal }
+                {
+                    localOwner: isLocalOwnerCli(context),
+                    requestId: context.requestId,
+                    signal: context.signal
+                }
             );
             return assertJsonValue(result, `Extension ${input.extensionId} RPC result`);
         },
@@ -51,7 +55,11 @@ export function createExtensionRouteModule(port: ExtensionControlPort): PrefixRo
             return assertCommandResult(await port.command(
                 input.extensionId,
                 input.argv,
-                { requestId: context.requestId, signal: context.signal }
+                {
+                    localOwner: isLocalOwnerCli(context),
+                    requestId: context.requestId,
+                    signal: context.signal
+                }
             ), input.extensionId) as unknown as JsonValue;
         },
         reload: async (request, context) => {
@@ -96,12 +104,16 @@ async function requireRecord(port: ExtensionControlPort, id: string): Promise<Ex
 }
 
 function requireLocalManagement(context: PrefixRouteContext): void {
-    if (context.peer === "cli" && context.subject?.kind === "local-owner") return;
+    if (isLocalOwnerCli(context)) return;
     throw createError({
         code: errorCodes.controlExtensionAccessDenied,
         message: "Extension lifecycle mutations are restricted to the local owner CLI.",
         retryable: false
     });
+}
+
+function isLocalOwnerCli(context: PrefixRouteContext): boolean {
+    return context.peer === "cli" && context.subject?.kind === "local-owner";
 }
 
 function requireCliCommand(context: PrefixRouteContext): void {

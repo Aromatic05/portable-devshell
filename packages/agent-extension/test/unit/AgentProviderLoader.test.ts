@@ -13,11 +13,22 @@ async function harness(t: test.TestContext) {
     t.after(async () => await rm(root, { force: true, recursive: true }));
     const dataDirectory = join(root, "data");
     const stateDirectory = join(root, "state");
+    const warnings: string[] = [];
+    const errors: string[] = [];
     await mkdir(stateDirectory, { recursive: true });
     const context = {
+        data: {
+            async installBundle() { throw new Error("not used"); },
+            async removeBundle() {}
+        },
         generation: "agent-generation-a",
         id: "agent",
-        logger: { debug() {}, error() {}, info() {}, warn() {} },
+        logger: {
+            debug() {},
+            error(message: string) { errors.push(message); },
+            info() {},
+            warn(message: string) { warnings.push(message); }
+        },
         paths: {
             codeDirectory: join(root, "code"),
             dataDirectory,
@@ -27,7 +38,7 @@ async function harness(t: test.TestContext) {
         version: "0.1.0",
         worker: { async openSession() { throw new Error("not used"); } }
     } satisfies ExtensionContext;
-    return { context, dataDirectory, stateDirectory };
+    return { context, dataDirectory, errors, stateDirectory, warnings };
 }
 
 async function writeProvider(input: {
@@ -40,7 +51,7 @@ async function writeProvider(input: {
     runtimeVersion?: string;
 }) {
     const id = input.id ?? "pi";
-    const directory = join(input.dataDirectory, "providers", id, input.generation);
+    const directory = join(input.dataDirectory, "bundles", input.generation);
     await mkdir(join(directory, "dist"), { recursive: true });
     await writeFile(join(directory, "devshell-agent-provider.json"), `${JSON.stringify({
         apiVersion: input.manifestApiVersion ?? 1,
@@ -60,13 +71,24 @@ async function writeProvider(input: {
     ].join("\n"), "utf8");
 }
 
+async function writeRegistry(
+    stateDirectory: string,
+    entry: { enabled: boolean; lastKnownGoodGeneration?: string; selectedGeneration?: string }
+) {
+    await writeFile(join(stateDirectory, "providers.json"), `${JSON.stringify({
+        providers: { pi: entry },
+        schemaVersion: 1
+    })}\n`, "utf8");
+}
+
 test("Agent provider selection is independent from the Agent Extension generation", async (t) => {
     const h = await harness(t);
     await writeProvider({ dataDirectory: h.dataDirectory, generation: "pi-hash-a" });
-    await writeFile(join(h.stateDirectory, "providers.json"), `${JSON.stringify({
-        providers: { pi: { enabled: true, generation: "pi-hash-a" } },
-        schemaVersion: 1
-    })}\n`, "utf8");
+    await writeRegistry(h.stateDirectory, {
+        enabled: true,
+        lastKnownGoodGeneration: "pi-hash-a",
+        selectedGeneration: "pi-hash-a"
+    });
 
     const providers = await new AgentProviderLoader(h.context).loadSelected();
 
@@ -90,16 +112,9 @@ test("Agent provider generation can change while the Agent Extension generation 
         manifestVersion: "0.1.1",
         runtimeVersion: "0.1.1"
     });
-    const registryFile = join(h.stateDirectory, "providers.json");
-    await writeFile(registryFile, `${JSON.stringify({
-        providers: { pi: { enabled: true, generation: "pi-hash-a" } },
-        schemaVersion: 1
-    })}\n`, "utf8");
+    await writeRegistry(h.stateDirectory, { enabled: true, selectedGeneration: "pi-hash-a" });
     const first = await new AgentProviderLoader(h.context).loadSelected();
-    await writeFile(registryFile, `${JSON.stringify({
-        providers: { pi: { enabled: true, generation: "pi-hash-b" } },
-        schemaVersion: 1
-    })}\n`, "utf8");
+    await writeRegistry(h.stateDirectory, { enabled: true, selectedGeneration: "pi-hash-b" });
     const second = await new AgentProviderLoader(h.context).loadSelected();
 
     assert.equal(h.context.generation, "agent-generation-a");
@@ -107,26 +122,30 @@ test("Agent provider generation can change while the Agent Extension generation 
     assert.equal(second[0]?.version, "0.1.1");
 });
 
-test("Agent provider loader rejects incompatible or lying generations", async (t) => {
+test("Agent provider loader falls back to last-known-good without failing Agent Extension activation", async (t) => {
     const h = await harness(t);
-    const registryFile = join(h.stateDirectory, "providers.json");
+    await writeProvider({ dataDirectory: h.dataDirectory, generation: "good" });
     await writeProvider({ dataDirectory: h.dataDirectory, generation: "bad-api", manifestApiVersion: 2 });
-    await writeFile(registryFile, `${JSON.stringify({
-        providers: { pi: { enabled: true, generation: "bad-api" } },
-        schemaVersion: 1
-    })}\n`, "utf8");
-    await assert.rejects(
-        () => new AgentProviderLoader(h.context).loadSelected(),
-        /requires API version 2/u
-    );
+    await writeRegistry(h.stateDirectory, {
+        enabled: true,
+        lastKnownGoodGeneration: "good",
+        selectedGeneration: "bad-api"
+    });
 
+    const providers = await new AgentProviderLoader(h.context).loadSelected();
+
+    assert.equal(providers[0]?.id, "pi");
+    assert.equal(h.warnings.some((message) => message.includes("bad-api")), true);
+    assert.equal(h.errors.length, 0);
+});
+
+test("Agent provider loader isolates an invalid provider when no known-good generation exists", async (t) => {
+    const h = await harness(t);
     await writeProvider({ dataDirectory: h.dataDirectory, generation: "lying", runtimeId: "other" });
-    await writeFile(registryFile, `${JSON.stringify({
-        providers: { pi: { enabled: true, generation: "lying" } },
-        schemaVersion: 1
-    })}\n`, "utf8");
-    await assert.rejects(
-        () => new AgentProviderLoader(h.context).loadSelected(),
-        /returned id other/u
-    );
+    await writeRegistry(h.stateDirectory, { enabled: true, selectedGeneration: "lying" });
+
+    const providers = await new AgentProviderLoader(h.context).loadSelected();
+
+    assert.deepEqual(providers, []);
+    assert.equal(h.errors.some((message) => message.includes("no loadable generation")), true);
 });

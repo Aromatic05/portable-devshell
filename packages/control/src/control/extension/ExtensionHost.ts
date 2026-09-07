@@ -74,7 +74,7 @@ export class ExtensionHost {
         id: string,
         operation: string,
         input: ExtensionJsonValue | undefined,
-        context: { requestId: string; signal: AbortSignal }
+        context: { localOwner: boolean; requestId: string; signal: AbortSignal }
     ): Promise<ExtensionJsonValue> {
         const lease = this.acquire(id);
         try {
@@ -89,7 +89,7 @@ export class ExtensionHost {
     async dispatchCommand(
         id: string,
         argv: readonly string[],
-        context: { requestId: string; signal: AbortSignal }
+        context: { localOwner: boolean; requestId: string; signal: AbortSignal }
     ): Promise<ExtensionCommandResult> {
         const lease = this.acquire(id);
         try {

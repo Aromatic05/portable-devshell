@@ -38,11 +38,11 @@ function port(events: string[] = []): ExtensionControlPort {
     let enabled = true;
     return {
         async call(id, operation, input, invocation): Promise<JsonValue> {
-            events.push(`call:${id}:${operation}:${invocation.requestId}`);
+            events.push(`call:${id}:${operation}:${invocation.requestId}:${invocation.localOwner}`);
             return { input: input ?? null };
         },
         async command(id, argv, invocation) {
-            events.push(`command:${id}:${argv.join("|")}:${invocation.requestId}`);
+            events.push(`command:${id}:${argv.join("|")}:${invocation.requestId}:${invocation.localOwner}`);
             return { kind: "text", text: "ok" };
         },
         async disable(id) {
@@ -93,7 +93,19 @@ test("Extension routes expose read and RPC dispatch generically without lifecycl
         }, context("web", "web-session")),
         { input: { value: 1 } }
     );
-    assert.deepEqual(events, ["list", "call:example:ping:req-1"]);
+    assert.deepEqual(
+        await operation(module, "call").handle({
+            id: "2a",
+            name: "call",
+            payload: { extensionId: "example", operation: "ping" }
+        }, context("web", "local-owner")),
+        { input: null }
+    );
+    assert.deepEqual(events, [
+        "list",
+        "call:example:ping:req-1:false",
+        "call:example:ping:req-1:false"
+    ]);
 });
 
 test("Extension command dispatch is CLI-only while lifecycle mutations require local-owner CLI", async () => {
@@ -109,6 +121,11 @@ test("Extension command dispatch is CLI-only while lifecycle mutations require l
         name: "command",
         payload: { argv: ["--help"], extensionId: "example" }
     }, context("cli", "bearer")), { kind: "text", text: "ok" });
+    assert.deepEqual(await command.handle({
+        id: "1a",
+        name: "command",
+        payload: { argv: ["provider", "list"], extensionId: "example" }
+    }, context("cli", "local-owner")), { kind: "text", text: "ok" });
     await assert.rejects(
         async () => await command.handle({
             id: "2",
@@ -142,7 +159,8 @@ test("Extension command dispatch is CLI-only while lifecycle mutations require l
         { id: "example", purged: true, removed: true }
     );
     assert.deepEqual(events, [
-        "command:example:--help:req-1",
+        "command:example:--help:req-1:false",
+        "command:example:provider|list:req-1:true",
         "reload:example",
         "list",
         "install:/tmp/example.dsext",

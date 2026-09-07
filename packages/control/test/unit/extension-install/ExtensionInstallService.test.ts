@@ -84,6 +84,7 @@ test("Extension install materializes a directory as an immutable content-address
     assert.equal(installed.selectedGeneration, installed.activeGeneration);
     assert.equal(installed.lastKnownGoodGeneration, installed.activeGeneration);
     assert.deepEqual(await h.host.dispatchRpc("example", "ping", undefined, {
+        localOwner: false,
         requestId: "ping-1",
         signal: new AbortController().signal
     }), { version: "1.0.0" });
@@ -145,6 +146,7 @@ test("Extension candidate activation failure removes only the new generation and
     const records = await h.host.list();
     assert.equal(records[0]?.activeGeneration, good.activeGeneration);
     assert.deepEqual(await h.host.dispatchRpc("example", "ping", undefined, {
+        localOwner: false,
         requestId: "ping-after-failure",
         signal: new AbortController().signal
     }), { version: "1.0.0" });
@@ -200,6 +202,7 @@ test("Extension remove disables routing, waits for the leased generation to drai
     });
     (globalThis as Record<string, unknown>).__devshellExtensionDisposed = false;
     const active = h.host.dispatchRpc("example", "hold", undefined, {
+        localOwner: false,
         requestId: "hold",
         signal: new AbortController().signal
     });
@@ -215,6 +218,7 @@ test("Extension remove disables routing, waits for the leased generation to drai
     assert.equal(await exists(h.paths.generationDirectory("example", installed.activeGeneration!)), true);
     await assert.rejects(
         h.host.dispatchRpc("example", "hold", undefined, {
+            localOwner: false,
             requestId: "new-hold",
             signal: new AbortController().signal
         }),
@@ -236,6 +240,8 @@ test("Extension remove --purge deletes mutable state after the runtime has drain
     const h = await harness(t);
     await h.service.install(await h.source("purge"));
     await writeFile(join(h.paths.stateDirectory("example"), "state.txt"), "purge\n", "utf8");
+    await mkdir(h.paths.dataDirectory("example"), { recursive: true });
+    await writeFile(join(h.paths.dataDirectory("example"), "data.txt"), "purge data\n", "utf8");
 
     assert.deepEqual(await h.service.remove("example", true), {
         id: "example",
@@ -243,6 +249,7 @@ test("Extension remove --purge deletes mutable state after the runtime has drain
         removed: true
     });
     assert.equal(await exists(h.paths.stateDirectory("example")), false);
+    assert.equal(await exists(h.paths.dataDirectory("example")), false);
 });
 
 async function exists(path: string): Promise<boolean> {
