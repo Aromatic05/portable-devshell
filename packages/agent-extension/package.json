@@ -16,8 +16,11 @@
         "devshell-extension.json"
     ],
     "dependencies": {
-        "@portable-devshell/agentd": "workspace:*",
-        "@portable-devshell/extension": "workspace:*"
+        "@earendil-works/pi-coding-agent": "0.84.4",
+        "@portable-devshell/extension": "workspace:*",
+        "@portable-devshell/pi-extension": "workspace:*",
+        "@portable-devshell/shared": "workspace:*",
+        "pi-gui-extension": "0.4.1"
     },
     "scripts": {
         "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b --force",

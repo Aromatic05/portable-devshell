@@ -2,11 +2,6 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import type {
-    AgentProvider,
-    AgentProviderHandle,
-    AgentProviderStartContext
-} from "@portable-devshell/agentd";
 import {
     parseExtensionManifest,
     type ExtensionContext,
@@ -17,6 +12,7 @@ import {
 import { executeAgentCommand, type AgentProviderCommandPort } from "../../src/AgentCommand.ts";
 import { AgentExtensionRuntime } from "../../src/AgentRuntime.ts";
 import { activate } from "../../src/index.ts";
+import type { AgentProvider, AgentProviderHandle, AgentProviderStartContext } from "../../src/provider/AgentProvider.ts";
 
 const neverClosed = new Promise<void>(() => undefined);
 
@@ -48,7 +44,7 @@ test("Agent Extension start opens one canonical Worker session and owns it until
         `provider.start:${record.agentId}:/state/extensions/agent`
     ]);
     assert.equal(starts[0]?.tools.tools[0]?.name, "file_read");
-    assert.equal(starts[0]?.runtime.agentdDirectory, "/state/extensions/agent");
+    assert.equal(starts[0]?.runtime.agentDirectory, "/state/extensions/agent");
 
     assert.deepEqual(
         await starts[0]!.tools.callTool("file_read", { path: "README.md" }, "op-1"),
@@ -276,7 +272,7 @@ function providerFixture(starts: AgentProviderStartContext[], events: string[]):
         version: "1",
         async start(context) {
             starts.push(context);
-            events.push(`provider.start:${context.agentId}:${context.runtime.agentdDirectory}`);
+            events.push(`provider.start:${context.agentId}:${context.runtime.agentDirectory}`);
             nextAgent += 1;
             return handleFixture(context.agentId, events, nextAgent);
         }

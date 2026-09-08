@@ -3,12 +3,13 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-import { AgentProviderRegistry } from "@portable-devshell/agentd";
 import type { ExtensionContext } from "@portable-devshell/extension";
 
-import { AgentProviderLoader } from "../../src/AgentProviderLoader.ts";
-import { AgentProviderManager } from "../../src/AgentProviderManager.ts";
-import { AgentProviderRegistryStore } from "../../src/AgentProviderRegistryStore.ts";
+import { AgentProviderRegistry } from "../../src/provider/AgentProviderRegistry.ts";
+
+import { AgentProviderLoader } from "../../src/provider/AgentProviderLoader.ts";
+import { AgentProviderManager } from "../../src/provider/AgentProviderManager.ts";
+import { AgentProviderRegistryStore } from "../../src/provider/AgentProviderRegistryStore.ts";
 import { AgentExtensionRuntime } from "../../src/AgentRuntime.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 

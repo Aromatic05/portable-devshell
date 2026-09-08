@@ -1,11 +1,11 @@
-import type { AgentHostRecord } from "@portable-devshell/agentd";
+import type { AgentHostRecord } from "./host/AgentHost.js";
 import type {
     ExtensionCommandResult,
     ExtensionInvocationContext,
     ExtensionJsonValue
 } from "@portable-devshell/extension";
 
-import type { AgentProviderManagementRecord } from "./AgentProviderManager.js";
+import type { AgentProviderManagementRecord } from "./provider/AgentProviderManager.js";
 import { AgentExtensionRuntime, AGENT_WEB_RELATIVE_PATH } from "./AgentRuntime.js";
 
 export interface AgentProviderCommandPort {

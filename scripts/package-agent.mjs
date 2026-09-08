@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
+    copyFile,
     lstat,
     mkdir,
     mkdtemp,
     readFile,
     readdir,
+    rename,
     rm,
     writeFile
 } from "node:fs/promises";
@@ -15,6 +17,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolvePnpmCommand } from "./PnpmCommand.mjs";
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
+const piProviderManifest = resolve(repoRoot, "packages/agent-extension/src/provider/pi/devshell-agent-provider.json");
 
 export async function packageAgentArtifacts(options = {}) {
     const outputDirectory = resolve(repoRoot, options.outputDirectory ?? "release-assets");
@@ -31,13 +34,16 @@ export async function packageAgentArtifacts(options = {}) {
     try {
         await mkdir(outputDirectory, { recursive: true });
         buildWorkspacePackage("@portable-devshell/agent-extension");
-        buildWorkspacePackage("@portable-devshell/agent-provider-pi");
         buildWorkspacePackage("@portable-devshell/control");
         deployWorkspacePackage("@portable-devshell/agent-extension", extensionDirectory);
-        deployWorkspacePackage("@portable-devshell/agent-provider-pi", providerDirectory);
+        deployWorkspacePackage("@portable-devshell/agent-extension", providerDirectory);
         await Promise.all([
             sanitizeDeployTree(extensionDirectory),
             sanitizeDeployTree(providerDirectory)
+        ]);
+        await Promise.all([
+            shapeThinAgentExtensionTree(extensionDirectory),
+            shapePiProviderTree(providerDirectory)
         ]);
         await Promise.all([
             assertNoSymbolicLinks(extensionDirectory),
@@ -77,8 +83,51 @@ export async function sanitizeDeployTree(root) {
     ]);
 }
 
+export async function shapeThinAgentExtensionTree(root) {
+    await rm(join(root, "dist", "provider", "pi"), { force: true, recursive: true });
+    const nodeModules = join(root, "node_modules");
+    for (const name of await readdir(nodeModules).catch(() => [])) {
+        if (name === "@portable-devshell") continue;
+        await rm(join(nodeModules, name), { force: true, recursive: true });
+    }
+    const portable = join(nodeModules, "@portable-devshell");
+    for (const name of await readdir(portable).catch(() => [])) {
+        if (name === "extension" || name === "shared") continue;
+        await rm(join(portable, name), { force: true, recursive: true });
+    }
+    await rewriteDeploymentPackage(root, {
+        dependencies: {
+            "@portable-devshell/extension": "workspace:*",
+            "@portable-devshell/shared": "workspace:*"
+        },
+        entry: "./dist/index.js",
+        name: "@portable-devshell/agent-extension"
+    });
+}
+
+export async function shapePiProviderTree(root) {
+    const providerTree = join(root, ".pi-provider-dist");
+    await rename(join(root, "dist", "provider", "pi"), providerTree);
+    await rm(join(root, "dist"), { force: true, recursive: true });
+    await mkdir(join(root, "dist", "provider"), { recursive: true });
+    await rename(providerTree, join(root, "dist", "provider", "pi"));
+    await copyFile(piProviderManifest, join(root, "devshell-agent-provider.json"));
+    await rm(join(root, "devshell-extension.json"), { force: true });
+    await rm(join(root, "node_modules", "@portable-devshell", "extension"), { force: true, recursive: true });
+    await rewriteDeploymentPackage(root, {
+        dependencies: {
+            "@earendil-works/pi-coding-agent": "0.84.4",
+            "@portable-devshell/pi-extension": "workspace:*",
+            "@portable-devshell/shared": "workspace:*",
+            "pi-gui-extension": "0.4.1"
+        },
+        entry: "./dist/provider/pi/index.js",
+        name: "@portable-devshell-internal/agent-provider-pi"
+    });
+}
+
 export async function assertNoSymbolicLinks(root) {
-    await walk(root, async (path, relativePath, metadata) => {
+    await walk(root, async (_path, relativePath, metadata) => {
         if (metadata.isSymbolicLink()) {
             throw new Error(`packaged Agent artifact contains symbolic link: ${relativePath}`);
         }
@@ -87,7 +136,7 @@ export async function assertNoSymbolicLinks(root) {
 
 export async function assertThinAgentExtensionTree(root) {
     const forbidden = [
-        "node_modules/@portable-devshell/agent-provider-pi",
+        "dist/provider/pi",
         "node_modules/@portable-devshell/pi-extension",
         "node_modules/pi-gui-extension"
     ];
@@ -107,6 +156,22 @@ export function hostTarget() {
     const arch = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "x64" : undefined;
     if (arch === undefined) throw new Error(`unsupported host architecture: ${process.arch}`);
     return `${os}-${arch}`;
+}
+
+async function rewriteDeploymentPackage(root, options) {
+    const path = join(root, "package.json");
+    const manifest = JSON.parse(await readFile(path, "utf8"));
+    manifest.name = options.name;
+    manifest.main = options.entry;
+    manifest.types = options.entry.replace(/\.js$/u, ".d.ts");
+    manifest.exports = {
+        ".": {
+            types: manifest.types,
+            default: manifest.main
+        }
+    };
+    manifest.dependencies = options.dependencies;
+    await writeFile(path, `${JSON.stringify(manifest, null, 4)}\n`, "utf8");
 }
 
 async function walk(root, visit) {

@@ -1,9 +1,7 @@
-import {
-    parseAgentWorkerTarget,
-    type AgentToolSession,
-    type AgentWorkerTarget
-} from "@portable-devshell/agentd";
 import type { ExtensionContext, ExtensionWorkerSession } from "@portable-devshell/extension";
+
+import type { AgentToolSession } from "./provider/AgentToolSession.js";
+import { parseAgentWorkerTarget, type AgentWorkerTarget } from "./worker/AgentWorkerTarget.js";
 
 export async function openAgentToolSession(
     context: ExtensionContext,

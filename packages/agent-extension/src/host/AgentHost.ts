@@ -1,0 +1,236 @@
+import { randomUUID } from "node:crypto";
+
+import type {
+    AgentProvider,
+    AgentProviderHandle
+} from "../provider/AgentProvider.js";
+import type { AgentToolSession } from "../provider/AgentToolSession.js";
+import { AgentProviderRuntimePaths } from "../provider/AgentProviderRuntimePaths.js";
+import type { AgentWorkerTarget } from "../worker/AgentWorkerTarget.js";
+import { AgentProviderRegistry } from "../provider/AgentProviderRegistry.js";
+
+export type AgentHostState = "starting" | "running" | "stopping" | "stopped";
+
+export interface AgentHostRecord {
+    agentId: string;
+    provider: string;
+    providerVersion: string;
+    state: AgentHostState;
+    target: AgentWorkerTarget;
+}
+
+export interface AgentHostWebEndpoint {
+    basePath: string;
+    upstream: string;
+}
+
+export interface AgentHostStartOptions {
+    provider: string;
+    target: AgentWorkerTarget;
+    tools: AgentToolSession;
+}
+
+export interface AgentHostOptions {
+    idFactory?: () => string;
+    providers?: readonly AgentProvider[];
+    registry?: AgentProviderRegistry;
+    runtimeRootDirectory: string;
+    webBasePath?: string;
+}
+
+interface AgentHostRuntime {
+    handle: AgentProviderHandle;
+    record: AgentHostRecord;
+    tools: AgentToolSession;
+}
+
+export class AgentHost {
+    readonly #idFactory: () => string;
+    readonly #registry: AgentProviderRegistry;
+    readonly #runtimeRootDirectory: string;
+    readonly #runtimes = new Map<string, AgentHostRuntime>();
+    readonly #webBasePath: string;
+
+    constructor(options: AgentHostOptions) {
+        this.#idFactory = options.idFactory ?? (() => `ag-${randomUUID()}`);
+        this.#registry = options.registry ?? new AgentProviderRegistry(options.providers);
+        this.#runtimeRootDirectory = options.runtimeRootDirectory;
+        this.#webBasePath = normalizeBasePath(options.webBasePath ?? "/agent");
+    }
+
+    get registry(): AgentProviderRegistry {
+        return this.#registry;
+    }
+
+    list(): AgentHostRecord[] {
+        return [...this.#runtimes.values()].map((runtime) => cloneRecord(runtime.record));
+    }
+
+    get(agentId: string): AgentHostRecord | undefined {
+        const runtime = this.#runtimes.get(agentId);
+        return runtime === undefined ? undefined : cloneRecord(runtime.record);
+    }
+
+    webEndpoint(): AgentHostWebEndpoint | undefined {
+        const endpoints = [...this.#runtimes.values()]
+            .map((runtime) => runtime.handle.web?.upstream.toString())
+            .filter((upstream): upstream is string => upstream !== undefined);
+        if (endpoints.length === 0) return undefined;
+        const upstream = endpoints[0]!;
+        if (endpoints.some((candidate) => candidate !== upstream)) {
+            throw new Error("Running Agent providers expose multiple Web endpoints; one /agent hub is required.");
+        }
+        return {
+            basePath: `${this.#webBasePath}/`,
+            upstream
+        };
+    }
+
+    async prompt(agentId: string, message: string): Promise<void> {
+        await this.#requireRuntime(agentId).handle.prompt(message);
+    }
+
+    async steer(agentId: string, message: string): Promise<void> {
+        const runtime = this.#requireRuntime(agentId);
+        if (runtime.handle.steer === undefined) {
+            throw new Error(`Agent provider ${runtime.record.provider} does not support steering.`);
+        }
+        await runtime.handle.steer(message);
+    }
+
+    async followUp(agentId: string, message: string): Promise<void> {
+        const runtime = this.#requireRuntime(agentId);
+        if (runtime.handle.followUp === undefined) {
+            throw new Error(`Agent provider ${runtime.record.provider} does not support follow-up messages.`);
+        }
+        await runtime.handle.followUp(message);
+    }
+
+    async reload(agentId: string): Promise<void> {
+        const runtime = this.#requireRuntime(agentId);
+        if (runtime.handle.reload === undefined) {
+            throw new Error(`Agent provider ${runtime.record.provider} does not support reload.`);
+        }
+        await runtime.handle.reload();
+    }
+
+    async abort(agentId: string): Promise<void> {
+        const runtime = this.#requireRuntime(agentId);
+        if (runtime.handle.abort === undefined) {
+            throw new Error(`Agent provider ${runtime.record.provider} does not support abort.`);
+        }
+        await runtime.handle.abort();
+    }
+
+    async start(options: AgentHostStartOptions): Promise<AgentHostRecord> {
+        const provider = this.#registry.require(options.provider);
+        const agentId = this.#idFactory();
+        if (this.#runtimes.has(agentId)) {
+            throw new Error(`Agent id already exists: ${agentId}`);
+        }
+
+        let handle: AgentProviderHandle;
+        try {
+            handle = await provider.start({
+                agentId,
+                runtime: new AgentProviderRuntimePaths({
+                    provider: provider.id,
+                    rootDirectory: this.#runtimeRootDirectory,
+                    version: provider.version
+                }),
+                target: options.target,
+                tools: options.tools,
+                web: { basePath: `${this.#webBasePath}/` }
+            });
+        } catch (error) {
+            const cleanup = await settleCleanup(options.tools);
+            if (cleanup !== undefined) {
+                throw new AggregateError([error, cleanup], `Agent ${agentId} failed to start and release its tool session.`);
+            }
+            throw error;
+        }
+        const record: AgentHostRecord = {
+            agentId,
+            provider: provider.id,
+            providerVersion: provider.version,
+            state: "running",
+            target: { ...options.target }
+        };
+        const runtime = { handle, record, tools: options.tools };
+        this.#runtimes.set(agentId, runtime);
+        void handle.closed.then(async () => {
+            if (this.#runtimes.get(agentId) !== runtime) return;
+            runtime.record.state = "stopped";
+            this.#runtimes.delete(agentId);
+            await runtime.tools.close();
+        }).catch(() => undefined);
+        return cloneRecord(record);
+    }
+
+    async stop(agentId: string): Promise<AgentHostRecord> {
+        const runtime = this.#runtimes.get(agentId);
+        if (runtime === undefined) {
+            throw new Error(`Unknown Agent: ${agentId}`);
+        }
+        runtime.record.state = "stopping";
+        let failure: unknown;
+        try {
+            await runtime.handle.stop();
+        } catch (error) {
+            failure = error;
+        }
+        const toolFailure = await settleCleanup(runtime.tools);
+        runtime.record.state = "stopped";
+        const stopped = cloneRecord(runtime.record);
+        this.#runtimes.delete(agentId);
+        if (failure !== undefined && toolFailure !== undefined) {
+            throw new AggregateError([failure, toolFailure], `Agent ${agentId} failed to stop cleanly.`);
+        }
+        if (failure !== undefined) throw failure;
+        if (toolFailure !== undefined) throw toolFailure;
+        return stopped;
+    }
+
+    async stopAll(): Promise<void> {
+        const failures: unknown[] = [];
+        for (const agentId of [...this.#runtimes.keys()]) {
+            if (!this.#runtimes.has(agentId)) continue;
+            await this.stop(agentId).catch((error) => failures.push(error));
+        }
+        if (failures.length > 0) {
+            throw new AggregateError(failures, "One or more Agents failed to stop cleanly.");
+        }
+    }
+
+    #requireRuntime(agentId: string): AgentHostRuntime {
+        const runtime = this.#runtimes.get(agentId);
+        if (runtime === undefined) {
+            throw new Error(`Unknown Agent: ${agentId}`);
+        }
+        return runtime;
+    }
+}
+
+function normalizeBasePath(value: string): string {
+    const trimmed = value.trim();
+    if (!trimmed.startsWith("/")) {
+        throw new TypeError("Agent web base path must start with '/'.");
+    }
+    return trimmed === "/" ? "" : trimmed.replace(/\/+$/u, "");
+}
+
+function cloneRecord(record: AgentHostRecord): AgentHostRecord {
+    return {
+        ...record,
+        target: { ...record.target }
+    };
+}
+
+async function settleCleanup(session: AgentToolSession): Promise<unknown | undefined> {
+    try {
+        await session.close();
+        return undefined;
+    } catch (error) {
+        return error;
+    }
+}

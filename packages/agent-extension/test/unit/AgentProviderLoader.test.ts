@@ -5,7 +5,7 @@ import test from "node:test";
 
 import type { ExtensionContext } from "@portable-devshell/extension";
 
-import { AgentProviderLoader } from "../../src/AgentProviderLoader.ts";
+import { AgentProviderLoader } from "../../src/provider/AgentProviderLoader.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 async function harness(t: test.TestContext) {

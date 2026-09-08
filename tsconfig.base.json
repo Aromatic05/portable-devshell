@@ -16,9 +16,6 @@
             "@portable-devshell/core": [
                 "./packages/core/dist/index.d.ts"
             ],
-            "@portable-devshell/agentd": [
-                "./packages/agentd/dist/index.d.ts"
-            ],
             "@portable-devshell/control": [
                 "./packages/control/dist/index.d.ts"
             ],

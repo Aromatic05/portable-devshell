@@ -1,10 +1,26 @@
 import { registerHooks } from "node:module";
+import { after } from "node:test";
+
+if (process.execArgv.includes("--test") || process.env.NODE_TEST_CONTEXT !== undefined) {
+    installTestWatchdog();
+}
+
+function installTestWatchdog() {
+    const timeoutMs = Number.parseInt(process.env.PORTABLE_DEVSHELL_TEST_WATCHDOG_MS ?? "30000", 10);
+    const watchdog = setTimeout(() => {
+        console.error(new Error(`global test watchdog timeout after ${timeoutMs}ms`).stack);
+        process.exit(1);
+    }, timeoutMs);
+    watchdog.unref();
+    after(() => clearTimeout(watchdog));
+    process.once("exit", () => clearTimeout(watchdog));
+}
 
 const workspacePackages = new Map([
-    ["@portable-devshell/agentd", new URL("../../agentd/src/index.ts", import.meta.url).href],
     ["@portable-devshell/extension", new URL("../../extension/src/index.ts", import.meta.url).href],
     ["@portable-devshell/pi-extension", new URL("../../pi-extension/src/index.ts", import.meta.url).href],
-    ["@portable-devshell/shared", new URL("../../shared/src/index.ts", import.meta.url).href]
+    ["@portable-devshell/shared", new URL("../../shared/src/index.ts", import.meta.url).href],
+    ["@portable-devshell/shared/transport/frame", new URL("../../shared/src/transport/protocol/Frame.ts", import.meta.url).href]
 ]);
 
 registerHooks({

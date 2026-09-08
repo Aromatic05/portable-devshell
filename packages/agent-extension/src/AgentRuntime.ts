@@ -1,10 +1,7 @@
-import {
-    AgentHost,
-    AgentProviderRegistry,
-    parseAgentWorkerTarget,
-    type AgentHostRecord,
-    type AgentProvider
-} from "@portable-devshell/agentd";
+import { AgentHost, type AgentHostRecord } from "./host/AgentHost.js";
+import { AgentProviderRegistry } from "./provider/AgentProviderRegistry.js";
+import type { AgentProvider } from "./provider/AgentProvider.js";
+import { parseAgentWorkerTarget } from "./worker/AgentWorkerTarget.js";
 import type { ExtensionContext, ExtensionJsonValue } from "@portable-devshell/extension";
 
 import { readAgentId, readMessageInput, readStartInput } from "./AgentInput.js";

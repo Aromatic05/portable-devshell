@@ -1,6 +1,5 @@
 import { join } from "node:path";
 
-import { AgentProviderRegistry } from "@portable-devshell/agentd";
 import type {
     ExtensionActivation,
     ExtensionContext,
@@ -10,10 +9,11 @@ import type {
 
 import { executeAgentCommand } from "./AgentCommand.js";
 import { readAgentId } from "./AgentInput.js";
-import { AgentProviderLoader } from "./AgentProviderLoader.js";
-import { AgentProviderManager } from "./AgentProviderManager.js";
-import { AgentProviderRegistryStore } from "./AgentProviderRegistryStore.js";
 import { AgentExtensionRuntime } from "./AgentRuntime.js";
+import { AgentProviderLoader } from "./provider/AgentProviderLoader.js";
+import { AgentProviderManager } from "./provider/AgentProviderManager.js";
+import { AgentProviderRegistry } from "./provider/AgentProviderRegistry.js";
+import { AgentProviderRegistryStore } from "./provider/AgentProviderRegistryStore.js";
 
 export async function activate(context: ExtensionContext): Promise<ExtensionActivation> {
     const providerStore = new AgentProviderRegistryStore(join(context.paths.stateDirectory, "providers.json"));
