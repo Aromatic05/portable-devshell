@@ -8,6 +8,7 @@ import {
     appendDevshellRemoteWorkspacePrompt,
     createDevshellPiExtension,
     createDevshellPiWorkspaceBridge,
+    createStandaloneDevshellPiExtension,
     expandDevshellPiPromptTemplate,
     loadDevshellPiWorkspaceContext,
     loadDevshellPiWorkspaceResources,
@@ -16,9 +17,12 @@ import {
     replacePiProjectContext,
     transformDevshellPiSkillInput
 } from "../../src/index.ts";
+import standaloneDevshellPiExtension from "../../src/index.ts";
 import {
+    devshellPiRendererToolNames,
     formatPiToolCall,
     formatPiToolResult,
+    hasExplicitPiToolRenderer,
     parseEditChangeSet,
     renderPiToolCall,
     renderPiToolResult,
@@ -45,6 +49,11 @@ test("Pi devshell adapter requires an injected tool session instead of opening C
     await bridge.close();
     await bridge.close();
     assert.equal(closes, 1);
+});
+
+test("standalone default export is a Pi extension factory, not the factory generator", () => {
+    assert.equal(typeof standaloneDevshellPiExtension, "function");
+    assert.notEqual(standaloneDevshellPiExtension, createStandaloneDevshellPiExtension);
 });
 
 test("managed Pi adapter leaves tool-session shutdown to its embedding owner", async () => {
@@ -427,12 +436,168 @@ test("Pi devshell edit tool contributes its Worker preconditions and grammar to 
 test("Pi devshell renderer formats common calls without JSON fallback", () => {
     assert.equal(
         formatPiToolCall("file_search", { pattern: "renderCall", paths: ["./src", "./test"] }),
-        "file_search /renderCall/ in ./src, ./test"
+        "grep /renderCall/ in ./src, ./test"
     );
     assert.equal(
         formatPiToolCall("bash_run", { command: "pnpm test", cwd: "./packages/pi-extension" }),
-        "bash_run $ pnpm test in ./packages/pi-extension"
+        "$ pnpm test in ./packages/pi-extension"
     );
+});
+
+test("Pi devshell renderer explicitly covers the complete current Worker catalog", () => {
+    const expected = [
+        "artifact_read",
+        "bash_run",
+        "file_edit",
+        "file_find",
+        "file_info",
+        "file_read",
+        "file_search",
+        "tmux_close",
+        "tmux_create",
+        "tmux_input",
+        "tmux_inspect",
+        "tmux_list",
+        "tmux_read",
+        "tmux_run"
+    ];
+    assert.deepEqual([...devshellPiRendererToolNames], expected);
+    for (const toolName of expected) assert.equal(hasExplicitPiToolRenderer(toolName), true, toolName);
+    assert.equal(hasExplicitPiToolRenderer("future_tool"), false);
+});
+
+test("Pi devshell read renderer follows native collapsed and expanded semantics", () => {
+    const args = { files: [{ path: "./src/demo.ts", selector: "10-12", view: "content" }] };
+    const callContext = context(args);
+    const call = renderPiToolCall("file_read", args, identityTheme, callContext);
+    assert.deepEqual(visibleSelfLines(call), ["read ./src/demo.ts:10-12"]);
+
+    const result = {
+        content: [{ type: "text", text: "10:const value = 1;\n11:return value;" }],
+        details: {
+            files: [{
+                path: "./src/demo.ts",
+                content: "10:const value = 1;\n11:return value;",
+                language: "typescript",
+                truncated: true,
+                nextSelector: "12"
+            }]
+        }
+    };
+    const collapsed = renderPiToolResult(
+        "file_read",
+        result,
+        { expanded: false, isPartial: false },
+        identityTheme,
+        { ...callContext, lastComponent: undefined }
+    );
+    assert.deepEqual(collapsed.render(120), []);
+
+    const expanded = renderPiToolResult(
+        "file_read",
+        result,
+        { expanded: true, isPartial: false },
+        identityTheme,
+        { ...callContext, expanded: true, lastComponent: undefined }
+    );
+    assert.deepEqual(visibleSelfLines(expanded), [
+        "10 const value = 1;",
+        "11 return value;",
+        "[More available: selector 12]"
+    ]);
+});
+
+test("Pi devshell find and info results use native compact rows rather than structured keys", () => {
+    assert.equal(
+        formatPiToolResult("file_find", {
+            content: [],
+            details: {
+                entries: [
+                    { path: "src", type: "directory" },
+                    { path: "src/index.ts", type: "file" }
+                ],
+                nextCursor: "cursor-2"
+            }
+        }, false),
+        ["src/", "src/index.ts", "[More results available: continue with next cursor]"].join("\n")
+    );
+    const info = formatPiToolResult("file_info", {
+        content: [],
+        details: {
+            entries: [
+                { path: "./src", type: "directory", mode: 493 },
+                { path: "./missing", exists: false }
+            ]
+        }
+    }, false);
+    assert.match(info, /^\.\/src · directory · 0755$/mu);
+    assert.match(info, /^\.\/missing · missing$/mu);
+    assert.equal(info.includes("entries:"), false);
+});
+
+test("Pi devshell bash renderer shows a width-aware tail and completion status", () => {
+    const callContext = context({ command: "pnpm test" });
+    const result = renderPiToolResult("bash_run", {
+        content: [],
+        details: {
+            exitCode: 0,
+            stdout: "one\ntwo\nthree\nfour\nfive\nsix\nseven\n",
+            stderr: "",
+            stdoutTruncated: true,
+            stderrTruncated: false,
+            durationMs: 1234,
+            termination: "exited"
+        }
+    }, { expanded: false, isPartial: false }, identityTheme, callContext);
+    assert.deepEqual(result.render(120), [
+        "",
+        "... (2 earlier lines, Ctrl+O to expand)",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "[stdout truncated]",
+        "exit 0 · Took 1.2s"
+    ]);
+});
+
+test("Pi devshell tmux renderer consumes Worker output arrays and keeps task state compact", () => {
+    const rendered = formatPiToolResult("tmux_run", {
+        content: [],
+        details: {
+            output: ["build", "test"],
+            task: { id: "task-abc", status: "running" },
+            detached: true
+        }
+    }, false);
+    assert.equal(rendered, ["build", "test", "task-abc · running · detached"].join("\n"));
+    assert.equal(rendered.includes("output:"), false);
+    assert.equal(rendered.includes("task:"), false);
+});
+
+test("Pi devshell artifact renderer exposes paging without dumping artifact metadata", () => {
+    const rendered = formatPiToolResult("artifact_read", {
+        content: [],
+        details: {
+            handle: "artifact-1",
+            stream: "stdout",
+            offsetBytes: 0,
+            returnedBytes: 12,
+            totalBytes: 24,
+            sourceBytes: 24,
+            content: "alpha\nbeta",
+            encoding: "utf8",
+            lossy: false,
+            eof: false,
+            nextOffsetBytes: 12,
+            artifactTruncated: false,
+            blake3: "deadbeef",
+            expiresAtMs: 123
+        }
+    }, false);
+    assert.equal(rendered, ["alpha", "beta", "[More available: offsetBytes=12]"].join("\n"));
+    assert.equal(rendered.includes("blake3"), false);
 });
 
 test("Pi devshell renderer turns file search results into readable sections", () => {

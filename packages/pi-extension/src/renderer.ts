@@ -1,6 +1,4 @@
-import { Text, type Component } from "@earendil-works/pi-tui";
-
-import type { JsonValue } from "@portable-devshell/shared";
+import type { Component } from "@earendil-works/pi-tui";
 
 import {
     formatFileEditStaticCall,
@@ -8,43 +6,72 @@ import {
     renderFileEditFallback,
     renderFileEditResultComponent
 } from "./file-edit-renderer.js";
+import {
+    formatArtifactCall,
+    formatFindCall,
+    formatInfoCall,
+    formatReadCall,
+    formatSearchCall,
+    renderArtifactResult,
+    renderFileFind,
+    renderFileInfo,
+    renderFileRead,
+    renderFileReadComponent,
+    renderFileSummaryComponent,
+    renderFileSearch
+} from "./file-tool-renderer.js";
+import type {
+    PiThemeLike,
+    PiToolRenderContextLike,
+    PiToolRenderResultLike,
+    PiToolRenderResultOptionsLike
+} from "./renderer-types.js";
+import {
+    asRecord,
+    joinCall,
+    joinStyled,
+    renderError,
+    renderStructured,
+    setText,
+    stringField,
+    style,
+    summarizeRecord,
+    textContentLines
+} from "./renderer-utils.js";
+import { formatShellCall, renderBashResult, renderBashResultComponent } from "./shell-tool-renderer.js";
+import { formatTmuxCall, renderTerminalResultComponent, renderTmuxResult } from "./tmux-tool-renderer.js";
 
 export { parseEditChangeSet, renderWorkerUnifiedDiff } from "./file-edit-renderer.js";
+export type {
+    PiThemeLike,
+    PiToolRenderContextLike,
+    PiToolRenderResultLike,
+    PiToolRenderResultOptionsLike
+} from "./renderer-types.js";
 
-export interface PiThemeLike {
-    bg(role: string, text: string): string;
-    bold(text: string): string;
-    fg(role: string, text: string): string;
-    inverse(text: string): string;
+export const devshellPiRendererToolNames = Object.freeze([
+    "artifact_read",
+    "bash_run",
+    "file_edit",
+    "file_find",
+    "file_info",
+    "file_read",
+    "file_search",
+    "tmux_close",
+    "tmux_create",
+    "tmux_input",
+    "tmux_inspect",
+    "tmux_list",
+    "tmux_read",
+    "tmux_run"
+] as const);
+
+const rendererToolNames = new Set<string>(devshellPiRendererToolNames);
+const expandedLineLimit = 160;
+
+export function hasExplicitPiToolRenderer(toolName: string): boolean {
+    return rendererToolNames.has(toolName);
 }
-
-export interface PiToolRenderContextLike {
-    args: unknown;
-    argsComplete: boolean;
-    cwd: string;
-    executionStarted: boolean;
-    expanded: boolean;
-    invalidate(): void;
-    isError: boolean;
-    isPartial: boolean;
-    lastComponent?: Component;
-    showImages: boolean;
-    state: Record<string, unknown>;
-    toolCallId: string;
-}
-
-export interface PiToolRenderResultOptionsLike {
-    expanded: boolean;
-    isPartial: boolean;
-}
-
-export interface PiToolRenderResultLike {
-    content: Array<{ text?: string; type: string }>;
-    details?: JsonValue;
-}
-
-const collapsedLineLimit = 18;
-const expandedLineLimit = 120;
 
 export function renderPiToolCall(
     toolName: string,
@@ -64,46 +91,59 @@ export function renderPiToolResult(
     context: PiToolRenderContextLike
 ): Component {
     if (toolName === "file_edit") return renderFileEditResultComponent(result, options, theme, context);
-    return setText(
-        context.lastComponent,
-        formatPiToolResult(toolName, result, options.expanded, theme, context.isError)
-    );
+    if (context.isError) return setText(context.lastComponent, renderError(result, theme));
+
+    switch (toolName) {
+        case "file_read":
+            return renderFileReadComponent(result, options, theme, context);
+        case "artifact_read":
+        case "file_find":
+        case "file_info":
+        case "file_search":
+            return renderFileSummaryComponent(toolName, result, options, theme, context);
+        case "bash_run":
+            return renderBashResultComponent(result, options, theme, context);
+        case "tmux_run":
+        case "tmux_read":
+        case "tmux_input":
+            return renderTerminalResultComponent(toolName, result, options, theme, context);
+        default:
+            return setText(
+                context.lastComponent,
+                formatPiToolResult(toolName, result, options.expanded, theme, false)
+            );
+    }
 }
 
 export function formatPiToolCall(toolName: string, args: unknown, theme?: PiThemeLike): string {
     const record = asRecord(args);
-    const title = style(theme, "toolTitle", toolName, true);
-    if (record === undefined) return title;
+    if (record === undefined) return style(theme, "toolTitle", displayToolLabel(toolName), true);
 
     switch (toolName) {
-        case "file_read":
-            return joinCall(title, [stringField(record, "path"), stringField(record, "selector"), option(record, "view")], theme);
-        case "file_search": {
-            const pattern = stringField(record, "pattern");
-            const paths = stringArrayField(record, "paths");
-            return joinCall(title, [
-                pattern === undefined ? undefined : `/${pattern}/`,
-                paths.length === 0 ? undefined : `in ${paths.join(", ")}`
-            ], theme);
-        }
-        case "file_find": {
-            const paths = stringArrayField(record, "paths");
-            return joinCall(title, [paths.length === 0 ? undefined : paths.join(", ")], theme);
-        }
+        case "artifact_read":
+            return formatArtifactCall(record, theme);
+        case "bash_run":
+            return formatShellCall(record, theme);
         case "file_edit":
             return formatFileEditStaticCall(stringField(record, "changes"), theme);
-        case "bash_run":
-            return formatCommandCall(title, record, theme, "$ ");
-        case "tmux_run":
-            return formatCommandCall(title, record, theme, "↳ ");
-        case "tmux_read":
-            return joinCall(title, [stringField(record, "task"), option(record, "line"), option(record, "timeMs")], theme);
+        case "file_find":
+            return formatFindCall(record, theme);
+        case "file_info":
+            return formatInfoCall(record, theme);
+        case "file_read":
+            return formatReadCall(record, theme);
+        case "file_search":
+            return formatSearchCall(record, theme);
+        case "tmux_close":
+        case "tmux_create":
         case "tmux_input":
-            return joinCall(title, [stringField(record, "task") ?? stringField(record, "pane"), previewScalar(record.input)], theme);
         case "tmux_inspect":
-            return joinCall(title, [stringField(record, "pane") ?? stringField(record, "panes")], theme);
+        case "tmux_list":
+        case "tmux_read":
+        case "tmux_run":
+            return formatTmuxCall(toolName, record, theme);
         default:
-            return joinCall(title, summarizeRecord(record), theme);
+            return joinCall(style(theme, "toolTitle", toolName, true), summarizeRecord(record), theme);
     }
 }
 
@@ -114,191 +154,50 @@ export function formatPiToolResult(
     theme?: PiThemeLike,
     isError = false
 ): string {
-    let lines: string[];
+    if (isError) return renderError(result, theme);
+
     switch (toolName) {
-        case "file_read":
-            lines = renderFileRead(result.details);
-            break;
-        case "file_search":
-            lines = renderFileSearch(result.details);
-            break;
-        case "file_edit":
-            lines = renderFileEditFallback(result.details, theme);
-            break;
+        case "artifact_read":
+            return joinStyled(renderArtifactResult(result.details, expanded), theme);
         case "bash_run":
-            lines = renderBashResult(result.details);
-            break;
-        case "tmux_run":
-        case "tmux_read":
-        case "tmux_inspect":
+            return joinStyled(renderBashResult(result.details, expanded), theme);
+        case "file_edit":
+            return joinStyled(renderFileEditFallback(result.details, theme), theme);
+        case "file_find":
+            return joinStyled(renderFileFind(result.details, expanded), theme);
+        case "file_info":
+            return joinStyled(renderFileInfo(result.details), theme);
+        case "file_read":
+            return joinStyled(renderFileRead(result.details, expanded), theme);
+        case "file_search":
+            return joinStyled(renderFileSearch(result.details, expanded), theme);
+        case "tmux_close":
+        case "tmux_create":
         case "tmux_input":
-            lines = renderTmuxResult(result.details);
-            break;
-        default:
-            lines = renderStructured(result.details);
-            break;
-    }
-
-    if (lines.length === 0) lines = textContentLines(result);
-    const clipped = clipLines(lines, expanded ? expandedLineLimit : collapsedLineLimit);
-    return clipped.map((line) => style(theme, isError ? "error" : "toolOutput", line)).join("\n");
-}
-
-function renderFileRead(value: JsonValue | undefined): string[] {
-    const record = asRecord(value);
-    const content = record === undefined ? undefined : stringField(record, "content");
-    return content === undefined ? renderStructured(value) : content.split("\n");
-}
-
-function renderFileSearch(value: JsonValue | undefined): string[] {
-    const record = asRecord(value);
-    if (record === undefined || !Array.isArray(record.files)) return renderStructured(value);
-    const lines: string[] = [];
-    for (const entry of record.files) {
-        const file = asRecord(entry);
-        if (file === undefined) continue;
-        const path = stringField(file, "path");
-        const content = stringField(file, "content");
-        if (path !== undefined) lines.push(path);
-        if (content !== undefined) lines.push(...content.split("\n").map((line) => `  ${line}`));
-    }
-    appendComments(lines, record);
-    return lines;
-}
-
-function renderBashResult(value: JsonValue | undefined): string[] {
-    const record = asRecord(value);
-    if (record === undefined) return [];
-    const lines: string[] = [];
-    const stdout = stringField(record, "stdout");
-    const stderr = stringField(record, "stderr");
-    if (stdout) lines.push(...stdout.replace(/\n$/u, "").split("\n"));
-    if (stderr) lines.push(...stderr.replace(/\n$/u, "").split("\n").map((line) => `stderr: ${line}`));
-    if (record.exitCode !== undefined || record.durationMs !== undefined) {
-        lines.push([
-            record.exitCode === undefined ? undefined : `exit ${String(record.exitCode)}`,
-            typeof record.durationMs === "number" ? `${record.durationMs} ms` : undefined
-        ].filter(Boolean).join(" · "));
-    }
-    return lines.length === 0 ? renderStructured(value) : lines;
-}
-
-function renderTmuxResult(value: JsonValue | undefined): string[] {
-    const record = asRecord(value);
-    if (record === undefined) return [];
-    const lines: string[] = [];
-    const output = stringField(record, "output");
-    if (output) lines.push(...output.split("\n"));
-    const task = asRecord(record.task);
-    if (task !== undefined) {
-        const summary = [stringField(task, "id"), previewScalar(task.status)].filter(Boolean).join(" · ");
-        if (summary) lines.push(summary);
-    }
-    appendComments(lines, record);
-    return lines.length === 0 ? renderStructured(value) : lines;
-}
-
-function setText(component: Component | undefined, text: string): Component {
-    if (component instanceof Text) {
-        component.setText(text);
-        return component;
-    }
-    return new Text(text, 0, 0);
-}
-
-function formatCommandCall(title: string, record: Record<string, unknown>, theme: PiThemeLike | undefined, prompt: string): string {
-    const command = stringField(record, "command");
-    return [
-        title,
-        command === undefined ? undefined : style(theme, "accent", `${prompt}${oneLine(command, 120)}`),
-        stringField(record, "cwd") === undefined ? undefined : style(theme, "muted", `in ${stringField(record, "cwd")}`),
-        stringField(record, "wait") === undefined ? undefined : style(theme, "muted", `wait=${stringField(record, "wait")}`)
-    ].filter((value): value is string => value !== undefined).join(" ");
-}
-
-function joinCall(title: string, values: Array<string | undefined>, theme?: PiThemeLike): string {
-    return [title, ...values
-        .filter((value): value is string => value !== undefined && value.length > 0)
-        .map((value) => style(theme, "toolOutput", value))].join(" ");
-}
-
-function summarizeRecord(record: Record<string, unknown>): Array<string | undefined> {
-    return Object.entries(record)
-        .filter(([key]) => !["ctxId", "instance"].includes(key))
-        .slice(0, 4)
-        .map(([key, value]) => {
-            const preview = previewScalar(value);
-            return preview === undefined ? undefined : `${key}=${preview}`;
-        });
-}
-
-function appendComments(lines: string[], record: Record<string, unknown>): void {
-    if (!Array.isArray(record.comment)) return;
-    for (const comment of record.comment) if (typeof comment === "string" && comment.length > 0) lines.push(comment);
-}
-
-function renderStructured(value: JsonValue | undefined): string[] {
-    if (value === undefined || value === null) return [];
-    if (typeof value !== "object") return [String(value)];
-    if (Array.isArray(value)) {
-        return value.flatMap((entry) => {
-            const nested = renderStructured(entry);
-            return nested.length === 0 ? [] : [`• ${nested[0]}`, ...nested.slice(1).map((line) => `  ${line}`)];
-        });
-    }
-    const lines: string[] = [];
-    for (const [key, entry] of Object.entries(value)) {
-        if (entry === undefined || entry === null) continue;
-        if (typeof entry !== "object") lines.push(`${key}: ${oneLine(String(entry), 240)}`);
-        else {
-            lines.push(`${key}:`);
-            lines.push(...renderStructured(entry as JsonValue).map((line) => `  ${line}`));
+        case "tmux_inspect":
+        case "tmux_list":
+        case "tmux_read":
+        case "tmux_run":
+            return joinStyled(renderTmuxResult(toolName, result.details, expanded), theme);
+        default: {
+            let lines = renderStructured(result.details);
+            if (lines.length === 0) lines = textContentLines(result);
+            const clipped = lines.length <= (expanded ? expandedLineLimit : 18)
+                ? lines
+                : [...lines.slice(0, expanded ? expandedLineLimit : 18), "... (more output, Ctrl+O to expand)"];
+            return joinStyled(clipped, theme);
         }
     }
-    return lines;
 }
 
-function textContentLines(result: PiToolRenderResultLike): string[] {
-    return result.content
-        .filter((entry) => entry.type === "text" && typeof entry.text === "string")
-        .flatMap((entry) => entry.text!.split("\n"));
-}
-
-function clipLines(lines: string[], limit: number): string[] {
-    return lines.length <= limit ? lines : [...lines.slice(0, limit), `… (${lines.length - limit} more lines, Ctrl+O to expand)`];
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-    return typeof value === "object" && value !== null && !Array.isArray(value)
-        ? value as Record<string, unknown>
-        : undefined;
-}
-
-function stringField(record: Record<string, unknown>, key: string): string | undefined {
-    return typeof record[key] === "string" ? record[key] : undefined;
-}
-
-function stringArrayField(record: Record<string, unknown>, key: string): string[] {
-    return Array.isArray(record[key]) ? record[key].filter((value): value is string => typeof value === "string") : [];
-}
-
-function option(record: Record<string, unknown>, key: string): string | undefined {
-    const value = previewScalar(record[key]);
-    return value === undefined ? undefined : `${key}=${value}`;
-}
-
-function previewScalar(value: unknown): string | undefined {
-    if (typeof value === "string") return oneLine(value, 80);
-    if (typeof value === "number" || typeof value === "boolean") return String(value);
-    return undefined;
-}
-
-function oneLine(value: string, limit: number): string {
-    const flattened = value.replace(/\s+/gu, " ").trim();
-    return flattened.length <= limit ? flattened : `${flattened.slice(0, limit - 1)}…`;
-}
-
-function style(theme: PiThemeLike | undefined, role: string, text: string, bold = false): string {
-    if (theme === undefined) return text;
-    return theme.fg(role, bold ? theme.bold(text) : text);
+function displayToolLabel(toolName: string): string {
+    switch (toolName) {
+        case "artifact_read": return "artifact";
+        case "bash_run": return "$";
+        case "file_find": return "find";
+        case "file_info": return "stat";
+        case "file_read": return "read";
+        case "file_search": return "grep";
+        default: return toolName.startsWith("tmux_") ? `tmux ${toolName.slice(5)}` : toolName;
+    }
 }
