@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { join } from "node:path";
 import test from "node:test";
+
+import { EXTENSION_API_VERSION } from "@portable-devshell/extension";
 
 import {
     ControlPathHome,
@@ -13,6 +15,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlRuntime } from "../../src/testing.ts";
+import { ExtensionPathLayout } from "../../src/control/extension/ExtensionPathLayout.ts";
 import { ControlRuntimeMcp } from "../../src/composition/runtime/ControlRuntimeMcp.ts";
 import { ControlRuntimeState } from "../../src/composition/runtime/ControlRuntimeState.ts";
 import { createTestIpcPath, ipcEndpointAcceptsConnections } from "../../../../test/TestPlatformSupport.ts";
@@ -540,3 +543,139 @@ async function requestHttp(origin: string, path: string): Promise<{ body: string
         requestHandle.end();
     });
 }
+
+
+test("runtime installs builtin Extensions through the normal installer before opening the Control channel", async (t) => {
+    const root = await createTestTempDirectory("runtime-builtin-extension");
+    const socketPath = createTestIpcPath("control-runtime-builtin", root);
+    const source = join(root, "builtin-source");
+    await mkdir(source, { recursive: true });
+    await writeFile(join(source, "devshell-extension.json"), `${JSON.stringify({
+        apiVersion: EXTENSION_API_VERSION,
+        capabilities: [],
+        entry: "extension.mjs",
+        id: "example",
+        name: "Example builtin",
+        schemaVersion: 1,
+        version: "1.0.0"
+    })}\n`, "utf8");
+    await writeFile(join(source, "extension.mjs"), "export function activate() { return { dispose() {} }; }\n", "utf8");
+
+    const extensionPaths = new ExtensionPathLayout({
+        dataHome: join(root, "data"),
+        homeDirectory: join(root, "home"),
+        runtimeRoot: join(root, "runtime")
+    });
+    let activeGeneration: string | undefined;
+    const extensions = {
+        async activateGeneration(id: string, generation: string) {
+            assert.equal(id, "example");
+            assert.equal(await ipcEndpointAcceptsConnections(socketPath), false);
+            activeGeneration = generation;
+        },
+        async disable() {},
+        async dispatchCommand() { return { kind: "text", text: "" }; },
+        async dispatchRpc() { return {}; },
+        async enable() {},
+        async forget() {},
+        async list() {
+            return activeGeneration === undefined ? [] : [{
+                activeGeneration,
+                enabled: true,
+                id: "example",
+                retired: [],
+                selectedGeneration: activeGeneration,
+                state: "active",
+                version: "1.0.0"
+            }];
+        },
+        async reload() {},
+        async retireInstance() {},
+        async start() {},
+        async stop() {},
+        async waitForDrain() {}
+    } as never;
+    const runtime = new ControlRuntime({
+        artifact: {
+            service: undefined,
+            async stop() {}
+        } as never,
+        builtinExtensionSources: [source],
+        extensionPaths,
+        extensions,
+        instances: {
+            list: () => [],
+            onChange: () => () => undefined,
+            async stopOwned() {}
+        } as never,
+        mcp: {
+            configEditor: testConfigEditor(),
+            instanceCreate: undefined,
+            oauthApprovals: () => undefined,
+            async start() {},
+            status: () => ({ running: false }),
+            async stop() {}
+        } as never,
+        restart: async () => undefined,
+        reverse: { service: undefined, stop() {} } as never,
+        shutdown: async () => undefined,
+        socketPath
+    });
+    t.after(async () => {
+        await cleanupInOrder(
+            () => runtime.stop(),
+            () => rm(root, { force: true, recursive: true })
+        );
+    });
+
+    await runtime.start();
+    assert.match(activeGeneration ?? "", /^v1\.0\.0-[0-9a-f]{64}$/u);
+    assert.equal(await ipcEndpointAcceptsConnections(socketPath), true);
+});
+
+test("runtime keeps the Control channel closed when builtin Extension installation fails", async (t) => {
+    const root = await createTestTempDirectory("runtime-builtin-extension-failure");
+    const socketPath = createTestIpcPath("control-runtime-builtin-failure", root);
+    const source = join(root, "invalid-builtin");
+    await mkdir(source, { recursive: true });
+    const runtime = new ControlRuntime({
+        artifact: { service: undefined, async stop() {} } as never,
+        builtinExtensionSources: [source],
+        extensionPaths: new ExtensionPathLayout({
+            dataHome: join(root, "data"),
+            homeDirectory: join(root, "home"),
+            runtimeRoot: join(root, "runtime")
+        }),
+        extensions: {
+            async activateGeneration() {},
+            async disable() {},
+            async dispatchCommand() { return { kind: "text", text: "" }; },
+            async dispatchRpc() { return {}; },
+            async enable() {},
+            async forget() {},
+            async list() { return []; },
+            async reload() {},
+            async retireInstance() {},
+            async start() {},
+            async stop() {},
+            async waitForDrain() {}
+        } as never,
+        instances: { list: () => [], onChange: () => () => undefined, async stopOwned() {} } as never,
+        mcp: {
+            configEditor: testConfigEditor(),
+            instanceCreate: undefined,
+            oauthApprovals: () => undefined,
+            async start() {},
+            status: () => ({ running: false }),
+            async stop() {}
+        } as never,
+        restart: async () => undefined,
+        reverse: { service: undefined, stop() {} } as never,
+        shutdown: async () => undefined,
+        socketPath
+    });
+    t.after(async () => await rm(root, { force: true, recursive: true }));
+
+    await assert.rejects(runtime.start(), /missing devshell-extension\.json/iu);
+    assert.equal(await ipcEndpointAcceptsConnections(socketPath), false);
+});

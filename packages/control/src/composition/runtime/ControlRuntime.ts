@@ -25,6 +25,7 @@ import type { ControlRuntimeReverse } from "./ControlRuntimeReverse.js";
 
 export interface ControlRuntimeOptions {
     artifact: ControlRuntimeArtifact;
+    builtinExtensionSources?: readonly string[];
     extensionPaths: ExtensionPathLayout;
     extensions: ExtensionHost;
     instances: InstanceRegistry;
@@ -43,6 +44,7 @@ interface ControlWebRuntime {
 
 export class ControlRuntime {
     readonly #artifact: ControlRuntimeArtifact;
+    readonly #builtinExtensionSources: readonly string[];
     readonly #channels: ControlChannelServer;
     readonly #debug: DebugPatchService;
     readonly #extensionControl: ExtensionControlService;
@@ -59,6 +61,7 @@ export class ControlRuntime {
 
     constructor(options: ControlRuntimeOptions) {
         this.#artifact = options.artifact;
+        this.#builtinExtensionSources = Object.freeze([...(options.builtinExtensionSources ?? [])]);
         this.#extensionPaths = options.extensionPaths;
         this.#extensions = options.extensions;
         this.#extensionControl = new ExtensionControlService({
@@ -148,6 +151,9 @@ export class ControlRuntime {
             }
             await this.#mcp.start();
             await this.#extensions.start();
+            for (const source of this.#builtinExtensionSources) {
+                await this.#extensionControl.install(source);
+            }
             await this.#channels.start();
         } catch (error) {
             await this.stop().catch(() => undefined);

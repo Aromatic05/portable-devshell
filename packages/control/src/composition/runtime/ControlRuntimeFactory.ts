@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { ControlPathHome } from "@portable-devshell/shared";
 import { ExtensionHost } from "../../control/extension/ExtensionHost.js";
 import { ExtensionAssetCapabilityControl } from "../../control/extension/ExtensionAssetCapabilityControl.js";
+import { readBuiltinExtensionSources } from "../../control/extension/ExtensionBuiltinSource.js";
 import { ExtensionLoader } from "../../control/extension/ExtensionLoader.js";
 import { ExtensionPathLayout } from "../../control/extension/ExtensionPathLayout.js";
 import { ExtensionRegistryStore } from "../../control/extension/ExtensionRegistryStore.js";
@@ -14,13 +15,18 @@ import { ControlRuntimeMcp } from "./ControlRuntimeMcp.js";
 import { ControlRuntimeReverse } from "./ControlRuntimeReverse.js";
 
 export interface ControlRuntimeFactoryOptions {
+    builtinExtensionSources?: readonly string[];
     mcpFactory?: McpRuntimeFactory;
 }
 
 export class ControlRuntimeFactory {
+    readonly #builtinExtensionSources: readonly string[];
     readonly #mcpFactory: McpRuntimeFactory;
 
     constructor(options: ControlRuntimeFactoryOptions = {}) {
+        this.#builtinExtensionSources = Object.freeze([
+            ...(options.builtinExtensionSources ?? readBuiltinExtensionSources())
+        ]);
         this.#mcpFactory = options.mcpFactory ?? new McpRuntimeFactory();
     }
 
@@ -65,6 +71,7 @@ export class ControlRuntimeFactory {
             });
             return new ControlRuntime({
                 artifact,
+                builtinExtensionSources: this.#builtinExtensionSources,
                 extensionPaths,
                 extensions,
                 instances: options.state.instances,
