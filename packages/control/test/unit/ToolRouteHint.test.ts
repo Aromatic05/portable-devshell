@@ -31,9 +31,12 @@ function callHandler(callTool: (toolName: string, input: JsonValue) => Promise<J
             async listPendingApprovals() {
                 throw new Error("unused");
             },
+            listTools() { return []; },
+            async prepareWorkspace(workspace: string) { return { workspace } as never; },
             async readToolCalls() {
                 throw new Error("unused");
-            }
+            },
+            async releaseToolSession() {}
         }
     });
     const operation = module.operations.find((entry) => entry.name === "call");
@@ -89,7 +92,10 @@ test("control tool route serves pending approval reads without scanning approval
             async getApproval() { throw new Error("unused"); },
             async listApprovals() { throw new Error("approval history must not be read"); },
             async listPendingApprovals() { return [{ approvalId: "approval-pending" } as never]; },
-            async readToolCalls() { throw new Error("unused"); }
+            listTools() { return []; },
+            async prepareWorkspace(workspace: string) { return { workspace } as never; },
+            async readToolCalls() { throw new Error("unused"); },
+            async releaseToolSession() {}
         }
     });
     const operation = module.operations.find((entry) => entry.name === "listApprovals");
@@ -101,4 +107,56 @@ test("control tool route serves pending approval reads without scanning approval
     ) as Array<{ approvalId: string }>;
 
     assert.deepEqual(result, [{ approvalId: "approval-pending" }]);
+});
+
+test("control tool session exposes canonical workspace and releases the connection-owned session", async () => {
+    const released: string[] = [];
+    const module = createToolRouteModule({
+        worker: {
+            async callTool() { throw new Error("unused"); },
+            async decideApproval() { throw new Error("unused"); },
+            async getApproval() { throw new Error("unused"); },
+            async listApprovals() { return []; },
+            async listPendingApprovals() { return []; },
+            listTools() {
+                return [{
+                    description: "Read file",
+                    group: "file",
+                    inputSchema: { type: "object" },
+                    name: "file_read",
+                    outputSchema: {},
+                    requiredCapabilities: ["read"]
+                }];
+            },
+            async prepareWorkspace(workspace: string) {
+                assert.equal(workspace, "/requested");
+                return { workspace: "/canonical" } as never;
+            },
+            async readToolCalls() { return []; },
+            async releaseToolSession(sessionId: string) { released.push(sessionId); }
+        }
+    });
+    const open = module.operations.find((entry) => entry.name === "openSession");
+    const close = module.operations.find((entry) => entry.name === "closeSession");
+    if (open === undefined || close === undefined) throw new Error("tool session operations are missing");
+
+    assert.deepEqual(await open.handle(
+        { id: "1", name: "openSession", payload: { workspace: "/requested" } },
+        routeContext("pi-connection")
+    ), {
+        tools: [{
+            description: "Read file",
+            group: "file",
+            inputSchema: { type: "object" },
+            name: "file_read",
+            outputSchema: {},
+            requiredCapabilities: ["read"]
+        }],
+        workspace: "/canonical"
+    });
+    assert.deepEqual(await close.handle(
+        { id: "2", name: "closeSession", payload: {} },
+        routeContext("pi-connection")
+    ), {});
+    assert.deepEqual(released, ["pi-connection"]);
 });

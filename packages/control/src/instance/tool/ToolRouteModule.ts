@@ -19,14 +19,15 @@ import {
     readToolApprovalId,
     readToolApprovalListOptions,
     readToolCall,
-    readToolCallQuery
+    readToolCallQuery,
+    readToolSessionOpen
 } from "./ToolRouteInput.js";
 
 export interface ToolRouteInstancePort {
     name?: string;
     worker: Pick<
         WorkerInstance,
-        "callTool" | "decideApproval" | "getApproval" | "listApprovals" | "listPendingApprovals" | "readToolCalls"
+        "callTool" | "decideApproval" | "getApproval" | "listApprovals" | "listPendingApprovals" | "listTools" | "prepareWorkspace" | "readToolCalls" | "releaseToolSession"
     >;
 }
 
@@ -59,6 +60,17 @@ export function createToolRouteModule(
                     result: null
                 } as unknown as JsonValue;
             }
+        },
+        openSession: async (request) => {
+            const prepared = await instance.worker.prepareWorkspace(readToolSessionOpen(request.payload).workspace);
+            return {
+                tools: instance.worker.listTools(),
+                workspace: prepared.workspace
+            } as unknown as JsonValue;
+        },
+        closeSession: async (_request, context) => {
+            await instance.worker.releaseToolSession(context.connectionId);
+            return {};
         },
         listCalls: async (request) => {
             const query = readToolCallQuery(request.payload);

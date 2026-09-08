@@ -16,6 +16,14 @@ export type {
 export type { DevshellPiTarget } from "./DevshellPiTarget.js";
 
 export {
+    createStandaloneDevshellPiExtension,
+    openStandaloneDevshellPiToolSession,
+    parseStandaloneDevshellPiTarget,
+    standaloneDevshellPiExtension
+} from "./standalone-client.js";
+export type { StandaloneDevshellPiOptions } from "./standalone-client.js";
+
+export {
     appendDevshellRemoteWorkspacePrompt,
     replacePiProjectContext
 } from "./standalone-resources.js";
@@ -31,3 +39,5 @@ export type {
     DevshellPiWorkspaceResources,
     DevshellPiWorkspaceSkill
 } from "./workspace-resources.js";
+
+export { standaloneDevshellPiExtension as default } from "./standalone-client.js";

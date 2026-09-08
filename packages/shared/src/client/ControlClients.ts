@@ -218,6 +218,7 @@ export interface ControlClients {
     };
     tool: {
         call(instance: string, toolName: string, input: JsonValue, workspace: string): Promise<JsonValue>;
+        closeSession(instance: string): Promise<Record<string, never>>;
         decideApproval(
             instance: string,
             approvalId: string,
@@ -227,6 +228,7 @@ export interface ControlClients {
         getApproval(instance: string, approvalId: string): Promise<ApprovalRequest>;
         listApprovals(instance: string, options?: { pendingOnly?: boolean }): Promise<ApprovalRequest[]>;
         listCalls(instance: string, query?: ToolCallQuery): Promise<ToolCallRecord[]>;
+        openSession(instance: string, workspace: string): Promise<import("../dto/tool/DtoToolDefinition.js").ToolSessionOpenResult>;
     };
 }
 
@@ -394,6 +396,7 @@ export function createControlClients(
         tool: {
             call: (name, toolName, input, workspace) =>
                 tool.request(name, "call", { input, toolName, workspace }),
+            closeSession: (name) => tool.request(name, "closeSession", {}),
             decideApproval: (name, approvalId, decision, decisionOptions = {}) =>
                 tool.request(name, "decideApproval", {
                     approvalId,
@@ -404,6 +407,7 @@ export function createControlClients(
                 tool.request(name, "getApproval", { approvalId }),
             listApprovals: (name, options) => tool.request(name, "listApprovals", options),
             listCalls: (name, query) => tool.request(name, "listCalls", query),
+            openSession: (name, workspace) => tool.request(name, "openSession", { workspace }),
         },
     };
 }

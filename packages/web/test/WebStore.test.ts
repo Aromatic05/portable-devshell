@@ -455,6 +455,7 @@ function fakeClients(
         overview: { get: async () => operationalOverview() },
         tool: {
             call: async () => ({}),
+            closeSession: async () => ({}),
             listCalls: async () => [],
             listApprovals: async () => [],
             getApproval: async () => {
@@ -463,6 +464,7 @@ function fakeClients(
             decideApproval: async () => {
                 throw new Error("Not used.");
             },
+            openSession: async (_instance, workspace) => ({ tools: [], workspace }),
         },
         terminal: {
             attach: async () => {

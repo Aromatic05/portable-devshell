@@ -158,6 +158,7 @@ test("portable application manifest removes workspace paths and publishes the re
         }), "utf8");
 
         const manifest = await writePortableApplicationManifest(root, {
+            additionalBins: { pi: "portable-devshell-pi-launcher.mjs" },
             minimumNodeMajor: 24,
             version: "0.4.4"
         });
@@ -166,7 +167,10 @@ test("portable application manifest removes workspace paths and publishes the re
             version: "0.4.4",
             private: true,
             type: "module",
-            bin: { devshell: "./dist/CliMain.js" },
+            bin: {
+                devshell: "./dist/CliMain.js",
+                pi: "./portable-devshell-pi-launcher.mjs"
+            },
             engines: { node: ">=24" }
         });
         const source = await readFile(resolve(root, "package.json"), "utf8");

@@ -52,6 +52,7 @@ const backupDirectory = resolve(installRoot, `.backup-${version}-${process.pid}`
 const workerBackupDirectory = resolve(installRoot, `.worker-activation-backup-${process.pid}`);
 const currentLink = resolve(installRoot, "current");
 const commandLink = resolve(binDirectory, process.platform === "win32" ? "devshell.cmd" : "devshell");
+const piCommandLink = resolve(binDirectory, process.platform === "win32" ? "pi.cmd" : "pi");
 const allTargets = [
     { key: "linux-x64", rustTarget: "x86_64-unknown-linux-musl" },
     { key: "linux-arm64", rustTarget: "aarch64-unknown-linux-musl" },
@@ -79,14 +80,32 @@ try {
     beginStep("构建并验证应用");
     runPnpm(["build"]);
     try {
-        runPnpm(["--filter", "@portable-devshell/cli", "--prod", "deploy", deployDirectory]);
+        runPnpm([
+            "--config.node-linker=hoisted",
+            "--filter",
+            "@portable-devshell/cli",
+            "--prod",
+            "deploy",
+            "--legacy",
+            deployDirectory
+        ]);
         await materializeApplicationTree(deployDirectory, stagingDirectory);
     } finally {
         await rm(deployDirectory, { force: true, recursive: true });
     }
-    await writePortableApplicationManifest(stagingDirectory, { minimumNodeMajor: 24, version });
+    const stagingPiLauncher = resolve(stagingDirectory, "portable-devshell-pi-launcher.mjs");
+    await copyFile(resolve(repoRoot, "scripts", "pi-launcher.mjs"), stagingPiLauncher);
+    await writePortableApplicationManifest(stagingDirectory, {
+        additionalBins: { pi: "portable-devshell-pi-launcher.mjs" },
+        minimumNodeMajor: 24,
+        version
+    });
     const stagingCli = await assertPackageBinFile(await readPackageBinPath(stagingDirectory, "devshell"));
-    if (process.platform !== "win32") await chmod(stagingCli.absolutePath, 0o755);
+    const stagingPi = await assertPackageBinFile(await readPackageBinPath(stagingDirectory, "pi"));
+    if (process.platform !== "win32") {
+        await chmod(stagingCli.absolutePath, 0o755);
+        await chmod(stagingPi.absolutePath, 0o755);
+    }
     await assertCliStarts(stagingCli.absolutePath, "安装前验证失败");
     writeDetail("CLI 入口和运行时依赖验证通过");
 
@@ -441,38 +460,60 @@ async function activateHostWorker() {
 
 async function activateApplication(versionDirectory) {
     const cli = await assertPackageBinFile(await readPackageBinPath(versionDirectory, "devshell"));
+    const pi = await assertPackageBinFile(await readPackageBinPath(versionDirectory, "pi"));
     await mkdir(binDirectory, { recursive: true });
     if (process.platform === "win32") {
         await replaceSymlink(currentLink, versionDirectory, "junction");
         const cliPath = resolve(currentLink, cli.relativePath);
+        const piPath = resolve(currentLink, pi.relativePath);
         await writeFile(commandLink, `@echo off\r\nnode "${cliPath}" %*\r\n`, "utf8");
+        await writeFile(piCommandLink, `@echo off\r\nnode "${piPath}" %*\r\n`, "utf8");
     } else {
         await replaceSymlink(currentLink, `versions/${version}`);
         await replaceSymlink(commandLink, resolve(currentLink, cli.relativePath));
+        await replaceSymlink(piCommandLink, resolve(currentLink, pi.relativePath));
     }
 }
 
 async function captureApplicationActivation() {
     return {
-        commandContent: process.platform === "win32" ? await readFileIfExists(commandLink) : undefined,
-        commandTarget: process.platform === "win32" ? undefined : await readlinkIfExists(commandLink),
+        command: await captureCommandActivation(commandLink),
+        piCommand: await captureCommandActivation(piCommandLink),
         currentTarget: await readlinkIfExists(currentLink)
     };
 }
 
 async function restoreApplicationActivation(previous) {
     await rm(currentLink, { force: true, recursive: process.platform === "win32" });
-    await rm(commandLink, { force: true });
     if (previous.currentTarget !== undefined) {
         await symlink(previous.currentTarget, currentLink, process.platform === "win32" ? "junction" : undefined);
     }
-    if (process.platform === "win32") {
-        if (previous.commandContent !== undefined) {
-            await writeFile(commandLink, previous.commandContent, "utf8");
-        }
-    } else if (previous.commandTarget !== undefined) {
-        await symlink(previous.commandTarget, commandLink);
+    await restoreCommandActivation(commandLink, previous.command);
+    await restoreCommandActivation(piCommandLink, previous.piCommand);
+}
+
+async function captureCommandActivation(path) {
+    try {
+        const metadata = await lstat(path);
+        if (metadata.isSymbolicLink()) return { kind: "symlink", target: await readlink(path) };
+        if (metadata.isFile()) return { content: await readFile(path), kind: "file", mode: metadata.mode & 0o777 };
+        throw new Error(`Unsupported active installation entry: ${path}`);
+    } catch (error) {
+        if (error?.code === "ENOENT") return { kind: "missing" };
+        throw error;
     }
+}
+
+async function restoreCommandActivation(path, previous) {
+    await rm(path, { force: true });
+    if (previous.kind === "missing") return;
+    await mkdir(resolve(path, ".."), { recursive: true });
+    if (previous.kind === "symlink") {
+        await symlink(previous.target, path);
+        return;
+    }
+    await writeFile(path, previous.content, { mode: previous.mode });
+    if (process.platform !== "win32") await chmod(path, previous.mode);
 }
 
 async function assertCliStarts(cliPath, failureLabel) {

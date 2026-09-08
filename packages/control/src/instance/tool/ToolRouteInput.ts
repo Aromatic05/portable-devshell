@@ -23,6 +23,13 @@ export function readToolCall(payload?: JsonValue): { input: JsonValue; toolName:
     return { input: payload.input ?? null, toolName: payload.toolName, workspace: payload.workspace };
 }
 
+export function readToolSessionOpen(payload?: JsonValue): { workspace: string } {
+    if (!isRecord(payload) || typeof payload.workspace !== "string" || payload.workspace.trim().length === 0) {
+        throw invalid("tool.openSession requires workspace.");
+    }
+    return { workspace: payload.workspace };
+}
+
 export function readToolCallQuery(payload?: JsonValue): ToolCallQuery {
     if (!isRecord(payload)) {
         return { limit: DEFAULT_TOOL_CALL_READ_LIMIT };

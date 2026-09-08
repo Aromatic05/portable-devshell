@@ -88,6 +88,7 @@ export function resolvePackageBinPath(packageRoot, manifest, command) {
 export async function writePortableApplicationManifest(packageRoot, options) {
     const command = options.command ?? "devshell";
     const bin = await readPackageBinPath(packageRoot, command);
+    const additionalBins = options.additionalBins ?? {};
     const version = requireNonEmptyString(options.version, "portable application version");
     const minimumNodeMajor = options.minimumNodeMajor;
     if (!Number.isSafeInteger(minimumNodeMajor) || minimumNodeMajor < 1) {
@@ -100,7 +101,11 @@ export async function writePortableApplicationManifest(packageRoot, options) {
         private: true,
         type: "module",
         bin: {
-            [command]: `./${bin.relativePath}`
+            [command]: `./${bin.relativePath}`,
+            ...Object.fromEntries(Object.entries(additionalBins).map(([name, entry]) => [
+                name,
+                `./${normalizeRelativeBinPath(entry, name)}`
+            ]))
         },
         engines: {
             node: `>=${minimumNodeMajor}`

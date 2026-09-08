@@ -28,6 +28,11 @@ export interface ToolDefinition {
     requiredCapabilities: readonly ToolCapability[];
 }
 
+export interface ToolSessionOpenResult {
+    tools: ToolDefinition[];
+    workspace: string;
+}
+
 export type ToolCapability = "read" | "write" | "execute" | "manage";
 
 export interface ToolPolicy {
