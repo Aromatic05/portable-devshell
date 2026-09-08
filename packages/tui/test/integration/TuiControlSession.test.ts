@@ -100,6 +100,41 @@ test("TuiControlSession does not load details for a stopped instance during star
     assert.deepEqual(worker.logReadQueries, []);
 });
 
+test("TuiControlSession becomes connected before slow instance hydration completes", async (t) => {
+    const runtimeDir = await createTestTempDirectory("tui-fast-control-connect");
+    const socketPath = createTestIpcPath("tui-fast-control-connect", runtimeDir);
+    const worker = new FakeWorker("alpha");
+    const hydrationGate = deferred<void>();
+    const hydrationStarted = deferred<void>();
+    const server = createServer(socketPath, worker, () => 7, {
+        onTodoRead: () => hydrationStarted.resolve(),
+        todoReadGate: hydrationGate.promise,
+    });
+    const session = new TuiControlSession({
+        clients: createTuiClients({ socketPath }),
+    });
+
+    await server.start();
+    t.after(async () => {
+        hydrationGate.resolve();
+        await session.stop();
+        await server.stop();
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    const started = session.start();
+    await hydrationStarted.promise;
+    let startResolved = false;
+    void started.then(() => { startResolved = true; });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.equal(session.store.getState().connection.status, "connected");
+    assert.equal(startResolved, true);
+
+    hydrationGate.resolve();
+    await waitFor(() => session.store.getState().readModel.instanceState.alpha?.todo !== undefined);
+});
+
 test("TuiControlSession refreshes worker home metadata after RPC reconnect", async (t) => {
     const runtimeDir = await createTestTempDirectory("tui-worker-home-reconnect");
     const socketPath = createTestIpcPath("tui-worker-home-reconnect", runtimeDir);
@@ -507,7 +542,11 @@ function createServer(
     socketPath: string,
     worker: FakeWorker,
     getConfigVersion: () => number,
-    options: { restartable?: boolean } = {}
+    options: {
+        onTodoRead?: () => void;
+        restartable?: boolean;
+        todoReadGate?: Promise<void>;
+    } = {}
 ): {
     oauthApprovalReads(): number;
     restartCount(): number;
@@ -542,6 +581,8 @@ function createServer(
                 },
                 async delete() {},
                 async read() {
+                    options.onTodoRead?.();
+                    await options.todoReadGate;
                     return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
                 },
                 summaries() {
@@ -819,4 +860,10 @@ async function waitFor(factory: () => boolean, timeoutMs = 2_000): Promise<void>
     }
 
     throw new Error("Timed out waiting for condition.");
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((next) => { resolve = next; });
+    return { promise, resolve };
 }
