@@ -127,6 +127,10 @@ test("TUI startup pulls artifact shares and transfers from Control", async () =>
     });
 
     await session.start();
+    await waitFor(() =>
+        store.getState().readModel.artifactShares.length === 1 &&
+        store.getState().readModel.artifactTransfers.length === 1
+    );
     assert.deepEqual(store.getState().readModel.artifactShares, [share]);
     assert.deepEqual(store.getState().readModel.artifactTransfers, [transfer]);
     await session.stop();
@@ -209,6 +213,7 @@ test("TUI clears an OAuth polling failure after the background refresh recovers"
 
     try {
         await session.start();
+        await waitFor(() => approvalReads >= 1);
         t.mock.timers.tick(1_000);
         await waitFor(
             () => store.getState().panelErrors["connections:-:oauth"] !== undefined,
