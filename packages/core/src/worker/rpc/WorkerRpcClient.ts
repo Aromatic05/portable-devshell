@@ -19,8 +19,10 @@ export class WorkerRpcClient {
         method: string,
         params: JsonValue = {},
         context?: WorkerRpcRequestContext,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        onProgress?: (progress: JsonValue) => void
     ): Promise<JsonValue> {
+        const operationId = context?.operationId ?? randomUUID();
         const request: WorkerRpcRequestEnvelope = {
             type: "request",
             id: String(this.#nextRequestId++),
@@ -29,10 +31,28 @@ export class WorkerRpcClient {
             context: {
                 ...context,
                 ctxId: context?.ctxId ?? this.#ctxId,
-                operationId: context?.operationId ?? randomUUID()
+                operationId
             }
         };
-        const response = await this.#bridge.request(request, signal);
+        let lastSequence = 0;
+        const unsubscribe = onProgress === undefined
+            ? undefined
+            : this.#bridge.onNotification((notification) => {
+                const progress = readToolProgress(notification, operationId);
+                if (progress === undefined || progress.sequence <= lastSequence) return;
+                lastSequence = progress.sequence;
+                try {
+                    onProgress(progress.value);
+                } catch (error) {
+                    console.warn(error instanceof Error ? error : new Error(String(error)));
+                }
+            });
+        let response;
+        try {
+            response = await this.#bridge.request(request, signal);
+        } finally {
+            unsubscribe?.();
+        }
 
         if (response.ok) {
             return response.result;
@@ -40,4 +60,19 @@ export class WorkerRpcClient {
 
         throw new WorkerRpcError(response.error);
     }
+}
+
+function readToolProgress(
+    notification: { method: string; params: JsonValue },
+    operationId: string
+): { sequence: number; value: JsonValue } | undefined {
+    if (notification.method !== "tool.progress") return undefined;
+    if (typeof notification.params !== "object" || notification.params === null || Array.isArray(notification.params)) {
+        return undefined;
+    }
+    const params = notification.params as Record<string, JsonValue>;
+    if (params.operationId !== operationId || typeof params.sequence !== "number" || !Number.isSafeInteger(params.sequence)) {
+        return undefined;
+    }
+    return { sequence: params.sequence, value: params.value ?? null };
 }

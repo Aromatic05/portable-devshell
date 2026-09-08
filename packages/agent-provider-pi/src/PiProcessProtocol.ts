@@ -40,10 +40,18 @@ export interface PiParentToolResultMessage {
     type: "tool.result";
 }
 
+export interface PiParentToolProgressMessage {
+    agentId: string;
+    callId: string;
+    progress: JsonValue;
+    type: "tool.progress";
+}
+
 export type PiParentMessage = PiChildInitMessage
     | PiChildAgentStartMessage
     | PiChildAgentCommandMessage
     | PiChildShutdownMessage
+    | PiParentToolProgressMessage
     | PiParentToolResultMessage;
 
 export interface PiChildReadyMessage {

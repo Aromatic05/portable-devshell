@@ -455,6 +455,7 @@ function fakeClients(
         overview: { get: async () => operationalOverview() },
         tool: {
             call: async () => ({}),
+            callStreaming: async () => ({}),
             closeSession: async () => ({}),
             listCalls: async () => [],
             listApprovals: async () => [],

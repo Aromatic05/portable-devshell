@@ -51,7 +51,11 @@ export interface PiToolLike {
     execute(
         toolCallId: string,
         params: unknown,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        onUpdate?: (result: {
+            content: Array<{ text: string; type: "text" }>;
+            details: JsonValue;
+        }) => void
     ): Promise<{
         content: Array<{ text: string; type: "text" }>;
         details: JsonValue;
@@ -78,7 +82,8 @@ export interface DevshellPiToolSession {
         toolName: string,
         input: JsonValue,
         operationId: string,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        onProgress?: (progress: JsonValue) => void
     ): Promise<JsonValue>;
     close(): Promise<void> | void;
 }
@@ -206,10 +211,21 @@ function toPiTool(definition: DevshellPiToolDefinition, session: DevshellPiToolS
     const prompt = piPromptMetadata(definition.name);
     return {
         description: definition.description,
-        async execute(toolCallId, params, signal) {
+        async execute(toolCallId, params, signal, onUpdate) {
             signal?.throwIfAborted();
             const input = prepareToolInput(definition.name, params);
-            const result = await session.callTool(definition.name, input, toolCallId, signal);
+            const result = await session.callTool(
+                definition.name,
+                input,
+                toolCallId,
+                signal,
+                onUpdate === undefined ? undefined : (progress) => {
+                    onUpdate({
+                        content: [{ text: renderModelToolResult(definition.name, progress), type: "text" }],
+                        details: progress
+                    });
+                }
+            );
             signal?.throwIfAborted();
             return {
                 content: [{ text: renderModelToolResult(definition.name, result), type: "text" }],

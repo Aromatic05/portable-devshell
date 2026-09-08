@@ -49,7 +49,7 @@ export function renderBashResultComponent(
         ...splitOutput(stdout).map((line) => style(theme, "toolOutput", line)),
         ...splitOutput(stderr).map((line) => style(theme, "error", line))
     ];
-    const footer = bashFooter(details, theme);
+    const footer = bashFooter(details, theme, options.isPartial);
     const component = context.lastComponent instanceof OutputPreviewComponent
         ? context.lastComponent
         : new OutputPreviewComponent();
@@ -62,12 +62,12 @@ export function renderBashResult(value: JsonValue | undefined, expanded: boolean
     if (record === undefined) return [];
     const lines = [...splitOutput(stringField(record, "stdout") ?? ""), ...splitOutput(stringField(record, "stderr") ?? "")];
     const visible = expanded ? lines : tailWithHint(lines, 5);
-    const footer = bashFooter(record);
+    const footer = bashFooter(record, undefined, false);
     if (footer.length > 0) visible.push(...footer);
     return visible;
 }
 
-function bashFooter(record: Record<string, unknown>, theme?: PiThemeLike): string[] {
+function bashFooter(record: Record<string, unknown>, theme?: PiThemeLike, partial = false): string[] {
     const lines: string[] = [];
     const warnings: string[] = [];
     if (record.stdoutTruncated === true) warnings.push("stdout truncated");
@@ -77,8 +77,14 @@ function bashFooter(record: Record<string, unknown>, theme?: PiThemeLike): strin
     const exit = numberField(record, "exitCode");
     const signal = numberField(record, "termSignal");
     const duration = numberField(record, "durationMs");
-    const status = exit !== undefined ? `exit ${exit}` : signal !== undefined ? `signal ${signal}` : stringField(record, "termination");
-    const summary = [status, duration === undefined ? undefined : `Took ${formatDuration(duration)}`]
+    const status = partial
+        ? "running"
+        : exit !== undefined
+            ? `exit ${exit}`
+            : signal !== undefined
+                ? `signal ${signal}`
+                : stringField(record, "termination");
+    const summary = [status, duration === undefined ? undefined : `${partial ? "Elapsed" : "Took"} ${formatDuration(duration)}`]
         .filter((value): value is string => value !== undefined).join(" · ");
     if (summary.length > 0) lines.push(style(theme, "muted", summary));
     return lines;

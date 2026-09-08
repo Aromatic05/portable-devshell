@@ -31,14 +31,24 @@ test("Extension worker session uses the audited WorkerInstance call path and gen
     const calls: Array<{
         context: ToolCallContext;
         input: JsonValue;
+        onProgress?: (progress: JsonValue) => void;
         signal?: AbortSignal;
         toolName: string;
     }> = [];
     const released: Array<{ instance: string; reference: string }> = [];
     const closedToolSessions: string[] = [];
     const worker = {
-        async callTool(toolName: string, input: JsonValue, context: ToolCallContext, signal?: AbortSignal) {
-            calls.push({ context, input, signal, toolName });
+        async callTool(
+            toolName: string,
+            input: JsonValue,
+            context: ToolCallContext,
+            signal?: AbortSignal,
+            _transformResult?: unknown,
+            _invocationInput?: JsonValue,
+            onProgress?: (progress: JsonValue) => void
+        ) {
+            calls.push({ context, input, onProgress, signal, toolName });
+            onProgress?.({ phase: "running" });
             return { ok: true };
         },
         listTools() {
@@ -91,7 +101,9 @@ test("Extension worker session uses the audited WorkerInstance call path and gen
         name: "file_read"
     }]);
     const controller = new AbortController();
+    const progress: JsonValue[] = [];
     assert.deepEqual(await session.callTool("file_read", { path: "./README.md" }, {
+        onProgress: (value) => progress.push(value),
         operationId: "operation-1",
         signal: controller.signal
     }), { ok: true });
@@ -101,9 +113,11 @@ test("Extension worker session uses the audited WorkerInstance call path and gen
     assert.equal(calls[0]?.signal, controller.signal);
     assert.equal(calls[0]?.context.source, "extension");
     assert.equal(calls[0]?.context.extensionId, "example");
+    assert.equal(calls[0]?.context.operationId, "operation-1");
     assert.equal(calls[0]?.context.requestId, "operation-1");
     assert.equal(calls[0]?.context.workspace, "/canonical");
     assert.match(calls[0]?.context.ctxId ?? "", /^ext-/u);
+    assert.deepEqual(progress, [{ phase: "running" }]);
 
     await session.close();
     await session.close();

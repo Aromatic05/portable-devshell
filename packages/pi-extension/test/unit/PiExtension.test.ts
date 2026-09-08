@@ -83,6 +83,59 @@ test("managed Pi adapter leaves tool-session shutdown to its embedding owner", a
     assert.equal(closes, 0);
 });
 
+test("Pi devshell tool forwards Worker progress through Pi onUpdate before the final result", async () => {
+    let registeredTool: {
+        execute(
+            toolCallId: string,
+            params: unknown,
+            signal?: AbortSignal,
+            onUpdate?: (result: { content: Array<{ text: string; type: "text" }>; details: JsonValue }) => void
+        ): Promise<{ content: Array<{ text: string; type: "text" }>; details: JsonValue }>;
+    } | undefined;
+    const extension = createDevshellPiExtension({
+        target: { instance: "worker-a", workspace: "/repo" },
+        tools: [{ description: "Run bash", inputSchema: { type: "object" }, name: "bash_run" }],
+        async callTool(_toolName, _input, operationId, _signal, onProgress) {
+            assert.equal(operationId, "call-stream");
+            onProgress?.({ durationMs: 125, stderr: "", stdout: "partial\n", termination: "running" });
+            return { durationMs: 250, exitCode: 0, stderr: "", stdout: "partial\nfinal\n", termination: "exited" };
+        },
+        close() {}
+    }, { closeSessionOnShutdown: false });
+    await extension({
+        getCommands: () => [],
+        on() {},
+        registerCommand() {},
+        registerTool(tool) { registeredTool = tool; },
+        sendUserMessage() {}
+    });
+    assert.notEqual(registeredTool, undefined);
+    const updates: Array<{ content: Array<{ text: string; type: "text" }>; details: JsonValue }> = [];
+
+    const result = await registeredTool!.execute(
+        "call-stream",
+        { command: "printf partial; printf final" },
+        undefined,
+        (update) => updates.push(update)
+    );
+
+    assert.equal(updates.length, 1);
+    assert.deepEqual(updates[0]?.details, {
+        durationMs: 125,
+        stderr: "",
+        stdout: "partial\n",
+        termination: "running"
+    });
+    assert.match(updates[0]?.content[0]?.text ?? "", /partial/u);
+    assert.deepEqual(result.details, {
+        durationMs: 250,
+        exitCode: 0,
+        stderr: "",
+        stdout: "partial\nfinal\n",
+        termination: "exited"
+    });
+});
+
 const identityTheme: PiThemeLike = {
     bg: (_role, text) => text,
     bold: (text) => text,
@@ -560,6 +613,17 @@ test("Pi devshell bash renderer shows a width-aware tail and completion status",
         "[stdout truncated]",
         "exit 0 · Took 1.2s"
     ]);
+
+    const partial = renderPiToolResult("bash_run", {
+        content: [],
+        details: {
+            stdout: "compiling\n",
+            stderr: "",
+            durationMs: 1250,
+            termination: "running"
+        }
+    }, { expanded: false, isPartial: true }, identityTheme, { ...callContext, isPartial: true });
+    assert.deepEqual(partial.render(120), ["", "compiling", "running · Elapsed 1.3s"]);
 });
 
 test("Pi devshell tmux renderer consumes Worker output arrays and keeps task state compact", () => {

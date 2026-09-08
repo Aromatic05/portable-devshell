@@ -22,7 +22,8 @@ export interface AgentToolSession {
         toolName: string,
         input: JsonValue,
         operationId: string,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        onProgress?: (progress: JsonValue) => void
     ): Promise<JsonValue>;
     /** Close is required to be idempotent. */
     close(): Promise<void> | void;

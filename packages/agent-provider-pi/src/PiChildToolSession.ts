@@ -6,10 +6,12 @@ import type { AgentToolDefinition, AgentWorkerTarget } from "@portable-devshell/
 import type {
     PiChildMessage,
     PiParentMessage,
+    PiParentToolProgressMessage,
     PiParentToolResultMessage
 } from "./PiProcessProtocol.js";
 
 interface PendingToolRequest {
+    onProgress?: (progress: JsonValue) => void;
     reject(error: Error): void;
     resolve(value: JsonValue): void;
 }
@@ -38,13 +40,14 @@ export class PiChildToolSession implements DevshellPiToolSession {
         toolName: string,
         input: JsonValue,
         operationId: string,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        onProgress?: (progress: JsonValue) => void
     ): Promise<JsonValue> {
         if (this.#closed) throw new Error(`Pi Agent ${this.#agentId} tool session is closed.`);
         signal?.throwIfAborted();
         const callId = randomUUID();
         const response = new Promise<JsonValue>((resolve, reject) => {
-            this.#pending.set(callId, { resolve, reject });
+            this.#pending.set(callId, { onProgress, resolve, reject });
         });
         const abort = () => {
             const pending = this.#pending.get(callId);
@@ -94,9 +97,16 @@ export class PiChildToolSession implements DevshellPiToolSession {
     }
 
     accept(message: PiParentMessage): boolean {
-        if (message.type !== "tool.result" || message.agentId !== this.#agentId) return false;
-        this.#acceptResult(message);
-        return true;
+        if (!("agentId" in message) || message.agentId !== this.#agentId) return false;
+        if (message.type === "tool.progress") {
+            this.#acceptProgress(message);
+            return true;
+        }
+        if (message.type === "tool.result") {
+            this.#acceptResult(message);
+            return true;
+        }
+        return false;
     }
 
     disconnect(error: Error): void {
@@ -114,6 +124,16 @@ export class PiChildToolSession implements DevshellPiToolSession {
             return;
         }
         pending.resolve(message.result ?? null);
+    }
+
+    #acceptProgress(message: PiParentToolProgressMessage): void {
+        const pending = this.#pending.get(message.callId);
+        if (pending?.onProgress === undefined) return;
+        try {
+            pending.onProgress(message.progress);
+        } catch (error) {
+            console.warn(error instanceof Error ? error : new Error(String(error)));
+        }
     }
 }
 

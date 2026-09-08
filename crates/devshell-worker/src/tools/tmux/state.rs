@@ -30,6 +30,8 @@ use crate::tools::tmux::types::{
 use crate::tools::{ToolCall, ToolError};
 
 const DEFAULT_LINE: i64 = 80;
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
+const PROGRESS_LINES: i64 = -8;
 const MAX_OUTPUT_LINES: i64 = 400;
 const DEFAULT_RUN_TIME_MS: u64 = 30_000;
 const DEFAULT_INPUT_TIME_MS: u64 = 0;
@@ -214,9 +216,12 @@ impl TmuxState {
                 .insert(task);
         }
 
+        self.emit_task_progress(call, &task_id, true, None);
+
         let mut timed_out = false;
         if wait == TmuxWaitMode::Block {
             let deadline = task_started_at + Duration::from_millis(time_ms);
+            let mut last_progress = Instant::now();
             while Instant::now() < deadline {
                 if call.cancellation.is_cancelled() {
                     return Err(ToolError::new(
@@ -230,6 +235,10 @@ impl TmuxState {
                 }
                 if self.task_is_terminal(&task_id)? {
                     break;
+                }
+                if last_progress.elapsed() >= PROGRESS_INTERVAL {
+                    self.emit_task_progress(call, &task_id, true, None);
+                    last_progress = Instant::now();
                 }
                 thread::sleep(Duration::from_millis(50));
             }
@@ -328,6 +337,8 @@ impl TmuxState {
                     self.backend.send_input(&tmux_pane_id, &params.input)?;
                 }
                 let deadline = Instant::now() + Duration::from_millis(time_ms);
+                self.emit_task_progress(call, &task_id, false, None);
+                let mut last_progress = Instant::now();
                 loop {
                     if call.cancellation.is_cancelled() {
                         return Err(ToolError::new(
@@ -352,6 +363,10 @@ impl TmuxState {
                             self.refresh_task(&task_id)?;
                         }
                         break;
+                    }
+                    if last_progress.elapsed() >= PROGRESS_INTERVAL {
+                        self.emit_task_progress(call, &task_id, false, None);
+                        last_progress = Instant::now();
                     }
                     thread::sleep(Duration::from_millis(50));
                 }
@@ -418,6 +433,8 @@ impl TmuxState {
         let deadline = Instant::now() + Duration::from_millis(time_ms);
         self.refresh_task(&params.task)?;
         let mut refreshed_at_deadline = time_ms == 0;
+        self.emit_task_progress(call, &params.task, false, Some("waiting"));
+        let mut last_progress = Instant::now();
         let wait_reason = loop {
             call.check_cancelled()?;
             if self.backend.task_exit_recorded(&params.task) && !self.task_is_terminal(&params.task)? {
@@ -436,6 +453,10 @@ impl TmuxState {
                     continue;
                 }
                 break TmuxReadWaitReason::Timeout;
+            }
+            if last_progress.elapsed() >= PROGRESS_INTERVAL {
+                self.emit_task_progress(call, &params.task, false, Some("waiting"));
+                last_progress = Instant::now();
             }
             thread::sleep(Duration::from_millis(50));
         };
@@ -1118,6 +1139,60 @@ impl TmuxState {
             output: None,
             warnings: None,
         })
+    }
+
+    fn task_progress(
+        &self,
+        task_id: &str,
+        include_pane: bool,
+    ) -> Result<TmuxReadOutput, ToolError> {
+        let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
+        tasks.prune();
+        let task = tasks
+            .tasks
+            .get(task_id)
+            .ok_or_else(|| task_expired(task_id))?;
+        let terminal = !task.state.is_active()
+            && task.last_pane.is_none()
+            && !self.backend.task_runtime_pending(task_id);
+        let mut transcript = task.transcript.clone();
+        let output = transcript.take_output(&task.pane_id, &mut Vec::new(), PROGRESS_LINES, terminal)?;
+        let view = task_view(task);
+        let pane = (include_pane && task.state.is_active())
+            .then(|| task.last_pane.as_ref().map(pane_ref))
+            .flatten();
+        Ok(TmuxReadOutput {
+            task: view,
+            detached: None,
+            wait_reason: None,
+            pane,
+            output: non_empty(output),
+            warnings: None,
+        })
+    }
+
+    fn emit_task_progress(
+        &self,
+        call: &ToolCall,
+        task_id: &str,
+        include_pane: bool,
+        wait_reason: Option<&str>,
+    ) {
+        let Ok(progress) = self.task_progress(task_id, include_pane) else {
+            return;
+        };
+        let Ok(mut value) = serde_json::to_value(progress) else {
+            return;
+        };
+        if let Some(wait_reason) = wait_reason
+            && let Some(record) = value.as_object_mut()
+        {
+            record.insert(
+                "waitReason".to_string(),
+                serde_json::Value::String(wait_reason.to_string()),
+            );
+        }
+        call.emit_progress(value);
     }
 
     fn persist_task_record(&self, task_id: &str) -> Result<(), ToolError> {

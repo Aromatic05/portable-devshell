@@ -49,6 +49,7 @@ export class WorkerInstanceToolExecution {
         signal?: AbortSignal,
         transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
         invocationInput: JsonValue = input,
+        onProgress?: (progress: JsonValue) => void,
     ): Promise<JsonValue> {
         this.#assertReady();
         throwIfToolCallAborted(signal);
@@ -95,7 +96,7 @@ export class WorkerInstanceToolExecution {
         try {
             const rawResult = await reservation.run(async () => {
                 await this.#audit.running(scope, runningContext, approvalState);
-                return await this.#toolInvoker.invoke(toolName, invocationInput, context, signal);
+                return await this.#toolInvoker.invoke(toolName, invocationInput, context, signal, onProgress);
             });
             const result = transformResult === undefined
                 ? rawResult

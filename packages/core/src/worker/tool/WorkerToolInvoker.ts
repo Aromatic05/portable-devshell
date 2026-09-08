@@ -16,7 +16,8 @@ export class WorkerToolInvoker {
         toolName: string,
         input: JsonValue,
         context?: ToolCallContext,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        onProgress?: (progress: JsonValue) => void
     ): Promise<JsonValue> {
         const tool = this.#catalog.getTool(toolName);
 
@@ -29,6 +30,6 @@ export class WorkerToolInvoker {
             });
         }
 
-        return await this.#rpcClient.request(toolName, input, context, signal);
+        return await this.#rpcClient.request(toolName, input, context, signal, onProgress);
     }
 }

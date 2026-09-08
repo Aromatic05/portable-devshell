@@ -24,10 +24,10 @@ function adaptWorkerSession(worker: ExtensionWorkerSession): AgentToolSession {
             inputSchema: tool.inputSchema,
             name: tool.name
         })),
-        callTool: async (toolName, input, operationId, signal) => await worker.callTool(
+        callTool: async (toolName, input, operationId, signal, onProgress) => await worker.callTool(
             toolName,
             input,
-            { operationId, signal }
+            { onProgress, operationId, signal }
         ),
         close: async () => await worker.close()
     };

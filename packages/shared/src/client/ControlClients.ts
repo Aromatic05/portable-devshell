@@ -218,6 +218,17 @@ export interface ControlClients {
     };
     tool: {
         call(instance: string, toolName: string, input: JsonValue, workspace: string): Promise<JsonValue>;
+        callStreaming(
+            instance: string,
+            toolName: string,
+            input: JsonValue,
+            workspace: string,
+            options?: {
+                onProgress?(progress: JsonValue): void;
+                operationId?: string;
+                signal?: AbortSignal;
+            },
+        ): Promise<JsonValue>;
         closeSession(instance: string): Promise<Record<string, never>>;
         decideApproval(
             instance: string,
@@ -396,6 +407,17 @@ export function createControlClients(
         tool: {
             call: (name, toolName, input, workspace) =>
                 tool.request(name, "call", { input, toolName, workspace }),
+            callStreaming: async (name, toolName, input, workspace, callOptions = {}) =>
+                await streamToolCall(
+                    connection,
+                    async () => await tool.openStream(name, "callStream", {
+                        input,
+                        ...(callOptions.operationId === undefined ? {} : { operationId: callOptions.operationId }),
+                        toolName,
+                        workspace,
+                    }),
+                    callOptions,
+                ),
             closeSession: (name) => tool.request(name, "closeSession", {}),
             decideApproval: (name, approvalId, decision, decisionOptions = {}) =>
                 tool.request(name, "decideApproval", {
@@ -410,6 +432,48 @@ export function createControlClients(
             openSession: (name, workspace) => tool.request(name, "openSession", { workspace }),
         },
     };
+}
+
+async function streamToolCall(
+    connection: ClientConnection,
+    open: () => Promise<OpenedClientStream>,
+    options: { onProgress?(progress: JsonValue): void; signal?: AbortSignal },
+): Promise<JsonValue> {
+    let stream: import("../transport/ClientConnection.js").ClientStream | undefined;
+    try {
+        const opened = await open();
+        stream = opened.stream;
+        const aborted = () => stream?.close();
+        options.signal?.addEventListener("abort", aborted, { once: true });
+        try {
+            if (options.signal?.aborted === true) {
+                stream.close();
+                throw abortError(options.signal, "Tool call was aborted.");
+            }
+            while (true) {
+                const event = await stream.nextEvent();
+                if (event.name === "tool.progress") {
+                    try {
+                        options.onProgress?.(event.payload ?? null);
+                    } catch (error) {
+                        console.warn(error instanceof Error ? error : new Error(String(error)));
+                    }
+                    continue;
+                }
+                if (event.name === "stream.completed") return event.payload ?? null;
+                if (event.name === "stream.cancelled") {
+                    connection.throwRemoteError(event.error);
+                    throw new Error("Tool call stream was cancelled.");
+                }
+            }
+        } finally {
+            options.signal?.removeEventListener("abort", aborted);
+        }
+    } catch (error) {
+        throw connection.mapError(error);
+    } finally {
+        stream?.close();
+    }
 }
 
 async function startRuntime(
@@ -428,7 +492,7 @@ async function startRuntime(
         try {
             if (options.signal?.aborted === true) {
                 stream.close();
-                throw abortError(options.signal);
+                throw abortError(options.signal, "Runtime start was aborted.");
             }
             while (true) {
                 const event = await stream.nextEvent();
@@ -505,10 +569,10 @@ function isOneOf<T extends string>(
     return typeof value === "string" && values.includes(value as T);
 }
 
-function abortError(signal: AbortSignal): Error {
+function abortError(signal: AbortSignal, fallbackMessage: string): Error {
     return signal.reason instanceof Error
         ? signal.reason
-        : new Error("Runtime start was aborted.");
+        : new Error(fallbackMessage);
 }
 async function requestWithAbort<T>(
     request: Promise<T>,

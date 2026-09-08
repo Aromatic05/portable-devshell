@@ -58,9 +58,15 @@ export async function openStandaloneDevshellPiToolSession(
                 inputSchema: tool.inputSchema,
                 name: tool.name
             })),
-            async callTool(toolName, input, _operationId, signal) {
+            async callTool(toolName, input, operationId, signal, onProgress) {
                 signal?.throwIfAborted();
-                const result = await control.clients.tool.call(instance, toolName, input, opened.workspace);
+                const result = await control.clients.tool.callStreaming(
+                    instance,
+                    toolName,
+                    input,
+                    opened.workspace,
+                    { onProgress, operationId, signal }
+                );
                 signal?.throwIfAborted();
                 return result;
             },

@@ -49,10 +49,11 @@ export class WorkerHandle {
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        onProgress?: (progress: JsonValue) => void
     ): Promise<JsonValue> {
         this.#assertReady();
-        return await this.#toolInvoker.invoke(toolName, input, context, signal);
+        return await this.#toolInvoker.invoke(toolName, input, context, signal, onProgress);
     }
 
     async releaseToolSession(sessionId: string): Promise<void> {

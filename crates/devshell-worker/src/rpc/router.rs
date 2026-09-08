@@ -12,13 +12,14 @@ use crate::instance::WorkerConfig;
 use crate::rpc::control::register_control_handlers;
 use crate::rpc::control::alerts::AlertService;
 use crate::rpc::error::RpcError;
+use crate::rpc::notification::{DEFAULT_MAX_NOTIFICATION_BYTES, WorkerNotificationQueue};
 use crate::rpc::request::RpcRequest;
 use crate::rpc::response::RpcResponse;
 use crate::security::{SecurityPolicy, build_security_policy};
 use crate::terminal::TerminalManager;
 use crate::tools::artifact::payload::ArtifactPayloadStore;
 use crate::tools::artifact::receive::ArtifactReceiveStore;
-use crate::tools::{ToolCall, ToolCancellation, ToolName, ToolRegistry};
+use crate::tools::{ToolCall, ToolCancellation, ToolName, ToolProgressEmitter, ToolRegistry};
 
 const MAX_CONCURRENT_TOOL_CALLS: usize = 8;
 const MAX_STANDARD_TOOL_CALLS: usize = 6;
@@ -31,7 +32,7 @@ pub struct RpcRouter {
     tools: Arc<ToolRegistry>,
     policy: Arc<dyn SecurityPolicy>,
     shutdown_requested: Arc<AtomicBool>,
-    terminals: TerminalManager,
+    notifications: Arc<WorkerNotificationQueue>,
 }
 
 impl RpcRouter {
@@ -46,7 +47,11 @@ impl RpcRouter {
         let active_tool_calls = Arc::new(ActiveToolCallRegistry::new());
         let shutdown_requested = Arc::new(AtomicBool::new(false));
         let policy = build_security_policy(runtime.security_mode.clone());
-        let terminals = TerminalManager::with_policy(Arc::clone(&policy));
+        let notifications = Arc::new(WorkerNotificationQueue::new(DEFAULT_MAX_NOTIFICATION_BYTES));
+        let terminals = TerminalManager::with_policy_notifications(
+            Arc::clone(&policy),
+            Arc::clone(&notifications),
+        );
         let alerts = Arc::new(AlertService::new());
         let mut control_handlers = HashMap::new();
         register_control_handlers(
@@ -71,7 +76,7 @@ impl RpcRouter {
             tools,
             policy,
             shutdown_requested,
-            terminals,
+            notifications,
         }
     }
 
@@ -134,11 +139,11 @@ impl RpcRouter {
         self.shutdown_requested.load(Ordering::SeqCst)
     }
     pub fn try_pop_notification(&self) -> Result<Option<Vec<u8>>, String> {
-        self.terminals.try_pop_notification()
+        self.notifications.try_pop()
     }
 
     pub fn clear_notifications(&self) -> Result<(), String> {
-        self.terminals.clear_notifications()
+        self.notifications.clear()
     }
 
     fn dispatch_tool_inner(
@@ -171,18 +176,20 @@ impl RpcRouter {
                 format!("workspace is not a directory: {}", workspace.display()),
             ));
         }
+        let operation_id = context
+            .and_then(|value| value.operation_id.clone())
+            .unwrap_or_else(|| request.id.clone());
         tool.call(ToolCall {
             workspace,
             params: request.params.clone(),
             ctx_id: context
                 .and_then(|value| value.ctx_id.clone())
                 .unwrap_or_else(|| "ctx-worker-default".to_string()),
-            operation_id: context
-                .and_then(|value| value.operation_id.clone())
-                .unwrap_or_else(|| request.id.clone()),
+            operation_id: operation_id.clone(),
             policy: Arc::clone(&self.policy),
             process_registry: Arc::clone(&self.active_processes),
             cancellation,
+            progress: ToolProgressEmitter::new(operation_id, Arc::clone(&self.notifications)),
         })
         .map_err(RpcError::from)
     }

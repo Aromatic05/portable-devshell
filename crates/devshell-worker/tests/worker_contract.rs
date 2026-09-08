@@ -1478,11 +1478,12 @@ fn long_tool_call_does_not_block_control_requests_on_the_same_rpc_connection() {
         }),
     );
 
-    let first = read_rpc_frame(&mut stdout);
+    let responses = read_rpc_responses(&mut stdout, &["ping-during-tool", "long-tool"]);
+    let first = &responses[0];
     assert_eq!(first["id"], "ping-during-tool");
     assert_eq!(first["ok"], true);
 
-    let second = read_rpc_frame(&mut stdout);
+    let second = &responses[1];
     assert_eq!(second["id"], "long-tool");
     assert_eq!(second["ok"], true);
     assert_eq!(second["result"]["stdout"], "done");
@@ -1659,7 +1660,7 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
         }),
     );
 
-    let responses = [read_rpc_frame(&mut stdout), read_rpc_frame(&mut stdout)];
+    let responses = read_rpc_responses(&mut stdout, &["cancel-control", "cancel-me"]);
     let cancel_response = responses
         .iter()
         .find(|response| response["id"] == "cancel-control")
@@ -1930,6 +1931,26 @@ fn read_rpc_frame(reader: &mut impl Read) -> Value {
     let mut payload = vec![0_u8; u32::from_be_bytes(length) as usize];
     reader.read_exact(&mut payload).unwrap();
     serde_json::from_slice(&payload).unwrap()
+}
+
+fn read_rpc_responses(reader: &mut impl Read, ids: &[&str]) -> Vec<Value> {
+    let mut responses = vec![None; ids.len()];
+    while responses.iter().any(Option::is_none) {
+        let frame = read_rpc_frame(reader);
+        if frame["type"] != "response" {
+            continue;
+        }
+        let Some(id) = frame["id"].as_str() else {
+            continue;
+        };
+        if let Some(index) = ids.iter().position(|expected| *expected == id) {
+            responses[index] = Some(frame);
+        }
+    }
+    responses
+        .into_iter()
+        .map(|response| response.expect("requested RPC response"))
+        .collect()
 }
 
 #[cfg(unix)]

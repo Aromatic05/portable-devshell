@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::daemon::process_registry::ActiveProcessRegistry;
+use crate::rpc::notification::WorkerNotificationQueue;
 
 use crate::security::SecurityPolicy;
 use crate::tools::{ToolError, ToolName};
@@ -43,6 +44,7 @@ pub struct ToolCall {
     pub policy: Arc<dyn SecurityPolicy>,
     pub process_registry: Arc<ActiveProcessRegistry>,
     pub cancellation: ToolCancellation,
+    pub progress: ToolProgressEmitter,
 }
 
 impl ToolCall {
@@ -53,6 +55,45 @@ impl ToolCall {
     pub fn parse_params<T: DeserializeOwned>(&self) -> Result<T, ToolError> {
         serde_json::from_value(self.params.clone())
             .map_err(|error| ToolError::new("tool.invalidArguments", error.to_string()))
+    }
+
+    pub fn emit_progress(&self, value: serde_json::Value) {
+        self.progress.emit(value);
+    }
+
+    pub fn progress(&self) -> ToolProgressEmitter {
+        self.progress.clone()
+    }
+}
+
+#[derive(Clone)]
+pub struct ToolProgressEmitter {
+    notifications: Arc<WorkerNotificationQueue>,
+    operation_id: String,
+    sequence: Arc<AtomicU64>,
+}
+
+impl ToolProgressEmitter {
+    pub fn new(operation_id: String, notifications: Arc<WorkerNotificationQueue>) -> Self {
+        Self {
+            notifications,
+            operation_id,
+            sequence: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    pub fn emit(&self, value: serde_json::Value) {
+        let sequence = self.sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        let notification = serde_json::json!({
+            "type": "notification",
+            "method": "tool.progress",
+            "params": {
+                "operationId": self.operation_id,
+                "sequence": sequence,
+                "value": value,
+            }
+        });
+        let _ = self.notifications.push_lossy_json(&notification);
     }
 }
 

@@ -52,6 +52,7 @@ export interface ExtensionWorkerOpenInput {
 }
 
 export interface ExtensionWorkerCallOptions {
+    onProgress?(progress: ExtensionJsonValue): void;
     operationId?: string;
     signal?: AbortSignal;
 }

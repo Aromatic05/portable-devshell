@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::rpc::codec::encode_json;
 use crate::rpc::error::RpcError;
+use crate::rpc::notification::WorkerNotificationQueue;
 use crate::security::SecurityPolicy;
 use crate::security::path::{
     FilesystemCapability, PathNamespace, ResolvedPath, parse_requested_path,
@@ -26,7 +26,6 @@ use crate::security::path::{
 use crate::security::{SecurityMode, build_security_policy};
 
 const DEFAULT_MAX_REPLAY_BYTES: usize = 4 * 1024 * 1024;
-const DEFAULT_MAX_NOTIFICATION_BYTES: usize = 4 * 1024 * 1024;
 const DEFAULT_MAX_SESSIONS: usize = 16;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -118,7 +117,7 @@ struct TerminalManagerInner {
     generation: AtomicU64,
     max_replay_bytes: usize,
     max_sessions: usize,
-    notifications: NotificationQueue,
+    notifications: Arc<WorkerNotificationQueue>,
     policy: Arc<dyn SecurityPolicy>,
     sessions: Mutex<HashMap<String, Arc<TerminalSession>>>,
 }
@@ -160,11 +159,14 @@ pub(crate) struct SpawnedTerminal {
 }
 
 impl TerminalManager {
-    pub fn with_policy(policy: Arc<dyn SecurityPolicy>) -> Self {
+    pub(crate) fn with_policy_notifications(
+        policy: Arc<dyn SecurityPolicy>,
+        notifications: Arc<WorkerNotificationQueue>,
+    ) -> Self {
         Self::with_policy_limits(
             policy,
             DEFAULT_MAX_REPLAY_BYTES,
-            DEFAULT_MAX_NOTIFICATION_BYTES,
+            notifications,
             DEFAULT_MAX_SESSIONS,
         )
     }
@@ -178,7 +180,7 @@ impl TerminalManager {
         Self::with_policy_limits(
             build_security_policy(SecurityMode::Disabled),
             max_replay_bytes,
-            max_notification_bytes,
+            Arc::new(WorkerNotificationQueue::new(max_notification_bytes)),
             max_sessions,
         )
     }
@@ -186,7 +188,7 @@ impl TerminalManager {
     fn with_policy_limits(
         policy: Arc<dyn SecurityPolicy>,
         max_replay_bytes: usize,
-        max_notification_bytes: usize,
+        notifications: Arc<WorkerNotificationQueue>,
         max_sessions: usize,
     ) -> Self {
         Self {
@@ -194,7 +196,7 @@ impl TerminalManager {
                 generation: AtomicU64::new(0),
                 max_replay_bytes,
                 max_sessions,
-                notifications: NotificationQueue::new(max_notification_bytes),
+                notifications,
                 policy,
                 sessions: Mutex::new(HashMap::new()),
             }),
@@ -391,14 +393,6 @@ impl TerminalManager {
             .collect()
     }
 
-    pub fn try_pop_notification(&self) -> Result<Option<Vec<u8>>, String> {
-        self.inner.notifications.try_pop()
-    }
-
-    pub fn clear_notifications(&self) -> Result<(), String> {
-        self.inner.notifications.clear()
-    }
-
     fn require(&self, terminal_id: &str) -> Result<Arc<TerminalSession>, RpcError> {
         self.inner
             .sessions
@@ -478,7 +472,7 @@ impl TerminalManager {
                 }
             })
         };
-        self.inner.notifications.push(encode_json(&notification)?)
+        self.inner.notifications.push_json(&notification)
     }
 
     fn finish_session(
@@ -509,66 +503,7 @@ impl TerminalManager {
                 }
             })
         };
-        self.inner.notifications.push(encode_json(&notification)?)
-    }
-}
-
-struct NotificationQueue {
-    inner: Mutex<NotificationQueueState>,
-    max_bytes: usize,
-}
-
-struct NotificationQueueState {
-    bytes: usize,
-    frames: VecDeque<Vec<u8>>,
-}
-
-impl NotificationQueue {
-    fn new(max_bytes: usize) -> Self {
-        Self {
-            inner: Mutex::new(NotificationQueueState {
-                bytes: 0,
-                frames: VecDeque::new(),
-            }),
-            max_bytes,
-        }
-    }
-
-    fn push(&self, frame: Vec<u8>) -> Result<(), String> {
-        let mut inner = self
-            .inner
-            .lock()
-            .map_err(|_| "notification queue lock poisoned".to_string())?;
-        inner.bytes += frame.len();
-        inner.frames.push_back(frame);
-        while inner.bytes > self.max_bytes && inner.frames.len() > 1 {
-            if let Some(frame) = inner.frames.pop_front() {
-                inner.bytes = inner.bytes.saturating_sub(frame.len());
-            }
-        }
-        Ok(())
-    }
-
-    fn try_pop(&self) -> Result<Option<Vec<u8>>, String> {
-        let mut inner = self
-            .inner
-            .lock()
-            .map_err(|_| "notification queue lock poisoned".to_string())?;
-        let frame = inner.frames.pop_front();
-        if let Some(frame) = &frame {
-            inner.bytes = inner.bytes.saturating_sub(frame.len());
-        }
-        Ok(frame)
-    }
-
-    fn clear(&self) -> Result<(), String> {
-        let mut inner = self
-            .inner
-            .lock()
-            .map_err(|_| "notification queue lock poisoned".to_string())?;
-        inner.bytes = 0;
-        inner.frames.clear();
-        Ok(())
+        self.inner.notifications.push_json(&notification)
     }
 }
 

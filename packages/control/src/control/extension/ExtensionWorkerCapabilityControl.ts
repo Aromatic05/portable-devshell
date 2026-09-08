@@ -90,11 +90,17 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
                     {
                         ctxId: sessionId,
                         extensionId: this.#extensionId,
-                        ...(options.operationId === undefined ? {} : { requestId: options.operationId }),
+                        ...(options.operationId === undefined ? {} : {
+                            operationId: options.operationId,
+                            requestId: options.operationId
+                        }),
                         source: "extension",
                         workspace: prepared.workspace
                     },
-                    options.signal
+                    options.signal,
+                    undefined,
+                    undefined,
+                    options.onProgress as ((progress: JsonValue) => void) | undefined
                 ) as ExtensionJsonValue,
                 close,
                 listTools: () => lease.worker.listTools().map(toExtensionToolDefinition)

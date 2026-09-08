@@ -13,14 +13,22 @@ const DEFAULT_TOOL_CALL_READ_LIMIT = 200;
 const MAX_TOOL_CALL_READ_LIMIT = 1_000;
 const MAX_TOOL_CALL_RESPONSE_BYTES = 8 * 1024 * 1024;
 
-export function readToolCall(payload?: JsonValue): { input: JsonValue; toolName: string; workspace: string } {
+export function readToolCall(payload?: JsonValue): { input: JsonValue; operationId?: string; toolName: string; workspace: string } {
     if (!isRecord(payload) || typeof payload.toolName !== "string" || payload.toolName.length === 0) {
         throw invalid("tool.call requires toolName.");
     }
     if (typeof payload.workspace !== "string" || payload.workspace.trim().length === 0) {
         throw invalid("tool.call requires workspace.");
     }
-    return { input: payload.input ?? null, toolName: payload.toolName, workspace: payload.workspace };
+    if (payload.operationId !== undefined && (typeof payload.operationId !== "string" || payload.operationId.length === 0)) {
+        throw invalid("tool.call operationId must be a non-empty string.");
+    }
+    return {
+        input: payload.input ?? null,
+        ...(payload.operationId === undefined ? {} : { operationId: payload.operationId }),
+        toolName: payload.toolName,
+        workspace: payload.workspace
+    };
 }
 
 export function readToolSessionOpen(payload?: JsonValue): { workspace: string } {

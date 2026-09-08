@@ -31,7 +31,7 @@ let sdk: PiSdkModule | undefined;
 
 process.on("message", (value: unknown) => {
     const message = value as PiParentMessage;
-    if (message?.type === "tool.result") {
+    if (message?.type === "tool.result" || message?.type === "tool.progress") {
         toolSessions.get(message.agentId)?.accept(message);
         return;
     }
@@ -228,7 +228,7 @@ function sendFailure(message: PiParentMessage, error: unknown): void {
         send({ error: text, ok: false, type: "ready" });
         return;
     }
-    if (message.type === "tool.result") return;
+    if (message.type === "tool.result" || message.type === "tool.progress") return;
     send({ error: text, id: message.id, ok: false, type: "result" });
 }
 

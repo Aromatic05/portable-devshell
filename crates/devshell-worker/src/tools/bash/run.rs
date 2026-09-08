@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::ops::{Deref, DerefMut};
 use std::process::{Child, ExitStatus};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -19,7 +19,10 @@ use crate::tools::bash::backend::spawn_shell;
 use crate::tools::bash::group::bash_run_name;
 use crate::tools::bash::runtime::ShellRuntime;
 use crate::tools::bash::types::{BashRunOutput, BashRunParams, BashTermination};
-use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
+use crate::tools::{
+    ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName,
+    ToolProgressEmitter,
+};
 
 const DEFAULT_MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_TIMEOUT_MS: u64 = 100_000;
@@ -27,6 +30,8 @@ const MAX_CAPTURE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_STDIN_BYTES: usize = 4 * 1024 * 1024;
 const MAX_INLINE_JSON_BYTES_PER_STREAM: usize = 6 * 1024 * 1024;
 const FALLBACK_INLINE_BYTES_PER_STREAM: usize = 512 * 1024;
+const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
+const PROGRESS_TAIL_BYTES: usize = 64 * 1024;
 
 pub struct BashRunTool {
     name: ToolName,
@@ -123,6 +128,8 @@ impl ToolHandler for BashRunTool {
             .ok_or_else(|| ToolError::new("bash.ioFailed", "missing stderr pipe"))?;
         let stdout_bytes = Arc::new(AtomicUsize::new(0));
         let stderr_bytes = Arc::new(AtomicUsize::new(0));
+        let progress = Arc::new(BashProgress::new(started, call.progress()));
+        progress.emit_initial();
         let (stdout_draft, stdout_warning) =
             begin_artifact(&self.artifacts, ArtifactStream::Stdout);
         let (stderr_draft, stderr_warning) =
@@ -133,6 +140,8 @@ impl ToolHandler for BashRunTool {
             max_capture,
             stdout_draft,
             stdout_warning,
+            Arc::clone(&progress),
+            BashProgressStream::Stdout,
         );
         let stderr_thread = spawn_reader(
             stderr,
@@ -140,6 +149,8 @@ impl ToolHandler for BashRunTool {
             max_capture,
             stderr_draft,
             stderr_warning,
+            Arc::clone(&progress),
+            BashProgressStream::Stderr,
         );
         let stdin_thread = match params.stdin {
             Some(stdin) => Some(spawn_stdin_writer(input, stdin)),
@@ -160,12 +171,17 @@ impl ToolHandler for BashRunTool {
         } else {
             Ok(())
         };
-        let mut stdout = stdout_thread
+        let stdout_result = stdout_thread
             .join()
-            .map_err(|_| ToolError::new("bash.ioFailed", "stdout reader panicked"))??;
-        let mut stderr = stderr_thread
+            .map_err(|_| ToolError::new("bash.ioFailed", "stdout reader panicked"))
+            .and_then(|result| result);
+        let stderr_result = stderr_thread
             .join()
-            .map_err(|_| ToolError::new("bash.ioFailed", "stderr reader panicked"))??;
+            .map_err(|_| ToolError::new("bash.ioFailed", "stderr reader panicked"))
+            .and_then(|result| result);
+        progress.finish();
+        let mut stdout = stdout_result?;
+        let mut stderr = stderr_result?;
         stdin_result?;
         enforce_inline_rpc_budget(&mut stdout);
         enforce_inline_rpc_budget(&mut stderr);
@@ -320,6 +336,8 @@ fn spawn_reader(
     max: usize,
     mut artifact_draft: Option<ArtifactDraft>,
     mut artifact_warning: Option<String>,
+    progress: Arc<BashProgress>,
+    progress_stream: BashProgressStream,
 ) -> thread::JoinHandle<Result<StreamOutput, ToolError>> {
     thread::spawn(move || {
         let mut buffer = [0; 8192];
@@ -336,6 +354,7 @@ fn spawn_reader(
                 break;
             }
             bytes.fetch_add(count, Ordering::SeqCst);
+            progress.append(progress_stream, &buffer[..count]);
             if let Some(draft) = artifact_draft.as_mut()
                 && let Err(error) = draft.write_chunk(&buffer[..count])
             {
@@ -372,6 +391,154 @@ fn spawn_reader(
             artifact_warning,
         })
     })
+}
+
+#[derive(Clone, Copy)]
+enum BashProgressStream {
+    Stdout,
+    Stderr,
+}
+
+struct BashProgress {
+    emitter: ToolProgressEmitter,
+    inner: Mutex<BashProgressState>,
+    started: Instant,
+}
+
+struct BashProgressState {
+    finished: bool,
+    flush_sequence: u64,
+    last_emit: Option<Instant>,
+    scheduled_flush: Option<u64>,
+    stderr: VecDeque<u8>,
+    stderr_bytes: usize,
+    stdout: VecDeque<u8>,
+    stdout_bytes: usize,
+}
+
+impl BashProgress {
+    fn new(started: Instant, emitter: ToolProgressEmitter) -> Self {
+        Self {
+            emitter,
+            inner: Mutex::new(BashProgressState {
+                finished: false,
+                flush_sequence: 0,
+                last_emit: None,
+                scheduled_flush: None,
+                stderr: VecDeque::with_capacity(PROGRESS_TAIL_BYTES),
+                stderr_bytes: 0,
+                stdout: VecDeque::with_capacity(PROGRESS_TAIL_BYTES),
+                stdout_bytes: 0,
+            }),
+            started,
+        }
+    }
+
+    fn emit_initial(&self) {
+        self.emitter.emit(serde_json::json!({
+            "durationMs": 0,
+            "stderr": "",
+            "stderrBytes": 0,
+            "stdout": "",
+            "stdoutBytes": 0,
+            "termination": "running",
+        }));
+    }
+
+    fn append(self: &Arc<Self>, stream: BashProgressStream, bytes: &[u8]) {
+        let (snapshot, scheduled) = {
+            let Ok(mut state) = self.inner.lock() else {
+                return;
+            };
+            if state.finished {
+                return;
+            }
+            match stream {
+                BashProgressStream::Stdout => {
+                    state.stdout_bytes = state.stdout_bytes.saturating_add(bytes.len());
+                    append_progress_tail(&mut state.stdout, bytes);
+                }
+                BashProgressStream::Stderr => {
+                    state.stderr_bytes = state.stderr_bytes.saturating_add(bytes.len());
+                    append_progress_tail(&mut state.stderr, bytes);
+                }
+            }
+            let now = Instant::now();
+            if let Some(last_emit) = state.last_emit {
+                let elapsed = now.duration_since(last_emit);
+                if elapsed < PROGRESS_EMIT_INTERVAL {
+                    let scheduled = if state.scheduled_flush.is_none() {
+                        state.flush_sequence = state.flush_sequence.saturating_add(1);
+                        let id = state.flush_sequence;
+                        state.scheduled_flush = Some(id);
+                        Some((id, PROGRESS_EMIT_INTERVAL - elapsed))
+                    } else {
+                        None
+                    };
+                    (None, scheduled)
+                } else {
+                    state.last_emit = Some(now);
+                    state.scheduled_flush = None;
+                    (Some(self.snapshot(&state)), None)
+                }
+            } else {
+                state.last_emit = Some(now);
+                (Some(self.snapshot(&state)), None)
+            }
+        };
+        if let Some(snapshot) = snapshot {
+            self.emitter.emit(snapshot);
+        }
+        if let Some((id, delay)) = scheduled {
+            let progress = Arc::clone(self);
+            thread::spawn(move || {
+                thread::sleep(delay);
+                progress.flush_scheduled(id);
+            });
+        }
+    }
+
+    fn finish(&self) {
+        let Ok(mut state) = self.inner.lock() else {
+            return;
+        };
+        state.finished = true;
+        state.scheduled_flush = None;
+    }
+
+    fn flush_scheduled(&self, id: u64) {
+        let Ok(mut state) = self.inner.lock() else {
+            return;
+        };
+        if state.finished || state.scheduled_flush != Some(id) {
+            return;
+        }
+        state.scheduled_flush = None;
+        state.last_emit = Some(Instant::now());
+        self.emitter.emit(self.snapshot(&state));
+    }
+
+    fn snapshot(&self, state: &BashProgressState) -> serde_json::Value {
+        let stdout = state.stdout.iter().copied().collect::<Vec<_>>();
+        let stderr = state.stderr.iter().copied().collect::<Vec<_>>();
+        serde_json::json!({
+            "durationMs": self.started.elapsed().as_millis(),
+            "stderr": String::from_utf8_lossy(&stderr).to_string(),
+            "stderrBytes": state.stderr_bytes,
+            "stdout": String::from_utf8_lossy(&stdout).to_string(),
+            "stdoutBytes": state.stdout_bytes,
+            "termination": "running",
+        })
+    }
+}
+
+fn append_progress_tail(tail: &mut VecDeque<u8>, bytes: &[u8]) {
+    for byte in bytes {
+        if tail.len() == PROGRESS_TAIL_BYTES {
+            tail.pop_front();
+        }
+        tail.push_back(*byte);
+    }
 }
 
 fn spawn_stdin_writer(

@@ -334,7 +334,7 @@ class PiSharedProcess {
     }
 
     async #request(
-        message: Exclude<PiParentMessage, { type: "init" } | { type: "tool.result" }>,
+        message: Exclude<PiParentMessage, { type: "init" } | { type: "tool.progress" } | { type: "tool.result" }>,
         allowStopped = false
     ): Promise<void> {
         if (this.#stopped && !allowStopped) throw new Error("Pi provider child is already stopped.");
@@ -409,7 +409,15 @@ class PiSharedProcess {
                 message.toolName,
                 message.input,
                 message.operationId,
-                controller.signal
+                controller.signal,
+                (progress) => {
+                    void this.#send({
+                        agentId: message.agentId,
+                        callId: message.callId,
+                        progress,
+                        type: "tool.progress"
+                    }).catch(() => undefined);
+                }
             );
             await this.#send({
                 agentId: message.agentId,

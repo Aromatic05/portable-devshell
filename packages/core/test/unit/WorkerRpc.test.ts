@@ -21,7 +21,7 @@ import {
     type WorkerCommandTransport,
     type WorkerRpcResponseEnvelope
 } from "@portable-devshell/core/testing";
-import { realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test/TestPlatformSupport.ts";
+import { realWorkerTestOptions, resolveTestWorkerBinary, tmuxTestOptions } from "../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
@@ -142,6 +142,50 @@ test("WorkerRpcClient keeps context identity while assigning each call a distinc
     const generatedOperationIds = harness.requestContexts.slice(0, 4).map((context) => context?.operationId);
     assert.equal(generatedOperationIds.every((operationId) => typeof operationId === "string"), true);
     assert.equal(new Set(generatedOperationIds).size, generatedOperationIds.length);
+    bridge.close();
+});
+
+test("WorkerRpcClient routes only increasing progress for the matching operation id", async () => {
+    const harness = createRpcHarness({ slowMethods: new Set(["bash_run"]) });
+    const bridge = new WorkerRpcBridge({
+        transport: harness.transport,
+        rpcOptions: { instanceName: "rpc-progress" }
+    });
+    const client = new WorkerRpcClient(bridge);
+    const progress: JsonValue[] = [];
+
+    const pending = client.request(
+        "bash_run",
+        { command: "printf hi" },
+        { ctxId: "ctx-pi", operationId: "pi-tool-1", source: "extension", workspace: "/workspace" },
+        undefined,
+        (value) => progress.push(value)
+    );
+    await harness.waitForMethod("bash_run");
+    harness.sendNotification("tool.progress", {
+        operationId: "other-operation",
+        sequence: 1,
+        value: { stdout: "ignore" }
+    });
+    harness.sendNotification("tool.progress", {
+        operationId: "pi-tool-1",
+        sequence: 1,
+        value: { stdout: "one" }
+    });
+    harness.sendNotification("tool.progress", {
+        operationId: "pi-tool-1",
+        sequence: 1,
+        value: { stdout: "duplicate" }
+    });
+    harness.sendNotification("tool.progress", {
+        operationId: "pi-tool-1",
+        sequence: 3,
+        value: { stdout: "three" }
+    });
+    harness.respondMethod("bash_run");
+
+    await pending;
+    assert.deepEqual(progress, [{ stdout: "one" }, { stdout: "three" }]);
     bridge.close();
 });
 
@@ -305,6 +349,118 @@ test("WorkerProtocolClient performs ping, handshake, and tools.list against froz
     assert.notEqual(bashRun?.inputSchema, undefined);
 });
 
+test("WorkerRpcClient receives real bash_run progress before the unary final response", realWorkerTestOptions(workerBinaryPath), async (t) => {
+    const homeDirectory = await createTestTempDirectory("core-rpc-progress-home");
+    const runtimeDirectory = await createTestTempDirectory("core-rpc-progress-runtime");
+    const instanceName = `task-progress-${process.pid}`;
+    const env = { ...process.env, HOME: homeDirectory, XDG_RUNTIME_DIR: runtimeDirectory };
+    const transport = new WorkerTransportDriverLocal({
+        workerBinary: new WorkerBinary(workerBinaryPath!),
+        spawnFunction: nodeSpawn
+    });
+    assert.equal((await transport.runWorkerCommand("start", { env, instanceName })).exitCode, 0);
+    const bridge = new WorkerRpcBridge({ transport, rpcOptions: { env, instanceName } });
+    t.after(async () => {
+        bridge.close();
+        await transport.runWorkerCommand("stop", { env, instanceName });
+        await rm(homeDirectory, { recursive: true, force: true });
+        await rm(runtimeDirectory, { recursive: true, force: true });
+    });
+    const rpcClient = new WorkerRpcClient(bridge);
+    const protocolClient = new WorkerProtocolClient(rpcClient);
+    await protocolClient.handshake({
+        minProtocolVersion: WORKER_PROTOCOL_VERSION,
+        maxProtocolVersion: WORKER_PROTOCOL_VERSION,
+        clientName: "portable-devshell",
+        clientVersion: "0.1.0"
+    });
+    const progress: Array<{ atMs: number; value: JsonValue }> = [];
+    const startedAt = Date.now();
+
+    const result = await rpcClient.request(
+        "bash_run",
+        {
+            command: "printf 'one\\n'; sleep 0.02; printf 'two\\n'; sleep 1.2; printf 'three\\n'",
+            timeoutMs: 5_000
+        },
+        {
+            ctxId: "ctx-progress",
+            operationId: "real-progress",
+            source: "extension",
+            workspace: homeDirectory
+        },
+        undefined,
+        (value) => progress.push({ atMs: Date.now() - startedAt, value })
+    ) as Record<string, JsonValue>;
+
+    assert.ok(progress.length >= 2, `expected multiple progress frames, got ${progress.length}`);
+    assert.ok(progress.some(({ value }) => String((value as Record<string, JsonValue>).stdout ?? "").includes("one")));
+    const twoFrame = progress.find(({ value }) => String((value as Record<string, JsonValue>).stdout ?? "").includes("two"));
+    assert.notEqual(twoFrame, undefined);
+    assert.ok(twoFrame!.atMs < 800, `quiet coalesced progress was delayed until ${twoFrame!.atMs}ms`);
+    assert.equal(result.stdout, "one\ntwo\nthree\n");
+    assert.equal(result.exitCode, 0);
+});
+
+test("WorkerRpcClient receives non-consuming real tmux_run progress before the full final transcript", tmuxTestOptions(workerBinaryPath), async (t) => {
+    const homeDirectory = await createTestTempDirectory("core-rpc-tmux-progress-home");
+    const runtimeDirectory = await createTestTempDirectory("core-rpc-tmux-progress-runtime");
+    const instanceName = `task-tmux-progress-${process.pid}`;
+    const env = { ...process.env, HOME: homeDirectory, XDG_RUNTIME_DIR: runtimeDirectory };
+    const transport = new WorkerTransportDriverLocal({
+        workerBinary: new WorkerBinary(workerBinaryPath!),
+        spawnFunction: nodeSpawn
+    });
+    assert.equal((await transport.runWorkerCommand("start", { env, instanceName })).exitCode, 0);
+    const bridge = new WorkerRpcBridge({ transport, rpcOptions: { env, instanceName } });
+    t.after(async () => {
+        bridge.close();
+        await transport.runWorkerCommand("stop", { env, instanceName });
+        await rm(homeDirectory, { recursive: true, force: true });
+        await rm(runtimeDirectory, { recursive: true, force: true });
+    });
+    const rpcClient = new WorkerRpcClient(bridge);
+    const protocolClient = new WorkerProtocolClient(rpcClient);
+    await protocolClient.handshake({
+        minProtocolVersion: WORKER_PROTOCOL_VERSION,
+        maxProtocolVersion: WORKER_PROTOCOL_VERSION,
+        clientName: "portable-devshell",
+        clientVersion: "0.1.0"
+    });
+    const progress: JsonValue[] = [];
+
+    const result = await rpcClient.request(
+        "tmux_run",
+        {
+            command: "printf 'one\\n'; sleep 0.2; printf 'two\\n'; sleep 0.2; printf 'three\\n'",
+            line: 80,
+            timeout: 5_000,
+            wait: "block"
+        },
+        {
+            ctxId: "ctx-tmux-progress",
+            operationId: "real-tmux-progress",
+            source: "extension",
+            workspace: homeDirectory
+        },
+        undefined,
+        (value) => progress.push(value)
+    ) as Record<string, JsonValue>;
+
+    assert.ok(progress.length >= 2, `expected multiple tmux progress frames, got ${progress.length}`);
+    const progressOutput = progress.flatMap((value) => {
+        const output = (value as Record<string, JsonValue>).output;
+        return Array.isArray(output) ? output.map(String) : [];
+    }).join("\n");
+    assert.match(progressOutput, /one/u);
+    assert.match(progressOutput, /two/u);
+    const finalOutput = Array.isArray(result.output) ? result.output.map(String).join("\n") : "";
+    assert.match(finalOutput, /one/u);
+    assert.match(finalOutput, /two/u);
+    assert.match(finalOutput, /three/u);
+    assert.equal((result.task as Record<string, JsonValue> | undefined)?.status, "0");
+});
+
 function createRpcHarness(options?: { slowMethods?: Set<string> }): {
     transport: WorkerCommandTransport;
     spawnCount: number;
@@ -312,6 +468,8 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
     requestContexts: Array<{ ctxId?: string; operationId?: string; requestId?: string; source?: string } | undefined>;
     requests: Array<{ id: string; method: string; params?: JsonValue; context?: { ctxId?: string; operationId?: string; requestId?: string; source?: string } }>;
     disconnect: () => void;
+    respondMethod: (method: string) => void;
+    sendNotification: (method: string, params: JsonValue) => void;
     waitForMethod: (method: string) => Promise<void>;
 } {
     const requestMethods: string[] = [];
@@ -381,6 +539,18 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
         disconnect() {
             stdout.end();
             exitResolve?.({ code: 1, signal: null });
+        },
+        respondMethod(method: string) {
+            const request = [...requests].reverse().find((candidate) => candidate.method === method);
+            if (request === undefined) throw new Error(`No request available for ${method}.`);
+            stdout.write(encodeFrame(encodeWorkerRpcMessage(createResponse(method, request.id) as unknown as JsonValue)));
+        },
+        sendNotification(method: string, params: JsonValue) {
+            stdout.write(encodeFrame(encodeWorkerRpcMessage({
+                method,
+                params,
+                type: "notification"
+            } as unknown as JsonValue)));
         },
         waitForMethod(method: string) {
             if (requestMethods.includes(method)) {

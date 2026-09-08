@@ -84,6 +84,70 @@ test("control tool route turns a thrown error into a structured hint instead of 
     assert.match(String(result.comment[0]), /regenerate the operation/i);
 });
 
+test("control tool stream forwards progress before completing the unchanged final result", async () => {
+    const emitted: Array<{ name: string; payload?: JsonValue }> = [];
+    let completed: JsonValue | undefined;
+    let workerContext: Record<string, unknown> | undefined;
+    const module = createToolRouteModule({
+        worker: {
+            async callTool(
+                _toolName: string,
+                _input: JsonValue,
+                context: Record<string, unknown>,
+                _signal?: AbortSignal,
+                _transformResult?: unknown,
+                _invocationInput?: JsonValue,
+                onProgress?: (progress: JsonValue) => void
+            ) {
+                workerContext = context;
+                onProgress?.({ stdout: "one" });
+                onProgress?.({ stdout: "one\ntwo" });
+                return { exitCode: 0, stdout: "one\ntwo", stderr: "", termination: "exited" };
+            },
+            async decideApproval() { throw new Error("unused"); },
+            async getApproval() { throw new Error("unused"); },
+            async listApprovals() { return []; },
+            async listPendingApprovals() { return []; },
+            listTools() { return []; },
+            async prepareWorkspace(workspace: string) { return { workspace } as never; },
+            async readToolCalls() { return []; },
+            async releaseToolSession() {}
+        } as never
+    });
+    const operation = module.operations.find((entry) => entry.name === "callStream");
+    if (operation === undefined) throw new Error("tool.callStream operation is missing");
+    const context = {
+        ...routeContext("pi-stream"),
+        async openStream() {
+            return {
+                id: "stream-1",
+                async cancel() {},
+                async complete(payload?: JsonValue) { completed = payload; },
+                async emit(name: string, payload?: JsonValue) { emitted.push({ name, payload }); }
+            };
+        }
+    } as unknown as PrefixRouteContext;
+
+    assert.equal(await operation.handle({
+        id: "stream-request",
+        name: "callStream",
+        payload: {
+            input: { command: "printf one; printf two" },
+            operationId: "pi-call-1",
+            toolName: "bash_run",
+            workspace: "/workspace"
+        }
+    }, context), undefined);
+
+    assert.deepEqual(emitted, [
+        { name: "progress", payload: { stdout: "one" } },
+        { name: "progress", payload: { stdout: "one\ntwo" } }
+    ]);
+    assert.deepEqual(completed, { comment: [], exitCode: 0, stdout: "one\ntwo", stderr: "", termination: "exited" });
+    assert.equal(workerContext?.operationId, "pi-call-1");
+    assert.equal(workerContext?.requestId, "req-1");
+});
+
 test("control tool route serves pending approval reads without scanning approval history", async () => {
     const module = createToolRouteModule({
         worker: {

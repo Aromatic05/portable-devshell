@@ -10,6 +10,7 @@ export interface ToolCallAssociation {
 
 export interface ToolCallContext {
     requestId?: string;
+    operationId?: string;
     ctxId?: string;
     extensionId?: string;
     workspace?: string;

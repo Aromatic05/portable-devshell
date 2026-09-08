@@ -349,8 +349,9 @@ export class WorkerInstance {
         signal?: AbortSignal,
         transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
         invocationInput?: JsonValue,
+        onProgress?: (progress: JsonValue) => void,
     ): Promise<JsonValue> {
-        return await this.#tool.call(toolName, input, context, signal, transformResult, invocationInput);
+        return await this.#tool.call(toolName, input, context, signal, transformResult, invocationInput, onProgress);
     }
 
     async invokeToolInternal(

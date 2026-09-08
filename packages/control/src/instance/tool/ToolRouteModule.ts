@@ -61,6 +61,65 @@ export function createToolRouteModule(
                 } as unknown as JsonValue;
             }
         },
+        callStream: async (request, context) => {
+            const { input, operationId, toolName, workspace } = readToolCall(request.payload);
+            const controller = new AbortController();
+            let closed = false;
+            let sendTail = Promise.resolve();
+            const stream = await context.openStream(
+                { accepted: true },
+                {
+                    onClose: () => {
+                        closed = true;
+                        controller.abort(new Error("Tool progress stream was closed by the client."));
+                    }
+                }
+            );
+            const emitProgress = (progress: JsonValue) => {
+                if (closed) return;
+                sendTail = sendTail.then(async () => {
+                    if (!closed) await stream.emit("progress", progress);
+                }).catch((error) => {
+                    closed = true;
+                    controller.abort(error);
+                });
+            };
+            let result: JsonValue;
+            try {
+                const raw = await instance.worker.callTool(
+                    toolName,
+                    input,
+                    {
+                        requestId: context.requestId,
+                        ...(operationId === undefined ? {} : { operationId }),
+                        ctxId: context.connectionId,
+                        source: context.peer,
+                        workspace,
+                    },
+                    controller.signal,
+                    undefined,
+                    undefined,
+                    emitProgress
+                );
+                result = attachComments(raw, mergeComments([], resolveResultHints(toolName, raw)));
+            } catch (error) {
+                const failure = error instanceof ControlError ? error : createError({
+                    code: errorCodes.targetInvalid,
+                    message: error instanceof Error ? error.message : String(error),
+                    retryable: false
+                });
+                const body = toControlErrorBody(error);
+                const hints = body === undefined ? [] : resolveErrorHints(toolName, body);
+                result = {
+                    comment: mergeComments([], hints),
+                    error: { code: failure.code, message: failure.message, retryable: failure.retryable },
+                    result: null
+                } as unknown as JsonValue;
+            }
+            await sendTail;
+            if (!closed) await stream.complete(result);
+            return undefined;
+        },
         openSession: async (request) => {
             const prepared = await instance.worker.prepareWorkspace(readToolSessionOpen(request.payload).workspace);
             return {
