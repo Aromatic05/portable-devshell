@@ -126,8 +126,8 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             "id": "1",
             "method": "worker.handshake",
             "params": {
-                "minProtocolVersion": 5,
-                "maxProtocolVersion": 5,
+                "minProtocolVersion": 6,
+                "maxProtocolVersion": 6,
                 "clientName": "portable-devshell",
                 "clientVersion": "0.1.0"
             }
@@ -135,17 +135,14 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     );
     assert_eq!(handshake["type"], "response");
     assert_eq!(handshake["ok"], true);
-    assert_eq!(handshake["result"]["protocolVersion"], 5);
+    assert_eq!(handshake["result"]["protocolVersion"], 6);
     assert_eq!(
         handshake["result"]["workerVersion"],
         env!("CARGO_PKG_VERSION")
     );
     assert!(handshake["result"]["workerSha256"].is_null());
     assert!(handshake["result"].get("workspace").is_none(), "{handshake}");
-    assert_eq!(
-        handshake["result"]["skillsDirectory"],
-        env.protocol_skills_directory()
-    );
+    assert!(handshake["result"].get("skillsDirectory").is_none(), "{handshake}");
     assert!(handshake["result"].get("tools").is_none());
 
     let tools = env.rpc(
@@ -414,7 +411,7 @@ fn handshake_rejects_unsupported_protocol_versions() {
         "worker.protocolVersionUnsupported"
     );
     assert_eq!(handshake["error"]["retryable"], false);
-    assert_eq!(handshake["error"]["details"]["workerProtocolVersion"], 5);
+    assert_eq!(handshake["error"]["details"]["workerProtocolVersion"], 6);
 
     env.json_command(&["stop", "--instance", instance]);
 }

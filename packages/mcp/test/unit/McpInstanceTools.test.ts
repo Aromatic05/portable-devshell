@@ -477,7 +477,6 @@ function createWorker(options: {
         handshake: {
             homeDirectory: "/home/demo",
             instance: "main-pc",
-            skillsDirectory: "/home/demo/.devshell/skill",
             platform: {
                 arch: "x86_64",
                 distribution: { id: "arch", name: "Arch Linux", version: "rolling" },
@@ -537,7 +536,6 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
             return overrides.environment?.(instance) ?? {
                 homeDirectory: "/remote",
                 instance,
-                skillsDirectory: "/remote/.devshell/skill",
                 platform: { arch: "arm64", os: "darwin" }
             };
         },

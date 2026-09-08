@@ -909,7 +909,6 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
             handshake: {
                 homeDirectory: "/home/demo",
                 instance: "demo-local",
-                skillsDirectory: "/home/demo/.devshell/skill",
                 platform: {
                     arch: "x86_64",
                     distribution: { id: "arch", name: "Arch Linux", version: "rolling" },

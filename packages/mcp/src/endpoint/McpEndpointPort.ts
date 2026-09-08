@@ -50,7 +50,6 @@ export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
 export interface McpEndpointEnvironmentHandshake {
     homeDirectory: string;
     instance: string;
-    skillsDirectory: string;
     platform: {
         arch: string;
         distribution?: {

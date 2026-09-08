@@ -195,7 +195,6 @@ test("a routed artifact result consumes Comments from the routed instance Contex
                       homeDirectory: "/home/beta",
                       instance: "beta",
                       platform: { arch: "x86_64", os: "linux" },
-                      skillsDirectory: "/home/beta/.devshell/skills",
                   }
                 : undefined;
         },
@@ -328,9 +327,9 @@ function createHarness(
             return transformResult === undefined ? result : await transformResult(result, callId);
         },
         handshake: {
+            homeDirectory: "/workspace",
             instance: "alpha",
             platform: { arch: "x86_64", os: "linux" },
-            skillsDirectory: "/workspace/.devshell/skills",
             workspace: "/workspace",
         },
         listTools: () => [bashTool],

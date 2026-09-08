@@ -1,3 +1,5 @@
+import { posix, win32 } from "node:path";
+
 import {
     createError,
     errorCodes,
@@ -159,7 +161,7 @@ export class McpEndpointHandlerEnvironment {
                               projectMemoryDirectory: prepared.projectMemoryDirectory,
                           }
                         : {}),
-                    skillsDirectory: environment.skillsDirectory,
+                    skillsDirectory: managedSkillDirectory(environment),
                     temporaryDirectory: prepared.temporaryDirectory,
                     workspace: prepared.workspace,
                 }),
@@ -439,4 +441,9 @@ function workspacePreparationUnavailable(instance: string) {
         message: `Workspace preparation is unavailable for ${instance}.`,
         retryable: true,
     });
+}
+
+function managedSkillDirectory(environment: import("../McpEndpointPort.js").McpEndpointEnvironmentHandshake): string {
+    const path = environment.platform.os === "windows" ? win32 : posix;
+    return path.join(environment.homeDirectory, ".devshell", "skill");
 }

@@ -41,10 +41,6 @@ impl TestEnv {
         protocol_path(&self.workspace().canonicalize().unwrap())
     }
 
-    pub fn protocol_skills_directory(&self) -> String {
-        protocol_path(&self.home().join(".devshell").join("skill"))
-    }
-
     pub fn instance_root(&self, instance: &str) -> PathBuf {
         self.home_root.join(instance)
     }
