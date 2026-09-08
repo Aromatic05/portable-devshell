@@ -124,6 +124,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var busy = new Set();
   var confirmingTaskCancel = new Map();
   var expandedQuestions = new Set();
+  var renderedContent = null;
   var WIDGET_STATE_KEY = "portableDevshellWorkspace";
   var PRESENTATION_STATE_KEY = "portableDevshellPresentation";
   var HOST_CONNECT_TIMEOUT_MS = 3000;
@@ -1421,7 +1422,10 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       : item.kind === "approval" ? approvalCard(item)
       : "";
     var content = eventCard + goalCard() + (item ? "" : taskCards()) + backgroundWaitCards();
-    root.innerHTML = content || '<div class="card"><div class="card-head"><div class="row"><span class="event-name">Workspace</span><span class="badge">Ready</span></div></div><div class="card-body"><div class="muted">No active goal, task, question, approval, or background wait.</div></div></div>';
+    content = content || '<div class="card"><div class="card-head"><div class="row"><span class="event-name">Workspace</span><span class="badge">Ready</span></div></div><div class="card-body"><div class="muted">No active goal, task, question, approval, or background wait.</div></div></div>';
+    if (content === renderedContent) return;
+    renderedContent = content;
+    root.innerHTML = content;
   }
 
   root.addEventListener("click", function (event) {
