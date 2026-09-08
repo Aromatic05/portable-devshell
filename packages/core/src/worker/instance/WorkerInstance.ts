@@ -34,6 +34,8 @@ import type {
     WorkerArtifactReceiveFinishResult,
     WorkerArtifactReceiveWriteInput,
     WorkerArtifactReceiveWriteResult,
+    WorkerExtensionResourcePrepareInput,
+    WorkerExtensionResourcePrepareResult,
     WorkerHandshakeResult,
     WorkerProtocolClient
 } from "../protocol/WorkerProtocolClient.js";
@@ -281,6 +283,13 @@ export class WorkerInstance {
 
     async closeArtifactPayload(payloadId: string): Promise<void> {
         await this.#artifact.closePayload(payloadId);
+    }
+
+    async prepareExtensionResource(
+        input: WorkerExtensionResourcePrepareInput
+    ): Promise<WorkerExtensionResourcePrepareResult> {
+        this.#assertReady();
+        return await this.#protocolClient.prepareExtensionResource(input);
     }
 
     async beginArtifactReceive(input: WorkerArtifactReceiveBeginInput, signal?: AbortSignal): Promise<WorkerArtifactReceiveBeginResult> {

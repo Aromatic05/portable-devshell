@@ -923,6 +923,9 @@ mod tests {
             Arc::new(registry),
             payloads,
             receives,
+            Arc::new(crate::storage::ExtensionResourceStore::new(
+                root.path().join("resource-root"),
+            )),
         ));
         let responses = Arc::new(ReverseResponseQueue::default());
         let dispatcher = Arc::new(ReverseDispatcher::new(router, Arc::clone(&responses)));
@@ -1023,6 +1026,9 @@ mod tests {
             Arc::new(registry),
             payloads,
             receives,
+            Arc::new(crate::storage::ExtensionResourceStore::new(
+                root.path().join("resource-root"),
+            )),
         ));
         let responses = Arc::new(ReverseResponseQueue::default());
         let dispatcher = Arc::new(ReverseDispatcher::new(router, Arc::clone(&responses)));
@@ -1097,6 +1103,9 @@ mod tests {
             Arc::new(registry),
             payloads,
             receives,
+            Arc::new(crate::storage::ExtensionResourceStore::new(
+                root.path().join("resource-root"),
+            )),
         ));
         let responses = Arc::new(ReverseResponseQueue::default());
         let dispatcher = Arc::new(ReverseDispatcher::new(router, Arc::clone(&responses)));

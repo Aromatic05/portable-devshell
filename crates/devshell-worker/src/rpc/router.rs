@@ -16,6 +16,7 @@ use crate::rpc::notification::{DEFAULT_MAX_NOTIFICATION_BYTES, WorkerNotificatio
 use crate::rpc::request::RpcRequest;
 use crate::rpc::response::RpcResponse;
 use crate::security::{SecurityPolicy, build_security_policy};
+use crate::storage::ExtensionResourceStore;
 use crate::terminal::TerminalManager;
 use crate::tools::artifact::payload::ArtifactPayloadStore;
 use crate::tools::artifact::receive::ArtifactReceiveStore;
@@ -42,6 +43,7 @@ impl RpcRouter {
         tools: Arc<ToolRegistry>,
         payloads: Arc<ArtifactPayloadStore>,
         receives: Arc<ArtifactReceiveStore>,
+        resources: Arc<ExtensionResourceStore>,
     ) -> Self {
         let active_processes = Arc::new(ActiveProcessRegistry::new());
         let active_tool_calls = Arc::new(ActiveToolCallRegistry::new());
@@ -65,6 +67,7 @@ impl RpcRouter {
             Arc::clone(&policy),
             payloads,
             receives,
+            resources,
             terminals.clone(),
             alerts,
         );

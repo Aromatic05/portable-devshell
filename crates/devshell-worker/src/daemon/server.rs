@@ -73,6 +73,9 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     .map_err(|error| error.message)?;
     let receives = ArtifactReceiveStore::new(instance_paths.artifacts_dir.join("receives"))
         .map_err(|error| error.message)?;
+    let resources = Arc::new(crate::storage::ExtensionResourceStore::new(
+        instance_paths.instance_root.clone(),
+    ));
     let builtin_tools = builtin_registry(
         &instance_paths,
         &socket_paths,
@@ -88,6 +91,7 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
         tools,
         payloads,
         receives,
+        resources,
     ));
     payload_maintenance.schedule_maintenance();
     let _reverse_connector = config.reverse.clone().map(|reverse| {

@@ -126,8 +126,8 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             "id": "1",
             "method": "worker.handshake",
             "params": {
-                "minProtocolVersion": 6,
-                "maxProtocolVersion": 6,
+                "minProtocolVersion": 7,
+                "maxProtocolVersion": 7,
                 "clientName": "portable-devshell",
                 "clientVersion": "0.1.0"
             }
@@ -135,7 +135,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     );
     assert_eq!(handshake["type"], "response");
     assert_eq!(handshake["ok"], true);
-    assert_eq!(handshake["result"]["protocolVersion"], 6);
+    assert_eq!(handshake["result"]["protocolVersion"], 7);
     assert_eq!(
         handshake["result"]["workerVersion"],
         env!("CARGO_PKG_VERSION")
@@ -411,7 +411,7 @@ fn handshake_rejects_unsupported_protocol_versions() {
         "worker.protocolVersionUnsupported"
     );
     assert_eq!(handshake["error"]["retryable"], false);
-    assert_eq!(handshake["error"]["details"]["workerProtocolVersion"], 6);
+    assert_eq!(handshake["error"]["details"]["workerProtocolVersion"], 7);
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -1885,6 +1885,76 @@ fn internal_artifact_payload_rpc_is_persistent_and_not_listed_as_a_tool() {
     );
     assert_eq!(closed["ok"], true, "{closed}");
     assert_eq!(closed["result"]["closed"], true);
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn extension_resource_prepare_creates_a_private_instance_scoped_collection() {
+    let env = TestEnv::new();
+    let instance = "extension-resource";
+    env.command()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let tools = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "resource-tools",
+            "method": "tools.list",
+            "params": {}
+        }),
+    );
+    let names = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(!names.contains(&"extension.resource.prepare"));
+
+    let prepared = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "resource-prepare",
+            "method": "extension.resource.prepare",
+            "params": {
+                "extensionId": "skill",
+                "collection": "managed"
+            }
+        }),
+    );
+    assert_eq!(prepared["ok"], true, "{prepared}");
+    let expected = env
+        .instance_root(instance)
+        .join("extensions")
+        .join("skill")
+        .join("resources")
+        .join("managed");
+    assert!(expected.is_dir());
+    assert_eq!(
+        prepared["result"]["directory"],
+        expected.to_string_lossy().replace('\\', "/")
+    );
+
+    let escaped = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "resource-escape",
+            "method": "extension.resource.prepare",
+            "params": {
+                "extensionId": "../escape",
+                "collection": "managed"
+            }
+        }),
+    );
+    assert_eq!(escaped["ok"], false, "{escaped}");
+    assert_eq!(escaped["error"]["code"], "extension.resourceInvalid");
 
     env.json_command(&["stop", "--instance", instance]);
 }

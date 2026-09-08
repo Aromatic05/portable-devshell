@@ -112,6 +112,22 @@ test("WorkerProtocolClient routes artifact payload and receive lifecycle through
     bridge.close();
 });
 
+test("WorkerProtocolClient prepares private Extension resource collections through internal RPC", async () => {
+    const harness = createRpcHarness();
+    const bridge = new WorkerRpcBridge({
+        transport: harness.transport,
+        rpcOptions: { instanceName: "resource-rpc" }
+    });
+    const client = new WorkerProtocolClient(new WorkerRpcClient(bridge));
+
+    assert.deepEqual(await client.prepareExtensionResource({
+        collection: "managed",
+        extensionId: "skill"
+    }), { directory: "/home/dev/.devshell/resource-rpc/extensions/skill/resources/managed" });
+    assert.deepEqual(harness.requestMethods, ["extension.resource.prepare"]);
+    bridge.close();
+});
+
 test("WorkerRpcClient keeps context identity while assigning each call a distinct operation id", async () => {
     const harness = createRpcHarness();
     const bridge = new WorkerRpcBridge({
@@ -603,6 +619,15 @@ function createResponse(method: string, id: string): WorkerRpcResponseEnvelope {
                 platform: { os: "linux", arch: "x64" },
                 capabilities: { tools: true, streaming: false, cancel: true }
             }
+        };
+    }
+
+    if (method === "extension.resource.prepare") {
+        return {
+            type: "response",
+            id,
+            ok: true,
+            result: { directory: "/home/dev/.devshell/resource-rpc/extensions/skill/resources/managed" }
         };
     }
 

@@ -1,5 +1,6 @@
 pub mod artifact_payload;
 pub mod alerts;
+pub mod extension_resource;
 pub mod handshake;
 pub mod ping;
 pub mod status;
@@ -19,6 +20,7 @@ use crate::daemon::process_registry::ActiveProcessRegistry;
 use crate::instance::WorkerConfig;
 use crate::rpc::router::{ActiveToolCallRegistry, ControlHandler};
 use crate::security::SecurityPolicy;
+use crate::storage::ExtensionResourceStore;
 use crate::terminal::TerminalManager;
 use crate::tools::ToolRegistry;
 use crate::tools::artifact::direct::ArtifactDirectTransfer;
@@ -37,6 +39,7 @@ pub fn register_control_handlers(
     policy: Arc<dyn SecurityPolicy>,
     payloads: Arc<ArtifactPayloadStore>,
     receives: Arc<ArtifactReceiveStore>,
+    resources: Arc<ExtensionResourceStore>,
     terminals: TerminalManager,
     alerts: Arc<alerts::AlertService>,
 ) {
@@ -86,6 +89,10 @@ pub fn register_control_handlers(
     handlers.insert(
         "artifact.payload.close".to_string(),
         artifact_payload::payload_close(payloads),
+    );
+    handlers.insert(
+        "extension.resource.prepare".to_string(),
+        extension_resource::prepare(resources),
     );
     handlers.insert(
         "tool.call.cancel".to_string(),

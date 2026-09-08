@@ -2,7 +2,7 @@ import type { ArtifactPayloadDescriptor, ControlInstanceAlertsConfig, JsonValue 
 
 import { WorkerRpcClient } from "../rpc/WorkerRpcClient.js";
 
-export const WORKER_PROTOCOL_VERSION = 6;
+export const WORKER_PROTOCOL_VERSION = 7;
 
 export interface WorkerHandshakeParams {
     minProtocolVersion: number;
@@ -63,6 +63,15 @@ export interface WorkerWorkspacePrepareResult {
     projectMemoryPresent?: boolean;
     temporaryDirectory: string;
     workspace: string;
+}
+
+export interface WorkerExtensionResourcePrepareInput {
+    collection: string;
+    extensionId: string;
+}
+
+export interface WorkerExtensionResourcePrepareResult {
+    directory: string;
 }
 
 export interface WorkerAlertAdvice {
@@ -207,6 +216,14 @@ export class WorkerProtocolClient {
 
     async closeToolSession(sessionId: string): Promise<void> {
         await this.#rpcClient.request("tool.session.close", { sessionId });
+    }
+
+    async prepareExtensionResource(
+        input: WorkerExtensionResourcePrepareInput
+    ): Promise<WorkerExtensionResourcePrepareResult> {
+        return asObjectResult<WorkerExtensionResourcePrepareResult>(
+            await this.#rpcClient.request("extension.resource.prepare", input as unknown as JsonValue)
+        );
     }
 
     async openArtifactPayload(input: WorkerArtifactPayloadOpenInput, signal?: AbortSignal): Promise<WorkerArtifactPayloadOpenResult> {
