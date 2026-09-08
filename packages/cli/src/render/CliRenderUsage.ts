@@ -27,7 +27,7 @@ export function renderCliUsage(): string {
         "  watch <command>                Follow instance state or logs",
         "  artifact <command>             Manage artifact shares and transfers",
         "  secret <command>               Scan local files for likely secrets",
-        "  skill <command>                Discover and read layered Agent Skills",
+        "  skill <command>                Discover, manage, and transfer layered Agent Skills",
         "  extension <command>            Manage installed Extensions",
         "  <extension-id> [args...]        Invoke an installed Extension command",
         "  help                           Show this help",

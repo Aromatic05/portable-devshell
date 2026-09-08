@@ -1,47 +1,38 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import test from "node:test";
 
 import { CliMain } from "../../src/CliMain.ts";
 
-test("skill catalog commands run locally without negotiating Control", async () => {
-    const root = await mkdtemp(join(tmpdir(), "devshell-skill-cli-"));
-    const workspace = join(root, "workspace");
-    const home = join(root, "home");
-    const skillDirectory = join(workspace, ".agents", "skills", "review");
+test("skill command is dispatched through the generic Extension client with caller cwd", async () => {
+    const calls: Array<{ args: readonly string[]; id: string; workingDirectory?: string }> = [];
     const stdout = buffer();
     const stderr = buffer();
-    let helloCalls = 0;
-    try {
-        await mkdir(skillDirectory, { recursive: true });
-        await writeFile(
-            join(skillDirectory, "SKILL.md"),
-            "---\ndescription: Review changes\n---\n# Review\n\nInspect the change.\n",
-            "utf8"
-        );
-        const cli = new CliMain({
-            createCliClients: () => ({
-                close() {},
+    const cli = new CliMain({
+        createCliClients: () => ({
+            close() {},
+            service: {
                 async hello() {
-                    helloCalls += 1;
-                    throw new Error("skill commands must not contact Control");
+                    return {
+                        capabilities: ["request", "stream", "streamResume"],
+                        protocolVersion: 1
+                    };
                 }
-            } as never),
-            homeDirectory: home,
-            stderr,
-            stdout
-        });
+            },
+            extension: {
+                async command(id: string, args: readonly string[], options?: { workingDirectory?: string }) {
+                    calls.push({ id, args, workingDirectory: options?.workingDirectory });
+                    return { kind: "json", value: { ok: true } };
+                }
+            }
+        } as never),
+        stderr,
+        stdout
+    });
 
-        assert.equal(await cli.run(["skill", "list", "--workspace", workspace]), 0);
-        assert.equal(helloCalls, 0);
-        assert.equal(stderr.flush(), "");
-        const listed = JSON.parse(stdout.flush()) as { skills: Array<{ name: string; source: string }> };
-        assert.deepEqual(listed.skills, [{ description: "Review changes", name: "review", source: "project" }]);
-    } finally {
-        await rm(root, { force: true, recursive: true });
-    }
+    assert.equal(await cli.run(["skill", "list"]), 0);
+    assert.deepEqual(calls, [{ id: "skill", args: ["list"], workingDirectory: process.cwd() }]);
+    assert.match(stdout.flush(), /"ok": true/u);
+    assert.equal(stderr.flush(), "");
 });
 
 function buffer(): { flush(): string; write(chunk: string): void } {

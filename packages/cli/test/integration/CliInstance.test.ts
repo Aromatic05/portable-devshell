@@ -75,6 +75,10 @@ async function runRealWorkerSmoke(): Promise<void> {
     const workspaceMarkerName = "cli-real-workspace-marker.txt";
     const workspaceMarker = "portable-devshell-cli-real-workspace";
     await writeFile(join(workspacePath, workspaceMarkerName), workspaceMarker, "utf8");
+    const skillDirectory = join(workspacePath, ".agents", "skills", "review");
+    const skillContent = "# Review\n\nRead and review the requested changes.\n";
+    await mkdir(skillDirectory, { recursive: true });
+    await writeFile(join(skillDirectory, "SKILL.md"), skillContent, "utf8");
     const stdout = createBuffer();
     const stderr = createBuffer();
     const workerEnvName = workerPathEnvironmentName();
@@ -122,6 +126,41 @@ async function runRealWorkerSmoke(): Promise<void> {
 
         assert.equal(await runCli(["instance", "status", "aromatic-pc"]), 0);
         assert.match(stdout.flush(), /ready: true/u);
+
+        assert.equal(
+            await runCli([
+                "skill",
+                "get",
+                "review",
+                `aromatic-pc:${workspacePath}`,
+                "--workspace",
+                workspacePath
+            ]),
+            0
+        );
+        const skillGet = JSON.parse(stdout.flush()) as {
+            target: { instance: string; path: string; workspace: string };
+            transfer: { transferId: string; transferredBytes: number };
+        };
+        assert.equal(skillGet.target.instance, "aromatic-pc");
+        assert.equal(skillGet.target.path, "./.devshell/skill/review");
+        assert.match(skillGet.transfer.transferId, /^[0-9a-f-]{36}$/u);
+        assert.ok(skillGet.transfer.transferredBytes > 0);
+        const installedSkill = join(skillGet.target.workspace, ".devshell", "skill", "review", "SKILL.md");
+        assert.equal(await readFile(installedSkill, "utf8"), skillContent);
+
+        assert.equal(
+            await runCli([
+                "instance",
+                "call",
+                "aromatic-pc",
+                workspacePath,
+                "file_read",
+                JSON.stringify({ path: installedSkill })
+            ]),
+            0
+        );
+        assert.match(stdout.flush(), /Read and review the requested changes\./u);
 
         assert.equal(
             await runCli([

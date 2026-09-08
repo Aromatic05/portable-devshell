@@ -2,15 +2,13 @@ import { homedir } from "node:os";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
-import { CliRenderError } from "../../render/CliRenderError.js";
-
 const MAX_SKILLS = 256;
 const MAX_ENTRY_BYTES = 512 * 1024;
 const MAX_LIST_PREVIEW_BYTES = 64 * 1024;
 const MAX_RELATED_FILES = 1_000;
 const MAX_RELATED_SCAN_ENTRIES = 5_000;
 
-type SkillSourceName = "project" | "managed" | "global";
+export type SkillSourceName = "project" | "managed" | "global";
 
 interface SkillSource {
     path: string;
@@ -51,41 +49,6 @@ export interface ReadSkillFileResult {
     sourcePath: string;
 }
 
-export async function executeSkillCommand(
-    args: readonly string[],
-    output: { write(chunk: string): void },
-    defaults: SkillCatalogOptions = {}
-): Promise<void> {
-    if (args.length === 0 || ["help", "--help", "-h"].includes(args[0] ?? "")) {
-        output.write(`${renderSkillUsage()}\n`);
-        return;
-    }
-
-    const command = args[0]!;
-    const parsed = parseSkillArgs(args.slice(1), defaults);
-    switch (command) {
-        case "list":
-            requirePositionals(parsed.positionals, 0, "skill list");
-            writeJson(output, await listSkills(parsed.options));
-            return;
-        case "search":
-            requirePositionals(parsed.positionals, 1, "skill search <query>");
-            writeJson(output, await searchSkills(parsed.positionals[0]!, parsed.options));
-            return;
-        case "load":
-        case "inspect":
-            requirePositionals(parsed.positionals, 1, `skill ${command} <name>`);
-            writeJson(output, await loadSkill(parsed.positionals[0]!, parsed.options));
-            return;
-        case "read":
-            requirePositionals(parsed.positionals, 2, "skill read <name> <path>");
-            writeJson(output, await readSkillFile(parsed.positionals[0]!, parsed.positionals[1]!, parsed.options));
-            return;
-        default:
-            throw CliRenderError.usage(`Unknown skill command: ${command}\n\n${renderSkillUsage()}`);
-    }
-}
-
 export async function listSkills(options: SkillCatalogOptions = {}): Promise<SkillListResult> {
     const sources = skillSources(options);
     const accepted = new Set<string>();
@@ -120,7 +83,7 @@ export async function searchSkills(
     options: SkillCatalogOptions = {}
 ): Promise<SkillListResult> {
     const normalized = query.trim().toLowerCase();
-    if (normalized.length === 0) throw CliRenderError.usage("skill search requires a non-empty query");
+    if (normalized.length === 0) throw skillUsageError("skill search requires a non-empty query");
     const result = await listSkills(options);
     return {
         ...result,
@@ -175,19 +138,6 @@ export async function readSkillFile(
     };
 }
 
-export function renderSkillUsage(): string {
-    return [
-        "Usage:",
-        "  devshell skill list [--workspace <directory>]",
-        "  devshell skill search <query> [--workspace <directory>]",
-        "  devshell skill load <name> [--workspace <directory>]",
-        "  devshell skill inspect <name> [--workspace <directory>]",
-        "  devshell skill read <name> <path> [--workspace <directory>]",
-        "",
-        "Lookup priority: project .agents/skills, managed ~/.devshell/skill, global $XDG_CONFIG_HOME/agents/skills.",
-        "List/search return metadata only; load/read perform lazy content access."
-    ].join("\n");
-}
 
 function skillSources(options: SkillCatalogOptions): SkillSource[] {
     const home = resolve(options.home ?? homedir());
@@ -205,6 +155,19 @@ function skillSources(options: SkillCatalogOptions): SkillSource[] {
         seen.add(key);
         return true;
     });
+}
+
+export async function resolveSkillSource(
+    name: string,
+    options: SkillCatalogOptions = {}
+): Promise<{ name: string; root: string; source: SkillSourceName; sourcePath: string }> {
+    const selected = await selectSkillSource(name, options);
+    return {
+        name,
+        root: selected.root,
+        source: selected.source.source,
+        sourcePath: selected.source.path
+    };
 }
 
 async function selectSkillSource(
@@ -360,57 +323,23 @@ function stripQuotes(value: string): string {
 
 function validateSkillName(name: string): void {
     if (name.length === 0 || name !== name.trim() || name === "." || name === ".." || /[\\/]/u.test(name)) {
-        throw CliRenderError.usage("Skill name must be one non-empty directory name");
+        throw skillUsageError("Skill name must be one non-empty directory name");
     }
 }
 
 function validateRelatedPath(path: string): string {
     if (path.length === 0 || path.includes("\\") || isAbsolute(path)) {
-        throw CliRenderError.usage("Skill file path must be a relative POSIX path");
+        throw skillUsageError("Skill file path must be a relative POSIX path");
     }
     const parts = path.split("/");
     if (parts.some((part) => part.length === 0 || part === "." || part === "..")) {
-        throw CliRenderError.usage("Skill file path must stay inside the Skill directory");
+        throw skillUsageError("Skill file path must stay inside the Skill directory");
     }
     return parts.join("/");
 }
 
-function parseSkillArgs(
-    args: readonly string[],
-    defaults: SkillCatalogOptions
-): { options: SkillCatalogOptions; positionals: string[] } {
-    const positionals: string[] = [];
-    let workspace = defaults.workspace;
-    for (let index = 0; index < args.length; index += 1) {
-        const argument = args[index]!;
-        if (argument === "--workspace") {
-            const value = args[++index];
-            if (value === undefined || value.length === 0) throw CliRenderError.usage("skill --workspace requires a directory");
-            workspace = value;
-            continue;
-        }
-        if (argument.startsWith("-")) throw CliRenderError.usage(`Unknown skill option: ${argument}`);
-        positionals.push(argument);
-    }
-    return {
-        options: {
-            ...defaults,
-            ...(workspace === undefined ? {} : { workspace })
-        },
-        positionals
-    };
-}
-
-function requirePositionals(values: readonly string[], expected: number, usage: string): void {
-    if (values.length !== expected) throw CliRenderError.usage(`Usage: devshell ${usage}`);
-}
-
 function sortedSkills(skills: SkillMetadata[]): SkillMetadata[] {
     return [...skills].sort((a, b) => a.name.localeCompare(b.name));
-}
-
-function writeJson(output: { write(chunk: string): void }, value: unknown): void {
-    output.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
 function normalizePath(path: string): string {
@@ -423,4 +352,8 @@ function isEnoent(error: unknown): boolean {
 
 function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+function skillUsageError(message: string): TypeError {
+    return new TypeError(message);
 }

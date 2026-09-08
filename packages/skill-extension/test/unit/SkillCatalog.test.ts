@@ -9,7 +9,7 @@ import {
     loadSkill,
     readSkillFile,
     searchSkills
-} from "../../src/command/skill/CliCommandSkill.ts";
+} from "../../src/builtin/SkillCatalog.ts";
 
 test("skill catalog layers project over managed over global without loading instructions", async () => {
     const root = await mkdtemp(join(tmpdir(), "devshell-skill-layers-"));

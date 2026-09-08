@@ -6,12 +6,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ConfigBatchUpdateRequest, ConfigDraft } from "@portable-devshell/shared";
+import { skillExtensionDirectory } from "@portable-devshell/skill-extension";
 
 import { isCliEntrypoint } from "./CliEntrypoint.js";
 import { CliParser, type CliParsedCommand } from "./CliParser.js";
 import { executeArtifactCommand } from "./command/artifact/CliCommandArtifact.js";
 import { executeSecretCommand } from "./command/secret/CliCommandSecretScan.js";
-import { executeSkillCommand } from "./command/skill/CliCommandSkill.js";
 import {
     createCliClients as createControlClients,
     negotiateCliControl,
@@ -268,9 +268,6 @@ export class CliMain {
             case "secret":
                 await executeSecretCommand(command.args, this.#stdout);
                 return;
-            case "skill":
-                await executeSkillCommand(command.args, this.#stdout, { home: this.#homeDirectory });
-                return;
             case "tui":
                 await this.#startTui();
                 return;
@@ -443,6 +440,11 @@ export class CliMain {
         ]);
         return new lifecycle.ControlLifecycleManager({
             daemonModulePath: control.controlDaemonModulePath(),
+            env: {
+                [control.CONTROL_BUILTIN_EXTENSION_SOURCES_ENV]: JSON.stringify([
+                    { id: "skill", path: skillExtensionDirectory() }
+                ])
+            },
             homeDirectory: this.#homeDirectory,
             xdgRuntimeDir: this.#xdgRuntimeDir
         });

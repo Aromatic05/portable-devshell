@@ -12,7 +12,8 @@
         "@portable-devshell/control": "workspace:*",
         "@portable-devshell/shared": "workspace:*",
         "@portable-devshell/tui": "workspace:*",
-        "ignore": "7.0.5"
+        "ignore": "7.0.5",
+        "@portable-devshell/skill-extension": "workspace:*"
     },
     "exports": {
         ".": {

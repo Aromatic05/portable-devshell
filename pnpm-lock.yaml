@@ -85,6 +85,9 @@ importers:
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
+      '@portable-devshell/skill-extension':
+        specifier: workspace:*
+        version: link:../skill-extension
       '@portable-devshell/tui':
         specifier: workspace:*
         version: link:../tui
@@ -215,6 +218,12 @@ importers:
         version: 8.0.4
 
   packages/shared: {}
+
+  packages/skill-extension:
+    dependencies:
+      '@portable-devshell/extension':
+        specifier: workspace:*
+        version: link:../extension
 
   packages/tui:
     dependencies:

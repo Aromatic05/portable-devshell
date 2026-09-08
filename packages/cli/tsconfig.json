@@ -17,6 +17,9 @@
         },
         {
             "path": "../tui"
+        },
+        {
+            "path": "../skill-extension"
         }
     ]
 }
