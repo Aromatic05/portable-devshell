@@ -12,8 +12,9 @@ export interface ExtensionHostModuleLease {
  * Resolution stays local-first: Node resolves relative files and any dependency
  * shipped inside the generation normally. Only a missing bare package import
  * from a registered generation falls back to the Control application's module
- * graph. The hook is process-local today and can be installed unchanged inside
- * an Extension worker thread once the runtime sandbox lands.
+ * graph. Sandboxed generations install the resolver inside their own worker
+ * thread, so dependency fallback does not require importing Extension code into
+ * the Control main thread.
  */
 export class ExtensionHostModuleResolver {
     readonly #roots = new Map<string, number>();

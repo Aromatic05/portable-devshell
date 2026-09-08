@@ -203,6 +203,39 @@ test("Extension disable removes new routing immediately while a leased old gener
     await host.stop();
 });
 
+test("Extension host reports a faulted active generation as failed and rejects new leases", async () => {
+    const registry = new MemoryRegistry({
+        extensions: { example: { enabled: true, selectedGeneration: "a" } },
+        schemaVersion: 1
+    });
+    let loaded: ExtensionGeneration | undefined;
+    const host = new ExtensionHost({
+        loader: {
+            async load(id, name) {
+                loaded = generation(id, name, async () => "ok", []);
+                return loaded;
+            }
+        },
+        registry
+    });
+    await host.start();
+    loaded!.fault(new Error("sandbox OOM"));
+
+    const record = (await host.list())[0]!;
+    assert.equal(record.state, "failed");
+    assert.equal(record.activeGeneration, "a");
+    assert.equal(record.failure?.message, "sandbox OOM");
+    await assert.rejects(
+        host.dispatchRpc("example", "read", undefined, {
+            localOwner: false,
+            requestId: "faulted",
+            signal: new AbortController().signal
+        }),
+        /sandbox OOM/u
+    );
+    await host.stop();
+});
+
 async function waitFor(predicate: () => boolean): Promise<void> {
     const deadline = Date.now() + 1_000;
     while (Date.now() < deadline) {

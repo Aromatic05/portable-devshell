@@ -68,6 +68,13 @@ export class ExtensionHost {
             if (entry === undefined) throw extensionNotFound(id);
             throw extensionNotActive(id);
         }
+        if (active.state === "faulted") {
+            throw extensionFailure(
+                id,
+                active.generation,
+                active.faultError ?? new Error(`Extension ${id} sandbox faulted.`)
+            );
+        }
         return active.acquire();
     }
 
@@ -339,7 +346,15 @@ export class ExtensionHost {
 
     #record(id: string, entry: ExtensionRegistryEntry): ExtensionRuntimeRecord {
         const active = this.#active.get(id);
-        const failure = this.#failures.get(id);
+        const activeFailure = active?.state === "faulted"
+            ? {
+                  generation: active.generation,
+                  message: active.faultError instanceof Error
+                      ? active.faultError.message
+                      : String(active.faultError ?? "Extension sandbox faulted.")
+              }
+            : undefined;
+        const failure = activeFailure ?? this.#failures.get(id);
         const retired = [...(this.#retired.get(id) ?? [])].map((generation) => ({
             generation: generation.generation,
             inFlight: generation.inFlight,
@@ -356,7 +371,9 @@ export class ExtensionHost {
             ...(entry.selectedGeneration === undefined ? {} : { selectedGeneration: entry.selectedGeneration }),
             state: !entry.enabled
                 ? "disabled"
-                : active !== undefined
+                : active?.state === "faulted"
+                    ? "failed"
+                    : active !== undefined
                     ? "active"
                     : failure !== undefined
                         ? "failed"

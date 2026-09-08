@@ -1,6 +1,7 @@
 import { lstat, mkdir, readFile, rm } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { ResourceLimits } from "node:worker_threads";
 
 import {
     EXTENSION_API_VERSION,
@@ -22,6 +23,11 @@ import { ExtensionGeneration } from "./ExtensionGeneration.js";
 import { sharedExtensionHostModuleResolver, type ExtensionHostModuleResolver } from "./ExtensionHostModuleResolver.js";
 import { ExtensionPathLayout } from "../../state/ExtensionPathLayout.js";
 import { ExtensionWorkerCapabilityControl } from "./capability/ExtensionWorkerCapabilityControl.js";
+import {
+    ExtensionSandboxHost,
+    type ExtensionSandboxHostOptions
+} from "./sandbox/ExtensionSandboxHost.js";
+import type { ExtensionSandboxActivationDescriptor } from "./sandbox/ExtensionSandboxProtocol.js";
 
 export const CORE_EXTENSION_RESERVED_IDS = new Set([
     "approval",
@@ -64,6 +70,8 @@ export interface ExtensionLoaderOptions {
     loggerFactory?: (id: string, generation: string) => ExtensionLogger;
     paths: ExtensionPathLayout;
     reservedIds?: ReadonlySet<string>;
+    sandboxFactory?: (options: ExtensionSandboxHostOptions) => ExtensionSandboxHost;
+    sandboxResourceLimits?: ResourceLimits;
     workerFactory?: (input: {
         allowed: boolean;
         extensionId: string;
@@ -73,22 +81,26 @@ export interface ExtensionLoaderOptions {
 
 export class ExtensionLoader {
     readonly #assetsFactory?: ExtensionLoaderOptions["assetsFactory"];
-    readonly #importer: (url: string) => Promise<unknown>;
+    readonly #importer?: (url: string) => Promise<unknown>;
     readonly #hostModuleResolver: ExtensionHostModuleResolver;
     readonly #instances: InstanceRegistry;
     readonly #loggerFactory: (id: string, generation: string) => ExtensionLogger;
     readonly #paths: ExtensionPathLayout;
     readonly #reservedIds: ReadonlySet<string>;
+    readonly #sandboxFactory: (options: ExtensionSandboxHostOptions) => ExtensionSandboxHost;
+    readonly #sandboxResourceLimits?: ResourceLimits;
     readonly #workerFactory?: ExtensionLoaderOptions["workerFactory"];
 
     constructor(options: ExtensionLoaderOptions) {
         this.#assetsFactory = options.assetsFactory;
-        this.#importer = options.importer ?? (async (url) => await import(url) as unknown);
+        this.#importer = options.importer;
         this.#hostModuleResolver = options.hostModuleResolver ?? sharedExtensionHostModuleResolver();
         this.#instances = options.instances;
         this.#loggerFactory = options.loggerFactory ?? ((id, generation) => consoleExtensionLogger(id, generation));
         this.#paths = options.paths;
         this.#reservedIds = options.reservedIds ?? CORE_EXTENSION_RESERVED_IDS;
+        this.#sandboxFactory = options.sandboxFactory ?? ((sandboxOptions) => new ExtensionSandboxHost(sandboxOptions));
+        this.#sandboxResourceLimits = options.sandboxResourceLimits;
         this.#workerFactory = options.workerFactory;
     }
 
@@ -142,15 +154,31 @@ export class ExtensionLoader {
             generation,
             instances: this.#instances
         });
+        const logger = this.#loggerFactory(id, generation);
         const context: ExtensionContext = Object.freeze({
             assets,
             generation,
             id,
-            logger: this.#loggerFactory(id, generation),
+            logger,
             paths: Object.freeze({ codeDirectory, dataDirectory, runtimeDirectory, stateDirectory }),
             version: manifest.version,
             worker
         });
+
+        if (this.#importer === undefined) {
+            return await this.#loadSandboxed({
+                assets,
+                codeDirectory,
+                context,
+                entryPath,
+                generation,
+                id,
+                logger,
+                manifest,
+                runtimeDirectory,
+                worker
+            });
+        }
 
         const hostModules = this.#hostModuleResolver.register(codeDirectory);
         let rawActivation: unknown;
@@ -180,6 +208,124 @@ export class ExtensionLoader {
             );
         }
     }
+
+    async #loadSandboxed(input: {
+        assets: ExtensionAssetCapability;
+        codeDirectory: string;
+        context: ExtensionContext;
+        entryPath: string;
+        generation: string;
+        id: string;
+        logger: ExtensionLogger;
+        manifest: ExtensionManifest;
+        runtimeDirectory: string;
+        worker: ExtensionWorkerRuntime;
+    }): Promise<ExtensionGeneration> {
+        let candidate: ExtensionGeneration | undefined;
+        const sandbox = this.#sandboxFactory({
+            assets: input.assets,
+            codeDirectory: input.codeDirectory,
+            context: {
+                generation: input.generation,
+                id: input.id,
+                paths: input.context.paths,
+                version: input.manifest.version
+            },
+            entryUrl: pathToFileURL(input.entryPath).href,
+            logger: input.logger,
+            onFault: (error) => {
+                candidate?.fault(error);
+                void input.worker.closeAll().catch(() => undefined);
+            },
+            ...(this.#sandboxResourceLimits === undefined ? {} : {
+                resourceLimits: this.#sandboxResourceLimits
+            }),
+            worker: input.worker
+        });
+        try {
+            const descriptor = await sandbox.start();
+            const activation = await activationFromSandbox(
+                descriptor,
+                input.manifest,
+                input.codeDirectory,
+                sandbox
+            );
+            const wrapped = wrapActivation(activation, input.worker);
+            candidate = new ExtensionGeneration({
+                activation: wrapped,
+                dispose: async () => await disposeSandboxGeneration(
+                    sandbox,
+                    input.worker,
+                    input.runtimeDirectory
+                ),
+                generation: input.generation,
+                manifest: input.manifest
+            });
+            if (sandbox.faultError !== undefined) throw sandbox.faultError;
+            return candidate;
+        } catch (error) {
+            const cleanupFailures: unknown[] = [];
+            await sandbox.dispose().catch((cleanupError) => cleanupFailures.push(cleanupError));
+            await input.worker.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
+            await rm(input.runtimeDirectory, { force: true, recursive: true })
+                .catch((cleanupError) => cleanupFailures.push(cleanupError));
+            if (cleanupFailures.length === 0) throw error;
+            throw new AggregateError(
+                [error, ...cleanupFailures],
+                `Extension ${input.id} sandbox activation failed and candidate cleanup was incomplete.`
+            );
+        }
+    }
+}
+
+async function activationFromSandbox(
+    descriptor: ExtensionSandboxActivationDescriptor,
+    manifest: ExtensionManifest,
+    codeDirectory: string,
+    sandbox: ExtensionSandboxHost
+): Promise<ExtensionActivation> {
+    const activation: ExtensionActivation = {
+        dispose: async () => await sandbox.dispose()
+    };
+    if (descriptor.command !== undefined) {
+        requireManifestCapability(manifest, "command");
+        activation.command = async (argv, context) => await sandbox.command(argv, context);
+    }
+    if (descriptor.rpc !== undefined) {
+        requireManifestCapability(manifest, "rpc");
+        const handlers: Record<string, NonNullable<ExtensionActivation["rpc"]>[string]> = {};
+        for (const operation of descriptor.rpc) {
+            handlers[operation] = async (value, context) => await sandbox.rpc(operation, value, context);
+        }
+        activation.rpc = Object.freeze(handlers);
+    }
+    if (descriptor.lifecycle !== undefined) {
+        requireManifestCapability(manifest, "instance-lifecycle");
+        activation.lifecycle = Object.freeze({
+            onInstanceRetire: async (event: ExtensionInstanceRetireEvent) => await sandbox.retireInstance(event)
+        });
+    }
+    if (descriptor.web !== undefined) {
+        requireManifestCapability(manifest, "web");
+        if (descriptor.web.kind === "static") {
+            const directory = resolveContainedPath(
+                codeDirectory,
+                descriptor.web.directory,
+                "Extension web directory"
+            );
+            await assertPlainDirectory(directory, `Extension web directory for ${manifest.id}`);
+            activation.web = Object.freeze({
+                directory: descriptor.web.directory,
+                kind: "static"
+            });
+        } else {
+            activation.web = Object.freeze({
+                kind: "proxy",
+                resolveUpstream: async () => await sandbox.resolveUpstream()
+            });
+        }
+    }
+    return Object.freeze(activation);
 }
 
 function readExtensionModule(value: unknown, id: string): ExtensionModule {
@@ -315,6 +461,19 @@ async function disposeGeneration(
     try { releaseHostModules(); } catch (error) { failures.push(error); }
     if (failures.length === 1) throw failures[0];
     if (failures.length > 1) throw new AggregateError(failures, "Extension generation cleanup failed.");
+}
+
+async function disposeSandboxGeneration(
+    sandbox: ExtensionSandboxHost,
+    worker: ExtensionWorkerRuntime,
+    runtimeDirectory: string
+): Promise<void> {
+    const failures: unknown[] = [];
+    await sandbox.dispose().catch((error) => failures.push(error));
+    await worker.closeAll().catch((error) => failures.push(error));
+    await rm(runtimeDirectory, { force: true, recursive: true }).catch((error) => failures.push(error));
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, "Extension sandbox generation cleanup failed.");
 }
 
 function readDisposableActivation(value: unknown): { dispose(): Promise<void> } | undefined {

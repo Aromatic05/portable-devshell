@@ -243,21 +243,28 @@ test("Extension remove disables routing, waits for the leased generation to drai
     const h = await harness(t);
     const source = await h.source("drain", {
         body: [
-            "export async function activate() {",
+            "import { watch, writeFileSync } from 'node:fs';",
+            "import { join } from 'node:path';",
+            "export async function activate(context) {",
+            "  const stateDirectory = context.paths.stateDirectory;",
+            "  const releaseFile = join(stateDirectory, 'release.txt');",
+            "  const disposedFile = join(stateDirectory, 'disposed.txt');",
+            "  let releaseHold;",
+            "  const hold = new Promise((resolve) => { releaseHold = resolve; });",
+            "  const watcher = watch(stateDirectory, (_event, file) => {",
+            "    if (file !== 'release.txt') return;",
+            "    watcher.close();",
+            "    releaseHold();",
+            "  });",
             "  return {",
-            "    rpc: { hold: async () => await globalThis.__devshellExtensionHold },",
-            "    dispose() { globalThis.__devshellExtensionDisposed = true; }",
+            "    rpc: { hold: async () => await hold },",
+            "    dispose() { writeFileSync(disposedFile, 'disposed\\n'); }",
             "  };",
             "}",
             ""
         ].join("\n")
     });
     const installed = await h.service.install(source);
-    let releaseHold!: () => void;
-    (globalThis as Record<string, unknown>).__devshellExtensionHold = new Promise<void>((resolve) => {
-        releaseHold = resolve;
-    });
-    (globalThis as Record<string, unknown>).__devshellExtensionDisposed = false;
     const active = h.host.dispatchRpc("example", "hold", undefined, {
         localOwner: false,
         requestId: "hold",
@@ -282,15 +289,13 @@ test("Extension remove disables routing, waits for the leased generation to drai
         /not active/u
     );
 
-    releaseHold();
+    await writeFile(join(h.paths.stateDirectory("example"), "release.txt"), "release\n", "utf8");
     await active;
     assert.deepEqual(await removal, { id: "example", purged: false, removed: true });
-    assert.equal((globalThis as Record<string, unknown>).__devshellExtensionDisposed, true);
+    assert.equal(await readFile(join(h.paths.stateDirectory("example"), "disposed.txt"), "utf8"), "disposed\n");
     assert.equal(await exists(join(h.paths.codeRoot, "example")), false);
     assert.equal(await exists(join(h.paths.stateDirectory("example"), "state.txt")), true);
     assert.deepEqual(await h.host.list(), []);
-    delete (globalThis as Record<string, unknown>).__devshellExtensionHold;
-    delete (globalThis as Record<string, unknown>).__devshellExtensionDisposed;
 });
 
 test("Extension remove --purge deletes mutable state after the runtime has drained", async (t) => {

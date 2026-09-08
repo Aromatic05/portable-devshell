@@ -118,7 +118,11 @@ web
 worker
 ```
 
-未声明的宿主能力必须在使用前拒绝。Capability 是 public API grant，不是 OS sandbox；当前 Extension JavaScript 仍运行在受信任的 Control 进程中。
+未声明的宿主能力必须在使用前拒绝。
+
+每个 Extension generation 在独立的 `worker_threads` isolate 中执行，拥有独立 V8 heap、global state 和 event loop。Control 主线程只保留 contribution proxy，以及 assets / Worker control / logger 等宿主能力的 RPC bridge。默认对 generation 设置独立的 V8 old/young heap 与 stack 限额；sandbox OOM、崩溃或取消后拒绝停止时，只终止对应 worker thread，并将 generation 标记为 failed。
+
+这个机制是**内存与执行故障隔离**，不是 OS security sandbox。Extension worker 仍与 Control 处于同一进程身份和操作系统权限下，也仍可使用被 Node 暴露的 filesystem、network、process 等 API。Capability 是 public ABI grant，不应被解释成针对恶意 Extension 的系统调用权限边界。需要运行不受信任代码时，仍必须使用独立进程/OS sandbox。
 
 ## 不属于 public ABI 的能力
 

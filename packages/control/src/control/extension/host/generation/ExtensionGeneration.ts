@@ -1,6 +1,6 @@
 import type { ExtensionActivation, ExtensionManifest } from "@portable-devshell/extension";
 
-export type ExtensionGenerationState = "active" | "disposed" | "dispose-failed" | "draining" | "ready";
+export type ExtensionGenerationState = "active" | "disposed" | "dispose-failed" | "draining" | "faulted" | "ready";
 
 export interface ExtensionGenerationOptions {
     activation: ExtensionActivation;
@@ -23,6 +23,7 @@ export class ExtensionGeneration {
     readonly #dispose: () => Promise<void>;
     readonly #retirement: Promise<void>;
     #disposeError?: unknown;
+    #faultError?: unknown;
     #disposeStarted = false;
     #inFlight = 0;
     #rejectRetirement!: (error: unknown) => void;
@@ -47,6 +48,10 @@ export class ExtensionGeneration {
 
     get inFlight(): number {
         return this.#inFlight;
+    }
+
+    get faultError(): unknown {
+        return this.#faultError;
     }
 
     get state(): ExtensionGenerationState {
@@ -79,8 +84,14 @@ export class ExtensionGeneration {
         };
     }
 
+    fault(error: unknown): void {
+        if (this.#state !== "ready" && this.#state !== "active") return;
+        this.#faultError = error;
+        this.#state = "faulted";
+    }
+
     retire(): Promise<void> {
-        if (this.#state === "ready" || this.#state === "active") {
+        if (this.#state === "ready" || this.#state === "active" || this.#state === "faulted") {
             this.#state = "draining";
             this.#maybeDispose();
         }
