@@ -75,6 +75,7 @@ async function runRealWorkerSmoke(): Promise<void> {
     const workspaceMarkerName = "cli-real-workspace-marker.txt";
     const workspaceMarker = "portable-devshell-cli-real-workspace";
     await writeFile(join(workspacePath, workspaceMarkerName), workspaceMarker, "utf8");
+    await writeFile(join(workspacePath, "secret.env"), "PASSWORD = 'real-secret-value-123'\n", "utf8");
     const skillDirectory = join(workspacePath, ".agents", "skills", "review");
     const skillContent = "# Review\n\nRead and review the requested changes.\n";
     await mkdir(skillDirectory, { recursive: true });
@@ -114,6 +115,10 @@ async function runRealWorkerSmoke(): Promise<void> {
 
         assert.equal(await runCli(["status"]), 0);
         assert.match(stdout.flush(), /instances: 1/u);
+
+        assert.equal(await runCli(["secret", "scan", workspacePath]), 0);
+        const secretScan = JSON.parse(stdout.flush()) as { findings: Array<{ line: number; path: string; type: string }> };
+        assert.deepEqual(secretScan.findings, [{ line: 1, path: "secret.env", type: "generic_assignment" }]);
 
         assert.equal(await runCli(["instance", "list"]), 0);
         assert.match(stdout.flush(), /aromatic-pc\tstopped/u);

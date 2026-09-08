@@ -44,6 +44,7 @@ const workspacePackages = new Map([
     ["@portable-devshell/shared/browser", new URL("../../shared/src/browser.ts", import.meta.url).href],
     ["@portable-devshell/shared/transport/frame", new URL("../../shared/src/transport/protocol/Frame.ts", import.meta.url).href],
     ["@portable-devshell/skill-extension", new URL("../../skill-extension/src/index.ts", import.meta.url).href],
+    ["@portable-devshell/secret-extension", new URL("../../secret-extension/src/index.ts", import.meta.url).href],
     ["@portable-devshell/tui", new URL("../../tui/src/index.ts", import.meta.url).href],
     ["@portable-devshell/tui/testing", new URL("../../tui/src/testing.ts", import.meta.url).href]
 ]);

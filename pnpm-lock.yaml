@@ -82,6 +82,9 @@ importers:
       '@portable-devshell/control':
         specifier: workspace:*
         version: file:packages/control(react@18.3.1)
+      '@portable-devshell/secret-extension':
+        specifier: workspace:*
+        version: link:../secret-extension
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
@@ -91,9 +94,6 @@ importers:
       '@portable-devshell/tui':
         specifier: workspace:*
         version: link:../tui
-      ignore:
-        specifier: 7.0.5
-        version: 7.0.5
 
   packages/control:
     dependencies:
@@ -216,6 +216,12 @@ importers:
       diff:
         specifier: 8.0.4
         version: 8.0.4
+
+  packages/secret-extension:
+    dependencies:
+      '@portable-devshell/extension':
+        specifier: workspace:*
+        version: link:../extension
 
   packages/shared: {}
 

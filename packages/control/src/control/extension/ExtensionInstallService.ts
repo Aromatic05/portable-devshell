@@ -34,7 +34,7 @@ import {
 } from "./ExtensionInstallPolicy.js";
 import type { ExtensionPathLayout } from "./ExtensionPathLayout.js";
 
-export const BUILTIN_EXTENSION_IDS = new Set(["skill"]);
+export const BUILTIN_EXTENSION_IDS = new Set(["secret", "skill"]);
 
 export interface ExtensionInstallHost {
     activateGeneration(id: string, generation: string): Promise<void>;

@@ -18,6 +18,7 @@
             "@portable-devshell/agent-provider-pi": ["./packages/agent-provider-pi/src/index.ts"],
             "@portable-devshell/agent-extension": ["./packages/agent-extension/src/index.ts"],
             "@portable-devshell/skill-extension": ["./packages/skill-extension/src/index.ts"],
+            "@portable-devshell/secret-extension": ["./packages/secret-extension/src/index.ts"],
             "@portable-devshell/control": ["./packages/control/src/index.ts"],
             "@portable-devshell/control/testing": ["./packages/control/src/testing.ts"],
             "@portable-devshell/mcp": ["./packages/mcp/src/index.ts"],

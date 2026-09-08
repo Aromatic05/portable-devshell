@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { scanSecrets } from "../../src/command/secret/CliCommandSecretScan.ts";
+import { scanSecrets } from "../../src/builtin/SecretScan.ts";
 
 test("secret scan reports locations without returning secret values", async () => {
     const root = await mkdtemp(join(tmpdir(), "devshell-secret-scan-"));
@@ -80,6 +80,28 @@ test("secret scan applies glob and result limits", async () => {
         assert.equal(result.findings[0]?.path.endsWith(".env"), true);
         assert.equal(result.truncated, true);
     } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+
+test("secret scan fallback honors nested ignore scopes and negation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "devshell-secret-fallback-nested-"));
+    const previousPath = process.env.PATH;
+    try {
+        await mkdir(join(root, "nested"));
+        await writeFile(join(root, ".gitignore"), "*.env\n!keep.env\n", "utf8");
+        await writeFile(join(root, "drop.env"), "PASSWORD = 'drop-secret-value'\n", "utf8");
+        await writeFile(join(root, "keep.env"), "PASSWORD = 'keep-secret-value'\n", "utf8");
+        await writeFile(join(root, "nested", ".ignore"), "local.txt\n", "utf8");
+        await writeFile(join(root, "nested", "local.txt"), "PASSWORD = 'nested-secret-value'\n", "utf8");
+        await writeFile(join(root, "nested", "visible.txt"), "PASSWORD = 'visible-secret-value'\n", "utf8");
+        process.env.PATH = "";
+
+        const result = await scanSecrets({ cwd: root, limit: 20 });
+        assert.deepEqual(result.findings.map((finding) => finding.path), ["keep.env", "nested/visible.txt"]);
+    } finally {
+        process.env.PATH = previousPath;
         await rm(root, { force: true, recursive: true });
     }
 });

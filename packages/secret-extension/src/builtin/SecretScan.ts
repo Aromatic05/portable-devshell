@@ -1,9 +1,12 @@
 import { spawnSync } from "node:child_process";
 import { open, readFile, readdir, stat } from "node:fs/promises";
 import { matchesGlob, relative, resolve } from "node:path";
-import ignore, { type Ignore } from "ignore";
 
-import { CliRenderError } from "../../render/CliRenderError.js";
+import {
+    ignoredBySecretScopes,
+    parseSecretIgnore,
+    type SecretIgnoreScope
+} from "./SecretIgnore.js";
 
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 1_000;
@@ -15,11 +18,6 @@ const FALLBACK_SKIP_DIRECTORIES = new Set([".git", ".hg", ".svn", "node_modules"
 interface DiscoveryResult {
     files: string[];
     truncated: boolean;
-}
-
-interface IgnoreScope {
-    directory: string;
-    matcher: Ignore;
 }
 
 const SECRET_PATTERNS: ReadonlyArray<{ pattern: RegExp; type: string }> = [
@@ -50,24 +48,11 @@ export interface SecretScanOptions {
     limit?: number;
 }
 
-export async function executeSecretCommand(
-    args: readonly string[],
-    output: { write(chunk: string): void }
-): Promise<void> {
-    if (args.length === 0 || ["help", "--help", "-h"].includes(args[0] ?? "")) {
-        output.write(`${renderSecretUsage()}\n`);
-        return;
-    }
-    if (args[0] !== "scan") throw CliRenderError.usage(`Unknown secret command: ${args[0]}\n\n${renderSecretUsage()}`);
-    const options = parseSecretScanArgs(args.slice(1));
-    output.write(`${JSON.stringify(await scanSecrets(options), null, 2)}\n`);
-}
-
 export async function scanSecrets(options: SecretScanOptions): Promise<SecretScanResult> {
     const limit = normalizeLimit(options.limit);
     const base = resolve(options.cwd);
     const baseStat = await stat(base);
-    if (!baseStat.isDirectory()) throw CliRenderError.usage(`secret scan path must be a directory: ${options.cwd}`);
+    if (!baseStat.isDirectory()) throw new TypeError(`secret scan path must be a directory: ${options.cwd}`);
 
     const discovery = discoverWithRipgrep(base) ?? await discoverFallback(base);
     const findings: SecretScanFinding[] = [];
@@ -94,49 +79,9 @@ export async function scanSecrets(options: SecretScanOptions): Promise<SecretSca
     return { findings, truncated: discovery.truncated, truncatedFiles };
 }
 
-export function renderSecretUsage(): string {
-    return [
-        "Usage:",
-        "  devshell secret scan [directory] [--glob <pattern>] [--limit <n>]",
-        "",
-        "Reports secret type, path, and line only; matched secret values are never returned."
-    ].join("\n");
-}
-
-function parseSecretScanArgs(args: readonly string[]): SecretScanOptions {
-    let cwd = ".";
-    let glob: string | undefined;
-    let limit: number | undefined;
-    let pathSeen = false;
-    for (let index = 0; index < args.length; index += 1) {
-        const argument = args[index]!;
-        if (argument === "--glob") {
-            glob = requireOption(args, ++index, "--glob");
-            continue;
-        }
-        if (argument === "--limit") {
-            const value = requireOption(args, ++index, "--limit");
-            if (!/^\d+$/u.test(value)) throw CliRenderError.usage("secret scan --limit requires a positive integer");
-            limit = Number(value);
-            continue;
-        }
-        if (argument.startsWith("-")) throw CliRenderError.usage(`Unknown secret scan option: ${argument}`);
-        if (pathSeen) throw CliRenderError.usage("secret scan accepts at most one directory");
-        cwd = argument;
-        pathSeen = true;
-    }
-    return { cwd, ...(glob === undefined ? {} : { glob }), ...(limit === undefined ? {} : { limit }) };
-}
-
-function requireOption(args: readonly string[], index: number, option: string): string {
-    const value = args[index];
-    if (value === undefined || value.length === 0) throw CliRenderError.usage(`secret scan ${option} requires a value`);
-    return value;
-}
-
 function normalizeLimit(limit: number | undefined): number {
     const value = limit ?? DEFAULT_LIMIT;
-    if (!Number.isSafeInteger(value) || value < 1) throw CliRenderError.usage("secret scan limit must be a positive integer");
+    if (!Number.isSafeInteger(value) || value < 1) throw new TypeError("secret scan limit must be a positive integer");
     return Math.min(value, MAX_LIMIT);
 }
 
@@ -167,7 +112,7 @@ async function walk(
     base: string,
     directory: string,
     files: string[],
-    inheritedScopes: readonly IgnoreScope[],
+    inheritedScopes: readonly SecretIgnoreScope[],
     state: { scanned: number; truncated: boolean }
 ): Promise<void> {
     if (state.truncated) return;
@@ -182,12 +127,12 @@ async function walk(
         const path = resolve(directory, entry.name);
         const displayPath = normalizePath(relative(base, path));
         if (entry.isDirectory()) {
-            if (!FALLBACK_SKIP_DIRECTORIES.has(entry.name) && !ignoredByScopes(path, true, scopes)) {
+            if (!FALLBACK_SKIP_DIRECTORIES.has(entry.name) && !ignoredBySecretScopes(path, true, scopes)) {
                 await walk(base, path, files, scopes, state);
             }
             continue;
         }
-        if (!entry.isFile() || ignoredByScopes(path, false, scopes)) continue;
+        if (!entry.isFile() || ignoredBySecretScopes(path, false, scopes)) continue;
         files.push(displayPath);
         if (files.length >= MAX_DISCOVERED_FILES) {
             state.truncated = true;
@@ -196,30 +141,16 @@ async function walk(
     }
 }
 
-async function readIgnoreScope(directory: string): Promise<IgnoreScope | undefined> {
-    const patterns: string[] = [];
+async function readIgnoreScope(directory: string): Promise<SecretIgnoreScope | undefined> {
+    const rules = [];
     for (const name of [".gitignore", ".ignore"]) {
         try {
-            patterns.push(await readFile(resolve(directory, name), "utf8"));
+            rules.push(...parseSecretIgnore(await readFile(resolve(directory, name), "utf8")));
         } catch (error) {
             if (!isEnoent(error)) throw error;
         }
     }
-    if (patterns.length === 0) return undefined;
-    return { directory, matcher: ignore().add(patterns) };
-}
-
-function ignoredByScopes(path: string, directory: boolean, scopes: readonly IgnoreScope[]): boolean {
-    let ignored = false;
-    for (const scope of scopes) {
-        let candidate = normalizePath(relative(scope.directory, path));
-        if (candidate === ".." || candidate.startsWith("../")) continue;
-        if (directory) candidate += "/";
-        const result = scope.matcher.test(candidate);
-        if (result.ignored) ignored = true;
-        else if (result.unignored) ignored = false;
-    }
-    return ignored;
+    return rules.length === 0 ? undefined : { directory, rules };
 }
 
 async function readCandidate(path: string): Promise<{ text: string; truncated: boolean } | undefined> {
