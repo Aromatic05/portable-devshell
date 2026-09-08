@@ -918,6 +918,10 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
                 }
             },
             listTools: () => [bashRun],
+            async prepareExtensionResource(input) {
+                assert.deepEqual(input, { collection: "managed", extensionId: "skill" });
+                return { directory: "/home/demo/.devshell/demo-local/extensions/skill/resources/managed" };
+            },
             async prepareWorkspace(workspace) {
                 const temporaryDirectory = preparedTemporaryDirectories.length === 0
                     ? "/tmp/demo-local-123456"
@@ -981,7 +985,10 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
     assert.equal(environmentRecord.ctxId, "ctx-created");
     assert.equal(typeof environmentRecord.expiresAt, "string");
     assert.equal(environmentRecord.instance, "demo-local");
-    assert.equal(environmentRecord.skillsDirectory, "/home/demo/.devshell/skill");
+    assert.equal(
+        environmentRecord.skillsDirectory,
+        "/home/demo/.devshell/demo-local/extensions/skill/resources/managed"
+    );
     assert.equal(environmentRecord.workspace, "/projects/alpha");
     assert.equal("projectMemoryAgentFile" in environmentRecord, false);
     assert.equal("projectMemoryDirectory" in environmentRecord, false);

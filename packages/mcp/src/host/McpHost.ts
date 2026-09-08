@@ -32,6 +32,10 @@ interface WorkerInstanceLike {
     ): Promise<JsonValue>;
     hasToolSchemaCache?(): boolean;
     listTools(): ToolDefinition[];
+    prepareExtensionResource?(input: {
+        collection: string;
+        extensionId: string;
+    }): Promise<{ directory: string }>;
     prepareWorkspace?(workspace: string): Promise<{
         projectMemoryAgentFile: string;
         projectMemoryDirectory: string;

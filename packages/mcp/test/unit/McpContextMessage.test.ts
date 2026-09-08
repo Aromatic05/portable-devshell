@@ -333,6 +333,9 @@ function createHarness(
             workspace: "/workspace",
         },
         listTools: () => [bashTool],
+        async prepareExtensionResource() {
+            return { directory: "/workspace/.devshell/alpha/extensions/skill/resources/managed" };
+        },
         async prepareWorkspace(workspace: string) {
             return {
                 projectMemoryAgentFile: `${workspace}/AGENT.md`,

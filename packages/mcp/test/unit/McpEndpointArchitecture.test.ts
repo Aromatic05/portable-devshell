@@ -145,6 +145,10 @@ function createWorker(options: {
         },
         hasToolSchemaCache: () => options.cached ?? false,
         listTools: () => options.tools ?? [workerTool()],
+        async prepareExtensionResource(input: { collection: string; extensionId: string }) {
+            assert.deepEqual(input, { collection: "managed", extensionId: "skill" });
+            return { directory: "/home/demo/.devshell/demo-local/extensions/skill/resources/managed" };
+        },
         async prepareWorkspace(workspace: string) {
             return {
                 projectMemoryAgentFile: `${workspace}/AGENT.md`,

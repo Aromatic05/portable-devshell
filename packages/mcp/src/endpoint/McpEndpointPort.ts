@@ -30,6 +30,10 @@ export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
         context: ToolCallContext,
         signal?: AbortSignal,
     ): Promise<JsonValue>;
+    prepareExtensionResource?(input: {
+        collection: string;
+        extensionId: string;
+    }): Promise<{ directory: string }>;
     prepareWorkspace?(workspace: string): Promise<{
         projectMemoryAgentFile: string;
         projectMemoryDirectory: string;

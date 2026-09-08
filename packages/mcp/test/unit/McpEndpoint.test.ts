@@ -1674,6 +1674,10 @@ function createWorkerHarness(options?: {
                     shell: { executable: "/bin/bash", kind: "bash", version: "5" }
                 }
             },
+            async prepareExtensionResource(input: { collection: string; extensionId: string }) {
+                assert.deepEqual(input, { collection: "managed", extensionId: "skill" });
+                return { directory: "/home/demo/.devshell/demo/extensions/skill/resources/managed" };
+            },
             async prepareWorkspace(workspace: string) {
                 return {
                     projectMemoryAgentFile: `${workspace}/.devshell/AGENT.md`,

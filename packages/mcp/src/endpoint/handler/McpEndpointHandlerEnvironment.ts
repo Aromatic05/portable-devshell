@@ -1,5 +1,3 @@
-import { posix, win32 } from "node:path";
-
 import {
     createError,
     errorCodes,
@@ -98,7 +96,7 @@ export class McpEndpointHandlerEnvironment {
             throw contextWorkspaceRequired(record.ctxId, this.#instanceName);
         }
 
-        const { alerts, environment, prepared } =
+        const { alerts, environment, prepared, skillsDirectory } =
             await this.#prepareEnvironment(workspace);
         try {
             if (
@@ -161,7 +159,7 @@ export class McpEndpointHandlerEnvironment {
                               projectMemoryDirectory: prepared.projectMemoryDirectory,
                           }
                         : {}),
-                    skillsDirectory: managedSkillDirectory(environment),
+                    skillsDirectory,
                     temporaryDirectory: prepared.temporaryDirectory,
                     workspace: prepared.workspace,
                 }),
@@ -345,10 +343,18 @@ export class McpEndpointHandlerEnvironment {
         if (prepareWorkspace === undefined) {
             throw workspacePreparationUnavailable(this.#instanceName);
         }
+        const prepareExtensionResource = this.#worker.prepareExtensionResource;
+        if (prepareExtensionResource === undefined) {
+            throw extensionResourcePreparationUnavailable(this.#instanceName);
+        }
         const prepared = await prepareWorkspace.call(this.#worker, workspace);
+        const skills = await prepareExtensionResource.call(this.#worker, {
+            collection: "managed",
+            extensionId: "skill",
+        });
         const alerts = (await this.#worker.readAlerts(prepared.workspace))
             .advice;
-        return { alerts, environment, prepared };
+        return { alerts, environment, prepared, skillsDirectory: skills.directory };
     }
 
     async #rollbackUndisclosedContext(
@@ -443,7 +449,11 @@ function workspacePreparationUnavailable(instance: string) {
     });
 }
 
-function managedSkillDirectory(environment: import("../McpEndpointPort.js").McpEndpointEnvironmentHandshake): string {
-    const path = environment.platform.os === "windows" ? win32 : posix;
-    return path.join(environment.homeDirectory, ".devshell", "skill");
+function extensionResourcePreparationUnavailable(instance: string) {
+    return createError({
+        code: errorCodes.coreWorkerHandshakeFailed,
+        details: { instance },
+        message: `Extension resource preparation is unavailable for ${instance}.`,
+        retryable: true,
+    });
 }
