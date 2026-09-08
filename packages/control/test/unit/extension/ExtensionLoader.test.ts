@@ -10,8 +10,8 @@ import type {
     ExtensionWorkerSession
 } from "@portable-devshell/extension";
 
-import { ExtensionLoader, type ExtensionWorkerRuntime } from "../../../src/control/extension/ExtensionLoader.ts";
-import { ExtensionPathLayout } from "../../../src/control/extension/ExtensionPathLayout.ts";
+import { ExtensionLoader, type ExtensionWorkerRuntime } from "../../../src/control/extension/host/generation/ExtensionLoader.ts";
+import { ExtensionPathLayout } from "../../../src/control/extension/state/ExtensionPathLayout.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 interface LoaderHarness {

@@ -1,4 +1,4 @@
-export { CONTROL_BUILTIN_EXTENSION_SOURCES_ENV } from "./control/extension/ExtensionBuiltinSource.js";
+export { CONTROL_BUILTIN_EXTENSION_SOURCES_ENV } from "./control/extension/install/ExtensionBuiltinSource.js";
 export {
     ControlDaemon,
     controlDaemonModulePath

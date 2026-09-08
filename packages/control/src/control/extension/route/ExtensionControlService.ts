@@ -7,8 +7,8 @@ import type {
 } from "@portable-devshell/shared";
 
 import type { ExtensionControlPort } from "./ExtensionRouteModule.js";
-import type { ExtensionHost } from "./ExtensionHost.js";
-import type { ExtensionInstallService } from "./ExtensionInstallService.js";
+import type { ExtensionHost } from "../host/ExtensionHost.js";
+import type { ExtensionInstallService } from "../install/ExtensionInstallService.js";
 
 export class ExtensionControlService implements ExtensionControlPort {
     readonly #host: ExtensionHost;

@@ -24,6 +24,9 @@
         },
         {
             "path": "./packages/tui"
+        },
+        {
+            "path": "./extensions/mcp"
         }
     ]
 }

@@ -12,7 +12,7 @@ import {
     type PrefixRouteModuleDefinition
 } from "@portable-devshell/shared";
 
-import { routeModule } from "../../route/ControlRouteFactory.js";
+import { routeModule } from "../../../route/ControlRouteFactory.js";
 
 export interface ExtensionControlPort {
     disable(id: string): Promise<void>;

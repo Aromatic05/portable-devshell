@@ -5,11 +5,11 @@ import { controlRemoteRpcPath, controlWebBasePath } from "@portable-devshell/sha
 import { McpOAuthProtectedResource, type HttpHost } from "@portable-devshell/mcp";
 import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
 import { DebugPatchService } from "../../control/debug/DebugPatchService.js";
-import { ExtensionControlService } from "../../control/extension/ExtensionControlService.js";
-import type { ExtensionHost } from "../../control/extension/ExtensionHost.js";
-import { ExtensionInstallService } from "../../control/extension/ExtensionInstallService.js";
-import type { ExtensionPathLayout } from "../../control/extension/ExtensionPathLayout.js";
-import type { BuiltinExtensionSource } from "../../control/extension/ExtensionBuiltinSource.js";
+import { ExtensionControlService } from "../../control/extension/route/ExtensionControlService.js";
+import type { ExtensionHost } from "../../control/extension/host/ExtensionHost.js";
+import { ExtensionInstallService } from "../../control/extension/install/ExtensionInstallService.js";
+import type { ExtensionPathLayout } from "../../control/extension/state/ExtensionPathLayout.js";
+import type { BuiltinExtensionSource } from "../../control/extension/install/ExtensionBuiltinSource.js";
 import { OperationalOverviewService } from "../../control/overview/OperationalOverviewService.js";
 import { ControlChannelServer, type ControlChannelListener } from "../../server/channel/ControlChannelServer.js";
 import { ControlSocketListener } from "../../server/socket/ControlSocketListener.js";

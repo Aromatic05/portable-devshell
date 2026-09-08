@@ -6,11 +6,11 @@ import test from "node:test";
 import { EXTENSION_API_VERSION } from "@portable-devshell/extension";
 
 import { createArtifactDirectoryArchive } from "../../../src/control/artifact/host/ArtifactHostArchive.ts";
-import { ExtensionHost } from "../../../src/control/extension/ExtensionHost.ts";
-import { ExtensionInstallService } from "../../../src/control/extension/ExtensionInstallService.ts";
-import { ExtensionLoader } from "../../../src/control/extension/ExtensionLoader.ts";
-import { ExtensionPathLayout } from "../../../src/control/extension/ExtensionPathLayout.ts";
-import { ExtensionRegistryStore } from "../../../src/control/extension/ExtensionRegistryStore.ts";
+import { ExtensionHost } from "../../../src/control/extension/host/ExtensionHost.ts";
+import { ExtensionInstallService } from "../../../src/control/extension/install/ExtensionInstallService.ts";
+import { ExtensionLoader } from "../../../src/control/extension/host/generation/ExtensionLoader.ts";
+import { ExtensionPathLayout } from "../../../src/control/extension/state/ExtensionPathLayout.ts";
+import { ExtensionRegistryStore } from "../../../src/control/extension/state/ExtensionRegistryStore.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 interface Harness {
@@ -116,6 +116,38 @@ test("builtin Extension identity cannot be replaced by ordinary install", async 
         h.service.installBuiltin("unknown", source),
         /is not a registered builtin/u
     );
+});
+
+test("builtin Extension generation resolves host runtime dependencies without copying node_modules", async (t) => {
+    const h = await harness(t);
+    const source = await h.source("builtin-mcp-host-dependency", {
+        body: [
+            'import { Client } from "@modelcontextprotocol/client";',
+            "export async function activate() {",
+            "  return {",
+            "    rpc: { dependency: async () => ({ clientType: typeof Client }) },",
+            "    dispose() {}",
+            "  };",
+            "}",
+            ""
+        ].join("\n"),
+        id: "mcp"
+    });
+
+    const installed = await h.service.installBuiltin("mcp", source);
+
+    assert.equal(installed.state, "active");
+    assert.deepEqual(await h.host.dispatchRpc("mcp", "dependency", undefined, {
+        localOwner: false,
+        requestId: "host-dependency",
+        signal: new AbortController().signal
+    }), { clientType: "function" });
+    assert.equal(await exists(join(
+        h.paths.generationDirectory("mcp", installed.activeGeneration!),
+        "node_modules",
+        "@modelcontextprotocol",
+        "client"
+    )), false);
 });
 
 test("Extension install accepts the hardened .dsext archive and ignores mtime in generation identity", async (t) => {

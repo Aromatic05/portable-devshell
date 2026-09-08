@@ -3,8 +3,8 @@ import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ExtensionPathLayout } from "../../../src/control/extension/ExtensionPathLayout.ts";
-import { ExtensionRegistryStore } from "../../../src/control/extension/ExtensionRegistryStore.ts";
+import { ExtensionPathLayout } from "../../../src/control/extension/state/ExtensionPathLayout.ts";
+import { ExtensionRegistryStore } from "../../../src/control/extension/state/ExtensionRegistryStore.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 test("Extension registry persists selected and last-known-good generations atomically", async (t) => {

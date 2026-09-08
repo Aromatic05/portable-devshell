@@ -6,8 +6,6 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ConfigBatchUpdateRequest, ConfigDraft } from "@portable-devshell/shared";
-import { secretExtensionDirectory } from "@portable-devshell/secret-extension";
-import { skillExtensionDirectory } from "@portable-devshell/skill-extension";
 
 import { isCliEntrypoint } from "./CliEntrypoint.js";
 import { CliParser, type CliParsedCommand } from "./CliParser.js";
@@ -40,6 +38,7 @@ import { renderInstanceTodo } from "./render/instance/CliRenderInstanceTodo.js";
 import { renderToolCall } from "./render/tool/CliRenderToolCall.js";
 import { renderToolResult } from "./render/tool/CliRenderToolResult.js";
 import { CliWizardInstanceCreate } from "./wizard/CliWizardInstanceCreate.js";
+import { cliBuiltinExtensionSources } from "./extension/CliBuiltinExtensionSources.js";
 
 export interface CliMainOptions {
     createCliClients?: () => CliClients;
@@ -438,10 +437,7 @@ export class CliMain {
         return new lifecycle.ControlLifecycleManager({
             daemonModulePath: control.controlDaemonModulePath(),
             env: {
-                [control.CONTROL_BUILTIN_EXTENSION_SOURCES_ENV]: JSON.stringify([
-                    { id: "skill", path: skillExtensionDirectory() },
-                    { id: "secret", path: secretExtensionDirectory() }
-                ])
+                [control.CONTROL_BUILTIN_EXTENSION_SOURCES_ENV]: JSON.stringify(cliBuiltinExtensionSources())
             },
             homeDirectory: this.#homeDirectory,
             xdgRuntimeDir: this.#xdgRuntimeDir

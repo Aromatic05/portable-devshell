@@ -11,13 +11,13 @@ import {
     type ExtensionRuntimeRecord
 } from "@portable-devshell/shared";
 
-import { ExtensionGeneration, type ExtensionGenerationLease } from "./ExtensionGeneration.js";
+import { ExtensionGeneration, type ExtensionGenerationLease } from "./generation/ExtensionGeneration.js";
 import {
     cloneExtensionRegistry,
     type ExtensionRegistryEntry,
     type ExtensionRegistrySnapshot
-} from "./ExtensionRegistryModel.js";
-import type { ExtensionRegistryPort } from "./ExtensionRegistryStore.js";
+} from "../state/ExtensionRegistryModel.js";
+import type { ExtensionRegistryPort } from "../state/ExtensionRegistryStore.js";
 
 export interface ExtensionGenerationLoader {
     load(id: string, generation: string): Promise<ExtensionGeneration>;

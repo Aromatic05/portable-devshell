@@ -15,7 +15,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlRuntime } from "../../src/testing.ts";
-import { ExtensionPathLayout } from "../../src/control/extension/ExtensionPathLayout.ts";
+import { ExtensionPathLayout } from "../../src/control/extension/state/ExtensionPathLayout.ts";
 import { ControlRuntimeMcp } from "../../src/composition/runtime/ControlRuntimeMcp.ts";
 import { ControlRuntimeState } from "../../src/composition/runtime/ControlRuntimeState.ts";
 import { createTestIpcPath, ipcEndpointAcceptsConnections } from "../../../../test/TestPlatformSupport.ts";

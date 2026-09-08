@@ -13,8 +13,8 @@ import type { Duplex } from "node:stream";
 
 import type { HttpHost } from "@portable-devshell/mcp";
 
-import type { ExtensionHost } from "../../../control/extension/ExtensionHost.js";
-import type { ExtensionPathLayout } from "../../../control/extension/ExtensionPathLayout.js";
+import type { ExtensionHost } from "../../../control/extension/host/ExtensionHost.js";
+import type { ExtensionPathLayout } from "../../../control/extension/state/ExtensionPathLayout.js";
 import type { ControlWebSessionService } from "../ControlWebSessionService.js";
 
 export interface ExtensionWebGatewayOptions {

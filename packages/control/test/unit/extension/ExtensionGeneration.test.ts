@@ -5,7 +5,7 @@ import { EXTENSION_API_VERSION } from "@portable-devshell/extension";
 
 import type { ExtensionActivation, ExtensionManifest } from "@portable-devshell/extension";
 
-import { ExtensionGeneration } from "../../../src/control/extension/ExtensionGeneration.ts";
+import { ExtensionGeneration } from "../../../src/control/extension/host/generation/ExtensionGeneration.ts";
 
 const manifest: ExtensionManifest = {
     apiVersion: EXTENSION_API_VERSION,

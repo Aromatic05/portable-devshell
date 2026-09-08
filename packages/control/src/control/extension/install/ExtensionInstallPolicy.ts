@@ -1,4 +1,4 @@
-import type { ArtifactDirectoryArchiveLimits } from "../artifact/host/ArtifactHostArchive.js";
+import type { ArtifactDirectoryArchiveLimits } from "../../artifact/host/ArtifactHostArchive.js";
 
 export interface ExtensionInstallLimits extends ArtifactDirectoryArchiveLimits {
     maxCompressedBytes: number;

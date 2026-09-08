@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createArtifactDirectoryArchive } from "../../../src/control/artifact/host/ArtifactHostArchive.ts";
-import { ExtensionAssetCapabilityControl } from "../../../src/control/extension/ExtensionAssetCapabilityControl.ts";
+import { ExtensionAssetCapabilityControl } from "../../../src/control/extension/host/generation/capability/ExtensionAssetCapabilityControl.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 async function harness(t: test.TestContext) {

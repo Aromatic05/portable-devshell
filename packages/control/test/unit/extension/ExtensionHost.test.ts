@@ -5,13 +5,13 @@ import { EXTENSION_API_VERSION } from "@portable-devshell/extension";
 
 import type { ExtensionActivation, ExtensionManifest, ExtensionRpcHandler } from "@portable-devshell/extension";
 
-import { ExtensionGeneration } from "../../../src/control/extension/ExtensionGeneration.ts";
-import { ExtensionHost, type ExtensionGenerationLoader } from "../../../src/control/extension/ExtensionHost.ts";
+import { ExtensionGeneration } from "../../../src/control/extension/host/generation/ExtensionGeneration.ts";
+import { ExtensionHost, type ExtensionGenerationLoader } from "../../../src/control/extension/host/ExtensionHost.ts";
 import {
     cloneExtensionRegistry,
     type ExtensionRegistrySnapshot
-} from "../../../src/control/extension/ExtensionRegistryModel.ts";
-import type { ExtensionRegistryPort } from "../../../src/control/extension/ExtensionRegistryStore.ts";
+} from "../../../src/control/extension/state/ExtensionRegistryModel.ts";
+import type { ExtensionRegistryPort } from "../../../src/control/extension/state/ExtensionRegistryStore.ts";
 
 class MemoryRegistry implements ExtensionRegistryPort {
     value: ExtensionRegistrySnapshot;

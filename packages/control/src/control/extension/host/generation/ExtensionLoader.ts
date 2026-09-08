@@ -16,11 +16,12 @@ import {
     type ExtensionWorkerCapability
 } from "@portable-devshell/extension";
 
-import type { InstanceRegistry } from "../instance/registry/InstanceRegistry.js";
-import { ExtensionAssetCapabilityControl } from "./ExtensionAssetCapabilityControl.js";
+import type { InstanceRegistry } from "../../../instance/registry/InstanceRegistry.js";
+import { ExtensionAssetCapabilityControl } from "./capability/ExtensionAssetCapabilityControl.js";
 import { ExtensionGeneration } from "./ExtensionGeneration.js";
-import { ExtensionPathLayout } from "./ExtensionPathLayout.js";
-import { ExtensionWorkerCapabilityControl } from "./ExtensionWorkerCapabilityControl.js";
+import { sharedExtensionHostModuleResolver, type ExtensionHostModuleResolver } from "./ExtensionHostModuleResolver.js";
+import { ExtensionPathLayout } from "../../state/ExtensionPathLayout.js";
+import { ExtensionWorkerCapabilityControl } from "./capability/ExtensionWorkerCapabilityControl.js";
 
 export const CORE_EXTENSION_RESERVED_IDS = new Set([
     "approval",
@@ -59,6 +60,7 @@ export interface ExtensionLoaderOptions {
     }) => ExtensionAssetCapability;
     importer?: (url: string) => Promise<unknown>;
     instances: InstanceRegistry;
+    hostModuleResolver?: ExtensionHostModuleResolver;
     loggerFactory?: (id: string, generation: string) => ExtensionLogger;
     paths: ExtensionPathLayout;
     reservedIds?: ReadonlySet<string>;
@@ -72,6 +74,7 @@ export interface ExtensionLoaderOptions {
 export class ExtensionLoader {
     readonly #assetsFactory?: ExtensionLoaderOptions["assetsFactory"];
     readonly #importer: (url: string) => Promise<unknown>;
+    readonly #hostModuleResolver: ExtensionHostModuleResolver;
     readonly #instances: InstanceRegistry;
     readonly #loggerFactory: (id: string, generation: string) => ExtensionLogger;
     readonly #paths: ExtensionPathLayout;
@@ -81,6 +84,7 @@ export class ExtensionLoader {
     constructor(options: ExtensionLoaderOptions) {
         this.#assetsFactory = options.assetsFactory;
         this.#importer = options.importer ?? (async (url) => await import(url) as unknown);
+        this.#hostModuleResolver = options.hostModuleResolver ?? sharedExtensionHostModuleResolver();
         this.#instances = options.instances;
         this.#loggerFactory = options.loggerFactory ?? ((id, generation) => consoleExtensionLogger(id, generation));
         this.#paths = options.paths;
@@ -148,6 +152,7 @@ export class ExtensionLoader {
             worker
         });
 
+        const hostModules = this.#hostModuleResolver.register(codeDirectory);
         let rawActivation: unknown;
         let activation: ExtensionActivation | undefined;
         try {
@@ -157,7 +162,7 @@ export class ExtensionLoader {
             const wrapped = wrapActivation(activation, worker);
             return new ExtensionGeneration({
                 activation: wrapped,
-                dispose: async () => await disposeGeneration(activation!, worker, runtimeDirectory),
+                dispose: async () => await disposeGeneration(activation!, worker, runtimeDirectory, hostModules.release),
                 generation,
                 manifest
             });
@@ -167,6 +172,7 @@ export class ExtensionLoader {
             await disposable?.dispose().catch((cleanupError: unknown) => cleanupFailures.push(cleanupError));
             await worker.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
             await rm(runtimeDirectory, { force: true, recursive: true }).catch((cleanupError) => cleanupFailures.push(cleanupError));
+            try { hostModules.release(); } catch (cleanupError) { cleanupFailures.push(cleanupError); }
             if (cleanupFailures.length === 0) throw error;
             throw new AggregateError(
                 [error, ...cleanupFailures],
@@ -299,12 +305,14 @@ function wrapActivation(
 async function disposeGeneration(
     activation: ExtensionActivation,
     worker: ExtensionWorkerRuntime,
-    runtimeDirectory: string
+    runtimeDirectory: string,
+    releaseHostModules: () => void
 ): Promise<void> {
     const failures: unknown[] = [];
     await Promise.resolve(activation.dispose()).catch((error) => failures.push(error));
     await worker.closeAll().catch((error) => failures.push(error));
     await rm(runtimeDirectory, { force: true, recursive: true }).catch((error) => failures.push(error));
+    try { releaseHostModules(); } catch (error) { failures.push(error); }
     if (failures.length === 1) throw failures[0];
     if (failures.length > 1) throw new AggregateError(failures, "Extension generation cleanup failed.");
 }

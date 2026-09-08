@@ -10,7 +10,7 @@ import type {
 import {
     createExtensionRouteModule,
     type ExtensionControlPort
-} from "../../src/control/extension/ExtensionRouteModule.ts";
+} from "../../src/control/extension/route/ExtensionRouteModule.ts";
 
 function context(peer: "cli" | "tui" | "web", subjectKind: string): PrefixRouteContext {
     return {

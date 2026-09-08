@@ -7,22 +7,57 @@
         "jsx": "react-jsx",
         "noEmit": true,
         "paths": {
-            "@portable-devshell/extension": ["./packages/extension/src/index.ts"],
-            "@portable-devshell/shared": ["./packages/shared/src/index.ts"],
-            "@portable-devshell/shared/browser": ["./packages/shared/src/browser.ts"],
-            "@portable-devshell/shared/transport/frame": ["./packages/shared/src/transport/protocol/Frame.ts"],
-            "@portable-devshell/core": ["./packages/core/src/index.ts"],
-            "@portable-devshell/core/testing": ["./packages/core/src/testing.ts"],
-            "@portable-devshell/agent-extension": ["./extensions/agent/src/index.ts"],
-            "@portable-devshell/skill-extension": ["./extensions/skill/src/index.ts"],
-            "@portable-devshell/secret-extension": ["./extensions/secret/src/index.ts"],
-            "@portable-devshell/control": ["./packages/control/src/index.ts"],
-            "@portable-devshell/control/testing": ["./packages/control/src/testing.ts"],
-            "@portable-devshell/mcp": ["./packages/mcp/src/index.ts"],
-            "@portable-devshell/mcp/testing": ["./packages/mcp/src/testing.ts"],
-            "@portable-devshell/cli": ["./packages/cli/src/index.ts"],
-            "@portable-devshell/tui": ["./packages/tui/src/index.ts"],
-            "@portable-devshell/tui/testing": ["./packages/tui/src/testing.ts"]
+            "@portable-devshell/extension": [
+                "./packages/extension/src/index.ts"
+            ],
+            "@portable-devshell/shared": [
+                "./packages/shared/src/index.ts"
+            ],
+            "@portable-devshell/shared/browser": [
+                "./packages/shared/src/browser.ts"
+            ],
+            "@portable-devshell/shared/transport/frame": [
+                "./packages/shared/src/transport/protocol/Frame.ts"
+            ],
+            "@portable-devshell/core": [
+                "./packages/core/src/index.ts"
+            ],
+            "@portable-devshell/core/testing": [
+                "./packages/core/src/testing.ts"
+            ],
+            "@portable-devshell/agent-extension": [
+                "./extensions/agent/src/index.ts"
+            ],
+            "@portable-devshell/skill-extension": [
+                "./extensions/skill/src/index.ts"
+            ],
+            "@portable-devshell/secret-extension": [
+                "./extensions/secret/src/index.ts"
+            ],
+            "@portable-devshell/control": [
+                "./packages/control/src/index.ts"
+            ],
+            "@portable-devshell/control/testing": [
+                "./packages/control/src/testing.ts"
+            ],
+            "@portable-devshell/mcp": [
+                "./packages/mcp/src/index.ts"
+            ],
+            "@portable-devshell/mcp/testing": [
+                "./packages/mcp/src/testing.ts"
+            ],
+            "@portable-devshell/cli": [
+                "./packages/cli/src/index.ts"
+            ],
+            "@portable-devshell/tui": [
+                "./packages/tui/src/index.ts"
+            ],
+            "@portable-devshell/tui/testing": [
+                "./packages/tui/src/testing.ts"
+            ],
+            "@portable-devshell/mcp-extension": [
+                "./extensions/mcp/src/index.ts"
+            ]
         },
         "rootDir": "."
     },

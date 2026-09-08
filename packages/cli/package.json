@@ -13,7 +13,8 @@
         "@portable-devshell/shared": "workspace:*",
         "@portable-devshell/tui": "workspace:*",
         "@portable-devshell/skill-extension": "workspace:*",
-        "@portable-devshell/secret-extension": "workspace:*"
+        "@portable-devshell/secret-extension": "workspace:*",
+        "@portable-devshell/mcp-extension": "workspace:*"
     },
     "exports": {
         ".": {

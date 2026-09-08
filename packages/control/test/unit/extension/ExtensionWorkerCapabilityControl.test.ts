@@ -6,7 +6,7 @@ import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
 import {
     ExtensionWorkerCapabilityControl,
     resolveExtensionWorkerInstance
-} from "../../../src/control/extension/ExtensionWorkerCapabilityControl.ts";
+} from "../../../src/control/extension/host/generation/capability/ExtensionWorkerCapabilityControl.ts";
 
 test("Extension worker instance selection prefers one enabled local instance", () => {
     assert.equal(resolveExtensionWorkerInstance([

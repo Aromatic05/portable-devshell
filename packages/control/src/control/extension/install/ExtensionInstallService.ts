@@ -26,15 +26,15 @@ import {
 import {
     createArtifactDirectoryArchive,
     extractArtifactDirectoryArchive
-} from "../artifact/host/ArtifactHostArchive.js";
-import { CORE_EXTENSION_RESERVED_IDS } from "./ExtensionLoader.js";
+} from "../../artifact/host/ArtifactHostArchive.js";
+import { CORE_EXTENSION_RESERVED_IDS } from "../host/generation/ExtensionLoader.js";
 import {
     resolveExtensionInstallLimits,
     type ExtensionInstallLimits
 } from "./ExtensionInstallPolicy.js";
-import type { ExtensionPathLayout } from "./ExtensionPathLayout.js";
+import type { ExtensionPathLayout } from "../state/ExtensionPathLayout.js";
 
-export const BUILTIN_EXTENSION_IDS = new Set(["secret", "skill"]);
+export const BUILTIN_EXTENSION_IDS = new Set(["mcp", "secret", "skill"]);
 
 export interface ExtensionInstallHost {
     activateGeneration(id: string, generation: string): Promise<void>;

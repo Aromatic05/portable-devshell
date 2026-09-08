@@ -13,9 +13,9 @@ import type { JsonValue } from "@portable-devshell/shared";
 import {
     InstanceConnectionService,
     type InstanceConnectionLease
-} from "../instance/connection/InstanceConnectionService.js";
-import type { InstanceDescriptor } from "../instance/InstanceDescriptor.js";
-import type { InstanceRegistry } from "../instance/registry/InstanceRegistry.js";
+} from "../../../../instance/connection/InstanceConnectionService.js";
+import type { InstanceDescriptor } from "../../../../instance/InstanceDescriptor.js";
+import type { InstanceRegistry } from "../../../../instance/registry/InstanceRegistry.js";
 
 interface ExtensionWorkerConnectionPort {
     acquire(instance: string, reference: string): Promise<InstanceConnectionLease>;

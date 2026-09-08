@@ -12,7 +12,7 @@ import { createArtifactRouteModule } from "../control/artifact/route/ArtifactRou
 import type { ConfigEditorPort } from "../control/config/ConfigRouteModule.js";
 import { createConfigRouteModule } from "../control/config/ConfigRouteModule.js";
 import { createDebugRouteModule, type DebugPatchPort } from "../control/debug/DebugRouteModule.js";
-import { createExtensionRouteModule, type ExtensionControlPort } from "../control/extension/ExtensionRouteModule.js";
+import { createExtensionRouteModule, type ExtensionControlPort } from "../control/extension/route/ExtensionRouteModule.js";
 import type { InstanceCreatePort } from "../control/instance/InstanceRouteModule.js";
 import { createInstanceRouteModule } from "../control/instance/InstanceRouteModule.js";
 import type { InstanceRegistry } from "../control/instance/registry/InstanceRegistry.js";

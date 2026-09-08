@@ -1,0 +1,9 @@
+{
+    "schemaVersion": 1,
+    "apiVersion": 2,
+    "id": "mcp",
+    "name": "portable-devshell MCP Client",
+    "version": "0.1.0",
+    "entry": "index.ts",
+    "capabilities": ["command"]
+}

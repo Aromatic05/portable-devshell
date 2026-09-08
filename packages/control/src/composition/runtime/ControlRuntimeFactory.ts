@@ -1,12 +1,12 @@
 import { homedir } from "node:os";
 
 import { ControlPathHome } from "@portable-devshell/shared";
-import { ExtensionHost } from "../../control/extension/ExtensionHost.js";
-import { ExtensionAssetCapabilityControl } from "../../control/extension/ExtensionAssetCapabilityControl.js";
-import { readBuiltinExtensionSources, type BuiltinExtensionSource } from "../../control/extension/ExtensionBuiltinSource.js";
-import { ExtensionLoader } from "../../control/extension/ExtensionLoader.js";
-import { ExtensionPathLayout } from "../../control/extension/ExtensionPathLayout.js";
-import { ExtensionRegistryStore } from "../../control/extension/ExtensionRegistryStore.js";
+import { ExtensionHost } from "../../control/extension/host/ExtensionHost.js";
+import { ExtensionAssetCapabilityControl } from "../../control/extension/host/generation/capability/ExtensionAssetCapabilityControl.js";
+import { readBuiltinExtensionSources, type BuiltinExtensionSource } from "../../control/extension/install/ExtensionBuiltinSource.js";
+import { ExtensionLoader } from "../../control/extension/host/generation/ExtensionLoader.js";
+import { ExtensionPathLayout } from "../../control/extension/state/ExtensionPathLayout.js";
+import { ExtensionRegistryStore } from "../../control/extension/state/ExtensionRegistryStore.js";
 import { McpRuntimeFactory } from "../McpRuntimeFactory.js";
 import { ControlRuntimeArtifact } from "./ControlRuntimeArtifact.js";
 import { ControlRuntime } from "./ControlRuntime.js";
