@@ -48,6 +48,10 @@ export class ExtensionControlService implements ExtensionControlPort {
         return await this.#installer.install(sourcePath);
     }
 
+    async installBuiltin(id: string, sourcePath: string): Promise<ExtensionRuntimeRecord> {
+        return await this.#installer.installBuiltin(id, sourcePath);
+    }
+
     async list(): Promise<ExtensionRuntimeRecord[]> {
         return await this.#host.list();
     }

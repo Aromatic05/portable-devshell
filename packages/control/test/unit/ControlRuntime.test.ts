@@ -554,8 +554,8 @@ test("runtime installs builtin Extensions through the normal installer before op
         apiVersion: EXTENSION_API_VERSION,
         capabilities: [],
         entry: "extension.mjs",
-        id: "example",
-        name: "Example builtin",
+        id: "skill",
+        name: "Skill builtin",
         schemaVersion: 1,
         version: "1.0.0"
     })}\n`, "utf8");
@@ -569,7 +569,7 @@ test("runtime installs builtin Extensions through the normal installer before op
     let activeGeneration: string | undefined;
     const extensions = {
         async activateGeneration(id: string, generation: string) {
-            assert.equal(id, "example");
+            assert.equal(id, "skill");
             assert.equal(await ipcEndpointAcceptsConnections(socketPath), false);
             activeGeneration = generation;
         },
@@ -582,7 +582,7 @@ test("runtime installs builtin Extensions through the normal installer before op
             return activeGeneration === undefined ? [] : [{
                 activeGeneration,
                 enabled: true,
-                id: "example",
+                id: "skill",
                 retired: [],
                 selectedGeneration: activeGeneration,
                 state: "active",
@@ -600,7 +600,7 @@ test("runtime installs builtin Extensions through the normal installer before op
             service: undefined,
             async stop() {}
         } as never,
-        builtinExtensionSources: [source],
+        builtinExtensionSources: [{ id: "skill", path: source }],
         extensionPaths,
         extensions,
         instances: {
@@ -640,7 +640,7 @@ test("runtime keeps the Control channel closed when builtin Extension installati
     await mkdir(source, { recursive: true });
     const runtime = new ControlRuntime({
         artifact: { service: undefined, async stop() {} } as never,
-        builtinExtensionSources: [source],
+        builtinExtensionSources: [{ id: "skill", path: source }],
         extensionPaths: new ExtensionPathLayout({
             dataHome: join(root, "data"),
             homeDirectory: join(root, "home"),

@@ -19,7 +19,7 @@ interface Harness {
     paths: ExtensionPathLayout;
     root: string;
     service: ExtensionInstallService;
-    source(name: string, options?: { body?: string; version?: string }): Promise<string>;
+    source(name: string, options?: { body?: string; id?: string; version?: string }): Promise<string>;
 }
 
 async function harness(t: test.TestContext, limits = {}): Promise<Harness> {
@@ -55,8 +55,8 @@ async function harness(t: test.TestContext, limits = {}): Promise<Harness> {
                 apiVersion: EXTENSION_API_VERSION,
                 capabilities: ["rpc"],
                 entry: "extension.mjs",
-                id: "example",
-                name: "Example",
+                id: options.id ?? "example",
+                name: options.id === "skill" ? "Skill" : "Example",
                 schemaVersion: 1,
                 version: options.version ?? "1.0.0"
             })}\n`, "utf8");
@@ -93,6 +93,25 @@ test("Extension install materializes a directory as an immutable content-address
     const generationDirectory = h.paths.generationDirectory("example", installed.activeGeneration!);
     assert.equal((await stat(join(generationDirectory, "extension.mjs"))).isFile(), true);
     assert.equal((await readdir(h.paths.codeRoot)).some((name) => name.startsWith(".staging-")), false);
+});
+
+test("builtin Extension identity cannot be replaced by ordinary install", async (t) => {
+    const h = await harness(t);
+    const source = await h.source("builtin-skill", { id: "skill" });
+
+    await assert.rejects(h.service.install(source), /reserved for a builtin Extension/u);
+    const installed = await h.service.installBuiltin("skill", source);
+
+    assert.equal(installed.id, "skill");
+    assert.equal(installed.state, "active");
+    await assert.rejects(
+        h.service.installBuiltin("skill", await h.source("wrong-builtin", { id: "example" })),
+        /declares id example, expected skill/u
+    );
+    await assert.rejects(
+        h.service.installBuiltin("unknown", source),
+        /is not a registered builtin/u
+    );
 });
 
 test("Extension install accepts the hardened .dsext archive and ignores mtime in generation identity", async (t) => {

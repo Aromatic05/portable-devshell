@@ -34,6 +34,8 @@ import {
 } from "./ExtensionInstallPolicy.js";
 import type { ExtensionPathLayout } from "./ExtensionPathLayout.js";
 
+export const BUILTIN_EXTENSION_IDS = new Set(["skill"]);
+
 export interface ExtensionInstallHost {
     activateGeneration(id: string, generation: string): Promise<void>;
     disable(id: string): Promise<void>;
@@ -60,6 +62,17 @@ export class ExtensionInstallService {
     }
 
     async install(sourcePath: string): Promise<ExtensionRuntimeRecord> {
+        return await this.#install(sourcePath);
+    }
+
+    async installBuiltin(id: string, sourcePath: string): Promise<ExtensionRuntimeRecord> {
+        if (!BUILTIN_EXTENSION_IDS.has(id)) {
+            throw extensionInstallError(`Extension id ${id} is not a registered builtin.`);
+        }
+        return await this.#install(sourcePath, id);
+    }
+
+    async #install(sourcePath: string, builtinId?: string): Promise<ExtensionRuntimeRecord> {
         if (!isAbsolute(sourcePath)) {
             throw extensionInstallError("Extension install source must be an absolute local path.");
         }
@@ -99,7 +112,7 @@ export class ExtensionInstallService {
 
             await extractArtifactDirectoryArchive(archivePath, stagingDirectory, this.#limits);
             const manifest = await readStagedManifest(stagingDirectory);
-            assertInstallableManifest(manifest);
+            assertInstallableManifest(manifest, builtinId);
             const digest = await hashExtensionDirectory(stagingDirectory, this.#limits);
             const generation = generationName(manifest.version, digest);
             const extensionDirectory = join(this.#paths.codeRoot, manifest.id);
@@ -176,9 +189,15 @@ async function readStagedManifest(directory: string): Promise<ExtensionManifest>
     }
 }
 
-function assertInstallableManifest(manifest: ExtensionManifest): void {
+function assertInstallableManifest(manifest: ExtensionManifest, builtinId?: string): void {
     if (CORE_EXTENSION_RESERVED_IDS.has(manifest.id)) {
         throw extensionInstallError(`Extension id ${manifest.id} is reserved by portable-devshell.`);
+    }
+    if (builtinId === undefined && BUILTIN_EXTENSION_IDS.has(manifest.id)) {
+        throw extensionInstallError(`Extension id ${manifest.id} is reserved for a builtin Extension.`);
+    }
+    if (builtinId !== undefined && manifest.id !== builtinId) {
+        throw extensionInstallError(`Builtin Extension source declares id ${manifest.id}, expected ${builtinId}.`);
     }
     if (manifest.apiVersion !== EXTENSION_API_VERSION) {
         throw extensionInstallError(

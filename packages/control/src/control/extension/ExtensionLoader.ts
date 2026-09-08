@@ -36,7 +36,6 @@ export const CORE_EXTENSION_RESERVED_IDS = new Set([
     "overview",
     "restart",
     "secret",
-    "skill",
     "start",
     "status",
     "stop",

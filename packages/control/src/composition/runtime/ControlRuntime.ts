@@ -9,6 +9,7 @@ import { ExtensionControlService } from "../../control/extension/ExtensionContro
 import type { ExtensionHost } from "../../control/extension/ExtensionHost.js";
 import { ExtensionInstallService } from "../../control/extension/ExtensionInstallService.js";
 import type { ExtensionPathLayout } from "../../control/extension/ExtensionPathLayout.js";
+import type { BuiltinExtensionSource } from "../../control/extension/ExtensionBuiltinSource.js";
 import { OperationalOverviewService } from "../../control/overview/OperationalOverviewService.js";
 import { ControlChannelServer, type ControlChannelListener } from "../../server/channel/ControlChannelServer.js";
 import { ControlSocketListener } from "../../server/socket/ControlSocketListener.js";
@@ -25,7 +26,7 @@ import type { ControlRuntimeReverse } from "./ControlRuntimeReverse.js";
 
 export interface ControlRuntimeOptions {
     artifact: ControlRuntimeArtifact;
-    builtinExtensionSources?: readonly string[];
+    builtinExtensionSources?: readonly BuiltinExtensionSource[];
     extensionPaths: ExtensionPathLayout;
     extensions: ExtensionHost;
     instances: InstanceRegistry;
@@ -44,7 +45,7 @@ interface ControlWebRuntime {
 
 export class ControlRuntime {
     readonly #artifact: ControlRuntimeArtifact;
-    readonly #builtinExtensionSources: readonly string[];
+    readonly #builtinExtensionSources: readonly BuiltinExtensionSource[];
     readonly #channels: ControlChannelServer;
     readonly #debug: DebugPatchService;
     readonly #extensionControl: ExtensionControlService;
@@ -152,7 +153,7 @@ export class ControlRuntime {
             await this.#mcp.start();
             await this.#extensions.start();
             for (const source of this.#builtinExtensionSources) {
-                await this.#extensionControl.install(source);
+                await this.#extensionControl.installBuiltin(source.id, source.path);
             }
             await this.#channels.start();
         } catch (error) {
