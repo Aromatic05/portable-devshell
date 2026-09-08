@@ -1,11 +1,11 @@
 import type { ExtensionCapability, ExtensionManifest } from "./ExtensionApi.js";
 
-export const EXTENSION_API_VERSION = 1;
+export const EXTENSION_API_VERSION = 2;
 export const EXTENSION_MANIFEST_SCHEMA_VERSION = 1;
 
 const capabilities = new Set<ExtensionCapability>([
+    "assets",
     "command",
-    "data",
     "instance-lifecycle",
     "rpc",
     "web",

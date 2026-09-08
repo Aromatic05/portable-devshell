@@ -45,6 +45,7 @@ CLI、TUI、Web 与 MCP 都是 Control 的 client。它们不各自维护真实 
 packages/shared   wire types、error、schema、公共数据结构
 packages/core     WorkerInstance、RPC、provider-neutral 工具调用链
 packages/control  daemon、配置、instance 生命周期、持久状态、审计
+packages/extension  Control Extension public ABI
 packages/mcp      MCP endpoint、Context、Workspace、OAuth、HTTP integration
 packages/cli      Control CLI、instance/config/debug/skill/artifact 管理
 packages/tui      终端 UI

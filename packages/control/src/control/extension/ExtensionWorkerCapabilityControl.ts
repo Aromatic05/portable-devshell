@@ -5,6 +5,7 @@ import type {
     ExtensionToolDefinition,
     ExtensionWorkerCapability,
     ExtensionWorkerOpenInput,
+    ExtensionWorkerEnvironment,
     ExtensionWorkerSession
 } from "@portable-devshell/extension";
 import type { JsonValue } from "@portable-devshell/shared";
@@ -67,6 +68,7 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
         const reference = `extension-worker:${this.#extensionId}:${this.#generation}:${sessionId}`;
         const lease = await this.#connections.acquire(instance, reference);
         try {
+            const environment = extensionWorkerEnvironment(lease.worker.handshake);
             const prepared = await lease.worker.prepareWorkspace(input.workspace);
             let closed = false;
             const close = async () => {
@@ -82,6 +84,7 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
                 }
             };
             const session: ExtensionWorkerSession = {
+                environment,
                 instance,
                 workspace: prepared.workspace,
                 callTool: async (toolName, toolInput, options = {}) => await lease.worker.callTool(
@@ -144,6 +147,30 @@ export function resolveExtensionWorkerInstance(
             ? "No enabled devshell instance is available for this Extension."
             : "Multiple enabled devshell instances are available and no unique local instance can be selected."
     );
+}
+
+function extensionWorkerEnvironment(
+    handshake: InstanceDescriptor["worker"]["handshake"]
+): ExtensionWorkerEnvironment {
+    if (handshake === undefined) {
+        throw new Error("Extension worker session opened without a Worker handshake.");
+    }
+    return Object.freeze({
+        homeDirectory: handshake.homeDirectory,
+        platform: Object.freeze({
+            arch: handshake.platform.arch,
+            ...(handshake.platform.distribution === undefined ? {} : {
+                distribution: Object.freeze({ ...handshake.platform.distribution })
+            }),
+            os: handshake.platform.os,
+            ...(handshake.platform.packageManager === undefined ? {} : {
+                packageManager: handshake.platform.packageManager
+            }),
+            ...(handshake.platform.shell === undefined ? {} : {
+                shell: Object.freeze({ ...handshake.platform.shell })
+            })
+        })
+    });
 }
 
 function toExtensionToolDefinition(tool: {

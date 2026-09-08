@@ -1,6 +1,7 @@
 import type {
     ExtensionCommandResult,
     ExtensionInstanceRetireEvent,
+    ExtensionInvocationContext,
     ExtensionJsonValue
 } from "@portable-devshell/extension";
 import {
@@ -74,7 +75,7 @@ export class ExtensionHost {
         id: string,
         operation: string,
         input: ExtensionJsonValue | undefined,
-        context: { localOwner: boolean; requestId: string; signal: AbortSignal }
+        context: ExtensionInvocationContext
     ): Promise<ExtensionJsonValue> {
         const lease = this.acquire(id);
         try {
@@ -89,7 +90,7 @@ export class ExtensionHost {
     async dispatchCommand(
         id: string,
         argv: readonly string[],
-        context: { localOwner: boolean; requestId: string; signal: AbortSignal }
+        context: ExtensionInvocationContext
     ): Promise<ExtensionCommandResult> {
         const lease = this.acquire(id);
         try {

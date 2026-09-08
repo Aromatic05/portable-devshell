@@ -26,7 +26,8 @@ test("Agent Extension manifest declares only the generic capabilities it contrib
     ));
     assert.equal(manifest.id, "agent");
     assert.equal(manifest.entry, "dist/index.js");
-    assert.deepEqual(manifest.capabilities, ["command", "data", "instance-lifecycle", "rpc", "web", "worker"]);
+    assert.equal(manifest.apiVersion, 2);
+    assert.deepEqual(manifest.capabilities, ["command", "assets", "instance-lifecycle", "rpc", "web", "worker"]);
 });
 
 test("Agent Extension start opens one canonical Worker session and owns it until stop", async () => {
@@ -197,17 +198,26 @@ function extensionContext(options: {
     events: string[];
 }): ExtensionContext {
     return {
-        data: {
+        assets: {
             async installBundle(sourcePath) {
-                options.events.push(`data.install:${sourcePath}`);
+                options.events.push(`assets.install:${sourcePath}`);
                 return {
                     directory: "/data/extensions/agent/bundles/sha256-test",
                     generation: `sha256-${"a".repeat(64)}`
                 };
             },
+            async installDirectory() { throw new Error("not used"); },
+            async listBundles() { return []; },
             async removeBundle(generation) {
-                options.events.push(`data.remove:${generation}`);
-            }
+                options.events.push(`assets.remove:${generation}`);
+            },
+            async resolveBundle(generation) {
+                return {
+                    directory: `/data/extensions/agent/bundles/${generation}`,
+                    generation
+                };
+            },
+            async transferBundle() { throw new Error("not used"); }
         },
         generation: "0.1.0-test",
         id: "agent",
@@ -230,6 +240,10 @@ function extensionContext(options: {
                 const workspace = options.canonicalWorkspace ?? input.workspace;
                 let closed = false;
                 const session: ExtensionWorkerSession = {
+                    environment: {
+                        homeDirectory: "/home/dev",
+                        platform: { arch: "x64", os: "linux" },
+                    },
                     instance: input.instance ?? "worker-a",
                     workspace,
                     async callTool(toolName, _input, callOptions = {}) {

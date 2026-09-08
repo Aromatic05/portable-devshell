@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { EXTENSION_API_VERSION } from "@portable-devshell/extension";
+
 import type { ExtensionActivation, ExtensionManifest } from "@portable-devshell/extension";
 
 import { ExtensionGeneration } from "../../../src/control/extension/ExtensionGeneration.ts";
 
 const manifest: ExtensionManifest = {
-    apiVersion: 1,
+    apiVersion: EXTENSION_API_VERSION,
     capabilities: ["rpc"],
     entry: "extension.mjs",
     id: "example",

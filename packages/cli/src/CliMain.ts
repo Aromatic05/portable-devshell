@@ -299,7 +299,9 @@ export class CliMain {
                 this.#writeJson(await this.#clients.extension.reload(command.extensionId));
                 return;
             case "extension.command": {
-                const result = await this.#clients.extension.command(command.extensionId, command.args);
+                const result = await this.#clients.extension.command(command.extensionId, command.args, {
+                    workingDirectory: process.cwd()
+                });
                 if (result.kind === "text") {
                     const text = result.text ?? "";
                     this.#stdout.write(text.endsWith("\n") ? text : `${text}\n`);

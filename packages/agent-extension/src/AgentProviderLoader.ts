@@ -80,7 +80,7 @@ export class AgentProviderLoader {
 
     async inspectBundle(generation: string): Promise<AgentProviderManifest> {
         assertProviderSegment(generation, "generation");
-        const generationDirectory = this.generationDirectory(generation);
+        const generationDirectory = await this.#generationDirectory(generation);
         await assertPlainDirectory(generationDirectory, `Agent provider generation ${generation}`);
         const manifestPath = join(generationDirectory, "devshell-agent-provider.json");
         await assertPlainFile(manifestPath, `Agent provider manifest ${generation}`);
@@ -95,7 +95,7 @@ export class AgentProviderLoader {
 
     async loadGeneration(id: string, generation: string): Promise<LoadedAgentProvider> {
         const manifest = await this.inspectGeneration(id, generation);
-        const generationDirectory = this.generationDirectory(generation);
+        const generationDirectory = await this.#generationDirectory(generation);
         const entryPath = resolveContainedPath(generationDirectory, manifest.entry);
         await assertPlainFile(entryPath, `Agent provider entry ${id}/${generation}`);
         const module = readProviderModule(await this.#importer(pathToFileURL(entryPath).href), id);
@@ -111,9 +111,13 @@ export class AgentProviderLoader {
         return { generation, manifest, provider };
     }
 
-    generationDirectory(generation: string): string {
+    async #generationDirectory(generation: string): Promise<string> {
         assertProviderSegment(generation, "generation");
-        return join(this.#context.paths.dataDirectory, "bundles", generation);
+        const bundle = await this.#context.assets.resolveBundle(generation);
+        if (bundle === undefined) {
+            throw new Error(`Agent provider generation ${generation} is not installed.`);
+        }
+        return bundle.directory;
     }
 }
 

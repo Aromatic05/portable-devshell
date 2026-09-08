@@ -1,13 +1,13 @@
 {
     "schemaVersion": 1,
-    "apiVersion": 1,
+    "apiVersion": 2,
     "id": "agent",
     "name": "portable-devshell Agent",
     "version": "0.1.0",
     "entry": "dist/index.js",
     "capabilities": [
         "command",
-        "data",
+        "assets",
         "instance-lifecycle",
         "rpc",
         "web",

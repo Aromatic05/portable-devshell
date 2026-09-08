@@ -49,7 +49,7 @@ export class AgentProviderManager {
     }
 
     async install(sourcePath: string): Promise<AgentProviderManagementRecord> {
-        const bundle = await this.#context.data.installBundle(sourcePath);
+        const bundle = await this.#context.assets.installBundle(sourcePath);
         const manifest = await this.#loader.inspectBundle(bundle.generation);
         const loaded = await this.#loader.loadGeneration(manifest.id, bundle.generation);
         const before = await this.#store.read();
@@ -123,7 +123,7 @@ export class AgentProviderManager {
             entry.lastKnownGoodGeneration
         ].filter((generation): generation is string => generation !== undefined))];
         const settled = await Promise.allSettled(generations.map(async (generation) => {
-            await this.#context.data.removeBundle(generation);
+            await this.#context.assets.removeBundle(generation);
         }));
         const failures = settled.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
         if (failures.length === 1) throw failures[0];

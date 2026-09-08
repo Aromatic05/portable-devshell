@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 
 import { ControlPathHome } from "@portable-devshell/shared";
 import { ExtensionHost } from "../../control/extension/ExtensionHost.js";
+import { ExtensionAssetCapabilityControl } from "../../control/extension/ExtensionAssetCapabilityControl.js";
 import { ExtensionLoader } from "../../control/extension/ExtensionLoader.js";
 import { ExtensionPathLayout } from "../../control/extension/ExtensionPathLayout.js";
 import { ExtensionRegistryStore } from "../../control/extension/ExtensionRegistryStore.js";
@@ -41,6 +42,12 @@ export class ControlRuntimeFactory {
             const extensionPaths = new ExtensionPathLayout({ homeDirectory: options.state.homeDirectory });
             const extensions = new ExtensionHost({
                 loader: new ExtensionLoader({
+                    assetsFactory: ({ allowed, dataDirectory, extensionId }) => new ExtensionAssetCapabilityControl({
+                        allowed,
+                        dataDirectory,
+                        extensionId,
+                        transfer: async (input) => await artifact.transferExtensionAsset(extensionId, input)
+                    }),
                     instances: options.state.instances,
                     paths: extensionPaths
                 }),

@@ -3,6 +3,7 @@ import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
+import { EXTENSION_API_VERSION } from "@portable-devshell/extension";
 import type {
     ExtensionActivation,
     ExtensionContext,
@@ -43,7 +44,7 @@ async function createHarness(): Promise<LoaderHarness> {
             const directory = paths.generationDirectory(id, generation);
             await mkdir(directory, { recursive: true });
             await writeFile(join(directory, "devshell-extension.json"), `${JSON.stringify({
-                apiVersion: input.apiVersion ?? 1,
+                apiVersion: input.apiVersion ?? EXTENSION_API_VERSION,
                 capabilities: input.capabilities ?? ["rpc"],
                 entry: "extension.mjs",
                 id: input.manifestId ?? id,
@@ -65,6 +66,10 @@ function fakeWorker(events: string[]): ExtensionWorkerRuntime {
             return {
                 async callTool() { return {}; },
                 async close() {},
+                environment: {
+                    homeDirectory: "/home/test",
+                    platform: { arch: "x64", os: "linux" },
+                },
                 instance: "local",
                 listTools: () => [],
                 workspace: "/repo"
@@ -74,7 +79,7 @@ function fakeWorker(events: string[]): ExtensionWorkerRuntime {
     };
 }
 
-test("Extension loader returns a ready invisible candidate with narrow immutable context", async (t) => {
+test("Extension loader returns a ready invisible candidate with narrow immutable v2 context", async (t) => {
     const harness = await createHarness();
     t.after(harness.cleanup);
     const { id, generation } = await harness.writeGeneration({ capabilities: ["rpc", "worker"] });
@@ -122,7 +127,7 @@ test("Extension loader returns a ready invisible candidate with narrow immutable
 test("Extension loader rejects incompatible API and reserved ids before importing code", async (t) => {
     const harness = await createHarness();
     t.after(harness.cleanup);
-    const incompatible = await harness.writeGeneration({ apiVersion: 2 });
+    const incompatible = await harness.writeGeneration({ apiVersion: EXTENSION_API_VERSION + 1 });
     let imports = 0;
     const loader = new ExtensionLoader({
         importer: async () => {
@@ -133,7 +138,7 @@ test("Extension loader rejects incompatible API and reserved ids before importin
         paths: harness.paths
     });
 
-    await assert.rejects(loader.load(incompatible.id, incompatible.generation), /API version 2/u);
+    await assert.rejects(loader.load(incompatible.id, incompatible.generation), new RegExp(`API version ${EXTENSION_API_VERSION + 1}`, "u"));
     await assert.rejects(loader.load("status", "1.0.0-a"), /reserved/u);
     assert.equal(imports, 0);
 });

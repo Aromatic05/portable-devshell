@@ -7,18 +7,18 @@ import {
     parseExtensionManifest
 } from "../../src/index.ts";
 
-test("Extension manifest parser accepts the v1 contract", () => {
+test("Extension manifest parser accepts the v2 contract", () => {
     assert.deepEqual(parseExtensionManifest({
         apiVersion: EXTENSION_API_VERSION,
-        capabilities: ["rpc", "worker", "web", "data"],
+        capabilities: ["rpc", "worker", "web", "assets"],
         entry: "./extension.mjs",
         id: "agent",
         name: "Agent",
         schemaVersion: EXTENSION_MANIFEST_SCHEMA_VERSION,
         version: "0.1.0"
     }), {
-        apiVersion: 1,
-        capabilities: ["rpc", "worker", "web", "data"],
+        apiVersion: 2,
+        capabilities: ["rpc", "worker", "web", "assets"],
         entry: "./extension.mjs",
         id: "agent",
         name: "Agent",
@@ -29,7 +29,7 @@ test("Extension manifest parser accepts the v1 contract", () => {
 
 test("Extension manifest parser rejects invalid ids, escaping entry paths and duplicate capabilities", () => {
     const base = {
-        apiVersion: 1,
+        apiVersion: EXTENSION_API_VERSION,
         capabilities: ["rpc"],
         entry: "./extension.mjs",
         id: "example",
@@ -44,7 +44,7 @@ test("Extension manifest parser rejects invalid ids, escaping entry paths and du
 
 test("Extension manifest parser rejects unknown fields and unsupported schema versions", () => {
     const base = {
-        apiVersion: 1,
+        apiVersion: EXTENSION_API_VERSION,
         capabilities: [],
         entry: "extension.mjs",
         id: "example",

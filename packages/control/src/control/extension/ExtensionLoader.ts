@@ -7,7 +7,7 @@ import {
     parseExtensionManifest,
     type ExtensionActivation,
     type ExtensionContext,
-    type ExtensionDataCapability,
+    type ExtensionAssetCapability,
     type ExtensionInstanceRetireEvent,
     type ExtensionJsonValue,
     type ExtensionLogger,
@@ -17,7 +17,7 @@ import {
 } from "@portable-devshell/extension";
 
 import type { InstanceRegistry } from "../instance/registry/InstanceRegistry.js";
-import { ExtensionDataCapabilityControl } from "./ExtensionDataCapabilityControl.js";
+import { ExtensionAssetCapabilityControl } from "./ExtensionAssetCapabilityControl.js";
 import { ExtensionGeneration } from "./ExtensionGeneration.js";
 import { ExtensionPathLayout } from "./ExtensionPathLayout.js";
 import { ExtensionWorkerCapabilityControl } from "./ExtensionWorkerCapabilityControl.js";
@@ -53,12 +53,12 @@ export interface ExtensionWorkerRuntime extends ExtensionWorkerCapability {
 }
 
 export interface ExtensionLoaderOptions {
-    dataFactory?: (input: {
+    assetsFactory?: (input: {
         allowed: boolean;
         dataDirectory: string;
         extensionId: string;
         generation: string;
-    }) => ExtensionDataCapability;
+    }) => ExtensionAssetCapability;
     importer?: (url: string) => Promise<unknown>;
     instances: InstanceRegistry;
     loggerFactory?: (id: string, generation: string) => ExtensionLogger;
@@ -72,7 +72,7 @@ export interface ExtensionLoaderOptions {
 }
 
 export class ExtensionLoader {
-    readonly #dataFactory?: ExtensionLoaderOptions["dataFactory"];
+    readonly #assetsFactory?: ExtensionLoaderOptions["assetsFactory"];
     readonly #importer: (url: string) => Promise<unknown>;
     readonly #instances: InstanceRegistry;
     readonly #loggerFactory: (id: string, generation: string) => ExtensionLogger;
@@ -81,7 +81,7 @@ export class ExtensionLoader {
     readonly #workerFactory?: ExtensionLoaderOptions["workerFactory"];
 
     constructor(options: ExtensionLoaderOptions) {
-        this.#dataFactory = options.dataFactory;
+        this.#assetsFactory = options.assetsFactory;
         this.#importer = options.importer ?? (async (url) => await import(url) as unknown);
         this.#instances = options.instances;
         this.#loggerFactory = options.loggerFactory ?? ((id, generation) => consoleExtensionLogger(id, generation));
@@ -119,13 +119,13 @@ export class ExtensionLoader {
             mkdir(stateDirectory, { mode: 0o700, recursive: true })
         ]);
 
-        const data = this.#dataFactory?.({
-            allowed: manifest.capabilities.includes("data"),
+        const assets = this.#assetsFactory?.({
+            allowed: manifest.capabilities.includes("assets"),
             dataDirectory,
             extensionId: id,
             generation
-        }) ?? new ExtensionDataCapabilityControl({
-            allowed: manifest.capabilities.includes("data"),
+        }) ?? new ExtensionAssetCapabilityControl({
+            allowed: manifest.capabilities.includes("assets"),
             dataDirectory,
             extensionId: id
         });
@@ -141,7 +141,7 @@ export class ExtensionLoader {
             instances: this.#instances
         });
         const context: ExtensionContext = Object.freeze({
-            data,
+            assets,
             generation,
             id,
             logger: this.#loggerFactory(id, generation),

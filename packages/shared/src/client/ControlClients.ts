@@ -145,7 +145,11 @@ export interface ControlClients {
     };
     extension: {
         call(extensionId: string, operation: string, input?: JsonValue, signal?: AbortSignal): Promise<JsonValue>;
-        command(extensionId: string, argv: readonly string[], signal?: AbortSignal): Promise<ExtensionCommandWireResult>;
+        command(
+            extensionId: string,
+            argv: readonly string[],
+            options?: { signal?: AbortSignal; workingDirectory?: string }
+        ): Promise<ExtensionCommandWireResult>;
         disable(extensionId: string): Promise<ExtensionRuntimeRecord>;
         enable(extensionId: string): Promise<ExtensionRuntimeRecord>;
         get(extensionId: string): Promise<ExtensionRuntimeRecord>;
@@ -321,9 +325,15 @@ export function createControlClients(
                 signal,
                 "Extension call was aborted."
             ),
-            command: async (extensionId, argv, signal) => await requestWithAbort(
-                connection.request("@control", "extension", "command", { extensionId, argv: [...argv] }),
-                signal,
+            command: async (extensionId, argv, commandOptions = {}) => await requestWithAbort(
+                connection.request("@control", "extension", "command", {
+                    extensionId,
+                    argv: [...argv],
+                    ...(commandOptions.workingDirectory === undefined ? {} : {
+                        workingDirectory: commandOptions.workingDirectory
+                    })
+                }),
+                commandOptions.signal,
                 "Extension command was aborted."
             ),
             disable: (extensionId) => extension.request("disable", { extensionId }),

@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { createError, errorCodes } from "@portable-devshell/shared";
+import type { ExtensionAssetTransferResult } from "@portable-devshell/extension";
 
 import { ArtifactHttpRoute, artifactShareRoute } from "../../control/artifact/route/ArtifactHttpRoute.js";
 import { ArtifactHostBridge } from "../../control/artifact/host/ArtifactHostBridge.js";
@@ -21,6 +23,7 @@ export class ControlRuntimeArtifact {
     readonly #controlPaths: ControlPathHome;
     readonly #homeDirectory: string;
     readonly #instances: InstanceRegistry;
+    readonly #extensionAssetAuthorities = new Set<string>();
     #bridge?: ArtifactHostBridge;
     #service?: ArtifactService;
 
@@ -65,9 +68,66 @@ export class ControlRuntimeArtifact {
         this.#bridge = undefined;
     }
 
+    async transferExtensionAsset(
+        extensionId: string,
+        input: {
+            overwrite?: boolean;
+            signal?: AbortSignal;
+            sourcePath: string;
+            target: { instance: string; path: string; workspace: string };
+        }
+    ): Promise<ExtensionAssetTransferResult> {
+        input.signal?.throwIfAborted();
+        const authority = `@extension-asset:${randomUUID()}`;
+        this.#extensionAssetAuthorities.add(authority);
+        try {
+            const started = await this.service.startTransfer({
+                instance: "host",
+                operation: "start",
+                ...(input.overwrite === undefined ? {} : { overwrite: input.overwrite }),
+                sourcePath: input.sourcePath,
+                sourceWorkspace: input.sourcePath,
+                targetInstance: input.target.instance,
+                targetPath: input.target.path,
+                targetWorkspace: input.target.workspace
+            }, authority);
+            const transferId = started.transfer.transferId;
+            const abort = () => {
+                void this.service.cancelTransfer(transferId).catch(() => undefined);
+            };
+            input.signal?.addEventListener("abort", abort, { once: true });
+            try {
+                const completed = await this.service.waitForTransfer(transferId);
+                input.signal?.throwIfAborted();
+                if (completed.status !== "completed") {
+                    throw new Error(
+                        completed.failure?.message
+                            ?? `Extension ${extensionId} asset transfer ${transferId} ended with status ${completed.status}.`
+                    );
+                }
+                return Object.freeze({
+                    transferId,
+                    transferredBytes: completed.transferredBytes
+                });
+            } finally {
+                input.signal?.removeEventListener("abort", abort);
+            }
+        } finally {
+            this.#extensionAssetAuthorities.delete(authority);
+        }
+    }
+
     #resolveEndpoint(name: string, authorityInstance?: string) {
         if (name !== "host") return this.#instances.get(name)?.worker;
         if (authorityInstance === undefined || this.#bridge === undefined) return undefined;
+        if (this.#extensionAssetAuthorities.has(authorityInstance)) {
+            return this.#bridge.endpointFor({
+                appendControlEvent: async () => undefined,
+                authorityInstance,
+                provider: "local",
+                securityMode: "disabled"
+            });
+        }
         const authority = this.#instances.get(authorityInstance);
         if (authority === undefined) return undefined;
         const snapshot = authority.worker.snapshot();

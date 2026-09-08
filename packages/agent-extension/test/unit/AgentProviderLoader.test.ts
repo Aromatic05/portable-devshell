@@ -17,9 +17,15 @@ async function harness(t: test.TestContext) {
     const errors: string[] = [];
     await mkdir(stateDirectory, { recursive: true });
     const context = {
-        data: {
+        assets: {
             async installBundle() { throw new Error("not used"); },
-            async removeBundle() {}
+            async installDirectory() { throw new Error("not used"); },
+            async listBundles() { return []; },
+            async removeBundle() {},
+            async resolveBundle(generation: string) {
+                return { directory: join(dataDirectory, "bundles", generation), generation };
+            },
+            async transferBundle() { throw new Error("not used"); }
         },
         generation: "agent-generation-a",
         id: "agent",

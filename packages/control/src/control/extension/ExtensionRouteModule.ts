@@ -1,3 +1,6 @@
+import { isAbsolute } from "node:path";
+
+import type { ExtensionInvocationContext } from "@portable-devshell/extension";
 import {
     createError,
     errorCodes,
@@ -16,13 +19,13 @@ export interface ExtensionControlPort {
     command(
         id: string,
         argv: readonly string[],
-        context: { localOwner: boolean; requestId: string; signal: AbortSignal }
+        context: ExtensionInvocationContext
     ): Promise<ExtensionCommandWireResult>;
     call(
         id: string,
         operation: string,
         input: JsonValue | undefined,
-        context: { localOwner: boolean; requestId: string; signal: AbortSignal }
+        context: ExtensionInvocationContext
     ): Promise<JsonValue>;
     enable(id: string): Promise<void>;
     install(sourcePath: string): Promise<ExtensionRuntimeRecord>;
@@ -52,13 +55,24 @@ export function createExtensionRouteModule(port: ExtensionControlPort): PrefixRo
         command: async (request, context) => {
             requireCliCommand(context);
             const input = readCommand(request.payload);
+            const localOwner = isLocalOwnerCli(context);
+            if (input.workingDirectory !== undefined && !localOwner) {
+                throw createError({
+                    code: errorCodes.controlExtensionAccessDenied,
+                    message: "Extension command workingDirectory is restricted to the local owner CLI.",
+                    retryable: false
+                });
+            }
             return assertCommandResult(await port.command(
                 input.extensionId,
                 input.argv,
                 {
-                    localOwner: isLocalOwnerCli(context),
+                    localOwner,
                     requestId: context.requestId,
-                    signal: context.signal
+                    signal: context.signal,
+                    ...(input.workingDirectory === undefined ? {} : {
+                        workingDirectory: input.workingDirectory
+                    })
                 }
             ), input.extensionId) as unknown as JsonValue;
         },
@@ -139,13 +153,27 @@ function readCall(payload: JsonValue | undefined): {
     };
 }
 
-function readCommand(payload: JsonValue | undefined): { argv: string[]; extensionId: string } {
+function readCommand(payload: JsonValue | undefined): {
+    argv: string[];
+    extensionId: string;
+    workingDirectory?: string;
+} {
     const value = readRecord(payload, "extension.command");
-    assertOnlyKeys(value, ["argv", "extensionId"], "extension.command");
+    assertOnlyKeys(value, ["argv", "extensionId", "workingDirectory"], "extension.command");
     if (!Array.isArray(value.argv) || value.argv.some((candidate) => typeof candidate !== "string")) {
         throw invalid("extension.command argv must be an array of strings.");
     }
-    return { argv: [...value.argv] as string[], extensionId: readId(value.extensionId) };
+    if (
+        value.workingDirectory !== undefined &&
+        (typeof value.workingDirectory !== "string" || !isAbsolute(value.workingDirectory))
+    ) {
+        throw invalid("extension.command workingDirectory must be an absolute path.");
+    }
+    return {
+        argv: [...value.argv] as string[],
+        extensionId: readId(value.extensionId),
+        ...(value.workingDirectory === undefined ? {} : { workingDirectory: value.workingDirectory })
+    };
 }
 
 function readExtensionId(payload: JsonValue | undefined): string {

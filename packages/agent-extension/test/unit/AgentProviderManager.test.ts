@@ -21,15 +21,26 @@ async function harness(t: test.TestContext) {
     const generations = new Map<string, string>();
     const removed: string[] = [];
     const context: ExtensionContext = {
-        data: {
+        assets: {
             async installBundle(sourcePath) {
                 const generation = generations.get(sourcePath);
                 if (generation === undefined) throw new Error(`Unknown fixture bundle: ${sourcePath}`);
                 return { directory: join(dataDirectory, "bundles", generation), generation };
             },
+            async installDirectory() { throw new Error("not used"); },
+            async listBundles() {
+                return [...new Set(generations.values())].map((generation) => ({
+                    directory: join(dataDirectory, "bundles", generation),
+                    generation
+                }));
+            },
             async removeBundle(generation) {
                 removed.push(generation);
-            }
+            },
+            async resolveBundle(generation) {
+                return { directory: join(dataDirectory, "bundles", generation), generation };
+            },
+            async transferBundle() { throw new Error("not used"); }
         },
         generation: "agent-generation",
         id: "agent",
@@ -44,6 +55,10 @@ async function harness(t: test.TestContext) {
         worker: {
             async openSession(input) {
                 return {
+                    environment: {
+                        homeDirectory: "/home/dev",
+                        platform: { arch: "x64", os: "linux" },
+                    },
                     instance: input.instance ?? "worker-a",
                     workspace: input.workspace,
                     async callTool() { return {}; },

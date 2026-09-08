@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { EXTENSION_API_VERSION } from "@portable-devshell/extension";
+
 import type { ExtensionActivation, ExtensionManifest, ExtensionRpcHandler } from "@portable-devshell/extension";
 
 import { ExtensionGeneration } from "../../../src/control/extension/ExtensionGeneration.ts";
@@ -29,7 +31,7 @@ class MemoryRegistry implements ExtensionRegistryPort {
 
 function manifest(id: string, generation: string): ExtensionManifest {
     return {
-        apiVersion: 1,
+        apiVersion: EXTENSION_API_VERSION,
         capabilities: ["rpc"],
         entry: "extension.mjs",
         id,

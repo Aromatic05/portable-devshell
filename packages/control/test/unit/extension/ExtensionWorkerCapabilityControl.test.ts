@@ -38,6 +38,20 @@ test("Extension worker session uses the audited WorkerInstance call path and gen
     const released: Array<{ instance: string; reference: string }> = [];
     const closedToolSessions: string[] = [];
     const worker = {
+        handshake: {
+            capabilities: { cancel: true, streaming: true, tools: true },
+            homeDirectory: "/home/dev",
+            instance: "local",
+            platform: {
+                arch: "x64",
+                distribution: { id: "arch", name: "Arch Linux" },
+                os: "linux",
+                packageManager: "pacman",
+                shell: { executable: "/bin/bash", kind: "bash", version: "5.3" }
+            },
+            protocolVersion: 5,
+            workerVersion: "0.7.0"
+        },
         async callTool(
             toolName: string,
             input: JsonValue,
@@ -95,6 +109,16 @@ test("Extension worker session uses the audited WorkerInstance call path and gen
 
     assert.equal(session.instance, "local");
     assert.equal(session.workspace, "/canonical");
+    assert.deepEqual(session.environment, {
+        homeDirectory: "/home/dev",
+        platform: {
+            arch: "x64",
+            distribution: { id: "arch", name: "Arch Linux" },
+            os: "linux",
+            packageManager: "pacman",
+            shell: { executable: "/bin/bash", kind: "bash", version: "5.3" }
+        },
+    });
     assert.deepEqual(session.listTools(), [{
         description: "Read a file",
         inputSchema: { type: "object" },
@@ -148,6 +172,14 @@ test("Extension worker capability refuses undeclared access before acquiring an 
 test("Extension worker instance retirement closes only matching sessions", async () => {
     const releases: string[] = [];
     const workers = new Map<string, {
+        handshake: {
+            capabilities: { cancel: boolean; streaming: boolean; tools: boolean };
+            homeDirectory: string;
+            instance: string;
+            platform: { arch: string; os: string };
+            protocolVersion: number;
+            workerVersion: string;
+        };
         callTool(): Promise<JsonValue>;
         listTools(): never[];
         prepareWorkspace(workspace: string): Promise<{ projectMemoryAgentFile: string; projectMemoryDirectory: string; temporaryDirectory: string; workspace: string }>;
@@ -155,6 +187,14 @@ test("Extension worker instance retirement closes only matching sessions", async
     }>();
     for (const instance of ["one", "two"]) {
         workers.set(instance, {
+            handshake: {
+                capabilities: { cancel: true, streaming: true, tools: true },
+                homeDirectory: `/${instance}/home`,
+                instance,
+                platform: { arch: "x64", os: "linux" },
+                protocolVersion: 5,
+                workerVersion: "0.7.0"
+            },
             async callTool() { return {}; },
             listTools() { return []; },
             async prepareWorkspace(workspace) {

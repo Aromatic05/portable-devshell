@@ -3,6 +3,8 @@ import { access, mkdir, readFile, readdir, rm, stat, utimes, writeFile } from "n
 import { join } from "node:path";
 import test from "node:test";
 
+import { EXTENSION_API_VERSION } from "@portable-devshell/extension";
+
 import { createArtifactDirectoryArchive } from "../../../src/control/artifact/host/ArtifactHostArchive.ts";
 import { ExtensionHost } from "../../../src/control/extension/ExtensionHost.ts";
 import { ExtensionInstallService } from "../../../src/control/extension/ExtensionInstallService.ts";
@@ -50,7 +52,7 @@ async function harness(t: test.TestContext, limits = {}): Promise<Harness> {
             const source = join(root, name);
             await mkdir(source, { recursive: true });
             await writeFile(join(source, "devshell-extension.json"), `${JSON.stringify({
-                apiVersion: 1,
+                apiVersion: EXTENSION_API_VERSION,
                 capabilities: ["rpc"],
                 entry: "extension.mjs",
                 id: "example",

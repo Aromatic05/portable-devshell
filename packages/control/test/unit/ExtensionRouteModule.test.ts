@@ -42,7 +42,7 @@ function port(events: string[] = []): ExtensionControlPort {
             return { input: input ?? null };
         },
         async command(id, argv, invocation) {
-            events.push(`command:${id}:${argv.join("|")}:${invocation.requestId}:${invocation.localOwner}`);
+            events.push(`command:${id}:${argv.join("|")}:${invocation.requestId}:${invocation.localOwner}:${invocation.workingDirectory ?? ""}`);
             return { kind: "text", text: "ok" };
         },
         async disable(id) {
@@ -124,8 +124,16 @@ test("Extension command dispatch is CLI-only while lifecycle mutations require l
     assert.deepEqual(await command.handle({
         id: "1a",
         name: "command",
-        payload: { argv: ["provider", "list"], extensionId: "example" }
+        payload: { argv: ["provider", "list"], extensionId: "example", workingDirectory: "/repo" }
     }, context("cli", "local-owner")), { kind: "text", text: "ok" });
+    await assert.rejects(
+        async () => await command.handle({
+            id: "1b",
+            name: "command",
+            payload: { argv: [], extensionId: "example", workingDirectory: "/repo" }
+        }, context("cli", "bearer")),
+        /workingDirectory is restricted to the local owner CLI/iu
+    );
     await assert.rejects(
         async () => await command.handle({
             id: "2",
@@ -159,8 +167,8 @@ test("Extension command dispatch is CLI-only while lifecycle mutations require l
         { id: "example", purged: true, removed: true }
     );
     assert.deepEqual(events, [
-        "command:example:--help:req-1:false",
-        "command:example:provider|list:req-1:true",
+        "command:example:--help:req-1:false:",
+        "command:example:provider|list:req-1:true:/repo",
         "reload:example",
         "list",
         "install:/tmp/example.dsext",
@@ -195,6 +203,14 @@ test("Extension route parser rejects invalid namespaces, operations and command 
             payload: { argv: [1], extensionId: "example" }
         }, context("cli", "local-owner")),
         /array of strings/iu
+    );
+    await assert.rejects(
+        async () => await operation(module, "command").handle({
+            id: "4",
+            name: "command",
+            payload: { argv: [], extensionId: "example", workingDirectory: "relative" }
+        }, context("cli", "local-owner")),
+        /workingDirectory must be an absolute path/iu
     );
     assert.deepEqual(events, []);
 });
