@@ -152,6 +152,22 @@ export class ControlReadModel {
     }
 
     async load(options: ControlReadModelLoadOptions = {}): Promise<void> {
+        const epoch = await this.#connect(options, false);
+        await this.#hydrate(epoch);
+        if (this.#current(epoch)) {
+            this.#replaceSubscriptions(this.#state.instances.map(({ name }) => name), epoch);
+        }
+    }
+
+    async connect(options: ControlReadModelLoadOptions = {}): Promise<void> {
+        await this.#connect(options, true);
+    }
+
+    async hydrate(): Promise<void> {
+        await this.#hydrate(this.#epoch);
+    }
+
+    async #connect(options: ControlReadModelLoadOptions, subscribe: boolean): Promise<number> {
         this.reset();
         this.#loadOptions = options;
         const epoch = this.#epoch;
@@ -165,10 +181,17 @@ export class ControlReadModel {
                 : this.#request(this.#clients.service.status(), "service.status"),
             this.#request(this.#clients.instance.list(), "instance.list"),
         ]);
-        if (!this.#current(epoch)) return;
+        if (!this.#current(epoch)) return epoch;
         this.#state.service = service;
         this.#applyInstances(instances);
         this.#emit();
+        if (subscribe) this.#replaceSubscriptions(instances.map(({ name }) => name), epoch);
+        return epoch;
+    }
+
+    async #hydrate(epoch: number): Promise<void> {
+        const options = this.#loadOptions;
+        const instances = this.#state.instances;
         await Promise.all([
             this.refreshMcp(epoch),
             this.refreshOverview(epoch),
@@ -179,8 +202,6 @@ export class ControlReadModel {
                 .filter((instance) => instance.snapshot.status === "ready" || instance.snapshot.status === "running")
                 .map(async ({ name }) => await this.#refreshInstance(name, initialInstanceKeys, undefined, epoch)),
         ]);
-        if (!this.#current(epoch)) return;
-        this.#replaceSubscriptions(instances.map(({ name }) => name), epoch);
     }
 
     async refreshControl(): Promise<void> {

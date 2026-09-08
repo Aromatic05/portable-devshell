@@ -99,7 +99,11 @@ export class TuiControlSession {
         if (this.#started) return;
         this.#started = true;
         const generation = ++this.#generation;
-        await this.refresh(generation);
+        try {
+            await this.#connect(generation);
+        } catch (error) {
+            if (this.#current(generation)) this.#applyConnectionFailure(error);
+        }
         if (this.#current(generation) && this.#store.getState().connection.status === "connected") {
             this.#refreshScheduler.start();
         }
@@ -128,7 +132,7 @@ export class TuiControlSession {
                 "control.reconnect",
             );
             this.#assertCurrent(generation, "Control connection changed while reconnecting.");
-            await this.#load(generation);
+            await this.#connect(generation);
             this.#assertCurrent(generation, "Control connection changed while refreshing after reconnect.");
             this.#refreshScheduler.start();
         } catch (error) {
@@ -240,6 +244,21 @@ export class TuiControlSession {
         });
         this.#assertCurrent(generation, "Control connection changed during refresh.");
         this.#store.setConnectionState("connected");
+    }
+
+    async #connect(generation: number): Promise<void> {
+        this.#assertCurrent(generation, "Control connection changed before connecting.");
+        this.#store.setConnectionState("connecting");
+        await this.#model.connect({
+            artifacts: true,
+            config: true,
+            serviceStatus: false,
+        });
+        this.#assertCurrent(generation, "Control connection changed while connecting.");
+        this.#store.setConnectionState("connected");
+        void this.#model.hydrate().catch((error) => {
+            if (this.#current(generation)) this.#reportRefreshFailure("overview", error);
+        });
     }
 
     #syncModel(): void {
