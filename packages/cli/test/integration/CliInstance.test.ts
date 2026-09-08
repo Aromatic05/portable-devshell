@@ -137,21 +137,30 @@ async function runRealWorkerSmoke(): Promise<void> {
                 "skill",
                 "get",
                 "review",
-                `aromatic-pc:${workspacePath}`,
+                "aromatic-pc",
                 "--workspace",
                 workspacePath
             ]),
             0
         );
         const skillGet = JSON.parse(stdout.flush()) as {
-            target: { instance: string; path: string; workspace: string };
+            target: { collection: string; instance: string; key: string };
             transfer: { transferId: string; transferredBytes: number };
         };
-        assert.equal(skillGet.target.instance, "aromatic-pc");
-        assert.equal(skillGet.target.path, "./.devshell/skill/review");
+        assert.deepEqual(skillGet.target, { collection: "managed", instance: "aromatic-pc", key: "review" });
         assert.match(skillGet.transfer.transferId, /^[0-9a-f-]{36}$/u);
         assert.ok(skillGet.transfer.transferredBytes > 0);
-        const installedSkill = join(skillGet.target.workspace, ".devshell", "skill", "review", "SKILL.md");
+        const installedSkill = join(
+            homeDirectory,
+            ".devshell",
+            "aromatic-pc",
+            "extensions",
+            "skill",
+            "resources",
+            "managed",
+            "review",
+            "SKILL.md"
+        );
         assert.equal(await readFile(installedSkill, "utf8"), skillContent);
 
         assert.equal(

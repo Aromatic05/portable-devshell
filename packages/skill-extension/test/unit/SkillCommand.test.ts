@@ -6,9 +6,7 @@ import test from "node:test";
 
 import type {
     ExtensionContext,
-    ExtensionInvocationContext,
-    ExtensionJsonValue,
-    ExtensionWorkerPlatform
+    ExtensionInvocationContext
 } from "@portable-devshell/extension";
 
 import { executeSkillCommand } from "../../src/builtin/SkillCommand.ts";
@@ -24,9 +22,7 @@ function invocation(workingDirectory: string, localOwner = true): ExtensionInvoc
 
 function context(options: {
     events: string[];
-    platform?: ExtensionWorkerPlatform;
-    shellResult?: ExtensionJsonValue;
-    transferFailure?: Error;
+    projectionFailure?: Error;
 }): ExtensionContext {
     const generation = `sha256-${"a".repeat(64)}`;
     return {
@@ -37,13 +33,15 @@ function context(options: {
                 return { directory: "/asset", generation };
             },
             async listBundles() { return []; },
-            async removeBundle() {},
-            async resolveBundle() { return undefined; },
-            async transferBundle(input) {
-                options.events.push(`asset.transfer:${input.target.instance}:${input.target.workspace}:${input.target.path}:${input.overwrite}`);
-                if (options.transferFailure !== undefined) throw options.transferFailure;
+            async projectBundle(input) {
+                options.events.push(
+                    `asset.project:${input.target.instance}:${input.target.collection}:${input.target.key}:${input.overwrite}`
+                );
+                if (options.projectionFailure !== undefined) throw options.projectionFailure;
                 return { transferId: "transfer-1", transferredBytes: 123 };
-            }
+            },
+            async removeBundle() {},
+            async resolveBundle() { return undefined; }
         },
         generation: "g1",
         id: "skill",
@@ -58,23 +56,8 @@ function context(options: {
         },
         version: "0.1.0",
         worker: {
-            async openSession(input) {
-                options.events.push(`worker.open:${input.instance}:${input.workspace}`);
-                return {
-                    environment: {
-                        homeDirectory: options.platform?.os === "windows" ? "C:\\Users\\dev" : "/home/dev",
-                        platform: options.platform ?? { arch: "x64", os: "linux" }
-                    },
-                    instance: input.instance ?? "local-one",
-                    workspace: input.workspace,
-                    async callTool(name, inputValue, callOptions) {
-                        const record = inputValue as Record<string, ExtensionJsonValue>;
-                        options.events.push(`worker.call:${name}:${String(record.command)}:${String(callOptions?.operationId)}`);
-                        return options.shellResult ?? { exitCode: 0, stderr: "", stdout: "" };
-                    },
-                    async close() { options.events.push("worker.close"); },
-                    listTools: () => [{ description: "Run shell", inputSchema: {}, name: "bash_run" }]
-                };
+            async openSession() {
+                throw new Error("Skill resource projection must not open a Worker tool session");
             }
         }
     };
@@ -99,60 +82,39 @@ test("Skill command discovers project Skills from the local-owner CLI working di
     assert.deepEqual(events, []);
 });
 
-test("Skill get snapshots one selected Skill, prepares Worker state, then transfers it through Artifact", async (t) => {
+test("Skill get snapshots one selected Skill and projects it as an instance-scoped resource", async (t) => {
     const root = await mkdtemp(join(tmpdir(), "skill-extension-get-"));
     t.after(async () => await rm(root, { force: true, recursive: true }));
-    const skillDirectory = join(root, ".agents", "skills", "review");
+    const skillDirectory = join(root, ".agents", "skills", "Review changes");
     await mkdir(skillDirectory, { recursive: true });
     await writeFile(join(skillDirectory, "SKILL.md"), "# Review\n\nReview changes.\n", "utf8");
     const events: string[] = [];
 
     const result = await executeSkillCommand(
         context({ events }),
-        ["get", "review", "remote-one:/repo"],
+        ["get", "Review changes", "remote-one"],
         invocation(root)
     );
 
     assert.equal(result.kind, "json");
     assert.deepEqual(events, [
         `asset.install:${skillDirectory}`,
-        "worker.open:remote-one:/repo",
-        'worker.call:bash_run:mkdir -p -- "$HOME/.devshell/skill":skill.get.prepare',
-        "asset.transfer:remote-one:/home/dev:./.devshell/skill/review:true",
-        "worker.close"
+        "asset.project:remote-one:managed:Review changes:true"
     ]);
     assert.deepEqual(result.kind === "json" ? result.value : undefined, {
         generation: `sha256-${"a".repeat(64)}`,
-        name: "review",
+        name: "Review changes",
         source: "project",
         target: {
+            collection: "managed",
             instance: "remote-one",
-            path: "./.devshell/skill/review",
-            workspace: "/home/dev"
+            key: "Review changes"
         },
         transfer: { transferId: "transfer-1", transferredBytes: 123 }
     });
 });
 
-test("Skill get uses PowerShell directory preparation on Windows Workers", async (t) => {
-    const root = await mkdtemp(join(tmpdir(), "skill-extension-windows-"));
-    t.after(async () => await rm(root, { force: true, recursive: true }));
-    const skillDirectory = join(root, ".agents", "skills", "review");
-    await mkdir(skillDirectory, { recursive: true });
-    await writeFile(join(skillDirectory, "SKILL.md"), "# Review\n", "utf8");
-    const events: string[] = [];
-
-    await executeSkillCommand(
-        context({ events, platform: { arch: "x64", os: "windows" } }),
-        ["get", "review", "remote-one:C:\\repo"],
-        invocation(root)
-    );
-
-    assert.equal(events.some((event) => event.includes("New-Item -ItemType Directory -Force")), true);
-    assert.equal(events.some((event) => event.includes("asset.transfer:remote-one:C:\\Users\\dev:./.devshell/skill/review:true")), true);
-});
-
-test("Skill get closes the Worker session when preparation or transfer fails", async (t) => {
+test("Skill get surfaces projection failure without opening a Worker tool session", async (t) => {
     const root = await mkdtemp(join(tmpdir(), "skill-extension-failure-"));
     t.after(async () => await rm(root, { force: true, recursive: true }));
     const skillDirectory = join(root, ".agents", "skills", "review");
@@ -162,17 +124,19 @@ test("Skill get closes the Worker session when preparation or transfer fails", a
 
     await assert.rejects(
         executeSkillCommand(
-            context({ events, shellResult: { exitCode: 2, stderr: "mkdir failed" } }),
-            ["get", "review", "remote-one:/repo"],
+            context({ events, projectionFailure: new Error("projection failed") }),
+            ["get", "review", "remote-one"],
             invocation(root)
         ),
-        /mkdir failed/u
+        /projection failed/u
     );
-    assert.equal(events.at(-1), "worker.close");
-    assert.equal(events.some((event) => event.startsWith("asset.transfer:")), false);
+    assert.deepEqual(events, [
+        `asset.install:${skillDirectory}`,
+        "asset.project:remote-one:managed:review:true"
+    ]);
 });
 
-test("Skill commands reject non-owner callers and invalid remote targets", async (t) => {
+test("Skill commands reject non-owner callers and invalid resource targets", async (t) => {
     const root = await mkdtemp(join(tmpdir(), "skill-extension-authority-"));
     t.after(async () => await rm(root, { force: true, recursive: true }));
     const events: string[] = [];
@@ -182,7 +146,7 @@ test("Skill commands reject non-owner callers and invalid remote targets", async
         /local owner CLI/u
     );
     await assert.rejects(
-        executeSkillCommand(context({ events }), ["get", "review", "remote-one:relative"], invocation(root)),
-        /workspace must be absolute/u
+        executeSkillCommand(context({ events }), ["get", "review", "Bad_ID"], invocation(root)),
+        /instance name is invalid/u
     );
 });
