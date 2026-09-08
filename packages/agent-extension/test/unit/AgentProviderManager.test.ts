@@ -40,7 +40,7 @@ async function harness(t: test.TestContext) {
             async resolveBundle(generation) {
                 return { directory: join(dataDirectory, "bundles", generation), generation };
             },
-            async transferBundle() { throw new Error("not used"); }
+            async projectBundle() { throw new Error("not used"); }
         },
         generation: "agent-generation",
         id: "agent",

@@ -52,7 +52,7 @@ export class ControlRuntimeFactory {
                         allowed,
                         dataDirectory,
                         extensionId,
-                        transfer: async (input) => await artifact.transferExtensionAsset(extensionId, input)
+                        project: async (input) => await artifact.projectExtensionAsset(extensionId, input)
                     }),
                     instances: options.state.instances,
                     paths: extensionPaths

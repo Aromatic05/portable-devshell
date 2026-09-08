@@ -53,25 +53,25 @@ export interface ExtensionAssetBundle {
     readonly generation: string;
 }
 
-export interface ExtensionAssetTransferTarget {
-    /** Managed Worker instance receiving the asset. */
-    instance: string;
-    /** Destination path interpreted relative to workspace unless explicitly absolute. */
-    path: string;
-    /** Absolute target-side workspace used by the Artifact receive path. */
-    workspace: string;
-}
-
-export interface ExtensionAssetTransferInput {
-    generation: string;
-    overwrite?: boolean;
-    signal?: AbortSignal;
-    target: ExtensionAssetTransferTarget;
-}
-
 export interface ExtensionAssetTransferResult {
     readonly transferId: string;
     readonly transferredBytes: number;
+}
+
+export interface ExtensionAssetProjectionTarget {
+    /** Logical resource collection owned by the Extension on the target Worker. */
+    collection: string;
+    /** Managed Worker instance receiving the resource. */
+    instance: string;
+    /** One logical entry name inside the collection; never a filesystem path. */
+    key: string;
+}
+
+export interface ExtensionAssetProjectionInput {
+    generation: string;
+    overwrite?: boolean;
+    signal?: AbortSignal;
+    target: ExtensionAssetProjectionTarget;
 }
 
 /**
@@ -85,9 +85,9 @@ export interface ExtensionAssetCapability {
     installBundle(sourcePath: string): Promise<ExtensionAssetBundle>;
     installDirectory(sourcePath: string): Promise<ExtensionAssetBundle>;
     listBundles(): Promise<readonly ExtensionAssetBundle[]>;
+    projectBundle(input: ExtensionAssetProjectionInput): Promise<ExtensionAssetTransferResult>;
     removeBundle(generation: string): Promise<void>;
     resolveBundle(generation: string): Promise<ExtensionAssetBundle | undefined>;
-    transferBundle(input: ExtensionAssetTransferInput): Promise<ExtensionAssetTransferResult>;
 }
 
 export interface ExtensionToolDefinition {

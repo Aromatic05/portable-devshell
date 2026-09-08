@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { createError, errorCodes } from "@portable-devshell/shared";
-import type { ExtensionAssetTransferResult } from "@portable-devshell/extension";
+import type { ExtensionAssetProjectionInput, ExtensionAssetTransferResult } from "@portable-devshell/extension";
 
 import { ArtifactHttpRoute, artifactShareRoute } from "../../control/artifact/route/ArtifactHttpRoute.js";
 import { ArtifactHostBridge } from "../../control/artifact/host/ArtifactHostBridge.js";
@@ -115,6 +115,36 @@ export class ControlRuntimeArtifact {
         } finally {
             this.#extensionAssetAuthorities.delete(authority);
         }
+    }
+
+    async projectExtensionAsset(
+        extensionId: string,
+        input: {
+            overwrite?: boolean;
+            signal?: AbortSignal;
+            sourcePath: string;
+            target: ExtensionAssetProjectionInput["target"];
+        }
+    ): Promise<ExtensionAssetTransferResult> {
+        input.signal?.throwIfAborted();
+        const descriptor = this.#instances.get(input.target.instance);
+        if (descriptor === undefined) {
+            throw new Error(`Unknown Extension asset projection instance: ${input.target.instance}.`);
+        }
+        const resource = await descriptor.worker.prepareExtensionResource({
+            collection: input.target.collection,
+            extensionId
+        });
+        return await this.transferExtensionAsset(extensionId, {
+            ...(input.overwrite === undefined ? {} : { overwrite: input.overwrite }),
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
+            sourcePath: input.sourcePath,
+            target: {
+                instance: input.target.instance,
+                path: `./${input.target.key}`,
+                workspace: resource.directory
+            }
+        });
     }
 
     #resolveEndpoint(name: string, authorityInstance?: string) {

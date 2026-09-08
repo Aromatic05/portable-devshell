@@ -6,7 +6,7 @@ import { isAbsolute, join } from "node:path";
 import type {
     ExtensionAssetBundle,
     ExtensionAssetCapability,
-    ExtensionAssetTransferInput,
+    ExtensionAssetProjectionInput,
     ExtensionAssetTransferResult
 } from "@portable-devshell/extension";
 
@@ -19,15 +19,15 @@ import {
     type ExtensionInstallLimits
 } from "./ExtensionInstallPolicy.js";
 
-export interface ExtensionAssetTransferPortInput {
+export interface ExtensionAssetProjectionPortInput {
     overwrite?: boolean;
     signal?: AbortSignal;
     sourcePath: string;
-    target: ExtensionAssetTransferInput["target"];
+    target: ExtensionAssetProjectionInput["target"];
 }
 
-export type ExtensionAssetTransferPort = (
-    input: ExtensionAssetTransferPortInput
+export type ExtensionAssetProjectionPort = (
+    input: ExtensionAssetProjectionPortInput
 ) => Promise<ExtensionAssetTransferResult>;
 
 export interface ExtensionAssetCapabilityControlOptions {
@@ -35,7 +35,7 @@ export interface ExtensionAssetCapabilityControlOptions {
     dataDirectory: string;
     extensionId: string;
     limits?: Partial<ExtensionInstallLimits>;
-    transfer?: ExtensionAssetTransferPort;
+    project?: ExtensionAssetProjectionPort;
 }
 
 export class ExtensionAssetCapabilityControl implements ExtensionAssetCapability {
@@ -43,14 +43,14 @@ export class ExtensionAssetCapabilityControl implements ExtensionAssetCapability
     readonly #dataDirectory: string;
     readonly #extensionId: string;
     readonly #limits: ExtensionInstallLimits;
-    readonly #transfer?: ExtensionAssetTransferPort;
+    readonly #project?: ExtensionAssetProjectionPort;
 
     constructor(options: ExtensionAssetCapabilityControlOptions) {
         this.#allowed = options.allowed;
         this.#dataDirectory = options.dataDirectory;
         this.#extensionId = options.extensionId;
         this.#limits = resolveExtensionInstallLimits(options.limits);
-        this.#transfer = options.transfer;
+        this.#project = options.project;
     }
 
     async installBundle(sourcePath: string): Promise<ExtensionAssetBundle> {
@@ -160,18 +160,18 @@ export class ExtensionAssetCapabilityControl implements ExtensionAssetCapability
         await rm(bundle.directory, { force: true, recursive: true });
     }
 
-    async transferBundle(input: ExtensionAssetTransferInput): Promise<ExtensionAssetTransferResult> {
+    async projectBundle(input: ExtensionAssetProjectionInput): Promise<ExtensionAssetTransferResult> {
         this.#assertAllowed();
         input.signal?.throwIfAborted();
         const bundle = await this.resolveBundle(input.generation);
         if (bundle === undefined) {
             throw new Error(`Extension asset bundle ${input.generation} is not installed.`);
         }
-        validateTransferTarget(input.target);
-        if (this.#transfer === undefined) {
-            throw new Error(`Extension ${this.#extensionId} asset transfer is unavailable.`);
+        validateProjectionTarget(input.target);
+        if (this.#project === undefined) {
+            throw new Error(`Extension ${this.#extensionId} asset projection is unavailable.`);
         }
-        return await this.#transfer({
+        return await this.#project({
             ...(input.overwrite === undefined ? {} : { overwrite: input.overwrite }),
             ...(input.signal === undefined ? {} : { signal: input.signal }),
             sourcePath: bundle.directory,
@@ -190,10 +190,20 @@ export class ExtensionAssetCapabilityControl implements ExtensionAssetCapability
     }
 }
 
-function validateTransferTarget(target: ExtensionAssetTransferInput["target"]): void {
-    if (target.instance.length === 0) throw new TypeError("Extension asset transfer target instance must not be empty.");
-    if (target.path.length === 0) throw new TypeError("Extension asset transfer target path must not be empty.");
-    if (target.workspace.length === 0) throw new TypeError("Extension asset transfer target workspace must not be empty.");
+function validateProjectionTarget(target: ExtensionAssetProjectionInput["target"]): void {
+    if (target.instance.length === 0) throw new TypeError("Extension asset projection target instance must not be empty.");
+    if (!/^[a-z][a-z0-9-]*$/u.test(target.collection)) {
+        throw new TypeError("Extension asset projection resource collection must match [a-z][a-z0-9-]*.");
+    }
+    if (
+        target.key.length === 0
+        || target.key !== target.key.trim()
+        || target.key === "."
+        || target.key === ".."
+        || /[\\/]/u.test(target.key)
+    ) {
+        throw new TypeError("Extension asset projection resource key must be one non-empty path segment.");
+    }
 }
 
 async function hashPlainFile(path: string, expectedSize: number): Promise<string> {

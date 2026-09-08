@@ -78,46 +78,47 @@ test("Extension assets remove and resolve only validated bundle generations", as
     await assert.rejects(capability.removeBundle("../escape"), /Invalid Extension asset bundle generation/u);
 });
 
-test("Extension assets transfer only installed bundles through the injected Artifact port", async (t) => {
+test("Extension assets project installed bundles into a named Worker resource collection", async (t) => {
     const h = await harness(t);
     const calls: unknown[] = [];
     const capability = new ExtensionAssetCapabilityControl({
         allowed: true,
         dataDirectory: h.dataDirectory,
         extensionId: "skill",
-        transfer: async (input) => {
+        project: async (input) => {
             calls.push(input);
-            return { transferId: "transfer-1", transferredBytes: 17 };
+            return { transferId: "transfer-resource", transferredBytes: 23 };
         }
     });
     const installed = await capability.installDirectory(h.source);
     const signal = new AbortController().signal;
 
-    assert.deepEqual(await capability.transferBundle({
+    assert.deepEqual(await capability.projectBundle({
         generation: installed.generation,
         overwrite: true,
         signal,
         target: {
+            collection: "managed",
             instance: "remote-one",
-            path: "./.devshell/skill/review",
-            workspace: "/home/dev"
+            key: "Review changes"
         }
-    }), { transferId: "transfer-1", transferredBytes: 17 });
+    }), { transferId: "transfer-resource", transferredBytes: 23 });
     assert.deepEqual(calls, [{
         overwrite: true,
         signal,
         sourcePath: installed.directory,
         target: {
+            collection: "managed",
             instance: "remote-one",
-            path: "./.devshell/skill/review",
-            workspace: "/home/dev"
+            key: "Review changes"
         }
     }]);
+
     await assert.rejects(
-        capability.transferBundle({
-            generation: "sha256-" + "0".repeat(64),
-            target: { instance: "remote-one", path: "./x", workspace: "/home/dev" }
+        capability.projectBundle({
+            generation: installed.generation,
+            target: { collection: "managed", instance: "remote-one", key: "../escape" }
         }),
-        /is not installed/u
+        /resource key/u
     );
 });

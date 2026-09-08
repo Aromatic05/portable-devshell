@@ -217,7 +217,7 @@ function extensionContext(options: {
                     generation
                 };
             },
-            async transferBundle() { throw new Error("not used"); }
+            async projectBundle() { throw new Error("not used"); }
         },
         generation: "0.1.0-test",
         id: "agent",
