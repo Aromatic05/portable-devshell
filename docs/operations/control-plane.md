@@ -200,13 +200,15 @@ Web 支持 `none`、`token`、`oauth2`。公网部署同样应由部署者明确
 
 ## Debug / Secret / Skill
 
-这些是本机 CLI 管理能力，不进入普通 model-facing MCP catalog：
+这些是 local-owner 管理能力，不进入普通 model-facing MCP catalog：
 
 ```text
 devshell debug ...
 devshell secret ...
 devshell skill ...
 ```
+
+其中 Secret 与 Skill 都以 builtin Extension 运行在 Control，并通过标准 ExtensionHost/Generation/command ABI 装载；CLI 只保留命令入口和 caller context 注入。Debug 仍是 Control 自身的受保护调试能力。
 
 分别见：
 

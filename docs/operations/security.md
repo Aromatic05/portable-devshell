@@ -91,7 +91,7 @@ workspace
 
 ## Secret 扫描
 
-`devshell secret` 是**本机 CLI 静态扫描器**，不会把命中的 secret value 输出给 Control、MCP 或模型。
+`devshell secret` 由本机 Control 中的 builtin **Secret Extension** 提供，并且只接受 local-owner CLI 调用。CLI 只传扫描路径与选项；文件内容在 Control 主机本地读取，返回结果只包含 finding metadata，命中的 secret value 不会离开扫描器，也不会进入 MCP 或模型。
 
 ```bash
 devshell secret scan [directory] [--glob <pattern>] [--limit <n>]
@@ -132,7 +132,7 @@ generic assignment 会过滤常见 placeholder，降低示例配置的误报。
 
 ### Discovery
 
-如果有 `rg`，优先使用 `rg --files --hidden` 并排除 `.git`；否则使用内置 walker，并尊重 `.gitignore` / `.ignore`，跳过 `.git`、`.hg`、`.svn`、`node_modules`。
+如果有 `rg`，优先使用 `rg --files --hidden` 并排除 `.git`；否则使用 self-contained 内置 walker，按分层 ignore scope 处理 `.gitignore` / `.ignore`（包括 negation），并跳过 `.git`、`.hg`、`.svn`、`node_modules`。
 
 边界：
 
