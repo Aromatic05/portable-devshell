@@ -1,0 +1,16 @@
+{
+    "schemaVersion": 1,
+    "apiVersion": 2,
+    "id": "agent",
+    "name": "portable-devshell Agent",
+    "version": "0.1.0",
+    "entry": "index.ts",
+    "capabilities": [
+        "command",
+        "assets",
+        "instance-lifecycle",
+        "rpc",
+        "web",
+        "worker"
+    ]
+}

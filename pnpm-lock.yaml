@@ -44,23 +44,38 @@ importers:
         specifier: ^8.37.0
         version: 8.62.1(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3)
 
-  packages/agent-extension:
+  extensions/agent:
     dependencies:
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.4
         version: 0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(ws@8.21.0)(zod@4.5.4)
+      '@earendil-works/pi-tui':
+        specifier: 0.84.4
+        version: 0.84.4
       '@portable-devshell/extension':
         specifier: workspace:*
-        version: link:../extension
-      '@portable-devshell/pi-extension':
-        specifier: workspace:*
-        version: link:../pi-extension
+        version: link:../../packages/extension
       '@portable-devshell/shared':
         specifier: workspace:*
-        version: link:../shared
+        version: link:../../packages/shared
+      diff:
+        specifier: 8.0.4
+        version: 8.0.4
       pi-gui-extension:
         specifier: 0.4.1
         version: 0.4.1(@earendil-works/pi-coding-agent@0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(ws@8.21.0)(zod@4.5.4))
+
+  extensions/secret:
+    dependencies:
+      '@portable-devshell/extension':
+        specifier: workspace:*
+        version: link:../../packages/extension
+
+  extensions/skill:
+    dependencies:
+      '@portable-devshell/extension':
+        specifier: workspace:*
+        version: link:../../packages/extension
 
   packages/cli:
     dependencies:
@@ -69,13 +84,13 @@ importers:
         version: file:packages/control(react@18.3.1)
       '@portable-devshell/secret-extension':
         specifier: workspace:*
-        version: link:../secret-extension
+        version: link:../../extensions/secret
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
       '@portable-devshell/skill-extension':
         specifier: workspace:*
-        version: link:../skill-extension
+        version: link:../../extensions/skill
       '@portable-devshell/tui':
         specifier: workspace:*
         version: link:../tui
@@ -187,34 +202,7 @@ importers:
         specifier: ^5.0.5
         version: 5.0.6
 
-  packages/pi-extension:
-    dependencies:
-      '@earendil-works/pi-coding-agent':
-        specifier: 0.84.4
-        version: 0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(ws@8.21.0)(zod@4.5.4)
-      '@earendil-works/pi-tui':
-        specifier: 0.84.4
-        version: 0.84.4
-      '@portable-devshell/shared':
-        specifier: workspace:*
-        version: link:../shared
-      diff:
-        specifier: 8.0.4
-        version: 8.0.4
-
-  packages/secret-extension:
-    dependencies:
-      '@portable-devshell/extension':
-        specifier: workspace:*
-        version: link:../extension
-
   packages/shared: {}
-
-  packages/skill-extension:
-    dependencies:
-      '@portable-devshell/extension':
-        specifier: workspace:*
-        version: link:../extension
 
   packages/tui:
     dependencies:

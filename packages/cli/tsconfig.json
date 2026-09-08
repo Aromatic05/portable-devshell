@@ -19,7 +19,7 @@
             "path": "../tui"
         },
         {
-            "path": "../skill-extension"
+            "path": "../../extensions/skill"
         }
     ]
 }

@@ -17,7 +17,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolvePnpmCommand } from "./PnpmCommand.mjs";
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
-const piProviderManifest = resolve(repoRoot, "packages/agent-extension/src/provider/pi/devshell-agent-provider.json");
+const piProviderManifest = resolve(repoRoot, "extensions/agent/src/provider/pi/devshell-agent-provider.json");
 
 export async function packageAgentArtifacts(options = {}) {
     const outputDirectory = resolve(repoRoot, options.outputDirectory ?? "release-assets");
@@ -85,6 +85,12 @@ export async function sanitizeDeployTree(root) {
 
 export async function shapeThinAgentExtensionTree(root) {
     await rm(join(root, "dist", "provider", "pi"), { force: true, recursive: true });
+    const builtinManifest = JSON.parse(await readFile(join(root, "dist", "builtin", "devshell-extension.json"), "utf8"));
+    await writeFile(
+        join(root, "devshell-extension.json"),
+        `${JSON.stringify({ ...builtinManifest, entry: "dist/builtin/index.js" }, null, 4)}\n`,
+        "utf8"
+    );
     const nodeModules = join(root, "node_modules");
     for (const name of await readdir(nodeModules).catch(() => [])) {
         if (name === "@portable-devshell") continue;
@@ -117,8 +123,9 @@ export async function shapePiProviderTree(root) {
     await rewriteDeploymentPackage(root, {
         dependencies: {
             "@earendil-works/pi-coding-agent": "0.84.4",
-            "@portable-devshell/pi-extension": "workspace:*",
+            "@earendil-works/pi-tui": "0.84.4",
             "@portable-devshell/shared": "workspace:*",
+            "diff": "8.0.4",
             "pi-gui-extension": "0.4.1"
         },
         entry: "./dist/provider/pi/index.js",
@@ -137,7 +144,6 @@ export async function assertNoSymbolicLinks(root) {
 export async function assertThinAgentExtensionTree(root) {
     const forbidden = [
         "dist/provider/pi",
-        "node_modules/@portable-devshell/pi-extension",
         "node_modules/pi-gui-extension"
     ];
     await walk(root, async (_path, relativePath) => {

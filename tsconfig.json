@@ -11,7 +11,7 @@
             "path": "./packages/core"
         },
         {
-            "path": "./packages/agent-extension"
+            "path": "./extensions/agent"
         },
         {
             "path": "./packages/control"

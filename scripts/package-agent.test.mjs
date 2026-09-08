@@ -14,11 +14,13 @@ import {
 const repoRoot = new URL("../", import.meta.url);
 
 test("Agent Extension source package owns the Pi provider without separate Agent workspace packages", async () => {
-    const agentExtension = JSON.parse(await readFile(new URL("packages/agent-extension/package.json", repoRoot), "utf8"));
+    const agentExtension = JSON.parse(await readFile(new URL("extensions/agent/package.json", repoRoot), "utf8"));
     assert.equal(agentExtension.dependencies["@earendil-works/pi-coding-agent"], "0.84.4");
-    assert.equal(agentExtension.dependencies["@portable-devshell/pi-extension"], "workspace:*");
+    assert.equal(agentExtension.dependencies["@earendil-works/pi-tui"], "0.84.4");
+    assert.equal(agentExtension.dependencies.diff, "8.0.4");
     await assert.rejects(readFile(new URL("packages/agentd/package.json", repoRoot), "utf8"));
     await assert.rejects(readFile(new URL("packages/agent-provider-pi/package.json", repoRoot), "utf8"));
+    await assert.rejects(readFile(new URL("packages/pi-extension/package.json", repoRoot), "utf8"));
 });
 
 test("thin Agent Extension payload guard rejects Pi runtime content", async (t) => {
@@ -36,9 +38,18 @@ test("thin Agent Extension shaping removes the internal Pi subtree and provider 
     t.after(async () => await rm(root, { force: true, recursive: true }));
     await mkdir(join(root, "dist", "provider", "pi"), { recursive: true });
     await writeFile(join(root, "dist", "provider", "pi", "index.js"), "export {};\n", "utf8");
+    await mkdir(join(root, "dist", "builtin"), { recursive: true });
+    await writeFile(join(root, "dist", "builtin", "devshell-extension.json"), JSON.stringify({
+        apiVersion: 2,
+        capabilities: ["command"],
+        entry: "index.js",
+        id: "agent",
+        name: "portable-devshell Agent",
+        schemaVersion: 1,
+        version: "0.1.0"
+    }), "utf8");
     await mkdir(join(root, "node_modules", "@portable-devshell", "extension"), { recursive: true });
     await mkdir(join(root, "node_modules", "@portable-devshell", "shared"), { recursive: true });
-    await mkdir(join(root, "node_modules", "@portable-devshell", "pi-extension"), { recursive: true });
     await mkdir(join(root, "node_modules", "@earendil-works", "pi-coding-agent"), { recursive: true });
     await writeFile(join(root, "package.json"), JSON.stringify({ name: "source", type: "module" }), "utf8");
 
@@ -50,6 +61,8 @@ test("thin Agent Extension shaping removes the internal Pi subtree and provider 
         "@portable-devshell/extension",
         "@portable-devshell/shared"
     ]);
+    const extensionManifest = JSON.parse(await readFile(join(root, "devshell-extension.json"), "utf8"));
+    assert.equal(extensionManifest.entry, "dist/builtin/index.js");
 });
 
 test("Agent artifact sanitizer removes pnpm deployment metadata and symlink guard remains strict", async (t) => {

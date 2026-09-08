@@ -49,12 +49,11 @@ export async function resolveManagedPiRuntime(environment = process.env, homeDir
     }
     const piEntrypoint = resolveContainedFile(piPackageRoot, piBin, "Pi CLI entrypoint");
 
-    const extensionRoot = resolve(providerDirectory, "node_modules", "@portable-devshell", "pi-extension");
-    const extensionPackage = JSON.parse(await readFile(resolve(extensionRoot, "package.json"), "utf8"));
-    if (typeof extensionPackage.main !== "string" || extensionPackage.main.length === 0) {
-        throw new Error("Installed Pi provider does not expose the portable-devshell Pi extension entrypoint.");
-    }
-    const extensionEntrypoint = resolveContainedFile(extensionRoot, extensionPackage.main, "Pi extension entrypoint");
+    const extensionEntrypoint = resolveContainedFile(
+        providerDirectory,
+        "dist/provider/pi/extension/index.js",
+        "Pi extension entrypoint"
+    );
     await Promise.all([
         assertPlainFile(piEntrypoint, "Pi CLI entrypoint"),
         assertPlainFile(extensionEntrypoint, "Pi extension entrypoint")

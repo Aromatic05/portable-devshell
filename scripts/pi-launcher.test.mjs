@@ -25,16 +25,15 @@ test("pi launcher resolves the selected provider generation without embedding a 
     const generation = "sha256-test-generation";
     const provider = resolve(data, "portable-devshell", "extension-data", "agent", "bundles", generation);
     const piRoot = resolve(provider, "node_modules", "@earendil-works", "pi-coding-agent");
-    const extensionRoot = resolve(provider, "node_modules", "@portable-devshell", "pi-extension");
+    const extensionEntrypoint = resolve(provider, "dist", "provider", "pi", "extension", "index.js");
     const registryDirectory = resolve(home, ".devshell", "control", "extensions", "state", "agent");
     try {
         await mkdir(resolve(piRoot, "dist"), { recursive: true });
-        await mkdir(resolve(extensionRoot, "dist"), { recursive: true });
+        await mkdir(resolve(provider, "dist", "provider", "pi", "extension"), { recursive: true });
         await mkdir(registryDirectory, { recursive: true });
         await writeFile(resolve(piRoot, "package.json"), JSON.stringify({ bin: { pi: "./dist/cli.js" } }), "utf8");
         await writeFile(resolve(piRoot, "dist", "cli.js"), "export {};\n", "utf8");
-        await writeFile(resolve(extensionRoot, "package.json"), JSON.stringify({ main: "./dist/index.js" }), "utf8");
-        await writeFile(resolve(extensionRoot, "dist", "index.js"), "export default () => {};\n", "utf8");
+        await writeFile(extensionEntrypoint, "export default () => {};\n", "utf8");
         await writeFile(resolve(registryDirectory, "providers.json"), `${JSON.stringify({
             providers: {
                 pi: {
@@ -50,7 +49,7 @@ test("pi launcher resolves the selected provider generation without embedding a 
         assert.equal(runtime.selectedGeneration, generation);
         assert.equal(runtime.providerDirectory, provider);
         assert.equal(runtime.piEntrypoint, resolve(piRoot, "dist", "cli.js"));
-        assert.equal(runtime.extensionEntrypoint, resolve(extensionRoot, "dist", "index.js"));
+        assert.equal(runtime.extensionEntrypoint, extensionEntrypoint);
     } finally {
         await rm(root, { force: true, recursive: true });
     }
