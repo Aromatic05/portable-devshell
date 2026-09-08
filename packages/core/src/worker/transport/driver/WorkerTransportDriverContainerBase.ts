@@ -28,7 +28,6 @@ export interface WorkerTransportDriverContainerBaseOptions {
     container: InstanceContainerConfig;
     keepIdUserNamespace?: boolean;
     provider: "docker" | "podman";
-    skillsDirectory?: string;
     spawnFunction?: SpawnFunction;
     workerBinary?: WorkerBinary;
 }
@@ -61,14 +60,12 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
             createProviderError: this.#process.createError,
             probeTarget: () => this.#probeTarget(),
             spawnShell: (commandLine, stdio, context) => this.#spawnShell(commandLine, stdio, context),
-            skillsDirectory: options.skillsDirectory
         });
     }
 
     async installWorker(): Promise<void> {
         await this.#provision.ensureReady("installWorker");
         const installCommand = new WorkerBinary(await this.#resolveExecutable()).buildInstallCommand();
-        await this.#installer.syncSkills();
         const invocation = this.#createExecInvocation("installWorker", [installCommand.command, ...installCommand.args]);
         const result = await this.#process.run(invocation.context, {
             stdio: ["ignore", "pipe", "pipe"]
@@ -112,9 +109,6 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
         }
         try {
             const executable = await this.#resolveExecutable();
-            if (command === "start") {
-                await this.#installer.syncSkills();
-            }
             const workerCommand = new WorkerBinary(executable).buildCommand(
                 command,
                 options.instanceName,
@@ -141,7 +135,6 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
         const environment = this.#workerCommandEnvironment(options.env);
         await this.#provision.ensureReady("spawnWorkerRpc");
         const executable = await this.#resolveExecutable();
-        await this.#installer.syncSkills();
         const workerCommand = new WorkerBinary(executable).buildCommand("rpc", options.instanceName);
         const invocation = this.#createExecInvocation(
             "spawnWorkerRpc",

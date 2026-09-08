@@ -7,7 +7,6 @@ import { WorkerTransportDriverContainerBase } from "./WorkerTransportDriverConta
 export interface WorkerTransportDriverPodmanOptions {
     container: InstanceContainerConfig;
     podmanBinary?: string;
-    skillsDirectory?: string;
     spawnFunction?: SpawnFunction;
     workerBinary?: WorkerBinary;
 }
@@ -19,7 +18,6 @@ export class WorkerTransportDriverPodman extends WorkerTransportDriverContainerB
             container: options.container,
             keepIdUserNamespace: true,
             provider: "podman",
-            skillsDirectory: options.skillsDirectory,
             spawnFunction: options.spawnFunction,
             workerBinary: options.workerBinary
         });

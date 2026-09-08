@@ -1,14 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { chmod, mkdir, readFile, readlink, rm, stat, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, readlink, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
-
-import { extract } from "tar-stream";
 
 import {
     createContainerWorkerEnvironment,
@@ -16,7 +13,6 @@ import {
     WorkerTransportDriverLocal,
     WorkerTransportDriverPodman,
     WorkerInstallerRemote,
-    createWorkerSkillArchive,
     WorkerTransportDriverSsh,
     WorkerBinary,
     getWorkerTargetByKey,
@@ -27,7 +23,6 @@ import { realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../test
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
-const NO_SKILLS_DIRECTORY = join(tmpdir(), `portable-devshell-no-skills-${randomUUID()}`);
 
 const shellEscape = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
@@ -197,7 +192,6 @@ test("provider installWorker failures keep diagnostic details across local ssh d
             build: (spawnFunction: SpawnFunctionLike) =>
                 new WorkerTransportDriverSsh({
                     command: "ssh-bin devbox",
-                    skillsDirectory: NO_SKILLS_DIRECTORY,
                     workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
                     spawnFunction
                 }),
@@ -209,7 +203,6 @@ test("provider installWorker failures keep diagnostic details across local ssh d
                 new WorkerTransportDriverDocker({
                     container: createManagedContainerConfig(),
                     dockerBinary: "docker-bin",
-                    skillsDirectory: NO_SKILLS_DIRECTORY,
                     workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
                     spawnFunction
                 }),
@@ -221,7 +214,6 @@ test("provider installWorker failures keep diagnostic details across local ssh d
                 new WorkerTransportDriverPodman({
                     container: createManagedContainerConfig(),
                     podmanBinary: "podman-bin",
-                    skillsDirectory: NO_SKILLS_DIRECTORY,
                     workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
                     spawnFunction
                 }),
@@ -307,7 +299,6 @@ test("ssh transport starts the worker without a workspace cwd", async () => {
     const recorder = createSpawnRecorder();
     const transport = new WorkerTransportDriverSsh({
         command: "ssh-bin devbox",
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
     });
@@ -364,7 +355,6 @@ test("ssh transport uploads instance environment without replacing the local ssh
         return false;
     });
     const transport = new WorkerTransportDriverSsh({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
@@ -418,7 +408,6 @@ test("ssh RPC exit cleans an uploaded environment file after an early local term
         return false;
     });
     const transport = new WorkerTransportDriverSsh({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
@@ -442,7 +431,6 @@ test("ssh RPC exit cleans an uploaded environment file after an early local term
 test("ssh transport rejects environment keys that cannot be represented safely", async () => {
     const recorder = createSpawnRecorder();
     const transport = new WorkerTransportDriverSsh({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
@@ -465,7 +453,6 @@ test("ssh transport rejects environment keys that cannot be represented safely",
 test("ssh transport runs installWorker probe via remote shell", async () => {
     const recorder = createSpawnRecorder();
     const transport = new WorkerTransportDriverSsh({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
@@ -490,147 +477,6 @@ test("ssh transport runs installWorker probe via remote shell", async () => {
     });
 });
 
-
-test("skill archives assign portable Unix modes from entry type and shebang", async (t) => {
-    const root = await createTestTempDirectory("skill-mode");
-    const skillsDirectory = join(root, "skill");
-    await mkdir(join(skillsDirectory, "review", "scripts"), { recursive: true });
-    await writeFile(join(skillsDirectory, "review", "SKILL.md"), "# Review\n");
-    await writeFile(join(skillsDirectory, "review", "scripts", "run.sh"), "#!/bin/sh\nprintf review\n");
-    await writeFile(join(skillsDirectory, "review", "scripts", "helper.py"), "print('review')\n");
-    t.after(() => rm(root, { recursive: true, force: true }));
-
-    const archive = await createWorkerSkillArchive(skillsDirectory);
-    assert.notEqual(archive, undefined);
-    const entries = await readTarEntries(archive!.bytes);
-
-    assert.deepEqual(entries, {
-        "review/": { content: "", mode: 0o755, type: "directory" },
-        "review/SKILL.md": { content: "# Review\n", mode: 0o644, type: "file" },
-        "review/scripts/": { content: "", mode: 0o755, type: "directory" },
-        "review/scripts/helper.py": { content: "print('review')\n", mode: 0o644, type: "file" },
-        "review/scripts/run.sh": { content: "#!/bin/sh\nprintf review\n", mode: 0o755, type: "file" }
-    });
-});
-
-test("ssh transport mirrors control skills to the remote user skill directory", async (t) => {
-    const root = await createTestTempDirectory("skills");
-    const skillsDirectory = join(root, "skill");
-    const reviewDirectory = join(skillsDirectory, "review");
-    const scriptsDirectory = join(reviewDirectory, "scripts");
-    const skillPath = join(reviewDirectory, "SKILL.md");
-    await mkdir(scriptsDirectory, { recursive: true });
-    await chmod(reviewDirectory, 0o755);
-    await chmod(scriptsDirectory, 0o755);
-    await writeFile(skillPath, "# Review\n");
-    await chmod(skillPath, 0o644);
-    const scriptPath = join(scriptsDirectory, "run.sh");
-    await writeFile(scriptPath, "#!/bin/sh\nprintf review\n");
-    await chmod(scriptPath, 0o755);
-    t.after(() => rm(root, { recursive: true, force: true }));
-
-    const recorder = createSpawnRecorder((_call, child, callIndex) => {
-        if (callIndex === 0) {
-            closeRecordedChild(child, { stdout: "/home/dev" });
-            return true;
-        }
-        if (callIndex === 1 || callIndex === 3) {
-            child.stdin.once("finish", () => closeRecordedChild(child));
-            return true;
-        }
-        if (callIndex === 2 || callIndex === 4) {
-            closeRecordedChild(child, { stdout: "devshell-worker 0.0.0\n" });
-            return true;
-        }
-        return false;
-    });
-    const transport = new WorkerTransportDriverSsh({
-        command: "ssh-bin devbox",
-        skillsDirectory,
-        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
-    });
-
-    await transport.installWorker();
-    await transport.installWorker();
-
-    assert.equal(recorder.calls.length, 5);
-    assert.equal(recorder.calls[1]?.args[8]?.includes("/home/dev/.devshell/skill"), true);
-    assert.equal(recorder.calls[1]?.args[8]?.includes("tar -xpf -"), true);
-    assert.deepEqual(recorder.calls[1]?.options.stdio, ["pipe", "pipe", "pipe"]);
-    assert.equal(recorder.calls[2]?.args[8], shellEscape("'/usr/local/bin/devshell-worker' '--version'"));
-    assert.equal(recorder.calls[3]?.args[8]?.includes("tar -xpf -"), true);
-    assert.equal(recorder.calls[4]?.args[8], shellEscape("'/usr/local/bin/devshell-worker' '--version'"));
-
-    const firstEntries = await readTarEntries(Buffer.concat(recorder.children[1]?.stdinChunks ?? []));
-    const secondEntries = await readTarEntries(Buffer.concat(recorder.children[3]?.stdinChunks ?? []));
-    assert.deepEqual(secondEntries, firstEntries);
-    assert.deepEqual(firstEntries, {
-        "review/": { content: "", mode: 0o755, type: "directory" },
-        "review/SKILL.md": { content: "# Review\n", mode: 0o644, type: "file" },
-        "review/scripts/": { content: "", mode: 0o755, type: "directory" },
-        "review/scripts/run.sh": { content: "#!/bin/sh\nprintf review\n", mode: 0o755, type: "file" }
-    });
-});
-
-test("remote skill synchronization atomically replaces the real target directory", async (t) => {
-    if (process.platform === "win32") {
-        t.skip("requires sh and tar");
-        return;
-    }
-
-    const root = await createTestTempDirectory("real-skill-sync");
-    const source = join(root, "control", "skill");
-    const remoteHome = join(root, "remote-home");
-    await mkdir(join(source, "review", "scripts"), { recursive: true });
-    await mkdir(join(remoteHome, ".devshell", "skill", "stale"), { recursive: true });
-    await writeFile(join(source, "review", "SKILL.md"), "first\n");
-    const sourceScript = join(source, "review", "scripts", "run.sh");
-    await writeFile(sourceScript, "#!/bin/sh\nprintf first\n");
-    await chmod(sourceScript, 0o755);
-    await writeFile(join(remoteHome, ".devshell", "skill", "stale", "old.txt"), "stale\n");
-    t.after(() => rm(root, { recursive: true, force: true }));
-
-    const installer = new WorkerInstallerRemote({
-        createContext(operation, command) {
-            return { command: [...command], commandDisplay: command.join(" "), operation, provider: "ssh" };
-        },
-        createProviderError(context, cause) {
-            return createError({
-                code: errorCodes.coreWorkerProvisionFailed,
-                details: { operation: context.operation, provider: context.provider },
-                message: cause instanceof Error ? cause.message : String(cause),
-                retryable: false
-            });
-        },
-        probeTarget: async () => getWorkerTargetByKey("linux-x64"),
-        skillsDirectory: source,
-        spawnShell(commandLine, stdio) {
-            return nodeSpawn("sh", ["-lc", commandLine], { env: { ...process.env, HOME: remoteHome }, stdio });
-        }
-    });
-
-    await installer.syncSkills();
-    assert.equal(await readFile(join(remoteHome, ".devshell", "skill", "review", "SKILL.md"), "utf8"), "first\n");
-    assert.equal((await stat(join(remoteHome, ".devshell", "skill", "review", "scripts", "run.sh"))).mode & 0o777, 0o755);
-    await assert.rejects(readFile(join(remoteHome, ".devshell", "skill", "stale", "old.txt")), hasFsCode("ENOENT"));
-
-    await writeFile(join(remoteHome, ".devshell", "skill", "review", "SKILL.md"), "corrupt\n");
-    await installer.syncSkills();
-    assert.equal(await readFile(join(remoteHome, ".devshell", "skill", "review", "SKILL.md"), "utf8"), "first\n");
-
-    await rm(join(remoteHome, ".devshell", "skill", "review"), { recursive: true, force: true });
-    await installer.syncSkills();
-    assert.equal(await readFile(join(remoteHome, ".devshell", "skill", "review", "SKILL.md"), "utf8"), "first\n");
-    assert.equal((await stat(join(remoteHome, ".devshell", "skill", "review", "scripts", "run.sh"))).mode & 0o777, 0o755);
-
-    await writeFile(join(source, "review", "SKILL.md"), "second\n");
-    await unlink(sourceScript);
-    await installer.syncSkills();
-
-    assert.equal(await readFile(join(remoteHome, ".devshell", "skill", "review", "SKILL.md"), "utf8"), "second\n");
-    await assert.rejects(readFile(join(remoteHome, ".devshell", "skill", "review", "scripts", "run.sh")), hasFsCode("ENOENT"));
-});
 
 test("ssh transport probes remote target before installing default worker", async (t) => {
     const worker = await createDummyWorkerBinary();
@@ -672,7 +518,6 @@ test("ssh transport probes remote target before installing default worker", asyn
         return false;
     });
     const transport = new WorkerTransportDriverSsh({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
         spawnFunction: recorder.spawn
     });
@@ -761,7 +606,6 @@ test("ssh transport reuses a matching remote worker without uploading the binary
         return true;
     });
     const transport = new WorkerTransportDriverSsh({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
         spawnFunction: recorder.spawn
     });
@@ -854,7 +698,6 @@ test("ssh transport reinstalls default worker when target asset changes", async 
         return true;
     });
     const transport = new WorkerTransportDriverSsh({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
         spawnFunction: recorder.spawn
     });
@@ -877,7 +720,6 @@ test("ssh transport appends interactive-auth hint when batch mode authentication
         return true;
     });
     const transport = new WorkerTransportDriverSsh({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh demo",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
@@ -902,7 +744,6 @@ test("ssh transport interactive start establishes a reusable control socket", as
         return true;
     });
     const transport = new WorkerTransportDriverSsh({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         command: "ssh-bin devbox",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn
@@ -981,7 +822,6 @@ test("docker transport builds exec command", async () => {
         return false;
     });
     const transport = new WorkerTransportDriverDocker({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -1013,7 +853,6 @@ test("docker transport runs installWorker probe via exec", async () => {
         return false;
     });
     const transport = new WorkerTransportDriverDocker({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -1032,48 +871,6 @@ test("docker transport runs installWorker probe via exec", async () => {
         args: ["exec", "-i", "worker-container", "/usr/local/bin/devshell-worker", "--version"],
         options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
     });
-});
-
-test("docker transport mirrors control skills into the container user home", async (t) => {
-    const root = await createTestTempDirectory("container-skills");
-    const skillsDirectory = join(root, "skill");
-    await mkdir(join(skillsDirectory, "build"), { recursive: true });
-    await writeFile(join(skillsDirectory, "build", "SKILL.md"), "# Build\n");
-    t.after(() => rm(root, { recursive: true, force: true }));
-
-    const recorder = createSpawnRecorder((_call, child, callIndex) => {
-        if (callIndex === 0) {
-            closeRecordedChild(child, { stdout: "running\n" });
-            return true;
-        }
-        if (callIndex === 1) {
-            closeRecordedChild(child, { stdout: "/home/dev" });
-            return true;
-        }
-        if (callIndex === 2) {
-            child.stdin.once("finish", () => closeRecordedChild(child));
-            return true;
-        }
-        return false;
-    });
-    const transport = new WorkerTransportDriverDocker({
-        container: createManagedContainerConfig(),
-        dockerBinary: "docker-bin",
-        skillsDirectory,
-        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
-    });
-
-    await transport.installWorker();
-
-    assert.equal(recorder.calls.length, 4);
-    assert.deepEqual(recorder.calls[1]?.args.slice(0, 5), ["exec", "-i", "worker-container", "sh", "-lc"]);
-    assert.equal(recorder.calls[2]?.args[5]?.includes("/home/dev/.devshell/skill"), true);
-    assert.equal(recorder.calls[2]?.args[5]?.includes("tar -xpf -"), true);
-    assert.ok(Buffer.concat(recorder.children[2]?.stdinChunks ?? []).length > 0);
-    assert.deepEqual(recorder.calls[3]?.args, [
-        "exec", "-i", "worker-container", "/usr/local/bin/devshell-worker", "--version"
-    ]);
 });
 
 test("docker transport installs default worker before exec command", async (t) => {
@@ -1116,7 +913,6 @@ test("docker transport installs default worker before exec command", async (t) =
         return false;
     });
     const transport = new WorkerTransportDriverDocker({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
         spawnFunction: recorder.spawn
@@ -1170,7 +966,6 @@ test("podman transport builds exec command", async () => {
         return false;
     });
     const transport = new WorkerTransportDriverPodman({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -1206,7 +1001,6 @@ test("podman transport preserves provider storage environment and forwards worke
         return false;
     });
     const transport = new WorkerTransportDriverPodman({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -1284,7 +1078,6 @@ test("Windows container provider environment canonicalizes reserved keys case-in
 test("podman transport rejects provider-reserved instance environment before provisioning", async () => {
     const recorder = createSpawnRecorder();
     const transport = new WorkerTransportDriverPodman({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -1316,7 +1109,6 @@ test("podman transport runs installWorker probe via exec", async () => {
         return false;
     });
     const transport = new WorkerTransportDriverPodman({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -1377,7 +1169,6 @@ test("podman transport installs default worker before spawning rpc", async (t) =
         return false;
     });
     const transport = new WorkerTransportDriverPodman({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         spawnFunction: recorder.spawn
@@ -1438,7 +1229,6 @@ test("docker transport creates and starts managed containers before starting the
         return false;
     });
     const transport = new WorkerTransportDriverDocker({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: {
             containerName: "worker-container",
             image: "archlinux:latest",
@@ -1474,7 +1264,6 @@ test("docker transport creates and starts managed containers before starting the
 test("managed container retirement removes the devshell-owned container", async () => {
     const recorder = createSpawnRecorder();
     const transport = new WorkerTransportDriverDocker({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
@@ -1504,7 +1293,6 @@ test("dockerfile container mode builds the image before creating the managed con
         return false;
     });
     const transport = new WorkerTransportDriverDocker({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: {
             build: {
                 context: "/project",
@@ -1544,7 +1332,6 @@ test("dockerfile container mode builds the image before creating the managed con
 test("compose container mode starts the configured service and executes the worker through compose", async () => {
     const recorder = createSpawnRecorder();
     const transport = new WorkerTransportDriverDocker({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: {
             compose: {
                 file: "/project/compose.yaml",
@@ -1585,7 +1372,6 @@ test("compose container mode starts the configured service and executes the work
 test("container retirement leaves compose and user-owned stopped containers intact", async () => {
     const composeRecorder = createSpawnRecorder();
     const compose = new WorkerTransportDriverDocker({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: {
             compose: {
                 file: "/project/compose.yaml",
@@ -1600,7 +1386,6 @@ test("container retirement leaves compose and user-owned stopped containers inta
     });
     const adoptedRecorder = createSpawnRecorder();
     const adopted = new WorkerTransportDriverPodman({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: {
             adoptLifecycle: true,
             containerName: "user-container",
@@ -1627,7 +1412,6 @@ test("runtime retirement temporarily starts and restores an adopted stopped cont
         return false;
     });
     const transport = new WorkerTransportDriverPodman({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: {
             adoptLifecycle: true,
             containerName: "user-container",
@@ -1660,7 +1444,6 @@ test("runtime retirement temporarily starts and restores a stopped compose servi
         return false;
     });
     const transport = new WorkerTransportDriverDocker({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: {
             compose: {
                 file: "/project/compose.yaml",
@@ -1698,7 +1481,6 @@ test("existing image container mode creates a dedicated managed container", asyn
         return false;
     });
     const transport = new WorkerTransportDriverPodman({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: {
             containerName: "existing-image-container",
             image: "registry.example/devshell:latest",
@@ -1737,7 +1519,6 @@ test("managed container uses an explicit workspace mount without adding a duplic
         return false;
     });
     const transport = new WorkerTransportDriverPodman({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: {
             containerName: "mounted-container",
             image: "registry.example/devshell:latest",
@@ -1774,7 +1555,6 @@ test("existing stopped container mode adopts and restores the configured lifecyc
         return false;
     });
     const transport = new WorkerTransportDriverPodman({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: {
             adoptLifecycle: true,
             containerName: "adopted-container",
@@ -1818,7 +1598,6 @@ test("podman transport rejects already running existing stopped containers", asy
         return false;
     });
     const transport = new WorkerTransportDriverPodman({
-        skillsDirectory: NO_SKILLS_DIRECTORY,
         container: {
             adoptLifecycle: true,
             containerName: "worker-container",
@@ -2015,40 +1794,6 @@ async function installedWorkerSha(path: string): Promise<string> {
     const match = target.match(/[a-f0-9]{64}/u);
     assert.notEqual(match, null, `installed worker symlink does not contain a sha256: ${target}`);
     return match![0];
-}
-
-async function readTarEntries(bytes: Buffer): Promise<Record<string, { content: string; mode: number; type: string }>> {
-    const parser = extract();
-    const entries: Record<string, { content: string; mode: number; type: string }> = {};
-
-    await new Promise<void>((resolve, reject) => {
-        parser.on("entry", (header, stream, next) => {
-            const chunks: Buffer[] = [];
-            stream.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
-            stream.once("error", reject);
-            stream.once("end", () => {
-                entries[header.name] = {
-                    content: Buffer.concat(chunks).toString("utf8"),
-                    mode: header.mode ?? 0,
-                    type: header.type ?? "file"
-                };
-                next();
-            });
-            stream.resume();
-        });
-        parser.once("error", reject);
-        parser.once("finish", resolve);
-        parser.end(bytes);
-    });
-
-    return entries;
-}
-
-function hasFsCode(expected: string): (error: unknown) => boolean {
-    return (error: unknown) => {
-        assert.equal((error as { code?: string }).code, expected);
-        return true;
-    };
 }
 
 function closeRecordedChild(

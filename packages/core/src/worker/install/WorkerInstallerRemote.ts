@@ -1,7 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 
 import {
     ControlError,
@@ -11,11 +10,9 @@ import {
 
 import type { ProviderCommandContext } from "../command/WorkerCommandTransport.js";
 import { waitForCommandResult } from "../command/WorkerCommandTransport.js";
-import { resolveWorkerHomeDirectory } from "../platform/WorkerHomeDirectory.js";
 import { WorkerAssetResolver } from "../WorkerAssetResolver.js";
 import type { WorkerTarget } from "../target/WorkerTarget.js";
 import { WORKER_GENERATION_RETENTION_DAYS } from "./WorkerGenerationPolicy.js";
-import { createWorkerSkillArchive } from "./WorkerSkillArchive.js";
 
 export interface WorkerInstallerRemoteOptions {
     resolver?: WorkerAssetResolver;
@@ -42,7 +39,6 @@ export interface WorkerInstallerRemoteOptions {
         operation: string,
         command: readonly string[],
     ) => ProviderCommandContext;
-    skillsDirectory?: string;
 }
 
 export class WorkerInstallerRemote {
@@ -51,10 +47,8 @@ export class WorkerInstallerRemote {
     readonly #spawnShell: WorkerInstallerRemoteOptions["spawnShell"];
     readonly #createProviderError: WorkerInstallerRemoteOptions["createProviderError"];
     readonly #createContext: WorkerInstallerRemoteOptions["createContext"];
-    readonly #skillsDirectory: string;
     #homeDirectoryPromise?: Promise<string>;
     #installPromise?: Promise<string>;
-    #skillsSyncPromise?: Promise<void>;
 
     constructor(options: WorkerInstallerRemoteOptions) {
         this.#resolver = options.resolver ?? new WorkerAssetResolver();
@@ -62,9 +56,6 @@ export class WorkerInstallerRemote {
         this.#spawnShell = options.spawnShell;
         this.#createProviderError = options.createProviderError;
         this.#createContext = options.createContext;
-        this.#skillsDirectory =
-            options.skillsDirectory ??
-            join(resolveWorkerHomeDirectory(), ".devshell", "skill");
     }
 
     async ensure(executable: string): Promise<string> {
@@ -81,34 +72,6 @@ export class WorkerInstallerRemote {
         return await this.#installPromise;
     }
 
-    async syncSkills(): Promise<void> {
-        if (this.#skillsSyncPromise !== undefined) {
-            return await this.#skillsSyncPromise;
-        }
-
-        const archive = await createWorkerSkillArchive(
-            this.#skillsDirectory,
-        ).catch((error) => {
-            throw this.#createProviderError(
-                this.#createContext("syncSkills", [
-                    "read",
-                    this.#skillsDirectory,
-                ]),
-                error,
-                { errorCode: errorCodes.coreWorkerProvisionFailed },
-            );
-        });
-        if (archive === undefined) return;
-
-        const promise = this.#syncSkillsArchive(archive.bytes).finally(() => {
-            if (this.#skillsSyncPromise === promise) {
-                this.#skillsSyncPromise = undefined;
-            }
-        });
-        this.#skillsSyncPromise = promise;
-        await promise;
-    }
-
     async #installDefaultWorker(): Promise<string> {
         const target = await this.#probeTarget();
         const asset = await this.#resolver.resolve(target).catch((error) => {
@@ -121,7 +84,7 @@ export class WorkerInstallerRemote {
                 error,
             );
         });
-        const homeDirectory = await this.#resolveHomeDirectory("installWorker");
+        const homeDirectory = await this.#resolveHomeDirectory();
 
         if (
             await this.#isRemoteWorkerCurrent(
@@ -254,14 +217,12 @@ export class WorkerInstallerRemote {
         );
     }
 
-    async #resolveHomeDirectory(
-        operation: "installWorker" | "syncSkills",
-    ): Promise<string> {
+    async #resolveHomeDirectory(): Promise<string> {
         if (this.#homeDirectoryPromise !== undefined) {
             return await this.#homeDirectoryPromise;
         }
 
-        const promise = this.#readHomeDirectory(operation).catch((error) => {
+        const promise = this.#readHomeDirectory().catch((error) => {
             if (this.#homeDirectoryPromise === promise) {
                 this.#homeDirectoryPromise = undefined;
             }
@@ -271,12 +232,10 @@ export class WorkerInstallerRemote {
         return await promise;
     }
 
-    async #readHomeDirectory(
-        operation: "installWorker" | "syncSkills",
-    ): Promise<string> {
+    async #readHomeDirectory(): Promise<string> {
         const commandLine =
             'printf %s "${HOME:?HOME is required to install the worker}"';
-        const context = this.#createContext(operation, [
+        const context = this.#createContext("installWorker", [
             "sh",
             "-lc",
             commandLine,
@@ -314,47 +273,6 @@ export class WorkerInstallerRemote {
         return homeDirectory;
     }
 
-    async #syncSkillsArchive(bytes: Buffer): Promise<void> {
-        const homeDirectory = await this.#resolveHomeDirectory("syncSkills");
-        const commandLine = buildSkillSyncScript(homeDirectory);
-        const context = this.#createContext("syncSkills", [
-            "sh",
-            "-lc",
-            commandLine,
-        ]);
-        const child = this.#spawnShell(
-            commandLine,
-            ["pipe", "pipe", "pipe"],
-            context,
-        );
-
-        await writeToChildStdin(
-            child,
-            bytes,
-            this.#createProviderError,
-            context,
-            "skill archive",
-        );
-        const result = await waitForCommandResult(
-            child,
-            this.#createProviderError,
-            context,
-        );
-        if (result.exitCode !== 0) {
-            throw this.#createProviderError(
-                context,
-                new Error(
-                    result.stderr ||
-                        result.stdout ||
-                        "skill synchronization failed",
-                ),
-                {
-                    errorCode: errorCodes.coreWorkerProvisionFailed,
-                    result,
-                },
-            );
-        }
-    }
 }
 
 function buildInspectScript(
@@ -482,33 +400,6 @@ function hashFunctionScript(): string {
 
 function buildRemoteExecutablePath(homeDirectory: string): string {
     return `${homeDirectory}/.devshell/bin/devshell-worker`;
-}
-
-function buildSkillSyncScript(homeDirectory: string): string {
-    const rootDirectory = `${homeDirectory}/.devshell`;
-    const targetDirectory = `${rootDirectory}/skill`;
-
-    return [
-        "set -eu",
-        `root_dir=${shellEscape(rootDirectory)}`,
-        `target_dir=${shellEscape(targetDirectory)}`,
-        'staged_dir="$root_dir/.skill.tmp.$$"',
-        'backup_dir="$root_dir/.skill.backup.$$"',
-        'mkdir -p "$root_dir"',
-        'cleanup() { rm -rf "$staged_dir"; }',
-        "trap cleanup EXIT HUP INT TERM",
-        'rm -rf "$staged_dir" "$backup_dir"',
-        'mkdir -p "$staged_dir"',
-        'tar -xpf - -C "$staged_dir"',
-        'if [ -e "$target_dir" ]; then mv "$target_dir" "$backup_dir"; fi',
-        'if mv "$staged_dir" "$target_dir"; then',
-        '  rm -rf "$backup_dir"',
-        "else",
-        '  if [ -e "$backup_dir" ]; then mv "$backup_dir" "$target_dir"; fi',
-        "  exit 1",
-        "fi",
-        "trap - EXIT HUP INT TERM",
-    ].join("\n");
 }
 
 function shellEscape(value: string): string {

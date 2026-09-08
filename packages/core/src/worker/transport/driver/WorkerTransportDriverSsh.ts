@@ -35,7 +35,6 @@ const SSH_INTERACTIVE_HINT =
 
 export interface WorkerTransportDriverSshOptions {
     command: string;
-    skillsDirectory?: string;
     workerBinary?: WorkerBinary;
     spawnFunction?: SpawnFunction;
 }
@@ -57,13 +56,11 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
             probeTarget: () => this.#probeTarget(),
             spawnShell: (commandLine, stdio, context) => this.#spawnRemoteShell(commandLine, stdio, context),
             createProviderError: this.#process.createError,
-            skillsDirectory: options.skillsDirectory
         });
     }
 
     async installWorker(interactiveSession?: WorkerCommandInteractiveSession): Promise<void> {
         const installCommand = new WorkerBinary(await this.#resolveExecutable(interactiveSession)).buildInstallCommand();
-        await this.#installer.syncSkills();
         const commandLine = [installCommand.command, ...installCommand.args].map(shellEscape).join(" ");
         const context = this.#createRemoteShellContext(
             "installWorker",
@@ -94,9 +91,6 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
         }
 
         const executable = await this.#resolveExecutable(interactiveSession);
-        if (command === "start") {
-            await this.#installer.syncSkills();
-        }
         const workerCommand = new WorkerBinary(executable).buildCommand(
             command,
             options.instanceName,
@@ -133,7 +127,6 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
 
     async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
         const executable = await this.#resolveExecutable();
-        await this.#installer.syncSkills();
         const workerCommand = new WorkerBinary(executable).buildCommand("rpc", options.instanceName);
         const commandLine = [workerCommand.command, ...workerCommand.args].map(shellEscape).join(" ");
         const environmentFile = await this.#prepareRemoteEnvironment(options.env);
