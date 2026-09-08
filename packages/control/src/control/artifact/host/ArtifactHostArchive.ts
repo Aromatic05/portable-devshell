@@ -12,7 +12,7 @@ import {
     readdir,
     utimes
 } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Transform, type Readable } from "node:stream";
 import { createZstdCompress, createZstdDecompress } from "node:zlib";
@@ -169,8 +169,13 @@ export async function extractArtifactDirectoryArchive(
 }
 
 async function collectEntries(root: string): Promise<SourceEntry[]> {
+    const canonicalRoot = resolve(root);
+    const rootMetadata = await lstat(canonicalRoot);
+    if (rootMetadata.isSymbolicLink() || !rootMetadata.isDirectory()) {
+        throw artifactError("artifact.directoryUnsafe", "Directory archive source must be a plain directory.");
+    }
     const entries: SourceEntry[] = [];
-    await collectDirectory(root, root, entries);
+    await collectDirectory(canonicalRoot, canonicalRoot, entries);
     entries.sort((left, right) => Buffer.compare(Buffer.from(left.relativePath), Buffer.from(right.relativePath)));
     return entries;
 }
@@ -194,7 +199,7 @@ async function collectDirectory(root: string, current: string, output: SourceEnt
         if (metadata.isSymbolicLink()) {
             throw artifactError("artifact.directoryUnsafe", `Directory contains symbolic link: ${name}`);
         }
-        const relativePath = absolutePath.slice(root.length + 1).split("\\").join("/");
+        const relativePath = relative(root, absolutePath).split("\\").join("/");
         validateRelativePath(relativePath);
         const base = {
             absolutePath,
