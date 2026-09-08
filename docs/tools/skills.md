@@ -1,10 +1,12 @@
 # Agent Skills
 
-portable-devshell 提供一个分层、按需读取的 Agent Skill catalog。CLI 负责发现本机 Skill；worker handshake 同时暴露目标环境的 managed skills directory，供 Agent 环境 bootstrap 使用。
+portable-devshell 的 Skill 功能由 builtin **Skill Extension** 提供。Extension 运行在 Control：负责本机 Skill discovery、catalog、内容快照与显式传输；Worker 不实现 Skill 协议，也不会在 provider 生命周期里自动同步 Skill。
+
+Skill 到达目标 Worker 后只是普通文件。Agent 后续读取 `SKILL.md`、读取附属文件和执行脚本仍使用 `file_read` / `file_search` / `bash` / `tmux` 等普通 Worker tools。
 
 ## 目录优先级
 
-`devshell skill` 按以下顺序查找同名 Skill：
+`devshell skill` 在 Control 主机按以下顺序查找同名 Skill：
 
 ```text
 1. project  <workspace>/.agents/skills/<name>/
@@ -40,7 +42,10 @@ devshell skill search <query> [--workspace <directory>]
 devshell skill load <name> [--workspace <directory>]
 devshell skill inspect <name> [--workspace <directory>]
 devshell skill read <name> <path> [--workspace <directory>]
+devshell skill get <name> <instance:/absolute/workspace> [--workspace <local-directory>]
 ```
+
+这些命令读取 Control 主机文件，因此只接受 local-owner CLI 调用。CLI 会把调用者真实工作目录作为 Extension invocation context 传给 Control；Skill Extension 不使用 Control daemon 自己的 `process.cwd()`。
 
 `inspect` 当前与 `load` 使用同一完整加载语义。
 
@@ -84,6 +89,29 @@ devshell skill read my-skill scripts/check.sh --workspace /project
 
 `SKILL.md` 本身必须使用 `load`，不能通过 `read` 绕过入口语义。
 
+### `get`
+
+`get` 把当前 discovery 选中的**一个** Skill 安装到指定 Worker 的 managed Skill 目录：
+
+```bash
+devshell skill get my-skill remote-dev:/srv/project --workspace /local/project
+```
+
+流程是：
+
+```text
+Control Skill source
+    -> Extension asset snapshot (content-addressed)
+    -> open target Worker session
+    -> prepare ~/.devshell/skill with ordinary bash_run
+    -> Artifact transfer
+    -> ~/.devshell/skill/<name>/ on the Worker
+```
+
+Artifact receive 负责 payload 校验、staging 与目标替换。SSH/Docker/Podman/Reverse 不参与 Skill 语义，也没有另一套 tar/mv shell installer。
+
+`get` 是显式操作，不会因为 instance start、RPC reconnect 或 provider install 自动复制整套 catalog。重复 `get` 同名 Skill 会用新快照替换该目标 Skill；其他目标 Skill 不受影响。
+
 ## Lazy loading
 
 Skill catalog 的设计目标是避免把所有说明一次性塞进 Agent context：
@@ -108,37 +136,44 @@ related scan entries      5000
 
 ## Workspace 参数
 
-省略 `--workspace` 时，CLI 使用当前工作目录决定 project Skill root：
+省略 `--workspace` 时，local-owner CLI 的当前工作目录决定 project Skill root：
 
 ```text
 $PWD/.agents/skills
 ```
 
-显式传 `--workspace` 可以在不 `cd` 的情况下检查另一个项目：
+显式传 `--workspace` 可以在不 `cd` 的情况下检查另一个本地项目：
 
 ```bash
 devshell skill list --workspace /absolute/project
 ```
 
-这个 workspace 只影响本机 Skill discovery，不会创建 MCP Context，也不会修改某个 instance 的 environment attachment。
+这个 workspace 只影响 **Control 主机上的 Skill discovery**，不会创建 MCP Context，也不会修改 instance attachment。
+
+`skill get` 的 `<instance:/absolute/workspace>` 是另一件事：它指定目标 Worker session 的 instance 和 Worker 机器上的绝对 workspace。两者不能混为一谈。
 
 ## MCP / Worker 集成
 
-`environ_info` 会从目标 worker 的 handshake/environment 返回 skills directory 信息。Agent 可以据此发现目标环境已安装的 managed Skills。
+Worker handshake 只暴露通用环境，例如 `homeDirectory` 和 platform；它不包含 Skill-specific 字段。
 
-本机 `devshell skill` catalog 与远程 worker Skill 生命周期不要混为一谈：
+MCP builtin module 的 `environ_info` 仍返回 `skillsDirectory` 作为产品级环境信息。该值由 Worker 的 `homeDirectory + platform` 推导，表示目标环境的 managed Skill 目录：
 
-* local 环境通常直接读取本机目录；
-* SSH/container 等 managed worker 可以在 provider 生命周期中获得受管 Skill；
-* self-managed Reverse worker 自己维护远端 `~/.devshell/skill`。
+```text
+~/.devshell/skill
+```
 
-portable-devshell 不把整个 Skill catalog 转成一个巨大的 model-facing MCP tool schema；应该先发现，再按需加载。
+因此 Agent 可以先通过 `environ_info` 得到目标 managed Skill 位置，再使用普通 `file_read` / `file_search` 按需读取已经 `get` 到该 Worker 的 Skill。
+
+portable-devshell 不把整个 Skill catalog 转成巨大的 model-facing MCP schema；应该先发现/传输，再在目标环境按需读取。
 
 ## 安全边界
 
 Skill 是**指令与代码资产**，不是天然可信的数据：
 
 * project Skill 由项目仓库控制；
-* managed/global Skill 由用户环境控制；
+* managed/global Skill 由 Control 主机用户环境控制；
 * `skill load/read` 只读取文本，不自动执行相关脚本；
-* 是否执行 Skill 中建议的 shell/tool 操作，仍经过普通 tool policy、Approval 与 workspace 安全边界。
+* `skill get` 只传输选中的资产，不执行 Skill 内容；
+* `get` 的目录准备通过普通 audited Worker tool 完成；
+* Artifact transfer 只能传输 Extension 已安装的 asset generation，不能借此读取任意 Control host path；
+* 后续执行 Skill 中建议的 shell/tool 操作仍经过普通 tool policy、Approval、Audit 与 workspace 安全边界。
