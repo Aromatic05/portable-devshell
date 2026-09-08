@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -78,19 +78,30 @@ impl AlertService {
         let next_probe_id = Arc::new(AtomicU64::new(1));
         let polling_state = Arc::clone(&state);
         let polling_probe_id = Arc::clone(&next_probe_id);
-        thread::spawn(move || loop {
-            poll_due(&polling_state, &polling_probe_id);
-            thread::sleep(Duration::from_millis(250));
+        thread::spawn(move || {
+            loop {
+                poll_due(&polling_state, &polling_probe_id);
+                thread::sleep(Duration::from_millis(250));
+            }
         });
-        Self { next_probe_id, state }
+        Self {
+            next_probe_id,
+            state,
+        }
     }
 
     fn read(&self, input: AlertsReadInput) -> Result<AlertsReadResult, RpcError> {
-        let workspace = Path::new(&input.workspace).canonicalize().map_err(|error| {
-            RpcError::new("workspace.invalid", format!("failed to resolve workspace {}: {error}", input.workspace))
-        })?;
+        let workspace = Path::new(&input.workspace)
+            .canonicalize()
+            .map_err(|error| {
+                RpcError::new(
+                    "workspace.invalid",
+                    format!("failed to resolve workspace {}: {error}", input.workspace),
+                )
+            })?;
         let Some(config) = input.config else {
-            self.state.lock()
+            self.state
+                .lock()
                 .map_err(|_| RpcError::new("alerts.unavailable", "alert state lock poisoned"))?
                 .remove(&workspace);
             return Ok(AlertsReadResult { advice: Vec::new() });
@@ -99,38 +110,56 @@ impl AlertService {
         let now = Instant::now();
         let probe_id = self.next_probe_id.fetch_add(1, Ordering::Relaxed);
         {
-            let mut state = self.state.lock()
+            let mut state = self
+                .state
+                .lock()
                 .map_err(|_| RpcError::new("alerts.unavailable", "alert state lock poisoned"))?;
-            state.insert(workspace.clone(), WorkspaceAlerts {
-                active_probe: Some(probe_id),
-                advice: Vec::new(),
-                config: config.clone(),
-                last_run: None,
-                last_seen: now,
-            });
+            state.insert(
+                workspace.clone(),
+                WorkspaceAlerts {
+                    active_probe: Some(probe_id),
+                    advice: Vec::new(),
+                    config: config.clone(),
+                    last_run: None,
+                    last_seen: now,
+                },
+            );
         }
         let advice = collect_advice(&workspace, &config);
         complete_probe(&self.state, &workspace, probe_id, &config, advice);
-        let state = self.state.lock()
+        let state = self
+            .state
+            .lock()
             .map_err(|_| RpcError::new("alerts.unavailable", "alert state lock poisoned"))?;
         Ok(AlertsReadResult {
-            advice: state.get(&workspace).map(|entry| entry.advice.clone()).unwrap_or_default(),
+            advice: state
+                .get(&workspace)
+                .map(|entry| entry.advice.clone())
+                .unwrap_or_default(),
         })
     }
 
     fn touch(&self, input: AlertsReadInput) -> Result<(), RpcError> {
-        let workspace = Path::new(&input.workspace).canonicalize().map_err(|error| {
-            RpcError::new("workspace.invalid", format!("failed to resolve workspace {}: {error}", input.workspace))
-        })?;
+        let workspace = Path::new(&input.workspace)
+            .canonicalize()
+            .map_err(|error| {
+                RpcError::new(
+                    "workspace.invalid",
+                    format!("failed to resolve workspace {}: {error}", input.workspace),
+                )
+            })?;
         let Some(config) = input.config else {
-            self.state.lock()
+            self.state
+                .lock()
                 .map_err(|_| RpcError::new("alerts.unavailable", "alert state lock poisoned"))?
                 .remove(&workspace);
             return Ok(());
         };
         validate_config(&config)?;
         let now = Instant::now();
-        let mut state = self.state.lock()
+        let mut state = self
+            .state
+            .lock()
             .map_err(|_| RpcError::new("alerts.unavailable", "alert state lock poisoned"))?;
         match state.get_mut(&workspace) {
             Some(entry) => {
@@ -142,13 +171,16 @@ impl AlertService {
                 entry.last_seen = now;
             }
             None => {
-                state.insert(workspace, WorkspaceAlerts {
-                    active_probe: None,
-                    advice: Vec::new(),
-                    config,
-                    last_run: None,
-                    last_seen: now,
-                });
+                state.insert(
+                    workspace,
+                    WorkspaceAlerts {
+                        active_probe: None,
+                        advice: Vec::new(),
+                        config,
+                        last_run: None,
+                        last_seen: now,
+                    },
+                );
             }
         }
         Ok(())
@@ -156,13 +188,16 @@ impl AlertService {
 
     fn configure(&self, config: Option<AlertConfig>) -> Result<(), RpcError> {
         let Some(config) = config else {
-            self.state.lock()
+            self.state
+                .lock()
                 .map_err(|_| RpcError::new("alerts.unavailable", "alert state lock poisoned"))?
                 .clear();
             return Ok(());
         };
         validate_config(&config)?;
-        let mut state = self.state.lock()
+        let mut state = self
+            .state
+            .lock()
             .map_err(|_| RpcError::new("alerts.unavailable", "alert state lock poisoned"))?;
         for entry in state.values_mut() {
             if entry.config != config {
@@ -199,15 +234,30 @@ pub fn configure_handler(service: Arc<AlertService>) -> Arc<dyn ControlHandler> 
 }
 
 fn validate_config(config: &AlertConfig) -> Result<(), RpcError> {
-    if config.interval_ms.is_some_and(|value| value < MIN_INTERVAL_MS) {
-        return Err(RpcError::new("alerts.invalidConfig", "intervalMs must be at least 1000"));
+    if config
+        .interval_ms
+        .is_some_and(|value| value < MIN_INTERVAL_MS)
+    {
+        return Err(RpcError::new(
+            "alerts.invalidConfig",
+            "intervalMs must be at least 1000",
+        ));
     }
     for script in config.scripts.as_deref().unwrap_or_default() {
-        if script.id.trim().is_empty() || script.command.is_empty() || script.command.iter().any(|part| part.is_empty()) {
-            return Err(RpcError::new("alerts.invalidConfig", "scripts require a non-empty id and command"));
+        if script.id.trim().is_empty()
+            || script.command.is_empty()
+            || script.command.iter().any(|part| part.is_empty())
+        {
+            return Err(RpcError::new(
+                "alerts.invalidConfig",
+                "scripts require a non-empty id and command",
+            ));
         }
         if script.timeout_ms.is_some_and(|value| value == 0) {
-            return Err(RpcError::new("alerts.invalidConfig", "script timeoutMs must be positive"));
+            return Err(RpcError::new(
+                "alerts.invalidConfig",
+                "script timeoutMs must be positive",
+            ));
         }
     }
     Ok(())
@@ -217,24 +267,31 @@ fn interval(config: &AlertConfig) -> Duration {
     Duration::from_millis(config.interval_ms.unwrap_or(DEFAULT_INTERVAL_MS))
 }
 
-fn poll_due(
-    state: &Arc<Mutex<HashMap<PathBuf, WorkspaceAlerts>>>,
-    next_probe_id: &Arc<AtomicU64>,
-) {
+fn poll_due(state: &Arc<Mutex<HashMap<PathBuf, WorkspaceAlerts>>>, next_probe_id: &Arc<AtomicU64>) {
     let now = Instant::now();
-    let probes: Vec<(PathBuf, AlertConfig, u64)> = state.lock().ok().map(|mut entries| {
-        entries.retain(|_, entry| now.saturating_duration_since(entry.last_seen) < CACHE_IDLE_TTL);
-        entries.iter_mut().filter_map(|(workspace, entry)| {
-            if entry.active_probe.is_some() ||
-                entry.last_run.is_some_and(|last| now.saturating_duration_since(last) < interval(&entry.config))
-            {
-                return None;
-            }
-            let probe_id = next_probe_id.fetch_add(1, Ordering::Relaxed);
-            entry.active_probe = Some(probe_id);
-            Some((workspace.clone(), entry.config.clone(), probe_id))
-        }).collect()
-    }).unwrap_or_default();
+    let probes: Vec<(PathBuf, AlertConfig, u64)> = state
+        .lock()
+        .ok()
+        .map(|mut entries| {
+            entries
+                .retain(|_, entry| now.saturating_duration_since(entry.last_seen) < CACHE_IDLE_TTL);
+            entries
+                .iter_mut()
+                .filter_map(|(workspace, entry)| {
+                    if entry.active_probe.is_some()
+                        || entry.last_run.is_some_and(|last| {
+                            now.saturating_duration_since(last) < interval(&entry.config)
+                        })
+                    {
+                        return None;
+                    }
+                    let probe_id = next_probe_id.fetch_add(1, Ordering::Relaxed);
+                    entry.active_probe = Some(probe_id);
+                    Some((workspace.clone(), entry.config.clone(), probe_id))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     for (workspace, config, probe_id) in probes {
         let advice = collect_advice(&workspace, &config);
         complete_probe(state, &workspace, probe_id, &config, advice);
@@ -265,7 +322,9 @@ fn complete_probe(
 fn collect_advice(workspace: &Path, config: &AlertConfig) -> Vec<Advice> {
     let mut advice = Vec::new();
     if let (Some(limit), Some(used)) = (config.worker_memory_bytes, worker_rss_bytes()) {
-        if used >= limit { advice.push(Advice { code: "worker.memory.high".to_string(), text: format!("Worker RSS is {} MiB, at or above its {} MiB alert threshold. Stop high-memory work and clean up child processes before continuing.", used / 1024 / 1024, limit / 1024 / 1024) }); }
+        if used >= limit {
+            advice.push(Advice { code: "worker.memory.high".to_string(), text: format!("Worker RSS is {} MiB, at or above its {} MiB alert threshold. Stop high-memory work and clean up child processes before continuing.", used / 1024 / 1024, limit / 1024 / 1024) });
+        }
     }
     if let Some(limit) = config.max_uncommitted_changes {
         match uncommitted_changes(workspace) {
@@ -274,72 +333,147 @@ fn collect_advice(workspace: &Path, config: &AlertConfig) -> Vec<Advice> {
             _ => {}
         }
     }
-    for script in config.scripts.as_deref().unwrap_or_default() { advice.extend(run_script(workspace, script)); }
+    for script in config.scripts.as_deref().unwrap_or_default() {
+        advice.extend(run_script(workspace, script));
+    }
     advice
 }
 
 #[cfg(target_os = "linux")]
 fn worker_rss_bytes() -> Option<u64> {
-    std::fs::read_to_string("/proc/self/status").ok()?.lines().find_map(|line| line.strip_prefix("VmRSS:")?.split_whitespace().next()?.parse::<u64>().ok().map(|value| value * 1024))
+    std::fs::read_to_string("/proc/self/status")
+        .ok()?
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("VmRSS:")?
+                .split_whitespace()
+                .next()?
+                .parse::<u64>()
+                .ok()
+                .map(|value| value * 1024)
+        })
 }
 
 #[cfg(all(unix, not(target_os = "linux")))]
 fn worker_rss_bytes() -> Option<u64> {
-    let output = Command::new("ps").args(["-o", "rss=", "-p", &std::process::id().to_string()]).output().ok()?;
-    output.status.success().then(|| String::from_utf8_lossy(&output.stdout).trim().parse::<u64>().ok().map(|value| value * 1024))?
+    let output = Command::new("ps")
+        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+        .output()
+        .ok()?;
+    output.status.success().then(|| {
+        String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<u64>()
+            .ok()
+            .map(|value| value * 1024)
+    })?
 }
 
 #[cfg(windows)]
 fn worker_rss_bytes() -> Option<u64> {
     use std::mem::size_of;
-    use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+    use windows_sys::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
     let mut counters: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
     counters.cb = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
-    (unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb) } != 0).then_some(counters.WorkingSetSize as u64)
+    (unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb) } != 0)
+        .then_some(counters.WorkingSetSize as u64)
 }
 
 #[cfg(not(any(unix, windows)))]
-fn worker_rss_bytes() -> Option<u64> { None }
+fn worker_rss_bytes() -> Option<u64> {
+    None
+}
 
 fn uncommitted_changes(workspace: &Path) -> Result<usize, String> {
-    let repository = Command::new("git").args(["rev-parse", "--is-inside-work-tree"]).current_dir(workspace).output().map_err(|error| error.to_string())?;
-    if !repository.status.success() || String::from_utf8_lossy(&repository.stdout).trim() != "true" { return Ok(0); }
-    let output = Command::new("git").args(["status", "--porcelain"]).current_dir(workspace).output().map_err(|error| error.to_string())?;
-    if !output.status.success() { return Err(String::from_utf8_lossy(&output.stderr).trim().to_string()); }
+    let repository = Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .current_dir(workspace)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !repository.status.success() || String::from_utf8_lossy(&repository.stdout).trim() != "true"
+    {
+        return Ok(0);
+    }
+    let output = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(workspace)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
     Ok(String::from_utf8_lossy(&output.stdout).lines().count())
 }
 
 fn run_script(workspace: &Path, script: &AlertScript) -> Vec<Advice> {
     let mut command = Command::new(&script.command[0]);
-    command.args(&script.command[1..]).current_dir(workspace).env("DEVSHELL_ALERT_WORKSPACE", workspace).stdout(Stdio::piped());
-    let mut child = match command.spawn() { Ok(child) => child, Err(error) => return vec![script_failure(script, error.to_string())] };
+    command
+        .args(&script.command[1..])
+        .current_dir(workspace)
+        .env("DEVSHELL_ALERT_WORKSPACE", workspace)
+        .stdout(Stdio::piped());
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => return vec![script_failure(script, error.to_string())],
+    };
     let timeout = Duration::from_millis(script.timeout_ms.unwrap_or(DEFAULT_SCRIPT_TIMEOUT_MS));
     let started = Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => break,
-            Ok(Some(status)) => return vec![script_failure(script, format!("exited with {status}"))],
-            Ok(None) if started.elapsed() >= timeout => { let _ = child.kill(); let _ = child.wait(); return vec![script_failure(script, "timed out".to_string())]; }
+            Ok(Some(status)) => {
+                return vec![script_failure(script, format!("exited with {status}"))];
+            }
+            Ok(None) if started.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return vec![script_failure(script, "timed out".to_string())];
+            }
             Ok(None) => thread::sleep(Duration::from_millis(10)),
-            Err(error) => return vec![script_failure(script, error.to_string())]
+            Err(error) => return vec![script_failure(script, error.to_string())],
         }
     }
-    match child.wait_with_output().ok().and_then(|output| serde_json::from_slice::<Vec<Advice>>(&output.stdout).ok()) {
-        Some(advice) => advice.into_iter().filter(|entry| valid_advice(entry)).collect(),
-        None => vec![script_failure(script, "did not emit a JSON advice array".to_string())]
+    match child
+        .wait_with_output()
+        .ok()
+        .and_then(|output| serde_json::from_slice::<Vec<Advice>>(&output.stdout).ok())
+    {
+        Some(advice) => advice
+            .into_iter()
+            .filter(|entry| valid_advice(entry))
+            .collect(),
+        None => vec![script_failure(
+            script,
+            "did not emit a JSON advice array".to_string(),
+        )],
     }
 }
 
-fn script_failure(script: &AlertScript, reason: String) -> Advice { Advice { code: format!("alert.script.{}.failed", script.id), text: format!("Alert script {} failed: {reason}", script.id) } }
-fn valid_advice(advice: &Advice) -> bool { !advice.text.trim().is_empty() && advice.code.chars().all(|character| character.is_ascii_alphanumeric() || character == '.' || character == '_' || character == '-') }
+fn script_failure(script: &AlertScript, reason: String) -> Advice {
+    Advice {
+        code: format!("alert.script.{}.failed", script.id),
+        text: format!("Alert script {} failed: {reason}", script.id),
+    }
+}
+fn valid_advice(advice: &Advice) -> bool {
+    !advice.text.trim().is_empty()
+        && advice.code.chars().all(|character| {
+            character.is_ascii_alphanumeric()
+                || character == '.'
+                || character == '_'
+                || character == '-'
+        })
+}
 
 #[cfg(test)]
 mod tests {
     use super::{
-        AlertConfig, AlertScript, AlertService, AlertsReadInput, CACHE_IDLE_TTL,
-        run_script, uncommitted_changes,
+        AlertConfig, AlertScript, AlertService, AlertsReadInput, CACHE_IDLE_TTL, run_script,
+        uncommitted_changes,
     };
     use std::sync::Arc;
 
@@ -353,15 +487,17 @@ mod tests {
     fn disabling_alerts_clears_registered_workspace_state() {
         let workspace = crate::testing::temp_dir();
         let service = AlertService::new();
-        service.read(AlertsReadInput {
-            config: Some(AlertConfig {
-                interval_ms: Some(1_000),
-                max_uncommitted_changes: None,
-                scripts: None,
-                worker_memory_bytes: None,
-            }),
-            workspace: workspace.path().display().to_string(),
-        }).unwrap();
+        service
+            .read(AlertsReadInput {
+                config: Some(AlertConfig {
+                    interval_ms: Some(1_000),
+                    max_uncommitted_changes: None,
+                    scripts: None,
+                    worker_memory_bytes: None,
+                }),
+                workspace: workspace.path().display().to_string(),
+            })
+            .unwrap();
         assert_eq!(service.state.lock().unwrap().len(), 1);
 
         service.configure(None).unwrap();
@@ -373,11 +509,19 @@ mod tests {
     #[test]
     fn custom_script_emits_valid_advice() {
         let workspace = crate::testing::temp_dir();
-        let advice = run_script(workspace.path(), &AlertScript {
-            command: vec!["sh".to_string(), "-c".to_string(), "printf '%s' '[{\"code\":\"custom.ready\",\"text\":\"custom alert\"}]'".to_string()],
-            id: "custom".to_string(),
-            timeout_ms: Some(1_000)
-        });
+        let advice = run_script(
+            workspace.path(),
+            &AlertScript {
+                command: vec![
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    "printf '%s' '[{\"code\":\"custom.ready\",\"text\":\"custom alert\"}]'"
+                        .to_string(),
+                ],
+                id: "custom".to_string(),
+                timeout_ms: Some(1_000),
+            },
+        );
         assert_eq!(advice.len(), 1);
         assert_eq!(advice[0].code, "custom.ready");
         assert_eq!(advice[0].text, "custom alert");
@@ -429,23 +573,25 @@ mod tests {
     fn background_probes_stop_after_the_workspace_lease_expires() {
         let workspace = crate::testing::temp_dir();
         let service = AlertService::new();
-        service.read(AlertsReadInput {
-            config: Some(AlertConfig {
-                interval_ms: Some(1_000),
-                max_uncommitted_changes: None,
-                scripts: Some(vec![AlertScript {
-                    command: vec![
-                        "sh".to_string(),
-                        "-c".to_string(),
-                        "printf 'x\\n' >> probe-count; printf '[]'".to_string(),
-                    ],
-                    id: "counter".to_string(),
-                    timeout_ms: Some(1_000),
-                }]),
-                worker_memory_bytes: None,
-            }),
-            workspace: workspace.path().display().to_string(),
-        }).unwrap();
+        service
+            .read(AlertsReadInput {
+                config: Some(AlertConfig {
+                    interval_ms: Some(1_000),
+                    max_uncommitted_changes: None,
+                    scripts: Some(vec![AlertScript {
+                        command: vec![
+                            "sh".to_string(),
+                            "-c".to_string(),
+                            "printf 'x\\n' >> probe-count; printf '[]'".to_string(),
+                        ],
+                        id: "counter".to_string(),
+                        timeout_ms: Some(1_000),
+                    }]),
+                    worker_memory_bytes: None,
+                }),
+                workspace: workspace.path().display().to_string(),
+            })
+            .unwrap();
 
         let canonical = workspace.path().canonicalize().unwrap();
         {

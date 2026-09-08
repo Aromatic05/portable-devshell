@@ -243,7 +243,10 @@ struct EncodedLineWriter<'a> {
 }
 
 impl<'a> EncodedLineWriter<'a> {
-    fn new(writer: &'a mut dyn Write, format: crate::tools::file::state::TextFormat) -> Result<Self, ToolError> {
+    fn new(
+        writer: &'a mut dyn Write,
+        format: crate::tools::file::state::TextFormat,
+    ) -> Result<Self, ToolError> {
         let mut output = Self {
             writer,
             hasher: blake3::Hasher::new(),
@@ -294,4 +297,3 @@ impl<'a> EncodedLineWriter<'a> {
         Ok(())
     }
 }
-

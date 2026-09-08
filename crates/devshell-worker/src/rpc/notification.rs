@@ -47,7 +47,10 @@ impl WorkerNotificationQueue {
             .lock()
             .map_err(|_| "notification queue lock poisoned".to_string())?;
         inner.bytes += frame.len();
-        inner.frames.push_back(WorkerNotificationFrame { bytes: frame, lossy });
+        inner.frames.push_back(WorkerNotificationFrame {
+            bytes: frame,
+            lossy,
+        });
         while inner.bytes > self.max_bytes && inner.frames.len() > 1 {
             if let Some(index) = inner.frames.iter().position(|frame| frame.lossy) {
                 if let Some(frame) = inner.frames.remove(index) {

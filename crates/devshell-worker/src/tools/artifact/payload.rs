@@ -19,10 +19,10 @@ use crate::security::path::{
     FilesystemCapability, PathNamespace, ResolvedDirectory, ResolvedMetadata, ResolvedPath,
     parse_requested_path, resolve_existing_target,
 };
-use crate::tools::{ToolCancellation, ToolError};
 use crate::tools::artifact::storage;
 use crate::tools::artifact::store::{ArtifactLease, ArtifactStore};
 use crate::tools::artifact::types::ArtifactStream;
+use crate::tools::{ToolCancellation, ToolError};
 
 const METADATA_VERSION: u32 = 1;
 const MAX_READ_BYTES: usize = 1024 * 1024;
@@ -133,7 +133,9 @@ impl ArtifactPayloadStore {
             root,
             temp_dir,
             artifacts,
-            guard: Mutex::new(ArtifactPayloadStoreState { payload_count: None }),
+            guard: Mutex::new(ArtifactPayloadStoreState {
+                payload_count: None,
+            }),
         });
         Ok(store)
     }
@@ -178,7 +180,11 @@ impl ArtifactPayloadStore {
     fn payload_record_count(&self) -> Result<usize, ToolError> {
         Ok(storage::json_files(&self.root)?
             .into_iter()
-            .filter_map(|path| path.file_stem().and_then(|value| value.to_str()).map(str::to_owned))
+            .filter_map(|path| {
+                path.file_stem()
+                    .and_then(|value| value.to_str())
+                    .map(str::to_owned)
+            })
             .filter(|payload_id| validate_id(payload_id).is_ok())
             .count())
     }
@@ -281,11 +287,7 @@ impl ArtifactPayloadStore {
         resolved: &ResolvedPath,
         expires_at_ms: u128,
     ) -> Result<ArtifactPayloadOpenResult, ToolError> {
-        self.open_resolved_path_cancellable(
-            resolved,
-            expires_at_ms,
-            &ToolCancellation::default(),
-        )
+        self.open_resolved_path_cancellable(resolved, expires_at_ms, &ToolCancellation::default())
     }
 
     fn open_resolved_path_cancellable(
@@ -444,8 +446,7 @@ impl ArtifactPayloadStore {
             ));
         }
         let mut temp = self.new_temp("payload-file-")?;
-        let (payload_bytes, payload_blake3) =
-            copy_and_hash(&mut source, &mut temp, cancellation)?;
+        let (payload_bytes, payload_blake3) = copy_and_hash(&mut source, &mut temp, cancellation)?;
         temp.flush()
             .map_err(|error| ToolError::new("artifact.storageFailed", error.to_string()))?;
         temp.as_file()
@@ -595,8 +596,7 @@ impl ArtifactPayloadStore {
                 Ok(())
             }
             Some(metadata)
-                if metadata.version == METADATA_VERSION
-                    && metadata.payload_id == payload_id =>
+                if metadata.version == METADATA_VERSION && metadata.payload_id == payload_id =>
             {
                 self.remove_payload_locked(&mut state, &metadata)
             }
@@ -856,7 +856,8 @@ fn append_directory_entry<W: Write>(
             header.set_size(entry.size);
             header.set_cksum();
             let mut reader = CancellableHashingReader::new(&mut file, cancellation);
-            if let Err(error) = archive.append_data(&mut header, &entry.relative_path, &mut reader) {
+            if let Err(error) = archive.append_data(&mut header, &entry.relative_path, &mut reader)
+            {
                 cancellation.check()?;
                 return Err(ToolError::new("artifact.archiveFailed", error.to_string()));
             }
@@ -864,7 +865,10 @@ fn append_directory_entry<W: Write>(
             if archived_bytes != entry.size as usize {
                 return Err(ToolError::new(
                     "artifact.directoryChanged",
-                    format!("directory member changed during archive: {}", entry.relative_path),
+                    format!(
+                        "directory member changed during archive: {}",
+                        entry.relative_path
+                    ),
                 ));
             }
             cancellation.check()?;
@@ -872,7 +876,10 @@ fn append_directory_entry<W: Write>(
             if current_blake3 != content_blake3 {
                 return Err(ToolError::new(
                     "artifact.directoryChanged",
-                    format!("directory member changed while it was archived: {}", entry.relative_path),
+                    format!(
+                        "directory member changed while it was archived: {}",
+                        entry.relative_path
+                    ),
                 ));
             }
             update_manifest_hash(manifest_hasher, entry, Some(&content_blake3));
@@ -1363,7 +1370,8 @@ mod tests {
         let root = crate::testing::temp_dir();
         let artifacts = ArtifactStore::new(root.path().join("artifacts")).unwrap();
         let payload_root = root.path().join("payloads");
-        let payloads = ArtifactPayloadStore::new(payload_root.clone(), Arc::clone(&artifacts)).unwrap();
+        let payloads =
+            ArtifactPayloadStore::new(payload_root.clone(), Arc::clone(&artifacts)).unwrap();
         drop(payloads);
 
         let orphan = uuid::Uuid::new_v4().to_string();

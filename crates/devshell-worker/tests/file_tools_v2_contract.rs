@@ -175,9 +175,21 @@ fn file_read_batch_establishes_edit_coverage_for_every_returned_file() {
         }),
     );
     assert_eq!(edited["ok"], true, "{edited}");
-    assert!(edited["result"]["operations"].as_array().unwrap().iter().all(|operation| operation["status"] == "applied"));
-    assert_eq!(fs::read_to_string(env.workspace().join("first.txt")).unwrap(), "new first\n");
-    assert_eq!(fs::read_to_string(env.workspace().join("second.txt")).unwrap(), "new second\n");
+    assert!(
+        edited["result"]["operations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|operation| operation["status"] == "applied")
+    );
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("first.txt")).unwrap(),
+        "new first\n"
+    );
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("second.txt")).unwrap(),
+        "new second\n"
+    );
 
     env.json_command(&["stop", "--instance", instance]);
 }

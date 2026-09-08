@@ -7,11 +7,11 @@ use std::sync::Arc;
 use regex::RegexBuilder;
 
 use crate::security::path::ResolvedPath;
+use crate::tools::file::FileToolState;
 use crate::tools::file::discover::DiscoveryCursor;
 use crate::tools::file::resolve_existing;
-use crate::tools::file::state::{TextFile, TextMetadata, FULL_SNAPSHOT_LIMIT};
+use crate::tools::file::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
 use crate::tools::file::types::{FileSearchFile, FileSearchInput, FileSearchOutput, SearchSyntax};
-use crate::tools::file::FileToolState;
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const FILES_PER_PAGE: usize = 20;

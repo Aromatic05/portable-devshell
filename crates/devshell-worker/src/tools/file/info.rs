@@ -126,7 +126,7 @@ fn push_entry(
 
 #[cfg(test)]
 mod tests {
-    use super::{push_entry, FileInfoEntry, MAX_SERIALIZED_OUTPUT_BYTES};
+    use super::{FileInfoEntry, MAX_SERIALIZED_OUTPUT_BYTES, push_entry};
 
     #[test]
     fn file_info_batch_reports_output_budget_before_transport_overflow() {

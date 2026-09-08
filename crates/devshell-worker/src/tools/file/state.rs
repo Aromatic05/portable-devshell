@@ -351,69 +351,71 @@ pub fn scan_text_lines(
     cancellation: &crate::tools::ToolCancellation,
     mut visit: impl FnMut(usize, &str) -> Result<(), ToolError>,
 ) -> Result<TextInspection, ToolError> {
-        let mut reader = BufReader::new(file);
-        let mut hasher = blake3::Hasher::new();
-        let mut buffer = Vec::new();
-        let mut total_bytes = 0usize;
-        let mut total_lines = 0usize;
-        let mut first = true;
-        let mut scanned_lines = 0usize;
-        let mut bom = false;
-        let mut line_ending = None;
-        let mut last_byte = None;
-        loop {
-            if scanned_lines % 256 == 0 {
-                cancellation.check()?;
-            }
-            buffer.clear();
-            let count = reader
-                .read_until(b'\n', &mut buffer)
-                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;
-            if count == 0 {
-                break;
-            }
-            last_byte = buffer.last().copied();
-            scanned_lines = scanned_lines.saturating_add(1);
-            hasher.update(&buffer);
-            total_bytes += count;
-            if buffer.contains(&0) {
-                return Err(ToolError::new("file.notText", "file contains NUL bytes"));
-            }
-            let had_newline = buffer.last() == Some(&b'\n');
-            let mut content = buffer.as_slice();
-            if first && content.starts_with(&[0xEF, 0xBB, 0xBF]) {
-                bom = true;
-                content = &content[3..];
-            }
-            first = false;
-            if had_newline && line_ending.is_none() {
-                line_ending = Some(if content.len() >= 2 && content[content.len() - 2] == b'\r' {
+    let mut reader = BufReader::new(file);
+    let mut hasher = blake3::Hasher::new();
+    let mut buffer = Vec::new();
+    let mut total_bytes = 0usize;
+    let mut total_lines = 0usize;
+    let mut first = true;
+    let mut scanned_lines = 0usize;
+    let mut bom = false;
+    let mut line_ending = None;
+    let mut last_byte = None;
+    loop {
+        if scanned_lines % 256 == 0 {
+            cancellation.check()?;
+        }
+        buffer.clear();
+        let count = reader
+            .read_until(b'\n', &mut buffer)
+            .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;
+        if count == 0 {
+            break;
+        }
+        last_byte = buffer.last().copied();
+        scanned_lines = scanned_lines.saturating_add(1);
+        hasher.update(&buffer);
+        total_bytes += count;
+        if buffer.contains(&0) {
+            return Err(ToolError::new("file.notText", "file contains NUL bytes"));
+        }
+        let had_newline = buffer.last() == Some(&b'\n');
+        let mut content = buffer.as_slice();
+        if first && content.starts_with(&[0xEF, 0xBB, 0xBF]) {
+            bom = true;
+            content = &content[3..];
+        }
+        first = false;
+        if had_newline && line_ending.is_none() {
+            line_ending = Some(
+                if content.len() >= 2 && content[content.len() - 2] == b'\r' {
                     "\r\n"
                 } else {
                     "\n"
-                });
-            }
-            let without_lf = content.strip_suffix(b"\n").unwrap_or(content);
-            let without_eol = without_lf.strip_suffix(b"\r").unwrap_or(without_lf);
-            let text = std::str::from_utf8(without_eol)
-                .map_err(|_| ToolError::new("file.notText", "file is not valid UTF-8"))?;
-            if had_newline || !without_eol.is_empty() {
-                total_lines += 1;
-                visit(total_lines, text)?;
-            }
+                },
+            );
         }
-        Ok(TextInspection {
-            metadata: TextMetadata {
-                revision: hasher.finalize().to_hex().to_string(),
-                total_bytes,
-                total_lines,
-            },
-            format: TextFormat {
-                bom,
-                final_newline: matches!(last_byte, Some(b'\n' | b'\r')),
-                line_ending: line_ending.unwrap_or("\n"),
-            },
-        })
+        let without_lf = content.strip_suffix(b"\n").unwrap_or(content);
+        let without_eol = without_lf.strip_suffix(b"\r").unwrap_or(without_lf);
+        let text = std::str::from_utf8(without_eol)
+            .map_err(|_| ToolError::new("file.notText", "file is not valid UTF-8"))?;
+        if had_newline || !without_eol.is_empty() {
+            total_lines += 1;
+            visit(total_lines, text)?;
+        }
+    }
+    Ok(TextInspection {
+        metadata: TextMetadata {
+            revision: hasher.finalize().to_hex().to_string(),
+            total_bytes,
+            total_lines,
+        },
+        format: TextFormat {
+            bom,
+            final_newline: matches!(last_byte, Some(b'\n' | b'\r')),
+            line_ending: line_ending.unwrap_or("\n"),
+        },
+    })
 }
 
 impl TextFile {
@@ -479,10 +481,7 @@ impl TextFile {
         )
     }
 
-    pub fn from_normalized_format(
-        format: TextFormat,
-        normalized: &str,
-    ) -> Result<Self, ToolError> {
+    pub fn from_normalized_format(format: TextFormat, normalized: &str) -> Result<Self, ToolError> {
         if normalized.contains('\0') {
             return Err(ToolError::new(
                 "file.notText",

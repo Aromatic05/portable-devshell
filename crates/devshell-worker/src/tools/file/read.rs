@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use crate::security::path::ResolvedPath;
-use crate::tools::file::state::{TextFile, TextMetadata, FULL_SNAPSHOT_LIMIT};
+use crate::tools::file::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
 use crate::tools::file::structure;
 use crate::tools::file::types::{
     FileParseStatus, FileReadBatchEntry, FileReadBatchInput, FileReadBatchOutput, FileReadInput,
     FileReadOutput, FileReadRequest, FileReadView,
 };
-use crate::tools::file::{resolve_existing, FileToolState};
+use crate::tools::file::{FileToolState, resolve_existing};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const DEFAULT_LINE_COUNT: usize = 200;

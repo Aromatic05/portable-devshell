@@ -4,7 +4,7 @@ mod syntax;
 
 pub use capability::FilesystemCapability;
 pub use resolution::{
-    resolve_create_target, resolve_entry, resolve_existing_target, ResolvedDirectory,
-    ResolvedEntry, ResolvedMetadata, ResolvedPath, ResolvedTarget,
+    ResolvedDirectory, ResolvedEntry, ResolvedMetadata, ResolvedPath, ResolvedTarget,
+    resolve_create_target, resolve_entry, resolve_existing_target,
 };
-pub use syntax::{parse_requested_path, PathNamespace, RequestedPath};
+pub use syntax::{PathNamespace, RequestedPath, parse_requested_path};

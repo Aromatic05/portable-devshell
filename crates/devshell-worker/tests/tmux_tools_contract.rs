@@ -1330,7 +1330,11 @@ fn tmux_inspect_defaults_to_main_when_other_panes_exist() {
         "inspect-default-main",
     );
     assert_eq!(inspect["ok"], true, "{inspect}");
-    assert_eq!(inspect["result"]["panes"].as_array().unwrap().len(), 1, "{inspect}");
+    assert_eq!(
+        inspect["result"]["panes"].as_array().unwrap().len(),
+        1,
+        "{inspect}"
+    );
     assert_eq!(inspect["result"]["panes"][0]["name"], "main", "{inspect}");
     stop(&env, instance);
 }

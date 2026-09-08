@@ -1,5 +1,5 @@
-pub mod artifact_payload;
 pub mod alerts;
+pub mod artifact_payload;
 pub mod extension_resource;
 pub mod handshake;
 pub mod ping;
@@ -58,10 +58,7 @@ pub fn register_control_handlers(
     );
     handlers.insert(
         "artifact.receive.begin".to_string(),
-        artifact_payload::receive_begin(
-            Arc::clone(&receives),
-            Arc::clone(&policy),
-        ),
+        artifact_payload::receive_begin(Arc::clone(&receives), Arc::clone(&policy)),
     );
     handlers.insert(
         "artifact.receive.write".to_string(),
@@ -77,10 +74,7 @@ pub fn register_control_handlers(
     );
     handlers.insert(
         "artifact.payload.open".to_string(),
-        artifact_payload::payload_open(
-            Arc::clone(&payloads),
-            Arc::clone(&policy),
-        ),
+        artifact_payload::payload_open(Arc::clone(&payloads), Arc::clone(&policy)),
     );
     handlers.insert(
         "artifact.payload.read".to_string(),
@@ -133,10 +127,22 @@ pub fn register_control_handlers(
         stop::handler(shutdown_requested, active_processes, active_tool_calls),
     );
     handlers.insert("worker.ping".to_string(), ping::handler());
-    handlers.insert("workspace.prepare".to_string(), workspace::prepare_handler());
-    handlers.insert("workspace.touchTemporary".to_string(), workspace::touch_temporary_handler());
-    handlers.insert("alerts.configure".to_string(), alerts::configure_handler(Arc::clone(&alerts)));
-    handlers.insert("alerts.read".to_string(), alerts::read_handler(Arc::clone(&alerts)));
+    handlers.insert(
+        "workspace.prepare".to_string(),
+        workspace::prepare_handler(),
+    );
+    handlers.insert(
+        "workspace.touchTemporary".to_string(),
+        workspace::touch_temporary_handler(),
+    );
+    handlers.insert(
+        "alerts.configure".to_string(),
+        alerts::configure_handler(Arc::clone(&alerts)),
+    );
+    handlers.insert(
+        "alerts.read".to_string(),
+        alerts::read_handler(Arc::clone(&alerts)),
+    );
     handlers.insert("alerts.touch".to_string(), alerts::touch_handler(alerts));
     handlers.insert("tools.list".to_string(), tools_list::handler(tools));
 }

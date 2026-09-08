@@ -691,11 +691,7 @@ mod tests {
     #[test]
     fn real_terminal_replays_output_resizes_and_kills_explicitly() {
         let workspace = crate::testing::temp_dir();
-        let manager = TerminalManager::with_limits(
-            1024 * 1024,
-            1024 * 1024,
-            2,
-        );
+        let manager = TerminalManager::with_limits(1024 * 1024, 1024 * 1024, 2);
         let opened = manager
             .open(TerminalOpenInput {
                 cols: 80,
@@ -796,11 +792,7 @@ mod tests {
     #[test]
     fn terminated_terminal_does_not_permanently_consume_the_session_limit() {
         let workspace = crate::testing::temp_dir();
-        let manager = TerminalManager::with_limits(
-            1024 * 1024,
-            1024 * 1024,
-            1,
-        );
+        let manager = TerminalManager::with_limits(1024 * 1024, 1024 * 1024, 1);
         let first = manager
             .open(TerminalOpenInput {
                 cols: 80,

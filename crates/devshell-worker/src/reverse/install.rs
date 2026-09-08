@@ -27,10 +27,7 @@ pub fn install_current_binary() -> Result<PathBuf, String> {
     platform::install(&bytes, &home, target, &sha)
 }
 
-pub fn start_installed_worker(
-    binary: &Path,
-    instance: &InstanceName,
-) -> Result<(), String> {
+pub fn start_installed_worker(binary: &Path, instance: &InstanceName) -> Result<(), String> {
     let output = Command::new(binary)
         .arg("start")
         .arg("--instance")

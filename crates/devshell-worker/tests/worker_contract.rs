@@ -77,7 +77,11 @@ fn start_replaces_a_running_daemon_from_a_different_worker_identity() {
         .args(["start", "--instance", instance])
         .output()
         .unwrap();
-    assert!(old_start.status.success(), "{}", String::from_utf8_lossy(&old_start.stderr));
+    assert!(
+        old_start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&old_start.stderr)
+    );
     let old_start: Value = serde_json::from_slice(&old_start.stdout).unwrap();
     let old_pid = old_start["pid"].as_u64().unwrap();
 
@@ -87,7 +91,11 @@ fn start_replaces_a_running_daemon_from_a_different_worker_identity() {
         .args(["start", "--instance", instance])
         .output()
         .unwrap();
-    assert!(new_start.status.success(), "{}", String::from_utf8_lossy(&new_start.stderr));
+    assert!(
+        new_start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&new_start.stderr)
+    );
     let new_start: Value = serde_json::from_slice(&new_start.stdout).unwrap();
     let new_pid = new_start["pid"].as_u64().unwrap();
 
@@ -98,7 +106,11 @@ fn start_replaces_a_running_daemon_from_a_different_worker_identity() {
         .args(["status", "--instance", instance])
         .output()
         .unwrap();
-    assert!(status.status.success(), "{}", String::from_utf8_lossy(&status.stderr));
+    assert!(
+        status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
     let status: Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(status["workerSha256"], new_sha);
 
@@ -141,8 +153,14 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         env!("CARGO_PKG_VERSION")
     );
     assert!(handshake["result"]["workerSha256"].is_null());
-    assert!(handshake["result"].get("workspace").is_none(), "{handshake}");
-    assert!(handshake["result"].get("skillsDirectory").is_none(), "{handshake}");
+    assert!(
+        handshake["result"].get("workspace").is_none(),
+        "{handshake}"
+    );
+    assert!(
+        handshake["result"].get("skillsDirectory").is_none(),
+        "{handshake}"
+    );
     assert!(handshake["result"].get("tools").is_none());
 
     let tools = env.rpc(
@@ -220,30 +238,40 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         bash_schema["inputSchema"]["properties"]["timeoutMs"]["maximum"],
         100_000
     );
-    assert!(bash_schema["inputSchema"]["required"]
-        .as_array()
-        .is_some_and(|required| required.iter().any(|field| field == "timeoutMs")));
+    assert!(
+        bash_schema["inputSchema"]["required"]
+            .as_array()
+            .is_some_and(|required| required.iter().any(|field| field == "timeoutMs"))
+    );
     assert_eq!(
         bash_schema["inputSchema"]["properties"]["command"]["minLength"],
         1
     );
     if let Some(tmux_read_schema) = catalog.iter().find(|tool| tool["name"] == "tmux_read") {
-        assert!(tmux_read_schema["outputSchema"]["properties"]
-            .get("resume")
-            .is_none());
-        assert!(tmux_read_schema["outputSchema"]["properties"]
-            .get("timeout")
-            .is_none());
+        assert!(
+            tmux_read_schema["outputSchema"]["properties"]
+                .get("resume")
+                .is_none()
+        );
+        assert!(
+            tmux_read_schema["outputSchema"]["properties"]
+                .get("timeout")
+                .is_none()
+        );
         let tmux_run_schema = catalog
             .iter()
             .find(|tool| tool["name"] == "tmux_run")
             .unwrap();
-        assert!(tmux_run_schema["inputSchema"]["properties"]
-            .get("resume")
-            .is_none());
-        assert!(tmux_run_schema["outputSchema"]["properties"]
-            .get("resume")
-            .is_none());
+        assert!(
+            tmux_run_schema["inputSchema"]["properties"]
+                .get("resume")
+                .is_none()
+        );
+        assert!(
+            tmux_run_schema["outputSchema"]["properties"]
+                .get("resume")
+                .is_none()
+        );
         assert!(tmux_run_schema["outputSchema"]["properties"]["timeout"].is_object());
         assert!(tmux_run_schema["outputSchema"]["properties"]["interrupted"].is_object());
     }
@@ -264,9 +292,21 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         serde_json::json!(["files"])
     );
     assert!(file_read_schema["inputSchema"]["properties"]["files"].is_object());
-    assert!(file_read_schema["inputSchema"]["properties"].get("path").is_none());
-    assert!(file_read_schema["inputSchema"]["properties"].get("view").is_none());
-    assert!(file_read_schema["inputSchema"]["properties"].get("selector").is_none());
+    assert!(
+        file_read_schema["inputSchema"]["properties"]
+            .get("path")
+            .is_none()
+    );
+    assert!(
+        file_read_schema["inputSchema"]["properties"]
+            .get("view")
+            .is_none()
+    );
+    assert!(
+        file_read_schema["inputSchema"]["properties"]
+            .get("selector")
+            .is_none()
+    );
     assert_eq!(
         file_read_schema["inputSchema"]["properties"]["files"]["minItems"],
         1
@@ -277,13 +317,11 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         .find(|tool| tool["name"] == "file_search")
         .unwrap();
     assert_eq!(
-        file_search_schema["inputSchema"]["$defs"]["FileSearchStartInput"]["properties"]
-            ["paths"]["minItems"],
+        file_search_schema["inputSchema"]["$defs"]["FileSearchStartInput"]["properties"]["paths"]["minItems"],
         1
     );
     assert_eq!(
-        file_search_schema["inputSchema"]["$defs"]["FileCursorInput"]["properties"]["cursor"]
-            ["minLength"],
+        file_search_schema["inputSchema"]["$defs"]["FileCursorInput"]["properties"]["cursor"]["minLength"],
         1
     );
 
@@ -301,37 +339,45 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             .iter()
             .find(|tool| tool["name"] == "tmux_run")
             .unwrap();
-        assert!(tmux_run["inputSchema"]["properties"]
-            .get("timeMs")
-            .is_none());
-        assert!(tmux_run["description"]
-            .as_str()
-            .is_some_and(|value| value.contains("Use bash_run for short non-interactive work")));
-        assert!(tmux_run["description"]
-            .as_str()
-            .is_some_and(|value| value.contains("Prefer wait=block for unattended tasks on the current critical path")));
-        assert!(tmux_run["description"]
-            .as_str()
-            .is_some_and(|value| value.contains("use tmux_read unless the client explicitly provides automatic recovery")));
-        assert!(!tmux_run["description"]
-            .as_str()
-            .is_some_and(|value| value.contains("Live Workspace")));
+        assert!(
+            tmux_run["inputSchema"]["properties"]
+                .get("timeMs")
+                .is_none()
+        );
+        assert!(
+            tmux_run["description"]
+                .as_str()
+                .is_some_and(|value| value.contains("Use bash_run for short non-interactive work"))
+        );
+        assert!(tmux_run["description"].as_str().is_some_and(|value| {
+            value.contains("Prefer wait=block for unattended tasks on the current critical path")
+        }));
+        assert!(tmux_run["description"].as_str().is_some_and(|value| {
+            value.contains("use tmux_read unless the client explicitly provides automatic recovery")
+        }));
+        assert!(
+            !tmux_run["description"]
+                .as_str()
+                .is_some_and(|value| value.contains("Live Workspace"))
+        );
         assert!(tmux_run["inputSchema"]["properties"]["wait"]["description"]
             .as_str()
             .is_some_and(|value| value.contains("Use block when completion is required before continuing and there is no useful parallel work")));
         assert!(tmux_run["inputSchema"]["properties"]["wait"]["description"]
             .as_str()
             .is_some_and(|value| value.contains("Use nonblock only when you intentionally want to continue other work or interact with or observe the task later")));
-        assert!(tmux_run["inputSchema"]["properties"]["timeout"]["description"]
-            .as_str()
-            .is_some_and(|value| value.contains("Set it long enough for the expected runtime")));
+        assert!(
+            tmux_run["inputSchema"]["properties"]["timeout"]["description"]
+                .as_str()
+                .is_some_and(|value| value.contains("Set it long enough for the expected runtime"))
+        );
         let tmux_create = catalog
             .iter()
             .find(|tool| tool["name"] == "tmux_create")
             .unwrap();
-        assert!(tmux_create["description"]
-            .as_str()
-            .is_some_and(|value| value.contains("main already provides one built-in persistent pane")));
+        assert!(tmux_create["description"].as_str().is_some_and(|value| {
+            value.contains("main already provides one built-in persistent pane")
+        }));
     }
 
     #[cfg(unix)]
@@ -431,38 +477,52 @@ fn workspace_temporary_storage_migrates_to_runtime_and_recovers_after_runtime_lo
         .assert()
         .success();
 
-    let prepare = |id: &str| env.rpc(
-        instance,
-        &serde_json::json!({
-            "type": "request",
-            "id": id,
-            "method": "workspace.prepare",
-            "params": { "workspace": env.protocol_workspace() }
-        }),
-    );
+    let prepare = |id: &str| {
+        env.rpc(
+            instance,
+            &serde_json::json!({
+                "type": "request",
+                "id": id,
+                "method": "workspace.prepare",
+                "params": { "workspace": env.protocol_workspace() }
+            }),
+        )
+    };
 
     let first = prepare("workspace-prepare-1");
     assert_eq!(first["ok"], true);
-    assert!(fs::symlink_metadata(&context_temp_link).unwrap().file_type().is_symlink());
-    assert_eq!(fs::read_link(&context_temp_link).unwrap(), env.context_temp_target());
-    let first_temporary = std::path::PathBuf::from(
-        first["result"]["temporaryDirectory"].as_str().unwrap(),
+    assert!(
+        fs::symlink_metadata(&context_temp_link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
     );
+    assert_eq!(
+        fs::read_link(&context_temp_link).unwrap(),
+        env.context_temp_target()
+    );
+    let first_temporary =
+        std::path::PathBuf::from(first["result"]["temporaryDirectory"].as_str().unwrap());
     assert!(first_temporary.starts_with(&context_temp_link));
-    assert!(first_temporary.canonicalize().unwrap().starts_with(
-        env.context_temp_target().canonicalize().unwrap()
-    ));
+    assert!(
+        first_temporary
+            .canonicalize()
+            .unwrap()
+            .starts_with(env.context_temp_target().canonicalize().unwrap())
+    );
 
     fs::remove_dir_all(env.context_temp_target()).unwrap();
     let second = prepare("workspace-prepare-2");
     assert_eq!(second["ok"], true);
-    let second_temporary = std::path::PathBuf::from(
-        second["result"]["temporaryDirectory"].as_str().unwrap(),
-    );
+    let second_temporary =
+        std::path::PathBuf::from(second["result"]["temporaryDirectory"].as_str().unwrap());
     assert!(second_temporary.starts_with(&context_temp_link));
-    assert!(second_temporary.canonicalize().unwrap().starts_with(
-        env.context_temp_target().canonicalize().unwrap()
-    ));
+    assert!(
+        second_temporary
+            .canonicalize()
+            .unwrap()
+            .starts_with(env.context_temp_target().canonicalize().unwrap())
+    );
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -490,9 +550,12 @@ fn workspace_temporary_storage_without_xdg_runtime_uses_shared_memory() {
     assert_eq!(prepared["ok"], true);
     let target = fs::read_link(env.context_temp_link()).unwrap();
     assert!(target.starts_with("/dev/shm"));
-    assert!(std::path::Path::new(
-        prepared["result"]["temporaryDirectory"].as_str().unwrap()
-    ).canonicalize().unwrap().starts_with(target.canonicalize().unwrap()));
+    assert!(
+        std::path::Path::new(prepared["result"]["temporaryDirectory"].as_str().unwrap())
+            .canonicalize()
+            .unwrap()
+            .starts_with(target.canonicalize().unwrap())
+    );
 
     env.command_without_runtime_dir()
         .args(["stop", "--instance", instance])
@@ -528,9 +591,11 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
     );
     assert_eq!(missing_timeout["ok"], false, "{missing_timeout}");
     assert_eq!(missing_timeout["error"]["code"], "tool.invalidArguments");
-    assert!(missing_timeout["error"]["message"]
-        .as_str()
-        .is_some_and(|message| message.contains("timeoutMs")));
+    assert!(
+        missing_timeout["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("timeoutMs"))
+    );
 
     let timed_out = env.rpc(
         instance,
@@ -1331,7 +1396,9 @@ fn gc_skips_invalid_markers_and_responsive_instances() {
         .assert()
         .success();
     env.json_command(&["stop", "--instance", stopped]);
-    let control_history = env.instance_root(stopped).join("control-worker/history.keep");
+    let control_history = env
+        .instance_root(stopped)
+        .join("control-worker/history.keep");
     fs::create_dir_all(control_history.parent().unwrap()).unwrap();
     fs::write(&control_history, "keep\n").unwrap();
 

@@ -19,8 +19,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use crate::security::path::{
-    parse_requested_path, resolve_create_target, resolve_entry, resolve_existing_target,
     FilesystemCapability, PathNamespace, RequestedPath, ResolvedEntry, ResolvedPath,
+    parse_requested_path, resolve_create_target, resolve_entry, resolve_existing_target,
 };
 use crate::tools::{ToolCall, ToolError};
 

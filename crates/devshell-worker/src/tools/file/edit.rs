@@ -2,18 +2,18 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::security::path::{parse_requested_path, ResolvedPath, ResolvedTarget};
-use crate::tools::file::{context_patch, context_patch_stream};
+use crate::security::path::{ResolvedPath, ResolvedTarget, parse_requested_path};
 use crate::tools::file::diff;
 use crate::tools::file::publish::{self, PublishMode};
 use crate::tools::file::state::{
-    ContextFileSnapshot, SnapshotContent, TextFile, TextInspection, FULL_SNAPSHOT_LIMIT,
+    ContextFileSnapshot, FULL_SNAPSHOT_LIMIT, SnapshotContent, TextFile, TextInspection,
 };
 use crate::tools::file::types::{
     FileChangeAction, FileChangeError, FileChangeOperationOutput, FileChangeResultDetail,
     FileChangeSetInput, FileChangeSetOutput, FileChangeStatus,
 };
-use crate::tools::file::{authorize, resolve_create, FileToolState};
+use crate::tools::file::{FileToolState, authorize, resolve_create};
+use crate::tools::file::{context_patch, context_patch_stream};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const MAX_CHANGE_OPERATIONS: usize = 256;
@@ -657,13 +657,14 @@ impl FileEditTool {
             PublishMode::Replace,
             permissions,
             |writer| {
-                updated_metadata = Some(plan.write(
-                    resolved
-                        .open_file()
-                        .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
-                    writer,
-                    &call.cancellation,
-                )?);
+                updated_metadata =
+                    Some(plan.write(
+                        resolved.open_file().map_err(|error| {
+                            ToolError::new("file.readFailed", error.to_string())
+                        })?,
+                        writer,
+                        &call.cancellation,
+                    )?);
                 Ok(())
             },
             || {
@@ -689,13 +690,17 @@ impl FileEditTool {
             )
         })?;
         let ordinal = self.state.next_snapshot_ordinal();
-        self.state.context_snapshots.lock().unwrap().remember_sparse(
-            &call.ctx_id,
-            &path,
-            &updated_metadata,
-            seen.iter().copied(),
-            ordinal,
-        );
+        self.state
+            .context_snapshots
+            .lock()
+            .unwrap()
+            .remember_sparse(
+                &call.ctx_id,
+                &path,
+                &updated_metadata,
+                seen.iter().copied(),
+                ordinal,
+            );
         local_snapshots.insert(
             path.clone(),
             ContextFileSnapshot {
@@ -747,9 +752,9 @@ impl FileEditTool {
                 SnapshotContent::Full(content) => Some(content.clone()),
                 SnapshotContent::Sparse => Some(
                     TextFile::read_file(
-                        resolved
-                            .open_file()
-                            .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+                        resolved.open_file().map_err(|error| {
+                            ToolError::new("file.readFailed", error.to_string())
+                        })?,
                         &call.cancellation,
                     )?
                     .normalized(),
@@ -769,7 +774,9 @@ impl FileEditTool {
             .unwrap()
             .remove_path(&call.ctx_id, &path);
         local_snapshots.remove(&path);
-        let diff = before.as_deref().map(|before| limit_detail(diff::render(before, "")));
+        let diff = before
+            .as_deref()
+            .map(|before| limit_detail(diff::render(before, "")));
         Ok(FileChangeOperationOutput {
             removed_lines: (inspection.metadata.total_lines > 0)
                 .then_some(inspection.metadata.total_lines),
@@ -1598,7 +1605,7 @@ fn invalid_edit(message: impl Into<String>) -> ToolError {
 mod tests {
     use std::fs;
 
-    use super::{atomic_move_no_replace, parse_change_set, ParsedOperation};
+    use super::{ParsedOperation, atomic_move_no_replace, parse_change_set};
 
     #[test]
     fn parses_all_change_set_operations() {

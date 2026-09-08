@@ -24,8 +24,8 @@ use crate::tools::tmux::task::{
 use crate::tools::tmux::types::{
     TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams, TmuxInputOutput,
     TmuxInputParams, TmuxInspectParams, TmuxListOutput, TmuxPaneDetail, TmuxPaneOperationOutput,
-    TmuxReadOutput, TmuxReadParams, TmuxReadWaitReason, TmuxRunOutput, TmuxRunParams,
-    TmuxWaitMode, TmuxWarning,
+    TmuxReadOutput, TmuxReadParams, TmuxReadWaitReason, TmuxRunOutput, TmuxRunParams, TmuxWaitMode,
+    TmuxWarning,
 };
 use crate::tools::{ToolCall, ToolError};
 
@@ -350,7 +350,9 @@ impl TmuxState {
                             "inputDelivered": true
                         })));
                     }
-                    if self.backend.task_exit_recorded(&task_id) && !self.task_is_terminal(&task_id)? {
+                    if self.backend.task_exit_recorded(&task_id)
+                        && !self.task_is_terminal(&task_id)?
+                    {
                         self.refresh_task(&task_id)?;
                     }
                     if (line >= 0 && self.task_has_output_after(&task_id, output_watermark)?)
@@ -437,7 +439,9 @@ impl TmuxState {
         let mut last_progress = Instant::now();
         let wait_reason = loop {
             call.check_cancelled()?;
-            if self.backend.task_exit_recorded(&params.task) && !self.task_is_terminal(&params.task)? {
+            if self.backend.task_exit_recorded(&params.task)
+                && !self.task_is_terminal(&params.task)?
+            {
                 self.refresh_task(&params.task)?;
             }
             if line >= 0 && self.task_has_output(&params.task)? {
@@ -508,10 +512,11 @@ impl TmuxState {
         let selected = if all {
             workspace.panes.clone()
         } else {
-            vec![self
-                .backend
-                .resolve(&workspace, Some(pane.as_deref().unwrap_or("main")))?
-                .clone()]
+            vec![
+                self.backend
+                    .resolve(&workspace, Some(pane.as_deref().unwrap_or("main")))?
+                    .clone(),
+            ]
         };
         let selected_tasks = {
             let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
@@ -1156,7 +1161,8 @@ impl TmuxState {
             && task.last_pane.is_none()
             && !self.backend.task_runtime_pending(task_id);
         let mut transcript = task.transcript.clone();
-        let output = transcript.take_output(&task.pane_id, &mut Vec::new(), PROGRESS_LINES, terminal)?;
+        let output =
+            transcript.take_output(&task.pane_id, &mut Vec::new(), PROGRESS_LINES, terminal)?;
         let view = task_view(task);
         let pane = (include_pane && task.state.is_active())
             .then(|| task.last_pane.as_ref().map(pane_ref))

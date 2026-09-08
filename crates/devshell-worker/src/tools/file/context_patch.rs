@@ -1,6 +1,5 @@
-use std::collections::BTreeSet;
 use crate::tools::ToolError;
-
+use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Boundary {
@@ -364,7 +363,10 @@ mod tests {
 
         let expected = apply(base, patch).unwrap().normalized;
         assert_eq!(String::from_utf8(output.clone()).unwrap(), expected);
-        assert_eq!(metadata.revision, blake3::hash(&output).to_hex().to_string());
+        assert_eq!(
+            metadata.revision,
+            blake3::hash(&output).to_hex().to_string()
+        );
         assert_eq!(metadata.total_lines, 4);
     }
 

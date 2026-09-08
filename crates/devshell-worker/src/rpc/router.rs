@@ -9,8 +9,8 @@ use serde::{Serialize, de::DeserializeOwned};
 use crate::daemon::process::WorkerRuntimeContext;
 use crate::daemon::process_registry::ActiveProcessRegistry;
 use crate::instance::WorkerConfig;
-use crate::rpc::control::register_control_handlers;
 use crate::rpc::control::alerts::AlertService;
+use crate::rpc::control::register_control_handlers;
 use crate::rpc::error::RpcError;
 use crate::rpc::notification::{DEFAULT_MAX_NOTIFICATION_BYTES, WorkerNotificationQueue};
 use crate::rpc::request::RpcRequest;
@@ -123,9 +123,7 @@ impl RpcRouter {
             .control_handlers
             .get(&request.method)
             .ok_or_else(|| RpcError::new("rpc.methodNotFound", "Control method not found."))
-            .and_then(|handler| {
-                handler.handle_with_cancellation(&request, &permit.cancellation())
-            });
+            .and_then(|handler| handler.handle_with_cancellation(&request, &permit.cancellation()));
         Self::response(request.id, result)
     }
 
@@ -160,7 +158,12 @@ impl RpcRouter {
         let context = request.context.as_ref();
         let workspace = context
             .and_then(|value| value.workspace.as_deref())
-            .ok_or_else(|| RpcError::new("rpc.invalidContext", "tool calls require a workspace context"))?;
+            .ok_or_else(|| {
+                RpcError::new(
+                    "rpc.invalidContext",
+                    "tool calls require a workspace context",
+                )
+            })?;
         if !Path::new(workspace).is_absolute() {
             return Err(RpcError::new(
                 "rpc.invalidContext",

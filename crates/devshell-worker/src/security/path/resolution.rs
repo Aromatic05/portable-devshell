@@ -289,7 +289,7 @@ impl ResolvedDirectory {
     pub fn sync_all(&self) -> io::Result<()> {
         #[cfg(unix)]
         if let Some(directory) = &self.capability {
-            use nix::fcntl::{openat, OFlag};
+            use nix::fcntl::{OFlag, openat};
             use nix::sys::stat::Mode;
 
             let descriptor = openat(
@@ -802,7 +802,7 @@ fn resolve_workspace_existing(
     workspace: &Path,
     requested: &RequestedPath,
 ) -> Result<ResolvedPath, ToolError> {
-    use nix::fcntl::{open, openat, OFlag};
+    use nix::fcntl::{OFlag, open, openat};
     use nix::sys::stat::Mode;
 
     let root = workspace
@@ -888,7 +888,7 @@ fn resolve_workspace_create(
     workspace: &Path,
     requested: &RequestedPath,
 ) -> Result<ResolvedPath, ToolError> {
-    use nix::fcntl::{open, openat, OFlag};
+    use nix::fcntl::{OFlag, open, openat};
     use nix::sys::stat::Mode;
 
     let root = workspace
@@ -938,7 +938,7 @@ fn resolve_workspace_entry(
     workspace: &Path,
     requested: &RequestedPath,
 ) -> Result<ResolvedEntry, ToolError> {
-    use nix::fcntl::{open, openat, OFlag};
+    use nix::fcntl::{OFlag, open, openat};
     use nix::sys::stat::Mode;
 
     let root = workspace

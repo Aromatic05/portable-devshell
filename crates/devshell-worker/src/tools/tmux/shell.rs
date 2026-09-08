@@ -144,8 +144,20 @@ mod tests {
         )
         .unwrap();
 
-        assert!(launch.command.contains("-u DEVSHELL_WORKER_INTERNAL_INSTANCE"));
-        assert!(launch.command.contains("-u DEVSHELL_WORKER_INTERNAL_SECURITY_MODE"));
-        assert!(launch.command.contains("-u DEVSHELL_WORKER_INTERNAL_WORKSPACE"));
+        assert!(
+            launch
+                .command
+                .contains("-u DEVSHELL_WORKER_INTERNAL_INSTANCE")
+        );
+        assert!(
+            launch
+                .command
+                .contains("-u DEVSHELL_WORKER_INTERNAL_SECURITY_MODE")
+        );
+        assert!(
+            launch
+                .command
+                .contains("-u DEVSHELL_WORKER_INTERNAL_WORKSPACE")
+        );
     }
 }

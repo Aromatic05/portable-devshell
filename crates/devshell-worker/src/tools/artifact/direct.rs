@@ -365,7 +365,10 @@ mod tests {
     use std::fs;
     use std::sync::Arc;
 
-    use super::{advertised_hosts, ArtifactDirectPushInput, ArtifactDirectReceiveOpenInput, ArtifactDirectTransfer};
+    use super::{
+        ArtifactDirectPushInput, ArtifactDirectReceiveOpenInput, ArtifactDirectTransfer,
+        advertised_hosts,
+    };
     use crate::platform::unix_time_millis;
     use crate::security::policy::DisabledSecurityPolicy;
     use crate::tools::artifact::payload::ArtifactPayloadStore;

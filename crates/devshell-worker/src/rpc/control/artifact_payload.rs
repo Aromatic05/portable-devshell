@@ -9,7 +9,9 @@ use crate::rpc::router::{
 };
 use crate::security::SecurityPolicy;
 use crate::tools::ToolError;
-use crate::tools::artifact::direct::{ArtifactDirectPushInput, ArtifactDirectReceiveOpenInput, ArtifactDirectTransfer};
+use crate::tools::artifact::direct::{
+    ArtifactDirectPushInput, ArtifactDirectReceiveOpenInput, ArtifactDirectTransfer,
+};
 use crate::tools::artifact::payload::{ArtifactPayloadDescriptor, ArtifactPayloadStore};
 use crate::tools::artifact::receive::{ArtifactReceiveBeginInput, ArtifactReceiveStore};
 
@@ -73,7 +75,11 @@ pub fn payload_open(
     cancellable_control_handler(move |request, cancellation| {
         cancellation.check().map_err(RpcError::from)?;
         let input: ArtifactPayloadOpenInput = parse_params(request)?;
-        let result = match (input.handle.as_deref(), input.path.as_deref(), input.workspace.as_deref()) {
+        let result = match (
+            input.handle.as_deref(),
+            input.path.as_deref(),
+            input.workspace.as_deref(),
+        ) {
             (Some(handle), None, None) => payloads.open_handle(handle, input.expires_at_ms),
             (None, Some(path), Some(workspace)) if PathBuf::from(workspace).is_absolute() => {
                 payloads.open_path_cancellable(
@@ -197,7 +203,9 @@ pub fn direct_receive_open(direct: Arc<ArtifactDirectTransfer>) -> Arc<dyn Contr
 pub fn direct_receive_close(direct: Arc<ArtifactDirectTransfer>) -> Arc<dyn ControlHandler> {
     control_handler(move |request| {
         let input: ArtifactDirectReceiverIdInput = parse_params(request)?;
-        direct.close_receiver(&input.receiver_id).map_err(RpcError::from)?;
+        direct
+            .close_receiver(&input.receiver_id)
+            .map_err(RpcError::from)?;
         Ok(serde_json::json!({
             "closed": true,
             "receiverId": input.receiver_id

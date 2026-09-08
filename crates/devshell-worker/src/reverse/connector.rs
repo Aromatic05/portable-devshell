@@ -199,7 +199,8 @@ impl ReverseConnector {
         let bulk_active = Arc::clone(&active);
         let bulk = thread::spawn(move || {
             let mut backoff = Duration::from_secs(1);
-            while bulk_active.load(Ordering::SeqCst) && !bulk_connector.router.shutdown_requested() {
+            while bulk_active.load(Ordering::SeqCst) && !bulk_connector.router.shutdown_requested()
+            {
                 let result = match bulk_connector.connect_wss(generation, "bulk") {
                     Ok(socket) => {
                         backoff = Duration::from_secs(1);
@@ -207,7 +208,8 @@ impl ReverseConnector {
                     }
                     Err(error) => Err(error),
                 };
-                if !bulk_active.load(Ordering::SeqCst) || bulk_connector.router.shutdown_requested() {
+                if !bulk_active.load(Ordering::SeqCst) || bulk_connector.router.shutdown_requested()
+                {
                     break;
                 }
                 if let Err(error) = result {
