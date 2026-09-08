@@ -49,25 +49,26 @@ CLI command 的 invocation context 还可以携带 `workingDirectory`。该字�
 installBundle
 installDirectory
 listBundles
+projectBundle
 resolveBundle
 removeBundle
-transferBundle
 ```
 
 `generation` 是 opaque identity，Extension 不得解析它，也不得依赖 Control 的物理目录布局。`resolveBundle()` 返回的目录只表示该 generation 当前可用的位置；Extension 不应由它推导兄弟 generation 或 Control 内部路径。
 
 资产语义属于 Extension。例如 Agent 决定哪个 generation 是 Pi provider，Skill 决定哪个目录是一项 Skill。Control 只负责安全物化、内容寻址以及传输。
 
-资产跨机器时复用 Artifact 基础设施。Extension 只指定已安装的 generation 和目标：
+Extension-owned 资产跨机器时复用 Artifact 基础设施，并只通过 `projectBundle()` 进入 Worker resource namespace；Extension 只指定已安装的 generation 与逻辑目标 `instance + collection + key`：
 
 ```text
 generation
   -> Control resolves owned source
+  -> Worker Resource Host prepares Extension-owned collection
   -> Artifact transfer
-  -> target Worker
+  -> collection/key on target Worker
 ```
 
-Extension 不能通过 asset API 指定任意 Control host source path，因此 asset transfer 不是 host filesystem 读取旁路。
+`projectBundle()` 不接受 raw Worker filesystem path；真实 collection directory 由 Worker Resource Host 决定。Extension 也不能通过 asset API 指定任意 Control host source path，因此 resource projection 不是任一侧 filesystem 的读取/写入旁路。
 
 ## Worker control
 
@@ -98,7 +99,7 @@ homeDirectory
 platform
 ```
 
-业务资源目录不进入通用 ABI。比如 Skill 的 managed 目录由 Skill Extension 自己根据目标 home 和自身约定管理，Worker ABI 不理解 Skill。
+业务资源目录不进入通用 Worker session ABI。静态资源使用 `context.assets.projectBundle()`，由 Worker private Resource Host 管理 instance-scoped namespace；动态远端行为才使用 `context.worker.openSession()`。例如 Skill 只声明 `assets + command`，不需要 `worker` capability。
 
 不暴露 `WorkerInstance`、Worker protocol client、SSH/Docker/Reverse transport、RPC framing 或 connection lease。
 
@@ -131,6 +132,7 @@ Approval manager / audit writer
 raw Artifact host endpoint
 MCP HTTP/OAuth host internals
 Worker protocol client
+Worker Resource Host physical paths / private RPC
 ```
 
 MCP Server 因此是 builtin module，而不是 public Extension。Agent、Skill 等 builtin Extension 则应严格通过 public ABI 工作，用它们来持续验证 ABI 的完整性。

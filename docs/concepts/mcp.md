@@ -173,7 +173,7 @@ workspace_goal
 
 `environ_info` 返回当前 worker 上的 canonical workspace、platform、skills directory、temporary directory，以及存在时的 project memory 路径。
 
-Worker handshake 本身只提供通用的 `homeDirectory + platform`；MCP builtin module 据此派生 `skillsDirectory`。Worker protocol 不理解 Skill。
+Worker handshake 本身只提供通用的 `homeDirectory + platform`；MCP builtin module 通过通用 Worker Resource Host 准备 `skill/managed` collection，并把返回目录作为 `skillsDirectory`。Worker handshake 不理解 Skill。
 
 本机 `devshell skill` catalog 的发现优先级是：
 
@@ -183,7 +183,7 @@ managed  ~/.devshell/skill
 global   $XDG_CONFIG_HOME/agents/skills
 ```
 
-`skill list/search` 只加载轻量 metadata；`skill load/inspect` 才加载完整 `SKILL.md`，`skill read` 按需读取附属文件。需要把某项 Skill 安装到目标 Worker 时显式执行 `skill get <name> <instance:/workspace>`；Skill Extension 对选中目录做内容快照，再通过 Artifact 基础设施传输到目标 `~/.devshell/skill/<name>`。
+`skill list/search` 只加载轻量 metadata；`skill load/inspect` 才加载完整 `SKILL.md`，`skill read` 按需读取附属文件。需要把某项 Skill 安装到目标 Worker 时显式执行 `skill get <name> <instance>`；Skill Extension 对选中目录做内容快照，通过 Worker Resource Host 取得 instance-scoped `skill/managed` collection，再由 Artifact 基础设施原子传输到该 collection 的 `<name>` entry。
 
 Skill 不再绑定 provider 生命周期。local、SSH、Docker、Podman 和 self-managed Reverse 都使用同一条 Extension assets + Worker control + Artifact transfer 路径。
 

@@ -71,7 +71,7 @@ environ_info(workspace=<absolute worker path>)
 1. 创建、恢复或续租 Context；
 2. 在当前 instance 上 prepare workspace；
 3. 建立/更新 environment attachment；
-4. 返回平台、派生的 managed Skill 路径、project memory、temporary directory 等环境信息；
+4. 通过 Worker Resource Host 准备并返回 managed Skill collection 路径，同时返回平台、project memory、temporary directory 等环境信息；
 5. 启动该 workspace 的 alert lease（如果配置）；
 6. 在启用 Workspace MCP App 时附带 Workspace bootstrap metadata。
 
