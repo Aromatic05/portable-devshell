@@ -58,12 +58,11 @@ export class InstanceFactory {
         return {
             contextMessages,
             goal,
-            mcpCapabilities: instance.mcp.tools.capabilities,
             mcpContextMode: instance.mcp.contextMode,
-            mcpGroups: instance.mcp.tools.groups,
             enabled: instance.enabled,
             mcpEnabled: instance.mcp.enabled,
             mcpPath: `/${instance.name}/mcp`,
+            modelExtensions: [...instance.extensions.model],
             name: instance.name,
             provider: instance.provider,
             ...(reverseConnector === undefined ? {} : { reverseConnector }),

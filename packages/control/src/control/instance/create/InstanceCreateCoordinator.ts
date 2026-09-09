@@ -1,4 +1,4 @@
-import type { McpHost, McpInstanceGateway, McpSshInstanceCreateInput } from "@portable-devshell/mcp";
+import type { McpHost, McpInstanceGateway } from "@portable-devshell/mcp";
 import {
     ConfigInputError,
     configInputError,
@@ -33,9 +33,8 @@ const instanceCreateSchema: InstanceCreateSchema = {
         modes: ["preset", "dockerfile", "compose", "existingImage", "existingStoppedContainer"],
         presets: containerPresets
     },
-    defaultMcpCapabilities: defaultConfigNormalizeContext.defaultMcpCapabilities,
     defaultMcpContextMode: "explicit",
-    defaultMcpGroups: defaultConfigNormalizeContext.defaultMcpGroups,
+    defaultModelExtensions: defaultConfigNormalizeContext.defaultModelExtensions,
     defaultEnabled: defaultConfigNormalizeContext.defaultEnabled,
     defaultMcpEnabled: defaultConfigNormalizeContext.defaultMcpEnabled,
     defaultProvider: "local",
@@ -108,59 +107,6 @@ export class InstanceCreateCoordinator {
         const normalized = this.#normalizeDraft(params);
         return await this.#mutationRunner.runExclusive(async () => await this.#createNormalized(normalized));
     }
-
-    async createSshInstanceFromMcp(
-        sourceInstanceName: string,
-        input: McpSshInstanceCreateInput
-    ): Promise<InstanceCreateResult> {
-        return await this.#mutationRunner.runExclusive(async () =>
-            await this.#createSshInstanceFromMcp(sourceInstanceName, input)
-        );
-    }
-
-    async #createSshInstanceFromMcp(
-        sourceInstanceName: string,
-        input: McpSshInstanceCreateInput
-    ): Promise<InstanceCreateResult> {
-        const source = this.#getConfig().instances.find((instance) => instance.name === sourceInstanceName);
-        if (source === undefined) {
-            throw createError({
-                code: errorCodes.instanceMissing,
-                details: { instance: sourceInstanceName },
-                message: `Source instance ${sourceInstanceName} was not found.`,
-                retryable: false
-            });
-        }
-
-        const draft: ConfigInstanceDraft = {
-            approvalPolicy:
-                source.approvalPolicy === undefined
-                    ? undefined
-                    : {
-                          mode: source.approvalPolicy.mode,
-                          rules: source.approvalPolicy.rules?.map((rule) => ({ ...rule }))
-                      },
-            enabled: true,
-            mcp: {
-                enabled: true,
-                tools: {
-                    capabilities: source.mcp.tools.capabilities.filter((capability) => capability !== "manage"),
-                    groups: source.mcp.tools.groups.filter((group) => group !== "instance")
-                }
-            },
-            name: input.name,
-            provider: "ssh",
-            security: { ...source.security },
-            ssh: {
-                command: this.#readConfigInput(() => buildMcpSshCommand(input))
-            }
-        };
-
-        return await this.#createNormalized(
-            this.#readConfigInput(() => normalizeConfigInstanceDraft(draft))
-        );
-    }
-
     async #createNormalized(normalized: ControlInstanceConfig): Promise<InstanceCreateResult> {
         const previousConfig = this.#getConfig();
         const nextConfig = this.#validateMergedConfig(normalized);
@@ -270,36 +216,6 @@ export class InstanceCreateCoordinator {
     }
 }
 
-function buildMcpSshCommand(input: McpSshInstanceCreateInput): string {
-    assertSafeSshAtom(input.host, "host");
-    if (input.user !== undefined) assertSafeSshAtom(input.user, "user");
-
-    const args = ["ssh"];
-    if (input.port !== undefined) args.push("-p", String(input.port));
-    if (input.identityFile !== undefined) args.push("-i", input.identityFile);
-    args.push(input.user === undefined ? input.host : `${input.user}@${input.host}`);
-    return args.map(quoteCommandArgument).join(" ");
-}
-
-function assertSafeSshAtom(value: string, fieldName: string): void {
-    const hasUnsafeCharacter = [...value].some((character) => {
-        const codePoint = character.codePointAt(0) ?? 0;
-        return /\s/u.test(character) || codePoint < 32 || codePoint === 127;
-    });
-    if (value.startsWith("-") || hasUnsafeCharacter) {
-        throw configInputError(
-            "semantic",
-            [fieldName],
-            "config.ssh.unsafeAtom",
-            "must not contain whitespace, control characters, or begin with '-'"
-        );
-    }
-}
-
-function quoteCommandArgument(value: string): string {
-    return `'${value.replaceAll("'", `'\\''`)}'`;
-}
-
 function toConfigInvalidError(error: unknown): Error {
     if (isStructuredError(error)) {
         return createError({
@@ -333,6 +249,7 @@ function toSummary(instance: ControlInstanceConfig): InstanceCreateSummary {
         ...(instance.container === undefined ? {} : { container: redactContainerSecrets(instance.container) }),
         ...(instance.dockerBinary === undefined ? {} : { dockerBinary: instance.dockerBinary }),
         ...(instance.env === undefined ? {} : { env: redactSecretRecord(instance.env) }),
+        extensions: { model: [...instance.extensions.model] },
         ...(instance.logs === undefined ? {} : { logs: { ...instance.logs } }),
         ...(instance.podmanBinary === undefined ? {} : { podmanBinary: instance.podmanBinary }),
         enabled: instance.enabled,
@@ -345,11 +262,7 @@ function toSummary(instance: ControlInstanceConfig): InstanceCreateSummary {
             },
             contextMode: instance.mcp.contextMode,
             enabled: instance.mcp.enabled,
-            path: instance.mcp.path,
-            tools: {
-                capabilities: [...instance.mcp.tools.capabilities],
-                groups: [...instance.mcp.tools.groups]
-            }
+            path: instance.mcp.path
         },
         name: instance.name,
         provider: instance.provider,

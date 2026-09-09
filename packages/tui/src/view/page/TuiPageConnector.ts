@@ -1,4 +1,4 @@
-import { CONTROL_WEB_BASE_PATH, controlWebBasePath, defaultMcpToolGroups, type JsonValue } from "@portable-devshell/shared";
+import { CONTROL_WEB_BASE_PATH, controlWebBasePath, defaultConfigNormalizeContext, type JsonValue } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
@@ -209,7 +209,7 @@ function selectedInstanceDraft(state: TuiAppState, instanceName: string): Record
     const entry = Array.isArray(state.readModel.configView?.instances)
         ? state.readModel.configView.instances.find((value) => asRecord(value)?.name === instanceName)
         : undefined;
-    return asRecord(entry) ?? { mcp: { auth: "none", contextMode: "explicit", enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } }, name: instanceName };
+    return asRecord(entry) ?? { extensions: { model: [...defaultConfigNormalizeContext.defaultModelExtensions] }, mcp: { auth: "none", contextMode: "explicit", enabled: true, path: `/${instanceName}/mcp` }, name: instanceName };
 }
 
 function globalMcpDraft(state: TuiAppState): Record<string, JsonValue> {

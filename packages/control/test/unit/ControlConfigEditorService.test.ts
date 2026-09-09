@@ -1000,7 +1000,7 @@ test("config editor rejects delete and rebuild patches while an instance is runn
     assert.equal(config.instances[0]?.security.mode, "disabled");
 });
 
-test("config editor reconciles instance MCP bindings from patches without restarting control", async () => {
+test("config editor hot-applies model Extension ACL and MCP context changes without restarting control", async () => {
     let config = createConfig();
     const registry = new InstanceRegistry([descriptor({
         async reconfigure() {},
@@ -1013,9 +1013,8 @@ test("config editor reconciles instance MCP bindings from patches without restar
             async stopAll() { return []; },
             async touch() {},
         },
-        mcpCapabilities: ["read", "write", "execute"],
         mcpContextMode: "explicit",
-        mcpGroups: ["file", "bash", "artifact"],
+        modelExtensions: ["instance"],
         todo: {
             async cancelAll() {},
             async control() { throw new Error("unused"); },
@@ -1062,24 +1061,17 @@ test("config editor reconciles instance MCP bindings from patches without restar
     await service.updateInstanceConfig({
         instanceName: "demo-local",
         patch: {
-            mcp: {
-                tools: {
-                    capabilities: ["read", "write", "execute", "manage"],
-                    groups: ["file", "bash", "artifact", "instance"]
-                }
-            }
+            extensions: { model: ["instance", "artifact"] }
         }
     });
 
     assert.equal(registered.length, 1);
-    assert.deepEqual(retiredWorkspaceApps, ["demo-local"]);
+    assert.deepEqual(retiredWorkspaceApps, []);
     assert.equal(registered[0]?.gateway, gateway);
-    assert.deepEqual(registered[0]?.policy, {
-        capabilities: ["read", "write", "execute", "manage"],
-        groups: ["file", "bash", "artifact", "instance"]
-    });
+    assert.equal("policy" in registered[0]!, false);
     assert.deepEqual(registered[0]?.auth, { enabled: false, provider: "none" });
     assert.equal(registered[0]?.contextMode, "explicit");
+    assert.deepEqual(registry.get("demo-local")?.modelExtensions, ["instance", "artifact"]);
 
     await service.updateInstanceConfig({
         instanceName: "demo-local",
@@ -1123,11 +1115,7 @@ function createConfig() {
     config.instances = [
         normalizeConfigInstanceDraft({
             mcp: {
-                enabled: true,
-                tools: {
-                    capabilities: ["read", "write", "execute"],
-                    groups: ["file", "bash", "artifact"]
-                }
+                enabled: true
             },
             name: "demo-local",
             provider: "local",
@@ -1156,10 +1144,10 @@ function createService(
 
 function descriptor(worker: Record<string, unknown>, extra: Record<string, unknown> = {}) {
     return {
-        tools: { capabilities: ["read", "write", "execute"] as const, groups: ["file", "bash", "artifact"] },
         enabled: true,
         mcpEnabled: true,
         mcpPath: "/demo-local/mcp",
+        modelExtensions: ["instance"],
         name: "demo-local",
         worker: {
             managementMode: "controllerManaged",

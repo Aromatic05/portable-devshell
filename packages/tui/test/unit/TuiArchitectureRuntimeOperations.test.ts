@@ -76,9 +76,8 @@ function createHarness(options: {
                         presets: [],
                     },
                     defaultEnabled: true,
-                    defaultMcpCapabilities: [],
                     defaultMcpEnabled: false,
-                    defaultMcpGroups: [],
+                    defaultModelExtensions: ["instance"],
                     defaultProvider: "local" as const,
                     defaultSecurityMode: "disabled" as const,
                     providers: ["local" as const],
@@ -91,11 +90,11 @@ function createHarness(options: {
                 calls.push("instance.validate");
                 return {
                     enabled: true,
+                    extensions: { model: ["instance"] },
                     mcp: {
                         auth: { mode: "none" as const },
                         enabled: false,
                         path: `/${draft.name}/mcp`,
-                        tools: { capabilities: [], groups: [] },
                     },
                     name: draft.name,
                     provider: draft.provider,

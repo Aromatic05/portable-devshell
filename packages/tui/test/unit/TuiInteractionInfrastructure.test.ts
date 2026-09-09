@@ -1069,7 +1069,8 @@ test("create wizard provider and container choices replace incompatible fields",
         approvalPolicy: { mode: "disabled" },
         container: { containerName: "stale", image: "stale", mode: "existingImage" },
         enabled: true,
-        mcp: { auth: "none", enabled: true, tools: { capabilities: ["read"], groups: ["file"] } },
+        extensions: { model: ["instance"] },
+        mcp: { auth: "none", enabled: true },
         name: "choice-test",
         provider: "local",
         security: { mode: "disabled" },
@@ -1436,7 +1437,7 @@ test("failed Save & Restart restores a previously running instance", async () =>
     assert.equal(harness.store.getState().ui.dirtyForms["config:alpha"], true);
 });
 
-test("config separates MCP tool access and hot-applies it without a worker restart", () => {
+test("config separates model Extension access and hot-applies it without a worker restart", () => {
     const harness = createHarness();
     harness.store.setSelectedPage("config");
     openEditorForBox(harness, "config", "configuration");
@@ -1445,21 +1446,21 @@ test("config separates MCP tool access and hot-applies it without a worker resta
             string,
             unknown
         >),
+        extensions: { model: ["instance", "artifact"] },
         mcp: {
             enabled: true,
             path: "/alpha/mcp",
-            tools: { capabilities: ["read"], groups: ["file", "todo"] },
         },
     });
 
-    const mcpTools = expandBox(harness, "mcp-tools");
+    const modelExtensions = expandBox(harness, "model-extensions");
     const actions = expandBox(harness, "configuration-actions");
     assert.equal(
-        mcpTools.expandedLines.some((line) => line.text.includes("todo")),
+        modelExtensions.expandedLines.some((line) => line.text.includes("artifact")),
         true,
     );
     assert.equal(
-        mcpTools.expandedLines.some((line) => line.text.includes("read")),
+        modelExtensions.expandedLines.some((line) => line.text.includes("instance")),
         true,
     );
     assert.notEqual(
@@ -1486,23 +1487,23 @@ test("MCP context mode is selectable in create and config editors", async () => 
     assert.equal(draft.mcp?.contextMode, "openai-session");
 
     harness.store.setSelectedPage("config");
-    openEditorForBox(harness, "config", "mcp-tools");
+    openEditorForBox(harness, "config", "mcp");
     harness.store.setFormDraft("config:alpha", {
         ...(harness.store.getState().ui.formDrafts["config:alpha"] as Record<string, JsonValue>),
+        extensions: { model: ["instance"] },
         mcp: {
             contextMode: "explicit",
             enabled: true,
             path: "/alpha/mcp",
-            tools: { capabilities: ["read"], groups: ["file"] },
         },
     });
-    const mcpTools = expandBox(harness, "mcp-tools");
-    const configMode = mcpTools.expandedLines.find((line) => line.id?.includes(":field:mcp.contextMode"));
+    const mcp = expandBox(harness, "mcp");
+    const configMode = mcp.expandedLines.find((line) => line.id?.includes(":field:mcp.contextMode"));
     assert.equal(configMode?.editableValue?.value, "explicit");
     assert.ok(configMode?.id);
-    harness.store.setMainFocusId("mcp-tools");
+    harness.store.setMainFocusId("mcp");
     harness.store.setFocusScope("form");
-    harness.store.setSelectedDetailLine(mcpTools.expandedKey, configMode.id);
+    harness.store.setSelectedDetailLine(mcp.expandedKey, configMode.id);
     await harness.dispatch({ direction: "right", type: "editor.cursorMove" });
     draft = harness.store.getState().ui.formDrafts["config:alpha"] as { mcp?: { contextMode?: string } };
     assert.equal(draft.mcp?.contextMode, "openai-session");
@@ -1527,11 +1528,11 @@ test("self-managed reverse hides Control lifecycle actions and requires remote r
                 ...((state.readModel.configView!.instances as JsonValue[]) ?? []),
                 {
                     enabled: true,
+                    extensions: { model: ["instance"] },
                     logs: { retentionDays: 7 },
                     mcp: {
                         enabled: true,
                         path: "/reverse-mac/mcp",
-                        tools: { capabilities: ["read"], groups: ["file"] },
                     },
                     name: "reverse-mac",
                     provider: "reverse",
@@ -1606,11 +1607,11 @@ test("config exposes container and tool scheduler settings", () => {
         },
         dockerBinary: "/usr/bin/docker",
         enabled: true,
+        extensions: { model: ["instance"] },
         logs: { eventBufferSize: 100, maxBytes: 67_108_864, retentionDays: 7 },
         mcp: {
             enabled: true,
             path: "/alpha/mcp",
-            tools: { capabilities: ["read"], groups: ["file"] },
         },
         name: "alpha",
         provider: "docker",
@@ -1655,13 +1656,13 @@ test("config exposes container and tool scheduler settings", () => {
         provider.expandedLines.some((line) => line.text.includes("API_TOKEN=secret")),
         false,
     );
-    const mcpTools = expandBox(harness, "mcp-tools");
+    const mcp = expandBox(harness, "mcp");
     assert.equal(
-        mcpTools.expandedLines.some((line) => line.id?.includes(":field:mcp.path")),
+        mcp.expandedLines.some((line) => line.id?.includes(":field:mcp.path")),
         false,
     );
     assert.equal(
-        mcpTools.expandedLines.some((line) => line.text.includes("/alpha/mcp")),
+        mcp.expandedLines.some((line) => line.text.includes("/alpha/mcp")),
         true,
     );
     assert.equal(
@@ -2836,10 +2837,6 @@ function enableContextMessageMcp(harness: ReturnType<typeof createHarness>): voi
                 mcp: {
                     ...currentMcp,
                     enabled: true,
-                    tools: {
-                        capabilities: ["read", "write", "execute"],
-                        groups: ["bash"],
-                    },
                 },
             };
         }),
@@ -2931,13 +2928,12 @@ function openEditorForBox(
             {
                 approvalPolicy: { mode: "ask" },
                 enabled: true,
+                extensions: { model: ["instance"] },
                 mcp: {
+                    auth: "none",
+                    contextMode: "explicit",
                     enabled: true,
                     path: "/alpha/mcp",
-                    tools: {
-                        capabilities: ["read", "write", "execute"],
-                        groups: ["file", "bash", "artifact", "todo"],
-                    },
                 },
                 name: "alpha",
                 provider: "local",
@@ -3009,6 +3005,9 @@ function instanceCreateSummary(
             : { podmanBinary: draft.podmanBinary }),
         ...(draft.ssh === undefined ? {} : { ssh: draft.ssh }),
         enabled: draft.enabled ?? true,
+        extensions: {
+            model: [...(draft.extensions?.model ?? ["instance"])],
+        },
         mcp: {
             auth: draft.mcp?.auth === "oauth2"
                 ? {
@@ -3022,22 +3021,7 @@ function instanceCreateSummary(
                 : { mode: draft.mcp?.auth ?? "none" },
             enabled: draft.mcp?.enabled ?? true,
             path: `/${draft.name}/mcp`,
-            tools: {
-                capabilities: [
-                    ...(draft.mcp?.tools?.capabilities ?? [
-                        "read",
-                        "write",
-                        "execute",
-                    ]),
-                ],
-                groups: [
-                    ...(draft.mcp?.tools?.groups ?? [
-                        "file",
-                        "bash",
-                        "artifact",
-                    ]),
-                ],
-            },
+            contextMode: draft.mcp?.contextMode ?? "explicit",
         },
         name: draft.name,
         provider: draft.provider,
@@ -3172,8 +3156,7 @@ function createHarness(
                 ] as const,
                 presets: [],
             },
-            defaultMcpCapabilities: ["read", "write", "execute"],
-            defaultMcpGroups: ["file", "bash", "artifact", "context"],
+            defaultModelExtensions: ["instance"],
             defaultEnabled: true,
             defaultMcpEnabled: true,
             defaultProvider: "local" as const,
@@ -3258,15 +3241,19 @@ function seedPrompt3State(store: TuiAppStore) {
         instances: [
             {
                 enabled: true,
-                mcp: { enabled: true, path: "/alpha/mcp" },
+                extensions: { model: ["instance"] },
+                mcp: { auth: "none", contextMode: "explicit", enabled: true, path: "/alpha/mcp" },
                 name: "alpha",
                 provider: "local",
+                security: { mode: "disabled" },
             },
             {
                 enabled: true,
-                mcp: { enabled: false, path: "/beta/mcp" },
+                extensions: { model: ["instance"] },
+                mcp: { auth: "none", contextMode: "explicit", enabled: false, path: "/beta/mcp" },
                 name: "beta",
                 provider: "ssh",
+                security: { mode: "disabled" },
             },
         ],
         mcp: {

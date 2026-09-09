@@ -12,7 +12,10 @@ import {
     createArtifactCliCommandProvider,
     executeArtifactCommand
 } from "../../src/control/artifact/cli/ArtifactCliCommandProvider.ts";
-import type { CliModelExtensionCommandInvocationContext } from "../../src/control/cli/CliExtensionCommandProvider.ts";
+import type {
+    CliModelExtensionCommandInvocationContext,
+    CliNativeExtensionCommandInvocationContext
+} from "../../src/control/cli/CliExtensionCommandProvider.ts";
 
 function createArtifactPortStub() {
     const calls: Array<{ input?: unknown; method: string }> = [];
@@ -71,11 +74,21 @@ function transferRecord(transferId: string, status: "cancelled" | "queued" | "tr
     };
 }
 
-function invocation(): CliModelExtensionCommandInvocationContext {
+function modelInvocation(): CliModelExtensionCommandInvocationContext {
     return {
         requestId: "req-artifact",
         signal: new AbortController().signal,
         surface: "model"
+    };
+}
+
+function nativeInvocation(): CliNativeExtensionCommandInvocationContext {
+    return {
+        localOwner: true,
+        requestId: "req-artifact-native",
+        signal: new AbortController().signal,
+        surface: "native",
+        workingDirectory: "/workspace"
     };
 }
 
@@ -84,19 +97,26 @@ function requireJson(result: { kind: "json"; value: ExtensionJsonValue } | { kin
     return result.value;
 }
 
-test("Artifact command is a Control-resident cli.model-commands Extension provider", async () => {
-    const provider = createArtifactCliCommandProvider(createArtifactPortStub());
+test("Artifact command has independent Control-resident native and model providers", async () => {
+    const port = createArtifactPortStub();
+    const nativeProvider = createArtifactCliCommandProvider(port, "native");
+    const modelProvider = createArtifactCliCommandProvider(port, "model");
 
-    assert.equal(provider.extensionId, "artifact");
-    assert.deepEqual(provider.declaration, {
+    assert.equal(nativeProvider.extensionId, "artifact");
+    assert.equal(nativeProvider.surface, "native");
+    assert.equal(modelProvider.surface, "model");
+    assert.deepEqual(nativeProvider.declaration, {
         id: "artifact",
         summary: "Manage artifact shares and transfers",
         title: "Artifact",
         usage: "artifact <command>"
     });
-    const help = await provider.binding(["--help"], invocation());
-    assert.equal(help.kind, "text");
-    assert.match(help.text, /devshell artifact transfer/u);
+    const nativeHelp = await nativeProvider.binding(["--help"], nativeInvocation());
+    const modelHelp = await modelProvider.binding(["--help"], modelInvocation());
+    assert.equal(nativeHelp.kind, "text");
+    assert.equal(modelHelp.kind, "text");
+    assert.match(nativeHelp.text, /devshell artifact transfer/u);
+    assert.match(modelHelp.text, /devshell artifact transfer/u);
 });
 
 test("artifact share preserves source authority and options through the internal domain port", async () => {
@@ -104,7 +124,7 @@ test("artifact share preserves source authority and options through the internal
     const value = requireJson(await executeArtifactCommand([
         "share", "source-a", "path:./dist", "--workspace", "/source",
         "--expires-in", "600", "--max-downloads", "3"
-    ], port, invocation()));
+    ], port, modelInvocation()));
 
     assert.deepEqual(port.calls, [{
         input: {
@@ -139,7 +159,7 @@ test("artifact shares redacts bearer URLs while retaining metadata", async () =>
         url: "https://example.test/artifacts/share/secret-bearer-token"
     }];
 
-    const value = requireJson(await executeArtifactCommand(["shares"], port, invocation()));
+    const value = requireJson(await executeArtifactCommand(["shares"], port, modelInvocation()));
     assert.ok(Array.isArray(value));
     const first = value[0];
     assert.equal(typeof first, "object");
@@ -153,7 +173,7 @@ test("artifact transfer infers authority and normalizes a bare target path", asy
     await executeArtifactCommand([
         "transfer", "host", "path:~/Download/input.bin", "target-b", "copy.bin",
         "--source-workspace", "/source", "--target-workspace", "/target"
-    ], port, invocation());
+    ], port, modelInvocation());
 
     assert.deepEqual(port.calls, [{
         input: {
@@ -182,7 +202,7 @@ test("artifact status cancel list and revoke dispatch through the domain port", 
         ["shares"],
         ["revoke", "share-1"]
     ]) {
-        await executeArtifactCommand(args, port, invocation());
+        await executeArtifactCommand(args, port, modelInvocation());
     }
     assert.deepEqual(port.calls.map((call) => call.method), ["status", "cancel", "transfers", "shares", "revoke"]);
 });
@@ -190,7 +210,7 @@ test("artifact status cancel list and revoke dispatch through the domain port", 
 test("artifact invalid input remains cli.usage before touching the domain port", async () => {
     const port = createArtifactPortStub();
     await assert.rejects(
-        async () => await executeArtifactCommand(["share", "source-a", "./dist"], port, invocation()),
+        async () => await executeArtifactCommand(["share", "source-a", "./dist"], port, modelInvocation()),
         (error: unknown) => typeof error === "object" && error !== null && "code" in error && error.code === "cli.usage"
     );
     assert.equal(port.calls.length, 0);

@@ -48,6 +48,7 @@ test("runtime stop does not settle until owned cleanup completes", async (t) => 
         } as never,
         mcp: {
             configEditor: testConfigEditor(),
+            instanceGateway: testInstanceGateway(),
             instanceCreate: undefined,
             oauthApprovals: () => undefined,
             async start() {},
@@ -104,6 +105,12 @@ function testConfigEditor() {
     };
 }
 
+function testInstanceGateway() {
+    return {
+        setModelCommandCatalog() {}
+    };
+}
+
 function testExtensions() {
     return {
         async disable() {},
@@ -145,6 +152,7 @@ test("runtime stop attempts every cleanup step after failures", async (t) => {
         } as never,
         mcp: {
             configEditor: testConfigEditor(),
+            instanceGateway: testInstanceGateway(),
             instanceCreate: undefined,
             oauthApprovals: () => undefined,
             async start() {},
@@ -188,6 +196,7 @@ test("MCP hot replacement preserves the original failure when runtime rollback a
     const mcp = {
         configEditor: testConfigEditor(),
         host: undefined,
+        instanceGateway: testInstanceGateway(),
         instanceCreate: undefined,
         oauthApprovals: undefined,
         async replaceMcpHost() {
@@ -244,6 +253,7 @@ test("Web hot replacement preserves the original failure when host rollback also
     const http = {};
     const mcp = {
         configEditor: testConfigEditor(),
+        instanceGateway: testInstanceGateway(),
         instanceCreate: undefined,
         oauthApprovals: undefined,
         webAuth: { mode: "none" },
@@ -346,6 +356,7 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
         } as never,
         mcp: {
             configEditor: testConfigEditor(),
+            instanceGateway: testInstanceGateway(),
             instanceCreate: undefined,
             oauthApprovals: undefined,
             webAuth: { mode: "none" },
@@ -408,6 +419,7 @@ test("runtime does not mount WebUI routes when web.enabled is false", async (t) 
                     }
                 })
             },
+            instanceGateway: testInstanceGateway(),
             instanceCreate: undefined,
             oauthApprovals: undefined,
             publicBaseUrl: "http://127.0.0.1:17890",
@@ -603,6 +615,7 @@ test("runtime installs builtin Extensions through the normal installer before op
         } as never,
         mcp: {
             configEditor: testConfigEditor(),
+            instanceGateway: testInstanceGateway(),
             instanceCreate: undefined,
             oauthApprovals: () => undefined,
             async start() {},
@@ -653,6 +666,7 @@ test("runtime keeps the Control channel closed when builtin Extension installati
         instances: { list: () => [], onChange: () => () => undefined, async stopOwned() {} } as never,
         mcp: {
             configEditor: testConfigEditor(),
+            instanceGateway: testInstanceGateway(),
             instanceCreate: undefined,
             oauthApprovals: () => undefined,
             async start() {},

@@ -1,8 +1,4 @@
 import type {
-    ArtifactShareInput,
-    ArtifactTransferCancelInput,
-    ArtifactTransferLookupInput,
-    ArtifactTransferStartInput,
     ArtifactViewImageInput,
     ArtifactViewImageResult
 } from "@portable-devshell/shared";
@@ -25,14 +21,6 @@ import type {
     WaitRecord
 } from "@portable-devshell/shared";
 import type { McpEndpointEnvironmentHandshake } from "../endpoint/McpEndpointPort.js";
-
-export interface McpSshInstanceCreateInput {
-    host: string;
-    identityFile?: string;
-    name: string;
-    port?: number;
-    user?: string;
-}
 
 export interface McpWorkspaceEventSlice {
     events: InstanceEvent[];
@@ -68,8 +56,8 @@ export interface McpInstanceGateway {
         signal?: AbortSignal,
     ): Promise<JsonValue>;
     closeToolSession?(sessionId: string): Promise<void>;
-    createSshInstance(sourceInstance: string, input: McpSshInstanceCreateInput): Promise<JsonValue>;
     environment(instance: string): McpEndpointEnvironmentHandshake | undefined;
+    modelCommands?(instance: string): readonly string[];
     listInstances(): Promise<JsonValue>;
     goalContinuation?(instance: string, input: GoalContinuationInput, ctxId: string): Promise<JsonValue>;
     manageGoal?(instance: string, input: GoalManageInput, ctxId: string): Promise<GoalSnapshot | undefined>;
@@ -136,11 +124,6 @@ export interface McpInstanceGateway {
         input: ArtifactViewImageInput,
         signal?: AbortSignal
     ): Promise<ArtifactViewImageResult>;
-    shareArtifact?(defaultInstance: string, input: ArtifactShareInput): Promise<JsonValue>;
-    transferArtifact?(
-        defaultInstance: string,
-        input: ArtifactTransferStartInput | ArtifactTransferLookupInput | ArtifactTransferCancelInput
-    ): Promise<JsonValue>;
 }
 
 export type McpInteractionGateway = McpInstanceGateway & Required<Pick<

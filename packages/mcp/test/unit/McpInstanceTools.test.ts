@@ -41,27 +41,25 @@ const withContext = <T extends Record<string, unknown>>(input: T): T & { ctxId: 
     ctxId: activeContext.ctxId
 });
 
-test("instance tools are hidden unless instance group and manage capability are both enabled", () => {
+test("instance_connect is a fixed Context bootstrap primitive and management tools stay absent", () => {
     const worker = createWorker();
     const gateway = createGateway();
-    const withoutManage = new McpEndpointWorker({
+    const endpoint = new McpEndpointWorker({
         contextRegistry,
         gateway,
         instanceName: "main-pc",
-        policy: { capabilities: ["execute"], groups: ["bash", "instance"] },
         worker
     });
-    const withoutGroup = new McpEndpointWorker({
-        contextRegistry,
-        gateway,
-        instanceName: "main-pc",
-        policy: { capabilities: ["execute", "manage"], groups: ["bash"] },
-        worker
-    });
+    const tools = endpoint.listTools();
 
-    assert.equal(withoutManage.listTools().some((tool) => tool.name === "instance_list"), false);
-    assert.equal(withoutGroup.listTools().some((tool) => tool.name === "instance_list"), false);
-    assert.equal((withoutManage.listTools().find((tool) => tool.name === "bash_run")?.inputSchema as { properties?: Record<string, unknown> }).properties?.instance, undefined);
+    for (const name of ["instance_list", "instance_status", "instance_create", "instance_stop"]) {
+        assert.equal(tools.some((tool) => tool.name === name), false, name);
+    }
+    assert.equal(tools.some((tool) => tool.name === "instance_connect"), true);
+    assert.notEqual(
+        (tools.find((tool) => tool.name === "bash_run")?.inputSchema as { properties?: Record<string, unknown> }).properties?.instance,
+        undefined
+    );
 });
 
 test("management-enabled endpoint augments worker schemas for cross-instance routing", () => {
@@ -224,7 +222,6 @@ test("instance_connect reuses a live workspace attachment and releases a replace
         contextRegistry: registry,
         gateway,
         instanceName: "main-pc",
-        policy: { capabilities: ["execute", "manage"], groups: ["bash", "instance"] },
         worker: createWorker()
     });
     const call = async (workspace: string) => await endpoint.callTool(
@@ -276,7 +273,6 @@ test("instance_connect cleans an unused alert lease and reference when workspace
         contextRegistry: registry,
         gateway,
         instanceName: "main-pc",
-        policy: { capabilities: ["execute", "manage"], groups: ["bash", "instance"] },
         worker: createWorker()
     });
 
@@ -318,7 +314,6 @@ test("remote bash artifacts tell artifact_read to stay on the source instance", 
         contextRegistry: registry,
         gateway,
         instanceName: "main-pc",
-        policy: { capabilities: ["execute", "manage"], groups: ["bash", "instance"] },
         worker: createWorker()
     });
 
@@ -587,7 +582,7 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
     };
 }
 
-test("todo tools are control-side, group-controlled, capability-free, and available while the worker is stopped", async () => {
+test("todo tools are fixed control-side primitives and remain available while the worker is stopped", async () => {
     const calls: string[] = [];
     const gateway = createGateway({
         async readTodo(instance, input) {
@@ -603,7 +598,6 @@ test("todo tools are control-side, group-controlled, capability-free, and availa
         contextRegistry,
         gateway,
         instanceName: "main-pc",
-        policy: { capabilities: [], groups: ["todo"] },
         worker: createWorker({ hasSchema: false, ready: false })
     });
 
@@ -648,17 +642,7 @@ test("todo tools are control-side, group-controlled, capability-free, and availa
         "write:main-pc:ctx-instance-test:0"
     ]);
 
-    const hidden = new McpEndpointWorker({
-        contextRegistry,
-        gateway,
-        instanceName: "main-pc",
-        policy: { capabilities: ["read", "write"], groups: [] },
-        worker: createWorker({ hasSchema: false, ready: false })
-    });
-    await assert.rejects(hidden.callTool("todo_read", withContext({}), context), (error: unknown) => {
-        assert.equal((error as { code?: string }).code, "core.toolSchemaUnavailable");
-        return true;
-    });
+    assert.equal(endpoint.listTools().some((tool) => tool.name === "todo_read"), true);
 });
 
 test("openai-session binding uses the same Todo contract as explicit ctxId", async () => {
@@ -703,7 +687,6 @@ test("openai-session binding uses the same Todo contract as explicit ctxId", asy
         contextRegistry: registry,
         gateway,
         instanceName: "main-pc",
-        policy: { capabilities: [], groups: ["todo"] },
         worker: createWorker({ hasSchema: false, ready: false })
     });
     const requestContext = {

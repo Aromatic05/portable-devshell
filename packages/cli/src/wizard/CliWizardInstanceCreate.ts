@@ -76,8 +76,11 @@ export class CliWizardInstanceCreate {
                   schema.defaultMcpContextMode ?? "explicit"
               )
             : (schema.defaultMcpContextMode ?? "explicit");
-        const mcpGroups = await this.#stringList(lines, "MCP tool groups", schema.defaultMcpGroups);
-        const mcpCapabilities = await this.#stringList(lines, "MCP capabilities", schema.defaultMcpCapabilities);
+        const modelExtensions = await this.#stringList(
+            lines,
+            "model Extension allowlist",
+            schema.defaultModelExtensions
+        );
 
         this.#output.write("Security\n");
         const securityMode = await this.#securityMode(lines, schema);
@@ -98,14 +101,11 @@ export class CliWizardInstanceCreate {
             ...(logs === undefined ? {} : { logs }),
             ...(tools === undefined ? {} : { tools }),
             enabled,
+            extensions: { model: modelExtensions },
             mcp: {
                 ...mcpAuth,
                 contextMode: mcpContextMode,
-                enabled: mcpEnabled,
-                tools: {
-                    capabilities: mcpCapabilities as InstanceCreateDraft["mcp"] extends { tools?: { capabilities?: infer T } } ? T : never,
-                    groups: mcpGroups
-                }
+                enabled: mcpEnabled
             },
             name,
             provider,
@@ -593,8 +593,7 @@ export class CliWizardInstanceCreate {
             }
         }
         this.#output.write(`mcp path: ${summary.mcp.path}\n`);
-        this.#output.write(`MCP groups: ${summary.mcp.tools.groups.join(",")}\n`);
-        this.#output.write(`MCP capabilities: ${summary.mcp.tools.capabilities.join(",")}\n`);
+        this.#output.write(`model Extensions: ${summary.extensions.model.join(",")}\n`);
         this.#output.write(`security mode: ${summary.security.mode}\n`);
         this.#output.write(`approval mode: ${summary.approvalPolicy?.mode ?? "disabled"}\n`);
         if ((summary.approvalPolicy?.rules?.length ?? 0) > 0) {

@@ -86,7 +86,7 @@ export class ControlRuntime {
         const runtimeSubscriptions = new RuntimeSubscriptionManager();
         const modelCliCommands = new CliExtensionCommandService(this.#extensions, {
             providers: [
-                createArtifactCliCommandProvider(options.artifact.service),
+                createArtifactCliCommandProvider(options.artifact.service, "model"),
                 createInstanceModelCliCommandProvider({
                     instances: options.instances,
                     subscriptions: runtimeSubscriptions
@@ -94,9 +94,16 @@ export class ControlRuntime {
             ],
             surface: "model"
         });
+        options.mcp.instanceGateway.setModelCommandCatalog((instance) => {
+            const allowed = options.instances.get(instance)?.modelExtensions ?? [];
+            return modelCliCommands.list()
+                .filter((command) => allowed.includes(command.extensionId))
+                .map((command) => command.id);
+        });
         this.#modelDevshell = new ModelDevshellBroker({
             access: {
-                allows: ({ extensionId }) => extensionId === "instance"
+                allows: ({ extensionId, instance }) =>
+                    options.instances.get(instance)?.modelExtensions.includes(extensionId) === true
             },
             commands: modelCliCommands,
             contextAdmin: () => options.mcp.host?.contextAdmin,
@@ -104,7 +111,10 @@ export class ControlRuntime {
         });
         this.#routes = new ControlRouteComposition({
             artifact: options.artifact.service,
-            cliCommands: new CliExtensionCommandService(this.#extensions, { surface: "native" }),
+            cliCommands: new CliExtensionCommandService(this.#extensions, {
+                providers: [createArtifactCliCommandProvider(options.artifact.service, "native")],
+                surface: "native"
+            }),
             config: options.mcp.configEditor,
             contextAdmin: () => options.mcp.host?.contextAdmin,
             debug: this.#debug,

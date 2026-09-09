@@ -45,10 +45,9 @@ test(
         });
         const descriptor = {
             enabled: true,
-            mcpCapabilities: ["execute", "read"],
             mcpEnabled: true,
-            mcpGroups: ["bash", "tmux"],
             mcpPath: `/${instanceName}/mcp`,
+            modelExtensions: ["instance"],
             name: instanceName,
             provider: "local",
             todo: {
@@ -61,7 +60,6 @@ test(
             instances: [{
                 auth: { enabled: false, provider: "none" },
                 name: instanceName,
-                policy: { capabilities: ["execute", "read"], groups: ["bash", "tmux"] },
                 worker
             }],
             listenHost: "127.0.0.1",

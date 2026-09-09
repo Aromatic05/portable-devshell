@@ -4,7 +4,6 @@ import type {
     ApprovalPolicyMode,
     ApprovalPolicySourceScope
 } from "../dto/tool/DtoToolApproval.js";
-import type { ToolCapability } from "../dto/tool/DtoToolDefinition.js";
 import { configInputError, type ConfigPathSegment } from "./ConfigIssue.js";
 import type {
     ConfigBatchUpdateRequest,
@@ -37,6 +36,7 @@ const instanceKeys = [
     "dockerBinary",
     "enabled",
     "env",
+    "extensions",
     "logs",
     "mcp",
     "name",
@@ -97,6 +97,10 @@ export function parseConfigInstanceDraft(
         dockerBinary: readOptionalTrimmedString(record.dockerBinary, [...path, "dockerBinary"]),
         enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
         env: readOptionalStringRecord(record.env, [...path, "env"]),
+        extensions:
+            record.extensions === undefined
+                ? undefined
+                : parseInstanceExtensions(record.extensions, [...path, "extensions"]),
         logs: record.logs === undefined ? undefined : parseLogs(record.logs, [...path, "logs"]),
         mcp: record.mcp === undefined ? undefined : parseInstanceMcpDraft(record.mcp, [...path, "mcp"]),
         name: readRequiredTrimmedString(record.name, [...path, "name"]),
@@ -141,6 +145,10 @@ export function parseConfigInstancePatch(
         ),
         enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
         env: readNullable(record.env, (entry) => readStringRecord(entry, [...path, "env"])),
+        extensions:
+            record.extensions === undefined
+                ? undefined
+                : parseInstanceExtensions(record.extensions, [...path, "extensions"]),
         logs: readNullable(record.logs, (entry) => parseLogs(entry, [...path, "logs"])),
         mcp: record.mcp === undefined ? undefined : parseInstanceMcpPatch(record.mcp, [...path, "mcp"]),
         podmanBinary: readNullable(record.podmanBinary, (entry) =>
@@ -396,12 +404,7 @@ function parseMcpOAuth2Draft(value: unknown, path: readonly ConfigPathSegment[])
 
 function parseInstanceMcpDraft(value: unknown, path: readonly ConfigPathSegment[]): NonNullable<ConfigInstanceDraft["mcp"]> {
     const record = readRecord(value, path);
-    assertKnownKeys(record, ["auth", "contextMode", "enabled", "oauth2", "path", "token", "tools"], path);
-
-    const tools = record.tools === undefined ? undefined : readRecord(record.tools, [...path, "tools"]);
-    if (tools !== undefined) {
-        assertKnownKeys(tools, ["capabilities", "groups"], [...path, "tools"]);
-    }
+    assertKnownKeys(record, ["auth", "contextMode", "enabled", "oauth2", "path", "token"], path);
 
     return {
         ...parseMcpNamespaceAuth(record, path),
@@ -410,30 +413,13 @@ function parseInstanceMcpDraft(value: unknown, path: readonly ConfigPathSegment[
                 ? undefined
                 : readEnum(record.contextMode, [...path, "contextMode"], ["explicit", "openai-session"] as const),
         enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
-        path: readOptionalTrimmedString(record.path, [...path, "path"]),
-        tools:
-            tools === undefined
-                ? undefined
-                : {
-                      capabilities:
-                          tools.capabilities === undefined
-                              ? undefined
-                              : readToolCapabilityArray(tools.capabilities, [...path, "tools", "capabilities"]),
-                      groups:
-                          tools.groups === undefined
-                              ? undefined
-                              : readStringArray(tools.groups, [...path, "tools", "groups"])
-                  }
+        path: readOptionalTrimmedString(record.path, [...path, "path"])
     };
 }
 
 function parseInstanceMcpPatch(value: unknown, path: readonly ConfigPathSegment[]): NonNullable<ConfigInstancePatch["mcp"]> {
     const record = readRecord(value, path);
-    assertKnownKeys(record, ["auth", "contextMode", "enabled", "oauth2", "path", "token", "tools"], path);
-    const tools = record.tools === undefined ? undefined : readRecord(record.tools, [...path, "tools"]);
-    if (tools !== undefined) {
-        assertKnownKeys(tools, ["capabilities", "groups"], [...path, "tools"]);
-    }
+    assertKnownKeys(record, ["auth", "contextMode", "enabled", "oauth2", "path", "token"], path);
 
     return {
         ...parseMcpNamespaceAuth(record, path),
@@ -442,20 +428,18 @@ function parseInstanceMcpPatch(value: unknown, path: readonly ConfigPathSegment[
                 ? undefined
                 : readEnum(record.contextMode, [...path, "contextMode"], ["explicit", "openai-session"] as const),
         enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
-        path: readNullable(record.path, (entry) => readRequiredTrimmedString(entry, [...path, "path"])),
-        tools:
-            tools === undefined
-                ? undefined
-                : {
-                      capabilities:
-                          tools.capabilities === undefined
-                              ? undefined
-                              : readToolCapabilityArray(tools.capabilities, [...path, "tools", "capabilities"]),
-                      groups:
-                          tools.groups === undefined
-                              ? undefined
-                              : readStringArray(tools.groups, [...path, "tools", "groups"])
-                  }
+        path: readNullable(record.path, (entry) => readRequiredTrimmedString(entry, [...path, "path"]))
+    };
+}
+
+function parseInstanceExtensions(
+    value: unknown,
+    path: readonly ConfigPathSegment[]
+): NonNullable<ConfigInstanceDraft["extensions"]> {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["model"], path);
+    return {
+        model: record.model === undefined ? undefined : readStringArray(record.model, [...path, "model"])
     };
 }
 
@@ -771,18 +755,6 @@ function readOptionalInteger(value: unknown, path: readonly ConfigPathSegment[])
 
 function readStringArray(value: unknown, path: readonly ConfigPathSegment[]): string[] {
     return readArray(value, path).map((entry, index) => readRequiredTrimmedString(entry, [...path, index]));
-}
-
-function readToolCapabilityArray(value: unknown, path: readonly ConfigPathSegment[]): ToolCapability[] {
-    return readStringArray(value, path).map((entry, index) => {
-        if (entry === "read" || entry === "write" || entry === "execute" || entry === "manage") return entry;
-        throw configInputError(
-            "parse",
-            [...path, index],
-            "config.toolCapability.invalid",
-            "must be one of read, write, execute, manage"
-        );
-    });
 }
 
 function readStringRecord(value: unknown, path: readonly ConfigPathSegment[]): Record<string, string> {

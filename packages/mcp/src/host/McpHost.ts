@@ -1,7 +1,7 @@
-import type { ControlMcpContextMode, JsonValue, McpContextRecord, ToolCallContext, ToolDefinition, ToolPolicy } from "@portable-devshell/shared";
+import type { ControlMcpContextMode, JsonValue, McpContextRecord, ToolCallContext, ToolDefinition } from "@portable-devshell/shared";
 import { type McpAuthConfig } from "../auth/McpAuthConfig.js";
 import { McpContextRegistry } from "../context/McpContextRegistry.js";
-import { isMcpGoalGateway, type McpInstanceGateway } from "../instance/McpInstanceGateway.js";
+import { isMcpGoalGateway, isMcpInteractionGateway, type McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import { McpOAuthProtectedResource } from "../auth/oauth/McpOAuthProtectedResource.js";
 import type { McpOAuthApprovalService } from "../auth/oauth/McpOAuthApprovalService.js";
 import { McpEndpointBinding } from "../endpoint/McpEndpointBinding.js";
@@ -54,7 +54,6 @@ export interface McpHostInstanceConfig {
     auth?: McpAuthConfig;
     contextMode?: ControlMcpContextMode;
     gateway?: McpInstanceGateway;
-    policy: ToolPolicy;
     name: string;
     path?: string;
     worker: WorkerInstanceLike;
@@ -118,11 +117,6 @@ export class McpHost {
         }
         await this.#contextRegistry.initialize();
         await this.#workspaceAppLeases.initialize();
-        for (const instance of this.#config.instances) {
-            if (!workspaceAppEnabled(instance.policy)) {
-                await this.retireWorkspaceApp(instance.name);
-            }
-        }
         await this.#oauth?.warmup();
         for (const binding of this.#registry.list()) {
             this.#httpServer.registerBinding(binding.path, binding.binding, binding.auth);
@@ -141,7 +135,7 @@ export class McpHost {
         this.#liveRouteCleanups.delete(instance.name);
         this.#gateways.set(instance.name, instance.gateway);
         this.#workers.set(instance.name, instance.worker);
-        const workspaceApp = workspaceAppEnabled(instance.policy);
+        const workspaceApp = isMcpInteractionGateway(instance.gateway);
         if (!workspaceApp) this.#workspaceAppPresence.revokeInstance(instance.name);
         const liveBaseUrl = workspaceApp
             ? workspaceLiveBaseUrl(this.#config.publicBaseUrl, instance.name)
@@ -152,7 +146,6 @@ export class McpHost {
                 contextRegistry: this.#contextRegistry,
                 contextMode: instance.contextMode ?? "explicit",
                 gateway: instance.gateway,
-                policy: instance.policy,
                 instanceName: instance.name,
                 toolProvenance: this.#config.toolProvenance,
                 worker: instance.worker,
@@ -425,10 +418,6 @@ export class McpHost {
             running
         };
     }
-}
-
-function workspaceAppEnabled(policy: ToolPolicy): boolean {
-    return policy.groups.includes("workspace");
 }
 
 function oauthConfig(instances: readonly McpHostInstanceConfig[]) {

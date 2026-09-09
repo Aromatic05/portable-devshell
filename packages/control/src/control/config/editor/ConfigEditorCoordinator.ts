@@ -595,12 +595,11 @@ export class ConfigEditorCoordinator {
             this.#instanceRegistry.add(descriptor);
             try {
                 await descriptor.worker.reconfigure(toWorkerReconfigureInput(existing));
-                descriptor.mcpCapabilities = [...existing.mcp.tools.capabilities];
                 descriptor.mcpContextMode = existing.mcp.contextMode;
-                descriptor.mcpGroups = [...existing.mcp.tools.groups];
                 descriptor.enabled = existing.enabled;
                 descriptor.mcpEnabled = existing.mcp.enabled;
                 descriptor.mcpPath = existing.mcp.path;
+                descriptor.modelExtensions = [...existing.extensions.model];
             } catch (error) {
                 failures.push(error);
             }
@@ -639,12 +638,11 @@ export class ConfigEditorCoordinator {
         if (instance.enabled) {
             await descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
         }
-        descriptor.mcpCapabilities = [...instance.mcp.tools.capabilities];
         descriptor.mcpContextMode = instance.mcp.contextMode;
-        descriptor.mcpGroups = [...instance.mcp.tools.groups];
         descriptor.enabled = instance.enabled;
         descriptor.mcpEnabled = instance.mcp.enabled;
         descriptor.mcpPath = instance.mcp.path;
+        descriptor.modelExtensions = [...instance.extensions.model];
     }
 
     async #syncMcpEndpoint(instanceName: string): Promise<void> {
@@ -653,9 +651,6 @@ export class ConfigEditorCoordinator {
         const config = this.#getConfig();
         const instance = config.instances.find((entry) => entry.name === instanceName);
         const descriptor = this.#instanceRegistry.get(instanceName);
-        if (instance?.mcp.tools.groups.includes("workspace") !== true) {
-            await host.retireWorkspaceApp(instanceName);
-        }
         if (
             !config.mcp.enabled ||
             instance === undefined ||

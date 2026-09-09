@@ -366,7 +366,6 @@ test("cached MCP tool names stay callable without re-exposing stale recipients",
     const catalog = new McpEndpointCatalog({
         gateway,
         instanceName: "demo-local",
-        policy: { capabilities: ["manage"], groups: ["instance"] },
         worker: harness.worker,
     });
     const dispatch = new McpEndpointDispatch({
@@ -427,7 +426,6 @@ test("Workspace authorization metadata never enters audit results or MCP events"
     const catalog = new McpEndpointCatalog({
         gateway,
         instanceName: "demo-local",
-        policy: { capabilities: [], groups: ["workspace"] },
         worker: harness.worker,
     });
     const dispatch = new McpEndpointDispatch({ catalog, gateway, instanceName: "demo-local", worker: harness.worker });
@@ -458,47 +456,6 @@ test("Workspace authorization metadata never enters audit results or MCP events"
     assert.notEqual(workspaceAudit, undefined);
     assert.equal(JSON.stringify(workspaceAudit?.result).includes(token), false);
     assert.equal(JSON.stringify(harness.events).includes(token), false);
-});
-
-test("v0.6.15 Workspace wire calls stay hidden but dispatch through the current Workspace policy", async () => {
-    const harness = createWorker({ tools: [] });
-    const unused = async () => { throw new Error("unused"); };
-    const gateway = {
-        consumeWait: unused,
-        createWait: unused,
-        decideApproval: unused,
-        detachWait: unused,
-        listApprovals: async () => [],
-        listTools: () => [],
-        listWaits: async () => [],
-        resolveWait: unused,
-        waitForWait: unused,
-    } as never;
-    const catalog = new McpEndpointCatalog({
-        gateway,
-        instanceName: "demo-local",
-        policy: { capabilities: [], groups: ["workspace"] },
-        worker: harness.worker,
-    });
-    const dispatch = new McpEndpointDispatch({ catalog, gateway, instanceName: "demo-local", worker: harness.worker });
-    const environment = await dispatch.callTool(
-        "environ_info",
-        { workspace: "/workspace" },
-        { principal: "tester", requestId: "workspace-legacy-environment" },
-    );
-    assert.ok(environment instanceof McpNativeToolResult);
-    const ctxId = (environment.structuredContent as { ctxId?: string }).ctxId;
-    const token = (environment._meta?.["portable-devshell/workspace"] as { token?: string } | undefined)?.token;
-    if (typeof ctxId !== "string" || typeof token !== "string") throw new Error("workspace bootstrap missing");
-
-    const result = await dispatch.callTool(
-        "workspace_reentry_control",
-        { action: "get", ctxId, token },
-        { principal: "tester", requestId: "workspace-legacy-reentry" },
-    ) as { mode?: string };
-    assert.equal(result.mode, "automatic");
-    assert.equal(catalog.snapshot().merged.some((entry) => entry.definition.name === "workspace_reentry_control"), false);
-    assert.equal(catalog.snapshot().exposed.some((entry) => entry.definition.name === "workspace_reentry_control"), false);
 });
 
 test("OpenAI session resolves Workspace once and the App continues by ctxId without session metadata", async () => {
@@ -543,7 +500,6 @@ test("OpenAI session resolves Workspace once and the App continues by ctxId with
         contextSelector,
         gateway,
         instanceName: "demo-local",
-        policy: { capabilities: [], groups: ["workspace"] },
         worker: harness.worker,
     });
     const dispatch = new McpEndpointDispatch({
@@ -599,34 +555,6 @@ test("OpenAI session resolves Workspace once and the App continues by ctxId with
     );
     const afterSnapshot = await registry.lookup(ctxId!, { principal: "tester" });
     assert.equal(afterSnapshot.expiresAt, beforeSnapshot.expiresAt);
-});
-
-test("legacy aliases still obey the current MCP policy", async () => {
-    const harness = createWorker();
-    const gateway = {
-        listTools: () => [],
-    } as never;
-    const catalog = new McpEndpointCatalog({
-        gateway,
-        instanceName: "demo-local",
-        policy: { capabilities: [], groups: [] },
-        worker: harness.worker,
-    });
-    const dispatch = new McpEndpointDispatch({
-        catalog,
-        gateway,
-        instanceName: "demo-local",
-        worker: harness.worker,
-    });
-
-    await assert.rejects(
-        dispatch.callTool(
-            "instance_start",
-            { ctxId: "ctx-cached", instance: "remote" },
-            { principal: "tester", requestId: "request-start" },
-        ),
-        /not exposed/i,
-    );
 });
 
 test("tmux block sync window stays at three minutes for every Context mode", () => {
@@ -805,7 +733,6 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     const catalog = new McpEndpointCatalog({
         gateway,
         instanceName: "demo-local",
-        policy: { capabilities: ["read"], groups: ["workspace", "tmux"] },
         worker,
     });
     const contextRegistry = new McpContextRegistry();
@@ -988,38 +915,6 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     assert.equal(typeof waits[5]?.detachedAt, "string");
     assert.deepEqual(waits[5]?.result, terminalResults.get("task-5"));
 
-    const disabledCatalog = new McpEndpointCatalog({
-        gateway,
-        instanceName: "demo-local",
-        policy: { capabilities: ["read"], groups: ["tmux"] },
-        worker,
-    });
-    const disabledDispatch = new McpEndpointDispatch({
-        catalog: disabledCatalog,
-        contextRegistry: new McpContextRegistry(),
-        gateway,
-        instanceName: "demo-local",
-        tmuxBlockSyncMs: 250,
-        tmuxWaitPollMs: 1,
-        worker,
-    });
-    const disabledEnvironment = structuredResult<{ ctxId: string }>(await disabledDispatch.callTool(
-        "environ_info",
-        { workspace: "/workspace-disabled" },
-        { principal: "tester", requestId: "request-environment-disabled" },
-    ));
-    const disabledAbort = new AbortController();
-    const disabledCall = disabledDispatch.callTool(
-        "tmux_run",
-        { command: "sleep 10", ctxId: disabledEnvironment.ctxId, timeout: 660_000, wait: "block" },
-        { principal: "tester", requestId: "wait-disabled-workspace" },
-        disabledAbort.signal,
-    ) as Promise<{ detached?: boolean }>;
-    await waitUntil(() => runCalls === 6 && waits.length === 7);
-    disabledAbort.abort("transport closed");
-    const disabledResult = await disabledCall;
-    assert.equal(disabledResult.detached, true);
-    assert.equal(waits.at(-1)?.automaticRecovery, false);
 });
 
 test("tmux_read long waits detach into durable Workspace state", async () => {
@@ -1139,7 +1034,6 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
     const catalog = new McpEndpointCatalog({
         gateway,
         instanceName: "demo-local",
-        policy: { capabilities: ["read"], groups: ["tmux"] },
         worker,
     });
     let executionNow = Date.now();
@@ -1333,7 +1227,6 @@ test("failed environ_info rolls back only the undisclosed explicit Context", asy
     const catalog = new McpEndpointCatalog({
         contextSelector,
         instanceName: "demo-local",
-        policy: { capabilities: ["read"], groups: ["file"] },
         worker: harness.worker,
     });
     const dispatch = new McpEndpointDispatch({
@@ -1406,7 +1299,6 @@ test("successful environ_info creates a new explicit Context without retiring ol
     const catalog = new McpEndpointCatalog({
         contextSelector,
         instanceName: "demo-local",
-        policy: { capabilities: ["read"], groups: ["file"] },
         worker: harness.worker,
     });
     const dispatch = new McpEndpointDispatch({
@@ -1453,7 +1345,6 @@ test("environ_info releases the previous workspace alert lease after an explicit
     const harness = createWorker();
     const catalog = new McpEndpointCatalog({
         instanceName: "demo-local",
-        policy: { capabilities: ["read"], groups: ["file"] },
         worker: harness.worker,
     });
     const dispatch = new McpEndpointDispatch({
@@ -1479,7 +1370,6 @@ test("environ_info rolls back an undisclosed Context when post-create event reco
     const registry = new McpContextRegistry({ idFactory: () => "ctx-rollback" });
     const catalog = new McpEndpointCatalog({
         instanceName: "demo-local",
-        policy: { capabilities: ["read"], groups: ["file"] },
         worker: harness.worker,
     });
     const dispatch = new McpEndpointDispatch({
@@ -1517,7 +1407,6 @@ test("environ_info rollback keeps alerts leased by another Context attachment", 
     });
     const catalog = new McpEndpointCatalog({
         instanceName: "demo-local",
-        policy: { capabilities: ["read"], groups: ["file"] },
         worker: harness.worker,
     });
     const dispatch = new McpEndpointDispatch({

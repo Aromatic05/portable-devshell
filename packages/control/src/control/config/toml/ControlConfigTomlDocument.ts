@@ -66,26 +66,26 @@ export class ControlInstanceTomlDocument {
     decode(document: ConfigTomlDocument): ConfigInstanceDraft {
         const record = asRecord(document);
         const version = readDocumentVersion(record.version);
-        if (version !== 2 && version !== 3) {
-            throw configInputError("parse", ["version"], "config.document.versionUnsupported", "must be 2 or 3");
+        if (version !== 2 && version !== 3 && version !== 4) {
+            throw configInputError("parse", ["version"], "config.document.versionUnsupported", "must be 2, 3, or 4");
         }
         rejectLegacyField(record, "workerBinaryPath", "is not supported");
         rejectLegacyField(record, "host", "is not supported; use ssh.command");
         rejectLegacyField(record, "remoteCwd", "is not supported");
         rejectLegacyField(record, "sshBinary", "is not supported; use ssh.command");
-        if (version === 3) {
+        if (version >= 3) {
             rejectLegacyField(record, "workspace", "is not supported; select an absolute workspace when creating an environment context");
         }
         const { version: _version, workspace: _legacyWorkspace, ...config } = record;
-        const draft = parseConfigInstanceDraft(config);
-        return version === 2
-            ? Object.assign(migrateVersion2McpGroups(draft), { migratedFromVersion: 2 as const })
-            : draft;
+        const draft = parseConfigInstanceDraft(version === 4 ? config : stripLegacyMcpTools(config));
+        return version === 4
+            ? draft
+            : Object.assign(draft, { migratedFromVersion: version as 2 | 3 });
     }
 
     encode(instance: ControlInstanceConfig): ConfigTomlDocument {
         return compact({
-            version: 3,
+            version: 4,
             name: instance.name,
             enabled: instance.enabled,
             provider: instance.provider,
@@ -94,6 +94,9 @@ export class ControlInstanceTomlDocument {
             dockerBinary: instance.dockerBinary,
             podmanBinary: instance.podmanBinary,
             env: instance.env,
+            extensions: {
+                model: [...instance.extensions.model]
+            },
             alerts: instance.alerts,
             mcp: {
                 auth: instance.mcp.auth.mode,
@@ -101,11 +104,7 @@ export class ControlInstanceTomlDocument {
                 enabled: instance.mcp.enabled,
                 oauth2: instance.mcp.auth.mode === "oauth2" ? compact(instance.mcp.auth.oauth2) : undefined,
                 path: instance.mcp.path,
-                token: instance.mcp.auth.mode === "token" ? instance.mcp.auth.token : undefined,
-                tools: {
-                    capabilities: [...instance.mcp.tools.capabilities],
-                    groups: [...instance.mcp.tools.groups]
-                }
+                token: instance.mcp.auth.mode === "token" ? instance.mcp.auth.token : undefined
             },
             logs: instance.logs,
             approvalPolicy: instance.approvalPolicy,
@@ -128,26 +127,11 @@ function rejectLegacyField(record: Record<string, unknown>, key: string, message
     }
 }
 
-function migrateVersion2McpGroups(draft: ConfigInstanceDraft): ConfigInstanceDraft {
-    const groups = draft.mcp?.tools?.groups;
-    if (groups === undefined || groups.includes("workspace") || groups.includes("interaction")) return draft;
-    const legacyDefaultGroups = ["file", "bash", "artifact", "tmux", "todo"];
-    if (
-        !legacyDefaultGroups.every((group) => groups.includes(group)) ||
-        !groups.every((group) => legacyDefaultGroups.includes(group) || group === "instance")
-    ) {
-        return draft;
-    }
-    return {
-        ...draft,
-        mcp: {
-            ...draft.mcp,
-            tools: {
-                ...draft.mcp?.tools,
-                groups: [...groups, "workspace"]
-            }
-        }
-    };
+function stripLegacyMcpTools(config: Record<string, unknown>): Record<string, unknown> {
+    if (config.mcp === undefined) return config;
+    const mcp = asRecord(config.mcp);
+    const { tools: _legacyTools, ...mcpWithoutTools } = mcp;
+    return { ...config, mcp: mcpWithoutTools };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

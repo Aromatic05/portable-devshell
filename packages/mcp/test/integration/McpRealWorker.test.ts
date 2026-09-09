@@ -46,7 +46,6 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         instances: [
             {
                 auth: { enabled: false, provider: "none" },
-                policy: { capabilities: ["execute", "read"], groups: ["bash", "file", "tmux"] },
                 name: instanceName,
                 worker: instance
             }
@@ -206,7 +205,6 @@ test("MCP tools/call waits for approval before invoking the worker tool", realWo
         instances: [
             {
                 auth: { enabled: false, provider: "none" },
-                policy: { capabilities: ["execute"], groups: ["bash"] },
                 name: instanceName,
                 worker: instance
             }

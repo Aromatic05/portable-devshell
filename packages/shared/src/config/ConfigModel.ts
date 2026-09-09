@@ -1,5 +1,4 @@
 import type { ApprovalPolicy } from "../dto/tool/DtoToolApproval.js";
-import type { ToolCapability } from "../dto/tool/DtoToolDefinition.js";
 import type {
     InstanceContainerConfig,
     InstanceContainerMode,
@@ -57,10 +56,10 @@ export interface ControlInstanceMcpConfig {
     contextMode: ControlMcpContextMode;
     enabled: boolean;
     path: string;
-    tools: {
-        capabilities: ToolCapability[];
-        groups: string[];
-    };
+}
+
+export interface ControlInstanceExtensionsConfig {
+    model: string[];
 }
 
 export interface ControlInstanceSecurityConfig {
@@ -76,6 +75,7 @@ interface ControlInstanceConfigBase {
     approvalPolicy?: ApprovalPolicy;
     enabled: boolean;
     env?: Record<string, string>;
+    extensions: ControlInstanceExtensionsConfig;
     logs?: ControlInstanceLogsConfig;
     mcp: ControlInstanceMcpConfig;
     name: string;
@@ -227,10 +227,6 @@ export interface ConfigInstanceMcpDraft {
     oauth2?: ConfigMcpOAuth2Draft;
     path?: string;
     token?: string;
-    tools?: {
-        capabilities?: ToolCapability[];
-        groups?: string[];
-    };
 }
 
 export interface ConfigInstanceDraft {
@@ -240,6 +236,9 @@ export interface ConfigInstanceDraft {
     dockerBinary?: string;
     enabled?: boolean;
     env?: Record<string, string>;
+    extensions?: {
+        model?: string[];
+    };
     logs?: ControlInstanceLogsConfig;
     mcp?: ConfigInstanceMcpDraft;
     name: string;
@@ -306,6 +305,9 @@ export interface ConfigInstancePatch {
     dockerBinary?: ConfigNullable<string>;
     enabled?: boolean;
     env?: ConfigNullable<Record<string, string>>;
+    extensions?: {
+        model?: string[];
+    };
     logs?: ConfigNullable<ControlInstanceLogsConfig>;
     mcp?: {
         auth?: ControlMcpAuthMode;
@@ -314,10 +316,6 @@ export interface ConfigInstancePatch {
         oauth2?: ConfigMcpOAuth2Draft;
         path?: ConfigNullable<string>;
         token?: string;
-        tools?: {
-            capabilities?: ToolCapability[];
-            groups?: string[];
-        };
     };
     podmanBinary?: ConfigNullable<string>;
     provider?: ControlProviderKind;
@@ -416,20 +414,10 @@ export interface ConfigPresetDefinition {
 export interface ConfigNormalizeContext {
     containerPresets: readonly ConfigPresetDefinition[];
     defaultEnabled: boolean;
-    defaultMcpCapabilities: readonly ToolCapability[];
     defaultMcpEnabled: boolean;
-    defaultMcpGroups: readonly string[];
+    defaultModelExtensions: readonly string[];
     defaultSecurityMode: ControlSecurityMode;
 }
-
-export const defaultMcpToolGroups = [
-    "file",
-    "bash",
-    "artifact",
-    "tmux",
-    "todo",
-    "workspace",
-] as const;
 
 export const defaultConfigNormalizeContext: ConfigNormalizeContext = {
     containerPresets: [
@@ -439,9 +427,8 @@ export const defaultConfigNormalizeContext: ConfigNormalizeContext = {
         { image: "alpine:latest", preset: "alpine" },
     ],
     defaultEnabled: true,
-    defaultMcpCapabilities: ["read", "write", "execute"],
     defaultMcpEnabled: true,
-    defaultMcpGroups: defaultMcpToolGroups,
+    defaultModelExtensions: ["instance"],
     defaultSecurityMode: "disabled",
 };
 

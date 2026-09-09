@@ -64,10 +64,9 @@ export function createTestInstanceDescriptor(
     return {
         enabled: true,
         goal: createTestGoalPort(),
-        mcpCapabilities: [],
         mcpEnabled: false,
-        mcpGroups: [],
         mcpPath: "",
+        modelExtensions: [],
         name: "alpha",
         provider: "local",
         todo: createTestTodoPort(),

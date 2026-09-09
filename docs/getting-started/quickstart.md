@@ -132,7 +132,7 @@ devshell instance status demo-local
 http://127.0.0.1:17890/demo-local/mcp
 ```
 
-当前 instance 配置写回格式是 version `3`，MCP 默认类似：
+当前 instance 配置写回格式是 version `4`，MCP 与 model Extension ACL 默认类似：
 
 ```toml
 [mcp]
@@ -141,9 +141,8 @@ auth = "none"
 contextMode = "explicit"
 path = "/demo-local/mcp"
 
-[mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo", "workspace"]
-capabilities = ["read", "write", "execute"]
+[extensions]
+model = ["instance"]
 ```
 
 本机测试可以使用 `auth = "none"`；公网 endpoint 应使用 HTTPS 和认证。
@@ -158,7 +157,7 @@ environ_info(workspace=/absolute/path/on/worker)
 
 开始。
 
-它会建立 portable-devshell Context、prepare 当前 workspace，并在启用 Workspace group 时一起 bootstrap Live Workspace。
+它会建立 portable-devshell Context、prepare 当前 workspace，并在 Host 支持时一起 bootstrap Live Workspace。MCP `tools/list` 不再由 instance group/capability 配置动态裁剪。
 
 `explicit` Context mode 会把 `ctxId` 暴露给通用 MCP client；`openai-session` 可以把内部 `ctxId` 隐藏在 model-facing schema 之外。详见 [Context](../concepts/context.md)。
 

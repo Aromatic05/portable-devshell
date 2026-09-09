@@ -131,6 +131,9 @@ export class McpEndpointHandlerEnvironment {
                               ]
                             : []),
                         `Use ${prepared.temporaryDirectory} for all temporary files.`,
+                        ...modelDevshellComments(
+                            this.#gateway?.modelCommands?.(this.#instanceName) ?? []
+                        ),
                         ...alerts.map((advice) => advice.text),
                     ],
                     instance: this.#instanceName,
@@ -456,4 +459,12 @@ function extensionResourcePreparationUnavailable(instance: string) {
         message: `Extension resource preparation is unavailable for ${instance}.`,
         retryable: true,
     });
+}
+
+function modelDevshellComments(commands: readonly string[]): string[] {
+    if (commands.length === 0) return [];
+    return [
+        `Model devshell commands available through bash_run/tmux_run: ${commands.join(", ")}.`,
+        "Use devshell --help or devshell <command> --help to inspect the allowed model command surface.",
+    ];
 }

@@ -3,11 +3,8 @@ import {
     createError,
     errorCodes,
     toolNamespace,
-    type ToolDefinition,
-    type ToolPolicy
+    type ToolDefinition
 } from "@portable-devshell/shared";
-
-import { McpToolFilter } from "../McpToolFilter.js";
 
 export type McpToolCatalogEndpointOwner = "worker" | "artifact" | "environment" | "instance" | "workspace" | "todo";
 
@@ -22,12 +19,6 @@ export interface McpToolCatalogEndpointSource {
 }
 
 export class McpToolCatalogEndpoint {
-    readonly #filter: McpToolFilter;
-
-    constructor(policy: ToolPolicy) {
-        this.#filter = new McpToolFilter(policy);
-    }
-
     merge(sources: readonly McpToolCatalogEndpointSource[]): McpToolCatalogEndpointEntry[] {
         const merged = new Map<string, McpToolCatalogEndpointEntry>();
 
@@ -90,13 +81,5 @@ export class McpToolCatalogEndpoint {
         }
 
         return [...merged.values()];
-    }
-
-    filter(entries: readonly McpToolCatalogEndpointEntry[]): McpToolCatalogEndpointEntry[] {
-        return entries.filter((entry) => entry.owner === "environment" || this.#filter.isAllowed(entry.definition));
-    }
-
-    isAllowed(tool: ToolDefinition): boolean {
-        return this.#filter.isAllowed(tool);
     }
 }

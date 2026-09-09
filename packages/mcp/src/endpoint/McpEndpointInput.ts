@@ -1,9 +1,6 @@
 import {
     createError,
     errorCodes,
-    type ArtifactTransferCancelInput,
-    type ArtifactTransferLookupInput,
-    type ArtifactTransferStartInput,
     type ArtifactViewImageInput,
     type JsonValue,
     type ToolCallProvenance,
@@ -134,51 +131,6 @@ export function readMcpArtifactViewImageInput(input: JsonValue): ArtifactViewIma
         throw invalidArguments("artifact_viewImage requires path when handle is omitted.");
     }
     return { ...common, path, workspace: requiredString(input.workspace, "workspace") };
-}
-
-export function readMcpArtifactTransferInput(
-    input: JsonValue
-): ArtifactTransferStartInput | ArtifactTransferLookupInput | ArtifactTransferCancelInput {
-    if (!isRecord(input)) {
-        throw invalidArguments("artifact_transfer requires an object input.");
-    }
-    if (input.operation === "status" || input.operation === "cancel") {
-        return { operation: input.operation, transferId: requiredString(input.transferId, "transferId") };
-    }
-    if (input.operation !== "start") {
-        throw invalidArguments("artifact_transfer operation must be start, status, or cancel.");
-    }
-    const handle = optionalString(input.handle, "handle");
-    const sourcePath = optionalString(input.sourcePath, "sourcePath");
-    if ((handle === undefined) === (sourcePath === undefined)) {
-        throw invalidArguments("artifact_transfer start requires exactly one of handle or sourcePath.");
-    }
-    const instance = optionalString(input.instance, "instance");
-    const targetInstance = requiredString(input.targetInstance, "targetInstance");
-    const targetPath = requiredString(input.targetPath, "targetPath");
-    const targetWorkspace = requiredString(input.targetWorkspace, "targetWorkspace");
-    if (input.overwrite !== undefined && typeof input.overwrite !== "boolean") {
-        throw invalidArguments("overwrite must be a boolean.");
-    }
-    const common = {
-        ...(instance === undefined ? {} : { instance }),
-        operation: "start" as const,
-        overwrite: input.overwrite === true,
-        targetInstance,
-        targetPath,
-        targetWorkspace
-    };
-    if (handle !== undefined) {
-        return { ...common, handle };
-    }
-    if (sourcePath === undefined) {
-        throw invalidArguments("artifact_transfer start requires sourcePath when handle is omitted.");
-    }
-    return {
-        ...common,
-        sourcePath,
-        sourceWorkspace: requiredString(input.sourceWorkspace, "sourceWorkspace")
-    };
 }
 
 export function readMcpInstanceConnectInput(input: JsonValue): { instance: string; workspace?: string } {

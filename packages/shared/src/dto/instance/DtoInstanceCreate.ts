@@ -9,7 +9,6 @@ import type {
     ControlSecurityMode
 } from "../../config/ConfigModel.js";
 import type { ApprovalPolicy } from "../tool/DtoToolApproval.js";
-import type { ToolCapability } from "../tool/DtoToolDefinition.js";
 import type { InstanceSnapshot } from "./DtoInstanceSnapshot.js";
 
 export type InstanceContainerMode =
@@ -110,8 +109,7 @@ export interface InstanceCreateSchema {
     defaultEnabled: boolean;
     defaultMcpContextMode?: ControlMcpContextMode;
     defaultMcpEnabled: boolean;
-    defaultMcpCapabilities: readonly ToolCapability[];
-    defaultMcpGroups: readonly string[];
+    defaultModelExtensions: readonly string[];
     defaultSecurityMode: ControlSecurityMode;
 }
 
@@ -123,6 +121,9 @@ export interface InstanceCreateSummary {
     dockerBinary?: string;
     enabled: boolean;
     env?: Record<string, string>;
+    extensions: {
+        model: string[];
+    };
     logs?: ControlInstanceLogsConfig;
     mcp: {
         auth: {
@@ -132,10 +133,6 @@ export interface InstanceCreateSummary {
         contextMode?: ControlMcpContextMode;
         enabled: boolean;
         path: string;
-        tools: {
-            capabilities: ToolCapability[];
-            groups: string[];
-        };
     };
     name: string;
     podmanBinary?: string;

@@ -273,7 +273,6 @@ async function withTmuxHarness(instanceName: string, body: (harness: TmuxHarness
         instances: [{
             auth: { enabled: false, provider: "none" },
             name: instanceName,
-            policy: { capabilities: ["execute", "read"], groups: ["tmux"] },
             worker: instance
         }],
         listenHost: "127.0.0.1",

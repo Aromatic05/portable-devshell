@@ -1035,7 +1035,8 @@ test("real Ink runtime switches terminal sources and drives tmux View and Attach
             instances: [
                 {
                     enabled: true,
-                    mcp: { enabled: true, tools: { capabilities: [], groups: [] } },
+                    extensions: { model: ["instance"] },
+                    mcp: { enabled: true },
                     name: "alpha",
                     provider: "ssh",
                     security: { mode: "disabled" },
@@ -1235,7 +1236,39 @@ test("real Ink runtime switches terminal sources and drives tmux View and Attach
 
 test("real Ink runtime renders artifact_viewImage audit output in the detail panel", async () => {
     const host = createTerminal();
+    const imageCall: ToolCallRecord = {
+        callId: "image-call",
+        ctxId: "ctx-image",
+        completedAt: "2026-07-18T00:00:01.000Z",
+        input: { path: "./preview.png" },
+        inputSummary: '{"path":"./preview.png"}',
+        instance: asInstanceName("alpha"),
+        output: {
+            bytes: 68,
+            mediaType: "image/png",
+            name: "preview.png",
+            source: {
+                instance: "alpha",
+                path: "./preview.png",
+                type: "file",
+            },
+        },
+        source: "mcp",
+        startedAt: "2026-07-18T00:00:00.000Z",
+        status: "completed",
+        toolName: "artifact_viewImage",
+    };
     const clients = createClients({
+        configView: {
+            instances: [{
+                enabled: true,
+                extensions: { model: ["instance"] },
+                mcp: { auth: "none", contextMode: "explicit", enabled: true, path: "/alpha/mcp" },
+                name: "alpha",
+                provider: "local",
+                security: { mode: "disabled" },
+            }],
+        },
         image: {
             bytes: 68,
             content:
@@ -1245,6 +1278,14 @@ test("real Ink runtime renders artifact_viewImage audit output in the detail pan
             name: "preview.png",
             source: { instance: "alpha", path: "./preview.png", type: "file" },
         },
+        instanceList: [{
+            enabled: true,
+            homeDirectory: "/home/alpha",
+            mcpEnabled: true,
+            name: "alpha",
+            provider: "local",
+        }],
+        toolCallRecords: [imageCall],
     });
     const runtime = new TuiRuntime(
         { stdin: host.stdin, stdout: host.stdout },
@@ -1256,64 +1297,35 @@ test("real Ink runtime renders artifact_viewImage audit output in the detail pan
         await waitUntil(
             () => runtime.store.getState().connection.status === "connected",
         );
-        clients.setControlState(
-            [
-                {
-                    enabled: true,
-                    homeDirectory: "/home/alpha",
-                    mcpEnabled: true,
-                    name: "alpha",
-                    provider: "local",
-                },
-            ],
-            { instances: [{ name: "alpha", provider: "local" }] },
-        );
-        runtime.store.patchControlReadModel({ instances: [
-            {
-                enabled: true,
-                homeDirectory: "/home/alpha",
-                mcpEnabled: true,
-                name: "alpha",
-                provider: "local",
-            },
-        ] });
         runtime.store.setSelectedInstance("alpha");
-        runtime.store.setSelectedPage("instances");
-        runtime.store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [
-            {
-                callId: "image-call",
-                ctxId: "ctx-image",
-                completedAt: "2026-07-18T00:00:01.000Z",
-                input: { path: "./preview.png" },
-                inputSummary: '{"path":"./preview.png"}',
-                instance: "alpha" as never,
-                output: {
-                    bytes: 68,
-                    mediaType: "image/png",
-                    name: "preview.png",
-                    source: {
-                        instance: "alpha",
-                        path: "./preview.png",
-                        type: "file",
-                    },
-                },
-                source: "mcp",
-                startedAt: "2026-07-18T00:00:00.000Z",
-                status: "completed",
-                toolName: "artifact_viewImage",
-            },
-        ] } } });
         runtime.store.setSelectedPage("audit");
-        runtime.store.pushRoute({
+        await waitUntil(() =>
+            runtime.store.getState().readModel.instanceState.alpha?.toolCalls.some(
+                (call) => call.callId === "image-call",
+            ) === true,
+        );
+        runtime.store.replaceRoute({
             ctxId: "ctx-image",
             page: "audit",
             scope: "context",
             view: "context",
         });
+        assert.equal(runtime.store.getState().ui.selectedInstance, "alpha");
+        assert.deepEqual(currentTuiRoute(runtime.store.getState()), {
+            ctxId: "ctx-image",
+            page: "audit",
+            scope: "context",
+            view: "context",
+        });
+        assert.deepEqual(
+            runtime.store.getState().readModel.instanceState.alpha?.toolCalls.map((call) => call.callId),
+            ["image-call"],
+        );
 
         const box = selectMainScreenModel(runtime.store.getState()).boxes.find(
             (candidate) => candidate.id === "audit-call:image-call",
-        )!;
+        );
+        assert.ok(box);
         runtime.store.toggleExpanded(box.expandedKey);
         runtime.store.setFocusScope("boxDetail");
         runtime.store.setMainFocusId(box.id);
@@ -1449,9 +1461,8 @@ function createClients(
                         presets: [],
                     },
                     defaultEnabled: true,
-                    defaultMcpCapabilities: ["read", "write", "execute"],
                     defaultMcpEnabled: true,
-                    defaultMcpGroups: ["file", "bash", "artifact"],
+                    defaultModelExtensions: ["instance"],
                     defaultProvider: "local",
                     defaultSecurityMode: "disabled",
                     providers: ["local", "ssh", "docker", "podman"],

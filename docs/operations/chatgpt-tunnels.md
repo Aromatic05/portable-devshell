@@ -43,7 +43,7 @@ MCP 2026-07-28 已把 client identity/registration 继续向新模型推进，�
 
 ```toml
 # ~/.devshell/control/instances/<instance>.toml
-version = 3
+version = 4
 name = "demo-local"
 enabled = true
 provider = "local"
@@ -57,9 +57,8 @@ path = "/demo-local/mcp"
 resourceName = "demo-local"
 requiredScopes = ["mcp"]
 
-[mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo", "workspace"]
-capabilities = ["read", "write", "execute"]
+[extensions]
+model = ["instance"]
 ```
 
 控制端配置公共基址并启用 OAuth：

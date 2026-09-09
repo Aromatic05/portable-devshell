@@ -17,7 +17,6 @@ export { HttpHost } from "./host/HttpHost.js";
 export * from "./host/route/McpHostRouteMatcher.js";
 export * from "./host/route/McpHostRouteRegistry.js";
 export * from "./tool/McpToolDescriptionEnhancer.js";
-export * from "./tool/McpToolFilter.js";
 export * from "./tool/McpToolSchemaAdapter.js";
 export * from "./tool/McpToolAnnotations.js";
 export * from "./tool/McpToolTitle.js";

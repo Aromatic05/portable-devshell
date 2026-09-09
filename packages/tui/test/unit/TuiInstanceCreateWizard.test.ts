@@ -14,9 +14,8 @@ const schema: InstanceCreateSchema = {
         presets: [{ image: "archlinux:latest", preset: "arch" }]
     },
     defaultEnabled: true,
-    defaultMcpCapabilities: ["read", "write", "execute"],
     defaultMcpEnabled: true,
-    defaultMcpGroups: ["bash", "file"],
+    defaultModelExtensions: ["instance"],
     defaultProvider: "local",
     defaultSecurityMode: "disabled",
     providers: ["local", "ssh", "docker", "podman", "reverse"]
@@ -107,11 +106,11 @@ test("create wizard review and validation output redact every secret value", () 
                 mode: "existingImage"
             },
             env: { API_TOKEN: "instance-secret" },
+            extensions: { model: ["instance"] },
             mcp: {
                 auth: "token",
                 enabled: true,
-                token: "mcp-secret",
-                tools: { capabilities: ["read"], groups: ["file"] }
+                token: "mcp-secret"
             },
             name: "demo-docker",
             provider: "docker"
@@ -119,11 +118,11 @@ test("create wizard review and validation output redact every secret value", () 
         {
             enabled: true,
             env: { API_TOKEN: "summary-secret" },
+            extensions: { model: ["instance"] },
             mcp: {
                 auth: { mode: "none" },
                 enabled: true,
-                path: "/demo-docker/mcp",
-                tools: { capabilities: ["read"], groups: ["file"] }
+                path: "/demo-docker/mcp"
             },
             name: "demo-docker",
             provider: "docker",

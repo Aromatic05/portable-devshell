@@ -1,6 +1,5 @@
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import type {
-    CliModelCommandInvocationContext,
     CliCommandResult
 } from "@portable-devshell/extension/cli";
 import {
@@ -15,8 +14,7 @@ import {
 
 import type {
     CliExtensionCommandInvocationContext,
-    CliExtensionCommandProvider,
-    CliModelExtensionCommandInvocationContext
+    CliExtensionCommandProvider
 } from "../../cli/CliExtensionCommandProvider.js";
 
 export interface ArtifactCliCommandPort {
@@ -36,24 +34,27 @@ export const artifactCliCommandDeclaration = Object.freeze({
     usage: "artifact <command>"
 });
 
-export function createArtifactCliCommandProvider(port: ArtifactCliCommandPort): CliExtensionCommandProvider {
+export function createArtifactCliCommandProvider(
+    port: ArtifactCliCommandPort,
+    surface: "model" | "native"
+): CliExtensionCommandProvider {
     return Object.freeze({
         binding: async (argv: readonly string[], invocation: CliExtensionCommandInvocationContext) => {
-            if (invocation.surface !== "model") {
-                throw new TypeError("Artifact model command provider received native invocation state.");
+            if (invocation.surface !== surface) {
+                throw new TypeError(`Artifact ${surface} command provider received ${invocation.surface} invocation state.`);
             }
             return await executeArtifactCommand(argv, port, invocation);
         },
         declaration: artifactCliCommandDeclaration,
         extensionId: "artifact",
-        surface: "model"
+        surface
     });
 }
 
 export async function executeArtifactCommand(
     args: readonly string[],
     client: ArtifactCliCommandPort,
-    invocation: CliModelCommandInvocationContext | CliModelExtensionCommandInvocationContext
+    invocation: CliExtensionCommandInvocationContext
 ): Promise<CliCommandResult> {
     invocation.signal.throwIfAborted();
     const [command, ...rest] = args;

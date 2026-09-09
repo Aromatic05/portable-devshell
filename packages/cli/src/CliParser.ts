@@ -38,7 +38,6 @@ export type CliParsedCommand =
     | { kind: "control.start" }
     | { kind: "control.status" }
     | { kind: "control.stop" }
-    | { args: string[]; kind: "artifact" }
     | { kind: "tui" }
     | { kind: "extension.help" }
     | { kind: "extension.list" }
@@ -108,8 +107,6 @@ export class CliParser {
                 return this.#parseContext(argv.slice(1));
             case "debug":
                 return this.#parseDebug(argv.slice(1));
-            case "artifact":
-                return { args: [...argv.slice(1)], kind: "artifact" };
             case "tui":
                 return this.#expectNoExtra(argv, { kind: "tui" });
             case "extension":
@@ -133,8 +130,6 @@ export class CliParser {
                 return { kind: "instance.help" };
             case "watch":
                 return { kind: "watch.help" };
-            case "artifact":
-                return { args: ["--help"], kind: "artifact" };
             case "config":
             case "approval":
             case "oauth":

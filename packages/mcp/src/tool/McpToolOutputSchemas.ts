@@ -196,46 +196,6 @@ const artifactPayloadSchema: JsonValue = {
     anyOf: [artifactBytePayloadSchema, artifactDirectoryPayloadSchema],
 };
 
-const artifactTransferFailureSchema = objectSchema({
-    code: nonEmptyString,
-    message: stringValue,
-    retryable: booleanValue,
-}, ["code", "message", "retryable"]);
-
-const artifactTransferRecordSchema = objectSchema({
-    completedAt: stringValue,
-    createdAt: stringValue,
-    failure: artifactTransferFailureSchema,
-    payload: artifactPayloadSchema,
-    source: artifactSourceOutputSchema,
-    startedAt: stringValue,
-    status: {
-        enum: [
-            "queued",
-            "preparing",
-            "transferring",
-            "verifying",
-            "committing",
-            "completed",
-            "failed",
-            "cancelling",
-            "cancelled",
-            "interrupted",
-        ],
-        type: "string",
-    },
-    target: artifactTargetSchema,
-    totalBytes: nonNegativeInteger,
-    transferId: nonEmptyString,
-    transferredBytes: nonNegativeInteger,
-    updatedAt: stringValue,
-}, ["createdAt", "source", "status", "target", "transferId", "transferredBytes", "updatedAt"]);
-
-export const artifactTransferOutputSchema = objectSchema({
-    operation: { enum: ["start", "status", "cancel"], type: "string" },
-    transfer: artifactTransferRecordSchema,
-}, ["operation", "transfer"]);
-
 export const artifactShareOutputSchema = objectSchema({
     blake3: nonEmptyString,
     bytes: nonNegativeInteger,

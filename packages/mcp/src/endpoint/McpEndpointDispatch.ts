@@ -1338,7 +1338,6 @@ const OBSERVATION_TOOLS = new Set([
 ]);
 
 const MUTATION_TOOLS = new Set([
-    "artifact_transfer",
     "file_edit",
     "todo_write",
 ]);

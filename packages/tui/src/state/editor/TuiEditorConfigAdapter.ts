@@ -136,7 +136,7 @@ const numericFields = new Set([
 
 const jsonFields = new Set(["byTool", "env", "mounts", "rules"]);
 
-const listFields = new Set(["capabilities", "groups", "requiredScopes"]);
+const listFields = new Set(["model", "requiredScopes"]);
 
 function containerModeValue(value: string): string | undefined {
     switch (value.trim().toLowerCase()) {

@@ -42,7 +42,7 @@ export class McpEndpointHandlerWorker {
         const gateway = requireMcpEndpointGateway(this.options.gateway, this.options.instanceName);
         await waitForMcpGatewayReady(gateway, routed.instance, signal, { timeoutMs: this.options.readyWaitMs });
         const targetTool = gateway.listTools(routed.instance).find((tool) => tool.name === toolName);
-        if (targetTool === undefined || !this.options.catalog.isAllowed(targetTool)) {
+        if (targetTool === undefined) {
             throw mcpEndpointToolNotExposed(toolName, routed.instance);
         }
         this.options.catalog.assertAdaptable(targetTool);

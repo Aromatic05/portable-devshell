@@ -818,7 +818,6 @@ test("McpHost context admin releases alerts only after the last workspace contex
                 }
             } as never,
             name: "demo-local",
-            policy: { capabilities: [], groups: [] },
             worker: {
                 async releaseAlerts(workspace: string) { released.push(workspace); },
                 snapshot: () => ({ ready: true }),
@@ -891,7 +890,6 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
     const endpoint = new McpEndpointWorker({
         contextRegistry: registry,
         instanceName: "demo-local",
-        policy: { capabilities: ["execute"], groups: ["bash"] },
         worker: {
             async auditToolCall<T extends JsonValue>(
                 _toolName: string,

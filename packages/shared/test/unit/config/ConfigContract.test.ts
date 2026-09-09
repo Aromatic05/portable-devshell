@@ -67,6 +67,7 @@ test("config parser trims values and preserves explicit patch removals", () => {
         dockerBinary: undefined,
         enabled: undefined,
         env: null,
+        extensions: undefined,
         logs: undefined,
         mcp: undefined,
         podmanBinary: undefined,
@@ -221,96 +222,63 @@ test("openai-session context mode rejects custom token authentication", () => {
     })));
 });
 
-test("config normalization deduplicates MCP access lists", () => {
+test("config normalization deduplicates model Extension allowlists", () => {
     const config = normalizeConfigDraft({
         instances: [
             {
-                mcp: {
-                    tools: {
-                        capabilities: ["read", "read", "execute"],
-                        groups: ["file", "file", "bash"]
-                    }
-                },
+                extensions: { model: ["instance", "instance", "artifact"] },
                 name: "local-one",
                 provider: "local"
             }
         ]
     });
 
-    assert.deepEqual(config.instances[0]?.mcp.tools.capabilities, ["read", "execute"]);
-    assert.deepEqual(config.instances[0]?.mcp.tools.groups, ["file", "bash"]);
+    assert.deepEqual(config.instances[0]?.extensions.model, ["instance", "artifact"]);
 });
 
-test("obsolete context groups are removed from custom MCP allowlists", () => {
-    const custom = normalizeConfigInstanceDraft({
-        mcp: { tools: { groups: ["file", "bash", "context", "todo"] } },
-        name: "custom-policy",
-        provider: "local"
-    });
-
-    assert.deepEqual(custom.mcp.tools.groups, ["file", "bash", "todo"]);
-});
-
-test("explicit MCP allowlists can disable the workspace group", () => {
+test("model Extension allowlist defaults to the conservative Instance surface", () => {
     const normalized = normalizeConfigInstanceDraft({
-        mcp: { tools: { groups: ["file", "bash", "artifact", "tmux", "todo"] } },
-        name: "workspace-disabled",
+        name: "default-model-extensions",
         provider: "local"
     });
-
-    assert.deepEqual(normalized.mcp.tools.groups, ["file", "bash", "artifact", "tmux", "todo"]);
+    assert.deepEqual(normalized.extensions.model, ["instance"]);
 });
 
-test("explicit managed MCP allowlists can disable the workspace group", () => {
+test("explicit empty model Extension allowlist disables all model commands", () => {
     const normalized = normalizeConfigInstanceDraft({
-        mcp: { tools: { groups: ["file", "bash", "artifact", "tmux", "todo", "instance"] } },
-        name: "workspace-disabled-managed",
+        extensions: { model: [] },
+        name: "model-disabled",
         provider: "local"
     });
+    assert.deepEqual(normalized.extensions.model, []);
+});
 
-    assert.deepEqual(
-        normalized.mcp.tools.groups,
-        ["file", "bash", "artifact", "tmux", "todo", "instance"]
+test("instance config rejects the retired mcp.tools policy field", () => {
+    assert.throws(
+        () => parseConfigDraft({
+            instances: [{
+                mcp: { tools: { groups: ["file"] } },
+                name: "legacy-policy",
+                provider: "local"
+            }]
+        }),
+        /mcp\.tools is not supported/u
     );
 });
 
-test("bootstrap environ namespace never appears in configurable MCP groups", () => {
-    const normalized = normalizeConfigInstanceDraft({
-        mcp: {
-            tools: {
-                groups: ["file", "environ", "environment", "bash", "environ"]
-            }
-        },
-        name: "bootstrap-policy",
-        provider: "local"
-    });
-
-    assert.deepEqual(normalized.mcp.tools.groups, ["file", "bash"]);
-});
-
-test("config rejects MCP groups that are not namespace tokens", () => {
+test("config rejects invalid model Extension ids", () => {
     const normalized = normalizeConfigDraft({
         instances: [{
-            mcp: { tools: { groups: ["file", "bad_group"] } },
-            name: "bad-group",
+            extensions: { model: ["instance", "bad_extension"] },
+            name: "bad-extension",
             provider: "local"
         }]
     });
 
     assert.throws(
         () => validateConfigSemantics(normalized),
-        /without '_'/u,
+        /\[a-z\]\[a-z0-9-\]\*/u,
     );
-});
-
-test("the obsolete interaction group normalizes to the workspace namespace", () => {
-    const upgraded = normalizeConfigInstanceDraft({
-        mcp: { tools: { groups: ["file", "interaction"] } },
-        name: "upgraded-interaction-policy",
-        provider: "local"
-    });
-
-    assert.deepEqual(upgraded.mcp.tools.groups, ["file", "workspace"]);
 });
 
 test("provider changes discard stale provider-specific fields before normalization", () => {

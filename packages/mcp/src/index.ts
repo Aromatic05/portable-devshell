@@ -11,10 +11,7 @@ export type { McpToolProvenanceRecord, McpToolProvenanceRecorder } from "./endpo
 export { McpContextRegistry } from "./context/McpContextRegistry.js";
 export type { McpContextBinding } from "./context/McpContextRegistry.js";
 export { HttpHost } from "./host/HttpHost.js";
-export type {
-    McpInstanceGateway,
-    McpSshInstanceCreateInput
-} from "./instance/McpInstanceGateway.js";
+export type { McpInstanceGateway } from "./instance/McpInstanceGateway.js";
 export { resolvePortableDevshellApplicationVersion } from "./version/McpApplicationVersion.js";
 
 export * from "./workspace/WorkspaceAppLeaseStore.js";

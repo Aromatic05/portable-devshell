@@ -262,45 +262,6 @@ test("tmux_list full capacity is a diagnostic, not a list failure", () => {
     assert.deepEqual(codes(hints), ["tmux.capacityFull"]);
 });
 
-test("artifact_transfer queued is accepted but not completed", () => {
-    const hints = resolveResultHints("artifact_transfer", {
-        operation: "start",
-        transfer: { status: "queued", transferId: "x1" }
-    });
-    assert.deepEqual(codes(hints), ["artifact.transferQueued"]);
-});
-
-test("artifact_transfer non-terminal, terminal, and failure states are distinguished", () => {
-    assert.deepEqual(codes(resolveResultHints("artifact_transfer", {
-        operation: "status", transfer: { status: "transferring", transferId: "x1" }
-    })), ["artifact.transferInProgress"]);
-
-    assert.deepEqual(resolveResultHints("artifact_transfer", {
-        operation: "status", transfer: { status: "completed", transferId: "x1" }
-    }), []);
-
-    const failed = resolveResultHints("artifact_transfer", {
-        operation: "status",
-        transfer: { failure: { code: "artifact.targetExists", message: "exists", retryable: false }, status: "failed", transferId: "x1" }
-    });
-    assert.deepEqual(codes(failed), ["artifact.targetExists"]);
-
-    const interrupted = resolveResultHints("artifact_transfer", {
-        operation: "status", transfer: { status: "interrupted", transferId: "x1" }
-    });
-    assert.deepEqual(codes(interrupted), ["artifact.transferInterrupted"]);
-
-    const cancelled = resolveResultHints("artifact_transfer", {
-        operation: "status", transfer: { status: "cancelled", transferId: "x1" }
-    });
-    assert.deepEqual(codes(cancelled), ["artifact.transferCancelled"]);
-
-    const cancelCompleted = resolveResultHints("artifact_transfer", {
-        operation: "cancel", transfer: { status: "completed", transferId: "x1" }
-    });
-    assert.deepEqual(codes(cancelCompleted), ["artifact.transferCancelCompleted"]);
-});
-
 test("instance already-exists and config-invalid use real catalog codes and safe fields", () => {
     const exists = resolveErrorHints("instance_create", body("control.instanceAlreadyExists"));
     assert.deepEqual(codes(exists), ["control.instanceAlreadyExists"]);

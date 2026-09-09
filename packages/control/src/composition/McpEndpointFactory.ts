@@ -9,10 +9,6 @@ export class McpEndpointFactory {
             auth: toMcpAuthConfig(auth),
             contextMode: descriptor.mcpContextMode ?? "explicit",
             ...(gateway === undefined ? {} : { gateway }),
-            policy: {
-                capabilities: descriptor.mcpCapabilities,
-                groups: descriptor.mcpGroups
-            },
             name: descriptor.name,
             path: descriptor.mcpPath,
             worker: descriptor.worker

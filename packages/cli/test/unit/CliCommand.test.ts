@@ -992,8 +992,7 @@ test("CliMain runs interactive instance create through control rpc", async () =>
         async getInstanceCreateSchema() {
             calls.push("schema");
             return {
-                defaultMcpCapabilities: ["read", "write", "execute"],
-                defaultMcpGroups: ["file", "bash", "artifact"],
+                defaultModelExtensions: ["instance"],
                 defaultEnabled: true,
                 defaultMcpEnabled: true,
                 defaultProvider: "local",
@@ -1030,14 +1029,11 @@ test("CliMain runs interactive instance create through control rpc", async () =>
                 assert.equal(draft.name, "demo-local");
                 return {
                     enabled: true,
+                    extensions: { model: ["instance"] },
                     mcp: {
                         auth: { mode: "none" },
                         enabled: true,
-                        path: "/demo-local/mcp",
-                        tools: {
-                            capabilities: ["read", "write", "execute"],
-                            groups: ["file", "bash", "artifact"]
-                        }
+                        path: "/demo-local/mcp"
                     },
                     name: "demo-local",
                     provider: "local",

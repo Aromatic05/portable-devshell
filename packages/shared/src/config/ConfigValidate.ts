@@ -68,18 +68,18 @@ function validateInstance(instance: ControlInstanceConfig, index: number): void 
     validateScheduler(instance.tools?.scheduler, base);
     validateApprovalPolicy(instance, base);
     validateContainer(instance, base);
-    validateMcpGroups(instance, base);
+    validateModelExtensions(instance, base);
     validateMcpAuth(instance, base);
 }
 
-function validateMcpGroups(instance: ControlInstanceConfig, base: readonly (string | number)[]): void {
-    for (const [index, group] of instance.mcp.tools.groups.entries()) {
-        if (!/^[a-z0-9]+$/u.test(group)) {
+function validateModelExtensions(instance: ControlInstanceConfig, base: readonly (string | number)[]): void {
+    for (const [index, extensionId] of instance.extensions.model.entries()) {
+        if (!/^[a-z][a-z0-9-]*$/u.test(extensionId)) {
             throw configInputError(
                 "semantic",
-                [...base, "mcp", "tools", "groups", index],
-                "config.instance.mcpGroupInvalid",
-                "must be a lowercase namespace without '_'"
+                [...base, "extensions", "model", index],
+                "config.instance.modelExtensionInvalid",
+                "must match [a-z][a-z0-9-]*"
             );
         }
     }

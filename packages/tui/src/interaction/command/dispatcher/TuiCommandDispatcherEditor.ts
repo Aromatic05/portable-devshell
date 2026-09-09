@@ -1,4 +1,4 @@
-import { defaultMcpToolGroups, MASKED_CONFIG_TOKEN } from "@portable-devshell/shared";
+import { defaultConfigNormalizeContext, MASKED_CONFIG_TOKEN } from "@portable-devshell/shared";
 import type {
     ConfigBatchUpdateRequest,
     ConfigDraft,
@@ -48,14 +48,11 @@ export class TuiCommandDispatcherEditor {
                 this.#store.setFormDraft(key, {
                     approvalPolicy: { mode: "disabled" },
                     enabled: schema.defaultEnabled,
+                    extensions: { model: [...schema.defaultModelExtensions] },
                     mcp: {
                         auth: "none",
                         contextMode: schema.defaultMcpContextMode ?? "explicit",
-                        enabled: schema.defaultMcpEnabled,
-                        tools: {
-                            capabilities: [...schema.defaultMcpCapabilities],
-                            groups: [...schema.defaultMcpGroups]
-                        }
+                        enabled: schema.defaultMcpEnabled
                     },
                     name: "",
                     provider: schema.defaultProvider,
@@ -550,7 +547,7 @@ export class TuiCommandDispatcherEditor {
             ? entries.find((value) => asRecord(value)?.name === instanceName)
             : undefined;
         return toTuiInstanceEditorRecord(
-            cloneRecord(asRecord(entry) ?? { enabled: true, mcp: { auth: "none", contextMode: "explicit", enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } }, name: instanceName, provider: "local", security: { mode: "disabled" } })
+            cloneRecord(asRecord(entry) ?? { enabled: true, extensions: { model: [...defaultConfigNormalizeContext.defaultModelExtensions] }, mcp: { auth: "none", contextMode: "explicit", enabled: true, path: `/${instanceName}/mcp` }, name: instanceName, provider: "local", security: { mode: "disabled" } })
         );
     }
 

@@ -14,7 +14,6 @@ import type {
     TodoTaskControlAction,
     TodoWriteInput,
     ToolCallAssociation,
-    ToolCapability,
     WaitCreateInput,
     WaitRecord
 } from "@portable-devshell/shared";
@@ -74,11 +73,10 @@ export interface InstanceDescriptor {
     contextMessages?: InstanceContextMessagePort;
     enabled: boolean;
     goal: InstanceGoalPort;
-    mcpCapabilities: readonly ToolCapability[];
     mcpContextMode?: ControlMcpContextMode;
     mcpEnabled: boolean;
-    mcpGroups: readonly string[];
     mcpPath: string;
+    modelExtensions: readonly string[];
     name: string;
     provider: "docker" | "local" | "podman" | "reverse" | "ssh";
     reverseConnector?: WorkerRpcInboundConnector;

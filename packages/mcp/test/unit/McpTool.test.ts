@@ -4,7 +4,6 @@ import test from "node:test";
 import {
     McpToolCatalogEndpoint,
     McpToolDescriptionEnhancer,
-    McpToolFilter,
     McpToolSchemaAdapter,
     mcpToolAnnotations,
     mcpToolInvocationStatus,
@@ -113,66 +112,26 @@ test("ChatGPT invocation status is limited to long-lived visible tool states", (
     assert.equal(mcpToolInvocationStatus("file_read"), undefined);
 });
 
-test("McpToolFilter requires the group and every required capability", () => {
-    const partial = new McpToolFilter({
-        capabilities: ["execute", "read"],
-        groups: ["bash", "file", "todo"]
-    });
-    assert.deepEqual(partial.filter([bashRun, todoRead, fileSync]).map((tool) => tool.name), [
-        "bash_run",
-        "todo_read"
-    ]);
-
-    const complete = new McpToolFilter({
-        capabilities: ["read", "write"],
-        groups: ["file"]
-    });
-    assert.deepEqual(complete.filter([bashRun, todoRead, fileSync]).map((tool) => tool.name), ["file_sync"]);
-});
-
-test("McpToolFilter allows capability-free tools only when their group is enabled", () => {
-    assert.equal(new McpToolFilter({ capabilities: [], groups: ["todo"] }).isAllowed(todoRead), true);
-    assert.equal(new McpToolFilter({ capabilities: [], groups: [] }).isAllowed(todoRead), false);
-});
-
-test("McpToolCatalogEndpoint merges worker and control tools before applying one policy", () => {
-    const catalog = new McpToolCatalogEndpoint({
-        capabilities: ["execute"],
-        groups: ["bash", "todo"]
-    });
-    const merged = catalog.merge([
-        { owner: "worker", tools: [bashRun] },
-        { owner: "todo", tools: [todoRead] },
-        { owner: "instance", tools: [] }
-    ]);
-
-    assert.deepEqual(catalog.filter(merged).map((entry) => `${entry.owner}:${entry.definition.name}`), [
-        "worker:bash_run",
-        "todo:todo_read"
-    ]);
-});
-
 test("McpToolCatalogEndpoint enforces namespace groups and reserves environ bootstrap", () => {
-    const emptyPolicyCatalog = new McpToolCatalogEndpoint({ capabilities: [], groups: [] });
-    const environmentEntries = emptyPolicyCatalog.merge([{ owner: "environment", tools: [environInfo] }]);
+    const catalog = new McpToolCatalogEndpoint();
+    const environmentEntries = catalog.merge([{ owner: "environment", tools: [environInfo] }]);
     assert.deepEqual(
-        emptyPolicyCatalog.filter(environmentEntries).map((entry) => entry.definition.name),
+        environmentEntries.map((entry) => entry.definition.name),
         ["environ_info"]
     );
 
-    const namespaceCatalog = new McpToolCatalogEndpoint({ capabilities: [], groups: ["bash"] });
     assert.throws(
-        () => namespaceCatalog.merge([{ owner: "worker", tools: [{ ...bashRun, group: "file" }] }]),
+        () => catalog.merge([{ owner: "worker", tools: [{ ...bashRun, group: "file" }] }]),
         /namespace/iu,
     );
     assert.throws(
-        () => namespaceCatalog.merge([{ owner: "worker", tools: [environInfo] }]),
+        () => catalog.merge([{ owner: "worker", tools: [environInfo] }]),
         /reserved.*environ/iu,
     );
 });
 
 test("McpToolCatalogEndpoint rejects duplicate names across providers", () => {
-    const catalog = new McpToolCatalogEndpoint({ capabilities: [], groups: ["todo"] });
+    const catalog = new McpToolCatalogEndpoint();
 
     assert.throws(
         () =>

@@ -1,4 +1,4 @@
-import { defaultMcpToolGroups, type JsonValue } from "@portable-devshell/shared";
+import { defaultConfigNormalizeContext, type JsonValue } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
@@ -49,19 +49,27 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
                 choiceLine("mcp.enabled", "mcp.enabled", readPath(draft, "mcp.enabled")),
                 choiceLine("mcp.contextMode", "mcp.contextMode", readPath(draft, "mcp.contextMode")),
                 { id: "mcp-path", text: `mcp.path           ${stringValue(readPath(draft, "mcp.path"), `/${instanceName}/mcp`)} (fixed)` },
-                fieldLine("mcp.tools.groups", "groups", readPath(draft, "mcp.tools.groups")),
-                fieldLine("mcp.tools.capabilities", "capabilities", readPath(draft, "mcp.tools.capabilities")),
-                ...editorErrorLine(state, "config", "mcp-tools", ["mcp", "groups", "capabilities"])
+                ...editorErrorLine(state, "config", "mcp", ["mcp"])
             ],
-            id: "mcp-tools",
-            status: configStatus(state, ["mcp", "groups", "capabilities"], "normal"),
+            id: "mcp",
+            status: configStatus(state, ["mcp"], "normal"),
             summaryLines: [
                 compactSummary(
                     ["enabled", stringValue(readPath(draft, "mcp.enabled"), "false")],
-                    ["groups", stringValue(readPath(draft, "mcp.tools.groups"), "none")]
+                    ["context", stringValue(readPath(draft, "mcp.contextMode"), "explicit")]
                 )
             ],
-            title: "MCP Tool Access"
+            title: "MCP"
+        }),
+        makeBox(state, "config", instanceName, {
+            detailLines: [
+                fieldLine("extensions.model", "model", readPath(draft, "extensions.model")),
+                ...editorErrorLine(state, "config", "model-extensions", ["extensions"])
+            ],
+            id: "model-extensions",
+            status: configStatus(state, ["extensions"], "normal"),
+            summaryLines: [compactSummary(["allowed", stringValue(readPath(draft, "extensions.model"), "none")])],
+            title: "Model Extensions"
         }),
         makeBox(state, "config", instanceName, {
             detailLines: [
@@ -280,7 +288,8 @@ function instanceDraft(state: TuiAppState, instanceName: string): Record<string,
 
     return record === undefined ? {
         enabled: true,
-        mcp: { auth: "none", contextMode: "explicit", enabled: true, path: `/${instanceName}/mcp`, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } },
+        extensions: { model: [...defaultConfigNormalizeContext.defaultModelExtensions] },
+        mcp: { auth: "none", contextMode: "explicit", enabled: true, path: `/${instanceName}/mcp` },
         name: instanceName,
         provider: "local",
         security: { mode: "disabled" }

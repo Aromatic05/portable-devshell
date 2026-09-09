@@ -1,7 +1,4 @@
-import type {
-    McpInstanceGateway,
-    McpSshInstanceCreateInput
-} from "@portable-devshell/mcp";
+import type { McpInstanceGateway } from "@portable-devshell/mcp";
 import {
     createError,
     errorCodes,
@@ -10,14 +7,12 @@ import {
     type ToolDefinition
 } from "@portable-devshell/shared";
 
-import type { InstanceCreateCoordinator } from "../control/instance/create/InstanceCreateCoordinator.js";
 import type { ControlConfig } from "@portable-devshell/shared";
 import type { InstanceRegistry } from "../control/instance/registry/InstanceRegistry.js";
 import { InstanceConnectionService } from "../control/instance/connection/InstanceConnectionService.js";
 import type { ToolCallProvenanceStore } from "../control/tool/ToolCallProvenanceStore.js";
 
 export interface McpInstanceGatewayControlOptions {
-    createService: InstanceCreateCoordinator;
     getConfig: () => ControlConfig;
     instanceRegistry: InstanceRegistry;
     instanceConnections?: InstanceConnectionService;
@@ -25,14 +20,13 @@ export interface McpInstanceGatewayControlOptions {
 }
 
 export class McpInstanceGatewayControl implements McpInstanceGateway {
-    readonly #createService: InstanceCreateCoordinator;
     readonly #getConfig: () => ControlConfig;
     readonly #instanceRegistry: InstanceRegistry;
     readonly #instanceConnections: InstanceConnectionService;
     readonly #toolProvenance?: ToolCallProvenanceStore;
+    #modelCommands: (instance: string) => readonly string[] = () => [];
 
     constructor(options: McpInstanceGatewayControlOptions) {
-        this.#createService = options.createService;
         this.#getConfig = options.getConfig;
         this.#instanceRegistry = options.instanceRegistry;
         this.#instanceConnections = options.instanceConnections ?? new InstanceConnectionService(options.instanceRegistry);
@@ -103,12 +97,17 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         );
     }
 
-    async createSshInstance(sourceInstance: string, input: McpSshInstanceCreateInput): Promise<JsonValue> {
-        return (await this.#createService.createSshInstanceFromMcp(sourceInstance, input)) as unknown as JsonValue;
-    }
-
     environment(instance: string) {
         return this.#requireDescriptor(instance).worker.handshake;
+    }
+
+    modelCommands(instance: string): readonly string[] {
+        this.#requireDescriptor(instance);
+        return this.#modelCommands(instance);
+    }
+
+    setModelCommandCatalog(provider: (instance: string) => readonly string[]): void {
+        this.#modelCommands = provider;
     }
 
     async listInstances(): Promise<JsonValue> {

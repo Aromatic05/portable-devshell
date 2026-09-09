@@ -33,11 +33,11 @@ listenPort = 17890
 publicBaseUrl = "http://127.0.0.1:17890"
 ```
 
-认证、Context selector 和工具策略属于各 instance：
+认证、Context selector 和 model Extension ACL 属于各 instance：
 
 ```toml
 # ~/.devshell/control/instances/demo-local.toml
-version = 3
+version = 4
 name = "demo-local"
 enabled = true
 provider = "local"
@@ -48,9 +48,8 @@ auth = "none"
 contextMode = "explicit"
 path = "/demo-local/mcp"
 
-[mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo", "workspace"]
-capabilities = ["read", "write", "execute"]
+[extensions]
+model = ["instance"]
 ```
 
 `path` 由 instance 名生成，当前契约固定为 `/<instance>/mcp`。
@@ -132,26 +131,34 @@ oauth2
 
 `oauth2` 使用 portable-devshell 自带 OAuth resource server/authorization flow；它也是云端 Host 的推荐路径。OAuth v2 路径执行 issuer/resource/scope 校验，具体部署见 [OAuth 与公网暴露](../operations/oauth.md)。
 
-## 工具策略
+## 固定 MCP primitive 与 Extension command ACL
 
-工具必须同时通过 group 与 capability 两层过滤。
+MCP endpoint 不再用 instance 配置中的 group/capability 去动态裁剪 `tools/list`。MCP 是稳定的 Agent Runtime ABI：Control 合并固定的 protocol/runtime primitive 与当前 Worker tool schema，Extension 安装、卸载和 `[extensions].model` 变化不会通过增删 MCP tool 来表达授权。
 
-| Group | 主要 model-facing 工具 | 常见 capability |
-| --- | --- | --- |
-| `environ` | `environ_info` | bootstrap，始终特殊处理 |
-| `bash` | `bash_run` | `execute` |
-| `file` | `file_read`、`file_edit`、`file_find`、`file_search`、`file_info` | `read` / `write` |
-| `artifact` | `artifact_read`、`artifact_viewImage`、`artifact_transfer` | `read` / `write` |
-| `tmux` | `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_list`、`tmux_create`、`tmux_close` | `read` / `execute` |
-| `todo` | `todo_read`、`todo_write` | 无固定 capability |
-| `workspace` | `workspace_open`、`workspace_ask`、`workspace_goal` | 无固定 capability |
-| `instance` | `instance_connect` | `manage` |
+主要边界是：
 
-默认不启用 `instance` group，也不授予 `manage`。
+| Domain | MCP model-facing surface |
+| --- | --- |
+| Environment | `environ_info` |
+| Worker shell/file | `bash_run`、`file_read`、`file_edit`、`file_find`、`file_search`、`file_info` 等 Worker primitive |
+| Artifact | Worker `artifact_read`；Control `artifact_viewImage` |
+| tmux | `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_list`、`tmux_create`、`tmux_close` |
+| Todo | `todo_read`、`todo_write` |
+| Workspace | 小型 model-facing surface + App-only wire protocol |
+| Instance | 仅 `instance_connect` |
 
-`instance_connect` 是唯一保留在 model-facing MCP catalog 的 instance 管理动作，因为它的语义是“把一个已经存在的 managed instance/workspace 附着到当前 Context”。创建、列出、启动、停止、删除 instance 统一属于 CLI/TUI control plane。
+`instance_connect` 不是 instance 管理面，而是“把一个已经存在的 managed instance，以及可选 workspace，附着到当前 Context”的 bootstrap primitive。创建、列出、状态、启动、停止、删除等 instance 生命周期仍由原生 `devshell instance ...` / TUI 管理。
 
-Artifact 分享同样属于 Control 管理面；model-facing `artifact_transfer` 负责 Context 内的跨实例传输，而公开 share 的创建/撤销使用 `devshell artifact ...`。
+可扩展命令走另一条数据面。`bash_run` / `tmux_run` 启动的进程环境中存在 Context-bound `devshell` shim；它只解析 `cli.model-commands`，并按当前 instance 的 `[extensions].model` allowlist 授权。例如：
+
+```toml
+[extensions]
+model = ["instance", "artifact"]
+```
+
+默认值只有 `instance`。`environ_info` 会报告当前 Context 实际可用的 model `devshell` root，并提示使用 `devshell --help` / `devshell <command> --help`。model command 找不到或不在 ACL 中时不会 fallback 到原生 builtin CLI。
+
+Artifact 分享与跨实例传输属于 Artifact Extension command，不再是 MCP tool。人类本地使用 `devshell artifact ...`；模型只有在 `artifact` 被当前 instance 的 model Extension ACL 允许时，才能通过 shell/tmux 中的 `devshell artifact ...` 调用。
 
 ## Workspace App 工具边界
 

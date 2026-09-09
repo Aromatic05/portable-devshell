@@ -193,8 +193,7 @@ function wizardFields(step: number, draft: Record<string, JsonValue>): Array<str
                       ]
                     : []),
                 `path preview        /${String(readPath(draft, "name") ?? "<name>")}/mcp`,
-                fieldLine("mcp.tools.groups", "groups", readPath(draft, "mcp.tools.groups")),
-                fieldLine("mcp.tools.capabilities", "capabilities", readPath(draft, "mcp.tools.capabilities"))
+                fieldLine("extensions.model", "model Extensions", readPath(draft, "extensions.model"))
             ];
         }
         case 4:

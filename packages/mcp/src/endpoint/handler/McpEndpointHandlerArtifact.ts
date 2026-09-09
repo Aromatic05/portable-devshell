@@ -3,10 +3,7 @@ import { createError, errorCodes, type JsonValue, type ToolCallContext } from "@
 import type { McpInstanceGateway } from "../../instance/McpInstanceGateway.js";
 import type { McpToolCatalogArtifactName } from "../../tool/catalog/McpToolCatalogArtifact.js";
 import { waitForMcpEndpointAbortable } from "../McpEndpointCancellation.js";
-import {
-    readMcpArtifactTransferInput,
-    readMcpArtifactViewImageInput
-} from "../McpEndpointInput.js";
+import { readMcpArtifactViewImageInput } from "../McpEndpointInput.js";
 import { McpNativeToolResult, type McpEndpointResult } from "../McpEndpointResult.js";
 import { mcpEndpointToolNotExposed, requireMcpEndpointGateway } from "./McpEndpointHandlerSupport.js";
 
@@ -48,14 +45,6 @@ export class McpEndpointHandlerArtifact {
                     structuredContent
                 });
             }
-            case "artifact_transfer":
-                if (gateway.transferArtifact === undefined) {
-                    throw mcpEndpointToolNotExposed(toolName, this.options.instanceName);
-                }
-                return await waitForMcpEndpointAbortable(
-                    gateway.transferArtifact(this.options.instanceName, readMcpArtifactTransferInput(withTransferWorkspace(input, context))),
-                    signal
-                );
         }
     }
 }
@@ -73,11 +62,6 @@ function requireContextWorkspace(context: ToolCallContext): string {
 function withSourceWorkspace(input: JsonValue, context: ToolCallContext): JsonValue {
     if (!isRecord(input) || input.path === undefined) return input;
     return { ...input, workspace: requireContextWorkspace(context) };
-}
-
-function withTransferWorkspace(input: JsonValue, context: ToolCallContext): JsonValue {
-    if (!isRecord(input) || input.operation !== "start" || input.sourcePath === undefined) return input;
-    return { ...input, sourceWorkspace: requireContextWorkspace(context) };
 }
 
 function isRecord(value: JsonValue): value is Record<string, JsonValue> {

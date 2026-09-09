@@ -382,7 +382,6 @@ function createHarness(
     const catalog = new McpEndpointCatalog({
         gateway: gateway as never,
         instanceName: "alpha",
-        policy: { capabilities: ["execute"], groups: ["bash"] },
         worker,
     });
     return {

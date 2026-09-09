@@ -285,7 +285,6 @@ test("a real MCP SDK OAuth consumer completes registration, PKCE authorization, 
                     provider: "oauth2"
                 },
                 name: "real-oauth",
-                policy: { capabilities: ["execute"], groups: ["bash"] },
                 worker: instance
             }
         ],
@@ -722,7 +721,6 @@ async function startFrozenWorkerHost(
                 auth,
                 gateway,
                 name,
-                policy: { capabilities: ["execute"], groups: ["bash"] },
                 worker: instance
             }
         ],

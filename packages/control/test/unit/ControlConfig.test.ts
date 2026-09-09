@@ -54,7 +54,7 @@ test("valid global and instance documents are assembled into canonical config", 
         const instance = config.instances[0];
         assert.equal(instance?.name, "demo-local");
         assert.equal(instance?.mcp.path, "/demo-local/mcp");
-        assert.deepEqual(instance?.mcp.tools.groups, ["file", "bash", "artifact"]);
+        assert.deepEqual(instance?.extensions.model, ["instance"]);
         assert.equal(instance?.logs?.maxBytes, 33_554_432);
         assert.equal(instance?.approvalPolicy?.rules?.[0]?.source, "mcp");
         assert.equal(instance?.security.mode, "workspace");
@@ -111,7 +111,7 @@ test("version 1 global MCP auth migrates to each enabled namespace and writes ve
     }
 });
 
-test("version 2 instance documents migrate to version 3 without workspace", async () => {
+test("version 2 instance documents migrate to version 4 without workspace or MCP tool policy", async () => {
     const homeDirectory = await createTestTempDirectory("control-home");
 
     try {
@@ -151,18 +151,21 @@ test("version 2 instance documents migrate to version 3 without workspace", asyn
 
         const config = await new ControlConfigStore().readOrCreate(homeDirectory);
         assert.deepEqual(
-            config.instances.find((instance) => instance.name === "legacy-default")?.mcp.tools.groups,
-            ["file", "bash", "artifact", "tmux", "todo", "instance", "workspace"]
+            config.instances.find((instance) => instance.name === "legacy-default")?.extensions.model,
+            ["instance"]
         );
         assert.deepEqual(
-            config.instances.find((instance) => instance.name === "custom-policy")?.mcp.tools.groups,
-            ["file", "todo"]
+            config.instances.find((instance) => instance.name === "custom-policy")?.extensions.model,
+            ["instance"]
         );
         const migratedDefault = await readFile(paths.instanceConfigFile("legacy-default"), "utf8");
         const migratedCustom = await readFile(paths.instanceConfigFile("custom-policy"), "utf8");
         for (const source of [migratedDefault, migratedCustom]) {
-            assert.match(source, /^version = 3$/mu);
+            assert.match(source, /^version = 4$/mu);
             assert.doesNotMatch(source, /^workspace\s*=/mu);
+            assert.doesNotMatch(source, /\[mcp\.tools\]|groups\s*=|capabilities\s*=/u);
+            assert.match(source, /\[extensions\]/u);
+            assert.match(source, /model\s*=\s*\[\s*"instance"\s*\]/u);
         }
         assert.equal("workspace" in config.instances[0]!, false);
         assert.equal("workspace" in config.instances[1]!, false);
@@ -171,7 +174,7 @@ test("version 2 instance documents migrate to version 3 without workspace", asyn
     }
 });
 
-test("instance config load rewrites non-canonical MCP groups without bootstrap namespaces", async () => {
+test("version 3 MCP tool policy is retired into the version 4 model Extension allowlist", async () => {
     const homeDirectory = await createTestTempDirectory("control-home");
 
     try {
@@ -195,11 +198,13 @@ test("instance config load rewrites non-canonical MCP groups without bootstrap n
         );
 
         const config = await new ControlConfigStore().readOrCreate(homeDirectory);
-        assert.deepEqual(config.instances[0]?.mcp.tools.groups, ["file", "workspace"]);
+        assert.deepEqual(config.instances[0]?.extensions.model, ["instance"]);
 
         const source = await readFile(paths.instanceConfigFile("canonical-groups"), "utf8");
-        assert.match(source, /groups = \[\s*"file", "workspace"\s*\]/u);
-        assert.doesNotMatch(source, /environment|environ|interaction/u);
+        assert.match(source, /^version = 4$/mu);
+        assert.match(source, /\[extensions\]/u);
+        assert.match(source, /model\s*=\s*\[\s*"instance"\s*\]/u);
+        assert.doesNotMatch(source, /\[mcp\.tools\]|groups\s*=|capabilities\s*=|environment|environ|interaction/u);
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
     }
@@ -486,11 +491,7 @@ function createInstanceConfig() {
             retentionDays: 14
         },
         mcp: {
-            enabled: true,
-            tools: {
-                capabilities: ["read", "write", "execute"],
-                groups: ["file", "bash", "artifact"]
-            }
+            enabled: true
         },
         name: "demo-local",
         provider: "local",

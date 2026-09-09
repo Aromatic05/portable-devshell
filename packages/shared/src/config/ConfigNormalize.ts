@@ -86,16 +86,15 @@ export function normalizeConfigInstanceDraft(
         alerts: cloneAlerts(draft.alerts),
         enabled: draft.enabled ?? context.defaultEnabled,
         env: cloneNonEmptyRecord(draft.env),
+        extensions: {
+            model: deduplicate(draft.extensions?.model ?? context.defaultModelExtensions)
+        },
         logs: cloneOptionalRecord(draft.logs),
         mcp: {
             auth: normalizeInstanceMcpAuth(draft.mcp),
             contextMode: draft.mcp?.contextMode ?? "explicit",
             enabled: draft.mcp?.enabled ?? context.defaultMcpEnabled,
-            path: expectedMcpPath,
-            tools: {
-                capabilities: deduplicate(draft.mcp?.tools?.capabilities ?? context.defaultMcpCapabilities),
-                groups: normalizeMcpGroups(draft.mcp?.tools?.groups, context.defaultMcpGroups)
-            }
+            path: expectedMcpPath
         },
         name: draft.name,
         security: {
@@ -186,6 +185,12 @@ export function applyConfigInstancePatch(
             : applyNullable(patch.dockerBinary, base.dockerBinary),
         enabled: patch.enabled ?? base.enabled,
         env: applyNullable(patch.env, base.env),
+        extensions:
+            patch.extensions === undefined
+                ? base.extensions
+                : {
+                      model: patch.extensions.model ?? base.extensions?.model
+                  },
         logs: applyNullable(patch.logs, base.logs),
         mcp:
             mcpPatch === undefined
@@ -202,15 +207,7 @@ export function applyConfigInstancePatch(
                       ),
                       contextMode: mcpPatch.contextMode ?? base.mcp?.contextMode,
                       enabled: mcpPatch.enabled ?? base.mcp?.enabled,
-                      path: applyNullable(mcpPatch.path, base.mcp?.path),
-                      tools:
-                          mcpPatch.tools === undefined
-                              ? base.mcp?.tools
-                              : {
-                                    capabilities:
-                                        mcpPatch.tools.capabilities ?? base.mcp?.tools?.capabilities,
-                                    groups: mcpPatch.tools.groups ?? base.mcp?.tools?.groups
-                                }
+                      path: applyNullable(mcpPatch.path, base.mcp?.path)
                   },
         podmanBinary: providerChanged
             ? applyNullable(patch.podmanBinary, undefined)
@@ -312,16 +309,13 @@ export function toConfigInstanceDraft(instance: ControlInstanceConfig): ConfigIn
         dockerBinary: instance.dockerBinary,
         enabled: instance.enabled,
         env: cloneOptionalRecord(instance.env),
+        extensions: { model: [...instance.extensions.model] },
         logs: cloneOptionalRecord(instance.logs),
         mcp: {
             ...toInstanceMcpAuthDraft(instance.mcp.auth),
             contextMode: instance.mcp.contextMode,
             enabled: instance.mcp.enabled,
-            path: instance.mcp.path,
-            tools: {
-                capabilities: [...instance.mcp.tools.capabilities],
-                groups: [...instance.mcp.tools.groups]
-            }
+            path: instance.mcp.path
         },
         name: instance.name,
         podmanBinary: instance.podmanBinary,

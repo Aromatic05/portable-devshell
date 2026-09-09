@@ -1,8 +1,7 @@
 import type {
     ControlMcpContextMode,
     JsonValue,
-    ToolDefinition,
-    ToolPolicy
+    ToolDefinition
 } from "@portable-devshell/shared";
 
 import type { McpAuthConfig } from "../auth/McpAuthConfig.js";
@@ -33,7 +32,6 @@ export interface McpEndpointWorkerOptions {
     contextMode?: ControlMcpContextMode;
     gateway?: McpInstanceGateway;
     instanceName: string;
-    policy: ToolPolicy;
     readyWaitMs?: number;
     toolProvenance?: McpToolProvenanceRecorder;
     worker: McpEndpointWorkerPort;
@@ -55,7 +53,6 @@ export class McpEndpointWorker {
             contextSelector,
             gateway: options.gateway,
             instanceName: options.instanceName,
-            policy: options.policy,
             worker: options.worker
         });
         this.#dispatch = new McpEndpointDispatch({

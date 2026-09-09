@@ -23,8 +23,6 @@ test("Control-owned MCP tools describe their structured output instead of generi
         assertMeaningfulSchema(definition);
     }
 
-    assertProperties(definition(definitions, "artifact_transfer").outputSchema, ["operation", "transfer"]);
-
     const environment = definition(definitions, "environ_info");
     assert.equal((environment._meta as { ui?: { resourceUri?: string } })?.ui?.resourceUri, workspaceAppResourceUri);
     assert.equal((environment._meta as Record<string, unknown>)["ui/resourceUri"], workspaceAppResourceUri);
@@ -83,9 +81,6 @@ test("Control-owned MCP tools describe their structured output instead of generi
     const workspaceOpen = definition(definitions, "workspace_open");
     const adaptedOpen = adapter.toMcpTool(workspaceOpen, workspaceOpen.description);
     assertProperties(adaptedOpen.outputSchema, ["ctxId", "instance"]);
-    const transfer = definition(definitions, "artifact_transfer");
-    const adaptedTransfer = adapter.toMcpTool(transfer, transfer.description);
-    assertProperties(adaptedTransfer.outputSchema, ["operation", "transfer"]);
 });
 
 function definition(definitions: ToolDefinition[], name: string): ToolDefinition {

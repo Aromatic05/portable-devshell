@@ -2,17 +2,18 @@
 
 ## MCP 工具面
 
-Artifact 使用三个 MCP 工具名：
+Artifact 在 MCP 上只保留两个 primitive：
 
 ```text
 artifact_read
 artifact_viewImage
-artifact_transfer
 ```
 
 `artifact_read` 是 worker 工具，只读取 `bash_run` 为 stdout 或 stderr 创建的 Artifact。
 
-`artifact_viewImage` 和 `artifact_transfer` 由 control 提供，并合并到实例 MCP endpoint 的工具 catalog。分享属于 control-plane 管理能力，只通过 CLI/TUI 暴露。普通文件、目录、分享 payload 和传输 payload 不会获得 Artifact handle，也不能通过 `artifact_read` 读取。
+`artifact_viewImage` 由 control 提供，并合并到实例 MCP endpoint 的固定工具 catalog。分享和跨实例传输属于 Artifact Extension command，不再作为 MCP tool 暴露。普通文件、目录、分享 payload 和传输 payload 不会获得 Artifact handle，也不能通过 `artifact_read` 读取。
+
+本地用户通过 `devshell artifact ...` 使用 Artifact native Extension command。模型要调用同一 domain，必须先由当前 instance 的 `[extensions].model` 允许 `artifact`，然后在 `bash_run` / `tmux_run` 中通过 Context-bound `devshell artifact ...` 调用；不存在从 model command 到 builtin CLI 的 fallback。
 
 ## 图片查看
 
@@ -84,15 +85,15 @@ Referrer-Policy: no-referrer
 
 ## 异步传输
 
-`artifact_transfer` 是异步工具，支持三种操作：
+`devshell artifact transfer` 是异步命令。启动、查询和取消分别使用：
 
 ```text
-start
-status
-cancel
+devshell artifact transfer <source-instance> <artifact:<handle>|path:<path>> <target-instance> <target-path> --target-workspace <absolute-path> ...
+devshell artifact transfer status <transferId>
+devshell artifact transfer cancel <transferId>
 ```
 
-`start` 立即返回 `queued` 状态的传输记录。完整状态为：
+启动命令立即返回 `queued` 状态的传输记录。完整状态为：
 
 ```text
 queued

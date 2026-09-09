@@ -47,7 +47,6 @@ const idempotentMutationTools = new Set([
 
 const closedWorldTools = new Set([
     "artifact_read",
-    "artifact_transfer",
     "artifact_viewImage",
     "environ_info",
     "file_edit",

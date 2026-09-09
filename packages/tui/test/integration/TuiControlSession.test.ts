@@ -565,10 +565,9 @@ function createServer(
                 async stopAll() { return []; },
                 async touch() {},
             },
-            mcpCapabilities: [],
             mcpEnabled: false,
-            mcpGroups: [],
             mcpPath: "",
+            modelExtensions: [],
             name: "alpha",
             provider: "local",
             todo: {

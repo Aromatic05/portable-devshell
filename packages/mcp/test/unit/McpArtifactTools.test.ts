@@ -30,112 +30,7 @@ const png = Buffer.from(
     "base64"
 );
 
-test("artifact endpoint exposes worker read plus control view and transfer while worker is stopped", async () => {
-    const calls: Array<{ kind: string; defaultInstance: string; input: JsonValue }> = [];
-    const gateway = createGateway({
-        async viewArtifactImage(defaultInstance, input) {
-            calls.push({ defaultInstance, input: input as unknown as JsonValue, kind: "viewImage" });
-            return {
-                bytes: png.length,
-        comment: [],
-                content: png.toString("base64"),
-                encoding: "base64",
-                mediaType: "image/png",
-                name: "pixel.png",
-                source: {
-                    instance: defaultInstance,
-                    path: "./pixel.png",
-                    type: "file"
-                }
-            };
-        },
-        async transferArtifact(defaultInstance, input) {
-            calls.push({ defaultInstance, input: input as unknown as JsonValue, kind: "transfer" });
-            return { transferId: "transfer-1" };
-        }
-    });
-    const endpoint = new McpEndpointWorker({
-        contextRegistry,
-        gateway,
-        instanceName: "main-pc",
-        policy: { capabilities: ["read", "write"], groups: ["artifact"] },
-        worker: createWorker(false, true)
-    });
-
-    for (const tool of endpoint.listTools()) {
-        const schema = tool.inputSchema as { properties?: Record<string, unknown> };
-        assert.equal(schema.properties?.instance, undefined, tool.name);
-    }
-    for (const name of ["artifact_viewImage", "artifact_transfer"]) {
-        const schema = endpoint.listTools().find((tool) => tool.name === name)?.inputSchema as {
-            oneOf?: unknown;
-            properties?: Record<string, unknown>;
-            type?: string;
-        };
-        assert.equal(schema.oneOf, undefined, name);
-        assert.equal(schema.type, "object", name);
-        assert.notEqual(schema.properties, undefined, name);
-    }
-    const imageOutputSchema = endpoint.listTools().find((tool) => tool.name === "artifact_viewImage")?.outputSchema as {
-        properties?: { source?: { oneOf?: unknown; properties?: Record<string, unknown> } };
-    };
-    assert.equal(imageOutputSchema.properties?.source?.oneOf, undefined);
-    assert.notEqual(imageOutputSchema.properties?.source?.properties, undefined);
-    assert.equal(endpoint.listTools().some((tool) => tool.name === "artifact_share"), false);
-    const image = await endpoint.callTool(
-        "artifact_viewImage",
-        withContext({ path: "./pixel.png" }),
-        context
-    ) as unknown as {
-        content: Array<{ data?: string; mimeType?: string; text?: string; type: string }>;
-        structuredContent: JsonValue;
-    };
-    assert.deepEqual(image.content, [
-        { data: png.toString("base64"), mimeType: "image/png", type: "image" }
-    ]);
-    assert.deepEqual(image.structuredContent, {
-        bytes: png.length,
-        mediaType: "image/png",
-        name: "pixel.png",
-        source: {
-            instance: "main-pc",
-            path: "./pixel.png",
-            type: "file"
-        }
-    });
-    assert.deepEqual(
-        await endpoint.callTool(
-            "artifact_transfer",
-            withContext({
-                operation: "start",
-                sourcePath: "./dist",
-                targetInstance: "remote-server",
-                targetPath: "/srv/app",
-                targetWorkspace: "/srv"
-            }),
-            context
-        ),
-        { transferId: "transfer-1" }
-    );
-    assert.deepEqual(calls, [
-        { defaultInstance: "main-pc", input: { path: "./pixel.png", workspace: "/workspace" }, kind: "viewImage" },
-        {
-            defaultInstance: "main-pc",
-            input: {
-                operation: "start",
-                overwrite: false,
-                sourcePath: "./dist",
-                sourceWorkspace: "/workspace",
-                targetInstance: "remote-server",
-                targetPath: "/srv/app",
-                targetWorkspace: "/srv"
-            },
-            kind: "transfer"
-        }
-    ]);
-});
-
-test("artifact control tools apply read-only and mutating capability requirements independently", () => {
+test("artifact fixed MCP surface contains read and image primitives but no management operations", () => {
     const gateway = createGateway({
         async viewArtifactImage() {
             return {
@@ -146,15 +41,12 @@ test("artifact control tools apply read-only and mutating capability requirement
                 name: "pixel.png",
                 source: { instance: "main-pc", path: "./pixel.png", type: "file" }
             };
-        },
-        async shareArtifact() { return {}; },
-        async transferArtifact() { return {}; }
+        }
     });
     const endpoint = new McpEndpointWorker({
         contextRegistry,
         gateway,
         instanceName: "main-pc",
-        policy: { capabilities: ["read"], groups: ["artifact"] },
         worker: createWorker(false, true)
     });
     const names = endpoint.listTools().map((tool) => tool.name);
@@ -174,10 +66,6 @@ test("remote artifact path operations request an instance workspace attachment",
         contextRegistry,
         gateway,
         instanceName: "main-pc",
-        policy: {
-            capabilities: ["read", "write", "manage"],
-            groups: ["artifact", "instance"]
-        },
         worker: createWorker(false, true)
     });
 

@@ -17,7 +17,6 @@ test("route registry resolves per-instance binding", () => {
     const registry = new McpHostRouteRegistry();
     const binding = new McpEndpointBinding(
         new McpEndpointWorker({
-            policy: { capabilities: ["execute"], groups: ["bash"] },
             instanceName: "demo",
             worker: {
                 async appendMcpSessionClosed(_sessionId: string) {},

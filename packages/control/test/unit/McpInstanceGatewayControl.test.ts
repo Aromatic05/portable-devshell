@@ -11,10 +11,9 @@ function createGateway(ready: boolean): McpInstanceGatewayControl {
     const registry = new InstanceRegistry([
         {
             enabled: true,
-            mcpCapabilities: ["read", "write", "execute"],
             mcpEnabled: true,
-            mcpGroups: ["file", "bash", "artifact"],
             mcpPath: "/remote-server/mcp",
+            modelExtensions: ["instance"],
             name: "remote-server",
             worker: {
                 snapshot() {
@@ -25,7 +24,6 @@ function createGateway(ready: boolean): McpInstanceGatewayControl {
     ]);
 
     return new McpInstanceGatewayControl({
-        createService: {} as never,
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry
     });
@@ -56,10 +54,9 @@ test("cross-instance audit is recorded by the target worker", async () => {
     const calls: Array<{ context: unknown; input: unknown; toolName: string }> = [];
     const registry = new InstanceRegistry([{
         enabled: true,
-        mcpCapabilities: ["read"],
         mcpEnabled: true,
-        mcpGroups: ["artifact"],
         mcpPath: "/remote-server/mcp",
+        modelExtensions: [],
         name: "remote-server",
         worker: {
             async auditToolCall(toolName: string, input: unknown, context: unknown, operation: (callId: string) => Promise<unknown>) {
@@ -69,7 +66,6 @@ test("cross-instance audit is recorded by the target worker", async () => {
         }
     } as never]);
     const gateway = new McpInstanceGatewayControl({
-        createService: {} as never,
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry
     });
@@ -95,10 +91,9 @@ test("closing an MCP tool session releases worker-owned session state", async ()
     const registry = new InstanceRegistry(
         ["local-one", "remote-two"].map((name) => ({
             enabled: true,
-            mcpCapabilities: ["read", "write"],
             mcpEnabled: true,
-            mcpGroups: ["file"],
             mcpPath: `/${name}/mcp`,
+            modelExtensions: [],
             name,
             worker: {
                 async releaseToolSession(sessionId: string) {
@@ -108,7 +103,6 @@ test("closing an MCP tool session releases worker-owned session state", async ()
         })) as never
     );
     const gateway = new McpInstanceGatewayControl({
-        createService: {} as never,
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry
     });
@@ -143,10 +137,9 @@ test("MCP instance lifecycle responses preserve active Todo summaries", async ()
     let startCalls = 0;
     const registry = new InstanceRegistry([{
         enabled: true,
-        mcpCapabilities: ["manage"],
         mcpEnabled: true,
-        mcpGroups: ["instance"],
         mcpPath: "/remote-server/mcp",
+        modelExtensions: ["instance"],
         name: "remote-server",
         todo: { summaries: () => activeTodos },
         worker: {
@@ -166,7 +159,6 @@ test("MCP instance lifecycle responses preserve active Todo summaries", async ()
         }
     } as never]);
     const gateway = new McpInstanceGatewayControl({
-        createService: {} as never,
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry
     });
@@ -189,10 +181,9 @@ test("MCP instance connect lifecycle uses Context references without adopting an
     let stopCalls = 0;
     const registry = new InstanceRegistry([{
         enabled: true,
-        mcpCapabilities: ["manage"],
         mcpEnabled: true,
-        mcpGroups: ["instance"],
         mcpPath: "/managed/mcp",
+        modelExtensions: ["instance"],
         name: "managed",
         todo: { summaries: () => [] },
         worker: {
@@ -211,10 +202,9 @@ test("MCP instance connect lifecycle uses Context references without adopting an
         }
     } as never, {
         enabled: true,
-        mcpCapabilities: ["manage"],
         mcpEnabled: true,
-        mcpGroups: ["instance"],
         mcpPath: "/external/mcp",
+        modelExtensions: ["instance"],
         name: "external",
         todo: { summaries: () => [] },
         worker: {
@@ -227,7 +217,6 @@ test("MCP instance connect lifecycle uses Context references without adopting an
         }
     } as never]);
     const gateway = new McpInstanceGatewayControl({
-        createService: {} as never,
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry
     });

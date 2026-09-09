@@ -46,10 +46,9 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
     const registry = new InstanceRegistry([
         {
             enabled: true,
-            mcpCapabilities: ["read", "write", "execute"],
             mcpEnabled: true,
-            mcpGroups: ["bash"],
             mcpPath: "/reverse-test/mcp",
+            modelExtensions: ["instance"],
             name: "reverse-test",
             provider: "reverse",
             reverseConnector: connector,
@@ -157,10 +156,9 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
     const registry = new InstanceRegistry([
         {
             enabled: true,
-            mcpCapabilities: ["read", "write", "execute"],
             mcpEnabled: true,
-            mcpGroups: ["bash"],
             mcpPath: "/reverse-test/mcp",
+            modelExtensions: ["instance"],
             name: "reverse-test",
             provider: "reverse",
             reverseConnector: connector,

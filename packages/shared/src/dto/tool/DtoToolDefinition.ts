@@ -34,8 +34,3 @@ export interface ToolSessionOpenResult {
 }
 
 export type ToolCapability = "read" | "write" | "execute" | "manage";
-
-export interface ToolPolicy {
-    capabilities: readonly ToolCapability[];
-    groups: readonly string[];
-}

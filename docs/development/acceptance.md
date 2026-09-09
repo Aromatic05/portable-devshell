@@ -95,18 +95,18 @@ Windows runner 当前只证明 JS 应用、原生 Worker 和最终应用包的�
 
 ```text
 global config write version    2
-instance config write version  3
+instance config write version  4
 ```
 
-旧 global version 1 与 instance version 2 只作为 migration input；新示例不能继续写旧结构。
+旧 global version 1 与 instance version 2/3 只作为 migration input；新示例不能继续写旧结构。
 
-instance version 3 中：
+instance version 4 中：
 
 * 不存在持久化 `workspace`；
-* MCP policy 使用 `[mcp.tools]` 的 groups/capabilities；
-* 默认 groups 为 `file,bash,artifact,tmux,todo,workspace`；
-* 默认不包含 `instance` group，也不授予 `manage`；
-* `instance_connect` 是 model-facing MCP 中唯一保留的 instance attach 操作。
+* 不存在 MCP group/capability policy；`tools/list` 使用固定 runtime catalog；
+* `[extensions].model` 是 model Extension command allowlist，默认只有 `instance`；
+* `instance_connect` 是 MCP 中唯一保留的 instance Context attach primitive；
+* `devshell instance ...` 仍是 builtin CLI 主干；Artifact 管理/传输由 `cli.native-commands` / `cli.model-commands` provider 提供，而不是 builtin CLI 或 `artifact_transfer` MCP tool。
 
 ## MCP / Context / Workspace 门禁
 

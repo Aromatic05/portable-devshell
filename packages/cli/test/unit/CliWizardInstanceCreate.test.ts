@@ -27,10 +27,9 @@ const schema: InstanceCreateSchema = {
         ]
     },
     defaultEnabled: true,
-    defaultMcpCapabilities: ["read", "write", "execute"],
     defaultMcpContextMode: "explicit",
     defaultMcpEnabled: true,
-    defaultMcpGroups: ["file", "bash", "artifact"],
+    defaultModelExtensions: ["instance"],
     defaultProvider: "local",
     defaultSecurityMode: "disabled",
     providers: ["local", "ssh", "docker", "podman", "reverse"]
@@ -73,8 +72,7 @@ test("instance wizard retries invalid basic answers, deduplicates lists, and sup
     assert.equal(validated?.provider, "local");
     assert.equal(validated?.security?.mode, "workspace");
     assert.equal(validated?.mcp?.contextMode, "explicit");
-    assert.deepEqual(validated?.mcp?.tools?.groups, ["file", "bash"]);
-    assert.deepEqual(validated?.mcp?.tools?.capabilities, ["read", "execute"]);
+    assert.deepEqual(validated?.extensions?.model, ["file", "bash"]);
 });
 
 test("instance wizard collects SSH configuration and accepts validated creation", async () => {
@@ -103,14 +101,11 @@ test("instance wizard collects SSH configuration and accepts validated creation"
     assert.notEqual(result, undefined);
     assert.deepEqual(result?.draft, {
         enabled: true,
+        extensions: { model: ["instance"] },
         mcp: {
             auth: "none",
             contextMode: "explicit",
-            enabled: false,
-            tools: {
-                capabilities: ["read", "write", "execute"],
-                groups: ["file", "bash", "artifact"]
-            }
+            enabled: false
         },
         name: "remote-one",
         provider: "ssh",
@@ -160,6 +155,9 @@ test("instance wizard collects complete OAuth, approval, environment, log, and s
     const result = await wizard.run(schema, async (draft) => summaryFor(draft));
 
     assert.notEqual(result, undefined);
+    assert.deepEqual(result?.draft.extensions, {
+        model: ["file", "bash"]
+    });
     assert.deepEqual(result?.draft.mcp, {
         auth: "oauth2",
         contextMode: "openai-session",
@@ -168,10 +166,6 @@ test("instance wizard collects complete OAuth, approval, environment, log, and s
             documentationUrl: "https://docs.example.test/mcp",
             requiredScopes: ["mcp", "profile"],
             resourceName: "complete-resource"
-        },
-        tools: {
-            capabilities: ["read", "write", "execute"],
-            groups: ["file", "bash"]
         }
     });
     assert.deepEqual(result?.draft.approvalPolicy, {
@@ -276,6 +270,7 @@ function summaryFor(draft: InstanceCreateDraft): InstanceCreateSummary {
         ...(instance.container === undefined ? {} : { container: instance.container }),
         ...(instance.dockerBinary === undefined ? {} : { dockerBinary: instance.dockerBinary }),
         ...(instance.env === undefined ? {} : { env: { ...instance.env } }),
+        extensions: { model: [...instance.extensions.model] },
         ...(instance.logs === undefined ? {} : { logs: { ...instance.logs } }),
         ...(instance.podmanBinary === undefined ? {} : { podmanBinary: instance.podmanBinary }),
         ...(instance.ssh === undefined ? {} : { ssh: instance.ssh }),
@@ -290,11 +285,7 @@ function summaryFor(draft: InstanceCreateDraft): InstanceCreateSummary {
             },
             contextMode: instance.mcp.contextMode,
             enabled: instance.mcp.enabled,
-            path: instance.mcp.path,
-            tools: {
-                capabilities: [...instance.mcp.tools.capabilities],
-                groups: [...instance.mcp.tools.groups]
-            }
+            path: instance.mcp.path
         },
         name: instance.name,
         provider: instance.provider,

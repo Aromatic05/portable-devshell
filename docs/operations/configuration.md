@@ -190,7 +190,7 @@ Token 以明文保存在权限为 `0600` 的用户配置文件中。配置视图
 ## 本地实例配置
 
 ```toml
-version = 3
+version = 4
 name = "demo-local"
 enabled = true
 provider = "local"
@@ -200,9 +200,8 @@ enabled = true
 auth = "none"
 path = "/demo-local/mcp"
 
-[mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo", "workspace"]
-capabilities = ["read", "write", "execute"]
+[extensions]
+model = ["instance"]
 
 [security]
 mode = "workspace"
@@ -220,7 +219,7 @@ timeoutMs = 5000
 
 常用字段：
 
-- `version`：全局配置当前为 `2`，实例配置当前为 `3`；
+- `version`：全局配置当前为 `2`，实例配置当前为 `4`；
 - `name`：必须包含连字符；
 - `provider`：`local`、`ssh`、`docker`、`podman`、`reverse`；
 - instance 配置不包含 `workspace`。worker 启动与实例生命周期不绑定项目目录；CLI 工具调用显式传绝对 workspace，MCP Context 通过 `environ_info` 选择初始 worker 绝对目录，并通过 `instance_connect` 为同一 `ctxId` 附加其他 instance 的绝对 workspace；
@@ -229,8 +228,7 @@ timeoutMs = 5000
 - `[mcp].contextMode`：选择 MCP 边界如何解析 portable-devshell Context。`explicit`（默认）允许 model-facing 工具显式携带 `ctxId`；`openai-session` 使用稳定 Host metadata 绑定内部 Context，并把 `ctxId` 留在模型 schema 之外。两种模式内部都继续使用 `ctxId` 作为 runtime key；完整语义见 [Context](../concepts/context.md)；
 - `[mcp].token`：仅在 `auth = "token"` 时使用，至少 32 UTF-8 字节；
 - `[mcp].path`：固定为 `/<instance>/mcp`，不可自定义；
-- `[mcp.tools].groups`：启用的工具组；
-- `[mcp.tools].capabilities`：授予的 `read`、`write`、`execute`、`manage`；
+- `[extensions].model`：允许当前 instance 上的模型通过 `bash_run` / `tmux_run` 中 Context-bound `devshell` shim 调用的 Extension command root。默认 `["instance"]`；它不改变 MCP `tools/list`；
 - `[security].mode`：`disabled` 或 `workspace`；
 - `[alerts].intervalMs`：活跃 workspace 的后台 alert probe 周期，至少 `1000` ms；MCP Context 的有效工具调用会刷新该 workspace 的活跃租约，连续 24 小时无有效调用后停止 probe 并移除状态；
 - `[alerts].maxUncommittedChanges`：Git 未提交条目数量阈值，必须为非负整数；
@@ -239,12 +237,12 @@ timeoutMs = 5000
 
 Web auth 和 instance MCP auth 完全独立：修改 `[web]` 不会改变任何 instance endpoint；不同 instance 也可以使用不同认证模式和 token。
 
-全局 version 1 配置仅作为旧格式迁移入口读取。旧 `[mcp.auth]` 会在迁移时下沉到 instance，写回后成为全局 version 2；旧 instance version 2 会迁移为 version 3，并删除持久化 `workspace`。新配置不要继续使用这些旧结构。
+全局 version 1 配置仅作为旧格式迁移入口读取。旧 `[mcp.auth]` 会在迁移时下沉到 instance，写回后成为全局 version 2；旧 instance version 2/3 会迁移为 version 4，删除持久化 `workspace`，并丢弃已经退役的 `[mcp.tools]` group/capability policy。新配置不要继续使用这些旧结构。
 
 ## SSH 实例
 
 ```toml
-version = 3
+version = 4
 name = "demo-ssh"
 enabled = true
 provider = "ssh"
@@ -255,9 +253,8 @@ command = "ssh user@example-host"
 [mcp]
 enabled = true
 
-[mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo", "workspace"]
-capabilities = ["read", "write", "execute"]
+[extensions]
+model = ["instance"]
 ```
 
 worker 由 control 自动检测、上传并安装到远端用户目录。

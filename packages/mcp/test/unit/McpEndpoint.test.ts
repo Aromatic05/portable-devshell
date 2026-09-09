@@ -64,7 +64,6 @@ test("tool descriptors advertise endpoint authentication schemes", () => {
     const harness = createWorkerHarness();
     const base = {
         instanceName: "demo",
-        policy: { capabilities: ["execute"] as const, groups: ["bash"] },
         worker: harness.worker,
     };
 
@@ -109,7 +108,6 @@ test("HTTP tools/list keeps Workspace actions app-only while advertising host au
     const binding = new McpEndpointBinding(new McpEndpointWorker({
         gateway,
         instanceName: "demo",
-        policy: { capabilities: [], groups: ["workspace"] },
         worker: harness.worker,
     }));
     const server = await createBindingServer(binding);
@@ -157,7 +155,6 @@ test("tmux_run does not render a Workspace App", () => {
     });
     const tool = new McpEndpointWorker({
         instanceName: "demo",
-        policy: { capabilities: [] as const, groups: ["tmux"] },
         worker: harness.worker,
     }).listTools().find((entry) => entry.name === "tmux_run");
     const meta = tool?._meta as Record<string, JsonValue> | undefined;
@@ -167,37 +164,6 @@ test("tmux_run does not render a Workspace App", () => {
     assert.equal(meta?.["ui/resourceUri"], undefined);
     assert.equal((meta?.ui as { resourceUri?: string } | undefined)?.resourceUri, undefined);
     assert.equal(meta?.["openai/toolInvocation/invoking"], undefined);
-});
-
-test("MCP endpoint without Workspace policy does not expose HTML resources", async () => {
-    const server = await createBindingServer(createBinding());
-
-    try {
-        const session = await initialize(server.url);
-        assert.equal(session.initializeResult?.capabilities?.extensions?.["io.modelcontextprotocol/ui"], undefined);
-        const tools = await postJson(server.url, {
-            id: "req-tools-workspace-disabled",
-            jsonrpc: "2.0",
-            method: "tools/list",
-            params: {}
-        }, session.headers);
-        const toolNames = (tools.body.result?.tools as Array<{ name?: string }> | undefined)?.map((tool) => tool.name) ?? [];
-        assert.equal(toolNames.includes("environ_info"), true);
-        assert.equal(toolNames.includes("bash_run"), true);
-        assert.equal(toolNames.some((name) => name?.startsWith("workspace_")), false);
-
-        const listed = await postJson(server.url, {
-            id: "req-resources-disabled",
-            jsonrpc: "2.0",
-            method: "resources/list",
-            params: {}
-        }, session.headers);
-        assert.equal(listed.status, 200);
-        assert.equal(listed.body.result, undefined);
-        assert.notEqual(listed.body.error, undefined);
-    } finally {
-        await server.close();
-    }
 });
 
 test("Workspace MCP App renders from a versioned URI while keeping the stable reader alias", async () => {
@@ -340,7 +306,7 @@ test("stateless endpoint serves every request without sessions", async () => {
     }
 });
 
-test("tools/list uses group and capability filtering", async () => {
+test("tools/list exposes the fixed worker catalog without group or capability filtering", async () => {
     const binding = createBinding();
     const server = await createBindingServer(binding);
 
@@ -352,7 +318,7 @@ test("tools/list uses group and capability filtering", async () => {
         const listedTools = response.body.result?.tools ?? [];
         const names = listedTools.map((tool: { name: string }) => tool.name);
         assert.equal(names.includes("bash_run"), true);
-        assert.equal(names.includes("file_logs"), false);
+        assert.equal(names.includes("file_logs"), true);
         const bashTool = listedTools.find((tool: { name: string }) => tool.name === "bash_run") as {
             _meta?: { securitySchemes?: unknown };
             securitySchemes?: unknown;
@@ -460,7 +426,6 @@ test("tools/call forwards stale worker arguments even when the advertised schema
     });
     const binding = new McpEndpointBinding(new McpEndpointWorker({
         instanceName: "demo",
-        policy: { capabilities: ["read"], groups: ["file"] },
         worker: harness.worker,
     }));
     const server = await createBindingServer(binding);
@@ -664,7 +629,6 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
     }> = [];
     const endpoint = new McpEndpointWorker({
         instanceName: "demo",
-        policy: { capabilities: ["execute"], groups: ["bash"] },
         toolProvenance: {
             async record(record) {
                 provenanceRecords.push(record);
@@ -837,7 +801,6 @@ test("OpenAI session binding resolves one internal ctxId without making models c
         contextMode: "openai-session",
         contextRegistry: registry,
         instanceName: "demo",
-        policy: { capabilities: ["execute"], groups: ["bash"] },
         worker: harness.worker,
     });
     const requestContext = {
@@ -938,7 +901,6 @@ test("OpenAI session mode keeps ctxId out of model inputs but declares it for ap
         contextRegistry: registry,
         gateway,
         instanceName: "demo",
-        policy: { capabilities: ["execute"], groups: ["bash", "workspace"] },
         worker: harness.worker,
     });
     const tools = endpoint.listTools();
@@ -991,7 +953,6 @@ test("expired OpenAI session binding renews the same internal Context on ordinar
         contextMode: "openai-session",
         contextRegistry: registry,
         instanceName: "demo",
-        policy: { capabilities: ["execute"], groups: ["bash"] },
         worker: harness.worker,
     });
     const requestContext = {
@@ -1025,7 +986,6 @@ test("disabled OpenAI session binding reacquires a new Context and moves the bin
         contextMode: "openai-session",
         contextRegistry: registry,
         instanceName: "demo",
-        policy: { capabilities: ["execute"], groups: ["bash"] },
         worker: harness.worker,
     });
     const requestContext = {
@@ -1256,7 +1216,6 @@ test("instance_connect returns object structured content through SDK transport",
         new McpEndpointWorker({
             gateway,
             instanceName: "demo",
-            policy: { capabilities: ["manage"], groups: ["instance"] },
             worker: harness.worker
         })
     );
@@ -1318,7 +1277,6 @@ test("artifact_viewImage returns native image content over SDK transport", async
         new McpEndpointWorker({
             gateway,
             instanceName: "demo",
-            policy: { capabilities: ["read"], groups: ["artifact"] },
             worker: harness.worker
         })
     );
@@ -1465,7 +1423,6 @@ function createBinding(
         new McpEndpointWorker({
             contextMode: options?.contextMode,
             ...(gateway === undefined ? {} : { gateway }),
-            policy: { capabilities: ["execute"], groups: options?.workspaceApp === true ? ["bash", "workspace"] : ["bash"] },
             instanceName: "demo",
             readyWaitMs: options?.readyWaitMs,
             worker: harness.worker

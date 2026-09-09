@@ -53,10 +53,9 @@ function descriptor(overrides: {
     const currentSnapshot = overrides.currentSnapshot ?? (() => snapshot());
     return {
         enabled: true,
-        mcpCapabilities: [],
         mcpEnabled: true,
-        mcpGroups: [],
         mcpPath: "/mcp/demo-local",
+        modelExtensions: ["instance"],
         name: "demo-local",
         provider: "local",
         todo: {

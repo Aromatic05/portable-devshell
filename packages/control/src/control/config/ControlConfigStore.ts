@@ -146,7 +146,7 @@ export class ControlConfigStore {
                         ? draft.mcp
                         : { ...draft.mcp, ...toLegacyInstanceAuth(legacyMcpAuth) }
                 });
-                migrated ||= draft.migratedFromVersion === 2 || mcpGroupsChanged(draft, normalized);
+                migrated ||= draft.migratedFromVersion !== undefined;
                 instances.push(normalized);
             } catch (error) {
                 throw attachConfigFile(error, filePath);
@@ -166,15 +166,8 @@ export class ControlConfigStore {
 
 
 type ConfigInstanceDraftWithMigration = ConfigInstanceDraft & {
-    migratedFromVersion?: 2;
+    migratedFromVersion?: 2 | 3;
 };
-
-function mcpGroupsChanged(draft: ConfigInstanceDraft, normalized: ControlInstanceConfig): boolean {
-    const configured = draft.mcp?.tools?.groups;
-    if (configured === undefined) return false;
-    const canonical = normalized.mcp.tools.groups;
-    return configured.length !== canonical.length || configured.some((group, index) => group !== canonical[index]);
-}
 
 interface ConfigTransactionManifest {
     existingGlobal: boolean;

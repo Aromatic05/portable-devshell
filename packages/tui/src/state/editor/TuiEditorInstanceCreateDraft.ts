@@ -1,10 +1,11 @@
-import { defaultMcpToolGroups, type JsonValue } from "@portable-devshell/shared";
+import { defaultConfigNormalizeContext, type JsonValue } from "@portable-devshell/shared";
 
 export function createDefaultInstanceDraft(): Record<string, JsonValue> {
     return {
         approvalPolicy: { mode: "disabled" },
         enabled: true,
-        mcp: { auth: "none", contextMode: "explicit", enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: [...defaultMcpToolGroups] } },
+        extensions: { model: [...defaultConfigNormalizeContext.defaultModelExtensions] },
+        mcp: { auth: "none", contextMode: "explicit", enabled: true },
         name: "",
         provider: "local",
         security: { mode: "disabled" }

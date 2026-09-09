@@ -11,13 +11,13 @@ test("disabled instances are skipped and registry does not auto start workers", 
     config.instances.push(
         normalizeConfigInstanceDraft({
             enabled: true,
-            mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
+            mcp: { enabled: true },
             name: "demo-local",
             provider: "local",
         }),
         normalizeConfigInstanceDraft({
             enabled: false,
-            mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
+            mcp: { enabled: true },
             name: "demo-disabled",
             provider: "local",
         })
@@ -36,7 +36,7 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
     config.mcp.enabled = true;
     config.instances.push(normalizeConfigInstanceDraft({
         enabled: true,
-        mcp: { enabled: true, tools: { capabilities: ["read", "write", "execute"], groups: ["file", "bash", "artifact"] } },
+        mcp: { enabled: true },
         name: "demo-local",
         provider: "local",
     }));
@@ -49,10 +49,6 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
     assert.deepEqual(new McpEndpointFactory().map(descriptor), {
         auth: { enabled: false, provider: "none" },
         contextMode: "explicit",
-        policy: {
-            capabilities: ["read", "write", "execute"],
-            groups: ["file", "bash", "artifact"]
-        },
         name: "demo-local",
         path: "/demo-local/mcp",
         worker: descriptor.worker

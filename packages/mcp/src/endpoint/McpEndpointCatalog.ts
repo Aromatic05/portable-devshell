@@ -1,4 +1,4 @@
-import type { JsonValue, ToolDefinition, ToolPolicy } from "@portable-devshell/shared";
+import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
 
 import type { McpAuthConfig } from "../auth/McpAuthConfig.js";
 import { createMcpContextSelector, type McpContextSelector } from "../context/McpContextSelector.js";
@@ -42,7 +42,6 @@ export interface McpEndpointCatalogOptions {
     contextSelector?: McpContextSelector;
     gateway?: McpInstanceGateway;
     instanceName: string;
-    policy: ToolPolicy;
     worker: McpEndpointCatalogWorker;
 }
 
@@ -70,7 +69,7 @@ export class McpEndpointCatalog {
 
     constructor(options: McpEndpointCatalogOptions) {
         this.#auth = options.auth ?? { enabled: false, provider: "none" };
-        this.#catalog = new McpToolCatalogEndpoint(options.policy);
+        this.#catalog = new McpToolCatalogEndpoint();
         this.#contextSelector = options.contextSelector ?? createMcpContextSelector("explicit");
         this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
@@ -81,7 +80,7 @@ export class McpEndpointCatalog {
         const hasWorkerSchema = this.#worker.snapshot().ready === true ||
             this.#worker.hasToolSchemaCache?.() === true;
         const merged = this.#catalog.merge(this.#sources(hasWorkerSchema));
-        const exposed = this.#catalog.filter(merged);
+        const exposed = merged;
         return {
             exposed,
             hasWorkerSchema,
@@ -117,10 +116,6 @@ export class McpEndpointCatalog {
 
     getTool(toolName: string): ToolDefinition | undefined {
         return this.getExposed(toolName)?.definition;
-    }
-
-    isAllowed(tool: ToolDefinition): boolean {
-        return this.#catalog.isAllowed(tool);
     }
 
     adapt(tool: ToolDefinition): McpTool {
@@ -171,9 +166,7 @@ export class McpEndpointCatalog {
         const workspaceTools = this.#gateway !== undefined && isMcpInteractionGateway(this.#gateway)
             ? this.#interactionTools.list()
             : [];
-        const workspaceApp = workspaceTools.some((tool) =>
-            tool.name === "workspace_open" && this.#catalog.isAllowed(tool)
-        );
+        const workspaceApp = workspaceTools.some((tool) => tool.name === "workspace_open");
         const sources: McpToolCatalogEndpointSource[] = [{
             owner: "environment",
             tools: this.#environmentTools.list({
@@ -191,7 +184,6 @@ export class McpEndpointCatalog {
 
         if (this.#gateway !== undefined) {
             const artifactTools = this.#artifactTools.list({
-                transfer: this.#gateway.transferArtifact !== undefined,
                 viewImage: this.#gateway.viewArtifactImage !== undefined
             });
             if (artifactTools.length > 0) {

@@ -63,7 +63,6 @@ export class ControlRuntimeMcp {
             setConfig: (config) => options.state.setConfig(config)
         });
         this.instanceGateway = new McpInstanceGatewayControl({
-            createService: this.instanceCreate,
             getConfig: () => options.state.requireConfig(),
             instanceRegistry: options.state.instances,
             toolProvenance: this.toolProvenance
