@@ -225,11 +225,19 @@ test("CliMain keeps Extension management separate from cli.commands dispatch", a
     };
     const cli = new CliMain({
         createCliClients: () => testClients({
+            async cliCommands() {
+                calls.push("cli.commands");
+                return [{
+                    extensionId: "agent",
+                    id: "agent",
+                    summary: "Run and manage Agent providers",
+                    title: "Agent",
+                    usage: "agent <command>"
+                }];
+            },
             async extensionCommand(commandId: string, argv: readonly string[]) {
                 calls.push(`command:${commandId}:${argv.join("|")}`);
-                return argv[0] === "json"
-                    ? { kind: "json", value: { commandId } }
-                    : { kind: "text", text: "agent help" };
+                return { kind: "json", value: { commandId } };
             },
             async extensionDisable(extensionId: string) {
                 calls.push(`disable:${extensionId}`);
@@ -279,7 +287,17 @@ test("CliMain keeps Extension management separate from cli.commands dispatch", a
     assert.equal(await cli.run(["extension", "reload", "agent"]), 0);
     stdout.flush();
     assert.equal(await cli.run(["agent", "--help"]), 0);
-    assert.equal(stdout.flush(), "agent help\n");
+    assert.equal(stdout.flush(), [
+        "Agent",
+        "",
+        "Usage:",
+        "  devshell agent <command>",
+        "",
+        "Run and manage Agent providers",
+        "",
+        "Extension: agent",
+        ""
+    ].join("\n"));
     assert.equal(await cli.run(["agent", "json"]), 0);
     assert.match(stdout.flush(), /"commandId": "agent"/u);
 
@@ -291,7 +309,7 @@ test("CliMain keeps Extension management separate from cli.commands dispatch", a
         "enable:agent",
         "disable:agent",
         "reload:agent",
-        "command:agent:--help",
+        "cli.commands",
         "command:agent:json"
     ]);
     assert.equal(stderr.flush(), "");
@@ -1302,6 +1320,9 @@ function testClients(client: Record<string, unknown>) {
             revokeShare: (...args: unknown[]) => invoke("revokeShare", args),
             startTransfer: (...args: unknown[]) => invoke("startTransfer", args)
         },
+        cli: {
+            commands: (...args: unknown[]) => invoke("cliCommands", args),
+        },
         config: {
             get: (...args: unknown[]) => invoke("getConfig", args),
             update: (...args: unknown[]) => invoke("updateConfig", args),
@@ -1363,6 +1384,9 @@ function testClients(client: Record<string, unknown>) {
                 typeof client.subscribeTodo === "function" ? "subscribeTodo" : "subscribe",
                 args
             )
+        },
+        web: {
+            applications: (...args: unknown[]) => invoke("webApplications", args),
         },
         tool: {
             call: (...args: unknown[]) => invoke("callTool", args),

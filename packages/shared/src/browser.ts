@@ -22,6 +22,8 @@ export type {
     McpRuntimeStatus,
     RuntimeStartOptions
 } from "./client/ControlClients.js";
+export type { CliCommandDescriptor } from "./dto/cli/DtoCliCommand.js";
+export type { WebApplicationDescriptor } from "./dto/web/DtoWebApplication.js";
 export { InstanceEventStream, readInstanceEvent } from "./client/InstanceEventStream.js";
 export type {
     InstanceEventStreamPort,

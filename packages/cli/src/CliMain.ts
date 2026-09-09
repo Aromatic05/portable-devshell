@@ -22,7 +22,7 @@ import { CliCommandWatchStatus } from "./command/watch/CliCommandWatchStatus.js"
 import { cliExitCodes } from "./exit/CliExitCode.js";
 import { CliExitMapper } from "./exit/CliExitMapper.js";
 import { renderCliError } from "./render/CliRenderError.js";
-import { renderCliTopicUsage, renderCliUsage, renderExtensionUsage, renderInstanceUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
+import { renderCliTopicUsage, renderCliUsage, renderExtensionCommandUsage, renderExtensionUsage, renderInstanceUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
 import { renderControlLogs } from "./render/control/CliRenderControlLogs.js";
 import { renderControlStatus } from "./render/control/CliRenderControlStatus.js";
 import { renderInstanceList } from "./render/instance/CliRenderInstanceList.js";
@@ -292,6 +292,14 @@ export class CliMain {
                 this.#writeJson(await this.#clients.extension.reload(command.extensionId));
                 return;
             case "extension.command": {
+                if (isExtensionHelp(command.args)) {
+                    const descriptor = (await this.#clients.cli.commands())
+                        .find((candidate) => candidate.id === command.commandId);
+                    if (descriptor !== undefined) {
+                        this.#stdout.write(`${renderExtensionCommandUsage(descriptor)}\n`);
+                        return;
+                    }
+                }
                 const result = await this.#clients.extension.command(command.commandId, command.args, {
                     workingDirectory: process.cwd()
                 });
@@ -473,6 +481,10 @@ export class CliMain {
 if (isCliEntrypoint(import.meta.url, process.argv[1])) {
     const exitCode = await new CliMain().run(process.argv.slice(2));
     process.exit(exitCode);
+}
+
+function isExtensionHelp(args: readonly string[]): boolean {
+    return args.length === 1 && (args[0] === "--help" || args[0] === "-h");
 }
 
 function splitGlobalFlags(argv: readonly string[]): { commandArgs: string[]; debug: boolean; verbose: boolean } {

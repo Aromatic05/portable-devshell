@@ -47,7 +47,12 @@ export function Application({
     return <div className="app">
         <aside>
             <h1>portable-devshell</h1>
-            <Navigation active={route} counts={counts} navigate={navigate} />
+            <Navigation
+                active={route}
+                applications={state.readModel.webApplications}
+                counts={counts}
+                navigate={navigate}
+            />
         </aside>
         <main>
             <header className={`connection ${state.connection}`}>
@@ -75,7 +80,12 @@ export function Application({
             {route === "todos" ? <Todos disabled={interactionDisabled} state={state} store={store} /> : null}
         </main>
         <nav aria-label="Primary navigation" className="bottom">
-            <Navigation active={route} counts={counts} navigate={navigate} />
+            <Navigation
+                active={route}
+                applications={state.readModel.webApplications}
+                counts={counts}
+                navigate={navigate}
+            />
         </nav>
     </div>;
 }

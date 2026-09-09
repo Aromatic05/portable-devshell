@@ -13,6 +13,8 @@ export * from "./dto/DtoCommandResult.js";
 export * from "./dto/DtoControlProtocol.js";
 export * from "./dto/DtoDebug.js";
 export * from "./dto/DtoExtension.js";
+export * from "./dto/cli/DtoCliCommand.js";
+export * from "./dto/web/DtoWebApplication.js";
 export * from "./dto/context/DtoContextMessage.js";
 export * from "./dto/context/DtoContextRecord.js";
 export * from "./dto/artifact/DtoArtifact.js";

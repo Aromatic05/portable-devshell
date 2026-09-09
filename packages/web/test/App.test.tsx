@@ -23,6 +23,23 @@ afterEach(() => {
 });
 
 describe("authenticated application shell", () => {
+    it("renders discovered Extension applications as Web-domain navigation without invoking them", async () => {
+        const clients = fakeClients();
+        clients.web.applications = vi.fn(async () => [{
+            extensionId: "agent",
+            id: "agent",
+            title: "Agent",
+        }]);
+        const session = fakeSession({ authMode: "none", check: false, establish: true });
+
+        render(<App createClients={() => clients} session={session} />);
+
+        const links = await screen.findAllByRole("link", { name: "Agent" });
+        expect(links).toHaveLength(2);
+        for (const link of links) expect(link).toHaveAttribute("href", "./extensions/agent/");
+        expect(clients.web.applications).toHaveBeenCalledOnce();
+    });
+
     it("keeps the default browser session stable across React renders", async () => {
         const request = vi.fn<typeof fetch>().mockResolvedValue(
             new Response(null, { status: 204 }),
@@ -327,6 +344,7 @@ function fakeClients(): WebClients {
         onTransportClose: () => () => undefined,
         reconnect: async () => undefined,
         artifact: {} as WebClients["artifact"],
+        cli: {} as WebClients["cli"],
         config: {} as WebClients["config"],
         reverse: {} as WebClients["reverse"],
         terminal: {} as WebClients["terminal"],
@@ -385,6 +403,9 @@ function fakeClients(): WebClients {
             decideApproval: async () => {
                 throw new Error("Not used.");
             },
+        },
+        web: {
+            applications: async () => [],
         },
     };
 }

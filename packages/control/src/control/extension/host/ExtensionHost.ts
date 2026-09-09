@@ -11,7 +11,10 @@ import {
 } from "@portable-devshell/shared";
 
 import { ExtensionGeneration, type ExtensionGenerationLease } from "./generation/ExtensionGeneration.js";
-import { ExtensionCatalog } from "./generation/ExtensionCatalog.js";
+import {
+    ExtensionCatalog,
+    type ExtensionCatalogRegistration
+} from "./generation/ExtensionCatalog.js";
 import {
     cloneExtensionRegistry,
     type ExtensionRegistryEntry,
@@ -79,6 +82,11 @@ export class ExtensionHost {
             );
         }
         return active.acquire();
+    }
+
+    listDeclarations(pointId: string): readonly ExtensionCatalogRegistration[] {
+        if (!this.#started || this.#stopping) return [];
+        return this.#catalog.list(pointId);
     }
 
     async dispatchCommand(

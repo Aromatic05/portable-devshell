@@ -427,6 +427,7 @@ function fakeClients(
         },
         reconnect: vi.fn(async () => undefined),
         artifact: {} as WebClients["artifact"],
+        cli: {} as WebClients["cli"],
         config: {} as WebClients["config"],
         extension: {} as WebClients["extension"],
         context: {
@@ -518,6 +519,9 @@ function fakeClients(
             start: async () => snapshot,
             stop: async () => snapshot,
             subscribe: overrides.subscribe ?? (async () => pendingStream()),
+        },
+        web: {
+            applications: async () => [],
         },
     };
 }

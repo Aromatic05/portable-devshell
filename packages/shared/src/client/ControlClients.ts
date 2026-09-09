@@ -36,6 +36,8 @@ import type {
     ExtensionRemoveResult,
     ExtensionRuntimeRecord,
 } from "../dto/DtoExtension.js";
+import type { CliCommandDescriptor } from "../dto/cli/DtoCliCommand.js";
+import type { WebApplicationDescriptor } from "../dto/web/DtoWebApplication.js";
 import type {
     InstanceCreateDraft,
     InstanceCreateResult,
@@ -126,6 +128,9 @@ export interface ControlClients {
         updateMcpEndpoint(request: ConfigUpdateMcpRequest): Promise<Record<string, JsonValue>>;
         updateWeb(request: ConfigUpdateWebRequest): Promise<Record<string, JsonValue>>;
         validate(draft: ConfigDraft): Promise<Record<string, JsonValue>>;
+    };
+    cli: {
+        commands(): Promise<CliCommandDescriptor[]>;
     };
     context: {
         disable(ctxId: string): Promise<McpContextRecord>;
@@ -244,6 +249,9 @@ export interface ControlClients {
         listCalls(instance: string, query?: ToolCallQuery): Promise<ToolCallRecord[]>;
         openSession(instance: string, workspace: string): Promise<import("../dto/tool/DtoToolDefinition.js").ToolSessionOpenResult>;
     };
+    web: {
+        applications(): Promise<WebApplicationDescriptor[]>;
+    };
 }
 
 export function createControlClients(
@@ -251,6 +259,7 @@ export function createControlClients(
     options: { clientKind: ControlClientKind },
 ): ControlClients {
     const artifact = controlClientModule(connection, "artifact");
+    const cli = controlClientModule(connection, "cli");
     const config = controlClientModule(connection, "config");
     const context = controlClientModule(connection, "context");
     const debug = controlClientModule(connection, "debug");
@@ -266,6 +275,7 @@ export function createControlClients(
     const terminal = instanceClientModule(connection, "terminal");
     const todo = instanceClientModule(connection, "todo");
     const tool = instanceClientModule(connection, "tool");
+    const web = controlClientModule(connection, "web");
     const openRuntimeStart = (name: string): Promise<OpenedClientStream> =>
         runtime.openStream(name, "start");
 
@@ -283,6 +293,9 @@ export function createControlClients(
                 artifact.request("startTransfer", { ...input, defaultInstance }),
             viewImage: (defaultInstance, input) =>
                 artifact.request("viewImage", { ...input, defaultInstance }),
+        },
+        cli: {
+            commands: () => cli.request("commands"),
         },
         config: {
             get: () => config.request("get"),
@@ -430,6 +443,9 @@ export function createControlClients(
             listApprovals: (name, options) => tool.request(name, "listApprovals", options),
             listCalls: (name, query) => tool.request(name, "listCalls", query),
             openSession: (name, workspace) => tool.request(name, "openSession", { workspace }),
+        },
+        web: {
+            applications: () => web.request("applications"),
         },
     };
 }

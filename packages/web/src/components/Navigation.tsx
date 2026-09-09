@@ -1,4 +1,5 @@
 import type { Route } from "../routing/hashRoute.js";
+import type { WebApplicationDescriptor } from "@portable-devshell/shared/browser";
 
 const navigation: Array<{ route: Route; label: string; badge?: number }> = [
     { route: "overview", label: "Overview" },
@@ -10,10 +11,12 @@ const navigation: Array<{ route: Route; label: string; badge?: number }> = [
 
 export function Navigation({
     active,
+    applications,
     counts,
     navigate,
 }: {
     active: Route;
+    applications: readonly WebApplicationDescriptor[];
     counts: { approvals: number; instances: number; todos: number };
     navigate(route: Route): void;
 }) {
@@ -32,6 +35,19 @@ export function Navigation({
                     </button>
                 );
             })}
+            {applications.map((application) => (
+                <a
+                    className="nav-application"
+                    href={extensionApplicationHref(application.id)}
+                    key={`extension:${application.extensionId}:${application.id}`}
+                >
+                    {application.title}
+                </a>
+            ))}
         </>
     );
+}
+
+export function extensionApplicationHref(id: string): string {
+    return `./extensions/${encodeURIComponent(id)}/`;
 }

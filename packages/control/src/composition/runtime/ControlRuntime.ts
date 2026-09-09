@@ -5,7 +5,9 @@ import { controlRemoteRpcPath, controlWebBasePath } from "@portable-devshell/sha
 import { McpOAuthProtectedResource, type HttpHost } from "@portable-devshell/mcp";
 import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
 import { DebugPatchService } from "../../control/debug/DebugPatchService.js";
+import { CliExtensionCommandCatalog } from "../../control/cli/CliExtensionCommandCatalog.js";
 import { ExtensionControlService } from "../../control/extension/route/ExtensionControlService.js";
+import { WebApplicationCatalog } from "../../server/web/extension/WebApplicationCatalog.js";
 import type { ExtensionHost } from "../../control/extension/host/ExtensionHost.js";
 import { ExtensionInstallService } from "../../control/extension/install/ExtensionInstallService.js";
 import type { ExtensionPathLayout } from "../../control/extension/state/ExtensionPathLayout.js";
@@ -78,6 +80,7 @@ export class ControlRuntime {
         this.#debug = new DebugPatchService(options.instances);
         this.#routes = new ControlRouteComposition({
             artifact: options.artifact.service,
+            cliCommands: new CliExtensionCommandCatalog(this.#extensions),
             config: options.mcp.configEditor,
             contextAdmin: () => options.mcp.host?.contextAdmin,
             debug: this.#debug,
@@ -93,7 +96,8 @@ export class ControlRuntime {
             restart: options.restart,
             reverse: options.reverse.service,
             shutdown: options.shutdown,
-            toolProvenance: options.mcp.toolProvenance
+            toolProvenance: options.mcp.toolProvenance,
+            webApplications: new WebApplicationCatalog(this.#extensions)
         });
         this.#mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
             await this.#extensions.retireInstanceResources(instance.name);

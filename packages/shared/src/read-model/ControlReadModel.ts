@@ -2,6 +2,7 @@ import type {
     ArtifactShareResult,
     ArtifactTransferRecord,
 } from "../dto/artifact/DtoArtifact.js";
+import type { WebApplicationDescriptor } from "../dto/web/DtoWebApplication.js";
 import type { ContextMessageRecord } from "../dto/context/DtoContextMessage.js";
 import type { McpContextRecord } from "../dto/context/DtoContextRecord.js";
 import { CONTROL_PROTOCOL_VERSION } from "../dto/DtoControlProtocol.js";
@@ -48,7 +49,8 @@ export type ControlGlobalReadKey =
     | "instances"
     | "mcp"
     | "oauthApprovals"
-    | "overview";
+    | "overview"
+    | "webApplications";
 
 export interface ControlReadFailure {
     error: Error;
@@ -69,6 +71,7 @@ export interface ControlReadModelState {
     oauthApprovals: OAuthApprovalRequest[];
     overview?: OperationalOverview;
     service?: ControlServiceStatus;
+    webApplications: WebApplicationDescriptor[];
 }
 
 export interface ControlReadModelLoadOptions {
@@ -196,6 +199,7 @@ export class ControlReadModel {
             this.refreshMcp(epoch),
             this.refreshOverview(epoch),
             this.refreshContexts(epoch),
+            this.refreshWebApplications(epoch),
             options.config === true ? this.refreshConfig(epoch) : Promise.resolve(),
             options.artifacts === true ? this.refreshArtifacts(epoch) : Promise.resolve(),
             ...instances
@@ -210,6 +214,7 @@ export class ControlReadModel {
             this.#readGlobal("instances", this.#clients.instance.list(), (value) => this.#applyInstances(value), epoch),
             this.refreshMcp(epoch),
             this.refreshContexts(epoch),
+            this.refreshWebApplications(epoch),
         ];
         if (this.#loadOptions.config === true) reads.push(this.refreshConfig(epoch));
         await Promise.all(reads);
@@ -275,6 +280,31 @@ export class ControlReadModel {
             epoch,
             true,
         );
+    }
+
+    async refreshWebApplications(epoch = this.#epoch): Promise<void> {
+        const version = this.#nextVersion("webApplications");
+        try {
+            const applications = await this.#request(
+                this.#clients.web.applications(),
+                "web.applications",
+            );
+            if (!this.#valid("webApplications", version, epoch)) return;
+            this.#state.webApplications = [...applications].sort((left, right) =>
+                left.title.localeCompare(right.title) || left.id.localeCompare(right.id)
+            );
+            this.#clearFailure("webApplications");
+            this.#emit();
+        } catch (error) {
+            if (!this.#valid("webApplications", version, epoch)) return;
+            if (methodNotFound(error)) {
+                this.#state.webApplications = [];
+                this.#clearFailure("webApplications");
+                this.#emit();
+                return;
+            }
+            this.#setFailure("webApplications", error);
+        }
     }
 
     async refreshArtifacts(epoch = this.#epoch): Promise<void> {
@@ -959,6 +989,7 @@ export function createInitialControlReadModelState(): ControlReadModelState {
         instances: [],
         instanceState: {},
         oauthApprovals: [],
+        webApplications: [],
     };
 }
 
@@ -982,6 +1013,7 @@ function snapshotState(state: ControlReadModelState): ControlReadModelState {
             }]),
         ),
         oauthApprovals: [...state.oauthApprovals],
+        webApplications: [...state.webApplications],
     };
 }
 

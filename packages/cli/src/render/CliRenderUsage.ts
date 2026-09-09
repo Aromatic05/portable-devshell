@@ -1,3 +1,5 @@
+import type { CliCommandDescriptor } from "@portable-devshell/shared";
+
 export type CliHelpTopic = "approval" | "config" | "context" | "debug" | "oauth" | "todo" | "tool";
 
 export function renderCliUsage(): string {
@@ -110,6 +112,18 @@ export function renderExtensionUsage(): string {
         "  devshell extension reload <extensionId>",
         "",
         "Installed Extension commands use `devshell <extension-id> [args...]`."
+    ].join("\n");
+}
+
+export function renderExtensionCommandUsage(command: CliCommandDescriptor): string {
+    return [
+        command.title,
+        "",
+        "Usage:",
+        `  devshell ${command.usage ?? command.id}`,
+        ...(command.summary === undefined ? [] : ["", command.summary]),
+        "",
+        `Extension: ${command.extensionId}`,
     ].join("\n");
 }
 

@@ -31,6 +31,14 @@ export class ExtensionCatalog {
         return this.#extensions.get(extensionId);
     }
 
+    list(pointId: string): readonly ExtensionCatalogRegistration[] {
+        return [...this.#registrations.values()]
+            .filter((registration) => registration.pointId === pointId)
+            .sort((left, right) =>
+                left.id.localeCompare(right.id) || left.extensionId.localeCompare(right.extensionId)
+            );
+    }
+
     remove(extensionId: string): void {
         this.#extensions.delete(extensionId);
         for (const [key, registration] of this.#registrations) {

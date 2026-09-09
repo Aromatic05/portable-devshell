@@ -358,6 +358,17 @@ test("Extension startup catalogs last-known-good when the selected manifest is u
     const records = await host.list();
     assert.deepEqual(loaded, []);
     assert.deepEqual(manifestReads, ["bad:broken", "bad:good", "healthy:v1"]);
+    assert.deepEqual(
+        host.listDeclarations("cli.commands").map((registration) => ({
+            extensionId: registration.extensionId,
+            id: registration.id
+        })),
+        [
+            { extensionId: "bad", id: "bad" },
+            { extensionId: "healthy", id: "healthy" }
+        ]
+    );
+    assert.deepEqual(loaded, []);
     assert.equal(records.find((record) => record.id === "bad")?.activeGeneration, undefined);
     assert.equal(records.find((record) => record.id === "bad")?.state, "installed");
     assert.equal(records.find((record) => record.id === "healthy")?.activeGeneration, undefined);

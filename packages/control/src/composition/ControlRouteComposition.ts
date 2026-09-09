@@ -9,6 +9,7 @@ import {
 
 import type { ArtifactService } from "../control/artifact/ArtifactService.js";
 import { createArtifactRouteModule } from "../control/artifact/route/ArtifactRouteModule.js";
+import { createCliRouteModule, type CliCommandCatalogPort } from "../control/cli/CliRouteModule.js";
 import type { ConfigEditorPort } from "../control/config/ConfigRouteModule.js";
 import { createConfigRouteModule } from "../control/config/ConfigRouteModule.js";
 import { createDebugRouteModule, type DebugPatchPort } from "../control/debug/DebugRouteModule.js";
@@ -34,9 +35,14 @@ import { createTerminalRouteModule } from "../control/terminal/TerminalRouteModu
 import type { TerminalBackend } from "../control/terminal/TerminalProcess.js";
 import { TerminalSessionService } from "../control/terminal/TerminalSessionService.js";
 import { createToolRouteModule } from "../instance/tool/ToolRouteModule.js";
+import {
+    createWebApplicationRouteModule,
+    type WebApplicationCatalogPort
+} from "../server/web/extension/WebApplicationRouteModule.js";
 
 export interface ControlRouteCompositionOptions {
     artifact?: ArtifactService;
+    cliCommands?: CliCommandCatalogPort;
     config?: ConfigEditorPort;
     contextAdmin?: () => ContextAdminPort | undefined;
     debug?: DebugPatchPort;
@@ -51,6 +57,7 @@ export interface ControlRouteCompositionOptions {
     shutdown(): Promise<void> | void;
     terminalMaxUnackedBytes?: number;
     toolProvenance?: ToolCallProvenanceStore;
+    webApplications?: WebApplicationCatalogPort;
 }
 
 export class ControlRouteComposition {
@@ -109,6 +116,12 @@ export class ControlRouteComposition {
                     ...(this.#options.extension === undefined
                         ? []
                         : [createExtensionRouteModule(this.#options.extension)]),
+                    ...(this.#options.cliCommands === undefined
+                        ? []
+                        : [createCliRouteModule(this.#options.cliCommands)]),
+                    ...(this.#options.webApplications === undefined
+                        ? []
+                        : [createWebApplicationRouteModule(this.#options.webApplications)]),
                     createMcpRouteModule({
                         approvals: this.#options.oauthApprovals ?? (() => undefined),
                         status: this.#options.mcpStatus ?? (() => ({
