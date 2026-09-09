@@ -29,16 +29,34 @@ function registration(
 
 function extensionHost(entries: readonly ExtensionCatalogRegistration[], events: string[] = []) {
     return {
-        async dispatchCommand(commandId: string, argv: readonly string[], invocation: {
-            localOwner: boolean;
-            requestId: string;
-            workingDirectory?: string;
-        }) {
-            events.push(
-                `command:${commandId}:${argv.join("|")}:${invocation.requestId}:`
-                + `${invocation.localOwner}:${invocation.workingDirectory ?? ""}`
-            );
-            return { kind: "text" as const, text: "ok" };
+        async acquireRegistration(pointId: string, id: string) {
+            const entry = entries.find((candidate) => candidate.pointId === pointId && candidate.id === id);
+            if (entry === undefined) throw new Error(`missing registration ${pointId}/${id}`);
+            return {
+                extensionId: entry.extensionId,
+                lease: {
+                    release() {
+                        events.push(`release:${id}`);
+                    }
+                },
+                registration: {
+                    binding: async (argv: readonly string[], invocation: {
+                        localOwner: boolean;
+                        requestId: string;
+                        workingDirectory?: string;
+                    }) => {
+                        events.push(
+                            `command:${id}:${argv.join("|")}:${invocation.requestId}:`
+                            + `${invocation.localOwner}:${invocation.workingDirectory ?? ""}`
+                        );
+                        if (argv[0] === "fail") throw new Error("binding failed");
+                        return { kind: "text" as const, text: "ok" };
+                    },
+                    declaration: entry.declaration,
+                    id: entry.id,
+                    pointId: entry.pointId
+                }
+            } as never;
         },
         listDeclarations(pointId: string) {
             return entries.filter((entry) => entry.pointId === pointId);
@@ -119,6 +137,14 @@ test("CLI command route owns invocation, caller cwd, and payload validation", as
         name: "command",
         payload: { argv: ["provider", "list"], commandId: "agent", workingDirectory: "/repo" }
     }, context("cli", "local-owner")), { kind: "text", text: "ok" });
+    await assert.rejects(
+        async () => await command.handle({
+            id: "2a",
+            name: "command",
+            payload: { argv: ["fail"], commandId: "agent" }
+        }, context("cli", "local-owner")),
+        /binding failed/u
+    );
 
     await assert.rejects(
         async () => await command.handle({
@@ -163,7 +189,11 @@ test("CLI command route owns invocation, caller cwd, and payload validation", as
 
     assert.deepEqual(events, [
         "command:agent:--help:req-1:false:",
-        "command:agent:provider|list:req-1:true:/repo"
+        "release:agent",
+        "command:agent:provider|list:req-1:true:/repo",
+        "release:agent",
+        "command:agent:fail:req-1:true:",
+        "release:agent"
     ]);
 });
 

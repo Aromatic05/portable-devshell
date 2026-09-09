@@ -3,7 +3,6 @@ import test from "node:test";
 
 import {
     EXTENSION_API_VERSION,
-    type ExtensionInvocationContext,
     type ExtensionManifest
 } from "@portable-devshell/extension";
 import type { CliCommandResult } from "@portable-devshell/extension/cli";
@@ -99,18 +98,16 @@ function unregisteredGeneration(
     });
 }
 
-async function commandText(host: ExtensionHost, id: string, requestId: string): Promise<string> {
-    const result = await host.dispatchCommand(id, [], invocation(requestId));
-    assert.equal(result.kind, "text");
-    return result.text;
-}
-
-function invocation(requestId: string): ExtensionInvocationContext {
-    return {
-        localOwner: false,
-        requestId,
-        signal: new AbortController().signal
-    };
+async function commandText(host: ExtensionHost, id: string, _requestId: string): Promise<string> {
+    const { lease, registration } = await host.acquireRegistration("cli.commands", id);
+    try {
+        assert.equal(typeof registration.binding, "function");
+        const result = await (registration.binding as () => Promise<CliCommandResult>)();
+        assert.equal(result.kind, "text");
+        return result.text;
+    } finally {
+        lease.release();
+    }
 }
 
 test("Extension host swaps atomically while an old in-flight request drains on its original generation", async () => {
@@ -401,7 +398,7 @@ test("Extension disable removes new routing immediately while a leased old gener
 
     await host.disable("example");
     await assert.rejects(
-        host.dispatchCommand("example", [], invocation("new")),
+        host.acquireRegistration("cli.commands", "example"),
         /No Extension registration/u
     );
     assert.equal((await host.list())[0]?.state, "disabled");
@@ -471,7 +468,7 @@ test("Extension host reports a faulted active generation as failed and rejects n
     assert.equal(record.activeGeneration, "a");
     assert.equal(record.failure?.message, "sandbox OOM");
     await assert.rejects(
-        host.dispatchCommand("example", [], invocation("faulted")),
+        host.acquireRegistration("cli.commands", "example"),
         /sandbox OOM/u
     );
     await host.stop();

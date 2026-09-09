@@ -1,8 +1,4 @@
-import type {
-    ExtensionInvocationContext,
-    ExtensionManifest
-} from "@portable-devshell/extension";
-import type { CliCommandBinding, CliCommandResult } from "@portable-devshell/extension/cli";
+import type { ExtensionManifest } from "@portable-devshell/extension";
 import {
     createError,
     errorCodes,
@@ -87,22 +83,6 @@ export class ExtensionHost {
     listDeclarations(pointId: string): readonly ExtensionCatalogRegistration[] {
         if (!this.#started || this.#stopping) return [];
         return this.#catalog.list(pointId);
-    }
-
-    async dispatchCommand(
-        commandId: string,
-        argv: readonly string[],
-        context: ExtensionInvocationContext
-    ): Promise<CliCommandResult> {
-        const { lease, registration } = await this.acquireRegistration("cli.commands", commandId);
-        try {
-            if (typeof registration.binding !== "function") {
-                throw extensionInvalid(commandId, "has an invalid cli.commands binding");
-            }
-            return await (registration.binding as CliCommandBinding)(argv, context);
-        } finally {
-            lease.release();
-        }
     }
 
     async acquireRegistration(pointId: string, id: string): Promise<{

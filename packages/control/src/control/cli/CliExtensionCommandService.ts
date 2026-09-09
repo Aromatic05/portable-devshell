@@ -1,16 +1,21 @@
 import type { ExtensionInvocationContext } from "@portable-devshell/extension";
 import type {
+    CliCommandBinding,
     CliCommandDeclaration,
     CliCommandResult
 } from "@portable-devshell/extension/cli";
-import type { CliCommandDescriptor } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    type CliCommandDescriptor
+} from "@portable-devshell/shared";
 
 import type { ExtensionHost } from "../extension/host/ExtensionHost.js";
 
 export class CliExtensionCommandService {
-    readonly #extensions: Pick<ExtensionHost, "dispatchCommand" | "listDeclarations">;
+    readonly #extensions: Pick<ExtensionHost, "acquireRegistration" | "listDeclarations">;
 
-    constructor(extensions: Pick<ExtensionHost, "dispatchCommand" | "listDeclarations">) {
+    constructor(extensions: Pick<ExtensionHost, "acquireRegistration" | "listDeclarations">) {
         this.#extensions = extensions;
     }
 
@@ -19,7 +24,20 @@ export class CliExtensionCommandService {
         argv: readonly string[],
         context: ExtensionInvocationContext
     ): Promise<CliCommandResult> {
-        return await this.#extensions.dispatchCommand(commandId, argv, context);
+        const { lease, registration } = await this.#extensions.acquireRegistration("cli.commands", commandId);
+        try {
+            if (typeof registration.binding !== "function") {
+                throw createError({
+                    code: errorCodes.controlCliCommandFailed,
+                    details: { commandId },
+                    message: `CLI command ${commandId} has an invalid binding.`,
+                    retryable: false
+                });
+            }
+            return await (registration.binding as CliCommandBinding)(argv, context);
+        } finally {
+            lease.release();
+        }
     }
 
     list(): readonly CliCommandDescriptor[] {

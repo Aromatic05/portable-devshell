@@ -107,12 +107,9 @@ function testConfigEditor() {
 function testExtensions() {
     return {
         async disable() {},
-        async dispatchCommand() { return { kind: "text", text: "" }; },
-        async dispatchRpc() { return {}; },
         async enable() {},
         async list() { return []; },
         async reload() {},
-        async retireInstance() {},
         async start() {},
         async stop() {},
     } as never;
@@ -574,7 +571,6 @@ test("runtime installs builtin Extensions through the normal installer before op
             selectedGeneration = generation;
         },
         async disable() {},
-        async dispatchCommand() { return { kind: "text", text: "" }; },
         async enable() {},
         async forget() {},
         async list() {
@@ -588,7 +584,6 @@ test("runtime installs builtin Extensions through the normal installer before op
             }];
         },
         async reload() {},
-        async retireInstance() {},
         async start() {},
         async stop() {},
         async waitForDrain() {}
@@ -646,12 +641,10 @@ test("runtime keeps the Control channel closed when builtin Extension installati
         }),
         extensions: {
             async disable() {},
-            async dispatchCommand() { return { kind: "text", text: "" }; },
             async enable() {},
             async forget() {},
             async list() { return []; },
             async reload() {},
-            async retireInstance() {},
             async selectGeneration() {},
             async start() {},
             async stop() {},

@@ -81,6 +81,27 @@ async function harness(t: test.TestContext, limits = {}): Promise<Harness> {
     };
 }
 
+async function invokeCliRegistration(
+    host: ExtensionHost,
+    id: string,
+    requestId: string
+): Promise<unknown> {
+    const { lease, registration } = await host.acquireRegistration("cli.commands", id);
+    try {
+        assert.equal(typeof registration.binding, "function");
+        return await Reflect.apply(registration.binding as (...args: unknown[]) => unknown, undefined, [
+            [],
+            {
+                localOwner: false,
+                requestId,
+                signal: new AbortController().signal
+            }
+        ]);
+    } finally {
+        lease.release();
+    }
+}
+
 test("Extension install materializes, validates, and selects an immutable generation without keeping it active", async (t) => {
     const h = await harness(t);
     const source = await h.source("source-v1");
@@ -93,11 +114,10 @@ test("Extension install materializes, validates, and selects an immutable genera
     assert.match(installed.selectedGeneration ?? "", /^v1\.0\.0-[0-9a-f]{64}$/u);
     assert.equal(installed.lastKnownGoodGeneration, installed.selectedGeneration);
     const generation = installed.selectedGeneration!;
-    assert.deepEqual(await h.host.dispatchCommand("example", [], {
-        localOwner: false,
-        requestId: "ping-1",
-        signal: new AbortController().signal
-    }), { kind: "json", value: { version: "1.0.0" } });
+    assert.deepEqual(
+        await invokeCliRegistration(h.host, "example", "ping-1"),
+        { kind: "json", value: { version: "1.0.0" } }
+    );
     assert.equal((await h.host.list())[0]?.activeGeneration, generation);
     const generationDirectory = h.paths.generationDirectory("example", generation);
     assert.equal((await stat(join(generationDirectory, "extension.mjs"))).isFile(), true);
@@ -154,11 +174,10 @@ test("reinstalling the selected builtin generation preserves lazy startup until 
     assert.equal(repeated.state, "installed");
     assert.equal(repeated.activeGeneration, undefined);
     assert.equal(repeated.selectedGeneration, first.selectedGeneration);
-    assert.deepEqual(await host.dispatchCommand("skill", [], {
-        localOwner: false,
-        requestId: "lazy-builtin",
-        signal: new AbortController().signal
-    }), { kind: "json", value: { version: "1.0.0" } });
+    assert.deepEqual(
+        await invokeCliRegistration(host, "skill", "lazy-builtin"),
+        { kind: "json", value: { version: "1.0.0" } }
+    );
     assert.equal((await host.list())[0]?.state, "active");
 });
 
@@ -180,11 +199,10 @@ test("builtin Extension generation resolves host runtime dependencies without co
 
     assert.equal(installed.state, "installed");
     assert.equal(installed.activeGeneration, undefined);
-    assert.deepEqual(await h.host.dispatchCommand("mcp", [], {
-        localOwner: false,
-        requestId: "host-dependency",
-        signal: new AbortController().signal
-    }), { kind: "json", value: { clientType: "function" } });
+    assert.deepEqual(
+        await invokeCliRegistration(h.host, "mcp", "host-dependency"),
+        { kind: "json", value: { clientType: "function" } }
+    );
     assert.equal((await h.host.list())[0]?.activeGeneration, installed.selectedGeneration);
     assert.equal(await exists(join(
         h.paths.generationDirectory("mcp", installed.selectedGeneration!),
@@ -238,11 +256,10 @@ test("Extension candidate activation failure removes only the new generation and
     const h = await harness(t);
     const goodSource = await h.source("good", { version: "1.0.0" });
     const good = await h.service.install(goodSource);
-    assert.deepEqual(await h.host.dispatchCommand("example", [], {
-        localOwner: false,
-        requestId: "activate-good-before-upgrade",
-        signal: new AbortController().signal
-    }), { kind: "json", value: { version: "1.0.0" } });
+    assert.deepEqual(
+        await invokeCliRegistration(h.host, "example", "activate-good-before-upgrade"),
+        { kind: "json", value: { version: "1.0.0" } }
+    );
     assert.equal((await h.host.list())[0]?.activeGeneration, good.selectedGeneration);
     const badSource = await h.source("bad", {
         body: "export async function activate() { throw new Error('bad activation'); }\n",
@@ -254,11 +271,10 @@ test("Extension candidate activation failure removes only the new generation and
     const records = await h.host.list();
     assert.equal(records[0]?.activeGeneration, good.selectedGeneration);
     assert.equal(records[0]?.selectedGeneration, good.selectedGeneration);
-    assert.deepEqual(await h.host.dispatchCommand("example", [], {
-        localOwner: false,
-        requestId: "ping-after-failure",
-        signal: new AbortController().signal
-    }), { kind: "json", value: { version: "1.0.0" } });
+    assert.deepEqual(
+        await invokeCliRegistration(h.host, "example", "ping-after-failure"),
+        { kind: "json", value: { version: "1.0.0" } }
+    );
     assert.deepEqual(await readdir(join(h.paths.codeRoot, "example")), [good.selectedGeneration]);
 });
 
@@ -333,11 +349,7 @@ test("Extension remove disables routing, waits for the leased generation to drai
         ].join("\n")
     });
     const installed = await h.service.install(source);
-    const active = h.host.dispatchCommand("example", [], {
-        localOwner: false,
-        requestId: "hold",
-        signal: new AbortController().signal
-    });
+    const active = invokeCliRegistration(h.host, "example", "hold");
     await waitFor(async () => (await h.host.list())[0]?.state === "active");
     await writeFile(join(h.paths.stateDirectory("example"), "state.txt"), "keep\n", "utf8");
 
@@ -350,11 +362,7 @@ test("Extension remove disables routing, waits for the leased generation to drai
     assert.equal(removed, false);
     assert.equal(await exists(h.paths.generationDirectory("example", installed.selectedGeneration!)), true);
     await assert.rejects(
-        h.host.dispatchCommand("example", [], {
-            localOwner: false,
-            requestId: "new-hold",
-            signal: new AbortController().signal
-        }),
+        invokeCliRegistration(h.host, "example", "new-hold"),
         /No Extension registration/u
     );
 
@@ -387,11 +395,10 @@ test("Extension remove surfaces dispose failure before deleting the installed ge
     const installed = await h.service.install(source);
     const generationDirectory = h.paths.generationDirectory("example", installed.selectedGeneration!);
     await writeFile(join(h.paths.stateDirectory("example"), "fail-dispose"), "fail\n", "utf8");
-    assert.deepEqual(await h.host.dispatchCommand("example", [], {
-        localOwner: false,
-        requestId: "activate-dispose-failure",
-        signal: new AbortController().signal
-    }), { kind: "text", text: "ok" });
+    assert.deepEqual(
+        await invokeCliRegistration(h.host, "example", "activate-dispose-failure"),
+        { kind: "text", text: "ok" }
+    );
 
     await assert.rejects(
         h.service.remove("example"),
