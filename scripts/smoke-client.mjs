@@ -95,6 +95,23 @@ try {
     runCli(["start"]);
     controlStarted = true;
 
+    stage("migrate legacy instance config");
+    const migratedInstanceConfig = await readFile(
+        resolve(devshellHome, "control", "instances", `${instance}.toml`),
+        "utf8"
+    );
+    if (!/^version = 4$/mu.test(migratedInstanceConfig)) {
+        throw new Error(`legacy instance config was not rewritten to version 4:\n${migratedInstanceConfig}`);
+    }
+    if (/^\[mcp\.tools\]$/mu.test(migratedInstanceConfig)) {
+        throw new Error(`legacy mcp.tools policy survived version 4 migration:\n${migratedInstanceConfig}`);
+    }
+    for (const extensionId of ["artifact", "instance", "mcp", "secret", "skill"]) {
+        if (!new RegExp(`^model = \\[.*"${extensionId}".*\\]$`, "mu").test(migratedInstanceConfig)) {
+            throw new Error(`version 4 migration did not grant bundled model Extension ${extensionId}:\n${migratedInstanceConfig}`);
+        }
+    }
+
     stage("control status");
     runCli(["status"]);
 
