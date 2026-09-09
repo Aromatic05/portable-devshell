@@ -29,6 +29,10 @@ export class ExtensionSandboxPointCodecRegistry {
         }
     }
 
+    ids(): readonly string[] {
+        return Object.freeze([...this.#codecs.keys()].sort());
+    }
+
     describeBinding(
         pointId: string,
         binding: unknown,

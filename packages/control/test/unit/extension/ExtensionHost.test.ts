@@ -5,7 +5,6 @@ import {
     EXTENSION_API_VERSION,
     type ExtensionManifest
 } from "@portable-devshell/extension";
-import type { CliCommandResult } from "@portable-devshell/extension/cli";
 
 import { createControlExtensionPointRegistry } from "../../../src/composition/ControlExtensionPointRegistry.ts";
 import { ExtensionGeneration } from "../../../src/control/extension/host/generation/ExtensionGeneration.ts";
@@ -73,7 +72,7 @@ function generation(
         generation: name,
         manifest: manifest(id, name),
         registrations: new ExtensionRegistrationSet([{
-            binding: async (): Promise<CliCommandResult> => ({ kind: "text", text: await handler() }),
+            binding: async () => await handler(),
             declaration: { id, title: id },
             id,
             pointId: "cli.commands"
@@ -103,9 +102,7 @@ async function commandText(host: ExtensionHost, id: string, _requestId: string):
     const { lease, registration } = await host.acquireRegistration("cli.commands", id);
     try {
         assert.equal(typeof registration.binding, "function");
-        const result = await (registration.binding as () => Promise<CliCommandResult>)();
-        assert.equal(result.kind, "text");
-        return result.text;
+        return await (registration.binding as () => Promise<string>)();
     } finally {
         lease.release();
     }

@@ -54,6 +54,10 @@ export class ExtensionPointRegistry {
         }
     }
 
+    ids(): readonly string[] {
+        return Object.freeze([...this.#definitions.keys()].sort());
+    }
+
     parseDeclaration(
         pointId: string,
         declaration: ExtensionPointDeclaration,
