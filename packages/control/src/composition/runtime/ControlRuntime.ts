@@ -6,8 +6,6 @@ import { McpOAuthProtectedResource, type HttpHost } from "@portable-devshell/mcp
 import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
 import { DebugPatchService } from "../../control/debug/DebugPatchService.js";
 import { CliExtensionCommandService } from "../../control/cli/CliExtensionCommandService.js";
-import { createArtifactCliCommandProvider } from "../../control/artifact/cli/ArtifactCliCommandProvider.js";
-import { createInstanceCliCommandProvider } from "../../control/instance/cli/InstanceCliCommandProvider.js";
 import { RuntimeSubscriptionManager } from "../../instance/runtime/RuntimeSubscriptionManager.js";
 import { ExtensionControlService } from "../../control/extension/route/ExtensionControlService.js";
 import { WebApplicationCatalog } from "../../server/web/extension/WebApplicationCatalog.js";
@@ -84,16 +82,7 @@ export class ControlRuntime {
         const runtimeSubscriptions = new RuntimeSubscriptionManager();
         this.#routes = new ControlRouteComposition({
             artifact: options.artifact.service,
-            cliCommands: new CliExtensionCommandService(this.#extensions, [
-                createArtifactCliCommandProvider(options.artifact.service),
-                createInstanceCliCommandProvider({
-                    create: options.mcp.instanceCreate,
-                    editor: options.mcp.configEditor,
-                    instances: options.instances,
-                    reverse: options.reverse.service,
-                    subscriptions: runtimeSubscriptions
-                })
-            ]),
+            cliCommands: new CliExtensionCommandService(this.#extensions, { surface: "native" }),
             config: options.mcp.configEditor,
             contextAdmin: () => options.mcp.host?.contextAdmin,
             debug: this.#debug,

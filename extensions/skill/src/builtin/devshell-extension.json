@@ -1,13 +1,13 @@
 {
     "schemaVersion": 1,
-    "apiVersion": 3,
+    "apiVersion": 4,
     "id": "skill",
     "name": "portable-devshell Skill",
     "version": "0.1.0",
     "entry": "index.ts",
     "capabilities": ["assets"],
     "extensions": {
-        "cli.commands": [
+        "cli.native-commands": [
             {
                 "id": "skill",
                 "title": "Skill",

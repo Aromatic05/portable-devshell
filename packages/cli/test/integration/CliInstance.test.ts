@@ -417,7 +417,8 @@ async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void>
     assert.match(stdout.flush(), /status: ready/u);
 
     const previousControlPid = controlPid;
-    assert.equal(await runCli(["restart"]), 0);
+    const restartExit = await runCli(["restart"]);
+    assert.equal(restartExit, 0, stderr.flush());
     assert.match(stdout.flush(), /control: running/u);
     controlPid = await readControlPid(homeDirectory);
     assert.notEqual(controlPid, previousControlPid);
@@ -487,6 +488,9 @@ async function handleHarnessEvent(codec: Codec, event: Event): Promise<void> {
                 capabilities: ["request", "stream", "streamResume"],
                 protocolVersion: 1,
             });
+            return;
+        case "cli.commands":
+            await reply(codec, event, []);
             return;
         case "cli.commandStream":
             await handleCliCommandStream(codec, event);

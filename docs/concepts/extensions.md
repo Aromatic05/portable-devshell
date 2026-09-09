@@ -30,7 +30,7 @@ Manifest 在 activation 前描述静态事实：
 ```json
 {
     "schemaVersion": 1,
-    "apiVersion": 3,
+    "apiVersion": 4,
     "id": "example",
     "name": "Example",
     "version": "1.0.0",
@@ -38,7 +38,7 @@ Manifest 在 activation 前描述静态事实：
     "hostDependencies": [],
     "capabilities": ["assets", "workers"],
     "extensions": {
-        "cli.commands": [
+        "cli.native-commands": [
             { "id": "example", "title": "Example" }
         ]
     }
@@ -220,13 +220,16 @@ Extension Point 由具体 host domain 拥有，而不是由 Extension core 维�
 Point identity 使用稳定 namespaced string：
 
 ```text
-cli.commands
+cli.native-commands
+cli.model-commands
 web.applications
 ```
 
 Registration 使用 Extension-local id；Host 结合 point id、Extension id 和 local id 建立全局 identity。Runtime registration 默认属于当前 generation，generation retirement 自动撤销。
 
-Extension id 与 point-local registration id 是独立 namespace。CLI 的内置 command name 只由 `cli.commands` point definition 保留：Extension `status` 可以存在并提供另一个 command id，但 `cli.commands/status` 会在 static declaration validation 阶段被拒绝，因为 CLI parser 永远优先解析内置 `status`。这与 install domain 对 builtin Extension identity（当前 `skill / secret / mcp`）的保护互不替代。
+Extension id 与 point-local registration id 是独立 namespace；不同 Extension Point 之间也是独立 command state。`cli.native-commands/status` 可以与 builtin `status` 同名，也可以同时存在 `cli.model-commands/status`。冲突只在同一个 Extension Point 内判断；builtin command tree 不参与 Extension registration conflict。
+
+Native CLI 的 resolution 明确采用 overlay：先解析 enabled `cli.native-commands`，没有匹配项时才回退 builtin command。Model command state 完全独立，只解析 `cli.model-commands`；它永远不会因为 model command 缺失而回退 builtin 或 native command。这条边界既是交互模型，也是安全不变量。
 
 Control 的 Extension runtime Host 对 point domain 保持中立：它负责 static catalog、lazy activation、registration acquisition 和 generation lease，但不 import CLI/Web point contract，也不提供 `dispatchCommand`、`dispatchWeb` 之类的 domain-specific dispatch API。取得 lease 后，binding 的类型校验、调用和结果语义由对应 domain service 自己负责。
 
@@ -248,27 +251,30 @@ root 只导出 core ABI；CLI/Web domain contract 不从 root 聚合，也不要
 
 CLI/Web leaf 也只导出 Extension author 需要的 point descriptor、declaration/binding/context/result types。Manifest declaration 的 schema parser 属于 Control 中对应 domain owner 的 host validation implementation，不从 public leaf SDK 导出。
 
-### cli.commands
+### CLI command states
 
 `@portable-devshell/extension/cli` 当前公开：
 
 ```text
-commands
+nativeCommands
+modelCommands
 CliCommandDeclaration
-CliCommandBinding
-CliCommandInvocationContext
+CliNativeCommandBinding
+CliNativeCommandInvocationContext
+CliModelCommandBinding
+CliModelCommandInvocationContext
 CliCommandResult
 ```
 
-Declaration 可以提供 `title`、`summary` 和 `usage`。Binding 当前由 CLI domain 定义为 argv + invocation context -> CLI result；这是 CLI 自己的 contract，不是 generic Extension RPC。
+两个 point 共用 declaration shape，可以提供 `title`、`summary` 和 `usage`，但 registration/catalog/dispatch state 完全独立。Binding 都由 CLI domain 定义为 argv + invocation context -> CLI result；这是 CLI 自己的 contract，不是 generic Extension RPC。
 
-`CliCommandInvocationContext` 也由 CLI leaf contract 拥有，其中当前包含 `localOwner`、`requestId`、`signal` 和可选 `workingDirectory`。这些字段描述 CLI invocation authority/cancellation/path 语义，因此不会从 `@portable-devshell/extension` root 导出 generic `ExtensionInvocationContext`。
+`CliNativeCommandInvocationContext` 当前包含 `localOwner`、`requestId`、`signal` 和可选 `workingDirectory`，描述本地/远程 native CLI 的 authority、取消和 Control-host path 语义。`CliModelCommandInvocationContext` 刻意只公开 `requestId` 和 `signal`：它不携带 `localOwner`、Control-host cwd 或 raw `ctxId`，因此 Extension 不能把 model invocation 伪装成 native owner invocation。两种 context 都由 CLI leaf contract 拥有，不从 root 导出 generic `ExtensionInvocationContext`。
 
-Control 内部 static catalog 会由 CLI domain 投影成 command discovery DTO。该 discovery 只包含 CLI presentation metadata，不包含 generation 或 runtime binding。`devshell <extension-command> --help` 使用这一静态数据生成 help，因此查看 Extension command 帮助不会 activation Extension；普通 argv 仍按需取得 generation lease 并调用真实 binding。全局 `devshell --help` 不依赖 Control，保持本地可用。
+Control 内部 static catalog 由 CLI domain 按 state 分别投影。Native discovery 只包含 `cli.native-commands` 的 presentation metadata，不包含 generation 或 runtime binding；本地 CLI 用它在 builtin parser 之前判断 overlay。`devshell <native-extension-command> --help` 因而可以只靠静态 declaration 生成帮助，普通 argv 仍按需取得 generation lease。全局 `devshell --help` 仍不依赖 Control。
 
-Command invocation 也属于 CLI domain：Control 的 CLI route 负责 CLI-only access、`workingDirectory` authority、payload/result validation 和 binding dispatch；Extension management route 只负责 install/list/get/enable/disable/reload/remove，不再承载 `command` operation 或 command wire DTO。这样 discovery 与 execution 的 owner 一致，同时仍不把 RPC transport 暴露成 public Extension ABI。
+Native command invocation 仍由 Control 的 CLI route 负责 CLI-only access、`workingDirectory` authority、payload/result validation 和 binding dispatch；Extension management route 只负责 install/list/get/enable/disable/reload/remove。Model command state不复用这条 native route；模型侧 broker 只能连接 model resolver，从结构上排除 builtin/native fallback。
 
-CLI command implementation 自己抛出的 usage/business error 仍属于 command contract，可以作为命令反馈呈现；但在执行实现之前如果 `cli.commands` registration/generation 无法取得，CLI owner 会翻译成固定 `control.cliCommandFailed` / `CLI command <id> is unavailable.`，只带 `commandId`，不把 ExtensionHost error code、generation path 或原始 cause 暴露到 CLI wire error。
+CLI command implementation 自己抛出的 usage/business error 仍属于 command contract，可以作为命令反馈呈现；但在执行实现之前如果对应 state 的 registration/generation 无法取得，CLI owner 会翻译成固定 `control.cliCommandFailed` / `CLI command <id> is unavailable.`，只带 `commandId`，不把 ExtensionHost error code、generation path 或原始 cause 暴露到 wire error。
 
 Local-owner CLI 可以在 invocation context 中提供 `workingDirectory`。依赖 Control 主机 project 路径的 Extension 必须使用这个字段，而不能读取 daemon 自己的 `process.cwd()` 猜调用者目录。
 
@@ -333,7 +339,7 @@ extension.call
 ExtensionActivation contribution object
 ```
 
-不属于 API v3。
+不属于 API v4。
 
 ## Host dependencies 与 sandbox
 
@@ -352,19 +358,19 @@ ExtensionActivation contribution object
 ```text
 Agent
     capabilities: assets, workers, processes
-    extensions: cli.commands, web.applications
+    extensions: cli.native-commands, web.applications
 
 Skill
     capabilities: assets
-    extensions: cli.commands
+    extensions: cli.native-commands
 
 Secret
     capabilities: none
-    extensions: cli.commands
+    extensions: cli.native-commands
 
 MCP Client
     capabilities: none
-    extensions: cli.commands
+    extensions: cli.native-commands
 ```
 
 Builtin module 不应因为自身需求扩张 core taxonomy。

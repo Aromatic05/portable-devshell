@@ -17,7 +17,7 @@ import { WebApplicationCatalog } from "../../../src/server/web/extension/WebAppl
 import { createWebApplicationRouteModule } from "../../../src/server/web/extension/WebApplicationRouteModule.ts";
 
 function registration(
-    pointId: "cli.commands" | "web.applications",
+    pointId: "cli.native-commands" | "web.applications",
     extensionId: string,
     id: string,
     declaration: Record<string, unknown>
@@ -87,15 +87,15 @@ function operation(module: PrefixRouteModuleDefinition, name: string) {
     return found;
 }
 
-test("CLI discovery projects only cli.commands declaration metadata", () => {
+test("CLI discovery projects only cli.native-commands declaration metadata", () => {
     const service = new CliExtensionCommandService(extensionHost([
-        registration("cli.commands", "agent", "agent", {
+        registration("cli.native-commands", "agent", "agent", {
             summary: "Run and manage Agent providers",
             title: "Agent",
             usage: "agent <command>"
         }),
         registration("web.applications", "agent", "agent", { title: "Agent Web" })
-    ]));
+    ]), { surface: "native" });
 
     assert.deepEqual(service.list(), [{
         extensionId: "agent",
@@ -108,21 +108,25 @@ test("CLI discovery projects only cli.commands declaration metadata", () => {
     assert.equal("binding" in service.list()[0]!, false);
 });
 
-test("CLI discovery and dispatch include Control-resident Extension command providers", async () => {
+test("model CLI discovery and dispatch include Control-resident Extension command providers", async () => {
     const calls: string[] = [];
-    const service = new CliExtensionCommandService(extensionHost([]), [{
-        binding: async (argv, invocation) => {
-            calls.push(`${argv.join("|")}:${invocation.requestId}:${invocation.localOwner}`);
-            return { kind: "text", text: "resident-ok" };
-        },
-        declaration: {
-            id: "artifact",
-            summary: "Manage artifacts",
-            title: "Artifact",
-            usage: "artifact <command>"
-        },
-        extensionId: "artifact"
-    }]);
+    const service = new CliExtensionCommandService(extensionHost([]), {
+        providers: [{
+            binding: async (argv, invocation) => {
+                calls.push(`${argv.join("|")}:${invocation.requestId}:${invocation.surface}`);
+                return { kind: "text", text: "resident-ok" };
+            },
+            declaration: {
+                id: "artifact",
+                summary: "Manage artifacts",
+                title: "Artifact",
+                usage: "artifact <command>"
+            },
+            extensionId: "artifact",
+            surface: "model"
+        }],
+        surface: "model"
+    });
 
     assert.deepEqual(service.list(), [{
         extensionId: "artifact",
@@ -132,17 +136,36 @@ test("CLI discovery and dispatch include Control-resident Extension command prov
         usage: "artifact <command>"
     }]);
     assert.deepEqual(await service.command("artifact", ["shares"], {
-        localOwner: false,
         requestId: "req-resident",
         signal: new AbortController().signal
     }), { kind: "text", text: "resident-ok" });
-    assert.deepEqual(calls, ["shares:req-resident:false"]);
+    assert.deepEqual(calls, ["shares:req-resident:model"]);
+});
+
+test("model CLI state never falls back to native Extension commands", async () => {
+    const service = new CliExtensionCommandService(extensionHost([
+        registration("cli.native-commands", "status-ui", "status", { title: "Native Status" })
+    ]), { surface: "model" });
+
+    assert.deepEqual(service.list(), []);
+    await assert.rejects(
+        async () => await service.command("status", [], {
+            requestId: "req-model",
+            signal: new AbortController().signal
+        }),
+        (error: unknown) => {
+            const body = toControlErrorBody(error);
+            assert.equal(body?.code, errorCodes.controlCliCommandFailed);
+            assert.deepEqual(body?.details, { commandId: "status" });
+            return true;
+        }
+    );
 });
 
 test("Web discovery projects only web.applications declaration metadata", () => {
     const catalog = new WebApplicationCatalog(extensionHost([
         registration("web.applications", "agent", "agent", { title: "Agent" }),
-        registration("cli.commands", "agent", "agent", { title: "Agent CLI" })
+        registration("cli.native-commands", "agent", "agent", { title: "Agent CLI" })
     ]));
 
     assert.deepEqual(catalog.list(), [{
@@ -157,8 +180,8 @@ test("Web discovery projects only web.applications declaration metadata", () => 
 test("CLI command route owns invocation, caller cwd, and payload validation", async () => {
     const events: string[] = [];
     const service = new CliExtensionCommandService(extensionHost([
-        registration("cli.commands", "agent", "agent", { title: "Agent" })
-    ], events));
+        registration("cli.native-commands", "agent", "agent", { title: "Agent" })
+    ], events), { surface: "native" });
     const cli = createCliRouteModule(service);
     const command = operation(cli, "command");
 
@@ -233,7 +256,7 @@ test("CLI command route owns invocation, caller cwd, and payload validation", as
 });
 
 test("CLI command acquisition failure is translated without leaking ExtensionHost errors", async () => {
-    const service = new CliExtensionCommandService(extensionHost([]));
+    const service = new CliExtensionCommandService(extensionHost([]), { surface: "native" });
     const cli = createCliRouteModule(service);
     const command = operation(cli, "command");
 
@@ -257,8 +280,8 @@ test("CLI command acquisition failure is translated without leaking ExtensionHos
 
 test("CLI and Web discovery routes enforce their owning client domain", async () => {
     const cli = createCliRouteModule(new CliExtensionCommandService(extensionHost([
-        registration("cli.commands", "agent", "agent", { title: "Agent" })
-    ])));
+        registration("cli.native-commands", "agent", "agent", { title: "Agent" })
+    ]), { surface: "native" }));
     const web = createWebApplicationRouteModule({
         list: () => [{ extensionId: "agent", id: "agent", title: "Agent" }]
     });

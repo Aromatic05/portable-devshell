@@ -18,15 +18,15 @@ test("Control composes the same Extension Point ids for host validation and sand
 test("Control rejects a point-definition and sandbox-codec composition drift", () => {
     assert.throws(
         () => assertControlExtensionPointRegistryParity(
-            { ids: () => ["cli.commands", "web.applications"] },
-            { ids: () => ["cli.commands"] }
+            { ids: () => ["cli.native-commands", "web.applications"] },
+            { ids: () => ["cli.native-commands"] }
         ),
         /registry and sandbox codec registry are out of sync/u
     );
     assert.throws(
         () => assertControlExtensionPointRegistryParity(
-            { ids: () => ["cli.commands"] },
-            { ids: () => ["cli.commands", "web.applications"] }
+            { ids: () => ["cli.native-commands"] },
+            { ids: () => ["cli.native-commands", "web.applications"] }
         ),
         /registry and sandbox codec registry are out of sync/u
     );
@@ -35,7 +35,7 @@ test("Control rejects a point-definition and sandbox-codec composition drift", (
 test("Control domain point definitions own declaration schema validation", () => {
     const points = createControlExtensionPointRegistry();
 
-    assert.deepEqual(points.parseDeclaration("cli.commands", {
+    assert.deepEqual(points.parseDeclaration("cli.native-commands", {
         id: "agent",
         summary: "Run an Agent",
         title: "Agent",
@@ -54,7 +54,7 @@ test("Control domain point definitions own declaration schema validation", () =>
         title: "Agent"
     });
     assert.throws(
-        () => points.parseDeclaration("cli.commands", {
+        () => points.parseDeclaration("cli.native-commands", {
             id: "agent",
             title: "Agent",
             transport: "rpc"

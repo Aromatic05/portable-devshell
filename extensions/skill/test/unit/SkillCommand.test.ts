@@ -5,11 +5,11 @@ import { join } from "node:path";
 import test from "node:test";
 
 import type { ExtensionContext } from "@portable-devshell/extension";
-import type { CliCommandInvocationContext } from "@portable-devshell/extension/cli";
+import type { CliNativeCommandInvocationContext } from "@portable-devshell/extension/cli";
 
 import { executeSkillCommand } from "../../src/builtin/SkillCommand.ts";
 
-function invocation(workingDirectory: string, localOwner = true): CliCommandInvocationContext {
+function invocation(workingDirectory: string, localOwner = true): CliNativeCommandInvocationContext {
     return {
         localOwner,
         requestId: "req-1",

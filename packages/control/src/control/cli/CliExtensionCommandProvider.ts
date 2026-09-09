@@ -1,7 +1,8 @@
 import type {
     CliCommandDeclaration,
-    CliCommandInvocationContext,
-    CliCommandResult
+    CliCommandResult,
+    CliModelCommandInvocationContext,
+    CliNativeCommandInvocationContext
 } from "@portable-devshell/extension/cli";
 
 export interface CliExtensionCommandInputOptions {
@@ -16,23 +17,29 @@ export interface CliExtensionCommandIo {
     writeStdout(chunk: string): Promise<void>;
 }
 
-export interface CliExtensionCommandInvocationContext extends CliCommandInvocationContext {
+export interface CliNativeExtensionCommandInvocationContext extends CliNativeCommandInvocationContext {
     readonly io?: CliExtensionCommandIo;
+    readonly surface: "native";
 }
+
+export interface CliModelExtensionCommandInvocationContext extends CliModelCommandInvocationContext {
+    readonly io?: CliExtensionCommandIo;
+    readonly surface: "model";
+}
+
+export type CliExtensionCommandInvocationContext =
+    | CliNativeExtensionCommandInvocationContext
+    | CliModelExtensionCommandInvocationContext;
 
 export type CliExtensionCommandBinding = (
     argv: readonly string[],
     context: CliExtensionCommandInvocationContext
 ) => CliCommandResult | Promise<CliCommandResult>;
 
-/**
- * Control-resident provider for a built-in Extension command surface.
- *
- * It participates in the same cli.commands namespace and carries an Extension
- * identity, while the binding may call Control-owned domain APIs directly.
- */
+/** Control-resident implementation participating in exactly one Extension command state. */
 export interface CliExtensionCommandProvider {
     readonly binding: CliExtensionCommandBinding;
     readonly declaration: CliCommandDeclaration;
     readonly extensionId: string;
+    readonly surface: "model" | "native";
 }

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import type { ExtensionManifest } from "@portable-devshell/extension";
-import { commands } from "@portable-devshell/extension/cli";
+import { nativeCommands } from "@portable-devshell/extension/cli";
 import { applications } from "@portable-devshell/extension/web";
 
 import { createControlExtensionPointRegistry } from "../../../src/composition/ControlExtensionPointRegistry.ts";
@@ -13,11 +13,11 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
 
 function manifest(): ExtensionManifest {
     return {
-        apiVersion: 3,
+        apiVersion: 4,
         capabilities: [],
         entry: "extension.mjs",
         extensions: {
-            "cli.commands": [{ id: "example", title: "Example" }],
+            "cli.native-commands": [{ id: "example", title: "Example" }],
             "web.applications": [{ id: "example", title: "Example" }]
         },
         hostDependencies: [],
@@ -36,24 +36,24 @@ test("Extension registration finalization requires exact declared bindings and v
     const command = async () => ({ kind: "text" as const, text: "ok" });
     const web = Object.freeze({ source: Object.freeze({ directory: "web", kind: "files" as const }) });
 
-    builder.register(commands, "example", command);
+    builder.register(nativeCommands, "example", command);
     builder.register(applications, "example", web);
     const registrations = await builder.finalize();
 
-    assert.equal(registrations.get("cli.commands", "example")?.binding, command);
+    assert.equal(registrations.get("cli.native-commands", "example")?.binding, command);
     assert.equal(registrations.get("web.applications", "example")?.binding, web);
-    assert.deepEqual(registrations.list("cli.commands").map(({ id }) => id), ["example"]);
+    assert.deepEqual(registrations.list("cli.native-commands").map(({ id }) => id), ["example"]);
 });
 
 test("Extension registration rejects undeclared, duplicate, and invalid bindings", async () => {
     const builder = new ExtensionRegistrationBuilder(manifest(), "/unused", createControlExtensionPointRegistry());
     assert.throws(
-        () => builder.register(commands, "other", async () => ({ kind: "text", text: "bad" })),
-        /registered undeclared cli\.commands\/other/u
+        () => builder.register(nativeCommands, "other", async () => ({ kind: "text", text: "bad" })),
+        /registered undeclared cli\.native-commands\/other/u
     );
-    builder.register(commands, "example", async () => ({ kind: "text", text: "ok" }));
+    builder.register(nativeCommands, "example", async () => ({ kind: "text", text: "ok" }));
     assert.throws(
-        () => builder.register(commands, "example", async () => ({ kind: "text", text: "duplicate" })),
+        () => builder.register(nativeCommands, "example", async () => ({ kind: "text", text: "duplicate" })),
         /more than once/u
     );
 
@@ -68,7 +68,7 @@ test("Extension registration rejects a manifest declaration that activate did no
     const root = await createTestTempDirectory("extension-registration-missing");
     try {
         const builder = new ExtensionRegistrationBuilder(manifest(), root, createControlExtensionPointRegistry());
-        builder.register(commands, "example", async () => ({ kind: "text", text: "ok" }));
+        builder.register(nativeCommands, "example", async () => ({ kind: "text", text: "ok" }));
         await assert.rejects(builder.finalize(), /declares web\.applications\/example but did not bind it/u);
     } finally {
         await rm(root, { force: true, recursive: true });

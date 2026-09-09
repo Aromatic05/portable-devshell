@@ -22,7 +22,7 @@ test("Extension manifest accepts only the resource capability taxonomy and stati
         ...base,
         capabilities: ["assets", "workers", "processes"],
         extensions: {
-            "cli.commands": [{ id: "example", summary: "Run the example", title: "Example" }],
+            "cli.native-commands": [{ id: "example", summary: "Run the example", title: "Example" }],
             "web.applications": [{ id: "example", title: "Example" }]
         },
         hostDependencies: ["@modelcontextprotocol/client"]
@@ -30,7 +30,7 @@ test("Extension manifest accepts only the resource capability taxonomy and stati
         ...base,
         capabilities: ["assets", "workers", "processes"],
         extensions: {
-            "cli.commands": [{ id: "example", summary: "Run the example", title: "Example" }],
+            "cli.native-commands": [{ id: "example", summary: "Run the example", title: "Example" }],
             "web.applications": [{ id: "example", title: "Example" }]
         },
         hostDependencies: ["@modelcontextprotocol/client"]
@@ -59,18 +59,18 @@ test("Extension manifest validates Extension Point identities and declaration-lo
         /Extension Point id/u
     );
     assert.throws(
-        () => parseExtensionManifest({ ...base, extensions: { "cli.commands": [{ id: "Bad_ID" }] } }),
-        /cli\.commands/u
+        () => parseExtensionManifest({ ...base, extensions: { "cli.native-commands": [{ id: "Bad_ID" }] } }),
+        /cli\.native-commands/u
     );
     assert.throws(
         () => parseExtensionManifest({
             ...base,
-            extensions: { "cli.commands": [{ id: "example" }, { id: "example" }] }
+            extensions: { "cli.native-commands": [{ id: "example" }, { id: "example" }] }
         }),
         /duplicate ids/u
     );
     assert.throws(
-        () => parseExtensionManifest({ ...base, extensions: { "cli.commands": { id: "example" } } }),
+        () => parseExtensionManifest({ ...base, extensions: { "cli.native-commands": { id: "example" } } }),
         /must be an array/u
     );
 });

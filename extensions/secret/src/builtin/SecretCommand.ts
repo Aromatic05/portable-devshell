@@ -2,7 +2,7 @@ import { isAbsolute, resolve } from "node:path";
 
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import type {
-    CliCommandInvocationContext,
+    CliNativeCommandInvocationContext,
     CliCommandResult
 } from "@portable-devshell/extension/cli";
 
@@ -17,7 +17,7 @@ export const SECRET_USAGE = [
 
 export async function executeSecretCommand(
     argv: readonly string[],
-    invocation: CliCommandInvocationContext
+    invocation: CliNativeCommandInvocationContext
 ): Promise<CliCommandResult> {
     invocation.signal.throwIfAborted();
     requireLocalOwner(invocation);
@@ -35,7 +35,7 @@ export async function executeSecretCommand(
 
 function parseSecretScanArgs(
     args: readonly string[],
-    invocation: CliCommandInvocationContext
+    invocation: CliNativeCommandInvocationContext
 ): { cwd: string; glob?: string; limit?: number } {
     let directory = ".";
     let glob: string | undefined;
@@ -62,7 +62,7 @@ function parseSecretScanArgs(
     return { cwd, ...(glob === undefined ? {} : { glob }), ...(limit === undefined ? {} : { limit }) };
 }
 
-function resolveLocalPath(path: string, invocation: CliCommandInvocationContext): string {
+function resolveLocalPath(path: string, invocation: CliNativeCommandInvocationContext): string {
     if (isAbsolute(path)) return resolve(path);
     if (invocation.workingDirectory === undefined) {
         throw usageError("relative secret scan paths require the local CLI working directory");
@@ -76,7 +76,7 @@ function requireOption(args: readonly string[], index: number, option: string): 
     return value;
 }
 
-function requireLocalOwner(invocation: CliCommandInvocationContext): void {
+function requireLocalOwner(invocation: CliNativeCommandInvocationContext): void {
     if (!invocation.localOwner) throw new Error("Secret commands are restricted to the local owner CLI.");
 }
 

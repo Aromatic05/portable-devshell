@@ -2,7 +2,7 @@
 
 > 状态：核心元模型、static catalog、lazy activation 与第一批 CLI/Web domain discovery 已实现；后续章节继续约束未来 Extension Point 演进。
 >
-> API v3 已落地 `assets / workers / processes` capabilities、`cli.commands / web.applications` Extension Points、generation-owned registrations，以及最小 `activate / deactivate` module 生命周期。`docs/concepts/extensions.md` 描述当前运行时契约；本文保留设计推导、后续候选项和 public ABI 审查门禁。
+> API v4 已落地 `assets / workers / processes` capabilities、`cli.native-commands / cli.model-commands / web.applications` Extension Points、generation-owned registrations，以及最小 `activate / deactivate` module 生命周期。`docs/concepts/extensions.md` 描述当前运行时契约；本文保留设计推导、后续候选项和 public ABI 审查门禁。
 
 ## 1. 设计目标
 
@@ -247,7 +247,7 @@ privileges
 {
     "capabilities": ["assets", "workers", "processes"],
     "extensions": {
-        "cli.commands": [
+        "cli.native-commands": [
             { "id": "agent", "title": "Agent" }
         ],
         "web.applications": [
@@ -423,7 +423,8 @@ Control 内部可以维护一个 `ExtensionPointRegistry` 来组合当前已知 
 Point identity 使用稳定 namespaced id：
 
 ```text
-cli.commands
+cli.native-commands
+cli.model-commands
 web.applications
 agent.providers
 tools.tools    // 仅示意；具体命名必须由 Tool domain 再审
@@ -445,7 +446,7 @@ Global identity 由 Host 组合：
 
 Extension 不允许注册到别人的 namespace。
 
-`extension-id` 与各 Extension Point 的 local id 是不同 namespace。CLI 内置 command name 的冲突检查属于 `cli.commands` owner，不能用一组 CLI 名称去全局禁止同名 Extension id。例如 Extension `status` 可以合法提供 `cli.commands/custom-command`；反过来任意 Extension 都不能声明实际被内置 CLI tree 截获的 `cli.commands/status`。
+`extension-id` 与各 Extension Point 的 local id 是不同 namespace。CLI 的 native/model command state 彼此独立，也与 builtin command tree 独立。例如 `cli.native-commands/status` 可以 overlay builtin `status`，同一 Extension 还可以同时声明 `cli.model-commands/status`。只有同一个 point 内的 registration id 冲突需要拒绝。
 
 ### 6.4 Registration ownership
 
@@ -458,9 +459,9 @@ generation
 
 Generation retirement 自动撤销 registration。
 
-Runtime Host 只拥有 registration identity、lazy activation、generation lease 和 acquisition，不解释某个 point 的 binding 业务语义。具体 point owner 在取得 registration lease 后负责校验并调用 binding。例如 `cli.commands` 的 binding invocation 属于 CLI domain，而不是 `ExtensionHost` 的 `dispatchCommand` 一类特殊方法。
+Runtime Host 只拥有 registration identity、lazy activation、generation lease 和 acquisition，不解释某个 point 的 binding 业务语义。具体 point owner 在取得 registration lease 后负责校验并调用 binding。例如 `cli.native-commands` / `cli.model-commands` 的 binding invocation 属于 CLI domain，而不是 `ExtensionHost` 的 `dispatchCommand` 一类特殊方法。
 
-同样，manifest declaration 与 activation binding 的校验规则也属于 point owner。Generic runtime 可以要求“声明与 binding 一一对应”和“未知 point 被拒绝”，但不能自己实现 `cli.commands` 必须是 function、`web.applications` files source 必须位于 code generation 内这类 domain-specific 规则。
+同样，manifest declaration 与 activation binding 的校验规则也属于 point owner。Generic runtime 可以要求“声明与 binding 一一对应”和“未知 point 被拒绝”，但不能自己实现 CLI command binding 必须是 function、`web.applications` files source 必须位于 code generation 内这类 domain-specific 规则。
 
 第一版不要求 Extension 自己保存 `Disposable` 并手工清理每个 registration。
 
@@ -639,32 +640,41 @@ hostPoint === extensionBundledPoint
 
 ## 8. CLI Domain
 
-### 8.1 第一批 Extension Point：`cli.commands`
+### 8.1 两个独立的 command state
 
-当前 Skill、Secret、MCP Client、Agent 都需要 CLI 接入，因此 CLI 是第一批必须落地的 point owner。
+CLI public ABI 不再把人类本地 CLI 与 model-facing command projection 塞进同一个 point。API v4 明确拆成：
 
-`cli.commands` 表示：
+```text
+cli.native-commands
+cli.model-commands
+```
 
-> Extension 向 portable-devshell CLI command tree 提供一个或多个 command entries。
+它们都不是 capability，并且拥有独立 registration/catalog/resolution state。
 
-它不是 capability。
+`cli.native-commands` 面向 native CLI。它允许与 builtin command root 同名，并采用 overlay resolution：
 
-### 8.2 静态 declaration 应承担的内容
+```text
+native argv
+    -> enabled native Extension command
+    -> builtin command fallback
+    -> not found
+```
 
-> 实现状态：已落地。Control 通过 CLI domain-owned `commands` discovery 只投影 `cli.commands` declaration metadata；`devshell <extension-command> --help` 在不 activation Extension 的情况下生成 help。全局 `devshell --help` 仍保持离线、本地解析。
+因此 Extension 可以增强 `instance`、`status` 等原生命令，同时 builtin tree 继续作为 bootstrap / recovery baseline。
 
-CLI 在 Extension 未 activation 时就应该能够：
+`cli.model-commands` 面向受限 model command state：
 
-- 构建 command tree；
-- 生成 help；
-- 检测 command id 冲突；
-- 知道哪个 Extension 需要按需 activation。
+```text
+model argv
+    -> ACL-filtered model Extension command
+    -> not found
+```
 
-CLI domain 还必须在 declaration validation 阶段拒绝与内置顶层 command 冲突的 local id。这个规则只约束 `cli.commands` registration id，不约束 Extension 自身 id；builtin Extension identity（当前 `skill / secret / mcp`）是 install domain 的另一条独立保护规则。
+这里**永远没有 builtin/native fallback**。Model resolver 不应依赖 builtin parser，也不应通过“先查 model、失败再执行 native CLI”实现。这是 command architecture 与 authority boundary 的共同不变量。
 
-因此 metadata 应尽可能 declarative。
+### 8.2 静态 declaration 与 discovery
 
-候选内容：
+两个 point 共用 declarative metadata shape：
 
 ```text
 local id
@@ -673,35 +683,47 @@ usage shape
 possibly subcommand metadata
 ```
 
-具体字段由 CLI parser 的最终模型决定，不在 Extension core 中定义。
+具体字段属于 CLI domain，不进入 Extension core。Control 在 activation 前即可分别建立 native/model static catalog、检测同一 point 内冲突，并知道哪个 generation 需要 lazy activation。
 
-Declaration schema parser 同样属于 CLI host/domain validation implementation，而不是 Extension author API。当前 `@portable-devshell/extension/cli` 只导出 `commands` descriptor 与 declaration/binding/invocation/result types；Control 的 `CliExtensionPointDefinition` 自己负责静态 declaration 解析和内置 command 冲突校验。
+Native discovery 只投影 `cli.native-commands` presentation metadata；本地 CLI 在 builtin parser 之前用它判断 overlay。`devshell <native-command> --help` 因此可以不 activation Extension。Model discovery 只投影 `cli.model-commands`，不能混入 native/builtin entries。
 
-当前 discovery transport 也不是 generic Extension catalog：CLI domain 只返回 `extensionId / id / title / summary / usage`，不暴露 generation、runtime binding、sandbox callback token 或 Control transport details。
+Declaration schema parser 属于 CLI host/domain validation implementation，而不是 Extension author API。`@portable-devshell/extension/cli` 只导出 `nativeCommands / modelCommands` descriptors 与 declaration/binding/context/result types。
+
+不同 command state 可以拥有相同 local id：`cli.native-commands/status` 与 `cli.model-commands/status` 不冲突；native `status` 与 builtin `status` 也不冲突。只有同一个 Extension Point 内两个 Extensions 争用同一 registration id 才是 static conflict。
 
 ### 8.3 Runtime binding
 
-> 实现状态：已落地。CLI discovery 和 invocation 现在由同一个 CLI domain owner 承担；Control 的 Extension management route 不再包含 command dispatch。CLI route 自己负责 caller authority、payload/result validation，并通过 generation-owned binding 执行 command。
-
-Runtime binding 只负责执行：
+Runtime binding 仍只负责执行：
 
 ```text
-parsed invocation
+argv + state-specific invocation context
     -> Extension command implementation
-    -> domain-defined result
+    -> CLI result
 ```
 
-不要重新暴露一个 generic `argv -> JSON` RPC 作为所有 Extension 的共同模型。
+不要重新暴露 generic `extension.call` 或把 `argv -> JSON` 提升成 Extension core RPC。raw argv 是 CLI domain contract。
 
-如果 CLI domain 决定保留 raw argv，它也是 `cli.commands` 自己的 contract，不是 Extension core primitive。
+Native invocation 当前通过 CLI-owned Control route 获得 generation lease 并调用 `CliNativeCommandBinding`。Model invocation 将由 restricted devshell broker 进入 model resolver；它不经过 native route，也不能触发 builtin fallback。
 
-### 8.4 Working directory
+### 8.4 Invocation contexts
 
-local-owner CLI 的 working directory 是 CLI invocation domain 的语义，应继续由 CLI point invocation context 明确传递。
+两个 state 不共享一个“audience flag”式 context：
 
-> 实现状态：已落地。该 context 类型由 `@portable-devshell/extension/cli` 以 `CliCommandInvocationContext` 导出；Extension core root 不再定义 generic `ExtensionInvocationContext`。`localOwner / workingDirectory` 等 CLI-specific 字段因此不会反向污染 core ABI。
+```text
+CliNativeCommandInvocationContext
+    localOwner
+    requestId
+    signal
+    workingDirectory?
 
-Extension 不得读取 Control daemon 自己的 `process.cwd()` 来猜用户工作目录。
+CliModelCommandInvocationContext
+    requestId
+    signal
+```
+
+local-owner CLI 的 working directory 是 native invocation domain 语义，应明确传递。Extension 不得读取 Control daemon 自己的 `process.cwd()` 猜调用者目录。
+
+Model context 刻意不暴露 `localOwner`、Control-host cwd 或 raw `ctxId`。Context/instance/ACL 的 authoritative resolution 留在 model broker/Control 内部，而不是作为 Extension 可以选择或篡改的 public invocation authority。
 
 ### 8.5 不应导出的内容
 
@@ -1198,7 +1220,8 @@ processes
 ### Extension Points
 
 ```text
-cli.commands
+cli.native-commands
+cli.model-commands
 web.applications
 ```
 
@@ -1217,19 +1240,19 @@ make processes Control-owned
 ```text
 Agent
     capabilities: assets, workers, processes
-    extensions: cli.commands, web.applications
+    extensions: cli.native-commands, web.applications
 
 Skill
     capabilities: assets
-    extensions: cli.commands
+    extensions: cli.native-commands
 
 Secret
     capabilities: none
-    extensions: cli.commands
+    extensions: cli.native-commands
 
 MCP Client
     capabilities: none
-    extensions: cli.commands
+    extensions: cli.native-commands
 ```
 
 ## 22. 明确不做的事情

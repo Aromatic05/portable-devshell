@@ -1,6 +1,6 @@
 {
     "schemaVersion": 1,
-    "apiVersion": 3,
+    "apiVersion": 4,
     "id": "agent",
     "name": "portable-devshell Agent",
     "version": "0.1.0",
@@ -11,7 +11,7 @@
         "workers"
     ],
     "extensions": {
-        "cli.commands": [
+        "cli.native-commands": [
             {
                 "id": "agent",
                 "title": "Agent",

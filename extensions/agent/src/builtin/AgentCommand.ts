@@ -3,7 +3,7 @@ import type {
     ExtensionJsonValue
 } from "@portable-devshell/extension";
 import type {
-    CliCommandInvocationContext,
+    CliNativeCommandInvocationContext,
     CliCommandResult
 } from "@portable-devshell/extension/cli";
 
@@ -41,7 +41,7 @@ export async function executeAgentCommand(
     runtime: AgentExtensionRuntime,
     providers: AgentProviderCommandPort,
     argv: readonly string[],
-    context: CliCommandInvocationContext
+    context: CliNativeCommandInvocationContext
 ): Promise<CliCommandResult> {
     context.signal.throwIfAborted();
     if (argv.length === 0 || argv[0] === "help" || argv[0] === "--help" || argv[0] === "-h") {
@@ -96,7 +96,7 @@ export async function executeAgentCommand(
 async function providerCommand(
     providers: AgentProviderCommandPort,
     argv: readonly string[],
-    context: CliCommandInvocationContext
+    context: CliNativeCommandInvocationContext
 ): Promise<CliCommandResult> {
     if (argv.length === 0 || argv[0] === "list") {
         expectLength(argv, argv.length === 0 ? 0 : 1, "agent provider list");
@@ -188,7 +188,7 @@ function required(value: string | undefined, message: string): string {
     throw usageError(message);
 }
 
-function requireLocalOwner(context: CliCommandInvocationContext): void {
+function requireLocalOwner(context: CliNativeCommandInvocationContext): void {
     if (context.localOwner) return;
     throw new Error("Agent provider mutations are restricted to the local owner CLI.");
 }

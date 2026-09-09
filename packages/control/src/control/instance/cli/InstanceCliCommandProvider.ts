@@ -1,72 +1,56 @@
-import type { WorkerCommandInteractiveSession } from "@portable-devshell/core";
-import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import type { CliCommandResult } from "@portable-devshell/extension/cli";
 import {
-    ControlError,
     createError,
     errorCodes,
-    mergeComments,
-    resolveErrorHints,
-    resolveResultHints,
-    toControlErrorBody,
-    type InstanceCreateResult,
-    type InstanceEvent,
     type InstanceListEntry,
     type InstanceLogEntry,
     type InstanceSnapshot,
-    type JsonValue,
-    type ReverseDeviceCodeResult,
     type TodoItem,
     type TodoReadResult,
     type TodoTaskSummary
 } from "@portable-devshell/shared";
 
-import type { InstanceCreatePort, InstanceEditorPort } from "../InstanceRouteModule.js";
 import type { InstanceDescriptor } from "../InstanceDescriptor.js";
 import type { InstanceRegistry } from "../registry/InstanceRegistry.js";
-import type { ReverseCredentialService } from "../../reverse/credential/ReverseCredentialService.js";
 import type { RuntimeSubscriptionManager } from "../../../instance/runtime/RuntimeSubscriptionManager.js";
 import type {
     CliExtensionCommandInvocationContext,
-    CliExtensionCommandProvider
+    CliExtensionCommandProvider,
+    CliModelExtensionCommandInvocationContext
 } from "../../cli/CliExtensionCommandProvider.js";
 
-export interface InstanceCliCommandProviderOptions {
-    create: InstanceCreatePort;
-    editor: InstanceEditorPort;
+export interface InstanceModelCliCommandProviderOptions {
     instances: InstanceRegistry;
-    reverse?: ReverseCredentialService;
     subscriptions: RuntimeSubscriptionManager;
 }
 
-export interface InstanceCliCreateResult extends InstanceCreateResult {
-    reverseDeviceCode?: ReverseDeviceCodeResult;
-}
-
-export const instanceCliCommandDeclaration = Object.freeze({
+export const instanceModelCliCommandDeclaration = Object.freeze({
     id: "instance",
-    summary: "Inspect and manage portable-devshell instances",
+    summary: "Inspect portable-devshell instances",
     title: "Instance",
-    usage: "instance <command>"
+    usage: "instance <list|status|logs|todo>"
 });
 
-export function createInstanceCliCommandProvider(
-    options: InstanceCliCommandProviderOptions
+export function createInstanceModelCliCommandProvider(
+    options: InstanceModelCliCommandProviderOptions
 ): CliExtensionCommandProvider {
     return Object.freeze({
-        binding: async (
-            argv: readonly string[],
-            invocation: CliExtensionCommandInvocationContext
-        ) => await executeInstanceCommand(options, argv, invocation),
-        declaration: instanceCliCommandDeclaration,
-        extensionId: "instance"
+        binding: async (argv: readonly string[], invocation: CliExtensionCommandInvocationContext) => {
+            if (invocation.surface !== "model") {
+                throw new TypeError("Instance model command provider received native invocation state.");
+            }
+            return await executeInstanceModelCommand(options, argv, invocation);
+        },
+        declaration: instanceModelCliCommandDeclaration,
+        extensionId: "instance",
+        surface: "model"
     });
 }
 
-export async function executeInstanceCommand(
-    options: InstanceCliCommandProviderOptions,
+export async function executeInstanceModelCommand(
+    options: InstanceModelCliCommandProviderOptions,
     argv: readonly string[],
-    invocation: CliExtensionCommandInvocationContext
+    invocation: CliModelExtensionCommandInvocationContext
 ): Promise<CliCommandResult> {
     invocation.signal.throwIfAborted();
     const [command, ...args] = argv;
@@ -75,121 +59,29 @@ export async function executeInstanceCommand(
         case "--help":
         case "-h":
             expect(args, 0, "instance help");
-            return text(instanceUsage());
-        case "create":
-            requireLocalOwner(invocation, "instance create");
-            return json(await createInstance(options, args));
-        case "delete":
-            requireLocalOwner(invocation, "instance delete");
-            return json(await options.editor.deleteInstance({ instanceName: one(args, "instance delete <instance>") }));
-        case "enable":
-            requireLocalOwner(invocation, "instance enable");
-            return json(await options.editor.enableInstance({ instanceName: one(args, "instance enable <instance>") }));
-        case "disable":
-            requireLocalOwner(invocation, "instance disable");
-            return json(await options.editor.disableInstance({ instanceName: one(args, "instance disable <instance>") }));
+            return text(instanceModelUsage());
         case "list":
             expect(args, 0, "instance list");
             return text(renderInstanceList(listInstances(options.instances)));
         case "status":
-            return text(renderInstanceSnapshot(snapshot(requireInstance(options.instances, one(args, "instance status <instance>")))));
-        case "start":
-            requireLocalOwner(invocation, "instance start");
-            return text(renderInstanceSnapshot(await startInstance(
-                options.instances,
-                requireInstance(options.instances, one(args, "instance start <instance>")),
-                invocation
-            )));
-        case "stop":
-            requireLocalOwner(invocation, "instance stop");
-            return text(renderInstanceSnapshot(await stopInstance(
-                options.instances,
-                requireInstance(options.instances, one(args, "instance stop <instance>"))
-            )));
+            return text(renderInstanceSnapshot(
+                snapshot(requireInstance(options.instances, one(args, "instance status <instance>")))
+            ));
         case "logs":
             return await logs(options, args, invocation);
         case "todo":
             return await todo(options, args, invocation);
-        case "call":
-            requireLocalOwner(invocation, "instance call");
-            return text(await callTool(options, args, invocation));
-        case "device-code":
-            requireLocalOwner(invocation, "instance device-code");
-            return text(renderReverseDeviceCode(await reverse(options).createDeviceCode(
-                one(args, "instance device-code <instance>")
-            )));
-        case "rotate-token":
-            requireLocalOwner(invocation, "instance rotate-token");
-            return text(renderReverseTokenRotation(await reverse(options).rotateDeviceToken(
-                one(args, "instance rotate-token <instance>")
-            )));
-        case "revoke-token":
-            requireLocalOwner(invocation, "instance revoke-token");
-            return text(renderReverseTokenRevocation(await reverse(options).revokeDeviceToken(
-                one(args, "instance revoke-token <instance>")
-            )));
         case undefined:
-            throw usage(instanceUsage());
+            throw usage(instanceModelUsage());
         default:
-            throw usage(`Unknown instance command: ${command}\n\n${instanceUsage()}`);
+            throw usage(`Unknown instance model command: ${command}\n\n${instanceModelUsage()}`);
     }
-}
-
-async function createInstance(
-    options: InstanceCliCommandProviderOptions,
-    args: readonly string[]
-): Promise<InstanceCliCreateResult> {
-    if (args.length !== 1) throw usage("instance create requires <json-draft> when invoked through cli.commands");
-    const draft = parseJson(args[0]!, "instance create json-draft");
-    if (typeof draft !== "object" || draft === null || Array.isArray(draft)) {
-        throw usage("instance create json-draft must be a JSON object");
-    }
-    const result = await options.create.createInstance(draft);
-    if ((draft as Record<string, JsonValue>).provider !== "reverse") return result;
-    return {
-        ...result,
-        reverseDeviceCode: await reverse(options).createDeviceCode(result.name)
-    };
-}
-
-async function startInstance(
-    instances: InstanceRegistry,
-    descriptor: InstanceDescriptor,
-    invocation: CliExtensionCommandInvocationContext
-): Promise<InstanceSnapshot> {
-    if (!descriptor.enabled) {
-        throw createError({
-            code: errorCodes.instanceConflict,
-            details: { instance: descriptor.name, operation: "start" },
-            message: `Instance ${descriptor.name} is disabled.`,
-            retryable: false
-        });
-    }
-    const io = invocation.io;
-    let session: WorkerCommandInteractiveSession | undefined;
-    if (io !== undefined) {
-        await io.requestInput({ raw: true });
-        session = {
-            readInput: async () => await io.readInput(),
-            writeOutput: async (chunk) => await io.writeStderr(chunk)
-        };
-    }
-    const result = await descriptor.worker.startInteractive(session);
-    instances.markOwned(descriptor.name);
-    return withTodoSummaries(result, descriptor);
-}
-
-async function stopInstance(instances: InstanceRegistry, descriptor: InstanceDescriptor): Promise<InstanceSnapshot> {
-    const result = withTodoSummaries(await descriptor.worker.stop(), descriptor);
-    instances.clearOwned(descriptor.name);
-    if (!descriptor.enabled) instances.delete(descriptor.name);
-    return result;
 }
 
 async function logs(
-    options: InstanceCliCommandProviderOptions,
+    options: InstanceModelCliCommandProviderOptions,
     args: readonly string[],
-    invocation: CliExtensionCommandInvocationContext
+    invocation: CliModelExtensionCommandInvocationContext
 ): Promise<CliCommandResult> {
     const { follow, instance } = parseFollow(args, "instance logs <instance> [-f]");
     const descriptor = requireInstance(options.instances, instance);
@@ -223,9 +115,9 @@ async function logs(
 }
 
 async function todo(
-    options: InstanceCliCommandProviderOptions,
+    options: InstanceModelCliCommandProviderOptions,
     args: readonly string[],
-    invocation: CliExtensionCommandInvocationContext
+    invocation: CliModelExtensionCommandInvocationContext
 ): Promise<CliCommandResult> {
     const { follow, instance } = parseFollow(args, "instance todo <instance> [--follow|-f]", true);
     const descriptor = requireInstance(options.instances, instance);
@@ -252,40 +144,6 @@ async function todo(
         }
     );
     return text("");
-}
-
-async function callTool(
-    options: InstanceCliCommandProviderOptions,
-    args: readonly string[],
-    invocation: CliExtensionCommandInvocationContext
-): Promise<string> {
-    if (args.length !== 4) throw usage("instance call requires <instance> <workspace> <toolName> <jsonInput>");
-    const [instance, workspace, toolName, inputText] = args as [string, string, string, string];
-    const descriptor = requireInstance(options.instances, instance);
-    const input = parseJson(inputText, "instance call jsonInput");
-    let result: JsonValue;
-    try {
-        const raw = await descriptor.worker.callTool(toolName, input, {
-            requestId: invocation.requestId,
-            source: "cli",
-            workspace
-        }, invocation.signal);
-        result = attachComments(raw, mergeComments([], resolveResultHints(toolName, raw)));
-    } catch (error) {
-        const failure = error instanceof ControlError ? error : createError({
-            code: errorCodes.targetInvalid,
-            message: error instanceof Error ? error.message : String(error),
-            retryable: false
-        });
-        const body = toControlErrorBody(error);
-        const hints = body === undefined ? [] : resolveErrorHints(toolName, body);
-        result = {
-            comment: mergeComments([], hints),
-            error: { code: failure.code, message: failure.message, retryable: failure.retryable },
-            result: null
-        };
-    }
-    return `${renderToolCall(instance, toolName)}${renderToolResult(result)}`;
 }
 
 function listInstances(instances: InstanceRegistry): InstanceListEntry[] {
@@ -319,32 +177,14 @@ function requireInstance(instances: InstanceRegistry, name: string): InstanceDes
     });
 }
 
-function reverse(options: InstanceCliCommandProviderOptions): ReverseCredentialService {
-    if (options.reverse !== undefined) return options.reverse;
-    throw createError({
-        code: errorCodes.targetInvalid,
-        message: "Reverse connection management is not available.",
-        retryable: false
-    });
-}
-
 function requireIo(
-    invocation: CliExtensionCommandInvocationContext,
+    invocation: CliModelExtensionCommandInvocationContext,
     command: string
-): NonNullable<CliExtensionCommandInvocationContext["io"]> {
+): NonNullable<CliModelExtensionCommandInvocationContext["io"]> {
     if (invocation.io !== undefined) return invocation.io;
     throw createError({
         code: errorCodes.controlCliCommandFailed,
         message: `${command} requires streaming CLI I/O.`,
-        retryable: false
-    });
-}
-
-function requireLocalOwner(invocation: CliExtensionCommandInvocationContext, command: string): void {
-    if (invocation.localOwner) return;
-    throw createError({
-        code: errorCodes.controlCliAccessDenied,
-        message: `${command} is restricted to the local owner CLI.`,
         retryable: false
     });
 }
@@ -371,48 +211,25 @@ function expect(args: readonly string[], count: number, usageText: string): void
     if (args.length !== count) throw usage(usageText);
 }
 
-function parseJson(textValue: string, label: string): JsonValue {
-    try {
-        return JSON.parse(textValue) as JsonValue;
-    } catch (error) {
-        throw usage(`${label} must be valid JSON`, error);
-    }
-}
-
 function text(value: string): CliCommandResult {
     return { kind: "text", text: value };
 }
 
-function json(value: unknown): CliCommandResult {
-    return { kind: "json", value: JSON.parse(JSON.stringify(value)) as ExtensionJsonValue };
-}
-
-function usage(message: string, cause?: unknown): Error {
+function usage(message: string): Error {
     return createError({
         code: "cli.usage",
-        ...(cause === undefined ? {} : { cause }),
         message,
         retryable: false
     });
 }
 
-export function instanceUsage(): string {
+export function instanceModelUsage(): string {
     return [
         "Usage:",
-        "  devshell instance create",
-        "  devshell instance delete <instance>",
-        "  devshell instance enable <instance>",
-        "  devshell instance disable <instance>",
         "  devshell instance list",
         "  devshell instance status <instance>",
-        "  devshell instance start <instance>",
-        "  devshell instance stop <instance>",
         "  devshell instance logs <instance> [-f]",
-        "  devshell instance todo <instance> [--follow|-f]",
-        "  devshell instance call <instance> <workspace> <toolName> <jsonInput>",
-        "  devshell instance device-code <instance>",
-        "  devshell instance rotate-token <instance>",
-        "  devshell instance revoke-token <instance>"
+        "  devshell instance todo <instance> [--follow|-f]"
     ].join("\n");
 }
 
@@ -497,59 +314,4 @@ function renderTaskSummary(task: TodoTaskSummary): string {
     const symbol = task.status === "none" ? "·" : task.status === "paused" ? "Ⅱ" : todoSymbols[task.status];
     const current = task.currentItem === undefined ? "" : ` — ${task.currentItem}`;
     return `${symbol} ${task.title} [${task.completed}/${task.total}]${current}`;
-}
-
-function renderReverseDeviceCode(result: ReverseDeviceCodeResult): string {
-    return [
-        `instance: ${result.instance}`,
-        `device code: ${result.deviceCode}`,
-        `expires: ${result.expiresAt}`,
-        `enroll: devshell-worker enroll --controller ${result.controllerUrl} --device-code ${result.deviceCode}`,
-        ""
-    ].join("\n");
-}
-
-function renderReverseTokenRotation(result: { deviceToken: string; instance: string }): string {
-    return [
-        `instance: ${result.instance}`,
-        "device token rotated",
-        `new device token: ${result.deviceToken}`,
-        "Update the remote worker credential before reconnecting.",
-        ""
-    ].join("\n");
-}
-
-function renderReverseTokenRevocation(result: { instance: string; revoked: true }): string {
-    return `instance: ${result.instance}\ndevice token revoked\n`;
-}
-
-function renderToolCall(instance: string, toolName: string): string {
-    return `instance: ${instance}\ntool: ${toolName}\n`;
-}
-
-function renderToolResult(result: JsonValue): string {
-    if (!isCommandResult(result)) return `${JSON.stringify(result, null, 2)}\n`;
-    const sections = [`exitCode: ${result.exitCode}`];
-    if (result.stdout.length > 0) sections.push(`stdout:\n${result.stdout.replace(/\n$/u, "")}`);
-    if (result.stderr.length > 0) sections.push(`stderr:\n${result.stderr.replace(/\n$/u, "")}`);
-    return `${sections.join("\n")}\n`;
-}
-
-function isCommandResult(value: JsonValue): value is JsonValue & {
-    exitCode: number | null;
-    stderr: string;
-    stdout: string;
-} {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-    const candidate = value as Record<string, JsonValue>;
-    return (typeof candidate.exitCode === "number" || candidate.exitCode === null)
-        && typeof candidate.stdout === "string"
-        && typeof candidate.stderr === "string";
-}
-
-function attachComments(result: JsonValue, comments: readonly string[]): JsonValue {
-    if (typeof result !== "object" || result === null || Array.isArray(result)) {
-        throw new Error("Tool results must be objects when context comments are enabled.");
-    }
-    return { ...result, comment: [...comments] };
 }

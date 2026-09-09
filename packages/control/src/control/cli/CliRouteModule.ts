@@ -1,8 +1,8 @@
 import { isAbsolute } from "node:path";
 
 import type {
-    CliCommandInvocationContext,
-    CliCommandResult
+    CliCommandResult,
+    CliNativeCommandInvocationContext
 } from "@portable-devshell/extension/cli";
 import {
     createError,
@@ -23,7 +23,7 @@ export interface CliCommandPort {
     command(
         commandId: string,
         argv: readonly string[],
-        context: CliCommandInvocationContext,
+        context: CliNativeCommandInvocationContext,
         io?: CliExtensionCommandIo
     ): Promise<CliCommandResult>;
     list(): readonly CliCommandDescriptor[];
@@ -104,7 +104,7 @@ function invocationContext(
     input: ReturnType<typeof readCommand>,
     context: PrefixRouteContext,
     streamSignal?: AbortSignal
-): CliCommandInvocationContext {
+): CliNativeCommandInvocationContext {
     return Object.freeze({
         localOwner: isLocalOwnerCli(context),
         requestId: context.requestId,

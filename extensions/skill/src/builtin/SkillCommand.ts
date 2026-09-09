@@ -6,7 +6,7 @@ import type {
     ExtensionJsonValue
 } from "@portable-devshell/extension";
 import type {
-    CliCommandInvocationContext,
+    CliNativeCommandInvocationContext,
     CliCommandResult
 } from "@portable-devshell/extension/cli";
 
@@ -37,7 +37,7 @@ export const SKILL_USAGE = [
 export async function executeSkillCommand(
     extension: ExtensionContext,
     argv: readonly string[],
-    invocation: CliCommandInvocationContext
+    invocation: CliNativeCommandInvocationContext
 ): Promise<CliCommandResult> {
     invocation.signal.throwIfAborted();
     requireLocalOwner(invocation);
@@ -82,7 +82,7 @@ async function getSkill(
     name: string,
     targetText: string,
     options: SkillCatalogOptions,
-    invocation: CliCommandInvocationContext
+    invocation: CliNativeCommandInvocationContext
 ): Promise<ExtensionJsonValue> {
     const instance = parseInstance(targetText);
     const selected = await resolveSkillSource(name, options);
@@ -126,7 +126,7 @@ function projectionResult(
 
 function catalogOptions(
     requestedWorkspace: string | undefined,
-    invocation: CliCommandInvocationContext
+    invocation: CliNativeCommandInvocationContext
 ): SkillCatalogOptions {
     const caller = invocation.workingDirectory;
     if (requestedWorkspace === undefined) {
@@ -173,7 +173,7 @@ function expectPositionals(values: readonly string[], expected: number, usage: s
     if (values.length !== expected) throw usageError(`Usage: devshell ${usage}`);
 }
 
-function requireLocalOwner(invocation: CliCommandInvocationContext): void {
+function requireLocalOwner(invocation: CliNativeCommandInvocationContext): void {
     if (!invocation.localOwner) {
         throw new Error("Skill commands are restricted to the local owner CLI.");
     }

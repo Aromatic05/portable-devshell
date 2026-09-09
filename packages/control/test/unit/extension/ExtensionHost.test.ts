@@ -40,7 +40,7 @@ function manifest(id: string, generation: string): ExtensionManifest {
         capabilities: [],
         entry: "extension.mjs",
         extensions: {
-            "cli.commands": [{ id, title: id }]
+            "cli.native-commands": [{ id, title: id }]
         },
         hostDependencies: [],
         id,
@@ -75,7 +75,7 @@ function generation(
             binding: async () => await handler(),
             declaration: { id, title: id },
             id,
-            pointId: "cli.commands"
+            pointId: "cli.native-commands"
         }])
     });
 }
@@ -99,7 +99,7 @@ function unregisteredGeneration(
 }
 
 async function commandText(host: ExtensionHost, id: string, _requestId: string): Promise<string> {
-    const { lease, registration } = await host.acquireRegistration("cli.commands", id);
+    const { lease, registration } = await host.acquireRegistration("cli.native-commands", id);
     try {
         assert.equal(typeof registration.binding, "function");
         return await (registration.binding as () => Promise<string>)();
@@ -161,7 +161,7 @@ test("Extension host rejects a static registration conflict before loading candi
         async (id, name) => id === "second"
             ? {
                 ...manifest(id, name),
-                extensions: { "cli.commands": [{ id: "first", title: "Conflicting" }] }
+                extensions: { "cli.native-commands": [{ id: "first", title: "Conflicting" }] }
             }
             : manifest(id, name)
     );
@@ -170,7 +170,7 @@ test("Extension host rejects a static registration conflict before loading candi
 
     await assert.rejects(
         host.activateGeneration("second", "b"),
-        /registration conflict for cli\.commands\/first: second and first/u
+        /registration conflict for cli\.native-commands\/first: second and first/u
     );
     assert.deepEqual(loaded, []);
     await host.stop();
@@ -354,7 +354,7 @@ test("Extension startup catalogs last-known-good when the selected manifest is u
     assert.deepEqual(loaded, []);
     assert.deepEqual(manifestReads, ["bad:broken", "bad:good", "healthy:v1"]);
     assert.deepEqual(
-        host.listDeclarations("cli.commands").map((registration) => ({
+        host.listDeclarations("cli.native-commands").map((registration) => ({
             extensionId: registration.extensionId,
             id: registration.id
         })),
@@ -396,7 +396,7 @@ test("Extension disable removes new routing immediately while a leased old gener
 
     await host.disable("example");
     await assert.rejects(
-        host.acquireRegistration("cli.commands", "example"),
+        host.acquireRegistration("cli.native-commands", "example"),
         /No Extension registration/u
     );
     assert.equal((await host.list())[0]?.state, "disabled");
@@ -466,7 +466,7 @@ test("Extension host reports a faulted active generation as failed and rejects n
     assert.equal(record.activeGeneration, "a");
     assert.equal(record.failure?.message, "sandbox OOM");
     await assert.rejects(
-        host.acquireRegistration("cli.commands", "example"),
+        host.acquireRegistration("cli.native-commands", "example"),
         /sandbox OOM/u
     );
     await host.stop();

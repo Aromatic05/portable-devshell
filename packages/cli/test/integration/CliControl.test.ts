@@ -106,7 +106,9 @@ test("CliMain negotiates Control before a control-plane business request", async
                       capabilities: ["request", "stream", "streamResume"],
                       protocolVersion: 1,
                   }
-                : {};
+                : event.name === "cli.commands"
+                    ? []
+                    : {};
             void codec.send({
                 id: `reply-${event.id}`,
                 replyTo: event.id,
@@ -133,7 +135,7 @@ test("CliMain negotiates Control before a control-plane business request", async
     });
 
     assert.equal(await cli.run(["overview"]), 0);
-    assert.deepEqual(methods, ["service.hello", "overview.get"]);
+    assert.deepEqual(methods, ["service.hello", "cli.commands", "overview.get"]);
     assert.equal(stderr.flush(), "");
     assert.equal(stdout.flush(), "{}\n");
 });

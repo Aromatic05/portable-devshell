@@ -9,7 +9,7 @@ import {
     type ExtensionPointDeclaration,
     type ExtensionWorkerSession
 } from "@portable-devshell/extension";
-import { commands } from "@portable-devshell/extension/cli";
+import { nativeCommands } from "@portable-devshell/extension/cli";
 import { applications } from "@portable-devshell/extension/web";
 
 import { createControlExtensionPointRegistry } from "../../../src/composition/ControlExtensionPointRegistry.ts";
@@ -97,7 +97,7 @@ test("Extension loader reads and validates a generation manifest without activat
     const harness = await createHarness();
     t.after(harness.cleanup);
     const { id, generation } = await harness.writeGeneration({
-        extensions: { "cli.commands": [{ id: "example", title: "Example" }] }
+        extensions: { "cli.native-commands": [{ id: "example", title: "Example" }] }
     });
     let imports = 0;
     const loader = new ExtensionLoader({
@@ -114,7 +114,7 @@ test("Extension loader reads and validates a generation manifest without activat
 
     assert.equal(manifest.id, id);
     assert.deepEqual(manifest.extensions, {
-        "cli.commands": [{ id: "example", title: "Example" }]
+        "cli.native-commands": [{ id: "example", title: "Example" }]
     });
     assert.equal(imports, 0);
     await assert.rejects(access(harness.paths.runtimeDirectory(id, generation)));
@@ -122,12 +122,12 @@ test("Extension loader reads and validates a generation manifest without activat
     await assert.rejects(access(harness.paths.stateDirectory(id)));
 });
 
-test("Extension loader returns a ready invisible candidate with narrow immutable v3 context", async (t) => {
+test("Extension loader returns a ready invisible candidate with narrow immutable v4 context", async (t) => {
     const harness = await createHarness();
     t.after(harness.cleanup);
     const { id, generation } = await harness.writeGeneration({
         capabilities: ["workers"],
-        extensions: { "cli.commands": [{ id: "example", title: "Example" }] }
+        extensions: { "cli.native-commands": [{ id: "example", title: "Example" }] }
     });
     const events: string[] = [];
     let seenContext: ExtensionContext | undefined;
@@ -135,7 +135,7 @@ test("Extension loader returns a ready invisible candidate with narrow immutable
         importer: async () => ({
             activate(context: ExtensionContext): void {
                 seenContext = context;
-                context.register(commands, "example", async () => ({ kind: "json", value: { pong: true } }));
+                context.register(nativeCommands, "example", async () => ({ kind: "json", value: { pong: true } }));
             },
             deactivate() { events.push("module.deactivate"); }
         }),
@@ -162,7 +162,7 @@ test("Extension loader returns a ready invisible candidate with narrow immutable
     assert.equal(dirname(seenContext!.paths.runtimeDirectory), harness.paths.runtimeDirectory(id, generation));
     candidate.activate();
     const lease = candidate.acquire();
-    const registration = lease.registrations.get("cli.commands", "example");
+    const registration = lease.registrations.get("cli.native-commands", "example");
     assert.ok(registration);
     assert.deepEqual(await (registration.binding as (argv: readonly string[], context: unknown) => Promise<unknown>)([], {}), {
         kind: "json",
@@ -277,7 +277,7 @@ test("Extension loader deactivates a module before rejecting an undeclared runti
     const loader = new ExtensionLoader({
         importer: async () => ({
             activate(context: ExtensionContext) {
-                context.register(commands, "example", async () => ({ kind: "text", text: "should not register" }));
+                context.register(nativeCommands, "example", async () => ({ kind: "text", text: "should not register" }));
             },
             deactivate() { events.push("module.deactivate"); }
         }),
@@ -287,7 +287,7 @@ test("Extension loader deactivates a module before rejecting an undeclared runti
         workerFactory: () => fakeWorker(events)
     });
 
-    await assert.rejects(loader.load(target.id, target.generation), /registered undeclared cli\.commands\/example/u);
+    await assert.rejects(loader.load(target.id, target.generation), /registered undeclared cli\.native-commands\/example/u);
     assert.deepEqual(events, ["module.deactivate", "worker.closeAll"]);
 });
 

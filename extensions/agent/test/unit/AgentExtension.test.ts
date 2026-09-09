@@ -7,7 +7,7 @@ import {
     type ExtensionContext,
     type ExtensionWorkerSession
 } from "@portable-devshell/extension";
-import type { CliCommandInvocationContext } from "@portable-devshell/extension/cli";
+import type { CliNativeCommandInvocationContext } from "@portable-devshell/extension/cli";
 
 import { executeAgentCommand, type AgentProviderCommandPort } from "../../src/builtin/AgentCommand.ts";
 import { AgentExtensionRuntime } from "../../src/builtin/AgentRuntime.ts";
@@ -22,10 +22,10 @@ test("Agent Extension manifest declares host-managed capabilities and domain Ext
     ));
     assert.equal(manifest.id, "agent");
     assert.equal(manifest.entry, "index.ts");
-    assert.equal(manifest.apiVersion, 3);
+    assert.equal(manifest.apiVersion, 4);
     assert.deepEqual(manifest.capabilities, ["assets", "processes", "workers"]);
     assert.deepEqual(manifest.extensions, {
-        "cli.commands": [{
+        "cli.native-commands": [{
             id: "agent",
             summary: "Run and manage Agent providers",
             title: "Agent",
@@ -184,9 +184,9 @@ test("Agent Extension activation binds CLI and Web points without a generic RPC 
     try {
         assert.deepEqual(
             registrations.map(({ id, pointId }) => `${pointId}/${id}`).sort(),
-            ["cli.commands/agent", "web.applications/agent"]
+            ["cli.native-commands/agent", "web.applications/agent"]
         );
-        assert.equal(typeof registrations.find(({ pointId }) => pointId === "cli.commands")?.binding, "function");
+        assert.equal(typeof registrations.find(({ pointId }) => pointId === "cli.native-commands")?.binding, "function");
         const web = registrations.find(({ pointId }) => pointId === "web.applications")?.binding as {
             source?: { kind?: string; resolve?: unknown };
         } | undefined;
@@ -320,7 +320,7 @@ function handleFixture(agentId: string, events: string[], _ordinal = 0): AgentPr
     };
 }
 
-function invocationContext(localOwner = true): CliCommandInvocationContext {
+function invocationContext(localOwner = true): CliNativeCommandInvocationContext {
     return { localOwner, requestId: "req-1", signal: new AbortController().signal };
 }
 

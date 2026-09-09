@@ -66,7 +66,7 @@ async function harness(t: test.TestContext, limits = {}): Promise<Harness> {
                 capabilities: [],
                 entry: "extension.mjs",
                 extensions: {
-                    "cli.commands": [{ id: commandId, title: commandId }]
+                    "cli.native-commands": [{ id: commandId, title: commandId }]
                 },
                 ...(options.hostDependencies === undefined ? {} : { hostDependencies: options.hostDependencies }),
                 id,
@@ -76,7 +76,7 @@ async function harness(t: test.TestContext, limits = {}): Promise<Harness> {
             })}\n`, "utf8");
             await writeFile(join(source, "extension.mjs"), options.body ?? [
                 "export function activate(context) {",
-                `  context.register({ id: 'cli.commands' }, ${JSON.stringify(commandId)}, async () => ({ kind: 'json', value: { version: '1.0.0' } }));`,
+                `  context.register({ id: 'cli.native-commands' }, ${JSON.stringify(commandId)}, async () => ({ kind: 'json', value: { version: '1.0.0' } }));`,
                 "}",
                 ""
             ].join("\n"), "utf8");
@@ -90,7 +90,7 @@ async function invokeCliRegistration(
     id: string,
     requestId: string
 ): Promise<unknown> {
-    const { lease, registration } = await host.acquireRegistration("cli.commands", id);
+    const { lease, registration } = await host.acquireRegistration("cli.native-commands", id);
     try {
         assert.equal(typeof registration.binding, "function");
         return await Reflect.apply(registration.binding as (...args: unknown[]) => unknown, undefined, [
@@ -166,14 +166,17 @@ test("Extension identity is independent from the CLI command namespace", async (
     );
 });
 
-test("cli.commands rejects a built-in CLI command id regardless of Extension identity", async (t) => {
+test("cli.native-commands may overlay a built-in CLI command id", async (t) => {
     const h = await harness(t);
-    await assert.rejects(
-        h.service.install(await h.source("reserved-cli-command", {
-            commandId: "status",
-            id: "ordinary-extension"
-        })),
-        /cli\.commands\/status conflicts with a built-in CLI command/u
+    const installed = await h.service.install(await h.source("status-overlay", {
+        commandId: "status",
+        id: "ordinary-extension"
+    }));
+
+    assert.equal(installed.id, "ordinary-extension");
+    assert.deepEqual(
+        await invokeCliRegistration(h.host, "status", "status-overlay"),
+        { kind: "json", value: { version: "1.0.0" } }
     );
 });
 
@@ -217,7 +220,7 @@ test("builtin Extension generation resolves host runtime dependencies without co
         body: [
             'import { Client } from "@modelcontextprotocol/client";',
             "export function activate(context) {",
-            "  context.register({ id: 'cli.commands' }, 'mcp', async () => ({ kind: 'json', value: { clientType: typeof Client } }));",
+            "  context.register({ id: 'cli.native-commands' }, 'mcp', async () => ({ kind: 'json', value: { clientType: typeof Client } }));",
             "}",
             ""
         ].join("\n"),
@@ -369,7 +372,7 @@ test("Extension remove disables routing, waits for the leased generation to drai
             "    watcher.close();",
             "    releaseHold();",
             "  });",
-            "  context.register({ id: 'cli.commands' }, 'example', async () => {",
+            "  context.register({ id: 'cli.native-commands' }, 'example', async () => {",
             "    await hold;",
             "    return { kind: 'text', text: 'released' };",
             "  });",
@@ -414,7 +417,7 @@ test("Extension remove surfaces dispose failure before deleting the installed ge
             "let stateDirectory;",
             "export function activate(context) {",
             "  stateDirectory = context.paths.stateDirectory;",
-            "  context.register({ id: 'cli.commands' }, 'example', async () => ({ kind: 'text', text: 'ok' }));",
+            "  context.register({ id: 'cli.native-commands' }, 'example', async () => ({ kind: 'text', text: 'ok' }));",
             "}",
             "export function deactivate() {",
             "  if (existsSync(join(stateDirectory, 'fail-dispose'))) throw new Error('dispose failed during remove');",

@@ -1,7 +1,7 @@
 import { join } from "node:path";
 
 import type { ExtensionContext } from "@portable-devshell/extension";
-import { commands } from "@portable-devshell/extension/cli";
+import { nativeCommands } from "@portable-devshell/extension/cli";
 import { applications } from "@portable-devshell/extension/web";
 
 import { executeAgentCommand } from "./AgentCommand.js";
@@ -29,7 +29,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     });
     activeRuntime = runtime;
     context.register(
-        commands,
+        nativeCommands,
         "agent",
         async (argv, invocation) => await executeAgentCommand(runtime, providerManager, argv, invocation)
     );

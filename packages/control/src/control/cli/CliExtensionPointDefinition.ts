@@ -1,5 +1,6 @@
 import {
-    commands,
+    modelCommands,
+    nativeCommands,
     type CliCommandDeclaration
 } from "@portable-devshell/extension/cli";
 import type {
@@ -12,67 +13,46 @@ import type {
     ExtensionPointValidationContext
 } from "../extension/host/generation/ExtensionPointRegistry.js";
 import {
-    createCliSandboxBinding,
+    createCliModelSandboxBinding,
+    createCliNativeSandboxBinding,
     validateCliCommandBinding
 } from "./CliExtensionSandboxCodec.js";
 
-const CONTROL_CLI_COMMAND_IDS = new Set([
-    "approval",
-    "config",
-    "context",
-    "debug",
-    "extension",
-    "help",
-    "logs",
-    "oauth",
-    "overview",
-    "restart",
-    "start",
-    "status",
-    "stop",
-    "todo",
-    "tool",
-    "tui",
-    "watch"
-]);
-
-const RESIDENT_EXTENSION_COMMAND_IDS = new Set([
-    "artifact",
-    "instance"
-]);
-
-export const cliCommandsExtensionPointDefinition: ExtensionPointDefinition = Object.freeze({
-    createSandboxBinding: createCliSandboxBinding,
-    id: commands.id,
-    parseDeclaration(declaration: ExtensionPointDeclaration): CliCommandDeclaration {
-        const parsed = parseCliCommandDeclaration(declaration);
-        if (CONTROL_CLI_COMMAND_IDS.has(parsed.id)) {
-            throw new TypeError(`cli.commands/${parsed.id} conflicts with a built-in CLI command.`);
-        }
-        if (RESIDENT_EXTENSION_COMMAND_IDS.has(parsed.id)) {
-            throw new TypeError(`cli.commands/${parsed.id} conflicts with a Control-resident Extension command.`);
-        }
-        return parsed;
-    },
+export const cliNativeCommandsExtensionPointDefinition: ExtensionPointDefinition = Object.freeze({
+    createSandboxBinding: createCliNativeSandboxBinding,
+    id: nativeCommands.id,
+    parseDeclaration: (declaration: ExtensionPointDeclaration) => parseCliCommandDeclaration(declaration, nativeCommands.id),
     validateBinding(binding: unknown, context: ExtensionPointValidationContext) {
-        validateCliCommandBinding(binding, context);
+        validateCliCommandBinding(binding, context, nativeCommands.id);
     }
 });
 
-function parseCliCommandDeclaration(value: ExtensionPointDeclaration): CliCommandDeclaration {
+export const cliModelCommandsExtensionPointDefinition: ExtensionPointDefinition = Object.freeze({
+    createSandboxBinding: createCliModelSandboxBinding,
+    id: modelCommands.id,
+    parseDeclaration: (declaration: ExtensionPointDeclaration) => parseCliCommandDeclaration(declaration, modelCommands.id),
+    validateBinding(binding: unknown, context: ExtensionPointValidationContext) {
+        validateCliCommandBinding(binding, context, modelCommands.id);
+    }
+});
+
+function parseCliCommandDeclaration(
+    value: ExtensionPointDeclaration,
+    pointId: string
+): CliCommandDeclaration {
     const record = value as ExtensionPointDeclaration & Record<string, ExtensionJsonValue | undefined>;
     const allowed = new Set(["id", "summary", "title", "usage"]);
     const unknown = Object.keys(record).find((key) => !allowed.has(key));
-    if (unknown !== undefined) throw new TypeError(`cli.commands declaration has unknown field ${unknown}.`);
+    if (unknown !== undefined) throw new TypeError(`${pointId} declaration has unknown field ${unknown}.`);
     return Object.freeze({
         id: value.id,
-        ...(record.summary === undefined ? {} : { summary: readString(record.summary, "summary") }),
-        title: readString(record.title, "title"),
-        ...(record.usage === undefined ? {} : { usage: readString(record.usage, "usage") })
+        ...(record.summary === undefined ? {} : { summary: readString(record.summary, "summary", pointId) }),
+        title: readString(record.title, "title", pointId),
+        ...(record.usage === undefined ? {} : { usage: readString(record.usage, "usage", pointId) })
     });
 }
 
-function readString(value: ExtensionJsonValue | undefined, field: string): string {
+function readString(value: ExtensionJsonValue | undefined, field: string, pointId: string): string {
     if (typeof value === "string" && value.length > 0 && value.trim() === value) return value;
-    throw new TypeError(`cli.commands declaration ${field} must be a non-empty trimmed string.`);
+    throw new TypeError(`${pointId} declaration ${field} must be a non-empty trimmed string.`);
 }

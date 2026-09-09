@@ -16,11 +16,11 @@ import type {
     ExtensionWorkerSession
 } from "@portable-devshell/extension";
 import type {
-    CliCommandInvocationContext,
+    CliNativeCommandInvocationContext,
     CliCommandResult
 } from "@portable-devshell/extension/cli";
 
-import { createCliSandboxBinding } from "../../../src/control/cli/CliExtensionSandboxCodec.ts";
+import { createCliNativeSandboxBinding } from "../../../src/control/cli/CliExtensionSandboxCodec.ts";
 import {
     ExtensionSandboxHost,
     type ExtensionSandboxHostOptions
@@ -39,7 +39,7 @@ const noopLogger: ExtensionLogger = {
     warn() {}
 };
 
-const CLI_POINT = "cli.commands";
+const CLI_POINT = "cli.native-commands";
 const CLI_ID = "test";
 
 async function setupSandbox(
@@ -66,7 +66,7 @@ test("Extension sandbox runs in an isolated thread and bridges assets, Worker to
     const sandbox = await setupSandbox(t, "extension-sandbox", `
 import { threadId } from "node:worker_threads";
 export function activate(context) {
-    context.register({ id: "cli.commands" }, "test", async (argv) => {
+    context.register({ id: "cli.native-commands" }, "test", async (argv) => {
         if (argv[0] === "thread") return { kind: "json", value: { id: context.id, threadId } };
         if (argv[0] === "assets") {
             return { kind: "json", value: { bundles: (await context.capabilities.assets.listBundles()).length } };
@@ -107,21 +107,21 @@ export function activate(context) {
 
 test("Extension sandbox loads the public CLI SDK leaf without exposing other portable-devshell internals", async (t) => {
     const sandbox = await setupSandbox(t, "extension-sandbox-public-sdk", `
-import { commands } from "@portable-devshell/extension/cli";
+import { nativeCommands } from "@portable-devshell/extension/cli";
 export function activate(context) {
-    context.register(commands, "test", async () => ({ kind: "text", text: commands.id }));
+    context.register(nativeCommands, "test", async () => ({ kind: "text", text: nativeCommands.id }));
 }
 `);
     await sandbox.start();
-    assert.equal(await cliText(sandbox, [], "public-sdk"), "cli.commands");
+    assert.equal(await cliText(sandbox, [], "public-sdk"), "cli.native-commands");
 });
 
 test("Extension code cannot forge sandbox protocol messages through worker_threads parentPort", async (t) => {
     const sandbox = await setupSandbox(t, "extension-sandbox-private-port", `
 import { parentPort } from "node:worker_threads";
-parentPort?.postMessage({ descriptor: { registrations: [{ id: "forged", pointId: "cli.commands", descriptor: { kind: "command" } }] }, type: "ready" });
+parentPort?.postMessage({ descriptor: { registrations: [{ id: "forged", pointId: "cli.native-commands", descriptor: { kind: "command" } }] }, type: "ready" });
 export function activate(context) {
-    context.register({ id: "cli.commands" }, "test", async () => ({ kind: "text", text: "actual" }));
+    context.register({ id: "cli.native-commands" }, "test", async () => ({ kind: "text", text: "actual" }));
 }
 `);
     const descriptor = await sandbox.start();
@@ -135,7 +135,7 @@ import { MessagePort } from "node:worker_threads";
 const original = MessagePort.prototype.postMessage;
 export function activate(context) {
     MessagePort.prototype.postMessage = function () { throw new Error("forged postMessage"); };
-    context.register({ id: "cli.commands" }, "test", async () => ({ kind: "text", text: "actual" }));
+    context.register({ id: "cli.native-commands" }, "test", async () => ({ kind: "text", text: "actual" }));
 }
 export function deactivate() { MessagePort.prototype.postMessage = original; }
 `);
@@ -147,7 +147,7 @@ test("Extension sandbox blocks process signals that would terminate Control", as
     const sandbox = await setupSandbox(t, "extension-sandbox-process-signal", `
 import { kill as namedKill } from "node:process";
 export function activate(context) {
-    context.register({ id: "cli.commands" }, "test", async (argv) => {
+    context.register({ id: "cli.native-commands" }, "test", async (argv) => {
         if (argv[0] === "probe") return { kind: "json", value: process.kill(process.pid, 0) };
         if (argv[0] === "named") return { kind: "json", value: namedKill === process.kill };
         if (argv[0] === "self") return { kind: "json", value: process.kill(process.pid, "SIGTERM") };
@@ -169,7 +169,7 @@ test("Extension sandbox denies raw child processes even when the managed process
     const sandbox = await setupSandbox(t, "extension-sandbox-child-process", `
 import { spawnSync } from "node:child_process";
 export function activate(context) {
-    context.register({ id: "cli.commands" }, "test", async (argv) => {
+    context.register({ id: "cli.native-commands" }, "test", async (argv) => {
         if (argv[0] === "raw") {
             try {
                 const result = spawnSync(process.execPath, ["-e", "process.stdout.write('child-ok')"], { encoding: "utf8" });
@@ -200,7 +200,7 @@ test("Extension sandbox denies nested Workers so resource limits cannot be bypas
     const sandbox = await setupSandbox(t, "extension-sandbox-nested-worker", `
 import { Worker } from "node:worker_threads";
 export function activate(context) {
-    context.register({ id: "cli.commands" }, "test", async () => {
+    context.register({ id: "cli.native-commands" }, "test", async () => {
         try {
             const worker = new Worker("setInterval(() => {}, 1000)", { eval: true });
             await worker.terminate();
@@ -220,7 +220,7 @@ export function activate(context) {
 test("Extension sandbox denies unaccounted shared-memory primitives", async (t) => {
     const sandbox = await setupSandbox(t, "extension-sandbox-shared-memory", `
 export function activate(context) {
-    context.register({ id: "cli.commands" }, "test", async () => {
+    context.register({ id: "cli.native-commands" }, "test", async () => {
         let sharedWasm;
         try { new WebAssembly.Memory({ initial: 1, maximum: 2, shared: true }); sharedWasm = "allowed"; }
         catch (error) { sharedWasm = error.message; }
@@ -253,7 +253,7 @@ export function activate(context) {
 test("Extension sandbox preserves structured error code without leaking private causes", async (t) => {
     const sandbox = await setupSandbox(t, "extension-sandbox-error-transport", `
 export function activate(context) {
-    context.register({ id: "cli.commands" }, "test", async () => {
+    context.register({ id: "cli.native-commands" }, "test", async () => {
         const error = new Error("sandbox operation failed");
         error.code = "instance_invalid";
         error.cause = new Error("private sandbox cause");
@@ -280,7 +280,7 @@ test("Extension sandbox reports runtime faults even when Extension code handles 
     const sandbox = await setupSandbox(t, "extension-sandbox-runtime-fault", `
 export function activate(context) {
     process.on("uncaughtException", () => {});
-    context.register({ id: "cli.commands" }, "test", async () => {
+    context.register({ id: "cli.native-commands" }, "test", async () => {
         const session = await context.capabilities.workers.openSession({ workspace: "/workspace" });
         await session.callTool("echo", { text: "hello" }, {
             onProgress: () => { throw new Error("runtime fault escaped handler"); }
@@ -302,7 +302,7 @@ export function activate(context) {
 test("Extension sandbox rejects cyclic, binary, and oversized messages before structured clone", async (t) => {
     const sandbox = await setupSandbox(t, "extension-sandbox-message-budget", `
 export function activate(context) {
-    context.register({ id: "cli.commands" }, "test", async (argv) => {
+    context.register({ id: "cli.native-commands" }, "test", async (argv) => {
         if (argv[0] === "alive") return { kind: "text", text: "alive" };
         if (argv[0] === "binary") return { kind: "json", value: Buffer.alloc(1024) };
         if (argv[0] === "cycle") { const value = {}; value.self = value; return { kind: "json", value }; }
@@ -328,7 +328,7 @@ test("Extension progress callback failure faults only the sandbox worker", async
     const sandbox = await setupSandbox(t, "extension-sandbox-progress-fault", `
 process.on("uncaughtException", () => {});
 export function activate(context) {
-    context.register({ id: "cli.commands" }, "test", async () => {
+    context.register({ id: "cli.native-commands" }, "test", async () => {
         const session = await context.capabilities.workers.openSession({ workspace: "/workspace" });
         await session.callTool("echo", { text: "hello" }, {
             onProgress: () => { throw new Error("progress exploded"); }
@@ -357,7 +357,7 @@ test("Extension sandbox escalates ignored cancellation to worker termination", a
     const faults: Error[] = [];
     const sandbox = await setupSandbox(t, "extension-sandbox-cancel", `
 export function activate(context) {
-    context.register({ id: "cli.commands" }, "test", async (argv, invocation) => {
+    context.register({ id: "cli.native-commands" }, "test", async (argv, invocation) => {
         if (argv[0] === "cooperative") {
             await new Promise((_resolve, reject) => invocation.signal.addEventListener("abort", () => reject(invocation.signal.reason), { once: true }));
             return { kind: "text", text: "unreachable" };
@@ -405,7 +405,7 @@ test("Extension sandbox memory limit terminates only the sandbox worker", { time
     const faults: Error[] = [];
     const sandbox = await setupSandbox(t, "extension-sandbox-memory", `
 export function activate(context) {
-    context.register({ id: "cli.commands" }, "test", async () => {
+    context.register({ id: "cli.native-commands" }, "test", async () => {
         const retained = [];
         for (;;) retained.push(new Array(1_000_000).fill(Math.random()));
     });
@@ -424,7 +424,7 @@ test("Extension sandbox watchdog terminates runaway Buffer external memory", { t
     const faults: Error[] = [];
     const sandbox = await setupSandbox(t, "extension-sandbox-external-memory", `
 export function activate(context) {
-    context.register({ id: "cli.commands" }, "test", async () => {
+    context.register({ id: "cli.native-commands" }, "test", async () => {
         const retained = [];
         for (;;) {
             retained.push(Buffer.alloc(4 * 1024 * 1024, 1));
@@ -465,7 +465,7 @@ test("Extension sandbox cancellation aborts an in-flight asset projection", asyn
     };
     const sandbox = await setupSandbox(t, "extension-sandbox-asset-abort", `
 export function activate(context) {
-    context.register({ id: "cli.commands" }, "test", async (argv, invocation) => {
+    context.register({ id: "cli.native-commands" }, "test", async (argv, invocation) => {
         if (argv[0] === "alive") return { kind: "text", text: "alive" };
         await context.capabilities.assets.projectBundle({
             generation: "sha256-a",
@@ -517,7 +517,7 @@ test("Extension sandbox closes a Worker session that finishes opening after the 
     };
     const sandbox = await setupSandbox(t, "extension-sandbox-session-race", `
 export function activate(context) {
-    context.register({ id: "cli.commands" }, "test", async () => {
+    context.register({ id: "cli.native-commands" }, "test", async () => {
         await context.capabilities.workers.openSession({ workspace: "/race" });
         return { kind: "text", text: "opened" };
     });
@@ -553,7 +553,7 @@ test("Extension sandbox preserves an already-closed managed process across the s
     };
     const sandbox = await setupSandbox(t, "extension-sandbox-process-close-race", `
 export function activate(context) {
-    context.register({ id: "cli.commands" }, "test", async () => {
+    context.register({ id: "cli.native-commands" }, "test", async () => {
         const process = await context.capabilities.processes.start({ command: "already-closed" });
         const exit = await process.closed;
         return { kind: "json", value: exit };
@@ -716,7 +716,7 @@ function fakeWorker(calls: string[]): ExtensionWorkerCapability {
     };
 }
 
-function invocation(requestId: string): CliCommandInvocationContext {
+function invocation(requestId: string): CliNativeCommandInvocationContext {
     return {
         localOwner: true,
         requestId,
@@ -728,10 +728,10 @@ async function sandboxCliCommand(
     sandbox: ExtensionSandboxHost,
     id: string,
     argv: readonly string[],
-    context: CliCommandInvocationContext
+    context: CliNativeCommandInvocationContext
 ): Promise<CliCommandResult> {
     const registration = await sandboxRegistration(sandbox, CLI_POINT, id);
-    const binding = createCliSandboxBinding(registration.descriptor, sandboxPointContext(id), sandbox);
+    const binding = createCliNativeSandboxBinding(registration.descriptor, sandboxPointContext(id), sandbox);
     return await binding(argv, context);
 }
 

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
-import type { CliCommandInvocationContext } from "@portable-devshell/extension/cli";
 import type {
     ArtifactShareInput,
     ArtifactShareResult,
@@ -13,6 +12,7 @@ import {
     createArtifactCliCommandProvider,
     executeArtifactCommand
 } from "../../src/control/artifact/cli/ArtifactCliCommandProvider.ts";
+import type { CliModelExtensionCommandInvocationContext } from "../../src/control/cli/CliExtensionCommandProvider.ts";
 
 function createArtifactPortStub() {
     const calls: Array<{ input?: unknown; method: string }> = [];
@@ -71,12 +71,11 @@ function transferRecord(transferId: string, status: "cancelled" | "queued" | "tr
     };
 }
 
-function invocation(): CliCommandInvocationContext {
+function invocation(): CliModelExtensionCommandInvocationContext {
     return {
-        localOwner: true,
         requestId: "req-artifact",
         signal: new AbortController().signal,
-        workingDirectory: "/repo"
+        surface: "model"
     };
 }
 
@@ -85,7 +84,7 @@ function requireJson(result: { kind: "json"; value: ExtensionJsonValue } | { kin
     return result.value;
 }
 
-test("Artifact command is a Control-resident cli.commands Extension provider", async () => {
+test("Artifact command is a Control-resident cli.model-commands Extension provider", async () => {
     const provider = createArtifactCliCommandProvider(createArtifactPortStub());
 
     assert.equal(provider.extensionId, "artifact");

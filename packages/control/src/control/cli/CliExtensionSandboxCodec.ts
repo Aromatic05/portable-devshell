@@ -1,8 +1,11 @@
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import {
-    commands,
-    type CliCommandBinding,
-    type CliCommandInvocationContext,
+    modelCommands,
+    nativeCommands,
+    type CliModelCommandBinding,
+    type CliModelCommandInvocationContext,
+    type CliNativeCommandBinding,
+    type CliNativeCommandInvocationContext,
     type CliCommandResult
 } from "@portable-devshell/extension/cli";
 
@@ -12,23 +15,23 @@ import type {
 } from "../extension/host/generation/ExtensionPointRegistry.js";
 import type { ExtensionSandboxPointCodec } from "../extension/host/generation/sandbox/ExtensionSandboxPointCodec.js";
 
-export const cliCommandsSandboxCodec: ExtensionSandboxPointCodec = Object.freeze({
+export const cliNativeCommandsSandboxCodec: ExtensionSandboxPointCodec = Object.freeze({
     describeBinding(binding: unknown, context: ExtensionPointValidationContext): ExtensionJsonValue {
-        validateCliCommandBinding(binding, context);
+        validateCliCommandBinding(binding, context, nativeCommands.id);
         return Object.freeze({ kind: "command" });
     },
-    id: commands.id,
+    id: nativeCommands.id,
     async invokeBinding(
         binding: unknown,
         input: ExtensionJsonValue | undefined,
         signal: AbortSignal,
         context: ExtensionPointValidationContext
     ): Promise<unknown> {
-        validateCliCommandBinding(binding, context);
-        const value = readRecord(input, `Extension ${context.extensionId} cli.commands/${context.id} invocation`);
+        validateCliCommandBinding(binding, context, nativeCommands.id);
+        const value = readRecord(input, `Extension ${context.extensionId} ${nativeCommands.id}/${context.id} invocation`);
         const argv = readStringArray(value.argv, "argv");
-        const invocation = readRecord(value.context, "CLI invocation context");
-        return await (binding as CliCommandBinding)(argv, Object.freeze({
+        const invocation = readRecord(value.context, "native CLI invocation context");
+        return await (binding as CliNativeCommandBinding)(argv, Object.freeze({
             localOwner: readBoolean(invocation.localOwner, "localOwner"),
             requestId: readString(invocation.requestId, "requestId"),
             signal,
@@ -39,20 +42,37 @@ export const cliCommandsSandboxCodec: ExtensionSandboxPointCodec = Object.freeze
     }
 });
 
-export function createCliSandboxBinding(
+export const cliModelCommandsSandboxCodec: ExtensionSandboxPointCodec = Object.freeze({
+    describeBinding(binding: unknown, context: ExtensionPointValidationContext): ExtensionJsonValue {
+        validateCliCommandBinding(binding, context, modelCommands.id);
+        return Object.freeze({ kind: "command" });
+    },
+    id: modelCommands.id,
+    async invokeBinding(
+        binding: unknown,
+        input: ExtensionJsonValue | undefined,
+        signal: AbortSignal,
+        context: ExtensionPointValidationContext
+    ): Promise<unknown> {
+        validateCliCommandBinding(binding, context, modelCommands.id);
+        const value = readRecord(input, `Extension ${context.extensionId} ${modelCommands.id}/${context.id} invocation`);
+        const argv = readStringArray(value.argv, "argv");
+        const invocation = readRecord(value.context, "model CLI invocation context");
+        return await (binding as CliModelCommandBinding)(argv, Object.freeze({
+            requestId: readString(invocation.requestId, "requestId"),
+            signal
+        }));
+    }
+});
+
+export function createCliNativeSandboxBinding(
     descriptor: ExtensionJsonValue,
     context: ExtensionPointValidationContext,
     bridge: ExtensionPointSandboxBridge
-): CliCommandBinding {
-    const value = readRecord(
-        descriptor,
-        `Extension ${context.extensionId} cli.commands/${context.id} sandbox descriptor`
-    );
-    if (value.kind !== "command" || Object.keys(value).some((key) => key !== "kind")) {
-        throw new TypeError(`Extension ${context.extensionId} cli.commands/${context.id} sandbox descriptor is invalid.`);
-    }
-    return async (argv: readonly string[], invocation: CliCommandInvocationContext): Promise<CliCommandResult> =>
-        await bridge.invokeBinding(commands.id, context.id, {
+): CliNativeCommandBinding {
+    assertCommandDescriptor(descriptor, context, nativeCommands.id);
+    return async (argv: readonly string[], invocation: CliNativeCommandInvocationContext): Promise<CliCommandResult> =>
+        await bridge.invokeBinding(nativeCommands.id, context.id, {
             argv: [...argv],
             context: {
                 localOwner: invocation.localOwner,
@@ -64,14 +84,39 @@ export function createCliSandboxBinding(
         }, { signal: invocation.signal }) as CliCommandResult;
 }
 
+export function createCliModelSandboxBinding(
+    descriptor: ExtensionJsonValue,
+    context: ExtensionPointValidationContext,
+    bridge: ExtensionPointSandboxBridge
+): CliModelCommandBinding {
+    assertCommandDescriptor(descriptor, context, modelCommands.id);
+    return async (argv: readonly string[], invocation: CliModelCommandInvocationContext): Promise<CliCommandResult> =>
+        await bridge.invokeBinding(modelCommands.id, context.id, {
+            argv: [...argv],
+            context: { requestId: invocation.requestId }
+        }, { signal: invocation.signal }) as CliCommandResult;
+}
+
 export function validateCliCommandBinding(
     binding: unknown,
-    context: ExtensionPointValidationContext
-): asserts binding is CliCommandBinding {
+    context: ExtensionPointValidationContext,
+    pointId: string
+): asserts binding is CliNativeCommandBinding | CliModelCommandBinding {
     if (typeof binding !== "function") {
         throw new TypeError(
-            `Extension ${context.extensionId} cli.commands/${context.id} binding must be a function.`
+            `Extension ${context.extensionId} ${pointId}/${context.id} binding must be a function.`
         );
+    }
+}
+
+function assertCommandDescriptor(
+    descriptor: ExtensionJsonValue,
+    context: ExtensionPointValidationContext,
+    pointId: string
+): void {
+    const value = readRecord(descriptor, `Extension ${context.extensionId} ${pointId}/${context.id} sandbox descriptor`);
+    if (value.kind !== "command" || Object.keys(value).some((key) => key !== "kind")) {
+        throw new TypeError(`Extension ${context.extensionId} ${pointId}/${context.id} sandbox descriptor is invalid.`);
     }
 }
 
