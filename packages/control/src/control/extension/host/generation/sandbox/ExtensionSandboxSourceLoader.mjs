@@ -3,8 +3,8 @@ import { registerHooks, stripTypeScriptTypes } from "node:module";
 
 const workspacePackages = new Map([
     ["@portable-devshell/extension", new URL("../../../../../../../extension/src/index.ts", import.meta.url).href],
-    ["@portable-devshell/extension/cli", new URL("../../../../../../../extension/src/cli.ts", import.meta.url).href],
-    ["@portable-devshell/extension/web", new URL("../../../../../../../extension/src/web.ts", import.meta.url).href],
+    ["@portable-devshell/extension/cli", new URL("../../../../../../../extension/src/domain/cli.ts", import.meta.url).href],
+    ["@portable-devshell/extension/web", new URL("../../../../../../../extension/src/domain/web.ts", import.meta.url).href],
     ["@portable-devshell/shared", new URL("../../../../../../../shared/src/index.ts", import.meta.url).href],
     ["@portable-devshell/shared/transport/frame", new URL("../../../../../../../shared/src/transport/protocol/Frame.ts", import.meta.url).href]
 ]);

@@ -11,12 +11,12 @@
             "default": "./dist/index.js"
         },
         "./cli": {
-            "types": "./dist/cli.d.ts",
-            "default": "./dist/cli.js"
+            "types": "./dist/domain/cli.d.ts",
+            "default": "./dist/domain/cli.js"
         },
         "./web": {
-            "types": "./dist/web.d.ts",
-            "default": "./dist/web.js"
+            "types": "./dist/domain/web.d.ts",
+            "default": "./dist/domain/web.js"
         }
     },
     "files": [
