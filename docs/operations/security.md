@@ -67,7 +67,7 @@ Approval record 包含 `callId`、tool、source、input summary、risk level、C
 OAuth registration/authorization 只决定某个 MCP client 是否获得 access token；拿到 token 后实际 tool call 仍要经过：
 
 ```text
-tool group/capability
+Worker tool capability / namespace constraints
 workspace/path security
 approval policy
 ```

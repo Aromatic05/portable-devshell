@@ -2,7 +2,7 @@
 
 > 状态：核心元模型、static catalog、lazy activation 与第一批 CLI/Web domain discovery 已实现；后续章节继续约束未来 Extension Point 演进。
 >
-> API v4 已落地 `assets / workers / processes` capabilities、`cli.native-commands / cli.model-commands / web.applications` Extension Points、generation-owned registrations，以及最小 `activate / deactivate` module 生命周期。`docs/concepts/extensions.md` 描述当前运行时契约；本文保留设计推导、后续候选项和 public ABI 审查门禁。
+> API v4 已落地 `artifacts / assets / instances / processes / workers` capabilities、`cli.native-commands / cli.model-commands / web.applications` Extension Points、generation-owned registrations，以及最小 `activate / deactivate` module 生命周期。`docs/concepts/extensions.md` 描述当前运行时契约；本文保留设计推导、后续候选项和 public ABI 审查门禁。
 
 ## 1. 设计目标
 
@@ -312,15 +312,17 @@ Capability 是：
 
 因此 capability 名称必须是同一层级的资源类别名词。
 
-第一版候选集合：
+当前 API v4 集合：
 
 ```text
+artifacts
 assets
-workers
+instances
 processes
+workers
 ```
 
-三者都是：
+五者都是：
 
 > 由宿主管理、由 Extension 获得操作权的一类 runtime resource。
 
@@ -363,7 +365,19 @@ Generation fault / close 后，Control 必须能强制清理该 generation 创�
 
 Sandbox 本身仍应拒绝裸 `child_process`，否则 Extension worker 被 terminate 后子进程可以成为孤儿，破坏 generation ownership。
 
-### 5.5 Runtime context
+### 5.5 `artifacts`
+
+`artifacts` 允许 Extension 使用 Control-owned Artifact share/transfer 管理能力，包括受控创建、查询、撤销、取消与等待。
+
+它不授予任意文件访问，也不暴露 Artifact service/store。Model command 是否能跨 instance/workspace 操作 Artifact 仍由对应 Extension 的 domain grammar 与 authoritative invocation Context 决定，而不是由 capability grant 自动放行。
+
+### 5.6 `instances`
+
+`instances` 允许 Extension 使用 Control-owned Instance 管理资源：创建 schema/validation、配置生命周期、snapshot/logs，以及带取消语义的 runtime event watch。
+
+它不暴露 `InstanceRegistry`、Worker transport 或 Control editor service；event watch 复用 Control 的 authoritative runtime subscription owner，而不是让 Extension 自己轮询内部状态。
+
+### 5.7 Runtime context
 
 目标概念结构：
 
@@ -379,16 +393,18 @@ ExtensionContext
 其中：
 
 ```text
+context.capabilities.artifacts
 context.capabilities.assets
-context.capabilities.workers
+context.capabilities.instances
 context.capabilities.processes
+context.capabilities.workers
 ```
 
 必须和 manifest grant 一一对应。
 
 没有声明的 capability 不应以“看起来可用、调用时才失败”的 manager 形式伪装存在。
 
-### 5.6 Capability 不是 OS security permission
+### 5.8 Capability 不是 OS security permission
 
 Capability 控制 portable-devshell 自己管理的资源，不等价于恶意代码 sandbox policy。
 
@@ -1212,9 +1228,11 @@ message budget exceeded
 ### Capabilities
 
 ```text
+artifacts
 assets
-workers
+instances
 processes
+workers
 ```
 
 ### Extension Points

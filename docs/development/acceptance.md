@@ -104,9 +104,9 @@ instance version 4 中：
 
 * 不存在持久化 `workspace`；
 * 不存在 MCP group/capability policy；`tools/list` 使用固定 runtime catalog；
-* `[extensions].model` 是 model Extension command allowlist，默认只有 `instance`；
+* `[extensions].model` 是 model Extension command allowlist；当前 bundled 默认是 `artifact / instance / mcp / secret / skill`，独立安装的 `agent` 需要显式加入；
 * `instance_connect` 是 MCP 中唯一保留的 instance Context attach primitive；
-* `devshell instance ...` 仍是 builtin CLI 主干；Artifact 管理/传输由 `cli.native-commands` / `cli.model-commands` provider 提供，而不是 builtin CLI 或 `artifact_transfer` MCP tool。
+* `devshell instance ...` 仍保留 builtin CLI 管理主干；Artifact 管理/传输由真实 builtin Artifact Extension 的 `cli.native-commands` / `cli.model-commands` registrations 提供，而不是 Control-resident provider、builtin Artifact parser 或 `artifact_transfer` MCP tool。
 
 ## MCP / Context / Workspace 门禁
 

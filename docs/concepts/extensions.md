@@ -2,7 +2,7 @@
 
 portable-devshell 的 Extension 运行在 **Control**。Worker 不加载 Extension，也不存在 native Worker plugin ABI。
 
-当前 public Extension API version 为 `3`。Builtin Extension 与独立安装的 Extension 使用同一套 ABI；builtin 身份不绕过 capability、registration、sandbox 或 generation ownership。
+当前 public Extension API version 为 `4`。Builtin Extension 与独立安装的 Extension 使用同一套 ABI；builtin 身份不绕过 capability、registration、sandbox 或 generation ownership。
 
 ## 核心模型
 
@@ -48,10 +48,14 @@ Manifest 在 activation 前描述静态事实：
 `capabilities` 只包含宿主管理资源类别。当前集合是：
 
 ```text
+artifacts
 assets
-workers
+instances
 processes
+workers
 ```
+
+`artifacts` 与 `instances` 是 Control-owned management resources：前者提供受控的 share/transfer 管理，后者提供 instance 配置、状态、日志、事件与生命周期操作。它们不暴露 Control 内部 service/registry，也不是 generic RPC capability。
 
 `extensions` 按稳定的 domain-owned Extension Point id 保存静态 declaration。它不授予任何资源权限。
 
@@ -113,10 +117,10 @@ register(...)
 
 ```ts
 import type { ExtensionContext } from "@portable-devshell/extension";
-import { commands } from "@portable-devshell/extension/cli";
+import { nativeCommands } from "@portable-devshell/extension/cli";
 
 export function activate(context: ExtensionContext): void {
-    context.register(commands, "example", async (argv, invocation) => {
+    context.register(nativeCommands, "example", async (argv, invocation) => {
         return { kind: "text", text: argv.join(" ") };
     });
 }

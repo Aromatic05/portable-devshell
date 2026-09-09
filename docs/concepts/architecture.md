@@ -147,7 +147,7 @@ input
 
 长 `tools/call` 使用 request-scoped SSE + 15 秒 keepalive。这样 transport 可以保持真实阻塞，同时不依赖 protocol session 来承载 portable-devshell 应用状态。
 
-工具 catalog 由 worker tools 与 Control-owned tools 合并后，再统一应用 group/capability policy。
+工具 catalog 由 Worker tools 与固定的 Control-owned runtime primitives 合并形成稳定目录；instance 配置不再用 group/capability policy 动态裁剪 `tools/list`。可扩展的 model command 通过 Context-bound `devshell` shim 与 `cli.model-commands` 单独授权。
 
 详见 [MCP](mcp.md)。
 

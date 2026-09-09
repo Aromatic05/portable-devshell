@@ -148,7 +148,7 @@ Context 还维护短生命周期的 execution/re-entry 状态，用来防止 Wor
 * request principal；
 * Workspace App 写操作使用的隐藏 capability；
 * instance/workspace attachment；
-* tool group/capability 与 approval policy。
+* Worker tool capability / namespace 约束与 approval policy。
 
 不要把“知道一个 ctxId”理解成“拥有该 Context 的全部权限”。
 
