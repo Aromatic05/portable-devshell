@@ -228,6 +228,8 @@ Control 的 Extension runtime Host 对 point domain 保持中立：它负责 sta
 
 当前 Control 在 composition 层构造内部 `ExtensionPointRegistry`。CLI/Web 各自注册 point definition：declaration schema、binding shape 和 point-specific resource validation 留在 domain owner；`ExtensionRegistration`、`ExtensionCatalog`、`ExtensionLoader` 只通过 registry 委托。这个 registry 不导出给 Extension，也不是一个 central point-kind enum。
 
+Sandbox transport 同样保持 domain ownership。Worker `ready` registration 只携带 point id、local id 和 opaque JSON descriptor；generic sandbox runtime 只提供私有 binding invocation bridge，不知道 `cli.command`、`web.files`、`web.endpoint` 这类 point-specific wire kind。CLI/Web 的内部 sandbox codec 负责 descriptor、Worker-side binding invocation 和 Host-side proxy restoration。该 generic bridge 只存在于 Control 私有实现层，不是 public `extension.call` 或 generic RPC ABI。
+
 Public SDK 按 domain subpath 发布 leaf contract：
 
 ```text

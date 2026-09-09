@@ -495,6 +495,8 @@ CLI command、Web application、Tool provider 的冲突和排序语义不同，�
 
 Extension Point callback 在 sandbox worker 内执行时，Control 可以内部使用 RPC-style protocol，但这只是 runtime transport。
 
+当前实现将 sandbox registration 的 wire representation 收敛为 opaque JSON descriptor，并用私有 `{ point-id, registration-id, input }` binding invocation bridge 跨 Worker 边界。Generic `ExtensionSandboxWorker` / `ExtensionSandboxHost` / `ExtensionLoader` 不解释 descriptor kind，也不 import CLI/Web point contract；descriptor 编解码、Worker-side invocation 和 Host-side proxy restoration 都由 point owner 的内部 sandbox codec 定义。
+
 Public ABI 只看到：
 
 ```text
@@ -510,11 +512,11 @@ result contract
 point-id
 registration-id
 invocation-id
-payload
-callback-token
+opaque binding descriptor
+opaque point-owned input/result payload
 ```
 
-这些 wire details 不导出到 Extension SDK。
+这些 wire details 不导出到 Extension SDK。内部 transport 可以 generic，但 point codec 不能因此回流成 public generic RPC；`ExtensionRpcHandler`、`extension.call` 或“任意 point payload”都不是 Extension-facing contract。
 
 因此旧的 generic：
 
