@@ -33,3 +33,21 @@ test("Secret command rejects non-owner invocation and missing cwd for relative p
     await assert.rejects(executeSecretCommand(["scan", "/tmp"], invocation(undefined, false)), /local owner/u);
     await assert.rejects(executeSecretCommand(["scan", "."], invocation()), /working directory/u);
 });
+
+test("Secret command honors cancellation without faulting the Extension", async () => {
+    const root = await mkdtemp(join(tmpdir(), "devshell-secret-cancel-"));
+    try {
+        const controller = new AbortController();
+        controller.abort(new Error("cancel secret scan"));
+        await assert.rejects(executeSecretCommand(["scan", root], {
+            localOwner: true,
+            requestId: "secret-cancel",
+            signal: controller.signal
+        }), /cancel secret scan/u);
+
+        const followUp = await executeSecretCommand(["help"], invocation(root));
+        assert.equal(followUp.kind, "text");
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});

@@ -12,7 +12,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 
 import {
-    EXTENSION_API_VERSION,
     parseExtensionManifest,
     type ExtensionManifest
 } from "@portable-devshell/extension";
@@ -199,11 +198,6 @@ function assertInstallableManifest(manifest: ExtensionManifest, builtinId?: stri
     if (builtinId !== undefined && manifest.id !== builtinId) {
         throw extensionInstallError(`Builtin Extension source declares id ${manifest.id}, expected ${builtinId}.`);
     }
-    if (manifest.apiVersion !== EXTENSION_API_VERSION) {
-        throw extensionInstallError(
-            `Extension ${manifest.id} requires API version ${manifest.apiVersion}, but Control supports ${EXTENSION_API_VERSION}.`
-        );
-    }
 }
 
 async function hashExtensionDirectory(root: string, limits: ExtensionInstallLimits): Promise<string> {
@@ -217,6 +211,11 @@ async function hashExtensionDirectory(root: string, limits: ExtensionInstallLimi
         for (const child of children) {
             const absolute = join(directory, child.name);
             const relative = prefix.length === 0 ? child.name : `${prefix}/${child.name}`;
+            if (relative.split("/").includes("node_modules")) {
+                throw extensionInstallError(
+                    `Extension source must use shared host dependencies instead of private node_modules: ${relative}.`
+                );
+            }
             const metadata = await lstat(absolute);
             if (metadata.isSymbolicLink()) {
                 throw extensionInstallError(`Extension source contains symbolic link: ${relative}.`);

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { ExtensionProcessCapability } from "@portable-devshell/extension";
+
 import type {
     AgentProvider,
     AgentProviderStartContext
@@ -12,6 +14,9 @@ import { parseAgentWorkerTarget, type AgentWorkerTarget } from "../../src/builti
 
 const neverClosed = new Promise<void>(() => undefined);
 const runtimeRootDirectory = "/extension-state/agent";
+const testProcesses: ExtensionProcessCapability = {
+    async start() { throw new Error("process start is not used by AgentHost unit fixtures"); }
+};
 
 test("AgentHost binds provider lifecycle, target, runtime prefix, tools, and one shared Web endpoint", async () => {
     const starts: AgentProviderStartContext[] = [];
@@ -43,6 +48,7 @@ test("AgentHost binds provider lifecycle, target, runtime prefix, tools, and one
     const tools = toolSession(target, () => { toolCloses += 1; });
     const host = new AgentHost({
         idFactory: () => "ag-1234567890abcdef",
+        processes: testProcesses,
         providers: [provider],
         runtimeRootDirectory
     });
@@ -95,6 +101,7 @@ test("AgentHost closes the tool session when provider startup fails", async () =
     const target = parseAgentWorkerTarget("worker-a:/repo");
     const host = new AgentHost({
         idFactory: () => "ag-start-failure",
+        processes: testProcesses,
         providers: [{
             id: "broken",
             version: "1",
@@ -111,10 +118,62 @@ test("AgentHost closes the tool session when provider startup fails", async () =
     assert.deepEqual(host.list(), []);
 });
 
+test("AgentHost counts a provider as in use while provider startup is still pending", async () => {
+    let enteredStart!: () => void;
+    let releaseStart!: () => void;
+    const entered = new Promise<void>((resolve) => { enteredStart = resolve; });
+    const gate = new Promise<void>((resolve) => { releaseStart = resolve; });
+    const target = parseAgentWorkerTarget("worker-a:/repo");
+    const host = new AgentHost({
+        idFactory: () => "ag-starting-provider",
+        processes: testProcesses,
+        providers: [{
+            id: "pi",
+            version: "1",
+            async start() {
+                enteredStart();
+                await gate;
+                return { closed: neverClosed, async prompt() {}, async stop() {} };
+            }
+        }],
+        runtimeRootDirectory
+    });
+
+    const pending = host.start({ provider: "pi", target, tools: toolSession(target) });
+    await entered;
+    assert.equal(host.isProviderInUse("pi"), true);
+    assert.deepEqual(host.list(), []);
+
+    releaseStart();
+    const record = await pending;
+    assert.equal(host.isProviderInUse("pi"), true);
+    await host.stop(record.agentId);
+    assert.equal(host.isProviderInUse("pi"), false);
+});
+
+test("AgentHost closes the tool session when the requested provider is unavailable", async () => {
+    let closes = 0;
+    const target = parseAgentWorkerTarget("worker-a:/repo");
+    const host = new AgentHost({
+        idFactory: () => "ag-missing-provider",
+        processes: testProcesses,
+        providers: [],
+        runtimeRootDirectory
+    });
+
+    await assert.rejects(
+        host.start({ provider: "missing", target, tools: toolSession(target, () => { closes += 1; }) }),
+        /Unknown Agent provider/u
+    );
+    assert.equal(closes, 1);
+    assert.equal(host.isProviderInUse("missing"), false);
+});
+
 test("AgentHost rejects reload when the provider does not expose that capability", async () => {
     const target = parseAgentWorkerTarget("worker-a:/repo");
     const host = new AgentHost({
         idFactory: () => "ag-no-reload",
+        processes: testProcesses,
         providers: [{
             id: "minimal",
             version: "1",
@@ -153,6 +212,7 @@ test("AgentHost requires one shared provider Web endpoint", async () => {
     };
     const host = new AgentHost({
         idFactory: () => `ag-${++nextId}`,
+        processes: testProcesses,
         providers: [provider],
         runtimeRootDirectory
     });
@@ -197,6 +257,7 @@ test("AgentHost removes a stopped runtime and closes tools when provider cleanup
     const target = parseAgentWorkerTarget("worker-a:/repo");
     const host = new AgentHost({
         idFactory: () => "ag-failing-cleanup",
+        processes: testProcesses,
         providers: [provider],
         runtimeRootDirectory
     });
@@ -230,6 +291,7 @@ test("AgentHost removes a runtime and closes tools when its provider terminates 
     };
     const host = new AgentHost({
         idFactory: () => "ag-provider-exit",
+        processes: testProcesses,
         providers: [provider],
         runtimeRootDirectory
     });
@@ -279,6 +341,7 @@ test("AgentHost stopAll ignores runtimes that terminate while another Agent is s
     };
     const host = new AgentHost({
         idFactory: () => `ag-${++nextId}`,
+        processes: testProcesses,
         providers: [provider],
         runtimeRootDirectory
     });
@@ -295,15 +358,19 @@ function toolSession(
     target: AgentWorkerTarget,
     onClose: () => void = () => undefined
 ): AgentToolSession {
-    let closed = false;
+    let isClosed = false;
+    let resolveClosed!: () => void;
+    const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
     return {
+        closed,
         target,
         tools: [],
         async callTool() { return null; },
         async close() {
-            if (closed) return;
-            closed = true;
+            if (isClosed) return;
+            isClosed = true;
             onClose();
+            resolveClosed();
         }
     };
 }

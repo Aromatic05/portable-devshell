@@ -1,26 +1,30 @@
-import type { ExtensionActivation, ExtensionManifest } from "@portable-devshell/extension";
+import type { ExtensionManifest } from "@portable-devshell/extension";
+
+import type { ExtensionRegistrationSet } from "./ExtensionRegistration.js";
 
 export type ExtensionGenerationState = "active" | "disposed" | "dispose-failed" | "draining" | "faulted" | "ready";
 
 export interface ExtensionGenerationOptions {
-    activation: ExtensionActivation;
     dispose: () => Promise<void>;
     generation: string;
     manifest: ExtensionManifest;
+    registrations: ExtensionRegistrationSet;
+    retireInstanceResources?: (instance: string) => Promise<void>;
 }
 
 export interface ExtensionGenerationLease {
-    readonly activation: ExtensionActivation;
     readonly generation: string;
     readonly manifest: ExtensionManifest;
+    readonly registrations: ExtensionRegistrationSet;
     release(): void;
 }
 
 export class ExtensionGeneration {
-    readonly activation: ExtensionActivation;
     readonly generation: string;
     readonly manifest: ExtensionManifest;
+    readonly registrations: ExtensionRegistrationSet;
     readonly #dispose: () => Promise<void>;
+    readonly #retireInstanceResources?: (instance: string) => Promise<void>;
     readonly #retirement: Promise<void>;
     #disposeError?: unknown;
     #faultError?: unknown;
@@ -31,10 +35,11 @@ export class ExtensionGeneration {
     #state: ExtensionGenerationState = "ready";
 
     constructor(options: ExtensionGenerationOptions) {
-        this.activation = options.activation;
         this.generation = options.generation;
         this.manifest = options.manifest;
+        this.registrations = options.registrations;
         this.#dispose = options.dispose;
+        this.#retireInstanceResources = options.retireInstanceResources;
         this.#retirement = new Promise<void>((resolve, reject) => {
             this.#resolveRetirement = resolve;
             this.#rejectRetirement = reject;
@@ -72,9 +77,9 @@ export class ExtensionGeneration {
         this.#inFlight += 1;
         let released = false;
         return {
-            activation: this.activation,
             generation: this.generation,
             manifest: this.manifest,
+            registrations: this.registrations,
             release: () => {
                 if (released) return;
                 released = true;
@@ -82,6 +87,10 @@ export class ExtensionGeneration {
                 this.#maybeDispose();
             }
         };
+    }
+
+    async retireInstanceResources(instance: string): Promise<void> {
+        await this.#retireInstanceResources?.(instance);
     }
 
     fault(error: unknown): void {

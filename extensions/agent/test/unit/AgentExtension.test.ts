@@ -11,19 +11,28 @@ import {
 
 import { executeAgentCommand, type AgentProviderCommandPort } from "../../src/builtin/AgentCommand.ts";
 import { AgentExtensionRuntime } from "../../src/builtin/AgentRuntime.ts";
-import { activate } from "../../src/builtin/index.ts";
+import { activate, deactivate } from "../../src/builtin/index.ts";
 import type { AgentProvider, AgentProviderHandle, AgentProviderStartContext } from "../../src/builtin/provider/AgentProvider.ts";
 
 const neverClosed = new Promise<void>(() => undefined);
 
-test("Agent Extension manifest declares only the generic capabilities it contributes", async () => {
+test("Agent Extension manifest declares host-managed capabilities and domain Extension Points", async () => {
     const manifest = parseExtensionManifest(JSON.parse(
         await readFile(new URL("../../src/builtin/devshell-extension.json", import.meta.url), "utf8")
     ));
     assert.equal(manifest.id, "agent");
     assert.equal(manifest.entry, "index.ts");
-    assert.equal(manifest.apiVersion, 2);
-    assert.deepEqual(manifest.capabilities, ["command", "assets", "instance-lifecycle", "rpc", "web", "worker"]);
+    assert.equal(manifest.apiVersion, 3);
+    assert.deepEqual(manifest.capabilities, ["assets", "processes", "workers"]);
+    assert.deepEqual(manifest.extensions, {
+        "cli.commands": [{
+            id: "agent",
+            summary: "Run and manage Agent providers",
+            title: "Agent",
+            usage: "agent <command>"
+        }],
+        "web.applications": [{ id: "agent", title: "Agent" }]
+    });
 });
 
 test("Agent Extension start opens one canonical Worker session and owns it until stop", async () => {
@@ -80,8 +89,9 @@ test("Agent Extension startup failure closes the already acquired Worker session
     ]);
 });
 
-test("Agent Extension retires only Agents bound to the retired instance", async () => {
+test("Agent Extension retires an Agent when its host-owned Worker session closes", async () => {
     const events: string[] = [];
+    const workerClosures = new Map<string, () => void>();
     let nextAgent = 0;
     const provider: AgentProvider = {
         id: "test",
@@ -92,11 +102,12 @@ test("Agent Extension retires only Agents bound to the retired instance", async 
             return handleFixture(context.agentId, events);
         }
     };
-    const runtime = new AgentExtensionRuntime(extensionContext({ events }), { providers: [provider] });
+    const runtime = new AgentExtensionRuntime(extensionContext({ events, workerClosures }), { providers: [provider] });
     const first = await runtime.start({ provider: "test", target: "worker-a:/one" });
     const second = await runtime.start({ provider: "test", target: "worker-b:/two" });
 
-    await runtime.retireInstance("worker-a");
+    workerClosures.get("worker-a")?.();
+    await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(runtime.get(first.agentId), undefined);
     assert.notEqual(runtime.get(second.agentId), undefined);
     assert.equal(events.includes("worker.close:/one"), true);
@@ -167,53 +178,99 @@ test("Agent provider mutations require local-owner Extension command authority",
     assert.equal(events.includes("provider.install:/provider.dsprovider"), true);
 });
 
-test("Agent Extension activation exposes business RPC but no internal toolSession operations", async () => {
-    const activation = await activate(extensionContext({ events: [] }));
+test("Agent Extension activation binds CLI and Web points without a generic RPC surface", async () => {
+    const registrations: Array<{ binding: unknown; id: string; pointId: string }> = [];
+    await activate(extensionContext({ events: [], registrations }));
     try {
-        assert.deepEqual(Object.keys(activation.rpc ?? {}).sort(), [
-            "abort",
-            "followUp",
-            "get",
-            "list",
-            "prompt",
-            "reload",
-            "start",
-            "steer",
-            "stop"
-        ]);
-        assert.equal(activation.web?.kind, "proxy");
-        assert.equal(typeof activation.command, "function");
-        assert.equal(typeof activation.lifecycle?.onInstanceRetire, "function");
+        assert.deepEqual(
+            registrations.map(({ id, pointId }) => `${pointId}/${id}`).sort(),
+            ["cli.commands/agent", "web.applications/agent"]
+        );
+        assert.equal(typeof registrations.find(({ pointId }) => pointId === "cli.commands")?.binding, "function");
+        const web = registrations.find(({ pointId }) => pointId === "web.applications")?.binding as {
+            source?: { kind?: string; resolve?: unknown };
+        } | undefined;
+        assert.equal(web?.source?.kind, "endpoint");
+        assert.equal(typeof web?.source?.resolve, "function");
     } finally {
-        await activation.dispose();
+        await deactivate();
     }
 });
 
 function extensionContext(options: {
     canonicalWorkspace?: string;
     events: string[];
+    registrations?: Array<{ binding: unknown; id: string; pointId: string }>;
+    workerClosures?: Map<string, () => void>;
 }): ExtensionContext {
+    const assets = {
+        async installBundle(sourcePath: string) {
+            options.events.push(`assets.install:${sourcePath}`);
+            return {
+                directory: "/data/extensions/agent/bundles/sha256-test",
+                generation: `sha256-${"a".repeat(64)}`
+            };
+        },
+        async installDirectory() { throw new Error("not used"); },
+        async listBundles() { return []; },
+        async removeBundle(generation: string) {
+            options.events.push(`assets.remove:${generation}`);
+        },
+        async resolveBundle(generation: string) {
+            return {
+                directory: `/data/extensions/agent/bundles/${generation}`,
+                generation
+            };
+        },
+        async projectBundle() { throw new Error("not used"); }
+    };
     return {
-        assets: {
-            async installBundle(sourcePath) {
-                options.events.push(`assets.install:${sourcePath}`);
-                return {
-                    directory: "/data/extensions/agent/bundles/sha256-test",
-                    generation: `sha256-${"a".repeat(64)}`
-                };
+        capabilities: {
+            assets,
+            processes: {
+                async start() { throw new Error("not used"); }
             },
-            async installDirectory() { throw new Error("not used"); },
-            async listBundles() { return []; },
-            async removeBundle(generation) {
-                options.events.push(`assets.remove:${generation}`);
-            },
-            async resolveBundle(generation) {
-                return {
-                    directory: `/data/extensions/agent/bundles/${generation}`,
-                    generation
-                };
-            },
-            async projectBundle() { throw new Error("not used"); }
+            workers: {
+                async openSession(input) {
+                    options.events.push(`worker.open:${input.instance ?? ""}:${input.workspace}`);
+                    const workspace = options.canonicalWorkspace ?? input.workspace;
+                    let closed = false;
+                    let resolveClosed!: () => void;
+                    const closedPromise = new Promise<void>((resolve) => { resolveClosed = resolve; });
+                    const instance = input.instance ?? "worker-a";
+                    const closeSession = () => {
+                        if (closed) return;
+                        closed = true;
+                        options.events.push(`worker.close:${workspace}`);
+                        resolveClosed();
+                    };
+                    options.workerClosures?.set(instance, closeSession);
+                    const session: ExtensionWorkerSession = {
+                        closed: closedPromise,
+                        environment: {
+                            homeDirectory: "/home/dev",
+                            platform: { arch: "x64", os: "linux" },
+                        },
+                        instance,
+                        workspace,
+                        async callTool(toolName, _input, callOptions = {}) {
+                            options.events.push(`worker.call:${toolName}:${callOptions.operationId ?? ""}:${workspace}`);
+                            return { ok: true };
+                        },
+                        async close() {
+                            closeSession();
+                        },
+                        listTools() {
+                            return [{
+                                description: "Read a file",
+                                inputSchema: { type: "object" },
+                                name: "file_read"
+                            }];
+                        }
+                    };
+                    return session;
+                }
+            }
         },
         generation: "0.1.0-test",
         id: "agent",
@@ -229,39 +286,10 @@ function extensionContext(options: {
             runtimeDirectory: "/runtime/extensions/agent",
             stateDirectory: "/state/extensions/agent"
         },
-        version: "0.1.0",
-        worker: {
-            async openSession(input) {
-                options.events.push(`worker.open:${input.instance ?? ""}:${input.workspace}`);
-                const workspace = options.canonicalWorkspace ?? input.workspace;
-                let closed = false;
-                const session: ExtensionWorkerSession = {
-                    environment: {
-                        homeDirectory: "/home/dev",
-                        platform: { arch: "x64", os: "linux" },
-                    },
-                    instance: input.instance ?? "worker-a",
-                    workspace,
-                    async callTool(toolName, _input, callOptions = {}) {
-                        options.events.push(`worker.call:${toolName}:${callOptions.operationId ?? ""}:${workspace}`);
-                        return { ok: true };
-                    },
-                    async close() {
-                        if (closed) return;
-                        closed = true;
-                        options.events.push(`worker.close:${workspace}`);
-                    },
-                    listTools() {
-                        return [{
-                            description: "Read a file",
-                            inputSchema: { type: "object" },
-                            name: "file_read"
-                        }];
-                    }
-                };
-                return session;
-            }
-        }
+        register(point, id, binding) {
+            options.registrations?.push({ binding, id, pointId: point.id });
+        },
+        version: "0.1.0"
     };
 }
 

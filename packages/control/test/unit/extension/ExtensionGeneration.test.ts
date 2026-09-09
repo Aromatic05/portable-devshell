@@ -2,32 +2,32 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { EXTENSION_API_VERSION } from "@portable-devshell/extension";
-
-import type { ExtensionActivation, ExtensionManifest } from "@portable-devshell/extension";
+import type { ExtensionManifest } from "@portable-devshell/extension";
 
 import { ExtensionGeneration } from "../../../src/control/extension/host/generation/ExtensionGeneration.ts";
+import { ExtensionRegistrationSet } from "../../../src/control/extension/host/generation/ExtensionRegistration.ts";
 
 const manifest: ExtensionManifest = {
     apiVersion: EXTENSION_API_VERSION,
-    capabilities: ["rpc"],
+    capabilities: [],
     entry: "extension.mjs",
+    extensions: {},
+    hostDependencies: [],
     id: "example",
     name: "Example",
     schemaVersion: 1,
     version: "1.0.0"
 };
 
-function activation(): ExtensionActivation {
-    return { dispose() {} };
-}
+const registrations = new ExtensionRegistrationSet([]);
 
 test("Extension generation drains existing leases before disposal and rejects new leases", async () => {
     let disposeCount = 0;
     const generation = new ExtensionGeneration({
-        activation: activation(),
         dispose: async () => { disposeCount += 1; },
         generation: "1.0.0-a",
-        manifest
+        manifest,
+        registrations
     });
     generation.activate();
     const lease = generation.acquire();
@@ -50,10 +50,10 @@ test("Extension generation drains existing leases before disposal and rejects ne
 test("Extension candidate can be retired before it becomes active", async () => {
     let disposed = false;
     const generation = new ExtensionGeneration({
-        activation: activation(),
         dispose: async () => { disposed = true; },
         generation: "1.0.0-candidate",
-        manifest
+        manifest,
+        registrations
     });
     await generation.retire();
     assert.equal(disposed, true);
@@ -64,13 +64,13 @@ test("Extension generation surfaces disposal failures without double disposal", 
     let disposeCount = 0;
     const failure = new Error("dispose failed");
     const generation = new ExtensionGeneration({
-        activation: activation(),
         dispose: async () => {
             disposeCount += 1;
             throw failure;
         },
         generation: "1.0.0-bad-dispose",
-        manifest
+        manifest,
+        registrations
     });
     generation.activate();
     await assert.rejects(generation.retire(), failure);

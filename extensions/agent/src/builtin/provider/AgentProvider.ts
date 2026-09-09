@@ -1,3 +1,5 @@
+import type { ExtensionProcessCapability } from "@portable-devshell/extension";
+
 import type { AgentProviderRuntimePaths } from "./AgentProviderRuntimePaths.js";
 import type { AgentWorkerTarget } from "../worker/AgentWorkerTarget.js";
 import type { AgentToolSession } from "./AgentToolSession.js";
@@ -9,6 +11,7 @@ export interface AgentProviderWebContext {
 
 export interface AgentProviderStartContext {
     agentId: string;
+    processes: ExtensionProcessCapability;
     runtime: AgentProviderRuntimePaths;
     target: AgentWorkerTarget;
     tools: AgentToolSession;

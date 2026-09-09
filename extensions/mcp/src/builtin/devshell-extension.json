@@ -1,9 +1,20 @@
 {
     "schemaVersion": 1,
-    "apiVersion": 2,
+    "apiVersion": 3,
     "id": "mcp",
     "name": "portable-devshell MCP Client",
     "version": "0.1.0",
     "entry": "index.ts",
-    "capabilities": ["command"]
+    "hostDependencies": ["@modelcontextprotocol/client"],
+    "capabilities": [],
+    "extensions": {
+        "cli.commands": [
+            {
+                "id": "mcp",
+                "title": "MCP Client",
+                "summary": "Manage MCP client profiles and requests",
+                "usage": "mcp <command>"
+            }
+        ]
+    }
 }

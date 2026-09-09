@@ -28,9 +28,22 @@ const toolSessions = new Map<string, PiChildToolSession>();
 let gui: PiGuiWeb | undefined;
 let modelRuntime: PiModelRuntimeLike | undefined;
 let sdk: PiSdkModule | undefined;
+let ownerLost = false;
+let lastOwnerHeartbeatMs = Date.now();
+const ownerHeartbeatTimeoutMs = readOwnerHeartbeatTimeout(process.argv[2]);
+const ownerWatchdog = setInterval(() => {
+    if (Date.now() - lastOwnerHeartbeatMs > ownerHeartbeatTimeoutMs) {
+        loseOwner(new Error("Pi provider owner heartbeat timed out."));
+    }
+}, Math.max(25, Math.min(1_000, Math.floor(ownerHeartbeatTimeoutMs / 4))));
+ownerWatchdog.unref();
 
 process.on("message", (value: unknown) => {
     const message = value as PiParentMessage;
+    if (message?.type === "owner.heartbeat") {
+        lastOwnerHeartbeatMs = Date.now();
+        return;
+    }
     if (message?.type === "tool.result" || message?.type === "tool.progress") {
         toolSessions.get(message.agentId)?.accept(message);
         return;
@@ -38,9 +51,7 @@ process.on("message", (value: unknown) => {
     void handleMessage(message).catch((error) => sendFailure(message, error));
 });
 process.once("disconnect", () => {
-    const error = new Error("Pi provider parent IPC disconnected.");
-    for (const session of toolSessions.values()) session.disconnect(error);
-    void shutdown().finally(() => process.exit(0));
+    loseOwner(new Error("Pi provider parent IPC disconnected."));
 });
 
 async function handleMessage(message: PiParentMessage): Promise<void> {
@@ -181,6 +192,7 @@ async function stopAgent(agentId: string): Promise<void> {
 }
 
 async function shutdown(): Promise<void> {
+    clearInterval(ownerWatchdog);
     for (const agentId of [...agents.keys()]) {
         await stopAgent(agentId).catch(() => undefined);
     }
@@ -189,6 +201,27 @@ async function shutdown(): Promise<void> {
     modelRuntime = undefined;
     sdk = undefined;
     toolSessions.clear();
+}
+
+function loseOwner(error: Error): void {
+    if (ownerLost) return;
+    ownerLost = true;
+    clearInterval(ownerWatchdog);
+    for (const session of toolSessions.values()) session.disconnect(error);
+    const forceExit = setTimeout(() => process.exit(0), 2_000);
+    void shutdown().finally(() => {
+        clearTimeout(forceExit);
+        process.exit(0);
+    });
+}
+
+function readOwnerHeartbeatTimeout(value: string | undefined): number {
+    if (value === undefined) return 10_000;
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < 50 || parsed > 60_000) {
+        throw new TypeError("Pi provider owner heartbeat timeout is invalid.");
+    }
+    return parsed;
 }
 
 function requireAgent(agentId: string): ManagedPiAgent {
@@ -228,7 +261,7 @@ function sendFailure(message: PiParentMessage, error: unknown): void {
         send({ error: text, ok: false, type: "ready" });
         return;
     }
-    if (message.type === "tool.result" || message.type === "tool.progress") return;
+    if (message.type === "owner.heartbeat" || message.type === "tool.result" || message.type === "tool.progress") return;
     send({ error: text, id: message.id, ok: false, type: "result" });
 }
 

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { CliMain } from "../../src/CliMain.ts";
 
-test("skill command is dispatched through the generic Extension client with caller cwd", async () => {
+test("skill cli.commands binding is dispatched with caller cwd", async () => {
     const calls: Array<{ args: readonly string[]; id: string; workingDirectory?: string }> = [];
     const stdout = buffer();
     const stderr = buffer();

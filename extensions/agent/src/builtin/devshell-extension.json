@@ -1,16 +1,29 @@
 {
     "schemaVersion": 1,
-    "apiVersion": 2,
+    "apiVersion": 3,
     "id": "agent",
     "name": "portable-devshell Agent",
     "version": "0.1.0",
     "entry": "index.ts",
     "capabilities": [
-        "command",
         "assets",
-        "instance-lifecycle",
-        "rpc",
-        "web",
-        "worker"
-    ]
+        "processes",
+        "workers"
+    ],
+    "extensions": {
+        "cli.commands": [
+            {
+                "id": "agent",
+                "title": "Agent",
+                "summary": "Run and manage Agent providers",
+                "usage": "agent <command>"
+            }
+        ],
+        "web.applications": [
+            {
+                "id": "agent",
+                "title": "Agent"
+            }
+        ]
+    }
 }

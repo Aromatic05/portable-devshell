@@ -1,9 +1,18 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+
+import type {
+    ExtensionJsonValue,
+    ExtensionManagedProcess,
+    ExtensionProcessCapability,
+    ExtensionProcessExit,
+    ExtensionProcessStartInput
+} from "@portable-devshell/extension";
 
 import type { AgentToolSession } from "../../src/builtin/provider/AgentToolSession.ts";
 import { PiAgentProcessFactory } from "../../src/provider/pi/PiAgentProcess.ts";
@@ -144,7 +153,7 @@ test("Pi process factory retires a child whose IPC disconnects without process e
 
         await assert.rejects(
             Promise.race([first.prompt("__disconnect__"), rejectAfter(200, "IPC disconnect was not observed")]),
-            /IPC.*disconnect/u
+            /(exited unexpectedly|IPC.*disconnect)/u
         );
         await first.closed;
 
@@ -163,6 +172,32 @@ test("Pi process factory retires a child whose IPC disconnects without process e
     }
 });
 
+test("Pi provider child does not inherit Extension sandbox permission flags", async () => {
+    const runtimeDirectory = await mkdtemp(join(tmpdir(), "devshell-pi-execargv-"));
+    const previousExecArgv = [...process.execArgv];
+    const factory = new PiAgentProcessFactory({ childModulePath });
+    const base = { entrypoint: "/managed/pi/dist/index.js", runtimeDirectory, webBasePath: "/web/agent/" };
+    try {
+        process.execArgv.push(
+            "--permission",
+            "--allow-fs-read=*",
+            "--allow-fs-write=*",
+            "--allow-child-process",
+            "--allow-worker"
+        );
+        const target = parseAgentWorkerTarget("worker-a:/repo/execargv");
+        const handle = await factory.start(startOptions(base, "ag-execargv", target));
+        await handle.stop();
+
+        const init = (await readEntries(runtimeDirectory)).find((entry) => entry.type === "init");
+        assert.ok(init !== undefined);
+        assert.equal(init.execArgv.some((argument) => argument === "--permission" || argument.startsWith("--allow-")), false);
+    } finally {
+        process.execArgv.splice(0, process.execArgv.length, ...previousExecArgv);
+        await rm(runtimeDirectory, { force: true, recursive: true });
+    }
+});
+
 function startOptions(
     base: { entrypoint: string; runtimeDirectory: string; webBasePath: string },
     agentId: string,
@@ -173,6 +208,7 @@ function startOptions(
         ...base,
         agentId,
         localCwd: join(base.runtimeDirectory, "agents", agentId, "cwd"),
+        processes: nodeProcessCapability(),
         target,
         tools
     };
@@ -182,8 +218,11 @@ function toolSession(
     target: AgentWorkerTarget,
     overrides: Partial<Pick<AgentToolSession, "callTool" | "close">> = {}
 ): AgentToolSession {
-    let closed = false;
+    let isClosed = false;
+    let resolveClosed!: () => void;
+    const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
     return {
+        closed,
         target,
         tools: [
             {
@@ -199,9 +238,80 @@ function toolSession(
         ],
         callTool: overrides.callTool ?? (async (_toolName, input) => input),
         async close() {
-            if (closed) return;
-            closed = true;
+            if (isClosed) return;
+            isClosed = true;
             await overrides.close?.();
+            resolveClosed();
+        }
+    };
+}
+
+function nodeProcessCapability(): ExtensionProcessCapability {
+    return {
+        async start(input: ExtensionProcessStartInput): Promise<ExtensionManagedProcess> {
+            const child = spawn(input.command, [...(input.args ?? [])], {
+                cwd: input.cwd,
+                env: { ...process.env, ...(input.environment ?? {}) },
+                serialization: "json",
+                stdio: input.messages
+                    ? ["ignore", "ignore", "pipe", "ipc"]
+                    : ["ignore", "ignore", "pipe"]
+            });
+            const messageListeners = new Set<(message: ExtensionJsonValue) => void>();
+            const stderrListeners = new Set<(chunk: string) => void>();
+            let settled = false;
+            let resolveClosed!: (exit: ExtensionProcessExit) => void;
+            const closed = new Promise<ExtensionProcessExit>((resolve) => { resolveClosed = resolve; });
+            const settle = (exit: ExtensionProcessExit) => {
+                if (settled) return;
+                settled = true;
+                messageListeners.clear();
+                stderrListeners.clear();
+                resolveClosed(Object.freeze({ ...exit }));
+            };
+            child.stderr?.setEncoding("utf8");
+            child.stderr?.on("data", (chunk: string) => {
+                for (const listener of stderrListeners) listener(chunk);
+            });
+            child.on("message", (message: unknown) => {
+                for (const listener of messageListeners) listener(message as ExtensionJsonValue);
+            });
+            child.once("disconnect", () => {
+                if (input.messages && !settled) child.kill("SIGTERM");
+            });
+            child.once("error", () => settle({}));
+            child.once("exit", (code, signal) => settle({
+                ...(code === null ? {} : { code }),
+                ...(signal === null ? {} : { signal })
+            }));
+            return Object.freeze({
+                closed,
+                onMessage(listener: (message: ExtensionJsonValue) => void) {
+                    messageListeners.add(listener);
+                    return () => messageListeners.delete(listener);
+                },
+                onStderr(listener: (chunk: string) => void) {
+                    stderrListeners.add(listener);
+                    return () => stderrListeners.delete(listener);
+                },
+                async send(message: ExtensionJsonValue) {
+                    if (!child.connected || child.send === undefined) {
+                        throw new Error("Test managed process message channel is unavailable.");
+                    }
+                    const send = child.send as (
+                        value: unknown,
+                        callback: (error: Error | null) => void
+                    ) => boolean;
+                    await new Promise<void>((resolve, reject) => {
+                        send.call(child, message, (error) => error === null ? resolve() : reject(error));
+                    });
+                },
+                async terminate(signal = "SIGTERM") {
+                    if (settled) return;
+                    child.kill(signal as NodeJS.Signals);
+                    await closed;
+                }
+            });
         }
     };
 }
@@ -216,16 +326,18 @@ async function readEntries(runtimeDirectory: string): Promise<Array<{
     agentDir: string;
     agentId: string;
     command: string;
+    execArgv: string[];
     pid: string;
     type: string;
 }>> {
     const text = await readFile(join(runtimeDirectory, "fake-pi-child.log"), "utf8");
     return text.trim().split("\n").filter(Boolean).map((line) => {
-        const [pid, stateDir, type, agentId, command] = line.split("\t");
+        const [pid, stateDir, type, agentId, command, execArgv] = line.split("\t");
         return {
             agentDir: stateDir ?? "",
             agentId: agentId ?? "",
             command: command ?? "",
+            execArgv: execArgv === undefined ? [] : JSON.parse(execArgv) as string[],
             pid: pid ?? "",
             type: type ?? ""
         };

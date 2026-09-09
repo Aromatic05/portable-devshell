@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { access, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
@@ -31,7 +32,8 @@ test("Extension assets install immutable content-addressed bundles from archives
     const reused = await capability.installBundle(h.bundle);
     const fromDirectory = await capability.installDirectory(h.source);
 
-    assert.match(fromArchive.generation, /^sha256-[0-9a-f]{64}$/u);
+    const archiveDigest = createHash("sha256").update(await readFile(h.bundle)).digest("hex");
+    assert.equal(fromArchive.generation, `sha256-${archiveDigest}`);
     assert.equal(reused.generation, fromArchive.generation);
     assert.equal(reused.directory, fromArchive.directory);
     assert.equal(await readFile(join(fromArchive.directory, "payload.txt"), "utf8"), "provider payload\n");

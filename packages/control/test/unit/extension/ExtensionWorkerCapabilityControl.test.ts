@@ -240,3 +240,131 @@ test("Extension worker instance retirement closes only matching sessions", async
     await two.close();
     assert.deepEqual(releases, ["one", "two"]);
 });
+
+test("Extension worker closeAll cleans an openSession that finishes after close starts", async () => {
+    let releaseAcquire!: () => void;
+    let markAcquireStarted!: () => void;
+    const acquireGate = new Promise<void>((resolve) => { releaseAcquire = resolve; });
+    const acquireStarted = new Promise<void>((resolve) => { markAcquireStarted = resolve; });
+    const releases: string[] = [];
+    const releasedToolSessions: string[] = [];
+    const worker = lifecycleWorker("local", releasedToolSessions);
+    const capability = new ExtensionWorkerCapabilityControl({
+        allowed: true,
+        connections: {
+            async acquire(instance) {
+                markAcquireStarted();
+                await acquireGate;
+                return { handle: {} as never, snapshot: {} as never, worker: worker as never };
+            },
+            async release(instance) { releases.push(instance); }
+        },
+        extensionId: "example",
+        generation: "g1",
+        instances: {
+            list: () => [{ enabled: true, name: "local", provider: "local" }]
+        } as never
+    });
+
+    const opening = capability.openSession({ workspace: "/repo" });
+    await acquireStarted;
+    await capability.closeAll();
+    releaseAcquire();
+
+    await assert.rejects(opening, /closed while opening a session/u);
+    assert.deepEqual(releases, ["local"]);
+    assert.equal(releasedToolSessions.length, 1);
+});
+
+test("Extension worker openSession preserves primary and cleanup failures", async () => {
+    const worker = lifecycleWorker("local", []);
+    worker.prepareWorkspace = async () => { throw new Error("prepare failed"); };
+    worker.releaseToolSession = async () => { throw new Error("tool cleanup failed"); };
+    const capability = new ExtensionWorkerCapabilityControl({
+        allowed: true,
+        connections: {
+            async acquire() {
+                return { handle: {} as never, snapshot: {} as never, worker: worker as never };
+            },
+            async release() { throw new Error("connection cleanup failed"); }
+        },
+        extensionId: "example",
+        generation: "g1",
+        instances: {
+            list: () => [{ enabled: true, name: "local", provider: "local" }]
+        } as never
+    });
+
+    await assert.rejects(
+        capability.openSession({ workspace: "/repo" }),
+        (error: unknown) => error instanceof AggregateError
+            && error.errors.map((candidate) => candidate instanceof Error ? candidate.message : String(candidate)).join("|")
+                === "prepare failed|tool cleanup failed|connection cleanup failed"
+    );
+});
+
+test("Extension worker instance retirement fences an older openSession but permits a later epoch", async () => {
+    let releaseFirstAcquire!: () => void;
+    let markFirstAcquireStarted!: () => void;
+    const firstAcquireGate = new Promise<void>((resolve) => { releaseFirstAcquire = resolve; });
+    const firstAcquireStarted = new Promise<void>((resolve) => { markFirstAcquireStarted = resolve; });
+    const releases: string[] = [];
+    const releasedToolSessions: string[] = [];
+    const worker = lifecycleWorker("local", releasedToolSessions);
+    let acquireCount = 0;
+    const capability = new ExtensionWorkerCapabilityControl({
+        allowed: true,
+        connections: {
+            async acquire(instance) {
+                acquireCount += 1;
+                if (acquireCount === 1) {
+                    markFirstAcquireStarted();
+                    await firstAcquireGate;
+                }
+                return { handle: {} as never, snapshot: {} as never, worker: worker as never };
+            },
+            async release(instance) { releases.push(instance); }
+        },
+        extensionId: "example",
+        generation: "g1",
+        instances: {
+            list: () => [{ enabled: true, name: "local", provider: "local" }]
+        } as never
+    });
+
+    const oldOpen = capability.openSession({ instance: "local", workspace: "/old" });
+    await firstAcquireStarted;
+    await capability.retireInstance("local");
+    releaseFirstAcquire();
+    await assert.rejects(oldOpen, /retired while opening a session/u);
+
+    const fresh = await capability.openSession({ instance: "local", workspace: "/fresh" });
+    assert.equal(fresh.workspace, "/fresh");
+    await fresh.close();
+    assert.deepEqual(releases, ["local", "local"]);
+    assert.equal(releasedToolSessions.length, 2);
+});
+
+function lifecycleWorker(instance: string, releasedToolSessions: string[]) {
+    return {
+        handshake: {
+            capabilities: { cancel: true, streaming: true, tools: true },
+            homeDirectory: `/${instance}/home`,
+            instance,
+            platform: { arch: "x64", os: "linux" },
+            protocolVersion: 5,
+            workerVersion: "0.7.0"
+        },
+        async callTool() { return {}; },
+        listTools() { return []; },
+        async prepareWorkspace(workspace: string) {
+            return {
+                projectMemoryAgentFile: `${workspace}/AGENTS.md`,
+                projectMemoryDirectory: workspace,
+                temporaryDirectory: `${workspace}/tmp`,
+                workspace
+            };
+        },
+        async releaseToolSession(sessionId: string) { releasedToolSessions.push(sessionId); }
+    };
+}

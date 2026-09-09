@@ -1,33 +1,46 @@
 import { randomUUID } from "node:crypto";
-import { parentPort, workerData } from "node:worker_threads";
+import { syncBuiltinESMExports } from "node:module";
+import { parentPort, workerData, type MessagePort } from "node:worker_threads";
 
 import type {
-    ExtensionActivation,
     ExtensionAssetBundle,
     ExtensionAssetCapability,
     ExtensionAssetProjectionInput,
     ExtensionAssetTransferResult,
+    ExtensionCapabilities,
     ExtensionContext,
     ExtensionInvocationContext,
     ExtensionJsonValue,
     ExtensionLogger,
+    ExtensionManagedProcess,
     ExtensionModule,
+    ExtensionProcessCapability,
+    ExtensionProcessExit,
+    ExtensionProcessStartInput,
     ExtensionWorkerCapability,
     ExtensionWorkerSession
 } from "@portable-devshell/extension";
+import type { CliCommandBinding } from "@portable-devshell/extension/cli";
+import type { WebApplicationBinding } from "@portable-devshell/extension/web";
 
 import { ExtensionHostModuleResolver } from "../ExtensionHostModuleResolver.js";
 import {
+    assertExtensionSandboxMessage,
     deserializeSandboxError,
     serializeSandboxError,
     type ExtensionHostToSandboxMessage,
-    type ExtensionSandboxActivationDescriptor,
     type ExtensionSandboxCapabilityOperation,
     type ExtensionSandboxInvokeOperation,
+    type ExtensionSandboxProcessDescriptor,
+    type ExtensionSandboxReadyDescriptor,
+    type ExtensionSandboxRegistrationDescriptor,
     type ExtensionSandboxToHostMessage,
     type ExtensionSandboxWorkerData,
     type ExtensionSandboxWorkerSessionDescriptor,
     type SandboxAssetProjectInput,
+    type SandboxProcessSendInput,
+    type SandboxProcessStartInput,
+    type SandboxProcessTerminateInput,
     type SandboxWorkerCallInput,
     type SandboxWorkerCloseInput,
     type SandboxWorkerOpenInput
@@ -39,25 +52,66 @@ interface PendingCapabilityRequest {
     resolve(value: unknown): void;
 }
 
-const port = requireParentPort();
+interface SandboxProcessRuntime {
+    closed: Promise<ExtensionProcessExit>;
+    messageListeners: Set<(message: ExtensionJsonValue) => void>;
+    resolveClosed(exit: ExtensionProcessExit): void;
+    stderrListeners: Set<(chunk: string) => void>;
+}
+
+interface PendingProcessEvents {
+    exit?: ExtensionProcessExit;
+    messages: ExtensionJsonValue[];
+    stderr: string[];
+}
+
 const data = workerData as ExtensionSandboxWorkerData;
 const capabilityRequests = new Map<string, PendingCapabilityRequest>();
 const invocationControllers = new Map<string, AbortController>();
-const hostModules = new ExtensionHostModuleResolver(import.meta.url);
-const hostModulesLease = hostModules.register(data.codeDirectory);
-let activation: ExtensionActivation | undefined;
-
-port.on("message", (message: ExtensionHostToSandboxMessage) => {
-    void acceptHostMessage(message);
+const registrations = new Map<string, { binding: unknown; id: string; pointId: string }>();
+const workerSessionClosures = new Map<string, () => void>();
+const processes = new Map<string, SandboxProcessRuntime>();
+const pendingProcessEvents = new Map<string, PendingProcessEvents>();
+const hostModules = new ExtensionHostModuleResolver(import.meta.url, {
+    deniedSpecifiers: ["node:vm", "vm"]
 });
+const hostModulesLease = hostModules.register(data.codeDirectory, data.hostDependencies);
+const scheduleFatal = process.nextTick.bind(process);
+const signalProcess = process.kill.bind(process);
+const getBuiltinModule = process.getBuiltinModule?.bind(process);
+let port!: MessagePort;
+let postToHost: ((message: ExtensionSandboxToHostMessage) => void) | undefined;
+let extensionModule: ExtensionModule | undefined;
 
-void initialize();
+void bootstrap().catch((error: unknown) => fatal(error));
+
+async function bootstrap(): Promise<void> {
+    const parent = requireParentPort();
+    port = await new Promise<MessagePort>((resolve, reject) => {
+        parent.once("message", (message: unknown) => {
+            if (!isBootstrapMessage(message)) {
+                reject(new TypeError("Extension sandbox bootstrap message is invalid."));
+                return;
+            }
+            resolve(message.port);
+        });
+    });
+    parent.close();
+    hardenProcessSignals();
+    hardenSharedMemory();
+    postToHost = port.postMessage.bind(port);
+    port.on("message", (message: ExtensionHostToSandboxMessage) => {
+        void acceptHostMessage(message).catch((error: unknown) => fatal(error));
+    });
+    port.start();
+    await initialize();
+}
 
 async function initialize(): Promise<void> {
     try {
-        const module = readExtensionModule(await import(data.entryUrl));
-        activation = await module.activate(createContext());
-        send({ activation: describeActivation(activation), type: "ready" });
+        extensionModule = readExtensionModule(await import(data.entryUrl));
+        await extensionModule.activate(createContext());
+        send({ descriptor: describeRegistrations(), type: "ready" });
     } catch (error) {
         send({ error: serializeSandboxError(error), type: "initError" });
     }
@@ -65,6 +119,9 @@ async function initialize(): Promise<void> {
 
 async function acceptHostMessage(message: ExtensionHostToSandboxMessage): Promise<void> {
     switch (message.type) {
+        case "healthPing":
+            send({ id: message.id, type: "healthPong" });
+            return;
         case "invoke":
             await invoke(message.id, message.operation);
             return;
@@ -88,13 +145,47 @@ async function acceptHostMessage(message: ExtensionHostToSandboxMessage): Promis
         case "capabilityProgress":
             capabilityRequests.get(message.id)?.onProgress?.(message.value);
             return;
+        case "workerSessionClosed": {
+            const close = workerSessionClosures.get(message.sessionId);
+            if (close === undefined) return;
+            workerSessionClosures.delete(message.sessionId);
+            close();
+            return;
+        }
+        case "processMessage": {
+            const runtime = processes.get(message.processId);
+            if (runtime === undefined) {
+                pendingProcessEvent(message.processId).messages.push(message.message);
+                return;
+            }
+            for (const listener of runtime.messageListeners) listener(message.message);
+            return;
+        }
+        case "processStderr": {
+            const runtime = processes.get(message.processId);
+            if (runtime === undefined) {
+                pendingProcessEvent(message.processId).stderr.push(message.chunk);
+                return;
+            }
+            for (const listener of runtime.stderrListeners) listener(message.chunk);
+            return;
+        }
+        case "processClosed": {
+            const runtime = processes.get(message.processId);
+            if (runtime === undefined) {
+                pendingProcessEvent(message.processId).exit = message.exit;
+                return;
+            }
+            closeProcessRuntime(message.processId, runtime, message.exit);
+            return;
+        }
     }
 }
 
 async function invoke(id: string, operation: ExtensionSandboxInvokeOperation): Promise<void> {
-    if (activation === undefined) {
+    if (extensionModule === undefined) {
         send({
-            error: serializeSandboxError(new Error("Extension sandbox activation is unavailable.")),
+            error: serializeSandboxError(new Error("Extension sandbox module is unavailable.")),
             id,
             type: "invokeError"
         });
@@ -105,40 +196,31 @@ async function invoke(id: string, operation: ExtensionSandboxInvokeOperation): P
     try {
         let value: unknown;
         switch (operation.kind) {
-            case "command": {
-                if (activation.command === undefined) throw new Error("Extension command handler is unavailable.");
-                value = await activation.command(
+            case "cliCommand": {
+                const binding = requireRegistration("cli.commands", operation.id);
+                if (typeof binding !== "function") {
+                    throw new Error(`Extension CLI command binding is unavailable: ${operation.id}.`);
+                }
+                value = await (binding as CliCommandBinding)(
                     operation.argv,
                     createInvocationContext(operation.context, controller.signal)
                 );
                 break;
             }
-            case "rpc": {
-                const handler = activation.rpc?.[operation.operation];
-                if (handler === undefined) throw new Error(`Extension RPC handler ${operation.operation} is unavailable.`);
-                value = await handler(
-                    operation.input,
-                    createInvocationContext(operation.context, controller.signal)
-                );
-                break;
-            }
-            case "instanceRetire":
-                await activation.lifecycle?.onInstanceRetire?.(operation.event);
-                value = undefined;
-                break;
-            case "resolveUpstream": {
-                if (activation.web?.kind !== "proxy") {
-                    throw new Error("Extension Web proxy contribution is unavailable.");
+            case "webEndpoint": {
+                const binding = requireRegistration("web.applications", operation.id) as WebApplicationBinding;
+                if (binding.source.kind !== "endpoint") {
+                    throw new Error(`Extension Web application ${operation.id} is not endpoint-backed.`);
                 }
-                const upstream = await activation.web.resolveUpstream();
+                const upstream = await binding.source.resolve();
                 if (upstream !== undefined && !(upstream instanceof URL)) {
-                    throw new TypeError("Extension Web proxy resolveUpstream() must return a URL or undefined.");
+                    throw new TypeError("Extension Web application endpoint resolve() must return a URL or undefined.");
                 }
                 value = upstream?.href;
                 break;
             }
-            case "dispose":
-                await activation.dispose();
+            case "deactivate":
+                await extensionModule.deactivate?.();
                 value = undefined;
                 hostModulesLease.release();
                 hostModules.dispose();
@@ -153,14 +235,22 @@ async function invoke(id: string, operation: ExtensionSandboxInvokeOperation): P
 }
 
 function createContext(): ExtensionContext {
+    const capabilities: ExtensionCapabilities = Object.freeze({
+        ...(data.capabilities.includes("assets") ? { assets: createAssets() } : {}),
+        ...(data.capabilities.includes("processes") ? { processes: createProcessCapability() } : {}),
+        ...(data.capabilities.includes("workers") ? { workers: createWorkerCapability() } : {})
+    });
+    const register: ExtensionContext["register"] = (point, id, binding) => {
+        registerBinding(point.id, id, binding);
+    };
     return Object.freeze({
-        assets: createAssets(),
+        capabilities,
         generation: data.context.generation,
         id: data.context.id,
         logger: createLogger(),
         paths: Object.freeze({ ...data.context.paths }),
+        register,
         version: data.context.version,
-        worker: createWorkerCapability()
     });
 }
 
@@ -216,16 +306,90 @@ function createAssets(): ExtensionAssetCapability {
     });
 }
 
+function createProcessCapability(): ExtensionProcessCapability {
+    return Object.freeze({
+        start: async (input: ExtensionProcessStartInput): Promise<ExtensionManagedProcess> => {
+            const request: SandboxProcessStartInput = {
+                command: input.command,
+                ...(input.args === undefined ? {} : { args: [...input.args] }),
+                ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+                ...(input.environment === undefined ? {} : { environment: { ...input.environment } }),
+                ...(input.messages === undefined ? {} : { messages: input.messages })
+            };
+            const opened = await requestCapability(
+                "processes.start",
+                request
+            ) as ExtensionSandboxProcessDescriptor;
+            let resolveClosed!: (exit: ExtensionProcessExit) => void;
+            const closed = new Promise<ExtensionProcessExit>((resolve) => { resolveClosed = resolve; });
+            const runtime: SandboxProcessRuntime = {
+                closed,
+                messageListeners: new Set(),
+                resolveClosed,
+                stderrListeners: new Set()
+            };
+            processes.set(opened.processId, runtime);
+            const pending = pendingProcessEvents.get(opened.processId);
+            if (pending !== undefined) pendingProcessEvents.delete(opened.processId);
+            const managed: ExtensionManagedProcess = {
+                closed,
+                onMessage: (listener) => {
+                    runtime.messageListeners.add(listener);
+                    return () => runtime.messageListeners.delete(listener);
+                },
+                onStderr: (listener) => {
+                    runtime.stderrListeners.add(listener);
+                    return () => runtime.stderrListeners.delete(listener);
+                },
+                send: async (message) => {
+                    await requestCapability(
+                        "processes.send",
+                        { message, processId: opened.processId } satisfies SandboxProcessSendInput
+                    );
+                },
+                terminate: async (signal) => {
+                    if (!processes.has(opened.processId)) return;
+                    await requestCapability(
+                        "processes.terminate",
+                        {
+                            processId: opened.processId,
+                            ...(signal === undefined ? {} : { signal })
+                        } satisfies SandboxProcessTerminateInput
+                    );
+                }
+            };
+            if (pending?.exit !== undefined) {
+                closeProcessRuntime(opened.processId, runtime, pending.exit);
+            } else if (pending !== undefined) {
+                queueMicrotask(() => {
+                    if (processes.get(opened.processId) !== runtime) return;
+                    for (const message of pending.messages) {
+                        for (const listener of runtime.messageListeners) listener(message);
+                    }
+                    for (const chunk of pending.stderr) {
+                        for (const listener of runtime.stderrListeners) listener(chunk);
+                    }
+                });
+            }
+            return Object.freeze(managed);
+        }
+    });
+}
+
 function createWorkerCapability(): ExtensionWorkerCapability {
     return Object.freeze({
         openSession: async (input: SandboxWorkerOpenInput): Promise<ExtensionWorkerSession> => {
             const opened = await requestCapability(
-                "worker.openSession",
+                "workers.openSession",
                 { ...input }
             ) as ExtensionSandboxWorkerSessionDescriptor;
             const tools = opened.tools.map((tool) => Object.freeze({ ...tool }));
             let closed = false;
+            let resolveClosed!: () => void;
+            const closedPromise = new Promise<void>((resolve) => { resolveClosed = resolve; });
+            workerSessionClosures.set(opened.sessionId, resolveClosed);
             const session: ExtensionWorkerSession = {
+                closed: closedPromise,
                 environment: Object.freeze({
                     ...opened.environment,
                     platform: Object.freeze({ ...opened.environment.platform })
@@ -233,7 +397,7 @@ function createWorkerCapability(): ExtensionWorkerCapability {
                 instance: opened.instance,
                 workspace: opened.workspace,
                 callTool: async (toolName, toolInput, options = {}) => await requestCapability(
-                    "worker.callTool",
+                    "workers.callTool",
                     {
                         input: toolInput,
                         ...(options.operationId === undefined ? {} : { operationId: options.operationId }),
@@ -245,16 +409,42 @@ function createWorkerCapability(): ExtensionWorkerCapability {
                 close: async () => {
                     if (closed) return;
                     closed = true;
-                    await requestCapability(
-                        "worker.closeSession",
-                        { sessionId: opened.sessionId } satisfies SandboxWorkerCloseInput
-                    );
+                    try {
+                        await requestCapability(
+                            "workers.closeSession",
+                            { sessionId: opened.sessionId } satisfies SandboxWorkerCloseInput
+                        );
+                    } finally {
+                        workerSessionClosures.delete(opened.sessionId);
+                        resolveClosed();
+                    }
                 },
                 listTools: () => tools.map((tool) => ({ ...tool }))
             };
             return Object.freeze(session);
         }
     });
+}
+
+function pendingProcessEvent(processId: string): PendingProcessEvents {
+    let pending = pendingProcessEvents.get(processId);
+    if (pending === undefined) {
+        pending = { messages: [], stderr: [] };
+        pendingProcessEvents.set(processId, pending);
+    }
+    return pending;
+}
+
+function closeProcessRuntime(
+    processId: string,
+    runtime: SandboxProcessRuntime,
+    exit: ExtensionProcessExit
+): void {
+    if (processes.get(processId) !== runtime) return;
+    processes.delete(processId);
+    runtime.messageListeners.clear();
+    runtime.stderrListeners.clear();
+    runtime.resolveClosed(Object.freeze({ ...exit }));
 }
 
 async function requestCapability(
@@ -319,90 +509,157 @@ function createInvocationContext(
     });
 }
 
-function describeActivation(value: unknown): ExtensionSandboxActivationDescriptor {
-    if (!isRecord(value)) throw new TypeError(`Extension ${data.context.id} activation must be an object.`);
-    const allowed = new Set(["command", "dispose", "lifecycle", "rpc", "web"]);
-    const unknown = Object.keys(value).find((key) => !allowed.has(key));
-    if (unknown !== undefined) {
-        throw new TypeError(`Extension ${data.context.id} activation has unknown field ${unknown}.`);
+function registerBinding(pointId: string, id: string, binding: unknown): void {
+    if (!/^[a-z][a-z0-9-]*$/u.test(id)) {
+        throw new TypeError(`Extension registration id is invalid: ${id}.`);
     }
-    if (typeof value.dispose !== "function") {
-        throw new TypeError(`Extension ${data.context.id} activation must provide dispose().`);
+    const key = registrationKey(pointId, id);
+    if (registrations.has(key)) {
+        throw new TypeError(`Extension ${data.context.id} registered ${pointId}/${id} more than once.`);
     }
-    const descriptor: ExtensionSandboxActivationDescriptor = {};
-    if (value.command !== undefined) {
-        if (typeof value.command !== "function") {
-            throw new TypeError(`Extension ${data.context.id} command must be a function.`);
-        }
-        descriptor.command = true;
-    }
-    if (value.rpc !== undefined) {
-        if (!isRecord(value.rpc)) throw new TypeError(`Extension ${data.context.id} rpc must be an object.`);
-        const operations: string[] = [];
-        for (const [operation, handler] of Object.entries(value.rpc)) {
-            if (!/^[A-Za-z][A-Za-z0-9]*$/u.test(operation)) {
-                throw new TypeError(`Extension ${data.context.id} RPC operation is invalid: ${operation}.`);
-            }
-            if (typeof handler !== "function") {
-                throw new TypeError(`Extension ${data.context.id} RPC operation ${operation} must be a function.`);
-            }
-            operations.push(operation);
-        }
-        descriptor.rpc = Object.freeze(operations.sort());
-    }
-    if (value.lifecycle !== undefined) {
-        if (!isRecord(value.lifecycle)) {
-            throw new TypeError(`Extension ${data.context.id} lifecycle must be an object.`);
-        }
-        const unknownLifecycle = Object.keys(value.lifecycle).find((key) => key !== "onInstanceRetire");
-        if (unknownLifecycle !== undefined) {
-            throw new TypeError(`Extension ${data.context.id} lifecycle has unknown field ${unknownLifecycle}.`);
-        }
-        if (
-            value.lifecycle.onInstanceRetire !== undefined
-            && typeof value.lifecycle.onInstanceRetire !== "function"
-        ) {
-            throw new TypeError(`Extension ${data.context.id} onInstanceRetire must be a function.`);
-        }
-        if (value.lifecycle.onInstanceRetire !== undefined) {
-            descriptor.lifecycle = Object.freeze({ onInstanceRetire: true });
-        }
-    }
-    if (value.web !== undefined) descriptor.web = describeWeb(value.web);
-    return Object.freeze(descriptor);
+    describeRuntime(pointId, binding, id);
+    registrations.set(key, { binding, id, pointId });
 }
 
-function describeWeb(value: unknown): NonNullable<ExtensionSandboxActivationDescriptor["web"]> {
-    if (!isRecord(value) || (value.kind !== "static" && value.kind !== "proxy")) {
-        throw new TypeError(`Extension ${data.context.id} web contribution must be static or proxy.`);
+function describeRegistrations(): ExtensionSandboxReadyDescriptor {
+    const descriptors: ExtensionSandboxRegistrationDescriptor[] = [];
+    for (const registration of registrations.values()) {
+        descriptors.push(Object.freeze({
+            id: registration.id,
+            pointId: registration.pointId,
+            runtime: describeRuntime(registration.pointId, registration.binding, registration.id)
+        }));
     }
-    if (value.kind === "static") {
-        if (Object.keys(value).some((key) => key !== "directory" && key !== "kind")) {
-            throw new TypeError(`Extension ${data.context.id} static web contribution has unknown fields.`);
+    return Object.freeze({ registrations: Object.freeze(descriptors) });
+}
+
+function describeRuntime(
+    pointId: string,
+    binding: unknown,
+    id: string
+): ExtensionSandboxRegistrationDescriptor["runtime"] {
+    if (pointId === "cli.commands") {
+        if (typeof binding !== "function") {
+            throw new TypeError(`Extension ${data.context.id} cli.commands/${id} binding must be a function.`);
         }
-        if (typeof value.directory !== "string" || value.directory.length === 0) {
-            throw new TypeError(`Extension ${data.context.id} static web directory must be a non-empty relative path.`);
+        return Object.freeze({ kind: "cli.command" });
+    }
+    if (pointId === "web.applications") {
+        if (!isRecord(binding) || !isRecord(binding.source)) {
+            throw new TypeError(`Extension ${data.context.id} web.applications/${id} binding must provide source.`);
         }
-        return Object.freeze({ directory: value.directory, kind: "static" });
+        if (binding.source.kind === "files" && typeof binding.source.directory === "string") {
+            return Object.freeze({ directory: binding.source.directory, kind: "web.files" });
+        }
+        if (binding.source.kind === "endpoint" && typeof binding.source.resolve === "function") {
+            return Object.freeze({ kind: "web.endpoint" });
+        }
+        throw new TypeError(`Extension ${data.context.id} web.applications/${id} source is invalid.`);
     }
-    if (Object.keys(value).some((key) => key !== "kind" && key !== "resolveUpstream")) {
-        throw new TypeError(`Extension ${data.context.id} proxy web contribution has unknown fields.`);
-    }
-    if (typeof value.resolveUpstream !== "function") {
-        throw new TypeError(`Extension ${data.context.id} proxy web contribution must provide resolveUpstream().`);
-    }
-    return Object.freeze({ kind: "proxy" });
+    throw new TypeError(`Extension ${data.context.id} cannot bind unsupported Extension Point ${pointId}.`);
+}
+
+function requireRegistration(pointId: string, id: string): unknown {
+    const binding = registrations.get(registrationKey(pointId, id))?.binding;
+    if (binding !== undefined) return binding;
+    throw new Error(`Extension registration is unavailable: ${pointId}/${id}.`);
+}
+
+function registrationKey(pointId: string, id: string): string {
+    return `${pointId}\u0000${id}`;
 }
 
 function readExtensionModule(value: unknown): ExtensionModule {
     if (!isRecord(value) || typeof value.activate !== "function") {
         throw new TypeError(`Extension ${data.context.id} entry must export an activate(context) function.`);
     }
-    return { activate: value.activate as ExtensionModule["activate"] };
+    if (value.deactivate !== undefined && typeof value.deactivate !== "function") {
+        throw new TypeError(`Extension ${data.context.id} deactivate export must be a function.`);
+    }
+    return {
+        activate: value.activate as ExtensionModule["activate"],
+        ...(value.deactivate === undefined ? {} : { deactivate: value.deactivate as NonNullable<ExtensionModule["deactivate"]> })
+    };
 }
 
 function send(message: ExtensionSandboxToHostMessage): void {
-    port.postMessage(message);
+    assertExtensionSandboxMessage(message, "Extension sandbox outbound message");
+    if (postToHost === undefined) throw new Error("Extension sandbox private channel is unavailable.");
+    postToHost(message);
+}
+
+function fatal(error: unknown): void {
+    const failure = error instanceof Error ? error : new Error(String(error));
+    if (postToHost !== undefined) {
+        try {
+            send({ error: serializeSandboxError(failure), type: "runtimeFault" });
+        } catch {
+            // Worker error/exit remains the bootstrap fallback when the private channel is unavailable.
+        }
+    }
+    scheduleFatal(() => { throw failure; });
+}
+
+function hardenProcessSignals(): void {
+    const sandboxKill = (pid: number, signal?: NodeJS.Signals | number): true => {
+        if (signal !== 0 && (pid === process.pid || pid <= 0)) {
+            throw new Error("Extension sandbox cannot signal the Control process or its process group.");
+        }
+        return signal === undefined
+            ? signalProcess(pid)
+            : signalProcess(pid, signal);
+    };
+    Object.defineProperty(process, "kill", {
+        configurable: false,
+        enumerable: true,
+        value: sandboxKill,
+        writable: false
+    });
+    syncBuiltinESMExports();
+}
+
+function hardenSharedMemory(): void {
+    Object.defineProperty(globalThis, "SharedArrayBuffer", {
+        configurable: false,
+        enumerable: false,
+        value: undefined,
+        writable: false
+    });
+    const memory = WebAssembly.Memory;
+    let guardedMemory!: typeof WebAssembly.Memory;
+    guardedMemory = new Proxy(memory, {
+        construct(target, argumentsList, newTarget) {
+            const descriptor = argumentsList[0] as WebAssembly.MemoryDescriptor | undefined;
+            if (descriptor?.shared === true) {
+                throw new Error("Extension sandbox does not allow shared WebAssembly memory.");
+            }
+            return Reflect.construct(
+                target,
+                argumentsList,
+                newTarget === guardedMemory ? target : newTarget
+            ) as WebAssembly.Memory;
+        }
+    });
+    Object.defineProperty(WebAssembly, "Memory", {
+        configurable: false,
+        enumerable: true,
+        value: guardedMemory,
+        writable: false
+    });
+    if (getBuiltinModule !== undefined) {
+        Object.defineProperty(process, "getBuiltinModule", {
+            configurable: false,
+            enumerable: true,
+            value: (id: string) => {
+                if (id === "vm" || id === "node:vm") {
+                    throw new Error(`Extension sandbox does not allow builtin module ${id}.`);
+                }
+                return getBuiltinModule(id);
+            },
+            writable: false
+        });
+        syncBuiltinESMExports();
+    }
 }
 
 function requireParentPort(): NonNullable<typeof parentPort> {
@@ -410,6 +667,19 @@ function requireParentPort(): NonNullable<typeof parentPort> {
         throw new Error("Extension sandbox worker requires a parent MessagePort.");
     }
     return parentPort;
+}
+
+function isBootstrapMessage(value: unknown): value is {
+    port: MessagePort;
+    type: "extensionSandboxBootstrap";
+} {
+    if (typeof value !== "object" || value === null) return false;
+    const candidate = value as { port?: unknown; type?: unknown };
+    return candidate.type === "extensionSandboxBootstrap"
+        && typeof candidate.port === "object"
+        && candidate.port !== null
+        && "postMessage" in candidate.port
+        && typeof (candidate.port as { postMessage?: unknown }).postMessage === "function";
 }
 
 function abortError(signal: AbortSignal | undefined): Error {

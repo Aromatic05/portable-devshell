@@ -84,3 +84,28 @@ test("Pi provider child exits when its parent IPC channel disconnects", async ()
         await rm(stateDirectory, { force: true, recursive: true });
     }
 });
+
+test("Pi provider child exits when owner heartbeat stops while IPC remains connected", async () => {
+    const stateDirectory = await mkdtemp(join(tmpdir(), "devshell-pi-child-heartbeat-"));
+    const childPath = fileURLToPath(new URL("../../src/provider/pi/PiAgentChild.ts", import.meta.url));
+    const workspaceLoader = new URL("../RegisterWorkspacePackages.mjs", import.meta.url).href;
+    const child = fork(childPath, ["150"], {
+        cwd: process.cwd(),
+        env: {
+            ...process.env,
+            PI_CODING_AGENT_DIR: stateDirectory,
+            TSX_TSCONFIG_PATH: process.env.TSX_TSCONFIG_PATH
+        },
+        execArgv: ["--import", "tsx", "--import", workspaceLoader],
+        stdio: ["ignore", "ignore", "ignore", "ipc"]
+    });
+
+    try {
+        const exit = await waitForExit(child);
+        assert.deepEqual(exit, { code: 0, signal: null });
+        assert.equal(child.connected, false);
+    } finally {
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        await rm(stateDirectory, { force: true, recursive: true });
+    }
+});

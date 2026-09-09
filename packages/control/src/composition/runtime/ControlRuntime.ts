@@ -96,10 +96,10 @@ export class ControlRuntime {
             toolProvenance: options.mcp.toolProvenance
         });
         this.#mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
-            await this.#extensions.retireInstance({ instance: instance.name, reason: "deleted" });
+            await this.#extensions.retireInstanceResources(instance.name);
         });
         this.#mcp.configEditor.registerInstanceDisableRetirement(async (instance) => {
-            await this.#extensions.retireInstance({ instance: instance.name, reason: "disabled" });
+            await this.#extensions.retireInstanceResources(instance.name);
         });
         this.#mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
             await this.#debug.retireInstance(instance.name);

@@ -26,22 +26,24 @@ function context(options: {
 }): ExtensionContext {
     const generation = `sha256-${"a".repeat(64)}`;
     return {
-        assets: {
-            async installBundle() { throw new Error("not used"); },
-            async installDirectory(sourcePath) {
-                options.events.push(`asset.install:${sourcePath}`);
-                return { directory: "/asset", generation };
-            },
-            async listBundles() { return []; },
-            async projectBundle(input) {
-                options.events.push(
-                    `asset.project:${input.target.instance}:${input.target.collection}:${input.target.key}:${input.overwrite}`
-                );
-                if (options.projectionFailure !== undefined) throw options.projectionFailure;
-                return { transferId: "transfer-1", transferredBytes: 123 };
-            },
-            async removeBundle() {},
-            async resolveBundle() { return undefined; }
+        capabilities: {
+            assets: {
+                async installBundle() { throw new Error("not used"); },
+                async installDirectory(sourcePath) {
+                    options.events.push(`asset.install:${sourcePath}`);
+                    return { directory: "/asset", generation };
+                },
+                async listBundles() { return []; },
+                async projectBundle(input) {
+                    options.events.push(
+                        `asset.project:${input.target.instance}:${input.target.collection}:${input.target.key}:${input.overwrite}`
+                    );
+                    if (options.projectionFailure !== undefined) throw options.projectionFailure;
+                    return { transferId: "transfer-1", transferredBytes: 123 };
+                },
+                async removeBundle() {},
+                async resolveBundle() { return undefined; }
+            }
         },
         generation: "g1",
         id: "skill",
@@ -54,12 +56,8 @@ function context(options: {
             runtimeDirectory: "/runtime",
             stateDirectory: "/state"
         },
-        version: "0.1.0",
-        worker: {
-            async openSession() {
-                throw new Error("Skill resource projection must not open a Worker tool session");
-            }
-        }
+        register() {},
+        version: "0.1.0"
     };
 }
 

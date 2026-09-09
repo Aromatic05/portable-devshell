@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { open, readFile, readdir, stat } from "node:fs/promises";
 import { matchesGlob, relative, resolve } from "node:path";
 
@@ -46,19 +45,22 @@ export interface SecretScanOptions {
     cwd: string;
     glob?: string;
     limit?: number;
+    signal?: AbortSignal;
 }
 
 export async function scanSecrets(options: SecretScanOptions): Promise<SecretScanResult> {
+    options.signal?.throwIfAborted();
     const limit = normalizeLimit(options.limit);
     const base = resolve(options.cwd);
     const baseStat = await stat(base);
     if (!baseStat.isDirectory()) throw new TypeError(`secret scan path must be a directory: ${options.cwd}`);
 
-    const discovery = discoverWithRipgrep(base) ?? await discoverFallback(base);
+    const discovery = await discoverFiles(base, options.signal);
     const findings: SecretScanFinding[] = [];
     let truncatedFiles = 0;
 
     for (const candidate of discovery.files) {
+        options.signal?.throwIfAborted();
         const displayPath = normalizePath(candidate);
         if (options.glob !== undefined && !matchesGlob(displayPath, options.glob)) continue;
         const read = await readCandidate(resolve(base, candidate));
@@ -85,25 +87,10 @@ function normalizeLimit(limit: number | undefined): number {
     return Math.min(value, MAX_LIMIT);
 }
 
-function discoverWithRipgrep(base: string): DiscoveryResult | undefined {
-    const result = spawnSync("rg", ["--files", "--hidden", "--glob", "!.git/**"], {
-        cwd: base,
-        encoding: "utf8",
-        maxBuffer: 16 * 1024 * 1024,
-        windowsHide: true
-    });
-    if (result.error !== undefined || (result.status !== 0 && result.status !== 1)) return undefined;
-    const files = result.stdout.split(/\r?\n/u).filter((value) => value.length > 0).sort();
-    return {
-        files: files.slice(0, MAX_DISCOVERED_FILES),
-        truncated: files.length > MAX_DISCOVERED_FILES
-    };
-}
-
-async function discoverFallback(base: string): Promise<DiscoveryResult> {
+async function discoverFiles(base: string, signal?: AbortSignal): Promise<DiscoveryResult> {
     const files: string[] = [];
     const state = { scanned: 0, truncated: false };
-    await walk(base, base, files, [], state);
+    await walk(base, base, files, [], state, signal);
     files.sort();
     return { files, truncated: state.truncated };
 }
@@ -113,12 +100,15 @@ async function walk(
     directory: string,
     files: string[],
     inheritedScopes: readonly SecretIgnoreScope[],
-    state: { scanned: number; truncated: boolean }
+    state: { scanned: number; truncated: boolean },
+    signal?: AbortSignal
 ): Promise<void> {
+    signal?.throwIfAborted();
     if (state.truncated) return;
     const localScope = await readIgnoreScope(directory);
     const scopes = localScope === undefined ? inheritedScopes : [...inheritedScopes, localScope];
     for (const entry of await readdir(directory, { withFileTypes: true })) {
+        signal?.throwIfAborted();
         state.scanned += 1;
         if (state.scanned > MAX_DISCOVERY_ENTRIES) {
             state.truncated = true;
@@ -128,7 +118,7 @@ async function walk(
         const displayPath = normalizePath(relative(base, path));
         if (entry.isDirectory()) {
             if (!FALLBACK_SKIP_DIRECTORIES.has(entry.name) && !ignoredBySecretScopes(path, true, scopes)) {
-                await walk(base, path, files, scopes, state);
+                await walk(base, path, files, scopes, state, signal);
             }
             continue;
         }
@@ -188,4 +178,8 @@ function normalizePath(path: string): string {
 
 function isEnoent(error: unknown): boolean {
     return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
+function abortError(signal: AbortSignal | undefined): Error {
+    return signal?.reason instanceof Error ? signal.reason : new Error("Secret scan was aborted.");
 }

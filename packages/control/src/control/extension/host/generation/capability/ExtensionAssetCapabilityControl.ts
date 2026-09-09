@@ -68,34 +68,40 @@ export class ExtensionAssetCapabilityControl implements ExtensionAssetCapability
             throw new TypeError("Extension asset bundle exceeds the compressed byte limit.");
         }
 
-        const digest = await hashPlainFile(sourcePath, source.size);
-        const generation = `sha256-${digest}`;
         const bundleRoot = this.#bundleRoot();
-        const destination = join(bundleRoot, generation);
-        const staging = join(this.#dataDirectory, `.asset-staging-${randomUUID()}`);
+        const transactionId = randomUUID();
+        const snapshot = join(this.#dataDirectory, `.asset-source-${transactionId}.bundle`);
         await mkdir(bundleRoot, { mode: 0o700, recursive: true });
         await assertPlainDirectory(bundleRoot, "Extension asset bundle root");
-        await mkdir(staging, { mode: 0o700 });
 
         try {
-            await extractArtifactDirectoryArchive(sourcePath, staging, this.#limits);
-            const existing = await lstat(destination).catch((error: unknown) => {
-                if (isMissing(error)) return undefined;
-                throw error;
-            });
-            if (existing === undefined) {
-                try {
-                    await rename(staging, destination);
-                } catch (error) {
-                    if (!isAlreadyExists(error)) throw error;
-                    await assertPlainDirectory(destination, `Extension asset bundle ${generation}`);
+            const digest = await snapshotPlainFile(sourcePath, source.size, snapshot);
+            const generation = `sha256-${digest}`;
+            const destination = join(bundleRoot, generation);
+            const staging = join(this.#dataDirectory, `.asset-staging-${transactionId}`);
+            await mkdir(staging, { mode: 0o700 });
+            try {
+                await extractArtifactDirectoryArchive(snapshot, staging, this.#limits);
+                const existing = await lstat(destination).catch((error: unknown) => {
+                    if (isMissing(error)) return undefined;
+                    throw error;
+                });
+                if (existing === undefined) {
+                    try {
+                        await rename(staging, destination);
+                    } catch (error) {
+                        if (!isAlreadyExists(error)) throw error;
+                        await assertPlainDirectory(destination, `Extension asset bundle ${generation}`);
+                    }
+                } else if (existing.isSymbolicLink() || !existing.isDirectory()) {
+                    throw new TypeError(`Extension asset bundle generation is not a plain directory: ${generation}.`);
                 }
-            } else if (existing.isSymbolicLink() || !existing.isDirectory()) {
-                throw new TypeError(`Extension asset bundle generation is not a plain directory: ${generation}.`);
+                return Object.freeze({ directory: destination, generation });
+            } finally {
+                await rm(staging, { force: true, recursive: true }).catch(() => undefined);
             }
-            return Object.freeze({ directory: destination, generation });
         } finally {
-            await rm(staging, { force: true, recursive: true }).catch(() => undefined);
+            await rm(snapshot, { force: true }).catch(() => undefined);
         }
     }
 
@@ -206,26 +212,43 @@ function validateProjectionTarget(target: ExtensionAssetProjectionInput["target"
     }
 }
 
-async function hashPlainFile(path: string, expectedSize: number): Promise<string> {
-    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+async function snapshotPlainFile(path: string, expectedSize: number, snapshotPath: string): Promise<string> {
+    const source = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
-        const current = await handle.stat();
-        if (!current.isFile() || current.size !== expectedSize) {
-            throw new Error("Extension asset bundle changed while being read.");
+        const snapshot = await open(snapshotPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
+        try {
+            const current = await source.stat();
+            if (!current.isFile() || current.size !== expectedSize) {
+                throw new Error("Extension asset bundle changed while being read.");
+            }
+            const hash = createHash("sha256");
+            const buffer = Buffer.allocUnsafe(64 * 1024);
+            let position = 0;
+            while (position < current.size) {
+                const requested = Math.min(buffer.length, current.size - position);
+                const { bytesRead } = await source.read(buffer, 0, requested, position);
+                if (bytesRead <= 0) throw new Error("Extension asset bundle changed while being read.");
+                hash.update(buffer.subarray(0, bytesRead));
+                let written = 0;
+                while (written < bytesRead) {
+                    const result = await snapshot.write(
+                        buffer,
+                        written,
+                        bytesRead - written,
+                        position + written
+                    );
+                    if (result.bytesWritten <= 0) throw new Error("Extension asset snapshot write made no progress.");
+                    written += result.bytesWritten;
+                }
+                position += bytesRead;
+            }
+            await snapshot.sync();
+            return hash.digest("hex");
+        } finally {
+            await snapshot.close();
         }
-        const hash = createHash("sha256");
-        const buffer = Buffer.allocUnsafe(64 * 1024);
-        let position = 0;
-        while (position < current.size) {
-            const requested = Math.min(buffer.length, current.size - position);
-            const { bytesRead } = await handle.read(buffer, 0, requested, position);
-            if (bytesRead <= 0) throw new Error("Extension asset bundle changed while being read.");
-            hash.update(buffer.subarray(0, bytesRead));
-            position += bytesRead;
-        }
-        return hash.digest("hex");
     } finally {
-        await handle.close();
+        await source.close();
     }
 }
 

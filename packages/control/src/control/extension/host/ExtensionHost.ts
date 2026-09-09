@@ -1,9 +1,7 @@
 import type {
-    ExtensionCommandResult,
-    ExtensionInstanceRetireEvent,
-    ExtensionInvocationContext,
-    ExtensionJsonValue
+    ExtensionInvocationContext
 } from "@portable-devshell/extension";
+import type { CliCommandBinding, CliCommandResult } from "@portable-devshell/extension/cli";
 import {
     createError,
     errorCodes,
@@ -34,6 +32,7 @@ export class ExtensionHost {
     readonly #loader: ExtensionGenerationLoader;
     readonly #registry: ExtensionRegistryPort;
     readonly #retired = new Map<string, Set<ExtensionGeneration>>();
+    readonly #retirementFailures = new Map<string, unknown[]>();
     readonly #retirementPromises = new Set<Promise<void>>();
     #mutationTail: Promise<void> = Promise.resolve();
     #registrySnapshot?: ExtensionRegistrySnapshot;
@@ -78,35 +77,46 @@ export class ExtensionHost {
         return active.acquire();
     }
 
-    async dispatchRpc(
-        id: string,
-        operation: string,
-        input: ExtensionJsonValue | undefined,
+    async dispatchCommand(
+        commandId: string,
+        argv: readonly string[],
         context: ExtensionInvocationContext
-    ): Promise<ExtensionJsonValue> {
-        const lease = this.acquire(id);
+    ): Promise<CliCommandResult> {
+        const { lease, registration } = this.acquireRegistration("cli.commands", commandId);
         try {
-            const handler = lease.activation.rpc?.[operation];
-            if (handler === undefined) throw extensionInvalid(id, `does not expose RPC operation ${operation}`);
-            return await handler(input, context);
+            if (typeof registration.binding !== "function") {
+                throw extensionInvalid(commandId, "has an invalid cli.commands binding");
+            }
+            return await (registration.binding as CliCommandBinding)(argv, context);
         } finally {
             lease.release();
         }
     }
 
-    async dispatchCommand(
-        id: string,
-        argv: readonly string[],
-        context: ExtensionInvocationContext
-    ): Promise<ExtensionCommandResult> {
-        const lease = this.acquire(id);
-        try {
-            const handler = lease.activation.command;
-            if (handler === undefined) throw extensionInvalid(id, "does not expose a CLI command");
-            return await handler(argv, context);
-        } finally {
-            lease.release();
+    acquireRegistration(pointId: string, id: string): {
+        extensionId: string;
+        lease: ExtensionGenerationLease;
+        registration: NonNullable<ReturnType<ExtensionGenerationLease["registrations"]["get"]>>;
+    } {
+        if (this.#stopping) throw new Error("Extension host is stopping.");
+        const matches = [...this.#active.entries()].flatMap(([extensionId, generation]) => {
+            const registration = generation.registrations.get(pointId, id);
+            return registration === undefined ? [] : [{ extensionId, generation, registration }];
+        });
+        if (matches.length === 0) {
+            throw new Error(`No active Extension registration for ${pointId}/${id}.`);
         }
+        if (matches.length > 1) {
+            throw new Error(`Conflicting active Extension registrations for ${pointId}/${id}.`);
+        }
+        const match = matches[0]!;
+        const lease = match.generation.acquire();
+        const registration = lease.registrations.get(pointId, id);
+        if (registration === undefined) {
+            lease.release();
+            throw new Error(`Extension registration disappeared during acquisition: ${pointId}/${id}.`);
+        }
+        return { extensionId: match.extensionId, lease, registration };
     }
 
     async activateGeneration(id: string, generation: string): Promise<void> {
@@ -126,13 +136,13 @@ export class ExtensionHost {
                 selectedGeneration: generation
             };
             try {
-                await this.#registry.write(next);
+                await this.#commitCandidate(id, candidate, snapshot, next);
             } catch (error) {
-                await candidate.retire().catch(() => undefined);
+                if (error instanceof ExtensionCandidatePublicationError) {
+                    throw extensionFailure(id, generation, error.cause ?? error);
+                }
                 throw error;
             }
-            this.#registrySnapshot = next;
-            this.#swap(id, candidate);
             this.#failures.delete(id);
         });
     }
@@ -156,13 +166,14 @@ export class ExtensionHost {
             const next = cloneExtensionRegistry(snapshot);
             next.extensions[id] = { ...entry, lastKnownGoodGeneration: generation };
             try {
-                await this.#registry.write(next);
+                await this.#commitCandidate(id, candidate, snapshot, next);
             } catch (error) {
-                await candidate.retire().catch(() => undefined);
+                if (error instanceof ExtensionCandidatePublicationError) {
+                    this.#recordFailure(id, generation, error.cause ?? error);
+                    throw extensionFailure(id, generation, error.cause ?? error);
+                }
                 throw error;
             }
-            this.#registrySnapshot = next;
-            this.#swap(id, candidate);
             this.#failures.delete(id);
         });
     }
@@ -173,13 +184,7 @@ export class ExtensionHost {
             const snapshot = this.#requireRegistry();
             const entry = snapshot.extensions[id];
             if (entry === undefined) throw extensionNotFound(id);
-            if (!entry.enabled) {
-                const next = cloneExtensionRegistry(snapshot);
-                next.extensions[id] = { ...entry, enabled: true };
-                await this.#registry.write(next);
-                this.#registrySnapshot = next;
-            }
-            await this.#startEntry(id, this.#requireRegistry().extensions[id]!, true);
+            await this.#startEntry(id, { ...entry, enabled: true }, true);
         });
     }
 
@@ -206,9 +211,12 @@ export class ExtensionHost {
 
     async waitForDrain(id: string): Promise<void> {
         const retired = [...(this.#retired.get(id) ?? [])];
-        if (retired.length === 0) return;
         const settled = await Promise.allSettled(retired.map(async (generation) => await generation.retire()));
-        const failures = settled.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+        const failures = uniqueFailures([
+            ...(this.#retirementFailures.get(id) ?? []),
+            ...settled.flatMap((result) => result.status === "rejected" ? [result.reason] : [])
+        ]);
+        this.#retirementFailures.delete(id);
         if (failures.length > 0) {
             throw new AggregateError(failures, `Extension ${id} failed to drain cleanly.`);
         }
@@ -219,7 +227,11 @@ export class ExtensionHost {
             this.#assertRunning();
             const snapshot = this.#requireRegistry();
             if (snapshot.extensions[id] === undefined) throw extensionNotFound(id);
-            if (this.#active.has(id) || (this.#retired.get(id)?.size ?? 0) > 0) {
+            if (
+                this.#active.has(id)
+                || (this.#retired.get(id)?.size ?? 0) > 0
+                || (this.#retirementFailures.get(id)?.length ?? 0) > 0
+            ) {
                 throw extensionInvalid(id, "still has active or draining generations");
             }
             const next = cloneExtensionRegistry(snapshot);
@@ -230,20 +242,17 @@ export class ExtensionHost {
         });
     }
 
-    async retireInstance(event: ExtensionInstanceRetireEvent): Promise<void> {
+    async retireInstanceResources(instance: string): Promise<void> {
         const failures: unknown[] = [];
         await Promise.all([...this.#active.entries()].map(async ([id, generation]) => {
-            const lease = generation.acquire();
             try {
-                await lease.activation.lifecycle?.onInstanceRetire?.(event);
+                await generation.retireInstanceResources(instance);
             } catch (error) {
-                failures.push(new Error(`Extension ${id} failed to retire instance ${event.instance}.`, { cause: error }));
-            } finally {
-                lease.release();
+                failures.push(new Error(`Extension ${id} failed to retire resources for instance ${instance}.`, { cause: error }));
             }
         }));
         if (failures.length > 0) {
-            throw new AggregateError(failures, `Extensions failed to retire instance ${event.instance}.`);
+            throw new AggregateError(failures, `Extensions failed to retire resources for instance ${instance}.`);
         }
     }
 
@@ -265,7 +274,11 @@ export class ExtensionHost {
             this.#active.clear();
         });
         const settled = await Promise.allSettled([...this.#retirementPromises]);
-        const failures = settled.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+        const failures = uniqueFailures([
+            ...settled.flatMap((result) => result.status === "rejected" ? [result.reason] : []),
+            ...[...this.#retirementFailures.values()].flat()
+        ]);
+        this.#retirementFailures.clear();
         if (failures.length > 0) throw new AggregateError(failures, "Extension generations failed to dispose cleanly.");
     }
 
@@ -299,13 +312,13 @@ export class ExtensionHost {
                 selectedGeneration: generation
             };
             try {
-                await this.#registry.write(next);
+                await this.#commitCandidate(id, candidate, snapshot, next);
             } catch (error) {
-                await candidate.retire().catch(() => undefined);
-                throw error;
+                if (!(error instanceof ExtensionCandidatePublicationError)) throw error;
+                selectedFailure ??= error;
+                this.#recordFailure(id, generation, error);
+                continue;
             }
-            this.#registrySnapshot = next;
-            this.#swap(id, candidate);
             if (generation === entry.selectedGeneration) this.#failures.delete(id);
             return;
         }
@@ -322,8 +335,72 @@ export class ExtensionHost {
         return candidate;
     }
 
-    #swap(id: string, candidate: ExtensionGeneration): void {
-        candidate.activate();
+    async #commitCandidate(
+        id: string,
+        candidate: ExtensionGeneration,
+        previousRegistry: ExtensionRegistrySnapshot,
+        nextRegistry: ExtensionRegistrySnapshot
+    ): Promise<void> {
+        try {
+            this.#assertNoRegistrationConflicts(id, candidate);
+            candidate.activate();
+        } catch (error) {
+            const cleanupFailures: unknown[] = [];
+            await candidate.retire().catch((cleanupError) => cleanupFailures.push(cleanupError));
+            const cause = cleanupFailures.length === 0
+                ? error
+                : new AggregateError(
+                    [error, ...cleanupFailures],
+                    `Extension ${id} candidate activation failed and cleanup was incomplete.`
+                );
+            throw new ExtensionCandidatePublicationError(candidate.generation, cause);
+        }
+        try {
+            await this.#registry.write(nextRegistry);
+        } catch (error) {
+            const cleanupFailures: unknown[] = [];
+            await candidate.retire().catch((cleanupError) => cleanupFailures.push(cleanupError));
+            if (cleanupFailures.length === 0) throw error;
+            throw new AggregateError(
+                [error, ...cleanupFailures],
+                `Extension ${id} registry commit failed and candidate cleanup was incomplete.`
+            );
+        }
+        if (candidate.state !== "active") {
+            const failure = candidate.faultError instanceof Error
+                ? candidate.faultError
+                : new Error(`Extension generation ${candidate.generation} faulted before publication.`);
+            const rollbackFailures: unknown[] = [];
+            await this.#registry.write(previousRegistry).catch((error) => rollbackFailures.push(error));
+            await candidate.retire().catch((error) => rollbackFailures.push(error));
+            if (rollbackFailures.length === 0) {
+                throw new ExtensionCandidatePublicationError(candidate.generation, failure);
+            }
+            throw new AggregateError(
+                [failure, ...rollbackFailures],
+                `Extension ${id} candidate faulted before publication and rollback was incomplete.`
+            );
+        }
+        this.#registrySnapshot = nextRegistry;
+        this.#publish(id, candidate);
+    }
+
+    #assertNoRegistrationConflicts(id: string, candidate: ExtensionGeneration): void {
+        for (const registration of candidate.registrations.list()) {
+            for (const [otherId, active] of this.#active) {
+                if (otherId === id) continue;
+                if (active.registrations.get(registration.pointId, registration.id) === undefined) continue;
+                throw new Error(
+                    `Extension registration conflict for ${registration.pointId}/${registration.id}: ${id} and ${otherId}.`
+                );
+            }
+        }
+    }
+
+    #publish(id: string, candidate: ExtensionGeneration): void {
+        if (candidate.state !== "active") {
+            throw new Error(`Extension generation ${candidate.generation} is not publishable from ${candidate.state}.`);
+        }
         const previous = this.#active.get(id);
         this.#active.set(id, candidate);
         if (previous !== undefined) this.#trackRetired(id, previous);
@@ -336,6 +413,9 @@ export class ExtensionHost {
         const retirement = generation.retire();
         this.#retirementPromises.add(retirement);
         void retirement.catch((error: unknown) => {
+            const failures = this.#retirementFailures.get(id) ?? [];
+            failures.push(error);
+            this.#retirementFailures.set(id, failures);
             this.#recordFailure(id, generation.generation, error);
         }).finally(() => {
             this.#retirementPromises.delete(retirement);
@@ -413,6 +493,26 @@ export class ExtensionHost {
         }
     }
 }
+
+class ExtensionCandidatePublicationError extends Error {
+    constructor(generation: string, cause: unknown) {
+        const detail = cause instanceof Error ? cause.message : String(cause);
+        super(`Extension generation ${generation} failed before publication: ${detail}`, { cause });
+        this.name = "ExtensionCandidatePublicationError";
+    }
+}
+
+function uniqueFailures(failures: readonly unknown[]): unknown[] {
+    const unique: unknown[] = [];
+    const seen = new Set<unknown>();
+    for (const failure of failures) {
+        if (seen.has(failure)) continue;
+        seen.add(failure);
+        unique.push(failure);
+    }
+    return unique;
+}
+
 function extensionNotFound(id: string): Error {
     return createError({
         code: errorCodes.controlExtensionNotFound,

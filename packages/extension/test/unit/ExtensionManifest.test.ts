@@ -7,51 +7,95 @@ import {
     parseExtensionManifest
 } from "../../src/index.ts";
 
-test("Extension manifest parser accepts the v2 contract", () => {
+const base = {
+    apiVersion: EXTENSION_API_VERSION,
+    capabilities: [] as string[],
+    entry: "extension.mjs",
+    id: "example",
+    name: "Example",
+    schemaVersion: EXTENSION_MANIFEST_SCHEMA_VERSION,
+    version: "1.0.0"
+};
+
+test("Extension manifest accepts only the resource capability taxonomy and static point declarations", () => {
     assert.deepEqual(parseExtensionManifest({
-        apiVersion: EXTENSION_API_VERSION,
-        capabilities: ["rpc", "worker", "web", "assets"],
-        entry: "./extension.mjs",
-        id: "agent",
-        name: "Agent",
-        schemaVersion: EXTENSION_MANIFEST_SCHEMA_VERSION,
-        version: "0.1.0"
+        ...base,
+        capabilities: ["assets", "workers", "processes"],
+        extensions: {
+            "cli.commands": [{ id: "example", summary: "Run the example", title: "Example" }],
+            "web.applications": [{ id: "example", title: "Example" }]
+        },
+        hostDependencies: ["@modelcontextprotocol/client"]
     }), {
-        apiVersion: 2,
-        capabilities: ["rpc", "worker", "web", "assets"],
-        entry: "./extension.mjs",
-        id: "agent",
-        name: "Agent",
-        schemaVersion: 1,
-        version: "0.1.0"
+        ...base,
+        capabilities: ["assets", "workers", "processes"],
+        extensions: {
+            "cli.commands": [{ id: "example", summary: "Run the example", title: "Example" }],
+            "web.applications": [{ id: "example", title: "Example" }]
+        },
+        hostDependencies: ["@modelcontextprotocol/client"]
     });
 });
 
-test("Extension manifest parser rejects invalid ids, escaping entry paths and duplicate capabilities", () => {
-    const base = {
-        apiVersion: EXTENSION_API_VERSION,
-        capabilities: ["rpc"],
-        entry: "./extension.mjs",
-        id: "example",
-        name: "Example",
-        schemaVersion: 1,
-        version: "1.0.0"
-    };
-    assert.throws(() => parseExtensionManifest({ ...base, id: "Bad_ID" }), /id/u);
-    assert.throws(() => parseExtensionManifest({ ...base, entry: "../escape.mjs" }), /entry/u);
-    assert.throws(() => parseExtensionManifest({ ...base, capabilities: ["rpc", "rpc"] }), /duplicate/u);
+test("Extension manifest does not preserve the unreleased v2 or contribution-as-capability ABI", () => {
+    assert.throws(() => parseExtensionManifest({ ...base, apiVersion: 2 }), /apiVersion/u);
+    for (const capability of ["command", "rpc", "web", "worker", "child-process", "instance-lifecycle"]) {
+        assert.throws(
+            () => parseExtensionManifest({ ...base, capabilities: [capability] }),
+            /Unknown Extension capability/u
+        );
+    }
 });
 
-test("Extension manifest parser rejects unknown fields and unsupported schema versions", () => {
-    const base = {
-        apiVersion: EXTENSION_API_VERSION,
-        capabilities: [],
-        entry: "extension.mjs",
-        id: "example",
-        name: "Example",
-        schemaVersion: 1,
-        version: "1.0.0"
-    };
+test("Extension manifest rejects invalid ids, escaping entry paths and duplicate capabilities", () => {
+    assert.throws(() => parseExtensionManifest({ ...base, id: "Bad_ID" }), /id/u);
+    assert.throws(() => parseExtensionManifest({ ...base, entry: "../escape.mjs" }), /entry/u);
+    assert.throws(() => parseExtensionManifest({ ...base, capabilities: ["assets", "assets"] }), /duplicate/u);
+});
+
+test("Extension manifest validates Extension Point identities and declaration-local identities", () => {
+    assert.throws(
+        () => parseExtensionManifest({ ...base, extensions: { cli: [{ id: "example" }] } }),
+        /Extension Point id/u
+    );
+    assert.throws(
+        () => parseExtensionManifest({ ...base, extensions: { "cli.commands": [{ id: "Bad_ID" }] } }),
+        /cli\.commands/u
+    );
+    assert.throws(
+        () => parseExtensionManifest({
+            ...base,
+            extensions: { "cli.commands": [{ id: "example" }, { id: "example" }] }
+        }),
+        /duplicate ids/u
+    );
+    assert.throws(
+        () => parseExtensionManifest({ ...base, extensions: { "cli.commands": { id: "example" } } }),
+        /must be an array/u
+    );
+});
+
+test("Extension manifest defaults extensions and hostDependencies to empty collections", () => {
+    assert.deepEqual(parseExtensionManifest(base).extensions, {});
+    assert.deepEqual(parseExtensionManifest(base).hostDependencies, []);
+});
+
+test("Extension manifest rejects unknown fields and unsupported schema versions", () => {
     assert.throws(() => parseExtensionManifest({ ...base, extra: true }), /Unknown/u);
     assert.throws(() => parseExtensionManifest({ ...base, schemaVersion: 2 }), /schemaVersion/u);
+});
+
+test("Extension manifest validates host dependency package roots", () => {
+    assert.throws(
+        () => parseExtensionManifest({ ...base, hostDependencies: ["@portable-devshell/control"] }),
+        /internal packages/u
+    );
+    assert.throws(
+        () => parseExtensionManifest({ ...base, hostDependencies: ["smol-toml/parser"] }),
+        /host dependency/u
+    );
+    assert.throws(
+        () => parseExtensionManifest({ ...base, hostDependencies: ["smol-toml", "smol-toml"] }),
+        /duplicates/u
+    );
 });

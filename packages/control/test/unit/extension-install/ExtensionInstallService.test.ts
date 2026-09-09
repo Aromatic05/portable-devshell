@@ -19,7 +19,12 @@ interface Harness {
     paths: ExtensionPathLayout;
     root: string;
     service: ExtensionInstallService;
-    source(name: string, options?: { body?: string; id?: string; version?: string }): Promise<string>;
+    source(name: string, options?: {
+        body?: string;
+        hostDependencies?: string[];
+        id?: string;
+        version?: string;
+    }): Promise<string>;
 }
 
 async function harness(t: test.TestContext, limits = {}): Promise<Harness> {
@@ -50,22 +55,24 @@ async function harness(t: test.TestContext, limits = {}): Promise<Harness> {
         service: new ExtensionInstallService({ host, limits, paths }),
         async source(name, options = {}) {
             const source = join(root, name);
+            const id = options.id ?? "example";
             await mkdir(source, { recursive: true });
             await writeFile(join(source, "devshell-extension.json"), `${JSON.stringify({
                 apiVersion: EXTENSION_API_VERSION,
-                capabilities: ["rpc"],
+                capabilities: [],
                 entry: "extension.mjs",
-                id: options.id ?? "example",
+                extensions: {
+                    "cli.commands": [{ id, title: id }]
+                },
+                ...(options.hostDependencies === undefined ? {} : { hostDependencies: options.hostDependencies }),
+                id,
                 name: options.id === "skill" ? "Skill" : "Example",
                 schemaVersion: 1,
                 version: options.version ?? "1.0.0"
             })}\n`, "utf8");
             await writeFile(join(source, "extension.mjs"), options.body ?? [
-                "export async function activate() {",
-                "  return {",
-                "    rpc: { ping: async () => ({ version: '1.0.0' }) },",
-                "    dispose() {}",
-                "  };",
+                "export function activate(context) {",
+                `  context.register({ id: 'cli.commands' }, ${JSON.stringify(id)}, async () => ({ kind: 'json', value: { version: '1.0.0' } }));`,
                 "}",
                 ""
             ].join("\n"), "utf8");
@@ -85,11 +92,11 @@ test("Extension install materializes a directory as an immutable content-address
     assert.match(installed.activeGeneration ?? "", /^v1\.0\.0-[0-9a-f]{64}$/u);
     assert.equal(installed.selectedGeneration, installed.activeGeneration);
     assert.equal(installed.lastKnownGoodGeneration, installed.activeGeneration);
-    assert.deepEqual(await h.host.dispatchRpc("example", "ping", undefined, {
+    assert.deepEqual(await h.host.dispatchCommand("example", [], {
         localOwner: false,
         requestId: "ping-1",
         signal: new AbortController().signal
-    }), { version: "1.0.0" });
+    }), { kind: "json", value: { version: "1.0.0" } });
     const generationDirectory = h.paths.generationDirectory("example", installed.activeGeneration!);
     assert.equal((await stat(join(generationDirectory, "extension.mjs"))).isFile(), true);
     assert.equal((await readdir(h.paths.codeRoot)).some((name) => name.startsWith(".staging-")), false);
@@ -123,25 +130,23 @@ test("builtin Extension generation resolves host runtime dependencies without co
     const source = await h.source("builtin-mcp-host-dependency", {
         body: [
             'import { Client } from "@modelcontextprotocol/client";',
-            "export async function activate() {",
-            "  return {",
-            "    rpc: { dependency: async () => ({ clientType: typeof Client }) },",
-            "    dispose() {}",
-            "  };",
+            "export function activate(context) {",
+            "  context.register({ id: 'cli.commands' }, 'mcp', async () => ({ kind: 'json', value: { clientType: typeof Client } }));",
             "}",
             ""
         ].join("\n"),
+        hostDependencies: ["@modelcontextprotocol/client"],
         id: "mcp"
     });
 
     const installed = await h.service.installBuiltin("mcp", source);
 
     assert.equal(installed.state, "active");
-    assert.deepEqual(await h.host.dispatchRpc("mcp", "dependency", undefined, {
+    assert.deepEqual(await h.host.dispatchCommand("mcp", [], {
         localOwner: false,
         requestId: "host-dependency",
         signal: new AbortController().signal
-    }), { clientType: "function" });
+    }), { kind: "json", value: { clientType: "function" } });
     assert.equal(await exists(join(
         h.paths.generationDirectory("mcp", installed.activeGeneration!),
         "node_modules",
@@ -202,18 +207,18 @@ test("Extension candidate activation failure removes only the new generation and
 
     const records = await h.host.list();
     assert.equal(records[0]?.activeGeneration, good.activeGeneration);
-    assert.deepEqual(await h.host.dispatchRpc("example", "ping", undefined, {
+    assert.deepEqual(await h.host.dispatchCommand("example", [], {
         localOwner: false,
         requestId: "ping-after-failure",
         signal: new AbortController().signal
-    }), { version: "1.0.0" });
+    }), { kind: "json", value: { version: "1.0.0" } });
     assert.deepEqual(await readdir(join(h.paths.codeRoot, "example")), [good.activeGeneration]);
 });
 
 test("Extension install enforces logical source limits before materialization", async (t) => {
     const h = await harness(t, { maxFileBytes: 32 });
     const source = await h.source("oversized", {
-        body: "export async function activate() { return { dispose() {} }; }\n"
+        body: "export function activate() {}\n"
     });
 
     await assert.rejects(h.service.install(source), /file exceeds the byte limit/u);
@@ -221,10 +226,24 @@ test("Extension install enforces logical source limits before materialization", 
     assert.equal((await readdir(h.paths.codeRoot)).some((name) => name.startsWith(".staging-")), false);
 });
 
+test("Extension install rejects private node_modules trees in favor of hostDependencies", async (t) => {
+    const h = await harness(t);
+    const source = await h.source("private-node-modules");
+    const dependencyDirectory = join(source, "node_modules", "example-dependency");
+    await mkdir(dependencyDirectory, { recursive: true });
+    await writeFile(join(dependencyDirectory, "index.js"), "export default 1;\n", "utf8");
+
+    await assert.rejects(
+        h.service.install(source),
+        /shared host dependencies instead of private node_modules/u
+    );
+    assert.deepEqual(await h.host.list(), []);
+});
+
 test("Extension install enforces extraction budgets for .dsext archives", async (t) => {
     const h = await harness(t);
     const source = await h.source("archive-oversized", {
-        body: `${"// payload padding\n".repeat(16)}export async function activate() { return { dispose() {} }; }\n`
+        body: `${"// payload padding\n".repeat(16)}export function activate() {}\n`
     });
     const bundle = join(h.root, "oversized.dsext");
     await createArtifactDirectoryArchive(source, bundle);
@@ -245,10 +264,11 @@ test("Extension remove disables routing, waits for the leased generation to drai
         body: [
             "import { watch, writeFileSync } from 'node:fs';",
             "import { join } from 'node:path';",
+            "let disposedFile;",
             "export async function activate(context) {",
             "  const stateDirectory = context.paths.stateDirectory;",
             "  const releaseFile = join(stateDirectory, 'release.txt');",
-            "  const disposedFile = join(stateDirectory, 'disposed.txt');",
+            "  disposedFile = join(stateDirectory, 'disposed.txt');",
             "  let releaseHold;",
             "  const hold = new Promise((resolve) => { releaseHold = resolve; });",
             "  const watcher = watch(stateDirectory, (_event, file) => {",
@@ -256,16 +276,17 @@ test("Extension remove disables routing, waits for the leased generation to drai
             "    watcher.close();",
             "    releaseHold();",
             "  });",
-            "  return {",
-            "    rpc: { hold: async () => await hold },",
-            "    dispose() { writeFileSync(disposedFile, 'disposed\\n'); }",
-            "  };",
+            "  context.register({ id: 'cli.commands' }, 'example', async () => {",
+            "    await hold;",
+            "    return { kind: 'text', text: 'released' };",
+            "  });",
             "}",
+            "export function deactivate() { writeFileSync(disposedFile, 'disposed\\n'); }",
             ""
         ].join("\n")
     });
     const installed = await h.service.install(source);
-    const active = h.host.dispatchRpc("example", "hold", undefined, {
+    const active = h.host.dispatchCommand("example", [], {
         localOwner: false,
         requestId: "hold",
         signal: new AbortController().signal
@@ -281,12 +302,12 @@ test("Extension remove disables routing, waits for the leased generation to drai
     assert.equal(removed, false);
     assert.equal(await exists(h.paths.generationDirectory("example", installed.activeGeneration!)), true);
     await assert.rejects(
-        h.host.dispatchRpc("example", "hold", undefined, {
+        h.host.dispatchCommand("example", [], {
             localOwner: false,
             requestId: "new-hold",
             signal: new AbortController().signal
         }),
-        /not active/u
+        /No active Extension registration/u
     );
 
     await writeFile(join(h.paths.stateDirectory("example"), "release.txt"), "release\n", "utf8");
@@ -296,6 +317,32 @@ test("Extension remove disables routing, waits for the leased generation to drai
     assert.equal(await exists(join(h.paths.codeRoot, "example")), false);
     assert.equal(await exists(join(h.paths.stateDirectory("example"), "state.txt")), true);
     assert.deepEqual(await h.host.list(), []);
+});
+
+test("Extension remove surfaces dispose failure before deleting the installed generation", async (t) => {
+    const h = await harness(t);
+    const source = await h.source("dispose-failure", {
+        body: [
+            "export function activate(context) {",
+            "  context.register({ id: 'cli.commands' }, 'example', async () => ({ kind: 'text', text: 'ok' }));",
+            "}",
+            "export function deactivate() { throw new Error('dispose failed during remove'); }",
+            ""
+        ].join("\n")
+    });
+    const installed = await h.service.install(source);
+    const generationDirectory = h.paths.generationDirectory("example", installed.activeGeneration!);
+
+    await assert.rejects(
+        h.service.remove("example"),
+        (error: unknown) => error instanceof AggregateError
+            && error.errors.some((candidate) => (
+                candidate instanceof Error && /dispose failed during remove/u.test(candidate.message)
+            ))
+    );
+
+    assert.equal(await exists(generationDirectory), true);
+    assert.equal((await h.host.list())[0]?.state, "disabled");
 });
 
 test("Extension remove --purge deletes mutable state after the runtime has drained", async (t) => {

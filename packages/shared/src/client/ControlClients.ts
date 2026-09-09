@@ -144,9 +144,8 @@ export interface ControlClients {
         unload(patchId: string): Promise<DebugPatchSummary>;
     };
     extension: {
-        call(extensionId: string, operation: string, input?: JsonValue, signal?: AbortSignal): Promise<JsonValue>;
         command(
-            extensionId: string,
+            commandId: string,
             argv: readonly string[],
             options?: { signal?: AbortSignal; workingDirectory?: string }
         ): Promise<ExtensionCommandWireResult>;
@@ -316,18 +315,9 @@ export function createControlClients(
             unload: (patchId) => debug.request("unload", { patchId }),
         },
         extension: {
-            call: async (extensionId, operation, input, signal) => await requestWithAbort(
-                connection.request("@control", "extension", "call", {
-                    extensionId,
-                    operation,
-                    ...(input === undefined ? {} : { input })
-                }),
-                signal,
-                "Extension call was aborted."
-            ),
-            command: async (extensionId, argv, commandOptions = {}) => await requestWithAbort(
+            command: async (commandId, argv, commandOptions = {}) => await requestWithAbort(
                 connection.request("@control", "extension", "command", {
-                    extensionId,
+                    commandId,
                     argv: [...argv],
                     ...(commandOptions.workingDirectory === undefined ? {} : {
                         workingDirectory: commandOptions.workingDirectory

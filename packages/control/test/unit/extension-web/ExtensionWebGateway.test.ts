@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest, type IncomingMessage } from "node:http";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
@@ -19,6 +19,8 @@ test("Extension Web proxy authenticates one generic namespace, strips credential
         path?: string;
         prefix?: string;
     }> = [];
+    let resolveHangingClosed!: () => void;
+    const hangingClosed = new Promise<void>((resolve) => { resolveHangingClosed = resolve; });
     const upstreamServer = createServer((request, response) => {
         observed.push({
             ...(typeof request.headers.authorization === "string" ? { authorization: request.headers.authorization } : {}),
@@ -28,6 +30,13 @@ test("Extension Web proxy authenticates one generic namespace, strips credential
                 ? { prefix: request.headers["x-forwarded-prefix"] }
                 : {})
         });
+        if (request.url === "/api/hang") {
+            response.statusCode = 200;
+            response.setHeader("content-type", "text/plain");
+            response.once("close", resolveHangingClosed);
+            response.write("open\n");
+            return;
+        }
         response.statusCode = 200;
         response.setHeader("content-type", "application/json");
         response.setHeader("set-cookie", "extension_secret=must-not-escape");
@@ -40,7 +49,12 @@ test("Extension Web proxy authenticates one generic namespace, strips credential
         path?: string;
         prefix?: string;
     } | undefined;
+    let websocketConnections = 0;
+    let resolveAbruptUpstreamClosed!: () => void;
+    const abruptUpstreamClosed = new Promise<void>((resolve) => { resolveAbruptUpstreamClosed = resolve; });
     upstreamWebSockets.on("connection", (socket, request) => {
+        websocketConnections += 1;
+        if (websocketConnections === 2) socket.once("close", resolveAbruptUpstreamClosed);
         observedUpgrade = {
             ...(typeof request.headers.authorization === "string" ? { authorization: request.headers.authorization } : {}),
             ...(typeof request.headers.cookie === "string" ? { cookie: request.headers.cookie } : {}),
@@ -61,23 +75,32 @@ test("Extension Web proxy authenticates one generic namespace, strips credential
     let leases = 0;
     let releases = 0;
     const extensions = {
-        acquire(id: string) {
+        acquireRegistration(pointId: string, id: string) {
+            assert.equal(pointId, "web.applications");
             assert.equal(id, "example");
             leases += 1;
             let released = false;
             return {
-                activation: {
-                    web: {
-                        kind: "proxy" as const,
-                        resolveUpstream: () => upstream
+                extensionId: "example",
+                lease: {
+                    generation: "g1",
+                    release() {
+                        if (released) return;
+                        released = true;
+                        leases -= 1;
+                        releases += 1;
                     }
                 },
-                generation: "g1",
-                release() {
-                    if (released) return;
-                    released = true;
-                    leases -= 1;
-                    releases += 1;
+                registration: {
+                    binding: {
+                        source: {
+                            kind: "endpoint" as const,
+                            resolve: () => upstream
+                        }
+                    },
+                    declaration: { id: "example", title: "Example" },
+                    id: "example",
+                    pointId: "web.applications"
                 }
             };
         }
@@ -129,6 +152,16 @@ test("Extension Web proxy authenticates one generic namespace, strips credential
         assert.equal(leases, 0);
         assert.equal(releases, 1);
 
+        const hanging = await openStreamingResponse(
+            `${baseUrl}/web/extensions/example/api/hang`,
+            cookie
+        );
+        assert.equal(leases, 1);
+        hanging.destroy();
+        await hangingClosed;
+        await waitFor(() => leases === 0);
+        assert.equal(releases, 2);
+
         const socket = new WebSocket(
             `ws://127.0.0.1:${address.port}/web/extensions/example/socket?mode=live`,
             { headers: { authorization: "Bearer must-not-reach-extension", cookie } }
@@ -153,7 +186,21 @@ test("Extension Web proxy authenticates one generic namespace, strips credential
         socket.close();
         await closed;
         await waitFor(() => leases === 0);
-        assert.equal(releases, 2);
+        assert.equal(releases, 3);
+
+        const abrupt = new WebSocket(
+            `ws://127.0.0.1:${address.port}/web/extensions/example/socket?mode=abrupt`,
+            { headers: { cookie } }
+        );
+        await new Promise<void>((resolve, reject) => {
+            abrupt.once("error", reject);
+            abrupt.once("open", resolve);
+        });
+        assert.equal(leases, 1);
+        abrupt.terminate();
+        await abruptUpstreamClosed;
+        await waitFor(() => leases === 0);
+        assert.equal(releases, 4);
     } finally {
         removeGateway();
         removeSessionRoutes();
@@ -178,17 +225,28 @@ test("Extension static Web contribution serves only files contained by the immut
     await writeFile(join(codeDirectory, "outside.txt"), "not web\n", "utf8");
     let leases = 0;
     const extensions = {
-        acquire(id: string) {
+        acquireRegistration(pointId: string, id: string) {
+            assert.equal(pointId, "web.applications");
             assert.equal(id, "example");
             leases += 1;
             let released = false;
             return {
-                activation: { web: { directory: "web", kind: "static" as const } },
-                generation: "g1",
-                release() {
-                    if (released) return;
-                    released = true;
-                    leases -= 1;
+                extensionId: "example",
+                lease: {
+                    generation: "g1",
+                    release() {
+                        if (released) return;
+                        released = true;
+                        leases -= 1;
+                    }
+                },
+                registration: {
+                    binding: {
+                        source: { directory: "web", kind: "files" as const }
+                    },
+                    declaration: { id: "example", title: "Example" },
+                    id: "example",
+                    pointId: "web.applications"
                 }
             };
         }
@@ -242,4 +300,18 @@ async function waitFor(predicate: () => boolean): Promise<void> {
         await new Promise((resolve) => setTimeout(resolve, 5));
     }
     throw new Error("Timed out waiting for Extension Web lease release.");
+}
+
+async function openStreamingResponse(url: string, cookie: string): Promise<IncomingMessage> {
+    return await new Promise<IncomingMessage>((resolve, reject) => {
+        const request = httpRequest(url, { headers: { cookie } }, (response) => {
+            response.once("error", reject);
+            response.once("data", () => {
+                response.pause();
+                resolve(response);
+            });
+        });
+        request.once("error", reject);
+        request.end();
+    });
 }

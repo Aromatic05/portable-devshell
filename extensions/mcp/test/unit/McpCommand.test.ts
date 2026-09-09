@@ -17,13 +17,21 @@ function invocation(localOwner = true) {
     };
 }
 
-test("MCP Extension manifest is a command-only client boundary", async () => {
+test("MCP Extension manifest exposes cli.commands without host-managed capabilities", async () => {
     const manifest = parseExtensionManifest(JSON.parse(
         await readFile(new URL("../../src/builtin/devshell-extension.json", import.meta.url), "utf8")
     ));
     assert.equal(manifest.id, "mcp");
-    assert.equal(manifest.apiVersion, 2);
-    assert.deepEqual(manifest.capabilities, ["command"]);
+    assert.equal(manifest.apiVersion, 3);
+    assert.deepEqual(manifest.capabilities, []);
+    assert.deepEqual(manifest.extensions, {
+        "cli.commands": [{
+            id: "mcp",
+            summary: "Manage MCP client profiles and requests",
+            title: "MCP Client",
+            usage: "mcp <command>"
+        }]
+    });
 });
 
 test("MCP command owns profile CRUD and restricts mutations to the local owner", async (t) => {

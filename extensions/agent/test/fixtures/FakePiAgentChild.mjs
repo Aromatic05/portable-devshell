@@ -7,6 +7,7 @@ const pendingTools = new Map();
 let nextToolCall = 0;
 
 process.on("message", (message) => {
+    if (message.type === "owner.heartbeat") return;
     if (message.type === "tool.result") {
         const pending = pendingTools.get(message.callId);
         if (pending === undefined) return;
@@ -27,7 +28,7 @@ process.on("message", (message) => {
 async function handle(message) {
     await appendFile(
         logPath,
-        `${process.pid}\t${process.env.PI_CODING_AGENT_DIR ?? ""}\t${message.type}\t${message.agentId ?? ""}\t${message.command ?? ""}\n`,
+        `${process.pid}\t${process.env.PI_CODING_AGENT_DIR ?? ""}\t${message.type}\t${message.agentId ?? ""}\t${message.command ?? ""}\t${JSON.stringify(process.execArgv)}\n`,
         "utf8"
     );
     if (message.type === "init") {

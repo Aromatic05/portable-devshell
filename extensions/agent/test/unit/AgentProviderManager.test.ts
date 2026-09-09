@@ -21,27 +21,56 @@ async function harness(t: test.TestContext) {
     await mkdir(stateDirectory, { recursive: true });
     const generations = new Map<string, string>();
     const removed: string[] = [];
+    const assets = {
+        async installBundle(sourcePath: string) {
+            const generation = generations.get(sourcePath);
+            if (generation === undefined) throw new Error(`Unknown fixture bundle: ${sourcePath}`);
+            return { directory: join(dataDirectory, "bundles", generation), generation };
+        },
+        async installDirectory() { throw new Error("not used"); },
+        async listBundles() {
+            return [...new Set(generations.values())].map((generation) => ({
+                directory: join(dataDirectory, "bundles", generation),
+                generation
+            }));
+        },
+        async removeBundle(generation: string) {
+            removed.push(generation);
+        },
+        async resolveBundle(generation: string) {
+            return { directory: join(dataDirectory, "bundles", generation), generation };
+        },
+        async projectBundle() { throw new Error("not used"); }
+    };
     const context: ExtensionContext = {
-        assets: {
-            async installBundle(sourcePath) {
-                const generation = generations.get(sourcePath);
-                if (generation === undefined) throw new Error(`Unknown fixture bundle: ${sourcePath}`);
-                return { directory: join(dataDirectory, "bundles", generation), generation };
+        capabilities: {
+            assets,
+            processes: {
+                async start() { throw new Error("not used"); }
             },
-            async installDirectory() { throw new Error("not used"); },
-            async listBundles() {
-                return [...new Set(generations.values())].map((generation) => ({
-                    directory: join(dataDirectory, "bundles", generation),
-                    generation
-                }));
-            },
-            async removeBundle(generation) {
-                removed.push(generation);
-            },
-            async resolveBundle(generation) {
-                return { directory: join(dataDirectory, "bundles", generation), generation };
-            },
-            async projectBundle() { throw new Error("not used"); }
+            workers: {
+                async openSession(input) {
+                    let resolveClosed!: () => void;
+                    const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
+                    let isClosed = false;
+                    return {
+                        closed,
+                        environment: {
+                            homeDirectory: "/home/dev",
+                            platform: { arch: "x64", os: "linux" },
+                        },
+                        instance: input.instance ?? "worker-a",
+                        workspace: input.workspace,
+                        async callTool() { return {}; },
+                        async close() {
+                            if (isClosed) return;
+                            isClosed = true;
+                            resolveClosed();
+                        },
+                        listTools() { return []; }
+                    };
+                }
+            }
         },
         generation: "agent-generation",
         id: "agent",
@@ -52,22 +81,8 @@ async function harness(t: test.TestContext) {
             runtimeDirectory: join(root, "runtime"),
             stateDirectory
         },
-        version: "0.1.0",
-        worker: {
-            async openSession(input) {
-                return {
-                    environment: {
-                        homeDirectory: "/home/dev",
-                        platform: { arch: "x64", os: "linux" },
-                    },
-                    instance: input.instance ?? "worker-a",
-                    workspace: input.workspace,
-                    async callTool() { return {}; },
-                    async close() {},
-                    listTools() { return []; }
-                };
-            }
-        }
+        register() {},
+        version: "0.1.0"
     };
     const store = new AgentProviderRegistryStore(join(stateDirectory, "providers.json"));
     const loader = new AgentProviderLoader(context, undefined, store);
@@ -139,6 +154,37 @@ test("Agent provider install atomically selects a validated generation and hot-r
     assert.equal(snapshot.providers.pi?.lastKnownGoodGeneration, "provider-v2");
 });
 
+test("Agent provider manager serializes concurrent mutations", async (t) => {
+    const h = await harness(t);
+    await writeProvider(h.context, "provider-v1", "0.1.0");
+    await writeProvider(h.context, "provider-v2", "0.2.0");
+    h.generations.set("/bundle-v1", "provider-v1");
+    h.generations.set("/bundle-v2", "provider-v2");
+    const assets = h.context.capabilities.assets!;
+    const originalInstall = assets.installBundle.bind(assets);
+    let activeInstalls = 0;
+    let maxActiveInstalls = 0;
+    assets.installBundle = async (sourcePath) => {
+        activeInstalls += 1;
+        maxActiveInstalls = Math.max(maxActiveInstalls, activeInstalls);
+        await new Promise<void>((resolve) => setTimeout(resolve, 20));
+        try {
+            return await originalInstall(sourcePath);
+        } finally {
+            activeInstalls -= 1;
+        }
+    };
+
+    await Promise.all([
+        h.manager.install("/bundle-v1"),
+        h.manager.install("/bundle-v2")
+    ]);
+
+    assert.equal(maxActiveInstalls, 1);
+    assert.equal((await h.store.read()).providers.pi?.selectedGeneration, "provider-v2");
+    assert.equal(h.registry.require("pi").version, "0.2.0");
+});
+
 test("Agent provider hot replacement preserves running handles and affects only future Agent starts", async (t) => {
     const h = await harness(t);
     await writeProvider(h.context, "provider-v1", "0.1.0");
@@ -173,6 +219,7 @@ test("Agent provider candidate failure preserves the previous selected generatio
     assert.equal(h.registry.require("pi").version, "0.1.0");
     const snapshot = await h.store.read();
     assert.equal(snapshot.providers.pi?.selectedGeneration, "provider-good");
+    assert.deepEqual(h.removed, ["provider-bad"]);
 });
 
 test("Agent provider disable and enable affect future starts while remove refuses an in-use provider", async (t) => {

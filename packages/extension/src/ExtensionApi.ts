@@ -4,19 +4,21 @@ export type ExtensionJsonValue =
     | ExtensionJsonValue[]
     | { [key: string]: ExtensionJsonValue };
 
-/** Public capabilities granted by Control to one Extension generation. */
-export type ExtensionCapability =
-    | "assets"
-    | "command"
-    | "instance-lifecycle"
-    | "rpc"
-    | "web"
-    | "worker";
+/** Host-managed runtime resource categories granted to one Extension generation. */
+export type ExtensionCapability = "assets" | "processes" | "workers";
+
+export interface ExtensionPointDeclaration {
+    readonly id: string;
+}
 
 export interface ExtensionManifest {
     apiVersion: number;
     capabilities: readonly ExtensionCapability[];
     entry: string;
+    /** Static declarations keyed by stable domain-owned Extension Point id. */
+    extensions: Readonly<Record<string, readonly ExtensionPointDeclaration[]>>;
+    /** Bare package roots explicitly accepted from the host's shared dependency tree. */
+    hostDependencies: readonly string[];
     id: string;
     name: string;
     schemaVersion: number;
@@ -28,7 +30,7 @@ export interface ExtensionPaths {
     codeDirectory: string;
     /** Persistent Extension-owned data shared across generations. */
     dataDirectory: string;
-    /** Ephemeral per-generation directory owned by Control. */
+    /** Ephemeral directory owned by one activation incarnation; changes across reloads. */
     runtimeDirectory: string;
     /** Mutable Extension state shared across generations. */
     stateDirectory: string;
@@ -74,13 +76,7 @@ export interface ExtensionAssetProjectionInput {
     target: ExtensionAssetProjectionTarget;
 }
 
-/**
- * Control-owned storage and transfer for Extension assets.
- *
- * Asset semantics (provider selection, Skill identity, profiles, etc.) remain
- * owned by the Extension. Control owns only immutable bundle storage and byte
- * transfer through the Artifact subsystem.
- */
+/** Control-owned storage and transfer for Extension assets. */
 export interface ExtensionAssetCapability {
     installBundle(sourcePath: string): Promise<ExtensionAssetBundle>;
     installDirectory(sourcePath: string): Promise<ExtensionAssetBundle>;
@@ -134,6 +130,8 @@ export interface ExtensionWorkerCallOptions {
 }
 
 export interface ExtensionWorkerSession {
+    /** Settles whenever this host-managed session ceases to be usable. */
+    readonly closed: Promise<void>;
     readonly environment: ExtensionWorkerEnvironment;
     readonly instance: string;
     readonly workspace: string;
@@ -150,15 +148,38 @@ export interface ExtensionWorkerCapability {
     openSession(input: ExtensionWorkerOpenInput): Promise<ExtensionWorkerSession>;
 }
 
+export interface ExtensionProcessExit {
+    readonly code?: number;
+    readonly signal?: string;
+}
+
+/** Input for a Control-owned process. The process remains generation-owned. */
+export interface ExtensionProcessStartInput {
+    readonly args?: readonly string[];
+    readonly command: string;
+    readonly cwd?: string;
+    readonly environment?: Readonly<Record<string, string>>;
+    /** Request a structured JSON message channel in addition to process lifetime management. */
+    readonly messages?: boolean;
+}
+
+export interface ExtensionManagedProcess {
+    readonly closed: Promise<ExtensionProcessExit>;
+    onMessage(listener: (message: ExtensionJsonValue) => void): () => void;
+    onStderr(listener: (chunk: string) => void): () => void;
+    send(message: ExtensionJsonValue): Promise<void>;
+    terminate(signal?: string): Promise<void>;
+}
+
+export interface ExtensionProcessCapability {
+    start(input: ExtensionProcessStartInput): Promise<ExtensionManagedProcess>;
+}
+
 /** Capabilities supplied by Control to an activated Extension generation. */
-export interface ExtensionContext {
-    readonly assets: ExtensionAssetCapability;
-    readonly generation: string;
-    readonly id: string;
-    readonly logger: ExtensionLogger;
-    readonly paths: ExtensionPaths;
-    readonly version: string;
-    readonly worker: ExtensionWorkerCapability;
+export interface ExtensionCapabilities {
+    readonly assets?: ExtensionAssetCapability;
+    readonly processes?: ExtensionProcessCapability;
+    readonly workers?: ExtensionWorkerCapability;
 }
 
 export interface ExtensionInvocationContext {
@@ -170,49 +191,45 @@ export interface ExtensionInvocationContext {
     readonly workingDirectory?: string;
 }
 
-export type ExtensionRpcHandler = (
-    input: ExtensionJsonValue | undefined,
-    context: ExtensionInvocationContext
-) => ExtensionJsonValue | Promise<ExtensionJsonValue>;
+declare const extensionPointDeclarationType: unique symbol;
+declare const extensionPointBindingType: unique symbol;
 
-export type ExtensionCommandResult =
-    | { kind: "json"; value: ExtensionJsonValue }
-    | { kind: "text"; text: string };
-
-export type ExtensionCommandHandler = (
-    argv: readonly string[],
-    context: ExtensionInvocationContext
-) => ExtensionCommandResult | Promise<ExtensionCommandResult>;
-
-export type ExtensionWebContribution =
-    | {
-          /** Relative directory below codeDirectory. */
-          directory: string;
-          kind: "static";
-      }
-    | {
-          kind: "proxy";
-          resolveUpstream(): URL | Promise<URL | undefined> | undefined;
-      };
-
-export interface ExtensionInstanceRetireEvent {
-    instance: string;
-    reason: "deleted" | "disabled";
+/** Stable domain-owned point identity plus compile-time declaration/binding types. */
+export interface ExtensionPoint<Declaration extends ExtensionPointDeclaration, Binding> {
+    readonly id: string;
+    readonly [extensionPointBindingType]?: Binding;
+    readonly [extensionPointDeclarationType]?: Declaration;
 }
 
-export interface ExtensionLifecycleHandlers {
-    onInstanceRetire?(event: ExtensionInstanceRetireEvent): Promise<void> | void;
+/**
+ * Define a stable Extension Point descriptor. Runtime identity is the id string,
+ * never JavaScript object identity, so descriptors may safely be bundled.
+ */
+export function defineExtensionPoint<Declaration extends ExtensionPointDeclaration, Binding>(
+    id: string
+): ExtensionPoint<Declaration, Binding> {
+    if (!/^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$/u.test(id)) {
+        throw new TypeError("Extension Point id must be a lowercase namespaced identifier.");
+    }
+    return Object.freeze({ id }) as ExtensionPoint<Declaration, Binding>;
 }
 
-/** Contributions supplied by an Extension to Control. */
-export interface ExtensionActivation {
-    command?: ExtensionCommandHandler;
-    dispose(): Promise<void> | void;
-    lifecycle?: ExtensionLifecycleHandlers;
-    rpc?: Readonly<Record<string, ExtensionRpcHandler>>;
-    web?: ExtensionWebContribution;
+export interface ExtensionContext {
+    readonly capabilities: ExtensionCapabilities;
+    readonly generation: string;
+    readonly id: string;
+    readonly logger: ExtensionLogger;
+    readonly paths: ExtensionPaths;
+    readonly version: string;
+    register<Declaration extends ExtensionPointDeclaration, Binding>(
+        point: ExtensionPoint<Declaration, Binding>,
+        id: string,
+        binding: Binding
+    ): void;
 }
 
 export interface ExtensionModule {
-    activate(context: ExtensionContext): ExtensionActivation | Promise<ExtensionActivation>;
+    activate(context: ExtensionContext): Promise<void> | void;
+    /** Extension-owned graceful cleanup only; host-managed resources are reclaimed independently. */
+    deactivate?(): Promise<void> | void;
 }

@@ -32,6 +32,10 @@ export interface PiChildShutdownMessage {
     type: "shutdown";
 }
 
+export interface PiChildOwnerHeartbeatMessage {
+    type: "owner.heartbeat";
+}
+
 export interface PiParentToolResultMessage {
     agentId: string;
     callId: string;
@@ -52,6 +56,7 @@ export type PiParentMessage = PiChildInitMessage
     | PiChildAgentStartMessage
     | PiChildAgentCommandMessage
     | PiChildShutdownMessage
+    | PiChildOwnerHeartbeatMessage
     | PiParentToolProgressMessage
     | PiParentToolResultMessage;
 

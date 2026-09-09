@@ -44,7 +44,9 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
     readonly #connections: ExtensionWorkerConnectionPort;
     readonly #extensionId: string;
     readonly #generation: string;
+    readonly #instanceEpochs = new Map<string, number>();
     readonly #instances: InstanceRegistry;
+    readonly #retiringInstances = new Set<string>();
     readonly #sessions = new Map<string, ManagedExtensionWorkerSession>();
     #closed = false;
 
@@ -58,32 +60,52 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
 
     async openSession(input: ExtensionWorkerOpenInput): Promise<ExtensionWorkerSession> {
         if (!this.#allowed) {
-            throw new Error(`Extension ${this.#extensionId} did not declare the worker capability.`);
+            throw new Error(`Extension ${this.#extensionId} did not declare the workers capability.`);
         }
-        if (this.#closed) throw new Error(`Extension ${this.#extensionId} worker capability is closed.`);
+        if (this.#closed) throw new Error(`Extension ${this.#extensionId} workers capability is closed.`);
         if (input.workspace.length === 0) throw new TypeError("Extension worker workspace must not be empty.");
 
         const instance = resolveExtensionWorkerInstance(this.#instances.list(), input.instance);
+        if (this.#retiringInstances.has(instance)) {
+            throw new Error(`Extension ${this.#extensionId} Worker instance ${instance} is retiring.`);
+        }
+        const instanceEpoch = this.#instanceEpochs.get(instance) ?? 0;
         const sessionId = `ext-${randomUUID()}`;
         const reference = `extension-worker:${this.#extensionId}:${this.#generation}:${sessionId}`;
         const lease = await this.#connections.acquire(instance, reference);
         try {
             const environment = extensionWorkerEnvironment(lease.worker.handshake);
             const prepared = await lease.worker.prepareWorkspace(input.workspace);
-            let closed = false;
-            const close = async () => {
-                if (closed) return;
-                closed = true;
+            if (
+                this.#closed
+                || this.#retiringInstances.has(instance)
+                || (this.#instanceEpochs.get(instance) ?? 0) !== instanceEpoch
+            ) {
+                throw new Error(
+                    this.#closed
+                        ? `Extension ${this.#extensionId} worker capability closed while opening a session.`
+                        : `Extension ${this.#extensionId} Worker instance ${instance} retired while opening a session.`
+                );
+            }
+            let closePromise: Promise<void> | undefined;
+            let resolveClosed!: () => void;
+            const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
+            const close = async () => await (closePromise ??= (async () => {
                 this.#sessions.delete(sessionId);
                 const failures: unknown[] = [];
-                await lease.worker.releaseToolSession(sessionId).catch((error) => failures.push(error));
-                await this.#connections.release(instance, reference).catch((error) => failures.push(error));
-                if (failures.length === 1) throw failures[0];
-                if (failures.length > 1) {
-                    throw new AggregateError(failures, `Extension worker session ${sessionId} failed to close cleanly.`);
+                try {
+                    await lease.worker.releaseToolSession(sessionId).catch((error) => failures.push(error));
+                    await this.#connections.release(instance, reference).catch((error) => failures.push(error));
+                    if (failures.length === 1) throw failures[0];
+                    if (failures.length > 1) {
+                        throw new AggregateError(failures, `Extension Worker session ${sessionId} failed to close cleanly.`);
+                    }
+                } finally {
+                    resolveClosed();
                 }
-            };
+            })());
             const session: ExtensionWorkerSession = {
+                closed,
                 environment,
                 instance,
                 workspace: prepared.workspace,
@@ -111,16 +133,27 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
             this.#sessions.set(sessionId, { instance, reference, session, sessionId });
             return session;
         } catch (error) {
-            await lease.worker.releaseToolSession(sessionId).catch(() => undefined);
-            await this.#connections.release(instance, reference).catch(() => undefined);
-            throw error;
+            const cleanupFailures: unknown[] = [];
+            await lease.worker.releaseToolSession(sessionId).catch((cleanupError) => cleanupFailures.push(cleanupError));
+            await this.#connections.release(instance, reference).catch((cleanupError) => cleanupFailures.push(cleanupError));
+            if (cleanupFailures.length === 0) throw error;
+            throw new AggregateError(
+                [error, ...cleanupFailures],
+                `Extension ${this.#extensionId} worker session failed to open and cleanup was incomplete.`
+            );
         }
     }
 
     async retireInstance(instance: string): Promise<void> {
-        const sessions = [...this.#sessions.values()].filter((candidate) => candidate.instance === instance);
-        const settled = await Promise.allSettled(sessions.map(async (candidate) => await candidate.session.close()));
-        throwAggregateFailures(settled, `Extension ${this.#extensionId} worker sessions failed to retire instance ${instance}.`);
+        this.#instanceEpochs.set(instance, (this.#instanceEpochs.get(instance) ?? 0) + 1);
+        this.#retiringInstances.add(instance);
+        try {
+            const sessions = [...this.#sessions.values()].filter((candidate) => candidate.instance === instance);
+            const settled = await Promise.allSettled(sessions.map(async (candidate) => await candidate.session.close()));
+            throwAggregateFailures(settled, `Extension ${this.#extensionId} worker sessions failed to retire instance ${instance}.`);
+        } finally {
+            this.#retiringInstances.delete(instance);
+        }
     }
 
     async closeAll(): Promise<void> {

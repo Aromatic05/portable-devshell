@@ -7,7 +7,9 @@ export async function openAgentToolSession(
     context: ExtensionContext,
     target: AgentWorkerTarget
 ): Promise<AgentToolSession> {
-    const worker = await context.worker.openSession({
+    const workers = context.capabilities.workers;
+    if (workers === undefined) throw new Error("Agent Extension requires the workers capability.");
+    const worker = await workers.openSession({
         instance: target.instance,
         workspace: target.workspace
     });
@@ -16,6 +18,7 @@ export async function openAgentToolSession(
 
 function adaptWorkerSession(worker: ExtensionWorkerSession): AgentToolSession {
     return {
+        closed: worker.closed,
         target: parseAgentWorkerTarget(`${worker.instance}:${worker.workspace}`),
         tools: worker.listTools().map((tool) => ({
             description: tool.description,

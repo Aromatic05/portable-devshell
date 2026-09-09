@@ -1,9 +1,9 @@
 import type { AgentHostRecord } from "./host/AgentHost.js";
 import type {
-    ExtensionCommandResult,
     ExtensionInvocationContext,
     ExtensionJsonValue
 } from "@portable-devshell/extension";
+import type { CliCommandResult } from "@portable-devshell/extension/cli";
 
 import type { AgentProviderManagementRecord } from "./provider/AgentProviderManager.js";
 import { AgentExtensionRuntime, AGENT_WEB_RELATIVE_PATH } from "./AgentRuntime.js";
@@ -40,7 +40,7 @@ export async function executeAgentCommand(
     providers: AgentProviderCommandPort,
     argv: readonly string[],
     context: ExtensionInvocationContext
-): Promise<ExtensionCommandResult> {
+): Promise<CliCommandResult> {
     context.signal.throwIfAborted();
     if (argv.length === 0 || argv[0] === "help" || argv[0] === "--help" || argv[0] === "-h") {
         if (argv.length > 1) throw usageError("Agent help does not accept extra arguments.");
@@ -95,7 +95,7 @@ async function providerCommand(
     providers: AgentProviderCommandPort,
     argv: readonly string[],
     context: ExtensionInvocationContext
-): Promise<ExtensionCommandResult> {
+): Promise<CliCommandResult> {
     if (argv.length === 0 || argv[0] === "list") {
         expectLength(argv, argv.length === 0 ? 0 : 1, "agent provider list");
         return json((await providers.list()).map(providerRecordToJson));
@@ -122,7 +122,7 @@ async function providerCommand(
     }
 }
 
-async function start(runtime: AgentExtensionRuntime, argv: readonly string[]): Promise<ExtensionCommandResult> {
+async function start(runtime: AgentExtensionRuntime, argv: readonly string[]): Promise<CliCommandResult> {
     let provider: string | undefined;
     let target: string | undefined;
     for (let index = 0; index < argv.length; index += 1) {
@@ -173,7 +173,7 @@ function providerRecordToJson(record: AgentProviderManagementRecord): ExtensionJ
     };
 }
 
-function json(value: ExtensionJsonValue): ExtensionCommandResult {
+function json(value: ExtensionJsonValue): CliCommandResult {
     return { kind: "json", value };
 }
 

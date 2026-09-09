@@ -2,7 +2,7 @@ import { lstat, readFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import type { ExtensionContext } from "@portable-devshell/extension";
+import type { ExtensionAssetCapability, ExtensionContext } from "@portable-devshell/extension";
 
 import type { AgentProvider } from "./AgentProvider.js";
 import {
@@ -23,6 +23,7 @@ export interface LoadedAgentProvider {
 }
 
 export class AgentProviderLoader {
+    readonly #assets: ExtensionAssetCapability;
     readonly #context: ExtensionContext;
     readonly #importer: (url: string) => Promise<unknown>;
     readonly #registry: AgentProviderRegistryStore;
@@ -32,6 +33,9 @@ export class AgentProviderLoader {
         importer: (url: string) => Promise<unknown> = async (url) => await import(url) as unknown,
         registry = new AgentProviderRegistryStore(join(context.paths.stateDirectory, "providers.json"))
     ) {
+        const assets = context.capabilities.assets;
+        if (assets === undefined) throw new Error("Agent Extension requires the assets capability.");
+        this.#assets = assets;
         this.#context = context;
         this.#importer = importer;
         this.#registry = registry;
@@ -113,7 +117,7 @@ export class AgentProviderLoader {
 
     async #generationDirectory(generation: string): Promise<string> {
         assertProviderSegment(generation, "generation");
-        const bundle = await this.#context.assets.resolveBundle(generation);
+        const bundle = await this.#assets.resolveBundle(generation);
         if (bundle === undefined) {
             throw new Error(`Agent provider generation ${generation} is not installed.`);
         }

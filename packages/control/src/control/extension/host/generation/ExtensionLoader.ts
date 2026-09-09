@@ -1,25 +1,26 @@
-import { lstat, mkdir, readFile, rm } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { lstat, mkdir, readFile, rm, rmdir } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ResourceLimits } from "node:worker_threads";
 
 import {
-    EXTENSION_API_VERSION,
     parseExtensionManifest,
-    type ExtensionActivation,
     type ExtensionContext,
     type ExtensionAssetCapability,
-    type ExtensionInstanceRetireEvent,
     type ExtensionJsonValue,
     type ExtensionLogger,
     type ExtensionManifest,
     type ExtensionModule,
+    type ExtensionProcessCapability,
     type ExtensionWorkerCapability
 } from "@portable-devshell/extension";
 
 import type { InstanceRegistry } from "../../../instance/registry/InstanceRegistry.js";
 import { ExtensionAssetCapabilityControl } from "./capability/ExtensionAssetCapabilityControl.js";
+import { ExtensionProcessCapabilityControl } from "./capability/ExtensionProcessCapabilityControl.js";
 import { ExtensionGeneration } from "./ExtensionGeneration.js";
+import { ExtensionRegistrationBuilder } from "./ExtensionRegistration.js";
 import { sharedExtensionHostModuleResolver, type ExtensionHostModuleResolver } from "./ExtensionHostModuleResolver.js";
 import { ExtensionPathLayout } from "../../state/ExtensionPathLayout.js";
 import { ExtensionWorkerCapabilityControl } from "./capability/ExtensionWorkerCapabilityControl.js";
@@ -27,7 +28,7 @@ import {
     ExtensionSandboxHost,
     type ExtensionSandboxHostOptions
 } from "./sandbox/ExtensionSandboxHost.js";
-import type { ExtensionSandboxActivationDescriptor } from "./sandbox/ExtensionSandboxProtocol.js";
+import type { ExtensionSandboxReadyDescriptor } from "./sandbox/ExtensionSandboxProtocol.js";
 
 export const CORE_EXTENSION_RESERVED_IDS = new Set([
     "approval",
@@ -57,6 +58,10 @@ export interface ExtensionWorkerRuntime extends ExtensionWorkerCapability {
     retireInstance(instance: string): Promise<void>;
 }
 
+export interface ExtensionProcessRuntime extends ExtensionProcessCapability {
+    closeAll(): Promise<void>;
+}
+
 export interface ExtensionLoaderOptions {
     assetsFactory?: (input: {
         allowed: boolean;
@@ -69,6 +74,11 @@ export interface ExtensionLoaderOptions {
     hostModuleResolver?: ExtensionHostModuleResolver;
     loggerFactory?: (id: string, generation: string) => ExtensionLogger;
     paths: ExtensionPathLayout;
+    processFactory?: (input: {
+        allowed: boolean;
+        extensionId: string;
+        generation: string;
+    }) => ExtensionProcessRuntime;
     reservedIds?: ReadonlySet<string>;
     sandboxFactory?: (options: ExtensionSandboxHostOptions) => ExtensionSandboxHost;
     sandboxResourceLimits?: ResourceLimits;
@@ -86,7 +96,9 @@ export class ExtensionLoader {
     readonly #instances: InstanceRegistry;
     readonly #loggerFactory: (id: string, generation: string) => ExtensionLogger;
     readonly #paths: ExtensionPathLayout;
+    readonly #processFactory?: ExtensionLoaderOptions["processFactory"];
     readonly #reservedIds: ReadonlySet<string>;
+    readonly #runtimeRoots = new Map<string, Promise<void>>();
     readonly #sandboxFactory: (options: ExtensionSandboxHostOptions) => ExtensionSandboxHost;
     readonly #sandboxResourceLimits?: ResourceLimits;
     readonly #workerFactory?: ExtensionLoaderOptions["workerFactory"];
@@ -98,6 +110,7 @@ export class ExtensionLoader {
         this.#instances = options.instances;
         this.#loggerFactory = options.loggerFactory ?? ((id, generation) => consoleExtensionLogger(id, generation));
         this.#paths = options.paths;
+        this.#processFactory = options.processFactory;
         this.#reservedIds = options.reservedIds ?? CORE_EXTENSION_RESERVED_IDS;
         this.#sandboxFactory = options.sandboxFactory ?? ((sandboxOptions) => new ExtensionSandboxHost(sandboxOptions));
         this.#sandboxResourceLimits = options.sandboxResourceLimits;
@@ -110,7 +123,7 @@ export class ExtensionLoader {
         }
         const codeDirectory = this.#paths.generationDirectory(id, generation);
         const dataDirectory = this.#paths.dataDirectory(id);
-        const runtimeDirectory = this.#paths.runtimeDirectory(id, generation);
+        const runtimeRoot = this.#paths.runtimeDirectory(id, generation);
         const stateDirectory = this.#paths.stateDirectory(id);
         await assertPlainDirectory(codeDirectory, `Extension generation directory for ${id}`);
         const manifestPath = this.#paths.manifestFile(id, generation);
@@ -119,17 +132,15 @@ export class ExtensionLoader {
         if (manifest.id !== id) {
             throw new Error(`Extension generation ${generation} declares id ${manifest.id}, expected ${id}.`);
         }
-        if (manifest.apiVersion !== EXTENSION_API_VERSION) {
-            throw new Error(
-                `Extension ${id} requires API version ${manifest.apiVersion}, but Control supports ${EXTENSION_API_VERSION}.`
-            );
-        }
         const entryPath = resolveContainedPath(codeDirectory, manifest.entry, "Extension entry");
         await assertPlainFile(entryPath, `Extension entry for ${id}`);
-        await rm(runtimeDirectory, { force: true, recursive: true });
+        await this.#prepareRuntimeRoot(runtimeRoot);
+        await mkdir(runtimeRoot, { mode: 0o700, recursive: true });
+        await assertPlainDirectory(runtimeRoot, `Extension runtime generation root for ${id}`);
+        const runtimeDirectory = join(runtimeRoot, `run-${randomUUID()}`);
         await Promise.all([
             mkdir(dataDirectory, { mode: 0o700, recursive: true }),
-            mkdir(runtimeDirectory, { mode: 0o700, recursive: true }),
+            mkdir(runtimeDirectory, { mode: 0o700 }),
             mkdir(stateDirectory, { mode: 0o700, recursive: true })
         ]);
 
@@ -145,24 +156,41 @@ export class ExtensionLoader {
         });
 
         const worker = this.#workerFactory?.({
-            allowed: manifest.capabilities.includes("worker"),
+            allowed: manifest.capabilities.includes("workers"),
             extensionId: id,
             generation
         }) ?? new ExtensionWorkerCapabilityControl({
-            allowed: manifest.capabilities.includes("worker"),
+            allowed: manifest.capabilities.includes("workers"),
             extensionId: id,
             generation,
             instances: this.#instances
         });
+        const processes = this.#processFactory?.({
+            allowed: manifest.capabilities.includes("processes"),
+            extensionId: id,
+            generation
+        }) ?? new ExtensionProcessCapabilityControl({
+            allowed: manifest.capabilities.includes("processes"),
+            extensionId: id,
+            generation
+        });
         const logger = this.#loggerFactory(id, generation);
+        const registrations = new ExtensionRegistrationBuilder(manifest, codeDirectory);
+        const register: ExtensionContext["register"] = (point, localId, binding) => {
+            registrations.register(point, localId, binding);
+        };
         const context: ExtensionContext = Object.freeze({
-            assets,
+            capabilities: Object.freeze({
+                ...(manifest.capabilities.includes("assets") ? { assets } : {}),
+                ...(manifest.capabilities.includes("processes") ? { processes } : {}),
+                ...(manifest.capabilities.includes("workers") ? { workers: worker } : {})
+            }),
             generation,
             id,
             logger,
             paths: Object.freeze({ codeDirectory, dataDirectory, runtimeDirectory, stateDirectory }),
-            version: manifest.version,
-            worker
+            register,
+            version: manifest.version
         });
 
         if (this.#importer === undefined) {
@@ -175,31 +203,40 @@ export class ExtensionLoader {
                 id,
                 logger,
                 manifest,
+                processes,
+                runtimeRoot,
                 runtimeDirectory,
                 worker
             });
         }
 
-        const hostModules = this.#hostModuleResolver.register(codeDirectory);
-        let rawActivation: unknown;
-        let activation: ExtensionActivation | undefined;
+        const hostModules = this.#hostModuleResolver.register(codeDirectory, manifest.hostDependencies);
+        let module: ExtensionModule | undefined;
         try {
-            const module = readExtensionModule(await this.#importer(pathToFileURL(entryPath).href), id);
-            rawActivation = await module.activate(context);
-            activation = await validateActivation(rawActivation, manifest, codeDirectory);
-            const wrapped = wrapActivation(activation, worker);
+            module = readExtensionModule(await this.#importer(pathToFileURL(entryPath).href), id);
+            await module.activate(context);
+            const bindings = await registrations.finalize();
             return new ExtensionGeneration({
-                activation: wrapped,
-                dispose: async () => await disposeGeneration(activation!, worker, runtimeDirectory, hostModules.release),
+                dispose: async () => await disposeGeneration(
+                    module!,
+                    processes,
+                    worker,
+                    runtimeRoot,
+                    runtimeDirectory,
+                    hostModules.release
+                ),
                 generation,
-                manifest
+                manifest,
+                registrations: bindings,
+                retireInstanceResources: async (instance) => await worker.retireInstance(instance)
             });
         } catch (error) {
             const cleanupFailures: unknown[] = [];
-            const disposable = readDisposableActivation(rawActivation);
-            await disposable?.dispose().catch((cleanupError: unknown) => cleanupFailures.push(cleanupError));
+            await Promise.resolve(module?.deactivate?.()).catch((cleanupError: unknown) => cleanupFailures.push(cleanupError));
+            await processes.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
             await worker.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
-            await rm(runtimeDirectory, { force: true, recursive: true }).catch((cleanupError) => cleanupFailures.push(cleanupError));
+            await cleanupRuntimeDirectory(runtimeRoot, runtimeDirectory)
+                .catch((cleanupError) => cleanupFailures.push(cleanupError));
             try { hostModules.release(); } catch (cleanupError) { cleanupFailures.push(cleanupError); }
             if (cleanupFailures.length === 0) throw error;
             throw new AggregateError(
@@ -207,6 +244,20 @@ export class ExtensionLoader {
                 `Extension ${id} activation failed and candidate cleanup was incomplete.`
             );
         }
+    }
+
+    async #prepareRuntimeRoot(runtimeRoot: string): Promise<void> {
+        let preparation = this.#runtimeRoots.get(runtimeRoot);
+        if (preparation === undefined) {
+            preparation = (async () => {
+                await rm(runtimeRoot, { force: true, recursive: true });
+                await mkdir(runtimeRoot, { mode: 0o700, recursive: true });
+                await assertPlainDirectory(runtimeRoot, "Extension runtime generation root");
+            })();
+            this.#runtimeRoots.set(runtimeRoot, preparation);
+            void preparation.catch(() => this.#runtimeRoots.delete(runtimeRoot));
+        }
+        await preparation;
     }
 
     async #loadSandboxed(input: {
@@ -218,12 +269,15 @@ export class ExtensionLoader {
         id: string;
         logger: ExtensionLogger;
         manifest: ExtensionManifest;
+        processes: ExtensionProcessRuntime;
+        runtimeRoot: string;
         runtimeDirectory: string;
         worker: ExtensionWorkerRuntime;
     }): Promise<ExtensionGeneration> {
         let candidate: ExtensionGeneration | undefined;
         const sandbox = this.#sandboxFactory({
             assets: input.assets,
+            capabilities: input.manifest.capabilities,
             codeDirectory: input.codeDirectory,
             context: {
                 generation: input.generation,
@@ -232,11 +286,14 @@ export class ExtensionLoader {
                 version: input.manifest.version
             },
             entryUrl: pathToFileURL(input.entryPath).href,
+            hostDependencies: input.manifest.hostDependencies,
             logger: input.logger,
             onFault: (error) => {
                 candidate?.fault(error);
+                void input.processes.closeAll().catch(() => undefined);
                 void input.worker.closeAll().catch(() => undefined);
             },
+            processes: input.processes,
             ...(this.#sandboxResourceLimits === undefined ? {} : {
                 resourceLimits: this.#sandboxResourceLimits
             }),
@@ -244,30 +301,33 @@ export class ExtensionLoader {
         });
         try {
             const descriptor = await sandbox.start();
-            const activation = await activationFromSandbox(
+            const bindings = await registrationsFromSandbox(
                 descriptor,
                 input.manifest,
                 input.codeDirectory,
                 sandbox
             );
-            const wrapped = wrapActivation(activation, input.worker);
             candidate = new ExtensionGeneration({
-                activation: wrapped,
                 dispose: async () => await disposeSandboxGeneration(
                     sandbox,
+                    input.processes,
                     input.worker,
+                    input.runtimeRoot,
                     input.runtimeDirectory
                 ),
                 generation: input.generation,
-                manifest: input.manifest
+                manifest: input.manifest,
+                registrations: bindings,
+                retireInstanceResources: async (instance) => await input.worker.retireInstance(instance)
             });
             if (sandbox.faultError !== undefined) throw sandbox.faultError;
             return candidate;
         } catch (error) {
             const cleanupFailures: unknown[] = [];
             await sandbox.dispose().catch((cleanupError) => cleanupFailures.push(cleanupError));
+            await input.processes.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
             await input.worker.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
-            await rm(input.runtimeDirectory, { force: true, recursive: true })
+            await cleanupRuntimeDirectory(input.runtimeRoot, input.runtimeDirectory)
                 .catch((cleanupError) => cleanupFailures.push(cleanupError));
             if (cleanupFailures.length === 0) throw error;
             throw new AggregateError(
@@ -278,186 +338,70 @@ export class ExtensionLoader {
     }
 }
 
-async function activationFromSandbox(
-    descriptor: ExtensionSandboxActivationDescriptor,
+async function registrationsFromSandbox(
+    descriptor: ExtensionSandboxReadyDescriptor,
     manifest: ExtensionManifest,
     codeDirectory: string,
     sandbox: ExtensionSandboxHost
-): Promise<ExtensionActivation> {
-    const activation: ExtensionActivation = {
-        dispose: async () => await sandbox.dispose()
-    };
-    if (descriptor.command !== undefined) {
-        requireManifestCapability(manifest, "command");
-        activation.command = async (argv, context) => await sandbox.command(argv, context);
-    }
-    if (descriptor.rpc !== undefined) {
-        requireManifestCapability(manifest, "rpc");
-        const handlers: Record<string, NonNullable<ExtensionActivation["rpc"]>[string]> = {};
-        for (const operation of descriptor.rpc) {
-            handlers[operation] = async (value, context) => await sandbox.rpc(operation, value, context);
-        }
-        activation.rpc = Object.freeze(handlers);
-    }
-    if (descriptor.lifecycle !== undefined) {
-        requireManifestCapability(manifest, "instance-lifecycle");
-        activation.lifecycle = Object.freeze({
-            onInstanceRetire: async (event: ExtensionInstanceRetireEvent) => await sandbox.retireInstance(event)
-        });
-    }
-    if (descriptor.web !== undefined) {
-        requireManifestCapability(manifest, "web");
-        if (descriptor.web.kind === "static") {
-            const directory = resolveContainedPath(
-                codeDirectory,
-                descriptor.web.directory,
-                "Extension web directory"
-            );
-            await assertPlainDirectory(directory, `Extension web directory for ${manifest.id}`);
-            activation.web = Object.freeze({
-                directory: descriptor.web.directory,
-                kind: "static"
-            });
-        } else {
-            activation.web = Object.freeze({
-                kind: "proxy",
-                resolveUpstream: async () => await sandbox.resolveUpstream()
-            });
+): Promise<import("./ExtensionRegistration.js").ExtensionRegistrationSet> {
+    const registrations = new ExtensionRegistrationBuilder(manifest, codeDirectory);
+    for (const registration of descriptor.registrations) {
+        switch (registration.runtime.kind) {
+            case "cli.command":
+                registrations.registerById(
+                    registration.pointId,
+                    registration.id,
+                    async (argv: readonly string[], context: import("@portable-devshell/extension").ExtensionInvocationContext) =>
+                        await sandbox.cliCommand(registration.id, argv, context)
+                );
+                break;
+            case "web.files":
+                registrations.registerById(registration.pointId, registration.id, Object.freeze({
+                    source: Object.freeze({
+                        directory: registration.runtime.directory,
+                        kind: "files" as const
+                    })
+                }));
+                break;
+            case "web.endpoint":
+                registrations.registerById(registration.pointId, registration.id, Object.freeze({
+                    source: Object.freeze({
+                        kind: "endpoint" as const,
+                        resolve: async () => await sandbox.webEndpoint(registration.id)
+                    })
+                }));
+                break;
         }
     }
-    return Object.freeze(activation);
+    return await registrations.finalize();
 }
 
 function readExtensionModule(value: unknown, id: string): ExtensionModule {
     if (!isRecord(value) || typeof value.activate !== "function") {
         throw new TypeError(`Extension ${id} entry must export an activate(context) function.`);
     }
-    return { activate: value.activate as ExtensionModule["activate"] };
-}
-
-async function validateActivation(
-    value: unknown,
-    manifest: ExtensionManifest,
-    codeDirectory: string
-): Promise<ExtensionActivation> {
-    if (!isRecord(value)) throw new TypeError(`Extension ${manifest.id} activation must be an object.`);
-    const allowed = new Set(["command", "dispose", "lifecycle", "rpc", "web"]);
-    const unknown = Object.keys(value).filter((key) => !allowed.has(key));
-    if (unknown.length > 0) {
-        throw new TypeError(`Extension ${manifest.id} activation has unknown field ${unknown[0]}.`);
+    if (value.deactivate !== undefined && typeof value.deactivate !== "function") {
+        throw new TypeError(`Extension ${id} deactivate export must be a function.`);
     }
-    if (typeof value.dispose !== "function") {
-        throw new TypeError(`Extension ${manifest.id} activation must provide dispose().`);
-    }
-
-    const activation: ExtensionActivation = {
-        dispose: value.dispose as ExtensionActivation["dispose"]
+    return {
+        activate: value.activate as ExtensionModule["activate"],
+        ...(value.deactivate === undefined ? {} : { deactivate: value.deactivate as NonNullable<ExtensionModule["deactivate"]> })
     };
-    if (value.command !== undefined) {
-        requireManifestCapability(manifest, "command");
-        if (typeof value.command !== "function") throw new TypeError(`Extension ${manifest.id} command must be a function.`);
-        activation.command = value.command as ExtensionActivation["command"];
-    }
-    if (value.rpc !== undefined) {
-        requireManifestCapability(manifest, "rpc");
-        if (!isRecord(value.rpc)) throw new TypeError(`Extension ${manifest.id} rpc must be an object.`);
-        const handlers: Record<string, NonNullable<ExtensionActivation["rpc"]>[string]> = {};
-        for (const [operation, handler] of Object.entries(value.rpc)) {
-            if (!/^[A-Za-z][A-Za-z0-9]*$/u.test(operation)) {
-                throw new TypeError(`Extension ${manifest.id} RPC operation is invalid: ${operation}.`);
-            }
-            if (typeof handler !== "function") {
-                throw new TypeError(`Extension ${manifest.id} RPC operation ${operation} must be a function.`);
-            }
-            handlers[operation] = handler as NonNullable<ExtensionActivation["rpc"]>[string];
-        }
-        activation.rpc = Object.freeze(handlers);
-    }
-    if (value.lifecycle !== undefined) {
-        requireManifestCapability(manifest, "instance-lifecycle");
-        if (!isRecord(value.lifecycle)) throw new TypeError(`Extension ${manifest.id} lifecycle must be an object.`);
-        const lifecycleKeys = Object.keys(value.lifecycle);
-        if (lifecycleKeys.some((key) => key !== "onInstanceRetire")) {
-            throw new TypeError(`Extension ${manifest.id} lifecycle has unknown field ${lifecycleKeys.find((key) => key !== "onInstanceRetire")}.`);
-        }
-        if (value.lifecycle.onInstanceRetire !== undefined && typeof value.lifecycle.onInstanceRetire !== "function") {
-            throw new TypeError(`Extension ${manifest.id} onInstanceRetire must be a function.`);
-        }
-        activation.lifecycle = {
-            ...(value.lifecycle.onInstanceRetire === undefined
-                ? {}
-                : { onInstanceRetire: value.lifecycle.onInstanceRetire as NonNullable<ExtensionActivation["lifecycle"]>["onInstanceRetire"] })
-        };
-    }
-    if (value.web !== undefined) {
-        requireManifestCapability(manifest, "web");
-        activation.web = await validateWebContribution(value.web, manifest.id, codeDirectory);
-    }
-    return Object.freeze(activation);
-}
-
-async function validateWebContribution(
-    value: unknown,
-    id: string,
-    codeDirectory: string
-): Promise<NonNullable<ExtensionActivation["web"]>> {
-    if (!isRecord(value) || (value.kind !== "static" && value.kind !== "proxy")) {
-        throw new TypeError(`Extension ${id} web contribution must be static or proxy.`);
-    }
-    if (value.kind === "static") {
-        if (Object.keys(value).some((key) => key !== "directory" && key !== "kind")) {
-            throw new TypeError(`Extension ${id} static web contribution has unknown fields.`);
-        }
-        if (typeof value.directory !== "string" || value.directory.length === 0) {
-            throw new TypeError(`Extension ${id} static web directory must be a non-empty relative path.`);
-        }
-        const directory = resolveContainedPath(codeDirectory, value.directory, "Extension web directory");
-        await assertPlainDirectory(directory, `Extension web directory for ${id}`);
-        return Object.freeze({ directory: value.directory, kind: "static" });
-    }
-    if (Object.keys(value).some((key) => key !== "kind" && key !== "resolveUpstream")) {
-        throw new TypeError(`Extension ${id} proxy web contribution has unknown fields.`);
-    }
-    if (typeof value.resolveUpstream !== "function") {
-        throw new TypeError(`Extension ${id} proxy web contribution must provide resolveUpstream().`);
-    }
-    return Object.freeze({
-        kind: "proxy",
-        resolveUpstream: value.resolveUpstream as () => URL | Promise<URL | undefined> | undefined
-    });
-}
-
-function wrapActivation(
-    activation: ExtensionActivation,
-    worker: ExtensionWorkerRuntime
-): ExtensionActivation {
-    const onInstanceRetire = activation.lifecycle?.onInstanceRetire;
-    return Object.freeze({
-        ...activation,
-        lifecycle: Object.freeze({
-            onInstanceRetire: async (event: ExtensionInstanceRetireEvent) => {
-                const failures: unknown[] = [];
-                await Promise.resolve(onInstanceRetire?.(event)).catch((error) => failures.push(error));
-                await worker.retireInstance(event.instance).catch((error) => failures.push(error));
-                if (failures.length === 1) throw failures[0];
-                if (failures.length > 1) {
-                    throw new AggregateError(failures, `Extension instance retirement failed for ${event.instance}.`);
-                }
-            }
-        })
-    });
 }
 
 async function disposeGeneration(
-    activation: ExtensionActivation,
+    module: ExtensionModule,
+    processes: ExtensionProcessRuntime,
     worker: ExtensionWorkerRuntime,
+    runtimeRoot: string,
     runtimeDirectory: string,
     releaseHostModules: () => void
 ): Promise<void> {
     const failures: unknown[] = [];
-    await Promise.resolve(activation.dispose()).catch((error) => failures.push(error));
+    await Promise.resolve(module.deactivate?.()).catch((error) => failures.push(error));
+    await processes.closeAll().catch((error) => failures.push(error));
     await worker.closeAll().catch((error) => failures.push(error));
-    await rm(runtimeDirectory, { force: true, recursive: true }).catch((error) => failures.push(error));
+    await cleanupRuntimeDirectory(runtimeRoot, runtimeDirectory).catch((error) => failures.push(error));
     try { releaseHostModules(); } catch (error) { failures.push(error); }
     if (failures.length === 1) throw failures[0];
     if (failures.length > 1) throw new AggregateError(failures, "Extension generation cleanup failed.");
@@ -465,28 +409,26 @@ async function disposeGeneration(
 
 async function disposeSandboxGeneration(
     sandbox: ExtensionSandboxHost,
+    processes: ExtensionProcessRuntime,
     worker: ExtensionWorkerRuntime,
+    runtimeRoot: string,
     runtimeDirectory: string
 ): Promise<void> {
     const failures: unknown[] = [];
     await sandbox.dispose().catch((error) => failures.push(error));
+    await processes.closeAll().catch((error) => failures.push(error));
     await worker.closeAll().catch((error) => failures.push(error));
-    await rm(runtimeDirectory, { force: true, recursive: true }).catch((error) => failures.push(error));
+    await cleanupRuntimeDirectory(runtimeRoot, runtimeDirectory).catch((error) => failures.push(error));
     if (failures.length === 1) throw failures[0];
     if (failures.length > 1) throw new AggregateError(failures, "Extension sandbox generation cleanup failed.");
 }
 
-function readDisposableActivation(value: unknown): { dispose(): Promise<void> } | undefined {
-    if (!isRecord(value) || typeof value.dispose !== "function") return undefined;
-    return {
-        dispose: async () => await Promise.resolve((value.dispose as () => Promise<void> | void)())
-    };
-}
-
-function requireManifestCapability(manifest: ExtensionManifest, capability: ExtensionManifest["capabilities"][number]): void {
-    if (!manifest.capabilities.includes(capability)) {
-        throw new TypeError(`Extension ${manifest.id} did not declare capability ${capability}.`);
-    }
+async function cleanupRuntimeDirectory(runtimeRoot: string, runtimeDirectory: string): Promise<void> {
+    await rm(runtimeDirectory, { force: true, recursive: true });
+    await rmdir(runtimeRoot).catch((error: unknown) => {
+        if (isMissing(error) || isDirectoryNotEmpty(error)) return;
+        throw error;
+    });
 }
 
 function resolveContainedPath(root: string, candidate: string, label: string): string {
@@ -509,6 +451,20 @@ async function assertPlainFile(path: string, label: string): Promise<void> {
     if (metadata.isSymbolicLink() || !metadata.isFile()) {
         throw new TypeError(`${label} must be a regular file, not a symlink.`);
     }
+}
+
+function isMissing(error: unknown): boolean {
+    return typeof error === "object"
+        && error !== null
+        && "code" in error
+        && (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+function isDirectoryNotEmpty(error: unknown): boolean {
+    return typeof error === "object"
+        && error !== null
+        && "code" in error
+        && (error as NodeJS.ErrnoException).code === "ENOTEMPTY";
 }
 
 function consoleExtensionLogger(id: string, generation: string): ExtensionLogger {

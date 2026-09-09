@@ -44,6 +44,7 @@ export class PiAgentProvider implements AgentProvider {
             agentId: context.agentId,
             entrypoint: installation.entrypoint,
             localCwd: paths.localCwd,
+            processes: context.processes,
             runtimeDirectory: context.runtime.stateDirectory,
             target: context.target,
             tools: context.tools,

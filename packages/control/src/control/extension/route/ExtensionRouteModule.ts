@@ -17,16 +17,10 @@ import { routeModule } from "../../../route/ControlRouteFactory.js";
 export interface ExtensionControlPort {
     disable(id: string): Promise<void>;
     command(
-        id: string,
+        commandId: string,
         argv: readonly string[],
         context: ExtensionInvocationContext
     ): Promise<ExtensionCommandWireResult>;
-    call(
-        id: string,
-        operation: string,
-        input: JsonValue | undefined,
-        context: ExtensionInvocationContext
-    ): Promise<JsonValue>;
     enable(id: string): Promise<void>;
     install(sourcePath: string): Promise<ExtensionRuntimeRecord>;
     list(): Promise<ExtensionRuntimeRecord[]>;
@@ -38,20 +32,6 @@ export function createExtensionRouteModule(port: ExtensionControlPort): PrefixRo
     return routeModule("extension", {
         list: async () => await port.list() as unknown as JsonValue,
         get: async (request) => await requireRecord(port, readExtensionId(request.payload)) as unknown as JsonValue,
-        call: async (request, context) => {
-            const input = readCall(request.payload);
-            const result = await port.call(
-                input.extensionId,
-                input.operation,
-                input.input,
-                {
-                    localOwner: isLocalOwnerCli(context),
-                    requestId: context.requestId,
-                    signal: context.signal
-                }
-            );
-            return assertJsonValue(result, `Extension ${input.extensionId} RPC result`);
-        },
         command: async (request, context) => {
             requireCliCommand(context);
             const input = readCommand(request.payload);
@@ -64,7 +44,7 @@ export function createExtensionRouteModule(port: ExtensionControlPort): PrefixRo
                 });
             }
             return assertCommandResult(await port.command(
-                input.extensionId,
+                input.commandId,
                 input.argv,
                 {
                     localOwner,
@@ -74,7 +54,7 @@ export function createExtensionRouteModule(port: ExtensionControlPort): PrefixRo
                         workingDirectory: input.workingDirectory
                     })
                 }
-            ), input.extensionId) as unknown as JsonValue;
+            ), input.commandId) as unknown as JsonValue;
         },
         reload: async (request, context) => {
             requireLocalManagement(context);
@@ -139,27 +119,13 @@ function requireCliCommand(context: PrefixRouteContext): void {
     });
 }
 
-function readCall(payload: JsonValue | undefined): {
-    extensionId: string;
-    input?: JsonValue;
-    operation: string;
-} {
-    const value = readRecord(payload, "extension.call");
-    assertOnlyKeys(value, ["extensionId", "input", "operation"], "extension.call");
-    return {
-        extensionId: readId(value.extensionId),
-        ...(value.input === undefined ? {} : { input: value.input }),
-        operation: readOperation(value.operation)
-    };
-}
-
 function readCommand(payload: JsonValue | undefined): {
     argv: string[];
-    extensionId: string;
+    commandId: string;
     workingDirectory?: string;
 } {
     const value = readRecord(payload, "extension.command");
-    assertOnlyKeys(value, ["argv", "extensionId", "workingDirectory"], "extension.command");
+    assertOnlyKeys(value, ["argv", "commandId", "workingDirectory"], "extension.command");
     if (!Array.isArray(value.argv) || value.argv.some((candidate) => typeof candidate !== "string")) {
         throw invalid("extension.command argv must be an array of strings.");
     }
@@ -171,7 +137,7 @@ function readCommand(payload: JsonValue | undefined): {
     }
     return {
         argv: [...value.argv] as string[],
-        extensionId: readId(value.extensionId),
+        commandId: readId(value.commandId, "commandId"),
         ...(value.workingDirectory === undefined ? {} : { workingDirectory: value.workingDirectory })
     };
 }
@@ -179,7 +145,7 @@ function readCommand(payload: JsonValue | undefined): {
 function readExtensionId(payload: JsonValue | undefined): string {
     const value = readRecord(payload, "Extension request");
     assertOnlyKeys(value, ["extensionId"], "Extension request");
-    return readId(value.extensionId);
+    return readId(value.extensionId, "extensionId");
 }
 
 function readInstallSource(payload: JsonValue | undefined): string {
@@ -196,19 +162,14 @@ function readRemove(payload: JsonValue | undefined): { extensionId: string; purg
         throw invalid("extension.remove purge must be boolean.");
     }
     return {
-        extensionId: readId(value.extensionId),
+        extensionId: readId(value.extensionId, "extensionId"),
         purge: value.purge === true
     };
 }
 
-function readId(value: JsonValue | undefined): string {
+function readId(value: JsonValue | undefined, label: "commandId" | "extensionId"): string {
     if (typeof value === "string" && /^[a-z][a-z0-9-]*$/u.test(value)) return value;
-    throw invalid("extensionId must match [a-z][a-z0-9-]*.");
-}
-
-function readOperation(value: JsonValue | undefined): string {
-    if (typeof value === "string" && /^[A-Za-z][A-Za-z0-9]*$/u.test(value)) return value;
-    throw invalid("Extension operation must be one route-safe identifier.");
+    throw invalid(`${label} must match [a-z][a-z0-9-]*.`);
 }
 
 function readRecord(payload: JsonValue | undefined, operation: string): Record<string, JsonValue> {
@@ -222,17 +183,17 @@ function assertOnlyKeys(value: Record<string, JsonValue>, keys: readonly string[
     if (unknown !== undefined) throw invalid(`${operation} contains unknown field ${unknown}.`);
 }
 
-function assertCommandResult(value: ExtensionCommandWireResult, extensionId: string): ExtensionCommandWireResult {
+function assertCommandResult(value: ExtensionCommandWireResult, commandId: string): ExtensionCommandWireResult {
     if (value.kind === "text" && typeof value.text === "string" && value.value === undefined) {
         return { kind: "text", text: value.text };
     }
     if (value.kind === "json" && value.text === undefined && value.value !== undefined) {
-        return { kind: "json", value: assertJsonValue(value.value, `Extension ${extensionId} command result`) };
+        return { kind: "json", value: assertJsonValue(value.value, `Extension command ${commandId} result`) };
     }
     throw createError({
         code: errorCodes.controlExtensionFailed,
-        details: { extensionId },
-        message: `Extension ${extensionId} returned an invalid command result.`,
+        details: { commandId },
+        message: `Extension command ${commandId} returned an invalid result.`,
         retryable: false
     });
 }

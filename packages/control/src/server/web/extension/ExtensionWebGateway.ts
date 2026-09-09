@@ -12,6 +12,7 @@ import { extname, isAbsolute, relative, resolve } from "node:path";
 import type { Duplex } from "node:stream";
 
 import type { HttpHost } from "@portable-devshell/mcp";
+import type { WebApplicationBinding } from "@portable-devshell/extension/web";
 
 import type { ExtensionHost } from "../../../control/extension/host/ExtensionHost.js";
 import type { ExtensionPathLayout } from "../../../control/extension/state/ExtensionPathLayout.js";
@@ -25,7 +26,7 @@ export interface ExtensionWebGatewayOptions {
 }
 
 interface ExtensionWebRequestTarget {
-    extensionId: string;
+    applicationId: string;
     mountPath: string;
     suffix: string;
 }
@@ -64,28 +65,25 @@ export class ExtensionWebGateway {
                 return;
             }
 
-            let lease;
+            let acquired;
             try {
-                lease = this.#extensions.acquire(target.extensionId);
+                acquired = this.#extensions.acquireRegistration("web.applications", target.applicationId);
             } catch {
                 writeError(response, 404, "Extension WebUI not found");
                 return;
             }
+            const { extensionId, lease, registration } = acquired;
             try {
-                const contribution = lease.activation.web;
-                if (contribution === undefined) {
-                    writeError(response, 404, "Extension WebUI not found");
-                    return;
-                }
-                if (contribution.kind === "static") {
+                const source = (registration.binding as WebApplicationBinding).source;
+                if (source.kind === "files") {
                     const directory = resolve(
-                        this.#paths.generationDirectory(target.extensionId, lease.generation),
-                        contribution.directory
+                        this.#paths.generationDirectory(extensionId, lease.generation),
+                        source.directory
                     );
                     await serveStatic(request, response, directory, target.suffix);
                     return;
                 }
-                const upstream = await contribution.resolveUpstream();
+                const upstream = await source.resolve();
                 if (upstream === undefined) {
                     writeError(response, 404, "Extension WebUI not found");
                     return;
@@ -109,20 +107,21 @@ export class ExtensionWebGateway {
                 rejectUpgrade(socket, 404, "Extension WebUI not found");
                 return;
             }
-            let lease;
+            let acquired;
             try {
-                lease = this.#extensions.acquire(target.extensionId);
+                acquired = this.#extensions.acquireRegistration("web.applications", target.applicationId);
             } catch {
                 rejectUpgrade(socket, 404, "Extension WebUI not found");
                 return;
             }
+            const { lease, registration } = acquired;
             try {
-                const contribution = lease.activation.web;
-                if (contribution?.kind !== "proxy") {
+                const source = (registration.binding as WebApplicationBinding).source;
+                if (source.kind !== "endpoint") {
                     rejectUpgrade(socket, 404, "Extension WebSocket not found");
                     return;
                 }
-                const upstream = await contribution.resolveUpstream();
+                const upstream = await source.resolve();
                 if (upstream === undefined) {
                     rejectUpgrade(socket, 404, "Extension WebSocket not found");
                     return;
@@ -165,17 +164,17 @@ function parseExtensionSuffix(value: string, basePath: string): ExtensionWebRequ
     const parsed = new URL(value, "http://localhost");
     const match = /^\/([^/]+)(\/.*)?$/u.exec(parsed.pathname);
     if (match === null) return undefined;
-    let extensionId: string;
+    let applicationId: string;
     try {
-        extensionId = decodeURIComponent(match[1]!);
+        applicationId = decodeURIComponent(match[1]!);
     } catch {
         return undefined;
     }
-    if (!/^[a-z][a-z0-9-]*$/u.test(extensionId)) return undefined;
+    if (!/^[a-z][a-z0-9-]*$/u.test(applicationId)) return undefined;
     const pathname = match[2] ?? "/";
     return {
-        extensionId,
-        mountPath: `${basePath}/${extensionId}`,
+        applicationId,
+        mountPath: `${basePath}/${applicationId}`,
         suffix: `${pathname}${parsed.search}`
     };
 }
@@ -251,19 +250,39 @@ async function proxyHttp(
 ): Promise<void> {
     const upstreamUrl = resolveUpstreamUrl(target.upstream, target.upstreamPath);
     await new Promise<void>((resolveRequest, rejectRequest) => {
+        let proxyResponse: IncomingMessage | undefined;
+        let settled = false;
+        const cleanup = () => {
+            request.off("aborted", downstreamClosed);
+            response.off("close", downstreamClosed);
+        };
+        const finish = (error?: unknown) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            if (error === undefined) resolveRequest();
+            else rejectRequest(error);
+        };
+        const downstreamClosed = () => {
+            proxyResponse?.destroy();
+            proxyRequest.destroy();
+            finish();
+        };
         const proxyRequest = requestFor(upstreamUrl, {
             headers: proxyHeaders(request.headers, upstreamUrl, mountPath),
             method: request.method ?? "GET"
-        }, (proxyResponse) => {
+        }, (upstreamResponse) => {
+            proxyResponse = upstreamResponse;
             response.statusCode = proxyResponse.statusCode ?? 502;
             if (proxyResponse.statusMessage !== undefined) response.statusMessage = proxyResponse.statusMessage;
             copyResponseHeaders(proxyResponse.headers, response);
             proxyResponse.pipe(response);
-            proxyResponse.once("end", resolveRequest);
-            proxyResponse.once("error", rejectRequest);
+            proxyResponse.once("end", () => finish());
+            proxyResponse.once("error", (error) => finish(error));
         });
-        proxyRequest.once("error", rejectRequest);
-        request.once("aborted", () => proxyRequest.destroy());
+        proxyRequest.once("error", (error) => finish(error));
+        request.once("aborted", downstreamClosed);
+        response.once("close", downstreamClosed);
         request.pipe(proxyRequest);
     }).catch((error) => {
         if (!response.headersSent) {
@@ -283,6 +302,23 @@ async function proxyUpgrade(
 ): Promise<void> {
     const upstreamUrl = resolveUpstreamUrl(target.upstream, target.upstreamPath);
     await new Promise<void>((resolveSocket, rejectSocket) => {
+        let upstreamSocket: Duplex | undefined;
+        let settled = false;
+        const finish = (error?: unknown) => {
+            if (settled) return;
+            settled = true;
+            socket.off("close", downstreamClosed);
+            upstreamSocket?.off("close", upstreamClosed);
+            if (!socket.destroyed) socket.destroy();
+            if (upstreamSocket !== undefined && !upstreamSocket.destroyed) upstreamSocket.destroy();
+            if (error === undefined) resolveSocket();
+            else rejectSocket(error);
+        };
+        const downstreamClosed = () => {
+            proxyRequest.destroy();
+            finish();
+        };
+        const upstreamClosed = () => finish();
         const proxyRequest = requestFor(upstreamUrl, {
             headers: {
                 ...proxyHeaders(request.headers, upstreamUrl, mountPath),
@@ -291,29 +327,23 @@ async function proxyUpgrade(
             },
             method: request.method ?? "GET"
         });
-        proxyRequest.once("upgrade", (proxyResponse, upstreamSocket, upstreamHead) => {
+        proxyRequest.once("upgrade", (proxyResponse, connectedUpstream, upstreamHead) => {
+            upstreamSocket = connectedUpstream;
             writeUpgradeResponse(socket, proxyResponse);
             if (upstreamHead.length > 0) socket.write(upstreamHead);
             if (head.length > 0) upstreamSocket.write(head);
             socket.pipe(upstreamSocket);
             upstreamSocket.pipe(socket);
-            let settled = false;
-            const finish = () => {
-                if (settled) return;
-                settled = true;
-                socket.off("close", finish);
-                upstreamSocket.off("close", finish);
-                resolveSocket();
-            };
-            socket.once("close", finish);
-            upstreamSocket.once("close", finish);
+            socket.once("close", downstreamClosed);
+            upstreamSocket.once("close", upstreamClosed);
         });
         proxyRequest.once("response", (proxyResponse) => {
             writeUpgradeResponse(socket, proxyResponse);
             proxyResponse.pipe(socket);
-            proxyResponse.once("end", resolveSocket);
+            proxyResponse.once("end", () => finish());
         });
-        proxyRequest.once("error", rejectSocket);
+        proxyRequest.once("error", (error) => finish(error));
+        socket.once("close", downstreamClosed);
         proxyRequest.end();
     }).catch((error) => {
         if (!socket.destroyed) {

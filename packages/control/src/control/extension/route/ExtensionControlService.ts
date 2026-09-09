@@ -2,8 +2,7 @@ import type { ExtensionInvocationContext } from "@portable-devshell/extension";
 import type {
     ExtensionCommandWireResult,
     ExtensionRemoveResult,
-    ExtensionRuntimeRecord,
-    JsonValue
+    ExtensionRuntimeRecord
 } from "@portable-devshell/shared";
 
 import type { ExtensionControlPort } from "./ExtensionRouteModule.js";
@@ -19,21 +18,12 @@ export class ExtensionControlService implements ExtensionControlPort {
         this.#installer = options.installer;
     }
 
-    async call(
-        id: string,
-        operation: string,
-        input: JsonValue | undefined,
-        context: ExtensionInvocationContext
-    ): Promise<JsonValue> {
-        return await this.#host.dispatchRpc(id, operation, input, context) as JsonValue;
-    }
-
     async command(
-        id: string,
+        commandId: string,
         argv: readonly string[],
         context: ExtensionInvocationContext
     ): Promise<ExtensionCommandWireResult> {
-        return await this.#host.dispatchCommand(id, argv, context) as ExtensionCommandWireResult;
+        return await this.#host.dispatchCommand(commandId, argv, context) as ExtensionCommandWireResult;
     }
 
     async disable(id: string): Promise<void> {

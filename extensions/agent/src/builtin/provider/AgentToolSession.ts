@@ -16,6 +16,8 @@ export interface AgentToolDefinition {
  * authorizes the underlying Worker connection.
  */
 export interface AgentToolSession {
+    /** Settles when the host-owned Worker session can no longer be used. */
+    readonly closed: Promise<void>;
     readonly target: AgentWorkerTarget;
     readonly tools: readonly AgentToolDefinition[];
     callTool(

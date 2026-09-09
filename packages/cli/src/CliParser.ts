@@ -46,7 +46,7 @@ export type CliParsedCommand =
     | { extensionId: string; kind: "extension.enable" | "extension.disable" | "extension.reload" }
     | { kind: "extension.install"; source: string }
     | { extensionId: string; kind: "extension.remove"; purge: boolean }
-    | { args: string[]; extensionId: string; kind: "extension.command" }
+    | { args: string[]; commandId: string; kind: "extension.command" }
     | { input: JsonValue; instance: string; kind: "instance.call"; toolName: string; workspace: string }
     | { kind: "instance.create" }
     | { instance: string; kind: "instance.delete" }
@@ -206,12 +206,18 @@ export class CliParser {
     }
 
     #parseExtensionCommand(argv: readonly string[]): CliParsedCommand {
-        const extensionId = this.#extensionId(argv[0]);
+        const commandId = this.#extensionCommandId(argv[0]);
         return {
             args: [...argv.slice(1)],
-            extensionId,
+            commandId,
             kind: "extension.command"
         };
+    }
+
+    #extensionCommandId(value: string | undefined): string {
+        const commandId = this.#required(value, "Extension command id is required");
+        if (/^[a-z][a-z0-9-]*$/u.test(commandId)) return commandId;
+        throw CliRenderError.usage("Extension command id must match [a-z][a-z0-9-]*");
     }
 
     #extensionId(value: string | undefined): string {

@@ -2,11 +2,11 @@ import { isAbsolute, resolve } from "node:path";
 
 import type {
     ExtensionAssetTransferResult,
-    ExtensionCommandResult,
     ExtensionContext,
     ExtensionInvocationContext,
     ExtensionJsonValue
 } from "@portable-devshell/extension";
+import type { CliCommandResult } from "@portable-devshell/extension/cli";
 
 import {
     listSkills,
@@ -36,7 +36,7 @@ export async function executeSkillCommand(
     extension: ExtensionContext,
     argv: readonly string[],
     invocation: ExtensionInvocationContext
-): Promise<ExtensionCommandResult> {
+): Promise<CliCommandResult> {
     invocation.signal.throwIfAborted();
     requireLocalOwner(invocation);
     if (argv.length === 0 || ["help", "--help", "-h"].includes(argv[0] ?? "")) {
@@ -84,8 +84,10 @@ async function getSkill(
 ): Promise<ExtensionJsonValue> {
     const instance = parseInstance(targetText);
     const selected = await resolveSkillSource(name, options);
-    const asset = await extension.assets.installDirectory(selected.root);
-    const transfer = await extension.assets.projectBundle({
+    const assets = extension.capabilities.assets;
+    if (assets === undefined) throw new Error("Skill Extension requires the assets capability.");
+    const asset = await assets.installDirectory(selected.root);
+    const transfer = await assets.projectBundle({
         generation: asset.generation,
         overwrite: true,
         signal: invocation.signal,
@@ -176,7 +178,7 @@ function requireLocalOwner(invocation: ExtensionInvocationContext): void {
     }
 }
 
-function json(value: unknown): ExtensionCommandResult {
+function json(value: unknown): CliCommandResult {
     return { kind: "json", value: value as ExtensionJsonValue };
 }
 

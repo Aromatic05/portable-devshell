@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "@portable-devshell/extension";
+import type { ExtensionAssetCapability, ExtensionContext } from "@portable-devshell/extension";
 
 import type { AgentProviderRegistry } from "./AgentProviderRegistry.js";
 import {
@@ -34,14 +34,17 @@ export interface AgentProviderManagerOptions {
 }
 
 export class AgentProviderManager {
-    readonly #context: ExtensionContext;
+    readonly #assets: ExtensionAssetCapability;
     readonly #isProviderInUse: (id: string) => boolean;
     readonly #loader: AgentProviderLoader;
     readonly #registry: AgentProviderRegistry;
     readonly #store: AgentProviderRegistryStore;
+    #mutation: Promise<void> = Promise.resolve();
 
     constructor(options: AgentProviderManagerOptions) {
-        this.#context = options.context;
+        const assets = options.context.capabilities.assets;
+        if (assets === undefined) throw new Error("Agent Extension requires the assets capability.");
+        this.#assets = assets;
         this.#isProviderInUse = options.isProviderInUse;
         this.#loader = options.loader;
         this.#registry = options.registry;
@@ -49,27 +52,43 @@ export class AgentProviderManager {
     }
 
     async install(sourcePath: string): Promise<AgentProviderManagementRecord> {
-        const bundle = await this.#context.assets.installBundle(sourcePath);
-        const manifest = await this.#loader.inspectBundle(bundle.generation);
-        const loaded = await this.#loader.loadGeneration(manifest.id, bundle.generation);
+        return await this.#exclusive(async () => await this.#install(sourcePath));
+    }
+
+    async #install(sourcePath: string): Promise<AgentProviderManagementRecord> {
         const before = await this.#store.read();
+        const bundle = await this.#assets.installBundle(sourcePath);
+        const loaded = await this.#loadInstalledCandidate(before, bundle.generation);
+        const manifest = loaded.manifest;
         const next = cloneAgentProviderRegistry(before);
         next.providers[manifest.id] = {
             enabled: true,
             lastKnownGoodGeneration: bundle.generation,
             selectedGeneration: bundle.generation
         };
-        await this.#store.write(next);
+        try {
+            await this.#store.write(next);
+        } catch (error) {
+            return await this.#failCandidate(before, bundle.generation, error, manifest.id);
+        }
         try {
             this.#registry.replace(loaded.provider);
         } catch (error) {
-            await this.#store.write(before).catch(() => undefined);
-            throw error;
+            try {
+                await this.#store.write(before);
+            } catch (rollbackError) {
+                throw new AggregateError(
+                    [error, rollbackError],
+                    `Agent provider ${manifest.id} runtime publish failed and registry rollback was incomplete.`
+                );
+            }
+            return await this.#failCandidate(before, bundle.generation, error, manifest.id);
         }
         return recordFromLoaded(next.providers[manifest.id]!, loaded);
     }
 
     async list(): Promise<AgentProviderManagementRecord[]> {
+        await this.#mutation;
         const snapshot = await this.#store.read();
         return await Promise.all(Object.entries(snapshot.providers)
             .sort(([left], [right]) => left.localeCompare(right))
@@ -77,6 +96,10 @@ export class AgentProviderManager {
     }
 
     async enable(id: string): Promise<AgentProviderManagementRecord> {
+        return await this.#exclusive(async () => await this.#enable(id));
+    }
+
+    async #enable(id: string): Promise<AgentProviderManagementRecord> {
         const before = await this.#store.read();
         const entry = requireEntry(before, id);
         const loaded = await this.#loadPreferred(id, entry);
@@ -91,39 +114,64 @@ export class AgentProviderManager {
         try {
             this.#registry.replace(loaded.provider);
         } catch (error) {
-            await this.#store.write(before).catch(() => undefined);
+            try {
+                await this.#store.write(before);
+            } catch (rollbackError) {
+                throw new AggregateError(
+                    [error, rollbackError],
+                    `Agent provider ${id} enable failed and registry rollback was incomplete.`
+                );
+            }
             throw error;
         }
         return recordFromLoaded(next.providers[id]!, loaded);
     }
 
     async disable(id: string): Promise<AgentProviderManagementRecord> {
+        return await this.#exclusive(async () => await this.#disable(id));
+    }
+
+    async #disable(id: string): Promise<AgentProviderManagementRecord> {
         const before = await this.#store.read();
         const entry = requireEntry(before, id);
         const next = cloneAgentProviderRegistry(before);
         next.providers[id] = { ...entry, enabled: false };
-        await this.#store.write(next);
-        this.#registry.unregister(id);
+        const provider = this.#registry.unregister(id);
+        try {
+            await this.#store.write(next);
+        } catch (error) {
+            if (provider !== undefined) this.#registry.replace(provider);
+            throw error;
+        }
         return await this.#record(id, next.providers[id]!);
     }
 
     async remove(id: string): Promise<{ id: string; removed: true }> {
+        return await this.#exclusive(async () => await this.#remove(id));
+    }
+
+    async #remove(id: string): Promise<{ id: string; removed: true }> {
+        const before = await this.#store.read();
+        const entry = requireEntry(before, id);
         if (this.#isProviderInUse(id)) {
             throw new Error(`Agent provider ${id} is still in use by a running Agent.`);
         }
-        const before = await this.#store.read();
-        const entry = requireEntry(before, id);
         const next = cloneAgentProviderRegistry(before);
         delete next.providers[id];
-        await this.#store.write(next);
-        this.#registry.unregister(id);
+        const provider = this.#registry.unregister(id);
+        try {
+            await this.#store.write(next);
+        } catch (error) {
+            if (provider !== undefined) this.#registry.replace(provider);
+            throw error;
+        }
 
         const generations = [...new Set([
             entry.selectedGeneration,
             entry.lastKnownGoodGeneration
         ].filter((generation): generation is string => generation !== undefined))];
         const settled = await Promise.allSettled(generations.map(async (generation) => {
-            await this.#context.assets.removeBundle(generation);
+            await this.#assets.removeBundle(generation);
         }));
         const failures = settled.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
         if (failures.length === 1) throw failures[0];
@@ -131,6 +179,36 @@ export class AgentProviderManager {
             throw new AggregateError(failures, `Agent provider ${id} was deregistered but bundle cleanup was incomplete.`);
         }
         return { id, removed: true };
+    }
+
+    async #loadInstalledCandidate(
+        before: AgentProviderRegistrySnapshot,
+        generation: string
+    ): Promise<LoadedAgentProvider> {
+        try {
+            const manifest = await this.#loader.inspectBundle(generation);
+            return await this.#loader.loadGeneration(manifest.id, generation);
+        } catch (error) {
+            return await this.#failCandidate(before, generation, error, "candidate");
+        }
+    }
+
+    async #failCandidate(
+        before: AgentProviderRegistrySnapshot,
+        generation: string,
+        error: unknown,
+        id: string
+    ): Promise<never> {
+        if (registryReferencesGeneration(before, generation)) throw error;
+        try {
+            await this.#assets.removeBundle(generation);
+        } catch (cleanupError) {
+            throw new AggregateError(
+                [error, cleanupError],
+                `Agent provider ${id} candidate failed and bundle cleanup was incomplete.`
+            );
+        }
+        throw error;
     }
 
     async #loadPreferred(id: string, entry: AgentProviderRegistryEntry): Promise<LoadedAgentProvider> {
@@ -181,6 +259,18 @@ export class AgentProviderManager {
             };
         }
     }
+
+    async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
+        const previous = this.#mutation;
+        let release!: () => void;
+        this.#mutation = new Promise<void>((resolve) => { release = resolve; });
+        await previous;
+        try {
+            return await operation();
+        } finally {
+            release();
+        }
+    }
 }
 
 function recordFromLoaded(
@@ -202,4 +292,10 @@ function requireEntry(snapshot: AgentProviderRegistrySnapshot, id: string): Agen
     const entry = snapshot.providers[id];
     if (entry !== undefined) return entry;
     throw new Error(`Unknown Agent provider: ${id}`);
+}
+
+function registryReferencesGeneration(snapshot: AgentProviderRegistrySnapshot, generation: string): boolean {
+    return Object.values(snapshot.providers).some((entry) =>
+        entry.selectedGeneration === generation || entry.lastKnownGoodGeneration === generation
+    );
 }

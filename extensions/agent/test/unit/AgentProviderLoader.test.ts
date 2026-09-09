@@ -17,15 +17,17 @@ async function harness(t: test.TestContext) {
     const errors: string[] = [];
     await mkdir(stateDirectory, { recursive: true });
     const context = {
-        assets: {
-            async installBundle() { throw new Error("not used"); },
-            async installDirectory() { throw new Error("not used"); },
-            async listBundles() { return []; },
-            async removeBundle() {},
-            async resolveBundle(generation: string) {
-                return { directory: join(dataDirectory, "bundles", generation), generation };
-            },
-            async projectBundle() { throw new Error("not used"); }
+        capabilities: {
+            assets: {
+                async installBundle() { throw new Error("not used"); },
+                async installDirectory() { throw new Error("not used"); },
+                async listBundles() { return []; },
+                async removeBundle() {},
+                async resolveBundle(generation: string) {
+                    return { directory: join(dataDirectory, "bundles", generation), generation };
+                },
+                async projectBundle() { throw new Error("not used"); }
+            }
         },
         generation: "agent-generation-a",
         id: "agent",
@@ -41,8 +43,8 @@ async function harness(t: test.TestContext) {
             runtimeDirectory: join(root, "runtime"),
             stateDirectory
         },
-        version: "0.1.0",
-        worker: { async openSession() { throw new Error("not used"); } }
+        register() {},
+        version: "0.1.0"
     } satisfies ExtensionContext;
     return { context, dataDirectory, errors, stateDirectory, warnings };
 }

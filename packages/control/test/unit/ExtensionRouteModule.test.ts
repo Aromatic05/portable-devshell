@@ -3,7 +3,6 @@ import test from "node:test";
 
 import type {
     ExtensionRuntimeRecord,
-    JsonValue,
     PrefixRouteContext
 } from "@portable-devshell/shared";
 
@@ -37,10 +36,6 @@ function record(enabled = true): ExtensionRuntimeRecord {
 function port(events: string[] = []): ExtensionControlPort {
     let enabled = true;
     return {
-        async call(id, operation, input, invocation): Promise<JsonValue> {
-            events.push(`call:${id}:${operation}:${invocation.requestId}:${invocation.localOwner}`);
-            return { input: input ?? null };
-        },
         async command(id, argv, invocation) {
             events.push(`command:${id}:${argv.join("|")}:${invocation.requestId}:${invocation.localOwner}:${invocation.workingDirectory ?? ""}`);
             return { kind: "text", text: "ok" };
@@ -77,7 +72,7 @@ function operation(module: ReturnType<typeof createExtensionRouteModule>, name: 
     return found;
 }
 
-test("Extension routes expose read and RPC dispatch generically without lifecycle authority", async () => {
+test("Extension routes expose management reads without a generic RPC surface", async () => {
     const events: string[] = [];
     const module = createExtensionRouteModule(port(events));
 
@@ -86,26 +81,14 @@ test("Extension routes expose read and RPC dispatch generically without lifecycl
         [record()]
     );
     assert.deepEqual(
-        await operation(module, "call").handle({
+        await operation(module, "get").handle({
             id: "2",
-            name: "call",
-            payload: { extensionId: "example", input: { value: 1 }, operation: "ping" }
+            name: "get",
+            payload: { extensionId: "example" }
         }, context("web", "web-session")),
-        { input: { value: 1 } }
+        record()
     );
-    assert.deepEqual(
-        await operation(module, "call").handle({
-            id: "2a",
-            name: "call",
-            payload: { extensionId: "example", operation: "ping" }
-        }, context("web", "local-owner")),
-        { input: null }
-    );
-    assert.deepEqual(events, [
-        "list",
-        "call:example:ping:req-1:false",
-        "call:example:ping:req-1:false"
-    ]);
+    assert.deepEqual(events, ["list", "list"]);
 });
 
 test("Extension command dispatch is CLI-only while lifecycle mutations require local-owner CLI", async () => {
@@ -119,18 +102,18 @@ test("Extension command dispatch is CLI-only while lifecycle mutations require l
     assert.deepEqual(await command.handle({
         id: "1",
         name: "command",
-        payload: { argv: ["--help"], extensionId: "example" }
+        payload: { argv: ["--help"], commandId: "example" }
     }, context("cli", "bearer")), { kind: "text", text: "ok" });
     assert.deepEqual(await command.handle({
         id: "1a",
         name: "command",
-        payload: { argv: ["provider", "list"], extensionId: "example", workingDirectory: "/repo" }
+        payload: { argv: ["provider", "list"], commandId: "example", workingDirectory: "/repo" }
     }, context("cli", "local-owner")), { kind: "text", text: "ok" });
     await assert.rejects(
         async () => await command.handle({
             id: "1b",
             name: "command",
-            payload: { argv: [], extensionId: "example", workingDirectory: "/repo" }
+            payload: { argv: [], commandId: "example", workingDirectory: "/repo" }
         }, context("cli", "bearer")),
         /workingDirectory is restricted to the local owner CLI/iu
     );
@@ -138,7 +121,7 @@ test("Extension command dispatch is CLI-only while lifecycle mutations require l
         async () => await command.handle({
             id: "2",
             name: "command",
-            payload: { argv: [], extensionId: "example" }
+            payload: { argv: [], commandId: "example" }
         }, context("web", "local-owner")),
         /only to CLI clients/iu
     );
@@ -176,31 +159,31 @@ test("Extension command dispatch is CLI-only while lifecycle mutations require l
     ]);
 });
 
-test("Extension route parser rejects invalid namespaces, operations and command payloads before dispatch", async () => {
+test("Extension route parser rejects invalid management ids and command payloads before dispatch", async () => {
     const events: string[] = [];
     const module = createExtensionRouteModule(port(events));
 
     await assert.rejects(
-        async () => await operation(module, "call").handle({
+        async () => await operation(module, "get").handle({
             id: "1",
-            name: "call",
-            payload: { extensionId: "Bad_ID", operation: "ping" }
+            name: "get",
+            payload: { extensionId: "Bad_ID" }
         }, context("cli", "local-owner")),
         /extensionId must match/iu
     );
     await assert.rejects(
-        async () => await operation(module, "call").handle({
+        async () => await operation(module, "command").handle({
             id: "2",
-            name: "call",
-            payload: { extensionId: "example", operation: "bad.operation" }
+            name: "command",
+            payload: { argv: [], commandId: "Bad_ID" }
         }, context("cli", "local-owner")),
-        /route-safe identifier/iu
+        /commandId must match/iu
     );
     await assert.rejects(
         async () => await operation(module, "command").handle({
             id: "3",
             name: "command",
-            payload: { argv: [1], extensionId: "example" }
+            payload: { argv: [1], commandId: "example" }
         }, context("cli", "local-owner")),
         /array of strings/iu
     );
@@ -208,7 +191,7 @@ test("Extension route parser rejects invalid namespaces, operations and command 
         async () => await operation(module, "command").handle({
             id: "4",
             name: "command",
-            payload: { argv: [], extensionId: "example", workingDirectory: "relative" }
+            payload: { argv: [], commandId: "example", workingDirectory: "relative" }
         }, context("cli", "local-owner")),
         /workingDirectory must be an absolute path/iu
     );

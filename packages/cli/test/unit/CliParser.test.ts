@@ -30,17 +30,17 @@ test("CliParser rejects invalid command shapes", () => {
     assert.throws(() => parser.parse(["instance", "unknown"]));
 });
 
-test("CliParser keeps Extension namespaces generic", () => {
+test("CliParser treats unknown top-level namespaces as cli.commands local ids", () => {
     const parser = new CliParser();
 
     assert.deepEqual(parser.parse(["agent", "start", "worker-a:/repo"]), {
         args: ["start", "worker-a:/repo"],
-        extensionId: "agent",
+        commandId: "agent",
         kind: "extension.command"
     });
     assert.deepEqual(parser.parse(["agent", "--help"]), {
         args: ["--help"],
-        extensionId: "agent",
+        commandId: "agent",
         kind: "extension.command"
     });
     assert.deepEqual(parser.parse(["extension"]), { kind: "extension.help" });

@@ -1,12 +1,19 @@
 {
     "schemaVersion": 1,
-    "apiVersion": 2,
+    "apiVersion": 3,
     "id": "skill",
     "name": "portable-devshell Skill",
     "version": "0.1.0",
     "entry": "index.ts",
-    "capabilities": [
-        "assets",
-        "command"
-    ]
+    "capabilities": ["assets"],
+    "extensions": {
+        "cli.commands": [
+            {
+                "id": "skill",
+                "title": "Skill",
+                "summary": "Inspect and project portable-devshell Skills",
+                "usage": "skill <command>"
+            }
+        ]
+    }
 }

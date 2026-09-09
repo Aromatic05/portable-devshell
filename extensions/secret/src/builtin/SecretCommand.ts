@@ -1,10 +1,10 @@
 import { isAbsolute, resolve } from "node:path";
 
 import type {
-    ExtensionCommandResult,
     ExtensionInvocationContext,
     ExtensionJsonValue
 } from "@portable-devshell/extension";
+import type { CliCommandResult } from "@portable-devshell/extension/cli";
 
 import { scanSecrets } from "./SecretScan.js";
 
@@ -18,7 +18,7 @@ export const SECRET_USAGE = [
 export async function executeSecretCommand(
     argv: readonly string[],
     invocation: ExtensionInvocationContext
-): Promise<ExtensionCommandResult> {
+): Promise<CliCommandResult> {
     invocation.signal.throwIfAborted();
     requireLocalOwner(invocation);
     if (argv.length === 0 || ["help", "--help", "-h"].includes(argv[0] ?? "")) {
@@ -27,7 +27,10 @@ export async function executeSecretCommand(
     }
     if (argv[0] !== "scan") throw usageError(`Unknown secret command: ${argv[0]}`);
     const options = parseSecretScanArgs(argv.slice(1), invocation);
-    return { kind: "json", value: await scanSecrets(options) as unknown as ExtensionJsonValue };
+    return {
+        kind: "json",
+        value: await scanSecrets({ ...options, signal: invocation.signal }) as unknown as ExtensionJsonValue
+    };
 }
 
 function parseSecretScanArgs(

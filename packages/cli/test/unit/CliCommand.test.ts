@@ -210,7 +210,7 @@ test("CliMain resolves help locally without contacting Control", async () => {
     assert.notEqual(stderr.flush().length, 0);
 });
 
-test("CliMain dispatches Extension management and namespaced commands through the generic client", async () => {
+test("CliMain keeps Extension management separate from cli.commands dispatch", async () => {
     const stdout = createBuffer();
     const stderr = createBuffer();
     const calls: string[] = [];
@@ -225,10 +225,10 @@ test("CliMain dispatches Extension management and namespaced commands through th
     };
     const cli = new CliMain({
         createCliClients: () => testClients({
-            async extensionCommand(extensionId: string, argv: readonly string[]) {
-                calls.push(`command:${extensionId}:${argv.join("|")}`);
+            async extensionCommand(commandId: string, argv: readonly string[]) {
+                calls.push(`command:${commandId}:${argv.join("|")}`);
                 return argv[0] === "json"
-                    ? { kind: "json", value: { extensionId } }
+                    ? { kind: "json", value: { commandId } }
                     : { kind: "text", text: "agent help" };
             },
             async extensionDisable(extensionId: string) {
@@ -281,7 +281,7 @@ test("CliMain dispatches Extension management and namespaced commands through th
     assert.equal(await cli.run(["agent", "--help"]), 0);
     assert.equal(stdout.flush(), "agent help\n");
     assert.equal(await cli.run(["agent", "json"]), 0);
-    assert.match(stdout.flush(), /"extensionId": "agent"/u);
+    assert.match(stdout.flush(), /"commandId": "agent"/u);
 
     assert.deepEqual(calls, [
         "list",

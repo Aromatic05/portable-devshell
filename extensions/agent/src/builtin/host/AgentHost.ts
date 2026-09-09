@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import type { ExtensionProcessCapability } from "@portable-devshell/extension";
+
 import type {
     AgentProvider,
     AgentProviderHandle
@@ -32,6 +34,7 @@ export interface AgentHostStartOptions {
 
 export interface AgentHostOptions {
     idFactory?: () => string;
+    processes: ExtensionProcessCapability;
     providers?: readonly AgentProvider[];
     registry?: AgentProviderRegistry;
     runtimeRootDirectory: string;
@@ -46,13 +49,16 @@ interface AgentHostRuntime {
 
 export class AgentHost {
     readonly #idFactory: () => string;
+    readonly #processes: ExtensionProcessCapability;
     readonly #registry: AgentProviderRegistry;
     readonly #runtimeRootDirectory: string;
     readonly #runtimes = new Map<string, AgentHostRuntime>();
+    readonly #startingProviders = new Map<string, string>();
     readonly #webBasePath: string;
 
     constructor(options: AgentHostOptions) {
         this.#idFactory = options.idFactory ?? (() => `ag-${randomUUID()}`);
+        this.#processes = options.processes;
         this.#registry = options.registry ?? new AgentProviderRegistry(options.providers);
         this.#runtimeRootDirectory = options.runtimeRootDirectory;
         this.#webBasePath = normalizeBasePath(options.webBasePath ?? "/agent");
@@ -69,6 +75,11 @@ export class AgentHost {
     get(agentId: string): AgentHostRecord | undefined {
         const runtime = this.#runtimes.get(agentId);
         return runtime === undefined ? undefined : cloneRecord(runtime.record);
+    }
+
+    isProviderInUse(providerId: string): boolean {
+        return [...this.#startingProviders.values()].includes(providerId)
+            || [...this.#runtimes.values()].some((runtime) => runtime.record.provider === providerId);
     }
 
     webEndpoint(): AgentHostWebEndpoint | undefined {
@@ -123,16 +134,19 @@ export class AgentHost {
     }
 
     async start(options: AgentHostStartOptions): Promise<AgentHostRecord> {
-        const provider = this.#registry.require(options.provider);
         const agentId = this.#idFactory();
-        if (this.#runtimes.has(agentId)) {
+        if (this.#runtimes.has(agentId) || this.#startingProviders.has(agentId)) {
             throw new Error(`Agent id already exists: ${agentId}`);
         }
 
+        let provider: AgentProvider;
         let handle: AgentProviderHandle;
         try {
+            provider = this.#registry.require(options.provider);
+            this.#startingProviders.set(agentId, provider.id);
             handle = await provider.start({
                 agentId,
+                processes: this.#processes,
                 runtime: new AgentProviderRuntimePaths({
                     provider: provider.id,
                     rootDirectory: this.#runtimeRootDirectory,
@@ -143,12 +157,14 @@ export class AgentHost {
                 web: { basePath: `${this.#webBasePath}/` }
             });
         } catch (error) {
+            this.#startingProviders.delete(agentId);
             const cleanup = await settleCleanup(options.tools);
             if (cleanup !== undefined) {
                 throw new AggregateError([error, cleanup], `Agent ${agentId} failed to start and release its tool session.`);
             }
             throw error;
         }
+        this.#startingProviders.delete(agentId);
         const record: AgentHostRecord = {
             agentId,
             provider: provider.id,
@@ -163,6 +179,14 @@ export class AgentHost {
             runtime.record.state = "stopped";
             this.#runtimes.delete(agentId);
             await runtime.tools.close();
+        }).catch(() => undefined);
+        void options.tools.closed.then(async () => {
+            if (this.#runtimes.get(agentId) !== runtime || runtime.record.state !== "running") return;
+            runtime.record.state = "stopping";
+            await runtime.handle.stop().catch(() => undefined);
+            if (this.#runtimes.get(agentId) !== runtime) return;
+            runtime.record.state = "stopped";
+            this.#runtimes.delete(agentId);
         }).catch(() => undefined);
         return cloneRecord(record);
     }
