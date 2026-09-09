@@ -633,6 +633,8 @@ hostPoint === extensionBundledPoint
 
 这允许 `.dsext` 自包含 SDK helper，而不需要通过 `hostDependencies` 暴露 `@portable-devshell/*` internal packages。
 
+当前 Control composition 对 host point-definition registry 与 sandbox point-codec registry 做 fail-fast parity 校验：两边必须拥有完全相同的稳定 point id 集合。这个检查的目的只是防止私有实现漂移，例如新增 `foo.bar` declaration/binding contract 却忘记补 sandbox descriptor/invocation codec；它不能演变成 generic public point catalog 或新的 Extension core taxonomy。
+
 ## 8. CLI Domain
 
 ### 8.1 第一批 Extension Point：`cli.commands`

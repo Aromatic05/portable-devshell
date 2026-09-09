@@ -230,6 +230,8 @@ Control 的 Extension runtime Host 对 point domain 保持中立：它负责 sta
 
 Sandbox transport 同样保持 domain ownership。Worker `ready` registration 只携带 point id、local id 和 opaque JSON descriptor；generic sandbox runtime 只提供私有 binding invocation bridge，不知道 `cli.command`、`web.files`、`web.endpoint` 这类 point-specific wire kind。CLI/Web 的内部 sandbox codec 负责 descriptor、Worker-side binding invocation 和 Host-side proxy restoration。该 generic bridge 只存在于 Control 私有实现层，不是 public `extension.call` 或 generic RPC ABI。
 
+Control composition 还会校验 host `ExtensionPointRegistry` 与 sandbox codec registry 的 point-id 集合完全一致。这个 parity gate 只约束两套私有实现投影，避免新增 point 时只注册 declaration/binding owner 或只注册 sandbox codec；它不是第三套 public registry，也不会把 codec/transport identity 暴露给 Extension。
+
 Public SDK 按 domain subpath 发布 leaf contract：
 
 ```text
