@@ -5,6 +5,10 @@ import type {
     PrefixRouteContext,
     PrefixRouteModuleDefinition
 } from "@portable-devshell/shared";
+import {
+    errorCodes,
+    toControlErrorBody
+} from "@portable-devshell/shared";
 
 import { CliExtensionCommandService } from "../../../src/control/cli/CliExtensionCommandService.ts";
 import { createCliRouteModule } from "../../../src/control/cli/CliRouteModule.ts";
@@ -195,6 +199,29 @@ test("CLI command route owns invocation, caller cwd, and payload validation", as
         "command:agent:fail:req-1:true:",
         "release:agent"
     ]);
+});
+
+test("CLI command acquisition failure is translated without leaking ExtensionHost errors", async () => {
+    const service = new CliExtensionCommandService(extensionHost([]));
+    const cli = createCliRouteModule(service);
+    const command = operation(cli, "command");
+
+    await assert.rejects(
+        async () => await command.handle({
+            id: "1",
+            name: "command",
+            payload: { argv: [], commandId: "missing" }
+        }, context("cli", "local-owner")),
+        (error: unknown) => {
+            const body = toControlErrorBody(error);
+            assert.equal(body?.code, errorCodes.controlCliCommandFailed);
+            assert.equal(body?.message, "CLI command missing is unavailable.");
+            assert.deepEqual(body?.details, { commandId: "missing" });
+            assert.equal(body?.cause, undefined);
+            assert.doesNotMatch(body?.message ?? "", /missing registration|Extension/u);
+            return true;
+        }
+    );
 });
 
 test("CLI and Web discovery routes enforce their owning client domain", async () => {

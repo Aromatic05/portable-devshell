@@ -24,7 +24,18 @@ export class CliExtensionCommandService {
         argv: readonly string[],
         context: CliCommandInvocationContext
     ): Promise<CliCommandResult> {
-        const { lease, registration } = await this.#extensions.acquireRegistration("cli.commands", commandId);
+        let acquired;
+        try {
+            acquired = await this.#extensions.acquireRegistration("cli.commands", commandId);
+        } catch {
+            throw createError({
+                code: errorCodes.controlCliCommandFailed,
+                details: { commandId },
+                message: `CLI command ${commandId} is unavailable.`,
+                retryable: false
+            });
+        }
+        const { lease, registration } = acquired;
         try {
             if (typeof registration.binding !== "function") {
                 throw createError({
