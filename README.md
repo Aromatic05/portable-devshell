@@ -91,16 +91,20 @@ devshell tui
 http://127.0.0.1:17890/<instance>/mcp
 ```
 
-实例工具策略由 group 和 capability 共同决定：
+MCP `tools/list` 使用固定 runtime catalog，不再按 instance 配置动态裁剪。模型通过
+`bash_run` / `tmux_run` 中的 Context-bound `devshell` 使用 Extension command；可用 root
+由当前 instance 的 `[extensions].model` allowlist 决定：
 
 ```toml
 [mcp]
 enabled = true
 
-[mcp.tools]
-groups = ["file", "bash", "artifact", "tmux", "todo", "workspace"]
-capabilities = ["read", "write", "execute"]
+[extensions]
+model = ["artifact", "instance", "mcp", "secret", "skill"]
 ```
+
+`instance_connect` 是 MCP 中保留的 instance Context attach primitive；instance 生命周期管理仍使用
+原生 `devshell instance ...`。model command 不会 fallback 到 native/builtin CLI。
 
 普通 MCP 客户端可以使用 `explicit` Context；支持稳定 Host metadata 的 ChatGPT endpoint 可使用 `openai-session`，让 model-facing 工具不携带内部 `ctxId`。两种模式最终都解析到 portable-devshell 自己的 Context。
 

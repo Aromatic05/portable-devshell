@@ -122,6 +122,33 @@ test("publishing creates one immutable release and has no upload or clobber fall
         assert.equal(calls[0].args.includes("upload"), false);
         assert.equal(calls[0].args.includes("--clobber"), false);
         assert.equal(calls[0].args.includes("--verify-tag"), true);
+        assert.equal(calls[0].args.includes("--notes"), false);
+    } finally {
+        await rm(fixture.root, { force: true, recursive: true });
+    }
+});
+
+test("publishing prepends curated migration notes before generated release notes", async () => {
+    const fixture = await createReleaseAssets();
+    const calls = [];
+    try {
+        await publishRelease({
+            assetDirectory: fixture.directory,
+            notes: "Breaking changes\n\nRead the migration guide.",
+            tag: "v1.2.3",
+            runCommand(command, args) {
+                calls.push({ args, command });
+                return { status: 0, stderr: "", stdout: "" };
+            },
+        });
+        assert.equal(calls.length, 1);
+        const notesIndex = calls[0].args.indexOf("--notes");
+        assert.notEqual(notesIndex, -1);
+        assert.equal(
+            calls[0].args[notesIndex + 1],
+            "Breaking changes\n\nRead the migration guide.",
+        );
+        assert.equal(calls[0].args.includes("--generate-notes"), true);
     } finally {
         await rm(fixture.root, { force: true, recursive: true });
     }

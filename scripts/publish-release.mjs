@@ -4,6 +4,8 @@ import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+
 const TARGETS = [
     "linux-x64",
     "linux-arm64",
@@ -114,6 +116,7 @@ export async function assertReleaseAbsent({
 
 export async function publishRelease({
     assetDirectory,
+    notes,
     tag,
     runCommand = runCommandSync,
 }) {
@@ -127,6 +130,9 @@ export async function publishRelease({
         "--generate-notes",
         "--title",
         tag,
+        ...(typeof notes === "string" && notes.trim().length > 0
+            ? ["--notes", notes.trim()]
+            : []),
         ...assets,
     ];
     const result = runCommand("gh", args);
@@ -177,7 +183,19 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
     } else {
         const assetDirectory =
             readOption(args, "--asset-dir") ?? "./release-assets";
-        await publishRelease({ assetDirectory, tag });
+        const notes = await readReleaseNotes(tag);
+        await publishRelease({ assetDirectory, notes, tag });
+    }
+}
+
+async function readReleaseNotes(tag) {
+    if (typeof tag !== "string" || tag.length === 0) return undefined;
+    const path = resolve(repositoryRoot, "docs", "releases", `${tag}.md`);
+    try {
+        return await readFile(path, "utf8");
+    } catch (error) {
+        if (error?.code === "ENOENT") return undefined;
+        throw error;
     }
 }
 
