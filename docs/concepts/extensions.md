@@ -250,10 +250,13 @@ root 只导出 core ABI；CLI/Web domain contract 不从 root 聚合，也不要
 commands
 CliCommandDeclaration
 CliCommandBinding
+CliCommandInvocationContext
 CliCommandResult
 ```
 
 Declaration 可以提供 `title`、`summary` 和 `usage`。Binding 当前由 CLI domain 定义为 argv + invocation context -> CLI result；这是 CLI 自己的 contract，不是 generic Extension RPC。
+
+`CliCommandInvocationContext` 也由 CLI leaf contract 拥有，其中当前包含 `localOwner`、`requestId`、`signal` 和可选 `workingDirectory`。这些字段描述 CLI invocation authority/cancellation/path 语义，因此不会从 `@portable-devshell/extension` root 导出 generic `ExtensionInvocationContext`。
 
 Control 内部 static catalog 会由 CLI domain 投影成 command discovery DTO。该 discovery 只包含 CLI presentation metadata，不包含 generation 或 runtime binding。`devshell <extension-command> --help` 使用这一静态数据生成 help，因此查看 Extension command 帮助不会 activation Extension；普通 argv 仍按需取得 generation lease 并调用真实 binding。全局 `devshell --help` 不依赖 Control，保持本地可用。
 

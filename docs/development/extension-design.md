@@ -695,6 +695,8 @@ parsed invocation
 
 local-owner CLI 的 working directory 是 CLI invocation domain 的语义，应继续由 CLI point invocation context 明确传递。
 
+> 实现状态：已落地。该 context 类型由 `@portable-devshell/extension/cli` 以 `CliCommandInvocationContext` 导出；Extension core root 不再定义 generic `ExtensionInvocationContext`。`localOwner / workingDirectory` 等 CLI-specific 字段因此不会反向污染 core ABI。
+
 Extension 不得读取 Control daemon 自己的 `process.cwd()` 来猜用户工作目录。
 
 ### 8.5 不应导出的内容
