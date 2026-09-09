@@ -37,6 +37,7 @@
 
 * [Testspace](development/testspace.md)：完整本地 DevShell + MCP connector 测试环境。
 * [验收与发布门禁](development/acceptance.md)：测试入口、发布前检查与 CI 约束。
+* [Extension 架构与 ABI 设计](development/extension-design.md)：Capability、Extension Point、generation ownership，以及各 domain 的 public Extension API 边界。
 
 ## 文档约定
 

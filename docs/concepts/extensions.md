@@ -1,49 +1,121 @@
 # Extension ABI
 
-portable-devshell 的 Extension 只运行在 **Control**。Worker 不加载 Extension，也不存在 native Worker plugin ABI。
+portable-devshell 的 Extension 运行在 **Control**。Worker 不加载 Extension，也不存在 native Worker plugin ABI。
 
-当前 public ABI version 为 `2`。Builtin Extension 与独立安装的 Extension 使用同一套 ABI；Builtin 身份不提供绕过接口。
+当前 public Extension API version 为 `3`。Builtin Extension 与独立安装的 Extension 使用同一套 ABI；builtin 身份不绕过 capability、registration、sandbox 或 generation ownership。
 
-## 边界
+## 核心模型
 
-一个 Extension 只组合三类能力：
+Extension ABI 由三个正交概念组成：
 
 ```text
-Extension
-├── Control ABI
-├── asset management / transfer
-└── Worker control
+Capabilities
+    Control -> Extension
+    Extension 获得宿主管理资源的 authority
+
+Extension Points
+    Extension -> host domain
+    Extension 为某个 domain 提供实现
+
+Generation Ownership
+    决定 capability resource、registration 和 sandbox 的生命周期
 ```
 
-Control 向 Extension 提供：
+Capability 不是 contribution，Extension Point 也不是 permission。Transport（RPC、MessagePort、HTTP proxy、child-process IPC 等）属于 runtime implementation，不进入 public ABI taxonomy。
+
+## Manifest
+
+Manifest 在 activation 前描述静态事实：
+
+```json
+{
+    "schemaVersion": 1,
+    "apiVersion": 3,
+    "id": "example",
+    "name": "Example",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "hostDependencies": [],
+    "capabilities": ["assets", "workers"],
+    "extensions": {
+        "cli.commands": [
+            { "id": "example", "title": "Example" }
+        ]
+    }
+}
+```
+
+`capabilities` 只包含宿主管理资源类别。当前集合是：
+
+```text
+assets
+workers
+processes
+```
+
+`extensions` 按稳定的 domain-owned Extension Point id 保存静态 declaration。它不授予任何资源权限。
+
+Runtime binding 必须与 manifest declaration 严格对应：未声明 registration、重复 registration、声明后没有 binding、未知 point 或不合法的 domain declaration 都会使 candidate activation 失败。
+
+## ExtensionContext
+
+Extension module 的公共生命周期保持最小：
 
 ```ts
-context.id
-context.version
-context.generation
-context.paths
-context.logger
-context.assets
-context.worker
+export interface ExtensionModule {
+    activate(context: ExtensionContext): Promise<void> | void;
+    deactivate?(): Promise<void> | void;
+}
 ```
 
-Extension 向 Control 提供 contribution：
+`ExtensionContext` 的结构是：
 
 ```text
-command
-rpc
-web
-instance-lifecycle
-dispose
+identity
+paths
+logger
+capabilities
+register(...)
 ```
 
-CLI command 的 invocation context 还可以携带 `workingDirectory`。该字段只由经过认证的 local-owner CLI 注入，表示调用者在 Control 主机上的工作目录；远程 CLI 不能声明它。依赖 Control 本地 project 路径的 Extension 必须使用这个字段，而不能读取 Control daemon 自己的 `process.cwd()`。
+典型使用：
 
-`context.*` 与 contribution 的方向不能混用：前者是宿主能力，后者是 Extension 对宿主提供的入口。
+```ts
+import type { ExtensionContext } from "@portable-devshell/extension";
+import { commands } from "@portable-devshell/extension/cli";
 
-## Assets
+export function activate(context: ExtensionContext): void {
+    context.register(commands, "example", async (argv, invocation) => {
+        return { kind: "text", text: argv.join(" ") };
+    });
+}
+```
 
-`context.assets` 管理 Extension 自己拥有的不可变资产 generation：
+`deactivate()` 只负责 Extension 自己拥有的 graceful cleanup。Control-owned Worker sessions、managed processes、registrations 等不能依赖 `deactivate()` 才能回收；sandbox fault 时 Host 仍必须能够强制清理它们。
+
+### Paths
+
+```text
+codeDirectory
+    immutable code generation
+
+dataDirectory
+    Extension-owned persistent data
+
+stateDirectory
+    mutable state shared across generations
+
+runtimeDirectory
+    one activation incarnation only
+```
+
+同一个 code generation reload 时，新旧 activation incarnation 可以短暂并存，因此 `runtimeDirectory` 每次 activation 独立，不能被持久化到下一次 reload。
+
+## Capabilities
+
+### assets
+
+`context.capabilities.assets` 管理 Extension 自己拥有的不可变 asset generations：
 
 ```text
 installBundle
@@ -54,25 +126,19 @@ resolveBundle
 removeBundle
 ```
 
-`generation` 是 opaque identity，Extension 不得解析它，也不得依赖 Control 的物理目录布局。`resolveBundle()` 返回的目录只表示该 generation 当前可用的位置；Extension 不应由它推导兄弟 generation 或 Control 内部路径。
+asset `generation` 是 opaque identity。Extension 不得解析 generation，也不得依赖 Control 的物理 storage layout。
 
-资产语义属于 Extension。例如 Agent 决定哪个 generation 是 Pi provider，Skill 决定哪个目录是一项 Skill。Control 只负责安全物化、内容寻址以及传输。
-
-Extension-owned 资产跨机器时复用 Artifact 基础设施，并只通过 `projectBundle()` 进入 Worker resource namespace；Extension 只指定已安装的 generation 与逻辑目标 `instance + collection + key`：
+`projectBundle()` 只接受逻辑 Worker resource target：
 
 ```text
-generation
-  -> Control resolves owned source
-  -> Worker Resource Host prepares Extension-owned collection
-  -> Artifact transfer
-  -> collection/key on target Worker
+instance + collection + key
 ```
 
-`projectBundle()` 不接受 raw Worker filesystem path；真实 collection directory 由 Worker Resource Host 决定。Extension 也不能通过 asset API 指定任意 Control host source path，因此 resource projection 不是任一侧 filesystem 的读取/写入旁路。
+它不接受 raw Worker filesystem path。真实目录由 Worker Resource Host 管理，传输复用 Artifact infrastructure。
 
-## Worker control
+### workers
 
-`context.worker.openSession()` 是 Extension 唯一的 target execution 入口：
+`context.capabilities.workers.openSession()` 是 Extension 的受控 Worker execution 入口：
 
 ```ts
 openSession({
@@ -84,6 +150,7 @@ openSession({
 Session 提供：
 
 ```text
+closed
 environment
 instance
 workspace
@@ -92,41 +159,157 @@ callTool
 close
 ```
 
-`environment` 是 Worker handshake 的稳定只读投影，目前只包含：
+`closed` 是 host-owned lifecycle signal。instance disabled/deleted、connection loss、generation cleanup 或 caller close 都会最终使 session 不再可用；依赖 Worker 的 Extension 应观察 session closure，而不是要求 generic lifecycle broadcast。
+
+工具调用仍经过正常 approval、scheduler 和 audit pipeline，并以 Extension 归因。Public ABI 不暴露 `WorkerInstance`、provider transport、Worker protocol client 或 raw Worker RPC。
+
+### processes
+
+`context.capabilities.processes` 创建 **Control-owned managed process**，不是授予 Node `child_process` 权限：
 
 ```text
-homeDirectory
-platform
+Extension
+    -> processes.start(...)
+    -> Control Process Manager
+    -> Managed Process
 ```
 
-业务资源目录不进入通用 Worker session ABI。静态资源使用 `context.assets.projectBundle()`，由 Worker private Resource Host 管理 instance-scoped namespace；动态远端行为才使用 `context.worker.openSession()`。例如 Skill 只声明 `assets + command`，不需要 `worker` capability。
+Managed process 可以暴露受控 structured-message channel、stderr、termination 和 `closed` result。Generation fault / retirement 时 Control 会回收仍存活的 managed processes；IPC channel 意外断开也会触发回收。
 
-不暴露 `WorkerInstance`、Worker protocol client、SSH/Docker/Reverse transport、RPC framing 或 connection lease。
+Extension sandbox 本身仍拒绝裸 `child_process`，因此 sandbox 被 terminate 后不会留下不受 generation ownership 管理的子进程。
 
-工具调用仍经过正常的 approval、scheduler 和 audit pipeline，并以 `source=extension` 和 Extension id 归因。
+## Extension Points
 
-## Capability
+Extension Point 由具体 host domain 拥有，而不是由 Extension core 维护一个全局 kind enum。
 
-Manifest 显式声明使用的 capability：
+Point identity 使用稳定 namespaced string：
 
 ```text
-assets
+cli.commands
+web.applications
+```
+
+Registration 使用 Extension-local id；Host 结合 point id、Extension id 和 local id 建立全局 identity。Runtime registration 默认属于当前 generation，generation retirement 自动撤销。
+
+Public SDK 按 domain subpath 发布 leaf contract：
+
+```text
+@portable-devshell/extension
+@portable-devshell/extension/cli
+@portable-devshell/extension/web
+```
+
+root 只导出 core ABI；CLI/Web domain contract 不从 root 聚合，也不要求 Extension 依赖完整 CLI/Web runtime package。
+
+### cli.commands
+
+`@portable-devshell/extension/cli` 当前公开：
+
+```text
+commands
+CliCommandDeclaration
+CliCommandBinding
+CliCommandResult
+```
+
+Declaration 可以提供 `title`、`summary` 和 `usage`。Binding 当前由 CLI domain 定义为 argv + invocation context -> CLI result；这是 CLI 自己的 contract，不是 generic Extension RPC。
+
+Local-owner CLI 可以在 invocation context 中提供 `workingDirectory`。依赖 Control 主机 project 路径的 Extension 必须使用这个字段，而不能读取 daemon 自己的 `process.cwd()` 猜调用者目录。
+
+### web.applications
+
+`@portable-devshell/extension/web` 当前公开：
+
+```text
+applications
+WebApplicationDeclaration
+WebApplicationBinding
+WebApplicationSource
+```
+
+Web host 拥有最终 mount path、authentication/session、same-origin/security headers、HTTP/WebSocket transport 和 lease lifetime。
+
+Application binding 只描述 application source：
+
+```text
+files
+    Extension code directory 下的静态 application directory
+
+endpoint
+    Extension 解析得到的受控 application endpoint
+```
+
+这些 source kind 属于 Web domain contract，不是 Extension core capability。Extension 不获得 raw `IncomingMessage` / `ServerResponse`、WebSocket implementation 或 portable-devshell 主 Web DOM。
+
+## Generation ownership
+
+Generation 是 runtime ownership root。正常 retirement 的顺序概念上是：
+
+```text
+stop accepting new invocations
+-> drain active invocation leases
+-> revoke registrations
+-> close Worker sessions
+-> terminate managed processes
+-> release other host-managed resources
+-> run Extension deactivate() when possible
+-> terminate sandbox
+-> remove runtime directory
+```
+
+Fault path 可以跳过 Extension-owned cleanup，但不能跳过 Host 对 registrations、sessions、processes 和 sandbox 的强制回收。
+
+旧的 generic：
+
+```text
 command
-instance-lifecycle
 rpc
 web
-worker
+lifecycle
+instance-lifecycle
+extension.call
+ExtensionActivation contribution object
 ```
 
-未声明的宿主能力必须在使用前拒绝。
+不属于 API v3。
 
-每个 Extension generation 在独立的 `worker_threads` isolate 中执行，拥有独立 V8 heap、global state 和 event loop。Control 主线程只保留 contribution proxy，以及 assets / Worker control / logger 等宿主能力的 RPC bridge。默认对 generation 设置独立的 V8 old/young heap 与 stack 限额；sandbox OOM、崩溃或取消后拒绝停止时，只终止对应 worker thread，并将 generation 标记为 failed。
+## Host dependencies 与 sandbox
 
-这个机制是**内存与执行故障隔离**，不是 OS security sandbox。Extension worker 仍与 Control 处于同一进程身份和操作系统权限下，也仍可使用被 Node 暴露的 filesystem、network、process 等 API。Capability 是 public ABI grant，不应被解释成针对恶意 Extension 的系统调用权限边界。需要运行不受信任代码时，仍必须使用独立进程/OS sandbox。
+`hostDependencies` 是共享宿主 dependency tree 的显式 bare-package contract。Extension 先从自己的 immutable generation 解析模块；只有显式声明的 package root 才允许回落到宿主共享依赖。
 
-## 不属于 public ABI 的能力
+`@portable-devshell/extension` 及其公开 domain subpath 是 Host 提供的 public SDK。其他 `@portable-devshell/*` internal package 不通过 `hostDependencies` 暴露；`.dsext` 也不能携带私有 `node_modules` 来建立第二套 package tree。
 
-以下内容保持 Control/Core internal，不为某个 builtin module 扩张 public ABI：
+每个 activation 在独立 `worker_threads` isolate 中运行，拥有独立 V8 heap、global state 和 event loop。Runtime 对 heap/stack/external memory 设置边界，并拒绝 nested Worker、native addon、`SharedArrayBuffer`、shared WebAssembly memory、`node:vm` 新 realm 和 raw child process 等会绕过 ownership / budget 的机制。
+
+这仍然是**执行、资源 ownership 与 fault isolation**，不是恶意代码的完整 OS sandbox。Capability 表示 portable-devshell 管理资源的 authority，不应被解释成 syscall ACL；需要运行不受信任代码时仍需要独立进程或 OS sandbox。
+
+## Builtin Extension 映射
+
+当前 builtin Extension 用来持续验证 public ABI：
+
+```text
+Agent
+    capabilities: assets, workers, processes
+    extensions: cli.commands, web.applications
+
+Skill
+    capabilities: assets
+    extensions: cli.commands
+
+Secret
+    capabilities: none
+    extensions: cli.commands
+
+MCP Client
+    capabilities: none
+    extensions: cli.commands
+```
+
+Builtin module 不应因为自身需求扩张 core taxonomy。
+
+## 不属于 public ABI
+
+以下内容保持 Control/Core internal：
 
 ```text
 InstanceRegistry / provider transport
@@ -137,6 +320,8 @@ raw Artifact host endpoint
 MCP HTTP/OAuth host internals
 Worker protocol client
 Worker Resource Host physical paths / private RPC
+Control route framing
+sandbox MessagePort protocol
 ```
 
-MCP Server 因此是 builtin module，而不是 public Extension。Agent、Skill 等 builtin Extension 则应严格通过 public ABI 工作，用它们来持续验证 ABI 的完整性。
+后续新增 public Extension API 时，应先明确 domain owner、方向、lifecycle ownership 和真实 Extension 用例，再决定它是 capability、Extension Point 还是普通 domain DTO。
