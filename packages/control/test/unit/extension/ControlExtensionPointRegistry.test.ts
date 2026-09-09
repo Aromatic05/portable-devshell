@@ -31,3 +31,41 @@ test("Control rejects a point-definition and sandbox-codec composition drift", (
         /registry and sandbox codec registry are out of sync/u
     );
 });
+
+test("Control domain point definitions own declaration schema validation", () => {
+    const points = createControlExtensionPointRegistry();
+
+    assert.deepEqual(points.parseDeclaration("cli.commands", {
+        id: "agent",
+        summary: "Run an Agent",
+        title: "Agent",
+        usage: "agent <command>"
+    }, "example"), {
+        id: "agent",
+        summary: "Run an Agent",
+        title: "Agent",
+        usage: "agent <command>"
+    });
+    assert.deepEqual(points.parseDeclaration("web.applications", {
+        id: "agent",
+        title: "Agent"
+    }, "example"), {
+        id: "agent",
+        title: "Agent"
+    });
+    assert.throws(
+        () => points.parseDeclaration("cli.commands", {
+            id: "agent",
+            title: "Agent",
+            transport: "rpc"
+        }, "example"),
+        /unknown field/u
+    );
+    assert.throws(
+        () => points.parseDeclaration("web.applications", {
+            id: "agent",
+            title: " Agent "
+        }, "example"),
+        /non-empty trimmed string/u
+    );
+});

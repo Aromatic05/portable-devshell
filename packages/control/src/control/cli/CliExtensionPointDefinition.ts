@@ -1,9 +1,11 @@
 import {
     commands,
-    parseCliCommandDeclaration,
     type CliCommandDeclaration
 } from "@portable-devshell/extension/cli";
-import type { ExtensionPointDeclaration } from "@portable-devshell/extension";
+import type {
+    ExtensionJsonValue,
+    ExtensionPointDeclaration
+} from "@portable-devshell/extension";
 
 import type {
     ExtensionPointDefinition,
@@ -50,3 +52,21 @@ export const cliCommandsExtensionPointDefinition: ExtensionPointDefinition = Obj
         validateCliCommandBinding(binding, context);
     }
 });
+
+function parseCliCommandDeclaration(value: ExtensionPointDeclaration): CliCommandDeclaration {
+    const record = value as ExtensionPointDeclaration & Record<string, ExtensionJsonValue | undefined>;
+    const allowed = new Set(["id", "summary", "title", "usage"]);
+    const unknown = Object.keys(record).find((key) => !allowed.has(key));
+    if (unknown !== undefined) throw new TypeError(`cli.commands declaration has unknown field ${unknown}.`);
+    return Object.freeze({
+        id: value.id,
+        ...(record.summary === undefined ? {} : { summary: readString(record.summary, "summary") }),
+        title: readString(record.title, "title"),
+        ...(record.usage === undefined ? {} : { usage: readString(record.usage, "usage") })
+    });
+}
+
+function readString(value: ExtensionJsonValue | undefined, field: string): string {
+    if (typeof value === "string" && value.length > 0 && value.trim() === value) return value;
+    throw new TypeError(`cli.commands declaration ${field} must be a non-empty trimmed string.`);
+}

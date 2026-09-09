@@ -3,9 +3,13 @@ import { isAbsolute, relative, resolve } from "node:path";
 
 import {
     applications,
-    parseWebApplicationDeclaration,
+    type WebApplicationDeclaration,
     type WebApplicationBinding
 } from "@portable-devshell/extension/web";
+import type {
+    ExtensionJsonValue,
+    ExtensionPointDeclaration
+} from "@portable-devshell/extension";
 
 import type {
     ExtensionPointDefinition,
@@ -39,6 +43,16 @@ export const webApplicationsExtensionPointDefinition: ExtensionPointDefinition =
         }
     }
 });
+
+function parseWebApplicationDeclaration(value: ExtensionPointDeclaration): WebApplicationDeclaration {
+    const record = value as ExtensionPointDeclaration & Record<string, ExtensionJsonValue | undefined>;
+    const unknown = Object.keys(record).find((key) => key !== "id" && key !== "title");
+    if (unknown !== undefined) throw new TypeError(`web.applications declaration has unknown field ${unknown}.`);
+    if (typeof record.title !== "string" || record.title.length === 0 || record.title.trim() !== record.title) {
+        throw new TypeError("web.applications declaration title must be a non-empty trimmed string.");
+    }
+    return Object.freeze({ id: value.id, title: record.title });
+}
 
 function resolveContainedPath(root: string, child: string, label: string): string {
     if (isAbsolute(child)) throw new TypeError(`${label} must be relative to the Extension code directory.`);
