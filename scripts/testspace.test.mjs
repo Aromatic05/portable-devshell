@@ -6,8 +6,11 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 
 import {
+    buildTestspaceInstanceConfig,
+    buildTestspaceReverseInstanceConfig,
     resolveTestspaceCommand,
     resolveTestspaceInvocation,
+    resolveTestspaceLaunchPlan,
     TESTSPACE_INSTANCE,
     TESTSPACE_REVERSE_INSTANCE,
     testspaceUrls,
@@ -55,6 +58,35 @@ test("testspace URLs point at the isolated instance and Web UI", () => {
         reverseMcp: `http://127.0.0.1:19000/${TESTSPACE_REVERSE_INSTANCE}/mcp`,
         web: "http://127.0.0.1:19001/web/",
     });
+});
+
+test("testspace launcher prepares build artifacts before entering the isolated runtime", () => {
+    assert.deepEqual(resolveTestspaceLaunchPlan(["start"]), {
+        command: "start",
+        prepare: true,
+        runtimeArgv: ["start", "--skip-build"],
+    });
+    assert.deepEqual(resolveTestspaceLaunchPlan(["start", "--skip-build"]), {
+        command: "start",
+        prepare: false,
+        runtimeArgv: ["start", "--skip-build"],
+    });
+    assert.deepEqual(resolveTestspaceLaunchPlan(["status"]), {
+        command: "status",
+        prepare: false,
+        runtimeArgv: ["status"],
+    });
+});
+
+test("testspace instance fixtures use v4 model ACL without retired MCP policy", () => {
+    for (const config of [buildTestspaceInstanceConfig(), buildTestspaceReverseInstanceConfig()]) {
+        assert.match(config, /^version = 4$/mu);
+        assert.match(config, /^\[extensions\]$/mu);
+        assert.match(config, /^model = \["artifact", "instance", "mcp", "secret", "skill"\]$/mu);
+        assert.doesNotMatch(config, /^\[mcp\.tools\]$/mu);
+        assert.doesNotMatch(config, /^groups =/mu);
+        assert.doesNotMatch(config, /^capabilities =/mu);
+    }
 });
 
 test("Web smoke disables the Chromium sandbox for Linux CI or map-root Testspace", () => {

@@ -228,7 +228,7 @@ timeoutMs = 5000
 - `[mcp].contextMode`：选择 MCP 边界如何解析 portable-devshell Context。`explicit`（默认）允许 model-facing 工具显式携带 `ctxId`；`openai-session` 使用稳定 Host metadata 绑定内部 Context，并把 `ctxId` 留在模型 schema 之外。两种模式内部都继续使用 `ctxId` 作为 runtime key；完整语义见 [Context](../concepts/context.md)；
 - `[mcp].token`：仅在 `auth = "token"` 时使用，至少 32 UTF-8 字节；
 - `[mcp].path`：固定为 `/<instance>/mcp`，不可自定义；
-- `[extensions].model`：允许当前 instance 上的模型通过 `bash_run` / `tmux_run` 中 Context-bound `devshell` shim 调用的 Extension command root。默认 `["instance"]`；它不改变 MCP `tools/list`；
+- `[extensions].model`：允许当前 instance 上的模型通过 `bash_run` / `tmux_run` 中 Context-bound `devshell` shim 调用的 Extension command root。当前 bundled 默认是 `["artifact", "instance", "mcp", "secret", "skill"]`；独立安装的 Extension 需要显式加入；它不改变 MCP `tools/list`；
 - `[security].mode`：`disabled` 或 `workspace`；
 - `[alerts].intervalMs`：活跃 workspace 的后台 alert probe 周期，至少 `1000` ms；MCP Context 的有效工具调用会刷新该 workspace 的活跃租约，连续 24 小时无有效调用后停止 probe 并移除状态；
 - `[alerts].maxUncommittedChanges`：Git 未提交条目数量阈值，必须为非负整数；

@@ -28,6 +28,16 @@ export function resolveTestspaceInvocation(argv) {
     return { args, command };
 }
 
+export function resolveTestspaceLaunchPlan(argv) {
+    const { command } = resolveTestspaceInvocation(argv);
+    const prepare = command === DEFAULT_TESTSPACE_COMMAND && !argv.includes("--skip-build");
+    return {
+        command,
+        prepare,
+        runtimeArgv: prepare ? [...argv, "--skip-build"] : [...argv],
+    };
+}
+
 export function buildTestspaceGlobalConfig({ mcpPort, webPort }) {
     return [
         "version = 2",
@@ -53,7 +63,7 @@ export function buildTestspaceGlobalConfig({ mcpPort, webPort }) {
 
 export function buildTestspaceInstanceConfig() {
     return [
-        "version = 3",
+        "version = 4",
         `name = "${TESTSPACE_INSTANCE}"`,
         "enabled = true",
         'provider = "local"',
@@ -63,9 +73,8 @@ export function buildTestspaceInstanceConfig() {
         'auth = "none"',
         `path = "/${TESTSPACE_INSTANCE}/mcp"`,
         "",
-        "[mcp.tools]",
-        'groups = ["file", "bash", "artifact", "tmux", "todo", "workspace", "instance"]',
-        'capabilities = ["read", "write", "execute", "manage"]',
+        "[extensions]",
+        'model = ["artifact", "instance", "mcp", "secret", "skill"]',
         "",
         "[approvalPolicy]",
         'mode = "allow"',
@@ -83,7 +92,7 @@ export function buildTestspaceInstanceConfig() {
 
 export function buildTestspaceReverseInstanceConfig() {
     return [
-        "version = 3",
+        "version = 4",
         `name = "${TESTSPACE_REVERSE_INSTANCE}"`,
         "enabled = true",
         'provider = "reverse"',
@@ -93,9 +102,8 @@ export function buildTestspaceReverseInstanceConfig() {
         'auth = "none"',
         `path = "/${TESTSPACE_REVERSE_INSTANCE}/mcp"`,
         "",
-        "[mcp.tools]",
-        'groups = ["file", "bash", "artifact", "tmux", "todo", "workspace", "instance"]',
-        'capabilities = ["read", "write", "execute", "manage"]',
+        "[extensions]",
+        'model = ["artifact", "instance", "mcp", "secret", "skill"]',
         "",
         "[approvalPolicy]",
         'mode = "allow"',
