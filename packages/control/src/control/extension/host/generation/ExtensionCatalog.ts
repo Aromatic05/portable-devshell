@@ -3,6 +3,7 @@ import type {
     ExtensionPointDeclaration
 } from "@portable-devshell/extension";
 
+import { ExtensionPointRegistry } from "./ExtensionPointRegistry.js";
 import { readExtensionDeclarations } from "./ExtensionRegistration.js";
 
 export interface ExtensionCatalogRegistration {
@@ -21,7 +22,12 @@ export interface ExtensionCatalogGeneration {
 /** Static manifest-backed catalog. Runtime bindings remain generation-owned elsewhere. */
 export class ExtensionCatalog {
     readonly #extensions = new Map<string, ExtensionCatalogGeneration>();
+    readonly #points: ExtensionPointRegistry;
     readonly #registrations = new Map<string, ExtensionCatalogRegistration>();
+
+    constructor(points: ExtensionPointRegistry) {
+        this.#points = points;
+    }
 
     get(pointId: string, id: string): ExtensionCatalogRegistration | undefined {
         return this.#registrations.get(registrationKey(pointId, id));
@@ -69,7 +75,7 @@ export class ExtensionCatalog {
                 `Extension generation ${generation} declares id ${manifest.id}, expected ${extensionId}.`
             );
         }
-        const registrations = readExtensionDeclarations(manifest).map((entry) => Object.freeze({
+        const registrations = readExtensionDeclarations(manifest, this.#points).map((entry) => Object.freeze({
             declaration: entry.declaration,
             extensionId,
             generation,

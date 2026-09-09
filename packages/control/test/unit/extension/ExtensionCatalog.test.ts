@@ -6,6 +6,7 @@ import {
     type ExtensionManifest
 } from "@portable-devshell/extension";
 
+import { createControlExtensionPointRegistry } from "../../../src/composition/ControlExtensionPointRegistry.ts";
 import { ExtensionCatalog } from "../../../src/control/extension/host/generation/ExtensionCatalog.ts";
 
 function manifest(
@@ -27,7 +28,7 @@ function manifest(
 }
 
 test("Extension catalog validates domain declarations without runtime bindings", () => {
-    const catalog = new ExtensionCatalog();
+    const catalog = new ExtensionCatalog(createControlExtensionPointRegistry());
     const current = manifest("example", "a", {
         "cli.commands": [{ id: "example", summary: "Run example", title: "Example" }],
         "web.applications": [{ id: "example-web", title: "Example Web" }]
@@ -50,7 +51,7 @@ test("Extension catalog validates domain declarations without runtime bindings",
 });
 
 test("Extension catalog rejects unsupported or invalid point declarations before activation", () => {
-    const catalog = new ExtensionCatalog();
+    const catalog = new ExtensionCatalog(createControlExtensionPointRegistry());
 
     assert.throws(
         () => catalog.replace("example", "a", manifest("example", "a", {
@@ -68,7 +69,7 @@ test("Extension catalog rejects unsupported or invalid point declarations before
 });
 
 test("Extension catalog detects conflicts across inactive Extensions and keeps replacement atomic", () => {
-    const catalog = new ExtensionCatalog();
+    const catalog = new ExtensionCatalog(createControlExtensionPointRegistry());
     catalog.replace("first", "a", manifest("first", "a", {
         "cli.commands": [{ id: "shared", title: "First" }]
     }));
@@ -92,7 +93,7 @@ test("Extension catalog detects conflicts across inactive Extensions and keeps r
 });
 
 test("Extension catalog replacement and removal update static routing without bindings", () => {
-    const catalog = new ExtensionCatalog();
+    const catalog = new ExtensionCatalog(createControlExtensionPointRegistry());
     catalog.replace("example", "a", manifest("example", "a", {
         "cli.commands": [{ id: "old", title: "Old" }]
     }));

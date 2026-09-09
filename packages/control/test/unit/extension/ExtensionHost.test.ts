@@ -7,6 +7,7 @@ import {
 } from "@portable-devshell/extension";
 import type { CliCommandResult } from "@portable-devshell/extension/cli";
 
+import { createControlExtensionPointRegistry } from "../../../src/composition/ControlExtensionPointRegistry.ts";
 import { ExtensionGeneration } from "../../../src/control/extension/host/generation/ExtensionGeneration.ts";
 import { ExtensionRegistrationSet } from "../../../src/control/extension/host/generation/ExtensionRegistration.ts";
 import { ExtensionHost, type ExtensionGenerationLoader } from "../../../src/control/extension/host/ExtensionHost.ts";
@@ -58,7 +59,7 @@ function createLoader(
     load: ExtensionGenerationLoader["load"],
     readManifest: ExtensionGenerationLoader["readManifest"] = async (id, generation) => manifest(id, generation)
 ): ExtensionGenerationLoader {
-    return { load, readManifest };
+    return { load, points: createControlExtensionPointRegistry(), readManifest };
 }
 
 function generation(

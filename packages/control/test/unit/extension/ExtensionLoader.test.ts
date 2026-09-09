@@ -12,6 +12,8 @@ import {
 import { commands } from "@portable-devshell/extension/cli";
 import { applications } from "@portable-devshell/extension/web";
 
+import { createControlExtensionPointRegistry } from "../../../src/composition/ControlExtensionPointRegistry.ts";
+
 import { ExtensionLoader, type ExtensionWorkerRuntime } from "../../../src/control/extension/host/generation/ExtensionLoader.ts";
 import { ExtensionPathLayout } from "../../../src/control/extension/state/ExtensionPathLayout.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
@@ -104,7 +106,8 @@ test("Extension loader reads and validates a generation manifest without activat
             return { activate() {} };
         },
         instances: { list: () => [] } as never,
-        paths: harness.paths
+        paths: harness.paths,
+        points: createControlExtensionPointRegistry(),
     });
 
     const manifest = await loader.readManifest(id, generation);
@@ -138,6 +141,7 @@ test("Extension loader returns a ready invisible candidate with narrow immutable
         }),
         instances: { list: () => [] } as never,
         paths: harness.paths,
+        points: createControlExtensionPointRegistry(),
         workerFactory: () => fakeWorker(events)
     });
 
@@ -183,7 +187,8 @@ test("Extension loader isolates runtime directories for overlapping loads of the
             }
         }),
         instances: { list: () => [] } as never,
-        paths: harness.paths
+        paths: harness.paths,
+        points: createControlExtensionPointRegistry(),
     });
 
     const first = await loader.load(id, generation);
@@ -217,7 +222,8 @@ test("Extension loader rejects incompatible API and reserved ids before importin
             return {};
         },
         instances: { list: () => [] } as never,
-        paths: harness.paths
+        paths: harness.paths,
+        points: createControlExtensionPointRegistry(),
     });
 
     await assert.rejects(loader.load(incompatible.id, incompatible.generation), /Unsupported Extension apiVersion/u);
@@ -232,7 +238,8 @@ test("Extension loader rejects manifest identity mismatch", async (t) => {
     const loader = new ExtensionLoader({
         importer: async () => ({ activate() {} }),
         instances: { list: () => [] } as never,
-        paths: harness.paths
+        paths: harness.paths,
+        points: createControlExtensionPointRegistry(),
     });
 
     await assert.rejects(loader.load(target.id, target.generation), /declares id other/u);
@@ -252,6 +259,7 @@ test("Extension loader rolls back Worker resources and runtime directory when ac
         }),
         instances: { list: () => [] } as never,
         paths: harness.paths,
+        points: createControlExtensionPointRegistry(),
         workerFactory: () => fakeWorker(events)
     });
 
@@ -274,6 +282,7 @@ test("Extension loader deactivates a module before rejecting an undeclared runti
         }),
         instances: { list: () => [] } as never,
         paths: harness.paths,
+        points: createControlExtensionPointRegistry(),
         workerFactory: () => fakeWorker(events)
     });
 
@@ -290,6 +299,7 @@ test("Extension loader keeps internal Worker retirement active without an Extens
         importer: async () => ({ activate() {} }),
         instances: { list: () => [] } as never,
         paths: harness.paths,
+        points: createControlExtensionPointRegistry(),
         workerFactory: () => fakeWorker(events)
     });
     const candidate = await loader.load(target.id, target.generation);
@@ -319,6 +329,7 @@ test("Extension loader rejects Web file bindings escaping the immutable generati
         }),
         instances: { list: () => [] } as never,
         paths: harness.paths,
+        points: createControlExtensionPointRegistry(),
         workerFactory: () => fakeWorker(events)
     });
 

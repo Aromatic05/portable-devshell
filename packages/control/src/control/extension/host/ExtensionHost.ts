@@ -11,6 +11,7 @@ import {
     ExtensionCatalog,
     type ExtensionCatalogRegistration
 } from "./generation/ExtensionCatalog.js";
+import type { ExtensionPointRegistry } from "./generation/ExtensionPointRegistry.js";
 import {
     cloneExtensionRegistry,
     type ExtensionRegistryEntry,
@@ -19,6 +20,7 @@ import {
 import type { ExtensionRegistryPort } from "../state/ExtensionRegistryStore.js";
 
 export interface ExtensionGenerationLoader {
+    readonly points: ExtensionPointRegistry;
     load(id: string, generation: string): Promise<ExtensionGeneration>;
     readManifest(id: string, generation: string): Promise<ExtensionManifest>;
 }
@@ -30,7 +32,7 @@ interface ExtensionFailure {
 
 export class ExtensionHost {
     readonly #active = new Map<string, ExtensionGeneration>();
-    readonly #catalog = new ExtensionCatalog();
+    readonly #catalog: ExtensionCatalog;
     readonly #failures = new Map<string, ExtensionFailure>();
     readonly #loader: ExtensionGenerationLoader;
     readonly #registry: ExtensionRegistryPort;
@@ -43,6 +45,7 @@ export class ExtensionHost {
     #stopping = false;
 
     constructor(options: { loader: ExtensionGenerationLoader; registry: ExtensionRegistryPort }) {
+        this.#catalog = new ExtensionCatalog(options.loader.points);
         this.#loader = options.loader;
         this.#registry = options.registry;
     }

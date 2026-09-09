@@ -7,6 +7,7 @@ import { readBuiltinExtensionSources, type BuiltinExtensionSource } from "../../
 import { ExtensionLoader } from "../../control/extension/host/generation/ExtensionLoader.js";
 import { ExtensionPathLayout } from "../../control/extension/state/ExtensionPathLayout.js";
 import { ExtensionRegistryStore } from "../../control/extension/state/ExtensionRegistryStore.js";
+import { createControlExtensionPointRegistry } from "../ControlExtensionPointRegistry.js";
 import { McpRuntimeFactory } from "../McpRuntimeFactory.js";
 import { ControlRuntimeArtifact } from "./ControlRuntimeArtifact.js";
 import { ControlRuntime } from "./ControlRuntime.js";
@@ -46,6 +47,7 @@ export class ControlRuntimeFactory {
         await artifact.start();
         try {
             const extensionPaths = new ExtensionPathLayout({ homeDirectory: options.state.homeDirectory });
+            const extensionPoints = createControlExtensionPointRegistry();
             const extensions = new ExtensionHost({
                 loader: new ExtensionLoader({
                     assetsFactory: ({ allowed, dataDirectory, extensionId }) => new ExtensionAssetCapabilityControl({
@@ -55,7 +57,8 @@ export class ControlRuntimeFactory {
                         project: async (input) => await artifact.projectExtensionAsset(extensionId, input)
                     }),
                     instances: options.state.instances,
-                    paths: extensionPaths
+                    paths: extensionPaths,
+                    points: extensionPoints
                 }),
                 registry: new ExtensionRegistryStore(extensionPaths.registryFile)
             });

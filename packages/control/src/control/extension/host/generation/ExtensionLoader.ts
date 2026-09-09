@@ -20,6 +20,7 @@ import type { InstanceRegistry } from "../../../instance/registry/InstanceRegist
 import { ExtensionAssetCapabilityControl } from "./capability/ExtensionAssetCapabilityControl.js";
 import { ExtensionProcessCapabilityControl } from "./capability/ExtensionProcessCapabilityControl.js";
 import { ExtensionGeneration } from "./ExtensionGeneration.js";
+import { ExtensionPointRegistry } from "./ExtensionPointRegistry.js";
 import { ExtensionRegistrationBuilder } from "./ExtensionRegistration.js";
 import { sharedExtensionHostModuleResolver, type ExtensionHostModuleResolver } from "./ExtensionHostModuleResolver.js";
 import { ExtensionPathLayout } from "../../state/ExtensionPathLayout.js";
@@ -74,6 +75,7 @@ export interface ExtensionLoaderOptions {
     hostModuleResolver?: ExtensionHostModuleResolver;
     loggerFactory?: (id: string, generation: string) => ExtensionLogger;
     paths: ExtensionPathLayout;
+    points: ExtensionPointRegistry;
     processFactory?: (input: {
         allowed: boolean;
         extensionId: string;
@@ -96,6 +98,7 @@ export class ExtensionLoader {
     readonly #instances: InstanceRegistry;
     readonly #loggerFactory: (id: string, generation: string) => ExtensionLogger;
     readonly #paths: ExtensionPathLayout;
+    readonly points: ExtensionPointRegistry;
     readonly #processFactory?: ExtensionLoaderOptions["processFactory"];
     readonly #reservedIds: ReadonlySet<string>;
     readonly #runtimeRoots = new Map<string, Promise<void>>();
@@ -110,6 +113,7 @@ export class ExtensionLoader {
         this.#instances = options.instances;
         this.#loggerFactory = options.loggerFactory ?? ((id, generation) => consoleExtensionLogger(id, generation));
         this.#paths = options.paths;
+        this.points = options.points;
         this.#processFactory = options.processFactory;
         this.#reservedIds = options.reservedIds ?? CORE_EXTENSION_RESERVED_IDS;
         this.#sandboxFactory = options.sandboxFactory ?? ((sandboxOptions) => new ExtensionSandboxHost(sandboxOptions));
@@ -166,7 +170,7 @@ export class ExtensionLoader {
             generation
         });
         const logger = this.#loggerFactory(id, generation);
-        const registrations = new ExtensionRegistrationBuilder(manifest, codeDirectory);
+        const registrations = new ExtensionRegistrationBuilder(manifest, codeDirectory, this.points);
         const register: ExtensionContext["register"] = (point, localId, binding) => {
             registrations.register(point, localId, binding);
         };
@@ -311,6 +315,7 @@ export class ExtensionLoader {
                 descriptor,
                 input.manifest,
                 input.codeDirectory,
+                this.points,
                 sandbox
             );
             candidate = new ExtensionGeneration({
@@ -348,9 +353,10 @@ async function registrationsFromSandbox(
     descriptor: ExtensionSandboxReadyDescriptor,
     manifest: ExtensionManifest,
     codeDirectory: string,
+    points: ExtensionPointRegistry,
     sandbox: ExtensionSandboxHost
 ): Promise<import("./ExtensionRegistration.js").ExtensionRegistrationSet> {
-    const registrations = new ExtensionRegistrationBuilder(manifest, codeDirectory);
+    const registrations = new ExtensionRegistrationBuilder(manifest, codeDirectory, points);
     for (const registration of descriptor.registrations) {
         switch (registration.runtime.kind) {
             case "cli.command":

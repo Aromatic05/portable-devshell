@@ -5,6 +5,7 @@ import test from "node:test";
 
 import { EXTENSION_API_VERSION } from "@portable-devshell/extension";
 
+import { createControlExtensionPointRegistry } from "../../../src/composition/ControlExtensionPointRegistry.ts";
 import { createArtifactDirectoryArchive } from "../../../src/control/artifact/host/ArtifactHostArchive.ts";
 import { ExtensionHost } from "../../../src/control/extension/host/ExtensionHost.ts";
 import { ExtensionInstallService } from "../../../src/control/extension/install/ExtensionInstallService.ts";
@@ -37,7 +38,8 @@ async function harness(t: test.TestContext, limits = {}): Promise<Harness> {
     const host = new ExtensionHost({
         loader: new ExtensionLoader({
             instances: { list: () => [] } as never,
-            paths
+            paths,
+            points: createControlExtensionPointRegistry()
         }),
         registry: new ExtensionRegistryStore(paths.registryFile)
     });
@@ -159,7 +161,8 @@ test("reinstalling the selected builtin generation preserves lazy startup until 
     const host = new ExtensionHost({
         loader: new ExtensionLoader({
             instances: { list: () => [] } as never,
-            paths: h.paths
+            paths: h.paths,
+            points: createControlExtensionPointRegistry()
         }),
         registry: new ExtensionRegistryStore(h.paths.registryFile)
     });

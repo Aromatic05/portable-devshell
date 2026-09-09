@@ -7,6 +7,7 @@ import type { ExtensionManifest } from "@portable-devshell/extension";
 import { commands } from "@portable-devshell/extension/cli";
 import { applications } from "@portable-devshell/extension/web";
 
+import { createControlExtensionPointRegistry } from "../../../src/composition/ControlExtensionPointRegistry.ts";
 import { ExtensionRegistrationBuilder } from "../../../src/control/extension/host/generation/ExtensionRegistration.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
@@ -31,7 +32,7 @@ test("Extension registration finalization requires exact declared bindings and v
     const root = await createTestTempDirectory("extension-registration");
     t.after(async () => await rm(root, { force: true, recursive: true }));
     await mkdir(join(root, "web"), { recursive: true });
-    const builder = new ExtensionRegistrationBuilder(manifest(), root);
+    const builder = new ExtensionRegistrationBuilder(manifest(), root, createControlExtensionPointRegistry());
     const command = async () => ({ kind: "text" as const, text: "ok" });
     const web = Object.freeze({ source: Object.freeze({ directory: "web", kind: "files" as const }) });
 
@@ -45,7 +46,7 @@ test("Extension registration finalization requires exact declared bindings and v
 });
 
 test("Extension registration rejects undeclared, duplicate, and invalid bindings", async () => {
-    const builder = new ExtensionRegistrationBuilder(manifest(), "/unused");
+    const builder = new ExtensionRegistrationBuilder(manifest(), "/unused", createControlExtensionPointRegistry());
     assert.throws(
         () => builder.register(commands, "other", async () => ({ kind: "text", text: "bad" })),
         /registered undeclared cli\.commands\/other/u
@@ -56,7 +57,7 @@ test("Extension registration rejects undeclared, duplicate, and invalid bindings
         /more than once/u
     );
 
-    const invalid = new ExtensionRegistrationBuilder(manifest(), "/unused");
+    const invalid = new ExtensionRegistrationBuilder(manifest(), "/unused", createControlExtensionPointRegistry());
     assert.throws(
         () => invalid.registerById("web.applications", "example", { source: { kind: "endpoint" } }),
         /must provide resolve/u
@@ -66,7 +67,7 @@ test("Extension registration rejects undeclared, duplicate, and invalid bindings
 test("Extension registration rejects a manifest declaration that activate did not bind", async () => {
     const root = await createTestTempDirectory("extension-registration-missing");
     try {
-        const builder = new ExtensionRegistrationBuilder(manifest(), root);
+        const builder = new ExtensionRegistrationBuilder(manifest(), root, createControlExtensionPointRegistry());
         builder.register(commands, "example", async () => ({ kind: "text", text: "ok" }));
         await assert.rejects(builder.finalize(), /declares web\.applications\/example but did not bind it/u);
     } finally {
