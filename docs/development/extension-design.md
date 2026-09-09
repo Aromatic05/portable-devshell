@@ -675,6 +675,8 @@ possibly subcommand metadata
 
 具体字段由 CLI parser 的最终模型决定，不在 Extension core 中定义。
 
+Declaration schema parser 同样属于 CLI host/domain validation implementation，而不是 Extension author API。当前 `@portable-devshell/extension/cli` 只导出 `commands` descriptor 与 declaration/binding/invocation/result types；Control 的 `CliExtensionPointDefinition` 自己负责静态 declaration 解析和内置 command 冲突校验。
+
 当前 discovery transport 也不是 generic Extension catalog：CLI domain 只返回 `extensionId / id / title / summary / usage`，不暴露 generation、runtime binding、sandbox callback token 或 Control transport details。
 
 ### 8.3 Runtime binding
@@ -792,6 +794,8 @@ Web host 在不 activation Extension 时应能够构建：
 - lazy activation target。
 
 因此 `web.applications` 应优先采用 manifest declaration + runtime binding。
+
+和 CLI 一样，Web declaration parser 由 Control 的 Web point definition 私有持有；`@portable-devshell/extension/web` 不导出 host-side parser。这样 author-facing contract 与宿主 validation implementation 不会被同一个 leaf entrypoint 混在一起。
 
 ### 9.5 不应导出的内容
 

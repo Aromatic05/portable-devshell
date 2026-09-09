@@ -246,6 +246,8 @@ Public SDK 按 domain subpath 发布 leaf contract：
 
 root 只导出 core ABI；CLI/Web domain contract 不从 root 聚合，也不要求 Extension 依赖完整 CLI/Web runtime package。
 
+CLI/Web leaf 也只导出 Extension author 需要的 point descriptor、declaration/binding/context/result types。Manifest declaration 的 schema parser 属于 Control 中对应 domain owner 的 host validation implementation，不从 public leaf SDK 导出。
+
 ### cli.commands
 
 `@portable-devshell/extension/cli` 当前公开：
