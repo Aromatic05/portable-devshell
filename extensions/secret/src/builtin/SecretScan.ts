@@ -41,6 +41,24 @@ export interface SecretScanResult {
     truncatedFiles: number;
 }
 
+export function scanSecretText(
+    path: string,
+    text: string,
+    limit = DEFAULT_LIMIT
+): SecretScanFinding[] {
+    const findings: SecretScanFinding[] = [];
+    const maximum = normalizeLimit(limit);
+    for (const { pattern, type } of SECRET_PATTERNS) {
+        pattern.lastIndex = 0;
+        for (const match of text.matchAll(pattern)) {
+            if (type === "generic_assignment" && isPlaceholder(match[0])) continue;
+            findings.push({ line: lineAt(text, match.index), path, type });
+            if (findings.length >= maximum) return findings;
+        }
+    }
+    return findings;
+}
+
 export interface SecretScanOptions {
     cwd: string;
     glob?: string;
@@ -67,15 +85,10 @@ export async function scanSecrets(options: SecretScanOptions): Promise<SecretSca
         if (read === undefined) continue;
         if (read.truncated) truncatedFiles += 1;
 
-        for (const { pattern, type } of SECRET_PATTERNS) {
-            pattern.lastIndex = 0;
-            for (const match of read.text.matchAll(pattern)) {
-                if (type === "generic_assignment" && isPlaceholder(match[0])) continue;
-                findings.push({ line: lineAt(read.text, match.index), path: displayPath, type });
-                if (findings.length >= limit) {
-                    return { findings, truncated: true, truncatedFiles };
-                }
-            }
+        const remaining = limit - findings.length;
+        findings.push(...scanSecretText(displayPath, read.text, remaining));
+        if (findings.length >= limit) {
+            return { findings, truncated: true, truncatedFiles };
         }
     }
     return { findings, truncated: discovery.truncated, truncatedFiles };
@@ -178,8 +191,4 @@ function normalizePath(path: string): string {
 
 function isEnoent(error: unknown): boolean {
     return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
-}
-
-function abortError(signal: AbortSignal | undefined): Error {
-    return signal?.reason instanceof Error ? signal.reason : new Error("Secret scan was aborted.");
 }

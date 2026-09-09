@@ -6,7 +6,7 @@ import { parseExtensionManifest } from "@portable-devshell/extension";
 
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import type { McpClientFactory, McpClientPort } from "../../src/builtin/McpClientRuntime.ts";
-import { executeMcpCommand, type McpCommandRuntime } from "../../src/builtin/McpCommand.ts";
+import { executeMcpCommand, executeMcpModelCommand, type McpCommandRuntime } from "../../src/builtin/McpCommand.ts";
 import { McpProfileStore } from "../../src/builtin/McpProfileStore.ts";
 
 function invocation(localOwner = true) {
@@ -17,7 +17,16 @@ function invocation(localOwner = true) {
     };
 }
 
-test("MCP Extension manifest exposes cli.native-commands without host-managed capabilities", async () => {
+function modelInvocation() {
+    return {
+        instance: "local-test",
+        requestId: "model-request",
+        signal: new AbortController().signal,
+        workspace: "/workspace"
+    };
+}
+
+test("MCP Extension manifest exposes separate native and model command surfaces without host-managed capabilities", async () => {
     const manifest = parseExtensionManifest(JSON.parse(
         await readFile(new URL("../../src/builtin/devshell-extension.json", import.meta.url), "utf8")
     ));
@@ -30,6 +39,12 @@ test("MCP Extension manifest exposes cli.native-commands without host-managed ca
             summary: "Manage MCP client profiles and requests",
             title: "MCP Client",
             usage: "mcp <command>"
+        }],
+        "cli.model-commands": [{
+            id: "mcp",
+            summary: "Inspect MCP profiles and call their tools",
+            title: "MCP Client",
+            usage: "mcp <list|get|tools|call>"
         }]
     });
 });
@@ -86,6 +101,23 @@ test("MCP command opens one client per tools/call operation, forwards cancellati
         "call:echo:{\"text\":\"hello\"}:same-signal",
         "close"
     ]);
+});
+
+test("MCP model command can inspect/call configured profiles but cannot mutate them", async (t) => {
+    const root = await createTestTempDirectory("mcp-model-command");
+    t.after(async () => await rm(root, { force: true, recursive: true }));
+    const profiles = new McpProfileStore(root);
+    await profiles.add({ name: "demo", url: "https://example.com/mcp" });
+    const runtime = fakeRuntime(profiles, []);
+
+    assert.deepEqual(await executeMcpModelCommand(runtime, ["tools", "demo"], modelInvocation()), {
+        kind: "json",
+        value: { tools: [{ name: "echo" }] }
+    });
+    await assert.rejects(
+        executeMcpModelCommand(runtime, ["remove", "demo"], modelInvocation()),
+        /native owner CLI/u
+    );
 });
 
 function fakeRuntime(profiles: McpProfileStore, events: string[]): McpCommandRuntime {

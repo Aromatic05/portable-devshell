@@ -1,10 +1,11 @@
 import { join } from "node:path";
 
 import type { ExtensionContext } from "@portable-devshell/extension";
-import { nativeCommands } from "@portable-devshell/extension/cli";
+import { modelCommands, nativeCommands } from "@portable-devshell/extension/cli";
 import { applications } from "@portable-devshell/extension/web";
 
 import { executeAgentCommand } from "./AgentCommand.js";
+import { executeAgentModelCommand } from "./AgentModelCommand.js";
 import { AgentExtensionRuntime } from "./AgentRuntime.js";
 import { AgentProviderLoader } from "./provider/AgentProviderLoader.js";
 import { AgentProviderManager } from "./provider/AgentProviderManager.js";
@@ -32,6 +33,11 @@ export async function activate(context: ExtensionContext): Promise<void> {
         nativeCommands,
         "agent",
         async (argv, invocation) => await executeAgentCommand(runtime, providerManager, argv, invocation)
+    );
+    context.register(
+        modelCommands,
+        "agent",
+        async (argv, invocation) => await executeAgentModelCommand(runtime, providerManager, argv, invocation)
     );
     context.register(applications, "agent", Object.freeze({
         source: Object.freeze({

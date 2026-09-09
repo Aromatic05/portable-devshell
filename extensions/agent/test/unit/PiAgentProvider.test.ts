@@ -78,6 +78,9 @@ test("Pi provider maps each Agent into the shared managed runtime with its injec
         const target = parseAgentWorkerTarget("worker-a:/remote/project");
         const context: AgentProviderStartContext = {
             agentId: "ag-pi-test",
+            processes: {
+                async start() { throw new Error("unused test process capability"); }
+            },
             runtime,
             target,
             tools: toolSession(target),
@@ -133,6 +136,7 @@ function createProviderHandle(): AgentProviderHandle {
 
 function toolSession(target: ReturnType<typeof parseAgentWorkerTarget>) {
     return {
+        closed: new Promise<void>(() => undefined),
         target,
         tools: [],
         async callTool() { return null; },

@@ -236,12 +236,12 @@ test("config normalization deduplicates model Extension allowlists", () => {
     assert.deepEqual(config.instances[0]?.extensions.model, ["instance", "artifact"]);
 });
 
-test("model Extension allowlist defaults to the conservative Instance surface", () => {
+test("model Extension allowlist defaults to the installed builtin model surfaces", () => {
     const normalized = normalizeConfigInstanceDraft({
         name: "default-model-extensions",
         provider: "local"
     });
-    assert.deepEqual(normalized.extensions.model, ["instance"]);
+    assert.deepEqual(normalized.extensions.model, ["artifact", "instance", "mcp", "secret", "skill"]);
 });
 
 test("explicit empty model Extension allowlist disables all model commands", () => {

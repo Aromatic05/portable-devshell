@@ -428,7 +428,7 @@ export const defaultConfigNormalizeContext: ConfigNormalizeContext = {
     ],
     defaultEnabled: true,
     defaultMcpEnabled: true,
-    defaultModelExtensions: ["instance"],
+    defaultModelExtensions: ["artifact", "instance", "mcp", "secret", "skill"],
     defaultSecurityMode: "disabled",
 };
 

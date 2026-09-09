@@ -5,7 +5,7 @@
     "name": "portable-devshell Skill",
     "version": "0.1.0",
     "entry": "index.ts",
-    "capabilities": ["assets"],
+    "capabilities": ["assets", "workers"],
     "extensions": {
         "cli.native-commands": [
             {
@@ -13,6 +13,14 @@
                 "title": "Skill",
                 "summary": "Inspect and project portable-devshell Skills",
                 "usage": "skill <command>"
+            }
+        ],
+        "cli.model-commands": [
+            {
+                "id": "skill",
+                "title": "Skill",
+                "summary": "Discover and read Skills for the current model workspace",
+                "usage": "skill <list|search|load|inspect|read>"
             }
         ]
     }

@@ -19,6 +19,14 @@
                 "usage": "agent <command>"
             }
         ],
+        "cli.model-commands": [
+            {
+                "id": "agent",
+                "title": "Agent",
+                "summary": "Run and interact with Agents in the current model Workspace",
+                "usage": "agent <command>"
+            }
+        ],
         "web.applications": [
             {
                 "id": "agent",

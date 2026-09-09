@@ -54,7 +54,7 @@ test("valid global and instance documents are assembled into canonical config", 
         const instance = config.instances[0];
         assert.equal(instance?.name, "demo-local");
         assert.equal(instance?.mcp.path, "/demo-local/mcp");
-        assert.deepEqual(instance?.extensions.model, ["instance"]);
+        assert.deepEqual(instance?.extensions.model, ["artifact", "instance", "mcp", "secret", "skill"]);
         assert.equal(instance?.logs?.maxBytes, 33_554_432);
         assert.equal(instance?.approvalPolicy?.rules?.[0]?.source, "mcp");
         assert.equal(instance?.security.mode, "workspace");
@@ -152,11 +152,11 @@ test("version 2 instance documents migrate to version 4 without workspace or MCP
         const config = await new ControlConfigStore().readOrCreate(homeDirectory);
         assert.deepEqual(
             config.instances.find((instance) => instance.name === "legacy-default")?.extensions.model,
-            ["instance"]
+            ["artifact", "instance", "mcp", "secret", "skill"]
         );
         assert.deepEqual(
             config.instances.find((instance) => instance.name === "custom-policy")?.extensions.model,
-            ["instance"]
+            ["artifact", "instance", "mcp", "secret", "skill"]
         );
         const migratedDefault = await readFile(paths.instanceConfigFile("legacy-default"), "utf8");
         const migratedCustom = await readFile(paths.instanceConfigFile("custom-policy"), "utf8");
@@ -165,7 +165,7 @@ test("version 2 instance documents migrate to version 4 without workspace or MCP
             assert.doesNotMatch(source, /^workspace\s*=/mu);
             assert.doesNotMatch(source, /\[mcp\.tools\]|groups\s*=|capabilities\s*=/u);
             assert.match(source, /\[extensions\]/u);
-            assert.match(source, /model\s*=\s*\[\s*"instance"\s*\]/u);
+            assert.match(source, /model\s*=\s*\[\s*"artifact",\s*"instance",\s*"mcp",\s*"secret",\s*"skill"\s*\]/u);
         }
         assert.equal("workspace" in config.instances[0]!, false);
         assert.equal("workspace" in config.instances[1]!, false);
@@ -198,12 +198,12 @@ test("version 3 MCP tool policy is retired into the version 4 model Extension al
         );
 
         const config = await new ControlConfigStore().readOrCreate(homeDirectory);
-        assert.deepEqual(config.instances[0]?.extensions.model, ["instance"]);
+        assert.deepEqual(config.instances[0]?.extensions.model, ["artifact", "instance", "mcp", "secret", "skill"]);
 
         const source = await readFile(paths.instanceConfigFile("canonical-groups"), "utf8");
         assert.match(source, /^version = 4$/mu);
         assert.match(source, /\[extensions\]/u);
-        assert.match(source, /model\s*=\s*\[\s*"instance"\s*\]/u);
+        assert.match(source, /model\s*=\s*\[\s*"artifact",\s*"instance",\s*"mcp",\s*"secret",\s*"skill"\s*\]/u);
         assert.doesNotMatch(source, /\[mcp\.tools\]|groups\s*=|capabilities\s*=|environment|environ|interaction/u);
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });

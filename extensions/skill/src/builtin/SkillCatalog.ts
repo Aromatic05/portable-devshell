@@ -18,6 +18,7 @@ interface SkillSource {
 export interface SkillCatalogOptions {
     configHome?: string;
     home?: string;
+    project?: boolean;
     workspace?: string;
 }
 
@@ -144,7 +145,7 @@ function skillSources(options: SkillCatalogOptions): SkillSource[] {
     const workspace = resolve(options.workspace ?? process.cwd());
     const configHome = resolve(options.configHome ?? process.env.XDG_CONFIG_HOME ?? join(home, ".config"));
     const candidates: SkillSource[] = [
-        { path: join(workspace, ".agents", "skills"), source: "project" },
+        ...(options.project === false ? [] : [{ path: join(workspace, ".agents", "skills"), source: "project" as const }]),
         { path: join(home, ".devshell", "skill"), source: "managed" },
         { path: join(configHome, "agents", "skills"), source: "global" }
     ];

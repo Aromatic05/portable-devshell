@@ -15,6 +15,14 @@
                 "summary": "Manage MCP client profiles and requests",
                 "usage": "mcp <command>"
             }
+        ],
+        "cli.model-commands": [
+            {
+                "id": "mcp",
+                "title": "MCP Client",
+                "summary": "Inspect MCP profiles and call their tools",
+                "usage": "mcp <list|get|tools|call>"
+            }
         ]
     }
 }

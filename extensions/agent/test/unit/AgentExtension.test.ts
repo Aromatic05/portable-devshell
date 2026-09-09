@@ -31,6 +31,12 @@ test("Agent Extension manifest declares host-managed capabilities and domain Ext
             title: "Agent",
             usage: "agent <command>"
         }],
+        "cli.model-commands": [{
+            id: "agent",
+            summary: "Run and interact with Agents in the current model Workspace",
+            title: "Agent",
+            usage: "agent <command>"
+        }],
         "web.applications": [{ id: "agent", title: "Agent" }]
     });
 });
@@ -184,8 +190,9 @@ test("Agent Extension activation binds CLI and Web points without a generic RPC 
     try {
         assert.deepEqual(
             registrations.map(({ id, pointId }) => `${pointId}/${id}`).sort(),
-            ["cli.native-commands/agent", "web.applications/agent"]
+            ["cli.model-commands/agent", "cli.native-commands/agent", "web.applications/agent"]
         );
+        assert.equal(typeof registrations.find(({ pointId }) => pointId === "cli.model-commands")?.binding, "function");
         assert.equal(typeof registrations.find(({ pointId }) => pointId === "cli.native-commands")?.binding, "function");
         const web = registrations.find(({ pointId }) => pointId === "web.applications")?.binding as {
             source?: { kind?: string; resolve?: unknown };
