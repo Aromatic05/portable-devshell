@@ -452,6 +452,8 @@ generation
 
 Generation retirement 自动撤销 registration。
 
+Runtime Host 只拥有 registration identity、lazy activation、generation lease 和 acquisition，不解释某个 point 的 binding 业务语义。具体 point owner 在取得 registration lease 后负责校验并调用 binding。例如 `cli.commands` 的 binding invocation 属于 CLI domain，而不是 `ExtensionHost` 的 `dispatchCommand` 一类特殊方法。
+
 第一版不要求 Extension 自己保存 `Disposable` 并手工清理每个 registration。
 
 只有某个 domain 明确需要“generation 存活期间提前撤销单项 registration”时，才为该 point 增加 scoped handle；不把 `dispose()` 做成所有 point 的通用负担。
