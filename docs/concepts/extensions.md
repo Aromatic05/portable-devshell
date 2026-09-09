@@ -272,7 +272,11 @@ CliCommandResult
 
 Control 内部 static catalog 由 CLI domain 按 state 分别投影。Native discovery 只包含 `cli.native-commands` 的 presentation metadata，不包含 generation 或 runtime binding；本地 CLI 用它在 builtin parser 之前判断 overlay。`devshell <native-extension-command> --help` 因而可以只靠静态 declaration 生成帮助，普通 argv 仍按需取得 generation lease。全局 `devshell --help` 仍不依赖 Control。
 
-Native command invocation 仍由 Control 的 CLI route 负责 CLI-only access、`workingDirectory` authority、payload/result validation 和 binding dispatch；Extension management route 只负责 install/list/get/enable/disable/reload/remove。Model command state不复用这条 native route；模型侧 broker 只能连接 model resolver，从结构上排除 builtin/native fallback。
+Native command invocation 仍由 Control 的 CLI route 负责 CLI-only access、`workingDirectory` authority、payload/result validation 和 binding dispatch；Extension management route 只负责 install/list/get/enable/disable/reload/remove。Model command state不复用这条 native route。
+
+MCP `bash_run` / managed `tmux_run` 当前通过 Worker-owned executable shim 暴露 restricted `devshell`：Worker 只在 `source=mcp` 的 ToolCall 环境前置私有 `devshell` executable 到 `PATH`，由 shell 自己完成 quoting、pipeline、redirection 和 executable resolution；Control 不解析 command string。shim 通过 Worker local broker 取得 model command stdout/stderr/exit status，远端 Worker↔Control 仍复用已有 Worker RPC channel。
+
+Control 根据 authoritative tool audit + MCP Context 校验 shim 上报的 `ctxId / parentCallId / workspace / taskId`。这些值只是 integrity assertion，不是 bearer authority；不匹配会作为 `worker.protocolIntegrityFault` 拒绝并记录。持久 tmux task 在父 `tmux_run` 完成后通过 audit result 中的 `task.id` 证明原始绑定；Context 已失效时不会自动重绑。Model resolver 最终只连接 `cli.model-commands`，从结构上排除 builtin/native fallback。
 
 CLI command implementation 自己抛出的 usage/business error 仍属于 command contract，可以作为命令反馈呈现；但在执行实现之前如果对应 state 的 registration/generation 无法取得，CLI owner 会翻译成固定 `control.cliCommandFailed` / `CLI command <id> is unavailable.`，只带 `commandId`，不把 ExtensionHost error code、generation path 或原始 cause 暴露到 wire error。
 

@@ -70,6 +70,7 @@ impl RpcRouter {
             resources,
             terminals.clone(),
             alerts,
+            Arc::clone(&notifications),
         );
 
         Self {
@@ -192,6 +193,7 @@ impl RpcRouter {
                 .and_then(|value| value.ctx_id.clone())
                 .unwrap_or_else(|| "ctx-worker-default".to_string()),
             operation_id: operation_id.clone(),
+            source: context.and_then(|value| value.source.clone()),
             policy: Arc::clone(&self.policy),
             process_registry: Arc::clone(&self.active_processes),
             cancellation,

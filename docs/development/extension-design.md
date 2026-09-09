@@ -703,7 +703,11 @@ argv + state-specific invocation context
 
 不要重新暴露 generic `extension.call` 或把 `argv -> JSON` 提升成 Extension core RPC。raw argv 是 CLI domain contract。
 
-Native invocation 当前通过 CLI-owned Control route 获得 generation lease 并调用 `CliNativeCommandBinding`。Model invocation 将由 restricted devshell broker 进入 model resolver；它不经过 native route，也不能触发 builtin fallback。
+Native invocation 当前通过 CLI-owned Control route 获得 generation lease并调用 `CliNativeCommandBinding`。Model invocation 已由 restricted devshell broker 进入 model resolver；它不经过 native route，也不能触发 builtin fallback。
+
+模型在 MCP `bash_run` / managed `tmux_run` 中看到的 `devshell` 不是 builtin Control CLI，而是 Worker runtime 注入的 executable shim。实现使用 executable/PATH resolution interception，而不是 Bash command-string parsing，因此 shell 本身继续负责 argv、pipe、redirect、substitution 等语义。shim 只连 Worker local broker；Worker 再通过既有 notification/control RPC 把 model command invocation 流式桥接到 Control。
+
+Control authority 不来自 Worker 自报 Context。每个 model invocation 必须与 authoritative audit ToolCall 的 `callId / source=mcp / ctxId / workspace` 一致；bash invocation 还要求 parent `bash_run` active，tmux invocation 则要求 active parent 或已完成 `tmux_run` 的 audited `task.id` 与 shim `taskId` 一致。Context 随后通过 MCP Context authority 再按 instance/workspace 校验。任何 mismatch 是 Worker protocol-integrity fault，而不是“换一个 ctxId 再试”。
 
 ### 8.4 Invocation contexts
 

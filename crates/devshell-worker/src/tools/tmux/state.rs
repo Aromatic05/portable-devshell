@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use super::warning;
+use crate::model_devshell::ModelDevshellShim;
 
 use crate::platform::unix_time_millis;
 use crate::security::path::{
@@ -55,6 +56,7 @@ struct PersistedTaskRecord {
 
 pub struct TmuxState {
     backend: TmuxBackend,
+    model_devshell: Arc<ModelDevshellShim>,
     structure: Mutex<()>,
     pane_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     tasks: Mutex<TaskRegistry>,
@@ -63,7 +65,10 @@ pub struct TmuxState {
 }
 
 impl TmuxState {
-    pub fn new(backend: TmuxBackend) -> Result<Self, ToolError> {
+    pub fn new(
+        backend: TmuxBackend,
+        model_devshell: Arc<ModelDevshellShim>,
+    ) -> Result<Self, ToolError> {
         let mut tasks = TaskRegistry::default();
         for record in backend.load_task_records::<PersistedTaskRecord>()? {
             if record.schema_version != 1 {
@@ -96,6 +101,7 @@ impl TmuxState {
         tasks.prune();
         Ok(Self {
             backend,
+            model_devshell,
             structure: Mutex::new(()),
             pane_locks: Mutex::new(HashMap::new()),
             tasks: Mutex::new(tasks),
@@ -161,6 +167,7 @@ impl TmuxState {
         let line = validate_line(params.line.unwrap_or(DEFAULT_LINE))?;
 
         let task_id = new_task_id();
+        let model_environment = self.model_devshell.environment(call, Some(&task_id), None);
         let task_started_at;
         {
             let _structure_guard = self
@@ -178,9 +185,12 @@ impl TmuxState {
                     format!("tmux pane capacity reached ({MAX_PANES})"),
                 ));
             }
-            let pane = self
-                .backend
-                .create_task_pane(&task_id, &cwd.canonical, &params.command)?;
+            let pane = self.backend.create_task_pane(
+                &task_id,
+                &cwd.canonical,
+                &params.command,
+                model_environment.as_ref(),
+            )?;
             if let Err(error) = verify_pane_cwd(&pane, &cwd) {
                 let _ = self.backend.close_pane(&pane);
                 self.backend.remove_task_runtime(&task_id);

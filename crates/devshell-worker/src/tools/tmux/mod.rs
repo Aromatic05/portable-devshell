@@ -18,6 +18,7 @@ use schemars::JsonSchema;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::daemon::process::WorkerRuntimeContext;
+use crate::model_devshell::ModelDevshellShim;
 use crate::socket::SocketPaths;
 use crate::storage::InstancePaths;
 use crate::tools::tmux::backend::TmuxBackend;
@@ -76,6 +77,7 @@ where
 
 struct TmuxStateRegistry {
     instance_paths: InstancePaths,
+    model_devshell: Arc<ModelDevshellShim>,
     runtime: WorkerRuntimeContext,
     socket_paths: SocketPaths,
     states: Mutex<HashMap<PathBuf, Arc<TmuxState>>>,
@@ -86,9 +88,11 @@ impl TmuxStateRegistry {
         instance_paths: &InstancePaths,
         socket_paths: &SocketPaths,
         runtime: &WorkerRuntimeContext,
+        model_devshell: Arc<ModelDevshellShim>,
     ) -> Self {
         Self {
             instance_paths: instance_paths.clone(),
+            model_devshell,
             runtime: runtime.clone(),
             socket_paths: socket_paths.clone(),
             states: Mutex::new(HashMap::new()),
@@ -105,12 +109,15 @@ impl TmuxStateRegistry {
         if let Some(state) = states.get(workspace) {
             return Ok(Arc::clone(state));
         }
-        let state = Arc::new(TmuxState::new(TmuxBackend::new(
-            &self.instance_paths,
-            &self.socket_paths,
-            &self.runtime,
-            workspace,
-        )?)?);
+        let state = Arc::new(TmuxState::new(
+            TmuxBackend::new(
+                &self.instance_paths,
+                &self.socket_paths,
+                &self.runtime,
+                workspace,
+            )?,
+            Arc::clone(&self.model_devshell),
+        )?);
         TmuxState::start_reaper(&state);
         states.insert(workspace.to_path_buf(), Arc::clone(&state));
         Ok(state)
@@ -143,6 +150,7 @@ pub fn register_tools(
     instance_paths: &InstancePaths,
     socket_paths: &SocketPaths,
     runtime: &WorkerRuntimeContext,
+    model_devshell: Arc<ModelDevshellShim>,
 ) -> Result<(), ToolError> {
     if !TmuxBackend::available() {
         return Ok(());
@@ -151,6 +159,7 @@ pub fn register_tools(
         instance_paths,
         socket_paths,
         runtime,
+        model_devshell,
     ));
     registry.register(tool::<TmuxRunParams, TmuxRunOutput>(
         ToolName::parse("tmux_run").unwrap(),

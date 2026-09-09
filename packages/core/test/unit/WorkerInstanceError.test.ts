@@ -170,7 +170,8 @@ function createInstance(
         rpcBridge: {
             close: () => undefined,
             connect: async () => undefined,
-            onDisconnect: () => () => undefined
+            onDisconnect: () => () => undefined,
+            onNotification: () => () => undefined
         } as never,
         stateMachine: new InstanceStateMachine(asInstanceName("demo-local")),
         terminalClient: {} as never,

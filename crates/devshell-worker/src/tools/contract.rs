@@ -41,6 +41,7 @@ pub struct ToolCall {
     pub params: serde_json::Value,
     pub ctx_id: String,
     pub operation_id: String,
+    pub source: Option<String>,
     pub policy: Arc<dyn SecurityPolicy>,
     pub process_registry: Arc<ActiveProcessRegistry>,
     pub cancellation: ToolCancellation,

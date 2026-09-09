@@ -1,5 +1,6 @@
 pub mod alerts;
 pub mod artifact_payload;
+pub mod devshell_command;
 pub mod extension_resource;
 pub mod handshake;
 pub mod ping;
@@ -18,6 +19,7 @@ use std::sync::atomic::AtomicBool;
 use crate::daemon::process::WorkerRuntimeContext;
 use crate::daemon::process_registry::ActiveProcessRegistry;
 use crate::instance::WorkerConfig;
+use crate::rpc::notification::WorkerNotificationQueue;
 use crate::rpc::router::{ActiveToolCallRegistry, ControlHandler};
 use crate::security::SecurityPolicy;
 use crate::storage::ExtensionResourceStore;
@@ -42,8 +44,31 @@ pub fn register_control_handlers(
     resources: Arc<ExtensionResourceStore>,
     terminals: TerminalManager,
     alerts: Arc<alerts::AlertService>,
+    notifications: Arc<WorkerNotificationQueue>,
 ) {
     let direct = ArtifactDirectTransfer::new(Arc::clone(&payloads), Arc::clone(&receives));
+    let devshell_commands =
+        devshell_command::DevshellCommandBroker::new(Arc::clone(&notifications));
+    handlers.insert(
+        "devshell.command.open".to_string(),
+        devshell_commands.open_handler(),
+    );
+    handlers.insert(
+        "devshell.command.read".to_string(),
+        devshell_commands.read_handler(),
+    );
+    handlers.insert(
+        "devshell.command.output".to_string(),
+        devshell_commands.output_handler(),
+    );
+    handlers.insert(
+        "devshell.command.complete".to_string(),
+        devshell_commands.complete_handler(),
+    );
+    handlers.insert(
+        "devshell.command.close".to_string(),
+        devshell_commands.close_handler(),
+    );
     handlers.insert(
         "artifact.receive.direct.open".to_string(),
         artifact_payload::direct_receive_open(Arc::clone(&direct)),

@@ -6,6 +6,9 @@ import { McpOAuthProtectedResource, type HttpHost } from "@portable-devshell/mcp
 import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
 import { DebugPatchService } from "../../control/debug/DebugPatchService.js";
 import { CliExtensionCommandService } from "../../control/cli/CliExtensionCommandService.js";
+import { ModelDevshellBroker } from "../../control/cli/ModelDevshellBroker.js";
+import { createArtifactCliCommandProvider } from "../../control/artifact/cli/ArtifactCliCommandProvider.js";
+import { createInstanceModelCliCommandProvider } from "../../control/instance/cli/InstanceCliCommandProvider.js";
 import { RuntimeSubscriptionManager } from "../../instance/runtime/RuntimeSubscriptionManager.js";
 import { ExtensionControlService } from "../../control/extension/route/ExtensionControlService.js";
 import { WebApplicationCatalog } from "../../server/web/extension/WebApplicationCatalog.js";
@@ -56,6 +59,7 @@ export class ControlRuntime {
     readonly #extensions: ExtensionHost;
     readonly #instances: InstanceRegistry;
     readonly #mcp: ControlRuntimeMcp;
+    readonly #modelDevshell: ModelDevshellBroker;
     readonly #reverse: ControlRuntimeReverse;
     readonly #routes: ControlRouteComposition;
     readonly #socketListener: ControlSocketListener;
@@ -80,6 +84,24 @@ export class ControlRuntime {
         this.#reverse = options.reverse;
         this.#debug = new DebugPatchService(options.instances);
         const runtimeSubscriptions = new RuntimeSubscriptionManager();
+        const modelCliCommands = new CliExtensionCommandService(this.#extensions, {
+            providers: [
+                createArtifactCliCommandProvider(options.artifact.service),
+                createInstanceModelCliCommandProvider({
+                    instances: options.instances,
+                    subscriptions: runtimeSubscriptions
+                })
+            ],
+            surface: "model"
+        });
+        this.#modelDevshell = new ModelDevshellBroker({
+            access: {
+                allows: ({ extensionId }) => extensionId === "instance"
+            },
+            commands: modelCliCommands,
+            contextAdmin: () => options.mcp.host?.contextAdmin,
+            instances: options.instances
+        });
         this.#routes = new ControlRouteComposition({
             artifact: options.artifact.service,
             cliCommands: new CliExtensionCommandService(this.#extensions, { surface: "native" }),
@@ -171,6 +193,7 @@ export class ControlRuntime {
 
     async stop(): Promise<void> {
         const failures: unknown[] = [];
+        this.#modelDevshell.dispose();
         await this.#channels.close().catch((error) => failures.push(error));
         await this.#extensions.stop().catch((error) => failures.push(error));
         await this.#debug.dispose().catch((error) => failures.push(error));

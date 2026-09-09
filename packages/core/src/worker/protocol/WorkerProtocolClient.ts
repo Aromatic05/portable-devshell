@@ -18,6 +18,18 @@ export interface WorkerStopResult {
     stopping: boolean;
 }
 
+export interface WorkerDevshellCommandOutputInput {
+    data: string;
+    sessionId: string;
+    stream: "stderr" | "stdout";
+}
+
+export interface WorkerDevshellCommandCompleteInput {
+    error?: string;
+    exitCode: number;
+    sessionId: string;
+}
+
 export interface WorkerShellRuntime {
     executable: string;
     kind: "bash" | "powershell" | string;
@@ -216,6 +228,14 @@ export class WorkerProtocolClient {
 
     async closeToolSession(sessionId: string): Promise<void> {
         await this.#rpcClient.request("tool.session.close", { sessionId });
+    }
+
+    async writeDevshellCommandOutput(input: WorkerDevshellCommandOutputInput): Promise<void> {
+        await this.#rpcClient.request("devshell.command.output", input as unknown as JsonValue);
+    }
+
+    async completeDevshellCommand(input: WorkerDevshellCommandCompleteInput): Promise<void> {
+        await this.#rpcClient.request("devshell.command.complete", input as unknown as JsonValue);
     }
 
     async prepareExtensionResource(

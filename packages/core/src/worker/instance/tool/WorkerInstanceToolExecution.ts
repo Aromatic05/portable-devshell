@@ -96,7 +96,13 @@ export class WorkerInstanceToolExecution {
         try {
             const rawResult = await reservation.run(async () => {
                 await this.#audit.running(scope, runningContext, approvalState);
-                return await this.#toolInvoker.invoke(toolName, invocationInput, context, signal, onProgress);
+                return await this.#toolInvoker.invoke(
+                    toolName,
+                    invocationInput,
+                    { ...context, operationId: scope.callId },
+                    signal,
+                    onProgress
+                );
             });
             const result = transformResult === undefined
                 ? rawResult

@@ -8,6 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::daemon::process_registry::ActiveProcessGuard;
+use crate::model_devshell::ModelDevshellShim;
 use crate::platform;
 use crate::security::path::{
     FilesystemCapability, PathNamespace, ResolvedPath, parse_requested_path,
@@ -36,13 +37,18 @@ const PROGRESS_TAIL_BYTES: usize = 64 * 1024;
 pub struct BashRunTool {
     name: ToolName,
     artifacts: Arc<ArtifactStore>,
+    model_devshell: Arc<ModelDevshellShim>,
     shell: ShellRuntime,
 }
 impl BashRunTool {
-    pub fn new(artifacts: Arc<ArtifactStore>) -> Result<Self, ToolError> {
+    pub fn new(
+        artifacts: Arc<ArtifactStore>,
+        model_devshell: Arc<ModelDevshellShim>,
+    ) -> Result<Self, ToolError> {
         Ok(Self {
             name: bash_run_name(),
             artifacts,
+            model_devshell,
             shell: ShellRuntime::detect()?,
         })
     }
@@ -60,7 +66,7 @@ impl ToolHandler for BashRunTool {
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
-        let params: BashRunParams = call.parse_params()?;
+        let mut params: BashRunParams = call.parse_params()?;
         if params.command.trim().is_empty() {
             return Err(ToolError::new(
                 "bash.invalidCommand",
@@ -103,6 +109,14 @@ impl ToolHandler for BashRunTool {
             .check_capability(FilesystemCapability::ProcessExecute)
             .map_err(ToolError::from)?;
         let cwd = resolve_cwd(&call, params.cwd.as_deref())?;
+        let requested_path = match params.env.get("PATH") {
+            Some(Some(value)) => Some(value.as_str()),
+            Some(None) => Some(""),
+            None => None,
+        };
+        if let Some(environment) = self.model_devshell.environment(&call, None, requested_path) {
+            environment.inject(&mut params.env);
+        }
         let started = Instant::now();
         let mut child = spawn_shell(&self.shell, &params.command, &cwd, &params.env)?;
         let pid = child.id() as i32;

@@ -11,6 +11,7 @@ export type InstanceEventType = ArtifactEventType
     | "worker.rpcConnected"
     | "worker.rpcDisconnected"
     | "worker.schemaRefreshed"
+    | "worker.protocolIntegrityFault"
     | "reverse.connected"
     | "reverse.disconnected"
     | "reverse.enrollmentChanged"

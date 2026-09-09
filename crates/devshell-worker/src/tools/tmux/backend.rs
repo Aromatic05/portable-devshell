@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::daemon::process::WorkerRuntimeContext;
+use crate::model_devshell::ModelDevshellEnvironment;
 use crate::platform::unix_time_millis;
 use crate::socket::SocketPaths;
 use crate::storage::InstancePaths;
@@ -434,6 +435,7 @@ impl TmuxBackend {
         task_id: &str,
         cwd: &Path,
         command: &str,
+        model_environment: Option<&ModelDevshellEnvironment>,
     ) -> Result<BackendPane, ToolError> {
         let pane = PaneRecord::new(task_id, Some(task_id.to_string()))?;
         let script_path = self.tasks_dir.join(format!("{task_id}.sh"));
@@ -447,11 +449,27 @@ impl TmuxBackend {
         let _ = fs::remove_file(&transcript_done_path);
         self.persist_transcript_ring_name(task_id)?;
         atomic_write_bytes(&script_path, command.as_bytes())?;
+        let task_command = match model_environment {
+            Some(environment) => format!(
+                "/usr/bin/env {} /bin/bash --noprofile --norc {}",
+                environment
+                    .pairs()
+                    .into_iter()
+                    .map(|(name, value)| format!("{name}={}", shell_quote(value)))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                shell_quote(&script_path.to_string_lossy()),
+            ),
+            None => format!(
+                "/bin/bash --noprofile --norc {}",
+                shell_quote(&script_path.to_string_lossy())
+            ),
+        };
         let runner = format!(
-            "umask 077; while [ ! -e {} ]; do /bin/sleep 0.02; done; /bin/rm -f {}; /bin/bash --noprofile --norc {}; status=$?; printf '%s\\n' \"$status\" > {}; exit \"$status\"",
+            "umask 077; while [ ! -e {} ]; do /bin/sleep 0.02; done; /bin/rm -f {}; {}; status=$?; printf '%s\\n' \"$status\" > {}; exit \"$status\"",
             shell_quote(&gate_path.to_string_lossy()),
             shell_quote(&gate_path.to_string_lossy()),
-            shell_quote(&script_path.to_string_lossy()),
+            task_command,
             shell_quote(&exit_path.to_string_lossy()),
         );
         let launch = format!(

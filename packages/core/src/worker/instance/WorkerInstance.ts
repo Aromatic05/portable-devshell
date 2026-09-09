@@ -20,6 +20,13 @@ import type { LogQuery } from "../../log/LogQuery.js";
 import type { InstanceLogEntry } from "../../log/store/LogStoreInstance.js";
 import type { WorkerCommandClient } from "../command/WorkerCommandClient.js";
 import type { WorkerCommandInteractiveSession } from "../command/WorkerCommandTransport.js";
+import {
+    WorkerDevshellCommandBridge,
+    type WorkerDevshellCommandClose,
+    type WorkerDevshellCommandCompletion,
+    type WorkerDevshellCommandOpen,
+    type WorkerDevshellCommandOutput
+} from "../devshell/WorkerDevshellCommandBridge.js";
 import type {
     WorkerArtifactDirectPushInput,
     WorkerArtifactDirectPushResult,
@@ -92,6 +99,7 @@ export class WorkerInstance {
     readonly #catalog: WorkerToolCatalog;
     readonly #config: ResolvedWorkerInstanceConfig;
     readonly #connection: WorkerInstanceConnection;
+    readonly #devshellCommands: WorkerDevshellCommandBridge;
     readonly #handle: WorkerHandle;
     readonly #lifecycle: WorkerInstanceLifecycle;
     readonly #protocolClient: WorkerProtocolClient;
@@ -126,6 +134,10 @@ export class WorkerInstance {
             rpcBridge: dependencies.rpcBridge,
             snapshot: () => this.snapshot()
         });
+        this.#devshellCommands = new WorkerDevshellCommandBridge(
+            dependencies.rpcBridge,
+            dependencies.protocolClient
+        );
         this.#terminalClient = dependencies.terminalClient;
         this.#lifecycle = new WorkerInstanceLifecycle({
             appendEvent: (type) => this.#state.appendEvent(type),
@@ -259,6 +271,22 @@ export class WorkerInstance {
 
     onRpcDisconnected(listener: (error: WorkerRpcError) => void): () => void {
         return this.#terminalClient.onDisconnected(listener);
+    }
+
+    onDevshellCommandOpen(listener: (request: WorkerDevshellCommandOpen) => void): () => void {
+        return this.#devshellCommands.onOpen(listener);
+    }
+
+    onDevshellCommandClose(listener: (request: WorkerDevshellCommandClose) => void): () => void {
+        return this.#devshellCommands.onClose(listener);
+    }
+
+    async writeDevshellCommandOutput(output: WorkerDevshellCommandOutput): Promise<void> {
+        await this.#devshellCommands.output(output);
+    }
+
+    async completeDevshellCommand(completion: WorkerDevshellCommandCompletion): Promise<void> {
+        await this.#devshellCommands.complete(completion);
     }
 
     async appendControlEvent(type: InstanceEventInput["type"], data?: JsonValue) {
@@ -475,6 +503,7 @@ export class WorkerInstance {
         try {
             await this.#lifecycle.closeConnection();
         } finally {
+            this.#devshellCommands.close();
             this.#audit.close();
         }
     }

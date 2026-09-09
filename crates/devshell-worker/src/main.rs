@@ -1,6 +1,7 @@
 mod cli;
 mod daemon;
 mod instance;
+mod model_devshell;
 mod platform;
 mod reverse;
 mod rpc;
@@ -15,6 +16,15 @@ mod tools;
 use instance::InstanceName;
 
 fn main() {
+    if let Some(result) = model_devshell::try_run_shim() {
+        match result {
+            Ok(code) => std::process::exit(code),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+    }
     match run() {
         Ok(output) => {
             if !output.is_empty() {
