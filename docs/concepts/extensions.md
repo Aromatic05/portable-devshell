@@ -245,6 +245,8 @@ CliCommandResult
 
 Declaration 可以提供 `title`、`summary` 和 `usage`。Binding 当前由 CLI domain 定义为 argv + invocation context -> CLI result；这是 CLI 自己的 contract，不是 generic Extension RPC。
 
+Control 内部 static catalog 会由 CLI domain 投影成 command discovery DTO。该 discovery 只包含 CLI presentation metadata，不包含 generation 或 runtime binding。`devshell <extension-command> --help` 使用这一静态数据生成 help，因此查看 Extension command 帮助不会 activation Extension；普通 argv 仍按需取得 generation lease 并调用真实 binding。全局 `devshell --help` 不依赖 Control，保持本地可用。
+
 Local-owner CLI 可以在 invocation context 中提供 `workingDirectory`。依赖 Control 主机 project 路径的 Extension 必须使用这个字段，而不能读取 daemon 自己的 `process.cwd()` 猜调用者目录。
 
 ### web.applications
@@ -271,6 +273,10 @@ endpoint
 ```
 
 这些 source kind 属于 Web domain contract，不是 Extension core capability。Extension 不获得 raw `IncomingMessage` / `ServerResponse`、WebSocket implementation 或 portable-devshell 主 Web DOM。
+
+Web domain 同样从 static catalog 投影 application discovery DTO，只暴露 `extensionId / id / title`。主 WebUI 的 navigation 直接由这些 declaration 生成，并链接到 Web host 已有的 `./extensions/<application-id>/` mount。读取 application catalog 或渲染导航都不会 activation Extension；只有真正请求 application content 时才需要 runtime binding。
+
+CLI/Web discovery 都是各自 domain 的 read surface，不存在 public `extension.catalog`、generic contribution listing 或 runtime binding introspection API。
 
 ## Generation ownership
 

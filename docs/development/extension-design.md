@@ -1,6 +1,6 @@
 # Extension 架构与 ABI 设计
 
-> 状态：核心元模型与第一阶段已实现；后续章节继续约束未来 Extension Point 演进。
+> 状态：核心元模型、static catalog、lazy activation 与第一批 CLI/Web domain discovery 已实现；后续章节继续约束未来 Extension Point 演进。
 >
 > API v3 已落地 `assets / workers / processes` capabilities、`cli.commands / web.applications` Extension Points、generation-owned registrations，以及最小 `activate / deactivate` module 生命周期。`docs/concepts/extensions.md` 描述当前运行时契约；本文保留设计推导、后续候选项和 public ABI 审查门禁。
 
@@ -637,6 +637,8 @@ hostPoint === extensionBundledPoint
 
 ### 8.2 静态 declaration 应承担的内容
 
+> 实现状态：已落地。Control 通过 CLI domain-owned `commands` discovery 只投影 `cli.commands` declaration metadata；`devshell <extension-command> --help` 在不 activation Extension 的情况下生成 help。全局 `devshell --help` 仍保持离线、本地解析。
+
 CLI 在 Extension 未 activation 时就应该能够：
 
 - 构建 command tree；
@@ -656,6 +658,8 @@ possibly subcommand metadata
 ```
 
 具体字段由 CLI parser 的最终模型决定，不在 Extension core 中定义。
+
+当前 discovery transport 也不是 generic Extension catalog：CLI domain 只返回 `extensionId / id / title / summary / usage`，不暴露 generation、runtime binding、sandbox callback token 或 Control transport details。
 
 ### 8.3 Runtime binding
 
@@ -757,6 +761,8 @@ resolveUpstream()
 具体 contract 可以允许不同 application source，但名称必须在 Web domain 内重新审查，不能把 `static` / `proxy` 直接提升为 Extension core taxonomy。
 
 ### 9.4 Static metadata
+
+> 实现状态：已落地。Web domain 从 static catalog 投影 `web.applications` declaration，主 WebUI 在 Extension 未 activation 时即可生成 application navigation entry。Navigation 直接链接到 Web host 已有的 `./extensions/<application-id>/` mount；它不是主 SPA hash route，也没有新增 `web.navigationItems` point。
 
 Web host 在不 activation Extension 时应能够构建：
 
