@@ -5,3 +5,9 @@ export interface CliCommandDescriptor {
     title: string;
     usage?: string;
 }
+
+export interface CliCommandWireResult {
+    kind: "json" | "text";
+    text?: string;
+    value?: import("../../type/TypeJsonValue.js").JsonValue;
+}

@@ -36,12 +36,12 @@ test("CliParser treats unknown top-level namespaces as cli.commands local ids", 
     assert.deepEqual(parser.parse(["agent", "start", "worker-a:/repo"]), {
         args: ["start", "worker-a:/repo"],
         commandId: "agent",
-        kind: "extension.command"
+        kind: "cli.command"
     });
     assert.deepEqual(parser.parse(["agent", "--help"]), {
         args: ["--help"],
         commandId: "agent",
-        kind: "extension.command"
+        kind: "cli.command"
     });
     assert.deepEqual(parser.parse(["extension"]), { kind: "extension.help" });
     assert.deepEqual(parser.parse(["extension", "list"]), { kind: "extension.list" });

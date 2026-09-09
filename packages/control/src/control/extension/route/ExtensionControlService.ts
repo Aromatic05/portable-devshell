@@ -1,6 +1,4 @@
-import type { ExtensionInvocationContext } from "@portable-devshell/extension";
 import type {
-    ExtensionCommandWireResult,
     ExtensionRemoveResult,
     ExtensionRuntimeRecord
 } from "@portable-devshell/shared";
@@ -16,14 +14,6 @@ export class ExtensionControlService implements ExtensionControlPort {
     constructor(options: { host: ExtensionHost; installer: ExtensionInstallService }) {
         this.#host = options.host;
         this.#installer = options.installer;
-    }
-
-    async command(
-        commandId: string,
-        argv: readonly string[],
-        context: ExtensionInvocationContext
-    ): Promise<ExtensionCommandWireResult> {
-        return await this.#host.dispatchCommand(commandId, argv, context) as ExtensionCommandWireResult;
     }
 
     async disable(id: string): Promise<void> {

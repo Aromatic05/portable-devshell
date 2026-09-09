@@ -18,11 +18,12 @@ test("secret cli.commands binding is dispatched with caller cwd", async () => {
                     };
                 }
             },
-            extension: {
+            cli: {
                 async command(id: string, args: readonly string[], options?: { workingDirectory?: string }) {
                     calls.push({ id, args, workingDirectory: options?.workingDirectory });
                     return { kind: "json", value: { findings: [] } };
-                }
+                },
+                async commands() { return []; }
             }
         } as never),
         stderr,

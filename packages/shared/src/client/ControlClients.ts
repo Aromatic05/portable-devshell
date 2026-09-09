@@ -32,11 +32,13 @@ import type {
     DebugTargetSummary,
 } from "../dto/DtoDebug.js";
 import type {
-    ExtensionCommandWireResult,
     ExtensionRemoveResult,
     ExtensionRuntimeRecord,
 } from "../dto/DtoExtension.js";
-import type { CliCommandDescriptor } from "../dto/cli/DtoCliCommand.js";
+import type {
+    CliCommandDescriptor,
+    CliCommandWireResult
+} from "../dto/cli/DtoCliCommand.js";
 import type { WebApplicationDescriptor } from "../dto/web/DtoWebApplication.js";
 import type {
     InstanceCreateDraft,
@@ -130,6 +132,11 @@ export interface ControlClients {
         validate(draft: ConfigDraft): Promise<Record<string, JsonValue>>;
     };
     cli: {
+        command(
+            commandId: string,
+            argv: readonly string[],
+            options?: { signal?: AbortSignal; workingDirectory?: string }
+        ): Promise<CliCommandWireResult>;
         commands(): Promise<CliCommandDescriptor[]>;
     };
     context: {
@@ -149,11 +156,6 @@ export interface ControlClients {
         unload(patchId: string): Promise<DebugPatchSummary>;
     };
     extension: {
-        command(
-            commandId: string,
-            argv: readonly string[],
-            options?: { signal?: AbortSignal; workingDirectory?: string }
-        ): Promise<ExtensionCommandWireResult>;
         disable(extensionId: string): Promise<ExtensionRuntimeRecord>;
         enable(extensionId: string): Promise<ExtensionRuntimeRecord>;
         get(extensionId: string): Promise<ExtensionRuntimeRecord>;
@@ -295,6 +297,17 @@ export function createControlClients(
                 artifact.request("viewImage", { ...input, defaultInstance }),
         },
         cli: {
+            command: async (commandId, argv, commandOptions = {}) => await requestWithAbort(
+                connection.request("@control", "cli", "command", {
+                    commandId,
+                    argv: [...argv],
+                    ...(commandOptions.workingDirectory === undefined ? {} : {
+                        workingDirectory: commandOptions.workingDirectory
+                    })
+                }),
+                commandOptions.signal,
+                "CLI command was aborted."
+            ),
             commands: () => cli.request("commands"),
         },
         config: {
@@ -328,17 +341,6 @@ export function createControlClients(
             unload: (patchId) => debug.request("unload", { patchId }),
         },
         extension: {
-            command: async (commandId, argv, commandOptions = {}) => await requestWithAbort(
-                connection.request("@control", "extension", "command", {
-                    commandId,
-                    argv: [...argv],
-                    ...(commandOptions.workingDirectory === undefined ? {} : {
-                        workingDirectory: commandOptions.workingDirectory
-                    })
-                }),
-                commandOptions.signal,
-                "Extension command was aborted."
-            ),
             disable: (extensionId) => extension.request("disable", { extensionId }),
             enable: (extensionId) => extension.request("enable", { extensionId }),
             get: (extensionId) => extension.request("get", { extensionId }),

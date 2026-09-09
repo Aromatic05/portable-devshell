@@ -46,7 +46,7 @@ export type CliParsedCommand =
     | { extensionId: string; kind: "extension.enable" | "extension.disable" | "extension.reload" }
     | { kind: "extension.install"; source: string }
     | { extensionId: string; kind: "extension.remove"; purge: boolean }
-    | { args: string[]; commandId: string; kind: "extension.command" }
+    | { args: string[]; commandId: string; kind: "cli.command" }
     | { input: JsonValue; instance: string; kind: "instance.call"; toolName: string; workspace: string }
     | { kind: "instance.create" }
     | { instance: string; kind: "instance.delete" }
@@ -119,7 +119,7 @@ export class CliParser {
             case "watch":
                 return this.#parseWatch(argv.slice(1));
             default:
-                return this.#parseExtensionCommand(argv);
+                return this.#parseCliCommand(argv);
         }
     }
 
@@ -205,19 +205,19 @@ export class CliParser {
         }
     }
 
-    #parseExtensionCommand(argv: readonly string[]): CliParsedCommand {
-        const commandId = this.#extensionCommandId(argv[0]);
+    #parseCliCommand(argv: readonly string[]): CliParsedCommand {
+        const commandId = this.#cliCommandId(argv[0]);
         return {
             args: [...argv.slice(1)],
             commandId,
-            kind: "extension.command"
+            kind: "cli.command"
         };
     }
 
-    #extensionCommandId(value: string | undefined): string {
-        const commandId = this.#required(value, "Extension command id is required");
+    #cliCommandId(value: string | undefined): string {
+        const commandId = this.#required(value, "CLI command id is required");
         if (/^[a-z][a-z0-9-]*$/u.test(commandId)) return commandId;
-        throw CliRenderError.usage("Extension command id must match [a-z][a-z0-9-]*");
+        throw CliRenderError.usage("CLI command id must match [a-z][a-z0-9-]*");
     }
 
     #extensionId(value: string | undefined): string {

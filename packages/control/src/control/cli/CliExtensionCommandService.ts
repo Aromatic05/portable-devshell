@@ -1,13 +1,25 @@
-import type { CliCommandDeclaration } from "@portable-devshell/extension/cli";
+import type { ExtensionInvocationContext } from "@portable-devshell/extension";
+import type {
+    CliCommandDeclaration,
+    CliCommandResult
+} from "@portable-devshell/extension/cli";
 import type { CliCommandDescriptor } from "@portable-devshell/shared";
 
 import type { ExtensionHost } from "../extension/host/ExtensionHost.js";
 
-export class CliExtensionCommandCatalog {
-    readonly #extensions: Pick<ExtensionHost, "listDeclarations">;
+export class CliExtensionCommandService {
+    readonly #extensions: Pick<ExtensionHost, "dispatchCommand" | "listDeclarations">;
 
-    constructor(extensions: Pick<ExtensionHost, "listDeclarations">) {
+    constructor(extensions: Pick<ExtensionHost, "dispatchCommand" | "listDeclarations">) {
         this.#extensions = extensions;
+    }
+
+    async command(
+        commandId: string,
+        argv: readonly string[],
+        context: ExtensionInvocationContext
+    ): Promise<CliCommandResult> {
+        return await this.#extensions.dispatchCommand(commandId, argv, context);
     }
 
     list(): readonly CliCommandDescriptor[] {

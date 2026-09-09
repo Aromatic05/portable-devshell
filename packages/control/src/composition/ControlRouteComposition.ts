@@ -9,7 +9,7 @@ import {
 
 import type { ArtifactService } from "../control/artifact/ArtifactService.js";
 import { createArtifactRouteModule } from "../control/artifact/route/ArtifactRouteModule.js";
-import { createCliRouteModule, type CliCommandCatalogPort } from "../control/cli/CliRouteModule.js";
+import { createCliRouteModule, type CliCommandPort } from "../control/cli/CliRouteModule.js";
 import type { ConfigEditorPort } from "../control/config/ConfigRouteModule.js";
 import { createConfigRouteModule } from "../control/config/ConfigRouteModule.js";
 import { createDebugRouteModule, type DebugPatchPort } from "../control/debug/DebugRouteModule.js";
@@ -42,7 +42,7 @@ import {
 
 export interface ControlRouteCompositionOptions {
     artifact?: ArtifactService;
-    cliCommands?: CliCommandCatalogPort;
+    cliCommands?: CliCommandPort;
     config?: ConfigEditorPort;
     contextAdmin?: () => ContextAdminPort | undefined;
     debug?: DebugPatchPort;

@@ -291,7 +291,7 @@ export class CliMain {
             case "extension.reload":
                 this.#writeJson(await this.#clients.extension.reload(command.extensionId));
                 return;
-            case "extension.command": {
+            case "cli.command": {
                 if (isExtensionHelp(command.args)) {
                     const descriptor = (await this.#clients.cli.commands())
                         .find((candidate) => candidate.id === command.commandId);
@@ -300,7 +300,7 @@ export class CliMain {
                         return;
                     }
                 }
-                const result = await this.#clients.extension.command(command.commandId, command.args, {
+                const result = await this.#clients.cli.command(command.commandId, command.args, {
                     workingDirectory: process.cwd()
                 });
                 if (result.kind === "text") {
@@ -518,6 +518,7 @@ function commandUsesControlClient(command: CliParsedCommand): boolean {
         command.kind.startsWith("oauth.") ||
         command.kind.startsWith("context.") ||
         command.kind.startsWith("debug.") ||
+        command.kind === "cli.command" ||
         (command.kind.startsWith("extension.") && command.kind !== "extension.help") ||
         command.kind.startsWith("tool.") ||
         command.kind.startsWith("todo.")

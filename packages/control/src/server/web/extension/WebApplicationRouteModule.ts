@@ -27,7 +27,7 @@ export function createWebApplicationRouteModule(
 function requireWeb(context: PrefixRouteContext): void {
     if (context.peer === "web") return;
     throw createError({
-        code: errorCodes.controlExtensionAccessDenied,
+        code: errorCodes.controlWebAccessDenied,
         message: "Web application discovery is available only to Web clients.",
         retryable: false
     });

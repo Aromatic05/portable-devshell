@@ -235,7 +235,7 @@ test("CliMain keeps Extension management separate from cli.commands dispatch", a
                     usage: "agent <command>"
                 }];
             },
-            async extensionCommand(commandId: string, argv: readonly string[]) {
+            async cliCommand(commandId: string, argv: readonly string[]) {
                 calls.push(`command:${commandId}:${argv.join("|")}`);
                 return { kind: "json", value: { commandId } };
             },
@@ -312,6 +312,34 @@ test("CliMain keeps Extension management separate from cli.commands dispatch", a
         "cli.commands",
         "command:agent:json"
     ]);
+    assert.equal(stderr.flush(), "");
+});
+
+test("CliMain negotiates Control before cli.commands invocation", async () => {
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const calls: string[] = [];
+    const cli = new CliMain({
+        createCliClients: () => testClients({
+            async hello() {
+                calls.push("hello");
+                return {
+                    capabilities: ["request", "stream", "streamResume"],
+                    protocolVersion: 1,
+                };
+            },
+            async cliCommand(commandId: string, argv: readonly string[]) {
+                calls.push(`command:${commandId}:${argv.join("|")}`);
+                return { kind: "text", text: "ok" };
+            }
+        }),
+        stderr,
+        stdout
+    });
+
+    assert.equal(await cli.run(["agent", "run"]), 0);
+    assert.equal(stdout.flush(), "ok\n");
+    assert.deepEqual(calls, ["hello", "command:agent:run"]);
     assert.equal(stderr.flush(), "");
 });
 
@@ -1321,6 +1349,7 @@ function testClients(client: Record<string, unknown>) {
             startTransfer: (...args: unknown[]) => invoke("startTransfer", args)
         },
         cli: {
+            command: (...args: unknown[]) => invoke("cliCommand", args),
             commands: (...args: unknown[]) => invoke("cliCommands", args),
         },
         config: {
@@ -1338,7 +1367,6 @@ function testClients(client: Record<string, unknown>) {
             queue: (...args: unknown[]) => invoke("createContextMessage", args),
         },
         extension: {
-            command: (...args: unknown[]) => invoke("extensionCommand", args),
             disable: (...args: unknown[]) => invoke("extensionDisable", args),
             enable: (...args: unknown[]) => invoke("extensionEnable", args),
             get: (...args: unknown[]) => invoke("extensionGet", args),

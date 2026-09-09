@@ -116,7 +116,10 @@ async function runRealWorkerSmoke(): Promise<void> {
         assert.equal(await runCli(["status"]), 0);
         assert.match(stdout.flush(), /instances: 1/u);
 
-        assert.equal(await runCli(["secret", "scan", workspacePath]), 0);
+        const secretExitCode = await runCli(["secret", "scan", workspacePath]);
+        if (secretExitCode !== 0) {
+            assert.fail(`secret scan failed with exit ${secretExitCode}: ${stderr.flush()}`);
+        }
         const secretScan = JSON.parse(stdout.flush()) as { findings: Array<{ line: number; path: string; type: string }> };
         assert.deepEqual(secretScan.findings, [{ line: 1, path: "secret.env", type: "generic_assignment" }]);
 

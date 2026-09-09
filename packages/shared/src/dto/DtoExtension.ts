@@ -1,5 +1,3 @@
-import type { JsonValue } from "../type/TypeJsonValue.js";
-
 export type ExtensionRuntimeState = "active" | "disabled" | "failed" | "installed";
 export type ExtensionGenerationRuntimeState = "active" | "disposed" | "dispose-failed" | "draining" | "faulted" | "ready";
 
@@ -25,12 +23,6 @@ export interface ExtensionRuntimeRecord {
     selectedGeneration?: string;
     state: ExtensionRuntimeState;
     version?: string;
-}
-
-export interface ExtensionCommandWireResult {
-    kind: "json" | "text";
-    text?: string;
-    value?: JsonValue;
 }
 
 export interface ExtensionRemoveResult {
