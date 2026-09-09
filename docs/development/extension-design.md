@@ -1153,6 +1153,8 @@ CLI command failure
 
 不要建立一个巨大 `ExtensionOperationError` 覆盖所有 domain semantics。
 
+当前 Web owner 已落实该边界：static catalog 中不存在的 application 是 404；已发布但 binding activation/source 不可用是 503；endpoint upstream failure 是 502。ExtensionHost/generation failure 与 Node upstream exception 只作为宿主内部诊断信息，不能把原始 message/path/socket error 反射进 HTTP/WebSocket 响应。
+
 以下错误可由 Extension runtime 统一处理：
 
 ```text

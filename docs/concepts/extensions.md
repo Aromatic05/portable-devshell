@@ -297,6 +297,8 @@ endpoint
 
 Web domain 同样从 static catalog 投影 application discovery DTO，只暴露 `extensionId / id / title`。主 WebUI 的 navigation 直接由这些 declaration 生成，并链接到 Web host 已有的 `./extensions/<application-id>/` mount。读取 application catalog 或渲染导航都不会 activation Extension；只有真正请求 application content 时才需要 runtime binding。
 
+Web application 的 HTTP/WebSocket failure 也由 Web host 翻译，而不是把 ExtensionHost 或 Node upstream exception 直接暴露给浏览器：未发布 application 返回 404；已发布但 activation/source/generation 暂不可用返回 503；endpoint upstream 建连失败返回 502。响应正文使用固定 Web-domain 文案，不包含 generation path、provider socket、`ECONNREFUSED` 等内部细节。
+
 CLI/Web discovery 都是各自 domain 的 read surface，不存在 public `extension.catalog`、generic contribution listing 或 runtime binding introspection API。
 
 ## Generation ownership
