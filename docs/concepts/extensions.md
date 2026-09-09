@@ -190,6 +190,8 @@ callTool
 close
 ```
 
+`listTools()` 返回 `ExtensionWorkerToolDefinition`。这个类型只描述当前 Worker session 可调用的远端工具目录，是 `workers` capability 的 DTO；它不代表 Extension core 拥有 Tool contribution taxonomy，也不是未来 Tool-domain Extension Point 的 declaration contract。
+
 `closed` 是 host-owned lifecycle signal。instance disabled/deleted、connection loss、generation cleanup 或 caller close 都会最终使 session 不再可用；依赖 Worker 的 Extension 应观察 session closure，而不是要求 generic lifecycle broadcast。
 
 工具调用仍经过正常 approval、scheduler 和 audit pipeline，并以 Extension 归因。Public ABI 不暴露 `WorkerInstance`、provider transport、Worker protocol client 或 raw Worker RPC。

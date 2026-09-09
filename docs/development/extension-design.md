@@ -906,6 +906,8 @@ Tool
 
 MCP 只是 Tool catalog 的一个投影和调用入口。
 
+当前 root ABI 中 `workers` capability 的 `listTools()` 只返回 `ExtensionWorkerToolDefinition`，用于描述一个已打开 Worker session 暴露的远端工具。这里刻意使用 `Worker` 前缀，避免把 Worker-access DTO 误解成 Extension core 已经定义了 Tool-domain contribution contract。
+
 因此未来应该考虑一个 Tool-domain point，而不是：
 
 ```text
