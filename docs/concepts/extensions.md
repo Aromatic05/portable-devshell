@@ -224,6 +224,8 @@ Registration 使用 Extension-local id；Host 结合 point id、Extension id 和
 
 Control 的 Extension runtime Host 对 point domain 保持中立：它负责 static catalog、lazy activation、registration acquisition 和 generation lease，但不 import CLI/Web point contract，也不提供 `dispatchCommand`、`dispatchWeb` 之类的 domain-specific dispatch API。取得 lease 后，binding 的类型校验、调用和结果语义由对应 domain service 自己负责。
 
+当前 Control 在 composition 层构造内部 `ExtensionPointRegistry`。CLI/Web 各自注册 point definition：declaration schema、binding shape 和 point-specific resource validation 留在 domain owner；`ExtensionRegistration`、`ExtensionCatalog`、`ExtensionLoader` 只通过 registry 委托。这个 registry 不导出给 Extension，也不是一个 central point-kind enum。
+
 Public SDK 按 domain subpath 发布 leaf contract：
 
 ```text

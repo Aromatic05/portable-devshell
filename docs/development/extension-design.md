@@ -414,6 +414,8 @@ registration lifecycle rules
 
 但不需要一个 central `ExtensionPointKind` enum。
 
+Control 内部可以维护一个 `ExtensionPointRegistry` 来组合当前已知 point definition，但它只是 composition/runtime infrastructure，不是 public ABI taxonomy。每个 definition 由 point owner 提供自己的 declaration parser、binding validator，以及需要时的 binding-resource validator；generic registration/catalog/loader 只按稳定 point id 委托，不 import CLI/Web contract。
+
 ### 6.2 Stable identity
 
 Point identity 使用稳定 namespaced id：
@@ -453,6 +455,8 @@ generation
 Generation retirement 自动撤销 registration。
 
 Runtime Host 只拥有 registration identity、lazy activation、generation lease 和 acquisition，不解释某个 point 的 binding 业务语义。具体 point owner 在取得 registration lease 后负责校验并调用 binding。例如 `cli.commands` 的 binding invocation 属于 CLI domain，而不是 `ExtensionHost` 的 `dispatchCommand` 一类特殊方法。
+
+同样，manifest declaration 与 activation binding 的校验规则也属于 point owner。Generic runtime 可以要求“声明与 binding 一一对应”和“未知 point 被拒绝”，但不能自己实现 `cli.commands` 必须是 function、`web.applications` files source 必须位于 code generation 内这类 domain-specific 规则。
 
 第一版不要求 Extension 自己保存 `Disposable` 并手工清理每个 registration。
 
