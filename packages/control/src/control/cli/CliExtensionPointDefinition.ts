@@ -16,9 +16,8 @@ import {
     validateCliCommandBinding
 } from "./CliExtensionSandboxCodec.js";
 
-const BUILTIN_CLI_COMMAND_IDS = new Set([
+const CONTROL_CLI_COMMAND_IDS = new Set([
     "approval",
-    "artifact",
     "config",
     "context",
     "debug",
@@ -38,13 +37,20 @@ const BUILTIN_CLI_COMMAND_IDS = new Set([
     "watch"
 ]);
 
+const RESIDENT_EXTENSION_COMMAND_IDS = new Set([
+    "artifact"
+]);
+
 export const cliCommandsExtensionPointDefinition: ExtensionPointDefinition = Object.freeze({
     createSandboxBinding: createCliSandboxBinding,
     id: commands.id,
     parseDeclaration(declaration: ExtensionPointDeclaration): CliCommandDeclaration {
         const parsed = parseCliCommandDeclaration(declaration);
-        if (BUILTIN_CLI_COMMAND_IDS.has(parsed.id)) {
+        if (CONTROL_CLI_COMMAND_IDS.has(parsed.id)) {
             throw new TypeError(`cli.commands/${parsed.id} conflicts with a built-in CLI command.`);
+        }
+        if (RESIDENT_EXTENSION_COMMAND_IDS.has(parsed.id)) {
+            throw new TypeError(`cli.commands/${parsed.id} conflicts with a Control-resident Extension command.`);
         }
         return parsed;
     },

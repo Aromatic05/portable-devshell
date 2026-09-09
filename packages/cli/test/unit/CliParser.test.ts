@@ -83,7 +83,11 @@ test("CliParser accepts trailing help consistently across command levels", () =>
 
     assert.deepEqual(parser.parse(["status", "--help"]), { kind: "help" });
     assert.deepEqual(parser.parse(["instance", "status", "--help"]), { kind: "instance.help" });
-    assert.deepEqual(parser.parse(["artifact", "share", "--help"]), { args: ["--help"], kind: "artifact" });
+    assert.deepEqual(parser.parse(["artifact", "share", "--help"]), {
+        args: ["share", "--help"],
+        commandId: "artifact",
+        kind: "cli.command"
+    });
     assert.deepEqual(parser.parse(["config", "update", "--help"]), { kind: "help", topic: "config" });
     assert.deepEqual(parser.parse(["debug", "load", "--help"]), { kind: "help", topic: "debug" });
     assert.deepEqual(parser.parse(["approval", "approve", "-h"]), { kind: "help", topic: "approval" });
@@ -134,6 +138,7 @@ test("CliParser routes artifact arguments through the normal command pipeline", 
     const parser = new CliParser();
     assert.deepEqual(parser.parse(["artifact", "transfer", "status", "transfer-1"]), {
         args: ["transfer", "status", "transfer-1"],
-        kind: "artifact"
+        commandId: "artifact",
+        kind: "cli.command"
     });
 });

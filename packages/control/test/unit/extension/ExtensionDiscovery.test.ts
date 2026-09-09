@@ -108,6 +108,37 @@ test("CLI discovery projects only cli.commands declaration metadata", () => {
     assert.equal("binding" in service.list()[0]!, false);
 });
 
+test("CLI discovery and dispatch include Control-resident Extension command providers", async () => {
+    const calls: string[] = [];
+    const service = new CliExtensionCommandService(extensionHost([]), [{
+        binding: async (argv, invocation) => {
+            calls.push(`${argv.join("|")}:${invocation.requestId}:${invocation.localOwner}`);
+            return { kind: "text", text: "resident-ok" };
+        },
+        declaration: {
+            id: "artifact",
+            summary: "Manage artifacts",
+            title: "Artifact",
+            usage: "artifact <command>"
+        },
+        extensionId: "artifact"
+    }]);
+
+    assert.deepEqual(service.list(), [{
+        extensionId: "artifact",
+        id: "artifact",
+        summary: "Manage artifacts",
+        title: "Artifact",
+        usage: "artifact <command>"
+    }]);
+    assert.deepEqual(await service.command("artifact", ["shares"], {
+        localOwner: false,
+        requestId: "req-resident",
+        signal: new AbortController().signal
+    }), { kind: "text", text: "resident-ok" });
+    assert.deepEqual(calls, ["shares:req-resident:false"]);
+});
+
 test("Web discovery projects only web.applications declaration metadata", () => {
     const catalog = new WebApplicationCatalog(extensionHost([
         registration("web.applications", "agent", "agent", { title: "Agent" }),

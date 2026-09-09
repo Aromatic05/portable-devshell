@@ -9,7 +9,6 @@ import type { ConfigBatchUpdateRequest, ConfigDraft } from "@portable-devshell/s
 
 import { isCliEntrypoint } from "./CliEntrypoint.js";
 import { CliParser, type CliParsedCommand } from "./CliParser.js";
-import { executeArtifactCommand } from "./command/artifact/CliCommandArtifact.js";
 import {
     createCliClients as createControlClients,
     negotiateCliControl,
@@ -261,9 +260,6 @@ export class CliMain {
             case "todo.delete":
                 this.#writeJson(await this.#clients.todo.delete(command.instance, command.taskId));
                 return;
-            case "artifact":
-                await executeArtifactCommand(command.args, this.#clients.artifact, this.#stdout);
-                return;
             case "tui":
                 await this.#startTui();
                 return;
@@ -506,11 +502,6 @@ function splitGlobalFlags(argv: readonly string[]): { commandArgs: string[]; deb
 }
 
 function commandUsesControlClient(command: CliParsedCommand): boolean {
-    if (command.kind === "artifact") {
-        return ["share", "shares", "revoke", "transfer", "transfers"].includes(
-            command.args[0] ?? "",
-        );
-    }
     if (
         command.kind === "overview" ||
         command.kind.startsWith("config.") ||

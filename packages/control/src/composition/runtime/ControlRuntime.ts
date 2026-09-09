@@ -6,6 +6,7 @@ import { McpOAuthProtectedResource, type HttpHost } from "@portable-devshell/mcp
 import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
 import { DebugPatchService } from "../../control/debug/DebugPatchService.js";
 import { CliExtensionCommandService } from "../../control/cli/CliExtensionCommandService.js";
+import { createArtifactCliCommandProvider } from "../../control/artifact/cli/ArtifactCliCommandProvider.js";
 import { ExtensionControlService } from "../../control/extension/route/ExtensionControlService.js";
 import { WebApplicationCatalog } from "../../server/web/extension/WebApplicationCatalog.js";
 import type { ExtensionHost } from "../../control/extension/host/ExtensionHost.js";
@@ -80,7 +81,9 @@ export class ControlRuntime {
         this.#debug = new DebugPatchService(options.instances);
         this.#routes = new ControlRouteComposition({
             artifact: options.artifact.service,
-            cliCommands: new CliExtensionCommandService(this.#extensions),
+            cliCommands: new CliExtensionCommandService(this.#extensions, [
+                createArtifactCliCommandProvider(options.artifact.service)
+            ]),
             config: options.mcp.configEditor,
             contextAdmin: () => options.mcp.host?.contextAdmin,
             debug: this.#debug,

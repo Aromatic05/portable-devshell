@@ -1,60 +1,77 @@
+import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import type {
-    ArtifactShareInput,
-    ArtifactShareResult,
-    ArtifactShareRevokeResult,
-    ArtifactTransferRecord,
-    ArtifactTransferResult,
-    ArtifactTransferStartInput
+    CliCommandInvocationContext,
+    CliCommandResult
+} from "@portable-devshell/extension/cli";
+import {
+    createError,
+    type ArtifactShareInput,
+    type ArtifactShareResult,
+    type ArtifactShareRevokeResult,
+    type ArtifactTransferRecord,
+    type ArtifactTransferResult,
+    type ArtifactTransferStartInput
 } from "@portable-devshell/shared";
 
-import { CliRenderError } from "../../render/CliRenderError.js";
+import type { CliExtensionCommandProvider } from "../../cli/CliExtensionCommandProvider.js";
 
-export interface CliClientArtifactPort {
+export interface ArtifactCliCommandPort {
     cancelTransfer(transferId: string): Promise<ArtifactTransferResult>;
-    createShare(defaultInstance: string, input: ArtifactShareInput): Promise<ArtifactShareResult>;
-    getTransfer(transferId: string): Promise<ArtifactTransferRecord>;
-    listShares(): Promise<ArtifactShareResult[]>;
-    listTransfers(): Promise<ArtifactTransferRecord[]>;
+    createShare(input: ArtifactShareInput, defaultInstance: string): Promise<ArtifactShareResult>;
+    getTransfer(transferId: string): ArtifactTransferRecord | Promise<ArtifactTransferRecord>;
+    listShares(): ArtifactShareResult[] | Promise<ArtifactShareResult[]>;
+    listTransfers(): ArtifactTransferRecord[] | Promise<ArtifactTransferRecord[]>;
     revokeShare(shareId: string): Promise<ArtifactShareRevokeResult>;
-    startTransfer(defaultInstance: string, input: ArtifactTransferStartInput): Promise<ArtifactTransferResult>;
+    startTransfer(input: ArtifactTransferStartInput, defaultInstance: string): Promise<ArtifactTransferResult>;
+}
+
+export const artifactCliCommandDeclaration = Object.freeze({
+    id: "artifact",
+    summary: "Manage artifact shares and transfers",
+    title: "Artifact",
+    usage: "artifact <command>"
+});
+
+export function createArtifactCliCommandProvider(port: ArtifactCliCommandPort): CliExtensionCommandProvider {
+    return Object.freeze({
+        binding: async (argv: readonly string[], invocation: CliCommandInvocationContext) =>
+            await executeArtifactCommand(argv, port, invocation),
+        declaration: artifactCliCommandDeclaration,
+        extensionId: "artifact"
+    });
 }
 
 export async function executeArtifactCommand(
     args: readonly string[],
-    client: CliClientArtifactPort,
-    stdout: { write(chunk: string): void }
-): Promise<void> {
+    client: ArtifactCliCommandPort,
+    invocation: CliCommandInvocationContext
+): Promise<CliCommandResult> {
+    invocation.signal.throwIfAborted();
     const [command, ...rest] = args;
     switch (command) {
         case "share":
-            writeJson(stdout, await share(client, rest));
-            return;
+            return json(await share(client, rest));
         case "shares":
             expectNoArguments(rest, "artifact shares");
-            writeJson(stdout, (await client.listShares()).map((share) => ({
+            return json((await client.listShares()).map((share) => ({
                 ...share,
                 url: "[redacted]"
             })));
-            return;
         case "revoke":
             if (rest.length !== 1) {
                 throw usage("artifact revoke requires <shareId>");
             }
-            writeJson(stdout, await client.revokeShare(required(rest[0], "shareId")));
-            return;
+            return json(await client.revokeShare(required(rest[0], "shareId")));
         case "transfer":
-            writeJson(stdout, await transfer(client, rest));
-            return;
+            return json(await transfer(client, rest));
         case "transfers":
             expectNoArguments(rest, "artifact transfers");
-            writeJson(stdout, await client.listTransfers());
-            return;
+            return json(await client.listTransfers());
         case "help":
         case "--help":
         case "-h":
             expectNoArguments(rest, "artifact help");
-            stdout.write(`${artifactUsage()}\n`);
-            return;
+            return { kind: "text", text: artifactUsage() };
         case undefined:
             throw usage(artifactUsage());
         default:
@@ -62,7 +79,7 @@ export async function executeArtifactCommand(
     }
 }
 
-async function share(client: CliClientArtifactPort, args: readonly string[]): Promise<ArtifactShareResult> {
+async function share(client: ArtifactCliCommandPort, args: readonly string[]): Promise<ArtifactShareResult> {
     const parsed = parseOptions(args, new Set(["--authority", "--expires-in", "--max-downloads", "--workspace"]));
     if (parsed.positionals.length !== 2) {
         throw usage(
@@ -84,7 +101,7 @@ async function share(client: CliClientArtifactPort, args: readonly string[]): Pr
     const maxDownloads = parsed.options.has("--max-downloads")
         ? integerAtLeast(parsed.options.get("--max-downloads"), "--max-downloads", 1)
         : undefined;
-    return await client.createShare(authority, "handle" in source
+    return await client.createShare("handle" in source
         ? {
             ...source,
             ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }),
@@ -97,11 +114,11 @@ async function share(client: CliClientArtifactPort, args: readonly string[]): Pr
             ...(maxDownloads === undefined ? {} : { maxDownloads }),
             instance,
             workspace: workspace!
-        });
+        }, authority);
 }
 
 async function transfer(
-    client: CliClientArtifactPort,
+    client: ArtifactCliCommandPort,
     args: readonly string[]
 ): Promise<ArtifactTransferRecord | ArtifactTransferResult> {
     const operation = args[0];
@@ -148,9 +165,9 @@ async function transfer(
         targetPath: normalizeArtifactTargetPath(targetPath),
         targetWorkspace
     };
-    return await client.startTransfer(authority, "handle" in source
+    return await client.startTransfer("handle" in source
         ? { ...common, handle: source.handle }
-        : { ...common, sourcePath: source.sourcePath, sourceWorkspace: sourceWorkspace! });
+        : { ...common, sourcePath: source.sourcePath, sourceWorkspace: sourceWorkspace! }, authority);
 }
 
 function normalizeArtifactTargetPath(value: string): string {
@@ -230,8 +247,8 @@ function expectNoArguments(args: readonly string[], command: string): void {
     }
 }
 
-function writeJson(stream: { write(chunk: string): void }, value: unknown): void {
-    stream.write(`${JSON.stringify(value, null, 2)}\n`);
+function json(value: unknown): CliCommandResult {
+    return { kind: "json", value: JSON.parse(JSON.stringify(value)) as ExtensionJsonValue };
 }
 
 export function artifactUsage(): string {
@@ -249,6 +266,10 @@ export function artifactUsage(): string {
     ].join("\n");
 }
 
-function usage(message: string): CliRenderError {
-    return CliRenderError.usage(message);
+function usage(message: string): Error {
+    return createError({
+        code: "cli.usage",
+        message,
+        retryable: false
+    });
 }
