@@ -1,7 +1,9 @@
 import { isAbsolute } from "node:path";
 
-import type { ExtensionInvocationContext } from "@portable-devshell/extension";
-import type { CliCommandResult } from "@portable-devshell/extension/cli";
+import type {
+    CliCommandInvocationContext,
+    CliCommandResult
+} from "@portable-devshell/extension/cli";
 import {
     createError,
     errorCodes,
@@ -18,7 +20,7 @@ export interface CliCommandPort {
     command(
         commandId: string,
         argv: readonly string[],
-        context: ExtensionInvocationContext
+        context: CliCommandInvocationContext
     ): Promise<CliCommandResult>;
     list(): readonly CliCommandDescriptor[];
 }

@@ -1,8 +1,8 @@
+import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import type {
-    ExtensionInvocationContext,
-    ExtensionJsonValue
-} from "@portable-devshell/extension";
-import type { CliCommandResult } from "@portable-devshell/extension/cli";
+    CliCommandInvocationContext,
+    CliCommandResult
+} from "@portable-devshell/extension/cli";
 
 import { McpHttpClientFactory, type McpClientFactory } from "./McpClientRuntime.js";
 import { McpProfileStore, validateMcpProfile } from "./McpProfileStore.js";
@@ -34,7 +34,7 @@ export function createMcpCommandRuntime(stateDirectory: string, version: string)
 export async function executeMcpCommand(
     runtime: McpCommandRuntime,
     argv: readonly string[],
-    invocation: ExtensionInvocationContext
+    invocation: CliCommandInvocationContext
 ): Promise<CliCommandResult> {
     invocation.signal.throwIfAborted();
     if (argv.length === 0 || ["help", "--help", "-h"].includes(argv[0] ?? "")) {
@@ -119,7 +119,7 @@ function expect(argv: readonly string[], length: number, usage: string): void {
     if (argv.length !== length) throw usageError(`Usage: devshell ${usage}`);
 }
 
-function requireLocalOwner(invocation: ExtensionInvocationContext): void {
+function requireLocalOwner(invocation: CliCommandInvocationContext): void {
     if (!invocation.localOwner) throw new Error("MCP profile mutations are restricted to the local owner CLI.");
 }
 

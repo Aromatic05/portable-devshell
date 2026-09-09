@@ -1,10 +1,8 @@
-import type {
-    ExtensionInvocationContext,
-    ExtensionJsonValue
-} from "@portable-devshell/extension";
+import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import {
     commands,
     type CliCommandBinding,
+    type CliCommandInvocationContext,
     type CliCommandResult
 } from "@portable-devshell/extension/cli";
 
@@ -53,7 +51,7 @@ export function createCliSandboxBinding(
     if (value.kind !== "command" || Object.keys(value).some((key) => key !== "kind")) {
         throw new TypeError(`Extension ${context.extensionId} cli.commands/${context.id} sandbox descriptor is invalid.`);
     }
-    return async (argv: readonly string[], invocation: ExtensionInvocationContext): Promise<CliCommandResult> =>
+    return async (argv: readonly string[], invocation: CliCommandInvocationContext): Promise<CliCommandResult> =>
         await bridge.invokeBinding(commands.id, context.id, {
             argv: [...argv],
             context: {

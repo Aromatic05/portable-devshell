@@ -7,7 +7,6 @@ import { pathToFileURL } from "node:url";
 import type {
     ExtensionAssetCapability,
     ExtensionCapability,
-    ExtensionInvocationContext,
     ExtensionJsonValue,
     ExtensionLogger,
     ExtensionManagedProcess,
@@ -16,7 +15,10 @@ import type {
     ExtensionWorkerCapability,
     ExtensionWorkerSession
 } from "@portable-devshell/extension";
-import type { CliCommandResult } from "@portable-devshell/extension/cli";
+import type {
+    CliCommandInvocationContext,
+    CliCommandResult
+} from "@portable-devshell/extension/cli";
 
 import { createCliSandboxBinding } from "../../../src/control/cli/CliExtensionSandboxCodec.ts";
 import {
@@ -714,7 +716,7 @@ function fakeWorker(calls: string[]): ExtensionWorkerCapability {
     };
 }
 
-function invocation(requestId: string): ExtensionInvocationContext {
+function invocation(requestId: string): CliCommandInvocationContext {
     return {
         localOwner: true,
         requestId,
@@ -726,7 +728,7 @@ async function sandboxCliCommand(
     sandbox: ExtensionSandboxHost,
     id: string,
     argv: readonly string[],
-    context: ExtensionInvocationContext
+    context: CliCommandInvocationContext
 ): Promise<CliCommandResult> {
     const registration = await sandboxRegistration(sandbox, CLI_POINT, id);
     const binding = createCliSandboxBinding(registration.descriptor, sandboxPointContext(id), sandbox);

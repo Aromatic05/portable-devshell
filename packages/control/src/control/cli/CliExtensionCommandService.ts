@@ -1,7 +1,7 @@
-import type { ExtensionInvocationContext } from "@portable-devshell/extension";
 import type {
     CliCommandBinding,
     CliCommandDeclaration,
+    CliCommandInvocationContext,
     CliCommandResult
 } from "@portable-devshell/extension/cli";
 import {
@@ -22,7 +22,7 @@ export class CliExtensionCommandService {
     async command(
         commandId: string,
         argv: readonly string[],
-        context: ExtensionInvocationContext
+        context: CliCommandInvocationContext
     ): Promise<CliCommandResult> {
         const { lease, registration } = await this.#extensions.acquireRegistration("cli.commands", commandId);
         try {

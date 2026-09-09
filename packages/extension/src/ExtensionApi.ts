@@ -182,15 +182,6 @@ export interface ExtensionCapabilities {
     readonly workers?: ExtensionWorkerCapability;
 }
 
-export interface ExtensionInvocationContext {
-    /** True only for a request authenticated as the local Control owner. */
-    readonly localOwner: boolean;
-    readonly requestId: string;
-    readonly signal: AbortSignal;
-    /** Local-owner CLI working directory on the Control host, when supplied. */
-    readonly workingDirectory?: string;
-}
-
 declare const extensionPointDeclarationType: unique symbol;
 declare const extensionPointBindingType: unique symbol;
 

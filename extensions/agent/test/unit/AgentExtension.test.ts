@@ -5,9 +5,9 @@ import test from "node:test";
 import {
     parseExtensionManifest,
     type ExtensionContext,
-    type ExtensionInvocationContext,
     type ExtensionWorkerSession
 } from "@portable-devshell/extension";
+import type { CliCommandInvocationContext } from "@portable-devshell/extension/cli";
 
 import { executeAgentCommand, type AgentProviderCommandPort } from "../../src/builtin/AgentCommand.ts";
 import { AgentExtensionRuntime } from "../../src/builtin/AgentRuntime.ts";
@@ -320,7 +320,7 @@ function handleFixture(agentId: string, events: string[], _ordinal = 0): AgentPr
     };
 }
 
-function invocationContext(localOwner = true): ExtensionInvocationContext {
+function invocationContext(localOwner = true): CliCommandInvocationContext {
     return { localOwner, requestId: "req-1", signal: new AbortController().signal };
 }
 

@@ -3,10 +3,12 @@ import { isAbsolute, resolve } from "node:path";
 import type {
     ExtensionAssetTransferResult,
     ExtensionContext,
-    ExtensionInvocationContext,
     ExtensionJsonValue
 } from "@portable-devshell/extension";
-import type { CliCommandResult } from "@portable-devshell/extension/cli";
+import type {
+    CliCommandInvocationContext,
+    CliCommandResult
+} from "@portable-devshell/extension/cli";
 
 import {
     listSkills,
@@ -35,7 +37,7 @@ export const SKILL_USAGE = [
 export async function executeSkillCommand(
     extension: ExtensionContext,
     argv: readonly string[],
-    invocation: ExtensionInvocationContext
+    invocation: CliCommandInvocationContext
 ): Promise<CliCommandResult> {
     invocation.signal.throwIfAborted();
     requireLocalOwner(invocation);
@@ -80,7 +82,7 @@ async function getSkill(
     name: string,
     targetText: string,
     options: SkillCatalogOptions,
-    invocation: ExtensionInvocationContext
+    invocation: CliCommandInvocationContext
 ): Promise<ExtensionJsonValue> {
     const instance = parseInstance(targetText);
     const selected = await resolveSkillSource(name, options);
@@ -125,7 +127,7 @@ function transferResult(
 
 function catalogOptions(
     requestedWorkspace: string | undefined,
-    invocation: ExtensionInvocationContext
+    invocation: CliCommandInvocationContext
 ): SkillCatalogOptions {
     const caller = invocation.workingDirectory;
     if (requestedWorkspace === undefined) {
@@ -172,7 +174,7 @@ function expectPositionals(values: readonly string[], expected: number, usage: s
     if (values.length !== expected) throw usageError(`Usage: devshell ${usage}`);
 }
 
-function requireLocalOwner(invocation: ExtensionInvocationContext): void {
+function requireLocalOwner(invocation: CliCommandInvocationContext): void {
     if (!invocation.localOwner) {
         throw new Error("Skill commands are restricted to the local owner CLI.");
     }
