@@ -158,44 +158,6 @@ export const artifactSourceOutputSchema = objectSchema({
     workspace: nonEmptyString,
 }, ["instance"]);
 
-const artifactTargetSchema = objectSchema({
-    instance: nonEmptyString,
-    path: nonEmptyString,
-    workspace: nonEmptyString,
-}, ["instance", "path"]);
-
-const artifactBytePayloadSchema = objectSchema({
-    mediaType: nonEmptyString,
-    name: nonEmptyString,
-    payloadBlake3: nonEmptyString,
-    payloadBytes: nonNegativeInteger,
-    type: { enum: ["stdout", "stderr", "file"], type: "string" },
-}, ["mediaType", "name", "payloadBlake3", "payloadBytes", "type"]);
-
-const artifactDirectoryPayloadSchema = objectSchema({
-    entryCount: nonNegativeInteger,
-    logicalBytes: nonNegativeInteger,
-    manifestBlake3: nonEmptyString,
-    mediaType: nonEmptyString,
-    name: nonEmptyString,
-    payloadBlake3: nonEmptyString,
-    payloadBytes: nonNegativeInteger,
-    type: { const: "directoryArchive", type: "string" },
-}, [
-    "entryCount",
-    "logicalBytes",
-    "manifestBlake3",
-    "mediaType",
-    "name",
-    "payloadBlake3",
-    "payloadBytes",
-    "type",
-]);
-
-const artifactPayloadSchema: JsonValue = {
-    anyOf: [artifactBytePayloadSchema, artifactDirectoryPayloadSchema],
-};
-
 export const artifactShareOutputSchema = objectSchema({
     blake3: nonEmptyString,
     bytes: nonNegativeInteger,

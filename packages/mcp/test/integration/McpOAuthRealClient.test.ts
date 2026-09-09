@@ -89,7 +89,6 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
             assert.equal(instance, "real-comment");
             return await messages.consumePending(ctxId, callId);
         },
-        async createSshInstance() { return null; },
         environment() { return undefined; },
         async listInstances() { return []; },
         listTools() { return []; },

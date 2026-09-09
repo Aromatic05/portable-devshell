@@ -1,6 +1,5 @@
 import type { ApprovalPolicy } from "../dto/tool/DtoToolApproval.js";
 import type { InstanceContainerConfig } from "../dto/instance/DtoInstanceCreate.js";
-import { bootstrapToolNamespace } from "../dto/tool/DtoToolDefinition.js";
 import { configInputError } from "./ConfigIssue.js";
 import type {
     ConfigContainerDraft,
@@ -540,18 +539,6 @@ function cloneOptionalRecord<T>(record: T | undefined): T | undefined {
 
 function cloneNonEmptyRecord(record: Record<string, string> | undefined): Record<string, string> | undefined {
     return record === undefined || Object.keys(record).length === 0 ? undefined : { ...record };
-}
-
-function normalizeMcpGroups(configured: readonly string[] | undefined, defaults: readonly string[]): string[] {
-    return deduplicate(
-        (configured ?? defaults)
-            .filter((group) =>
-                group !== "context"
-                && group !== bootstrapToolNamespace
-                && group !== "environment"
-            )
-            .map((group) => group === "interaction" ? "workspace" : group)
-    );
 }
 
 function deduplicate<T>(values: readonly T[]): T[] {

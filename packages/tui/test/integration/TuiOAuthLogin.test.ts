@@ -43,7 +43,6 @@ test("real TUI keyboard approval completes registration, authorization, token ex
                     provider: "oauth2",
                 },
                 name: "demo",
-                policy: { capabilities: ["execute"], groups: ["bash"] },
                 worker: createMcpWorker(),
             },
         ],

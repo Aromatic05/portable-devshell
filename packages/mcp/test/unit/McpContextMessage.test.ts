@@ -235,10 +235,6 @@ test("a routed artifact result consumes Comments from the routed instance Contex
     const catalog = new McpEndpointCatalog({
         gateway: gateway as never,
         instanceName: "alpha",
-        policy: {
-            capabilities: ["manage", "read"],
-            groups: ["artifact", "instance"],
-        },
         worker,
     });
     const dispatch = new McpEndpointDispatch({

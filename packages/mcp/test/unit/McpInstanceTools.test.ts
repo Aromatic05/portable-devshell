@@ -439,10 +439,6 @@ function createManagedEndpoint(
         contextRegistry,
         gateway,
         instanceName: "main-pc",
-        policy: {
-            capabilities: ["execute", "manage"],
-            groups: ["bash", "instance"]
-        },
         readyWaitMs: options?.readyWaitMs,
         worker
     });
@@ -520,12 +516,6 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
             return transformResult === undefined
                 ? result
                 : await transformResult(result, "call-test");
-        },
-        async createSshInstance(sourceInstance, input) {
-            if (overrides.createSshInstance !== undefined) {
-                return await overrides.createSshInstance(sourceInstance, input);
-            }
-            return { name: input.name };
         },
         environment(instance) {
             return overrides.environment?.(instance) ?? {

@@ -105,10 +105,6 @@ test(
                 logs: { eventBufferSize: 50 },
                 mcp: {
                     enabled: true,
-                    tools: {
-                        capabilities: ["read", "write", "execute"],
-                        groups: ["bash"],
-                    },
                 },
                 name: "reverse-test",
                 provider: "reverse",
@@ -513,10 +509,6 @@ test(
                 logs: { eventBufferSize: 50 },
                 mcp: {
                     enabled: true,
-                    tools: {
-                        capabilities: ["read", "write", "execute"],
-                        groups: ["bash"],
-                    },
                 },
                 name: "reverse-reenroll",
                 provider: "reverse",

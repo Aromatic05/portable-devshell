@@ -120,7 +120,6 @@ function createGateway(overrides: Partial<McpInstanceGateway>): McpInstanceGatew
             return await operation("call-test");
         },
         async callTool() { return {}; },
-        async createSshInstance(_source, input) { return { name: input.name }; },
         environment() { return undefined; },
         async listInstances() { return []; },
         listTools() { return [artifactRead]; },

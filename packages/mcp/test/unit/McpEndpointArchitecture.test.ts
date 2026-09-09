@@ -176,10 +176,6 @@ test("McpEndpointCatalog keeps control tools available without a worker schema",
             listTools: () => []
         } as never,
         instanceName: "demo-local",
-        policy: {
-            capabilities: ["manage"],
-            groups: ["instance"]
-        },
         worker: harness.worker
     });
 
@@ -252,10 +248,6 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
     const catalog = new McpEndpointCatalog({
         gateway,
         instanceName: "demo-local",
-        policy: {
-            capabilities: ["execute", "manage", "read", "write"],
-            groups: ["bash", "instance", "todo"]
-        },
         worker: harness.worker
     });
     const dispatch = new McpEndpointDispatch({

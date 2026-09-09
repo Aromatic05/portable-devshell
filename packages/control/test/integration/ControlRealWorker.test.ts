@@ -278,10 +278,6 @@ function createInstanceConfig(): ConfigInstanceDraft {
         },
         mcp: {
             enabled: true,
-            tools: {
-                capabilities: ["read", "write", "execute"],
-                groups: ["file", "bash", "artifact"],
-            },
         },
         name: "aromatic-pc",
         provider: "local" as const,

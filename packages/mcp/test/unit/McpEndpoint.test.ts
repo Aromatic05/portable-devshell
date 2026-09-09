@@ -565,10 +565,6 @@ test("environment and control-owned tools execute through the endpoint audit pat
     const endpoint = new McpEndpointWorker({
         gateway,
         instanceName: "demo-local",
-        policy: {
-            capabilities: ["manage", "read", "write"],
-            groups: ["artifact", "instance", "todo"],
-        },
         worker: harness.worker,
     });
     const requestContext = {

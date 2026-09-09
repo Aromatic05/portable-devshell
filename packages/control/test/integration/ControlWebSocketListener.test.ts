@@ -157,7 +157,6 @@ test("Web none auth stays independent when its shared MCP listener requires OAut
                 provider: "oauth2"
             },
             name: "demo",
-            policy: { capabilities: ["execute"], groups: ["bash"] },
             worker: createMcpWorker()
         }],
         listenHost: "127.0.0.1",

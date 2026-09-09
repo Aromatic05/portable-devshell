@@ -243,7 +243,6 @@ test("web oauth2 shares one provider with MCP on a shared listener without route
                 provider: "oauth2"
             },
             name: "demo",
-            policy: { capabilities: ["execute"], groups: ["bash"] },
             worker: createMcpWorker()
         }],
         listenHost: "127.0.0.1",
