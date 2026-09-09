@@ -1060,6 +1060,8 @@ generation fault
 
 Static Extension Point declaration 允许 Control 建立 catalog，而不立即执行 Extension code。
 
+> 实现状态：已落地。Control startup / enable 使用 manifest-backed static catalog；CLI/Web 首次 binding acquisition 按需 activation。Install 会执行一次完整 candidate validation 后立即 retire validation runtime，再提交 selected catalog，因此不会为了安装而长期保持 active generation。
+
 推荐 activation 模型：
 
 ```text
@@ -1074,6 +1076,30 @@ first bound invocation
     -> bind implementations
     -> invoke
 ```
+
+安装事务采用更强的验证路径，但不改变 steady-state lazy 语义：
+
+```text
+install new immutable generation
+    -> static declaration preflight
+    -> activate candidate for binding/resource validation
+    -> retire validation runtime
+    -> commit selected + last-known-good generation
+    -> publish static catalog
+    -> state = installed
+
+first real invocation
+    -> create a new activation incarnation
+    -> invoke through a generation lease
+```
+
+这样可以同时保证：
+
+- 一个静态 point conflict 在 Extension code 执行前就被拒绝；
+- 一个缺失 binding / 非法 binding resource 在 install 时就被拒绝；
+- 安装成功不会强迫所有 Extension 常驻；
+- hot replacement 后旧 generation 仍可按已有 lease drain；
+- last-known-good 只指向通过完整 candidate validation 的 generation。
 
 并非所有 builtin Extension 都必须 eager activate。
 

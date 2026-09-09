@@ -57,6 +57,37 @@ processes
 
 Runtime binding 必须与 manifest declaration 严格对应：未声明 registration、重复 registration、声明后没有 binding、未知 point 或不合法的 domain declaration 都会使 candidate activation 失败。
 
+### Static catalog 与 lazy activation
+
+Control 启动时不会为了发现 Extension Point 而执行所有 Extension code。对每个 enabled Extension，Host 先读取 selected generation 的 manifest，并完成 domain declaration 校验与跨 Extension registration conflict 检查，然后发布静态 catalog。
+
+此时 Extension 的 runtime record 可以处于：
+
+```text
+state = installed
+selectedGeneration = <generation>
+activeGeneration = absent
+```
+
+`installed` 在这里表示“generation 已选择且静态入口可路由，但当前没有 live activation”，不是安装不完整。
+
+第一次需要 bound implementation 时：
+
+```text
+CLI/Web request
+    -> resolve static catalog owner
+    -> activate selected generation
+    -> validate declaration/binding 1:1
+    -> acquire generation lease
+    -> invoke binding
+```
+
+如果 selected generation 在首次 activation 时失败，Host 可以按 registry 中已经验证过的 last-known-good generation 回退。Host 自身的 registry persistence failure 不会被误判成 candidate failure，也不会因此盲目切换 generation。
+
+Install 仍然保留强验证：新的 immutable generation 会实际执行一次 activation、binding/resource validation，然后立即 retire 这次验证 runtime；只有验证和 cleanup 都成功后，才提交 selected / last-known-good generation 和静态 catalog。因此安装成功不会留下常驻 sandbox，第一次真实调用仍然是独立的 runtime activation。重复安装当前已经选择且健康的同一 content generation 是幂等操作。
+
+显式 `reload` 与 ordinary first-use 不同：它是管理操作，要求立即重新 activation 当前 selected generation。`enable` 只恢复并校验静态 catalog；`disable` 立即撤销静态路由，并让已经存在的 generation leases 按正常 retirement 语义 drain。
+
 ## ExtensionContext
 
 Extension module 的公共生命周期保持最小：
