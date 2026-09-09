@@ -167,6 +167,8 @@ instance + collection + key
 
 它不接受 raw Worker filesystem path。真实目录由 Worker Resource Host 管理，传输复用 Artifact infrastructure。
 
+`projectBundle()` 会等宿主管理的投影传输完成后再返回 `ExtensionAssetProjectionResult`。Public result 只包含对 Extension 有意义的 projection outcome（当前为 `transferredBytes`）；内部 Artifact `transferId` 只用于 Control 自己的 wait/cancel/diagnostics，不进入 Extension ABI。
+
 ### workers
 
 `context.capabilities.workers.openSession()` 是 Extension 的受控 Worker execution 入口：

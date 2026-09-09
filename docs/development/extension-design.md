@@ -330,6 +330,8 @@ processes
 
 它不意味着任意 Control filesystem access，也不把 Asset 内部 storage layout 暴露给 Extension。
 
+同理，Worker projection 即使内部复用 Artifact transfer，也只应向 Extension 返回 projection outcome。Artifact `transferId` 如果没有对应的 Extension-facing query/cancel 语义，就只是 transport implementation identity，不能冻结进 public Asset result；当前 `ExtensionAssetProjectionResult` 只保留 `transferredBytes`。
+
 ### 5.3 `workers`
 
 `workers` 允许 Extension 打开受 Control 管理的 Worker sessions，并调用正常 Tool pipeline。
