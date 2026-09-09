@@ -51,6 +51,17 @@ function manifest(id: string, generation: string): ExtensionManifest {
     };
 }
 
+function unregisteredManifest(id: string, generation: string): ExtensionManifest {
+    return { ...manifest(id, generation), extensions: {} };
+}
+
+function createLoader(
+    load: ExtensionGenerationLoader["load"],
+    readManifest: ExtensionGenerationLoader["readManifest"] = async (id, generation) => manifest(id, generation)
+): ExtensionGenerationLoader {
+    return { load, readManifest };
+}
+
 function generation(
     id: string,
     name: string,
@@ -110,17 +121,15 @@ test("Extension host swaps atomically while an old in-flight request drains on i
     const disposed: string[] = [];
     let releaseOld!: () => void;
     const oldGate = new Promise<void>((resolve) => { releaseOld = resolve; });
-    const loader: ExtensionGenerationLoader = {
-        async load(id, name) {
-            if (name === "a") {
-                return generation(id, name, async () => {
-                    await oldGate;
-                    return "old";
-                }, disposed);
-            }
-            return generation(id, name, () => "new", disposed);
+    const loader = createLoader(async (id, name) => {
+        if (name === "a") {
+            return generation(id, name, async () => {
+                await oldGate;
+                return "old";
+            }, disposed);
         }
-    };
+        return generation(id, name, () => "new", disposed);
+    });
     const host = new ExtensionHost({ loader, registry });
     await host.start();
 
@@ -140,20 +149,51 @@ test("Extension host swaps atomically while an old in-flight request drains on i
     await host.stop();
 });
 
+test("Extension host rejects a static registration conflict before loading candidate code", async () => {
+    const registry = new MemoryRegistry({
+        extensions: {
+            first: { enabled: true, selectedGeneration: "a" },
+            second: { enabled: false, selectedGeneration: "b" }
+        },
+        schemaVersion: 1
+    });
+    const loaded: string[] = [];
+    const loader = createLoader(
+        async (id, name) => {
+            loaded.push(`${id}:${name}`);
+            return generation(id, name, () => id, []);
+        },
+        async (id, name) => id === "second"
+            ? {
+                ...manifest(id, name),
+                extensions: { "cli.commands": [{ id: "first", title: "Conflicting" }] }
+            }
+            : manifest(id, name)
+    );
+    const host = new ExtensionHost({ loader, registry });
+    await host.start();
+
+    await assert.rejects(
+        host.activateGeneration("second", "b"),
+        /registration conflict for cli\.commands\/first: second and first/u
+    );
+    assert.deepEqual(loaded, []);
+    await host.stop();
+});
+
 test("Extension candidate failure leaves the active generation and registry selection untouched", async () => {
     const registry = new MemoryRegistry({
         extensions: { example: { enabled: true, lastKnownGoodGeneration: "a", selectedGeneration: "a" } },
         schemaVersion: 1
     });
     const disposed: string[] = [];
-    const loader: ExtensionGenerationLoader = {
-        async load(id, name) {
-            if (name === "bad") throw new Error("candidate failed");
-            return generation(id, name, () => name, disposed);
-        }
-    };
+    const loader = createLoader(async (id, name) => {
+        if (name === "bad") throw new Error("candidate failed");
+        return generation(id, name, () => name, disposed);
+    });
     const host = new ExtensionHost({ loader, registry });
     await host.start();
+    assert.equal(await commandText(host, "example", "activate-old"), "a");
     await assert.rejects(host.activateGeneration("example", "bad"), /candidate failed/u);
     assert.equal(await commandText(host, "example", "still-old"), "a");
     assert.equal((await host.list())[0]?.activeGeneration, "a");
@@ -169,16 +209,15 @@ test("Extension candidate fault during registry commit rolls back selection and 
     const disposed: string[] = [];
     let candidateB: ExtensionGeneration | undefined;
     const host = new ExtensionHost({
-        loader: {
-            async load(id, name) {
-                const candidate = generation(id, name, () => name, disposed);
-                if (name === "b") candidateB = candidate;
-                return candidate;
-            }
-        },
+        loader: createLoader(async (id, name) => {
+            const candidate = generation(id, name, () => name, disposed);
+            if (name === "b") candidateB = candidate;
+            return candidate;
+        }),
         registry
     });
     await host.start();
+    assert.equal(await commandText(host, "example", "activate-old"), "a");
     registry.beforeWrite = (snapshot) => {
         if (snapshot.extensions.example?.selectedGeneration !== "b") return;
         registry.beforeWrite = undefined;
@@ -199,19 +238,18 @@ test("Extension registry commit failure preserves candidate cleanup failure", as
         schemaVersion: 1
     });
     const host = new ExtensionHost({
-        loader: {
-            async load(id, name) {
-                if (name !== "b") return generation(id, name, () => name, []);
-                return unregisteredGeneration(
-                    id,
-                    name,
-                    async () => { throw new Error("candidate cleanup failed"); }
-                );
-            }
-        },
+        loader: createLoader(async (id, name) => {
+            if (name !== "b") return generation(id, name, () => name, []);
+            return unregisteredGeneration(
+                id,
+                name,
+                async () => { throw new Error("candidate cleanup failed"); }
+            );
+        }),
         registry
     });
     await host.start();
+    assert.equal(await commandText(host, "example", "activate-old"), "a");
     registry.beforeWrite = (snapshot) => {
         if (snapshot.extensions.example?.selectedGeneration === "b") throw new Error("registry write failed");
     };
@@ -227,7 +265,7 @@ test("Extension registry commit failure preserves candidate cleanup failure", as
     await host.stop();
 });
 
-test("Extension startup falls back to last-known-good when selected candidate faults during registry commit", async () => {
+test("Extension first-use activation falls back to last-known-good when the selected candidate faults", async () => {
     const registry = new MemoryRegistry({
         extensions: {
             example: { enabled: true, lastKnownGoodGeneration: "good", selectedGeneration: "broken" }
@@ -242,26 +280,27 @@ test("Extension startup falls back to last-known-good when selected candidate fa
         broken.fault(new Error("selected candidate crashed"));
     };
     const host = new ExtensionHost({
-        loader: {
-            async load(id, name) {
-                loaded.push(name);
-                const candidate = generation(id, name, () => name, []);
-                if (name === "broken") broken = candidate;
-                return candidate;
-            }
-        },
+        loader: createLoader(async (id, name) => {
+            loaded.push(name);
+            const candidate = generation(id, name, () => name, []);
+            if (name === "broken") broken = candidate;
+            return candidate;
+        }),
         registry
     });
 
     await host.start();
 
+    assert.deepEqual(loaded, []);
+    assert.equal((await host.list())[0]?.state, "installed");
+    assert.equal(await commandText(host, "example", "lazy-fallback"), "good");
     assert.deepEqual(loaded, ["broken", "good"]);
     assert.equal(registry.value.extensions.example?.selectedGeneration, "good");
     assert.equal((await host.list())[0]?.activeGeneration, "good");
     await host.stop();
 });
 
-test("Extension startup does not treat registry persistence failure as a last-known-good candidate failure", async () => {
+test("Extension lazy activation does not treat registry persistence failure as a last-known-good candidate failure", async () => {
     const registry = new MemoryRegistry({
         extensions: {
             example: { enabled: true, lastKnownGoodGeneration: "good", selectedGeneration: "selected" }
@@ -271,17 +310,17 @@ test("Extension startup does not treat registry persistence failure as a last-kn
     const loaded: string[] = [];
     registry.beforeWrite = () => { throw new Error("registry disk failure"); };
     const host = new ExtensionHost({
-        loader: {
-            async load(id, name) {
-                loaded.push(name);
-                return generation(id, name, () => name, []);
-            }
-        },
+        loader: createLoader(async (id, name) => {
+            loaded.push(name);
+            return generation(id, name, () => name, []);
+        }),
         registry
     });
 
     await host.start();
 
+    assert.deepEqual(loaded, []);
+    await assert.rejects(commandText(host, "example", "registry-failure"), /registry disk failure/u);
     assert.deepEqual(loaded, ["selected"]);
     const record = (await host.list())[0]!;
     assert.equal(record.state, "failed");
@@ -290,7 +329,7 @@ test("Extension startup does not treat registry persistence failure as a last-kn
     await host.stop();
 });
 
-test("Extension startup falls back to last-known-good without preventing Control startup", async () => {
+test("Extension startup catalogs last-known-good when the selected manifest is unavailable without activating code", async () => {
     const registry = new MemoryRegistry({
         extensions: {
             bad: { enabled: true, lastKnownGoodGeneration: "good", selectedGeneration: "broken" },
@@ -299,21 +338,35 @@ test("Extension startup falls back to last-known-good without preventing Control
         schemaVersion: 1
     });
     const disposed: string[] = [];
-    const loader: ExtensionGenerationLoader = {
-        async load(id, name) {
-            if (id === "bad" && name === "broken") throw new Error("broken extension");
+    const loaded: string[] = [];
+    const manifestReads: string[] = [];
+    const loader = createLoader(
+        async (id, name) => {
+            loaded.push(`${id}:${name}`);
             return generation(id, name, () => `${id}:${name}`, disposed);
+        },
+        async (id, name) => {
+            manifestReads.push(`${id}:${name}`);
+            if (id === "bad" && name === "broken") throw new Error("broken manifest");
+            return manifest(id, name);
         }
-    };
+    );
     const host = new ExtensionHost({ loader, registry });
 
     await host.start();
 
     const records = await host.list();
-    assert.equal(records.find((record) => record.id === "bad")?.activeGeneration, "good");
-    assert.equal(records.find((record) => record.id === "healthy")?.activeGeneration, "v1");
+    assert.deepEqual(loaded, []);
+    assert.deepEqual(manifestReads, ["bad:broken", "bad:good", "healthy:v1"]);
+    assert.equal(records.find((record) => record.id === "bad")?.activeGeneration, undefined);
+    assert.equal(records.find((record) => record.id === "bad")?.state, "installed");
+    assert.equal(records.find((record) => record.id === "healthy")?.activeGeneration, undefined);
+    assert.equal(records.find((record) => record.id === "healthy")?.state, "installed");
     assert.equal(registry.value.extensions.bad?.selectedGeneration, "good");
     assert.equal(registry.value.extensions.bad?.lastKnownGoodGeneration, "good");
+    assert.equal(await commandText(host, "bad", "activate-bad"), "bad:good");
+    assert.equal(await commandText(host, "healthy", "activate-healthy"), "healthy:v1");
+    assert.deepEqual(loaded, ["bad:good", "healthy:v1"]);
     await host.stop();
 });
 
@@ -326,14 +379,10 @@ test("Extension disable removes new routing immediately while a leased old gener
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const host = new ExtensionHost({
-        loader: {
-            async load(id, name) {
-                return generation(id, name, async () => {
-                    await gate;
-                    return "done";
-                }, disposed);
-            }
-        },
+        loader: createLoader(async (id, name) => generation(id, name, async () => {
+            await gate;
+            return "done";
+        }, disposed)),
         registry
     });
     await host.start();
@@ -342,7 +391,7 @@ test("Extension disable removes new routing immediately while a leased old gener
     await host.disable("example");
     await assert.rejects(
         host.dispatchCommand("example", [], invocation("new")),
-        /No active Extension registration/u
+        /No Extension registration/u
     );
     assert.equal((await host.list())[0]?.state, "disabled");
     release();
@@ -351,32 +400,41 @@ test("Extension disable removes new routing immediately while a leased old gener
     await host.stop();
 });
 
-test("Extension enable commits enabled state only after a generation becomes publishable", async () => {
+test("Extension enable validates and publishes the static catalog without activating code", async () => {
     const registry = new MemoryRegistry({
         extensions: { example: { enabled: false, selectedGeneration: "a" } },
         schemaVersion: 1
     });
-    let fail = true;
+    let manifestFailure = true;
+    const loaded: string[] = [];
     const host = new ExtensionHost({
-        loader: {
-            async load(id, name) {
-                if (fail) throw new Error("enable candidate failed");
+        loader: createLoader(
+            async (id, name) => {
+                loaded.push(name);
                 return generation(id, name, () => "enabled", []);
+            },
+            async (id, name) => {
+                if (manifestFailure) throw new Error("enable manifest failed");
+                return manifest(id, name);
             }
-        },
+        ),
         registry
     });
     await host.start();
 
-    await assert.rejects(host.enable("example"), /enable candidate failed/u);
+    await assert.rejects(host.enable("example"), /enable manifest failed/u);
     assert.equal(registry.value.extensions.example?.enabled, false);
     assert.equal((await host.list())[0]?.state, "disabled");
+    assert.deepEqual(loaded, []);
 
-    fail = false;
+    manifestFailure = false;
     await host.enable("example");
     assert.equal(registry.value.extensions.example?.enabled, true);
-    assert.equal((await host.list())[0]?.state, "active");
+    assert.equal((await host.list())[0]?.state, "installed");
+    assert.deepEqual(loaded, []);
     assert.equal(await commandText(host, "example", "enabled"), "enabled");
+    assert.deepEqual(loaded, ["a"]);
+    assert.equal((await host.list())[0]?.state, "active");
     await host.stop();
 });
 
@@ -387,15 +445,14 @@ test("Extension host reports a faulted active generation as failed and rejects n
     });
     let loaded: ExtensionGeneration | undefined;
     const host = new ExtensionHost({
-        loader: {
-            async load(id, name) {
-                loaded = generation(id, name, () => "ok", []);
-                return loaded;
-            }
-        },
+        loader: createLoader(async (id, name) => {
+            loaded = generation(id, name, () => "ok", []);
+            return loaded;
+        }),
         registry
     });
     await host.start();
+    assert.equal(await commandText(host, "example", "activate"), "ok");
     loaded!.fault(new Error("sandbox OOM"));
 
     const record = (await host.list())[0]!;
@@ -404,7 +461,7 @@ test("Extension host reports a faulted active generation as failed and rejects n
     assert.equal(record.failure?.message, "sandbox OOM");
     await assert.rejects(
         host.dispatchCommand("example", [], invocation("faulted")),
-        /not active/u
+        /sandbox OOM/u
     );
     await host.stop();
 });
@@ -421,24 +478,25 @@ test("Extension host waits for every instance resource retirement even when anot
     const healthyGate = new Promise<void>((resolve) => { releaseHealthy = resolve; });
     let healthyCompleted = false;
     const host = new ExtensionHost({
-        loader: {
-            async load(id, name) {
-                return unregisteredGeneration(
-                    id,
-                    name,
-                    async () => undefined,
-                    id === "healthy"
-                        ? async () => {
-                            await healthyGate;
-                            healthyCompleted = true;
-                        }
-                        : async () => { throw new Error("resource retirement failed"); }
-                );
-            }
-        },
+        loader: createLoader(
+            async (id, name) => unregisteredGeneration(
+                id,
+                name,
+                async () => undefined,
+                id === "healthy"
+                    ? async () => {
+                        await healthyGate;
+                        healthyCompleted = true;
+                    }
+                    : async () => { throw new Error("resource retirement failed"); }
+            ),
+            async (id, name) => unregisteredManifest(id, name)
+        ),
         registry
     });
     await host.start();
+    await host.reload("failing");
+    await host.reload("healthy");
 
     let settled = false;
     const retirement = host.retireInstanceResources("local").then(
@@ -468,18 +526,18 @@ test("Extension host preserves a fast retirement failure until waitForDrain obse
         schemaVersion: 1
     });
     const host = new ExtensionHost({
-        loader: {
-            async load(id, name) {
-                return unregisteredGeneration(
-                    id,
-                    name,
-                    async () => { throw new Error("fast dispose failure"); }
-                );
-            }
-        },
+        loader: createLoader(
+            async (id, name) => unregisteredGeneration(
+                id,
+                name,
+                async () => { throw new Error("fast dispose failure"); }
+            ),
+            async (id, name) => unregisteredManifest(id, name)
+        ),
         registry
     });
     await host.start();
+    await host.reload("example");
     await host.disable("example");
     await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -499,18 +557,18 @@ test("Extension host stop reports a retirement failure even when it settles befo
         schemaVersion: 1
     });
     const host = new ExtensionHost({
-        loader: {
-            async load(id, name) {
-                return unregisteredGeneration(
-                    id,
-                    name,
-                    async () => { throw new Error("stop dispose failure"); }
-                );
-            }
-        },
+        loader: createLoader(
+            async (id, name) => unregisteredGeneration(
+                id,
+                name,
+                async () => { throw new Error("stop dispose failure"); }
+            ),
+            async (id, name) => unregisteredManifest(id, name)
+        ),
         registry
     });
     await host.start();
+    await host.reload("example");
 
     await assert.rejects(
         host.stop(),

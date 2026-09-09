@@ -118,20 +118,11 @@ export class ExtensionLoader {
     }
 
     async load(id: string, generation: string): Promise<ExtensionGeneration> {
-        if (this.#reservedIds.has(id)) {
-            throw new Error(`Extension id ${id} is reserved by portable-devshell.`);
-        }
+        const manifest = await this.readManifest(id, generation);
         const codeDirectory = this.#paths.generationDirectory(id, generation);
         const dataDirectory = this.#paths.dataDirectory(id);
         const runtimeRoot = this.#paths.runtimeDirectory(id, generation);
         const stateDirectory = this.#paths.stateDirectory(id);
-        await assertPlainDirectory(codeDirectory, `Extension generation directory for ${id}`);
-        const manifestPath = this.#paths.manifestFile(id, generation);
-        await assertPlainFile(manifestPath, `Extension manifest for ${id}`);
-        const manifest = parseExtensionManifest(JSON.parse(await readFile(manifestPath, "utf8")) as unknown);
-        if (manifest.id !== id) {
-            throw new Error(`Extension generation ${generation} declares id ${manifest.id}, expected ${id}.`);
-        }
         const entryPath = resolveContainedPath(codeDirectory, manifest.entry, "Extension entry");
         await assertPlainFile(entryPath, `Extension entry for ${id}`);
         await this.#prepareRuntimeRoot(runtimeRoot);
@@ -244,6 +235,21 @@ export class ExtensionLoader {
                 `Extension ${id} activation failed and candidate cleanup was incomplete.`
             );
         }
+    }
+
+    async readManifest(id: string, generation: string): Promise<ExtensionManifest> {
+        if (this.#reservedIds.has(id)) {
+            throw new Error(`Extension id ${id} is reserved by portable-devshell.`);
+        }
+        const codeDirectory = this.#paths.generationDirectory(id, generation);
+        await assertPlainDirectory(codeDirectory, `Extension generation directory for ${id}`);
+        const manifestPath = this.#paths.manifestFile(id, generation);
+        await assertPlainFile(manifestPath, `Extension manifest for ${id}`);
+        const manifest = parseExtensionManifest(JSON.parse(await readFile(manifestPath, "utf8")) as unknown);
+        if (manifest.id !== id) {
+            throw new Error(`Extension generation ${generation} declares id ${manifest.id}, expected ${id}.`);
+        }
+        return manifest;
     }
 
     async #prepareRuntimeRoot(runtimeRoot: string): Promise<void> {

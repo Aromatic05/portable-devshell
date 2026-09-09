@@ -91,6 +91,34 @@ function fakeWorker(events: string[]): ExtensionWorkerRuntime {
     };
 }
 
+test("Extension loader reads and validates a generation manifest without activating code or creating runtime state", async (t) => {
+    const harness = await createHarness();
+    t.after(harness.cleanup);
+    const { id, generation } = await harness.writeGeneration({
+        extensions: { "cli.commands": [{ id: "example", title: "Example" }] }
+    });
+    let imports = 0;
+    const loader = new ExtensionLoader({
+        importer: async () => {
+            imports += 1;
+            return { activate() {} };
+        },
+        instances: { list: () => [] } as never,
+        paths: harness.paths
+    });
+
+    const manifest = await loader.readManifest(id, generation);
+
+    assert.equal(manifest.id, id);
+    assert.deepEqual(manifest.extensions, {
+        "cli.commands": [{ id: "example", title: "Example" }]
+    });
+    assert.equal(imports, 0);
+    await assert.rejects(access(harness.paths.runtimeDirectory(id, generation)));
+    await assert.rejects(access(harness.paths.dataDirectory(id)));
+    await assert.rejects(access(harness.paths.stateDirectory(id)));
+});
+
 test("Extension loader returns a ready invisible candidate with narrow immutable v3 context", async (t) => {
     const harness = await createHarness();
     t.after(harness.cleanup);

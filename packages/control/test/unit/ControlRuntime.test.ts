@@ -566,26 +566,24 @@ test("runtime installs builtin Extensions through the normal installer before op
         homeDirectory: join(root, "home"),
         runtimeRoot: join(root, "runtime")
     });
-    let activeGeneration: string | undefined;
+    let selectedGeneration: string | undefined;
     const extensions = {
-        async activateGeneration(id: string, generation: string) {
+        async selectGeneration(id: string, generation: string) {
             assert.equal(id, "skill");
             assert.equal(await ipcEndpointAcceptsConnections(socketPath), false);
-            activeGeneration = generation;
+            selectedGeneration = generation;
         },
         async disable() {},
         async dispatchCommand() { return { kind: "text", text: "" }; },
-        async dispatchRpc() { return {}; },
         async enable() {},
         async forget() {},
         async list() {
-            return activeGeneration === undefined ? [] : [{
-                activeGeneration,
+            return selectedGeneration === undefined ? [] : [{
                 enabled: true,
                 id: "skill",
                 retired: [],
-                selectedGeneration: activeGeneration,
-                state: "active",
+                selectedGeneration,
+                state: "installed",
                 version: "1.0.0"
             }];
         },
@@ -629,7 +627,7 @@ test("runtime installs builtin Extensions through the normal installer before op
     });
 
     await runtime.start();
-    assert.match(activeGeneration ?? "", /^v1\.0\.0-[0-9a-f]{64}$/u);
+    assert.match(selectedGeneration ?? "", /^v1\.0\.0-[0-9a-f]{64}$/u);
     assert.equal(await ipcEndpointAcceptsConnections(socketPath), true);
 });
 
@@ -647,15 +645,14 @@ test("runtime keeps the Control channel closed when builtin Extension installati
             runtimeRoot: join(root, "runtime")
         }),
         extensions: {
-            async activateGeneration() {},
             async disable() {},
             async dispatchCommand() { return { kind: "text", text: "" }; },
-            async dispatchRpc() { return {}; },
             async enable() {},
             async forget() {},
             async list() { return []; },
             async reload() {},
             async retireInstance() {},
+            async selectGeneration() {},
             async start() {},
             async stop() {},
             async waitForDrain() {}

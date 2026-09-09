@@ -36,10 +36,10 @@ import type { ExtensionPathLayout } from "../state/ExtensionPathLayout.js";
 export const BUILTIN_EXTENSION_IDS = new Set(["mcp", "secret", "skill"]);
 
 export interface ExtensionInstallHost {
-    activateGeneration(id: string, generation: string): Promise<void>;
     disable(id: string): Promise<void>;
     forget(id: string): Promise<void>;
     list(): Promise<ExtensionRuntimeRecord[]>;
+    selectGeneration(id: string, generation: string): Promise<void>;
     waitForDrain(id: string): Promise<void>;
 }
 
@@ -137,8 +137,18 @@ export class ExtensionInstallService {
                 await rm(stagingDirectory, { force: true, recursive: true });
             }
 
+            const current = (await this.#host.list()).find((record) => record.id === manifest.id);
+            if (
+                !installedDirectoryCreated
+                && current?.enabled === true
+                && current.selectedGeneration === generation
+                && (current.state === "installed" || current.state === "active")
+            ) {
+                return current;
+            }
+
             try {
-                await this.#host.activateGeneration(manifest.id, generation);
+                await this.#host.selectGeneration(manifest.id, generation);
             } catch (error) {
                 if (installedDirectoryCreated) {
                     await rm(installedDirectory, { force: true, recursive: true }).catch(() => undefined);

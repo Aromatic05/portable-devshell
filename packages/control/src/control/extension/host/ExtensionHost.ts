@@ -1,5 +1,6 @@
 import type {
-    ExtensionInvocationContext
+    ExtensionInvocationContext,
+    ExtensionManifest
 } from "@portable-devshell/extension";
 import type { CliCommandBinding, CliCommandResult } from "@portable-devshell/extension/cli";
 import {
@@ -10,6 +11,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { ExtensionGeneration, type ExtensionGenerationLease } from "./generation/ExtensionGeneration.js";
+import { ExtensionCatalog } from "./generation/ExtensionCatalog.js";
 import {
     cloneExtensionRegistry,
     type ExtensionRegistryEntry,
@@ -19,6 +21,7 @@ import type { ExtensionRegistryPort } from "../state/ExtensionRegistryStore.js";
 
 export interface ExtensionGenerationLoader {
     load(id: string, generation: string): Promise<ExtensionGeneration>;
+    readManifest(id: string, generation: string): Promise<ExtensionManifest>;
 }
 
 interface ExtensionFailure {
@@ -28,6 +31,7 @@ interface ExtensionFailure {
 
 export class ExtensionHost {
     readonly #active = new Map<string, ExtensionGeneration>();
+    readonly #catalog = new ExtensionCatalog();
     readonly #failures = new Map<string, ExtensionFailure>();
     readonly #loader: ExtensionGenerationLoader;
     readonly #registry: ExtensionRegistryPort;
@@ -51,7 +55,7 @@ export class ExtensionHost {
             this.#registrySnapshot = snapshot;
             for (const [id, entry] of Object.entries(snapshot.extensions).sort(([left], [right]) => left.localeCompare(right))) {
                 if (!entry.enabled) continue;
-                await this.#startEntry(id, entry).catch((error: unknown) => {
+                await this.#catalogEntry(id, entry).catch((error: unknown) => {
                     this.#recordFailure(id, entry.selectedGeneration, error);
                 });
             }
@@ -82,7 +86,7 @@ export class ExtensionHost {
         argv: readonly string[],
         context: ExtensionInvocationContext
     ): Promise<CliCommandResult> {
-        const { lease, registration } = this.acquireRegistration("cli.commands", commandId);
+        const { lease, registration } = await this.acquireRegistration("cli.commands", commandId);
         try {
             if (typeof registration.binding !== "function") {
                 throw extensionInvalid(commandId, "has an invalid cli.commands binding");
@@ -93,30 +97,67 @@ export class ExtensionHost {
         }
     }
 
-    acquireRegistration(pointId: string, id: string): {
+    async acquireRegistration(pointId: string, id: string): Promise<{
+        extensionId: string;
+        lease: ExtensionGenerationLease;
+        registration: NonNullable<ReturnType<ExtensionGenerationLease["registrations"]["get"]>>;
+    }> {
+        if (this.#stopping) throw new Error("Extension host is stopping.");
+        const catalog = this.#catalog.get(pointId, id);
+        if (catalog === undefined) {
+            throw new Error(`No Extension registration for ${pointId}/${id}.`);
+        }
+        const active = this.#active.get(catalog.extensionId);
+        if (active?.generation === catalog.generation && active.state === "active") {
+            return this.#acquireRegistrationFromGeneration(catalog.extensionId, active, pointId, id);
+        }
+        return await this.#exclusive(async () => {
+            this.#assertRunning();
+            const current = this.#catalog.get(pointId, id);
+            if (current === undefined) {
+                throw new Error(`No Extension registration for ${pointId}/${id}.`);
+            }
+            const currentActive = this.#active.get(current.extensionId);
+            if (currentActive?.state === "faulted") {
+                throw extensionFailure(
+                    current.extensionId,
+                    currentActive.generation,
+                    currentActive.faultError ?? new Error(`Extension ${current.extensionId} sandbox faulted.`)
+                );
+            }
+            if (currentActive?.generation === current.generation && currentActive.state === "active") {
+                return this.#acquireRegistrationFromGeneration(current.extensionId, currentActive, pointId, id);
+            }
+            await this.#activateCatalogEntry(current.extensionId);
+            const resolved = this.#catalog.get(pointId, id);
+            if (resolved === undefined) {
+                throw new Error(`No Extension registration for ${pointId}/${id}.`);
+            }
+            const activated = this.#active.get(resolved.extensionId);
+            if (activated === undefined || activated.generation !== resolved.generation) {
+                throw extensionNotActive(resolved.extensionId);
+            }
+            return this.#acquireRegistrationFromGeneration(resolved.extensionId, activated, pointId, id);
+        });
+    }
+
+    #acquireRegistrationFromGeneration(
+        extensionId: string,
+        generation: ExtensionGeneration,
+        pointId: string,
+        id: string
+    ): {
         extensionId: string;
         lease: ExtensionGenerationLease;
         registration: NonNullable<ReturnType<ExtensionGenerationLease["registrations"]["get"]>>;
     } {
-        if (this.#stopping) throw new Error("Extension host is stopping.");
-        const matches = [...this.#active.entries()].flatMap(([extensionId, generation]) => {
-            const registration = generation.registrations.get(pointId, id);
-            return registration === undefined ? [] : [{ extensionId, generation, registration }];
-        });
-        if (matches.length === 0) {
-            throw new Error(`No active Extension registration for ${pointId}/${id}.`);
-        }
-        if (matches.length > 1) {
-            throw new Error(`Conflicting active Extension registrations for ${pointId}/${id}.`);
-        }
-        const match = matches[0]!;
-        const lease = match.generation.acquire();
+        const lease = generation.acquire();
         const registration = lease.registrations.get(pointId, id);
         if (registration === undefined) {
             lease.release();
             throw new Error(`Extension registration disappeared during acquisition: ${pointId}/${id}.`);
         }
-        return { extensionId: match.extensionId, lease, registration };
+        return { extensionId, lease, registration };
     }
 
     async activateGeneration(id: string, generation: string): Promise<void> {
@@ -124,6 +165,7 @@ export class ExtensionHost {
             this.#assertRunning();
             let candidate: ExtensionGeneration;
             try {
+                await this.#preflightGeneration(id, generation);
                 candidate = await this.#loadCandidate(id, generation);
             } catch (error) {
                 throw extensionFailure(id, generation, error);
@@ -142,6 +184,63 @@ export class ExtensionHost {
                     throw extensionFailure(id, generation, error.cause ?? error);
                 }
                 throw error;
+            }
+            this.#failures.delete(id);
+        });
+    }
+
+    /** Validate one immutable generation, select its catalog, and leave it inactive. */
+    async selectGeneration(id: string, generation: string): Promise<void> {
+        await this.#exclusive(async () => {
+            this.#assertRunning();
+            let candidate: ExtensionGeneration;
+            try {
+                await this.#preflightGeneration(id, generation);
+                candidate = await this.#loadCandidate(id, generation);
+            } catch (error) {
+                throw extensionFailure(id, generation, error);
+            }
+
+            let validationFailure: unknown;
+            try {
+                this.#catalog.assertCanReplace(id, generation, candidate.manifest);
+                if (candidate.state === "faulted") {
+                    throw candidate.faultError ?? new Error(`Extension generation ${generation} faulted during validation.`);
+                }
+            } catch (error) {
+                validationFailure = error;
+            }
+            const cleanupFailures: unknown[] = [];
+            await candidate.retire().catch((error) => cleanupFailures.push(error));
+            if (validationFailure !== undefined || cleanupFailures.length > 0) {
+                const failures = [
+                    ...(validationFailure === undefined ? [] : [validationFailure]),
+                    ...cleanupFailures
+                ];
+                const cause = failures.length === 1
+                    ? failures[0]
+                    : new AggregateError(
+                        failures,
+                        `Extension ${id} generation ${generation} validation cleanup was incomplete.`
+                    );
+                throw extensionFailure(id, generation, cause);
+            }
+
+            const snapshot = this.#requireRegistry();
+            const next = cloneExtensionRegistry(snapshot);
+            next.extensions[id] = {
+                enabled: true,
+                lastKnownGoodGeneration: generation,
+                selectedGeneration: generation
+            };
+            await this.#registry.write(next);
+            this.#registrySnapshot = next;
+            this.#catalog.replace(id, generation, candidate.manifest);
+
+            const active = this.#active.get(id);
+            if (active !== undefined) {
+                this.#active.delete(id);
+                this.#trackRetired(id, active);
             }
             this.#failures.delete(id);
         });
@@ -184,7 +283,7 @@ export class ExtensionHost {
             const snapshot = this.#requireRegistry();
             const entry = snapshot.extensions[id];
             if (entry === undefined) throw extensionNotFound(id);
-            await this.#startEntry(id, { ...entry, enabled: true }, true);
+            await this.#catalogEntry(id, { ...entry, enabled: true }, true);
         });
     }
 
@@ -200,6 +299,7 @@ export class ExtensionHost {
                 await this.#registry.write(next);
                 this.#registrySnapshot = next;
             }
+            this.#catalog.remove(id);
             const active = this.#active.get(id);
             if (active !== undefined) {
                 this.#active.delete(id);
@@ -238,6 +338,7 @@ export class ExtensionHost {
             delete next.extensions[id];
             await this.#registry.write(next);
             this.#registrySnapshot = next;
+            this.#catalog.remove(id);
             this.#failures.delete(id);
         });
     }
@@ -282,7 +383,7 @@ export class ExtensionHost {
         if (failures.length > 0) throw new AggregateError(failures, "Extension generations failed to dispose cleanly.");
     }
 
-    async #startEntry(id: string, entry: ExtensionRegistryEntry, throwOnFailure = false): Promise<void> {
+    async #catalogEntry(id: string, entry: ExtensionRegistryEntry, throwOnFailure = false): Promise<void> {
         const candidates = [...new Set([
             entry.selectedGeneration,
             entry.lastKnownGoodGeneration
@@ -295,35 +396,100 @@ export class ExtensionHost {
         }
         let selectedFailure: unknown;
         for (const generation of candidates) {
-            let candidate: ExtensionGeneration;
+            let manifest: ExtensionManifest;
             try {
-                candidate = await this.#loadCandidate(id, generation);
+                manifest = await this.#loader.readManifest(id, generation);
+                this.#catalog.assertCanReplace(id, generation, manifest);
             } catch (error) {
                 selectedFailure ??= error;
                 this.#recordFailure(id, generation, error);
                 continue;
             }
             const snapshot = this.#requireRegistry();
-            const next = cloneExtensionRegistry(snapshot);
+            const current = snapshot.extensions[id];
+            if (current === undefined) throw extensionNotFound(id);
+            if (!current.enabled || current.selectedGeneration !== generation) {
+                const next = cloneExtensionRegistry(snapshot);
+                next.extensions[id] = {
+                    ...current,
+                    enabled: true,
+                    selectedGeneration: generation
+                };
+                await this.#registry.write(next);
+                this.#registrySnapshot = next;
+            }
+            this.#catalog.replace(id, generation, manifest);
+            this.#failures.delete(id);
+            return;
+        }
+        const failure = selectedFailure ?? new Error(`Extension ${id} has no usable manifest generation.`);
+        if (throwOnFailure) throw failure;
+    }
+
+    async #activateCatalogEntry(id: string): Promise<void> {
+        const snapshot = this.#requireRegistry();
+        const entry = snapshot.extensions[id];
+        if (entry === undefined) throw extensionNotFound(id);
+        if (!entry.enabled) throw extensionNotActive(id, "disabled");
+        const catalog = this.#catalog.getExtension(id);
+        if (catalog === undefined) throw extensionNotActive(id, "not present in the static catalog");
+        const existing = this.#active.get(id);
+        if (existing?.state === "faulted") {
+            throw extensionFailure(
+                id,
+                existing.generation,
+                existing.faultError ?? new Error(`Extension ${id} sandbox faulted.`)
+            );
+        }
+        if (existing?.state === "active" && existing.generation === catalog.generation) return;
+
+        const candidates = [...new Set([
+            catalog.generation,
+            entry.lastKnownGoodGeneration
+        ].filter((value): value is string => value !== undefined))];
+        let selectedFailure: unknown;
+        for (const generation of candidates) {
+            let candidate: ExtensionGeneration;
+            try {
+                await this.#preflightGeneration(id, generation);
+                candidate = await this.#loadCandidate(id, generation);
+            } catch (error) {
+                selectedFailure ??= error;
+                this.#recordFailure(id, generation, error);
+                continue;
+            }
+            const currentSnapshot = this.#requireRegistry();
+            const current = currentSnapshot.extensions[id];
+            if (current === undefined) {
+                await candidate.retire().catch(() => undefined);
+                throw extensionNotFound(id);
+            }
+            const next = cloneExtensionRegistry(currentSnapshot);
             next.extensions[id] = {
-                ...entry,
+                ...current,
                 enabled: true,
                 lastKnownGoodGeneration: generation,
                 selectedGeneration: generation
             };
             try {
-                await this.#commitCandidate(id, candidate, snapshot, next);
+                await this.#commitCandidate(id, candidate, currentSnapshot, next);
             } catch (error) {
-                if (!(error instanceof ExtensionCandidatePublicationError)) throw error;
-                selectedFailure ??= error;
-                this.#recordFailure(id, generation, error);
+                if (!(error instanceof ExtensionCandidatePublicationError)) {
+                    this.#recordFailure(id, generation, error);
+                    throw error;
+                }
+                selectedFailure ??= error.cause ?? error;
+                this.#recordFailure(id, generation, error.cause ?? error);
                 continue;
             }
-            if (generation === entry.selectedGeneration) this.#failures.delete(id);
+            this.#failures.delete(id);
             return;
         }
-        const failure = selectedFailure ?? new Error(`Extension ${id} could not load.`);
-        if (throwOnFailure) throw failure;
+        throw extensionFailure(
+            id,
+            catalog.generation,
+            selectedFailure ?? new Error(`Extension ${id} could not activate.`)
+        );
     }
 
     async #loadCandidate(id: string, generation: string): Promise<ExtensionGeneration> {
@@ -335,6 +501,11 @@ export class ExtensionHost {
         return candidate;
     }
 
+    async #preflightGeneration(id: string, generation: string): Promise<void> {
+        const manifest = await this.#loader.readManifest(id, generation);
+        this.#catalog.assertCanReplace(id, generation, manifest);
+    }
+
     async #commitCandidate(
         id: string,
         candidate: ExtensionGeneration,
@@ -342,7 +513,7 @@ export class ExtensionHost {
         nextRegistry: ExtensionRegistrySnapshot
     ): Promise<void> {
         try {
-            this.#assertNoRegistrationConflicts(id, candidate);
+            this.#catalog.assertCanReplace(id, candidate.generation, candidate.manifest);
             candidate.activate();
         } catch (error) {
             const cleanupFailures: unknown[] = [];
@@ -382,19 +553,8 @@ export class ExtensionHost {
             );
         }
         this.#registrySnapshot = nextRegistry;
+        this.#catalog.replace(id, candidate.generation, candidate.manifest);
         this.#publish(id, candidate);
-    }
-
-    #assertNoRegistrationConflicts(id: string, candidate: ExtensionGeneration): void {
-        for (const registration of candidate.registrations.list()) {
-            for (const [otherId, active] of this.#active) {
-                if (otherId === id) continue;
-                if (active.registrations.get(registration.pointId, registration.id) === undefined) continue;
-                throw new Error(
-                    `Extension registration conflict for ${registration.pointId}/${registration.id}: ${id} and ${otherId}.`
-                );
-            }
-        }
     }
 
     #publish(id: string, candidate: ExtensionGeneration): void {
@@ -426,6 +586,7 @@ export class ExtensionHost {
 
     #record(id: string, entry: ExtensionRegistryEntry): ExtensionRuntimeRecord {
         const active = this.#active.get(id);
+        const manifest = active?.manifest ?? this.#catalog.getExtension(id)?.manifest;
         const activeFailure = active?.state === "faulted"
             ? {
                   generation: active.generation,
@@ -446,7 +607,7 @@ export class ExtensionHost {
             ...(failure === undefined ? {} : { failure: { ...failure } }),
             id,
             ...(entry.lastKnownGoodGeneration === undefined ? {} : { lastKnownGoodGeneration: entry.lastKnownGoodGeneration }),
-            ...(active === undefined ? {} : { name: active.manifest.name }),
+            ...(manifest === undefined ? {} : { name: manifest.name }),
             retired,
             ...(entry.selectedGeneration === undefined ? {} : { selectedGeneration: entry.selectedGeneration }),
             state: !entry.enabled
@@ -458,7 +619,7 @@ export class ExtensionHost {
                     : failure !== undefined
                         ? "failed"
                         : "installed",
-            ...(active === undefined ? {} : { version: active.manifest.version })
+            ...(manifest === undefined ? {} : { version: manifest.version })
         };
     }
 

@@ -67,7 +67,7 @@ export class ExtensionWebGateway {
 
             let acquired;
             try {
-                acquired = this.#extensions.acquireRegistration("web.applications", target.applicationId);
+                acquired = await this.#extensions.acquireRegistration("web.applications", target.applicationId);
             } catch {
                 writeError(response, 404, "Extension WebUI not found");
                 return;
@@ -109,7 +109,7 @@ export class ExtensionWebGateway {
             }
             let acquired;
             try {
-                acquired = this.#extensions.acquireRegistration("web.applications", target.applicationId);
+                acquired = await this.#extensions.acquireRegistration("web.applications", target.applicationId);
             } catch {
                 rejectUpgrade(socket, 404, "Extension WebUI not found");
                 return;

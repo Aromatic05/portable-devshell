@@ -23,6 +23,12 @@ export interface ExtensionRuntimeRegistration {
     readonly pointId: string;
 }
 
+export interface ExtensionRuntimeDeclaration {
+    readonly declaration: ExtensionPointDeclaration;
+    readonly id: string;
+    readonly pointId: string;
+}
+
 export class ExtensionRegistrationSet {
     readonly #entries: ReadonlyMap<string, ExtensionRuntimeRegistration>;
 
@@ -79,29 +85,47 @@ export class ExtensionRegistrationBuilder {
 
     async finalize(): Promise<ExtensionRegistrationSet> {
         const registrations: ExtensionRuntimeRegistration[] = [];
-        for (const [pointId, declarations] of Object.entries(this.#manifest.extensions)) {
-            for (const declaration of declarations) {
-                const parsed = validateDeclaration(pointId, declaration, this.#manifest.id);
-                const binding = this.#bindings.get(registrationKey(pointId, declaration.id));
-                if (binding === undefined) {
-                    throw new TypeError(
-                        `Extension ${this.#manifest.id} declares ${pointId}/${declaration.id} but did not bind it.`
-                    );
-                }
-                await validateBindingResources(pointId, binding.binding, this.#codeDirectory, this.#manifest.id, declaration.id);
-                registrations.push(Object.freeze({
-                    binding: binding.binding,
-                    declaration: parsed,
-                    id: declaration.id,
-                    pointId
-                }));
+        for (const entry of readExtensionDeclarations(this.#manifest)) {
+            const binding = this.#bindings.get(registrationKey(entry.pointId, entry.id));
+            if (binding === undefined) {
+                throw new TypeError(
+                    `Extension ${this.#manifest.id} declares ${entry.pointId}/${entry.id} but did not bind it.`
+                );
             }
+            await validateBindingResources(
+                entry.pointId,
+                binding.binding,
+                this.#codeDirectory,
+                this.#manifest.id,
+                entry.id
+            );
+            registrations.push(Object.freeze({
+                binding: binding.binding,
+                declaration: entry.declaration,
+                id: entry.id,
+                pointId: entry.pointId
+            }));
         }
         if (registrations.length !== this.#bindings.size) {
             throw new Error(`Extension ${this.#manifest.id} registration set is inconsistent with its manifest.`);
         }
         return new ExtensionRegistrationSet(registrations);
     }
+}
+
+/** Validate manifest declarations without importing or activating Extension code. */
+export function readExtensionDeclarations(manifest: ExtensionManifest): readonly ExtensionRuntimeDeclaration[] {
+    const declarations: ExtensionRuntimeDeclaration[] = [];
+    for (const [pointId, entries] of Object.entries(manifest.extensions)) {
+        for (const declaration of entries) {
+            declarations.push(Object.freeze({
+                declaration: validateDeclaration(pointId, declaration, manifest.id),
+                id: declaration.id,
+                pointId
+            }));
+        }
+    }
+    return declarations;
 }
 
 function validateDeclaration(
