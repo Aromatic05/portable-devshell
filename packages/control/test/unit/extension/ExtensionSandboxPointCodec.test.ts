@@ -6,7 +6,8 @@ import { ExtensionSandboxPointCodecRegistry } from "../../../src/control/extensi
 const context = Object.freeze({
     codeDirectory: "/extension/code",
     extensionId: "example",
-    id: "entry"
+    id: "entry",
+    async requestInterface() { return undefined; }
 });
 
 test("Extension sandbox codec registry rejects invalid and duplicate point identities", () => {

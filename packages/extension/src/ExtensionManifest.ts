@@ -9,7 +9,9 @@ export const EXTENSION_API_VERSION = 4;
 export const EXTENSION_MANIFEST_SCHEMA_VERSION = 1;
 
 const capabilities = new Set<ExtensionCapability>([
+    "artifacts",
     "assets",
+    "instances",
     "processes",
     "workers"
 ]);

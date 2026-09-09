@@ -10,10 +10,12 @@ import {
 } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import { asInstanceName, type JsonValue } from "@portable-devshell/shared";
+import { executeInstanceCommand } from "@portable-devshell/instance-extension";
+import type { CliModelCommandInvocationContext } from "@portable-devshell/extension/cli";
 
 import { CliExtensionCommandService } from "../../src/control/cli/CliExtensionCommandService.ts";
 import { ModelDevshellBroker } from "../../src/control/cli/ModelDevshellBroker.ts";
-import { createInstanceModelCliCommandProvider } from "../../src/control/instance/cli/InstanceCliCommandProvider.ts";
+import { ExtensionInstanceCapabilityControl } from "../../src/control/extension/host/generation/capability/ExtensionInstanceCapabilityControl.ts";
 import type { InstanceDescriptor } from "../../src/control/instance/InstanceDescriptor.ts";
 import { InstanceRegistry } from "../../src/control/instance/registry/InstanceRegistry.ts";
 import { RuntimeSubscriptionManager } from "../../src/instance/runtime/RuntimeSubscriptionManager.ts";
@@ -26,6 +28,22 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
+
+interface TestRpcResponse {
+    error?: JsonValue;
+    result?: {
+        isError?: boolean;
+        protocolVersion?: string;
+        structuredContent?: {
+            ctxId?: string;
+            exitCode?: number;
+            output?: JsonValue[];
+            stderr?: string;
+            stdout?: string;
+            task?: { id?: string; status?: string };
+        };
+    };
+}
 
 test(
     "MCP bash_run resolves model devshell through the Worker shim without builtin fallback",
@@ -65,11 +83,7 @@ test(
             listenHost: "127.0.0.1",
             listenPort: 0
         });
-        const commands = new CliExtensionCommandService(emptyExtensionHost(), {
-            providers: [createInstanceModelCliCommandProvider({
-                instances,
-                subscriptions: new RuntimeSubscriptionManager()
-            })],
+        const commands = new CliExtensionCommandService(instanceModelExtensionHost(instances, instanceName), {
             surface: "model"
         });
         const broker = new ModelDevshellBroker({
@@ -159,7 +173,7 @@ test(
                 assert.equal(delayed.error, undefined, JSON.stringify(delayed));
                 assert.equal(delayed.result?.isError, false, JSON.stringify(delayed));
                 const delayedTask = delayed.result?.structuredContent?.task?.id;
-                assert.equal(typeof delayedTask, "string", JSON.stringify(delayed));
+                assert.ok(typeof delayedTask === "string", JSON.stringify(delayed));
                 await new Promise((resolve) => setTimeout(resolve, 600));
                 const delayedRead = await callTool(endpoint, headers, "tmux_read", {
                     ctxId,
@@ -200,7 +214,7 @@ async function createContext(
         }
     }, headers);
     const ctxId = response.result?.structuredContent?.ctxId;
-    assert.equal(typeof ctxId, "string", JSON.stringify(response));
+    assert.ok(typeof ctxId === "string", JSON.stringify(response));
     return ctxId;
 }
 
@@ -230,13 +244,54 @@ async function callTool(
     }, headers);
 }
 
-function emptyExtensionHost() {
-    return {
-        async acquireRegistration() {
-            throw new Error("unexpected sandboxed model command lookup");
+function instanceModelExtensionHost(instances: InstanceRegistry, instanceName: string) {
+    const capability = new ExtensionInstanceCapabilityControl({
+        allowed: true,
+        create: {
+            async createInstance() { throw new Error("not used"); },
+            getSchema() { return {} as never; },
+            validateDraft() { return {} as never; }
         },
-        listDeclarations() {
-            return [];
+        editor: {
+            async deleteInstance() { throw new Error("not used"); },
+            async disableInstance() { throw new Error("not used"); },
+            async enableInstance() { throw new Error("not used"); }
+        },
+        extensionId: "instance",
+        instances,
+        listConfigured: () => [{ enabled: true, mcpEnabled: true, name: instanceName, provider: "local" }],
+        subscriptions: new RuntimeSubscriptionManager()
+    });
+    const declaration = {
+        id: "instance",
+        summary: "Inspect portable-devshell instances",
+        title: "Instance",
+        usage: "instance <command>"
+    };
+    return {
+        async acquireRegistration(pointId: string, id: string) {
+            assert.equal(pointId, "cli.model-commands");
+            assert.equal(id, "instance");
+            return {
+                lease: { release() {} },
+                registration: {
+                    binding: async (argv: readonly string[], invocation: CliModelCommandInvocationContext) =>
+                        await executeInstanceCommand(capability, argv, invocation),
+                    declaration,
+                    id,
+                    pointId
+                }
+            } as never;
+        },
+        listDeclarations(pointId: string) {
+            if (pointId !== "cli.model-commands") return [];
+            return [{
+                declaration,
+                extensionId: "instance",
+                generation: "test",
+                id: "instance",
+                pointId
+            }];
         }
     } as never;
 }
@@ -245,7 +300,7 @@ async function postJson(
     url: string,
     body: JsonValue,
     extraHeaders: Record<string, string> = {}
-): Promise<any> {
+): Promise<TestRpcResponse> {
     const response = await fetch(url, {
         body: JSON.stringify(body),
         headers: {
@@ -262,7 +317,7 @@ async function postJson(
         .split(/\r?\n/u)
         .filter((line) => line.startsWith("data: "))
         .map((line) => line.slice(6));
-    return JSON.parse(data.at(-1) ?? text);
+    return JSON.parse(data.at(-1) ?? text) as TestRpcResponse;
 }
 
 async function postRaw(

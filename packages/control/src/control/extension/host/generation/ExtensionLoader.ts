@@ -15,6 +15,8 @@ import {
     type ExtensionProcessCapability,
     type ExtensionWorkerCapability
 } from "@portable-devshell/extension";
+import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
+import type { ExtensionInstanceCapability } from "@portable-devshell/extension/instance";
 
 import type { InstanceRegistry } from "../../../instance/registry/InstanceRegistry.js";
 import { ExtensionAssetCapabilityControl } from "./capability/ExtensionAssetCapabilityControl.js";
@@ -41,6 +43,11 @@ export interface ExtensionProcessRuntime extends ExtensionProcessCapability {
 }
 
 export interface ExtensionLoaderOptions {
+    artifactFactory?: (input: {
+        allowed: boolean;
+        extensionId: string;
+        generation: string;
+    }) => ExtensionArtifactCapability;
     assetsFactory?: (input: {
         allowed: boolean;
         dataDirectory: string;
@@ -48,6 +55,11 @@ export interface ExtensionLoaderOptions {
         generation: string;
     }) => ExtensionAssetCapability;
     importer?: (url: string) => Promise<unknown>;
+    instanceFactory?: (input: {
+        allowed: boolean;
+        extensionId: string;
+        generation: string;
+    }) => ExtensionInstanceCapability;
     instances: InstanceRegistry;
     hostModuleResolver?: ExtensionHostModuleResolver;
     loggerFactory?: (id: string, generation: string) => ExtensionLogger;
@@ -68,9 +80,11 @@ export interface ExtensionLoaderOptions {
 }
 
 export class ExtensionLoader {
+    readonly #artifactFactory?: ExtensionLoaderOptions["artifactFactory"];
     readonly #assetsFactory?: ExtensionLoaderOptions["assetsFactory"];
     readonly #importer?: (url: string) => Promise<unknown>;
     readonly #hostModuleResolver: ExtensionHostModuleResolver;
+    readonly #instanceFactory?: ExtensionLoaderOptions["instanceFactory"];
     readonly #instances: InstanceRegistry;
     readonly #loggerFactory: (id: string, generation: string) => ExtensionLogger;
     readonly #paths: ExtensionPathLayout;
@@ -82,9 +96,11 @@ export class ExtensionLoader {
     readonly #workerFactory?: ExtensionLoaderOptions["workerFactory"];
 
     constructor(options: ExtensionLoaderOptions) {
+        this.#artifactFactory = options.artifactFactory;
         this.#assetsFactory = options.assetsFactory;
         this.#importer = options.importer;
         this.#hostModuleResolver = options.hostModuleResolver ?? sharedExtensionHostModuleResolver();
+        this.#instanceFactory = options.instanceFactory;
         this.#instances = options.instances;
         this.#loggerFactory = options.loggerFactory ?? ((id, generation) => consoleExtensionLogger(id, generation));
         this.#paths = options.paths;
@@ -124,6 +140,17 @@ export class ExtensionLoader {
             extensionId: id
         });
 
+        const artifacts = this.#artifactFactory?.({
+            allowed: manifest.capabilities.includes("artifacts"),
+            extensionId: id,
+            generation
+        }) ?? unavailableArtifacts(id);
+        const instanceManagement = this.#instanceFactory?.({
+            allowed: manifest.capabilities.includes("instances"),
+            extensionId: id,
+            generation
+        }) ?? unavailableInstances(id);
+
         const worker = this.#workerFactory?.({
             allowed: manifest.capabilities.includes("workers"),
             extensionId: id,
@@ -150,7 +177,9 @@ export class ExtensionLoader {
         };
         const context: ExtensionContext = Object.freeze({
             capabilities: Object.freeze({
+                ...(manifest.capabilities.includes("artifacts") ? { artifacts } : {}),
                 ...(manifest.capabilities.includes("assets") ? { assets } : {}),
+                ...(manifest.capabilities.includes("instances") ? { instances: instanceManagement } : {}),
                 ...(manifest.capabilities.includes("processes") ? { processes } : {}),
                 ...(manifest.capabilities.includes("workers") ? { workers: worker } : {})
             }),
@@ -164,12 +193,14 @@ export class ExtensionLoader {
 
         if (this.#importer === undefined) {
             return await this.#loadSandboxed({
+                artifacts,
                 assets,
                 codeDirectory,
                 context,
                 entryPath,
                 generation,
                 id,
+                instanceManagement,
                 logger,
                 manifest,
                 processes,
@@ -242,12 +273,14 @@ export class ExtensionLoader {
     }
 
     async #loadSandboxed(input: {
+        artifacts: ExtensionArtifactCapability;
         assets: ExtensionAssetCapability;
         codeDirectory: string;
         context: ExtensionContext;
         entryPath: string;
         generation: string;
         id: string;
+        instanceManagement: ExtensionInstanceCapability;
         logger: ExtensionLogger;
         manifest: ExtensionManifest;
         processes: ExtensionProcessRuntime;
@@ -257,6 +290,7 @@ export class ExtensionLoader {
     }): Promise<ExtensionGeneration> {
         let candidate: ExtensionGeneration | undefined;
         const sandbox = this.#sandboxFactory({
+            artifacts: input.artifacts,
             assets: input.assets,
             capabilities: input.manifest.capabilities,
             codeDirectory: input.codeDirectory,
@@ -268,6 +302,7 @@ export class ExtensionLoader {
             },
             entryUrl: pathToFileURL(input.entryPath).href,
             hostDependencies: input.manifest.hostDependencies,
+            instances: input.instanceManagement,
             logger: input.logger,
             onFault: (error) => {
                 candidate?.fault(error);
@@ -318,6 +353,43 @@ export class ExtensionLoader {
             );
         }
     }
+}
+
+function unavailableArtifacts(extensionId: string): ExtensionArtifactCapability {
+    const unavailable = (): never => {
+        throw new Error(`Extension ${extensionId} requested artifacts but the host did not configure that capability.`);
+    };
+    return Object.freeze({
+        cancelTransfer: async () => unavailable(),
+        createShare: async () => unavailable(),
+        getTransfer: async () => unavailable(),
+        listShares: async () => unavailable(),
+        listTransfers: async () => unavailable(),
+        revokeShare: async () => unavailable(),
+        startTransfer: async () => unavailable(),
+        waitForTransfer: async () => unavailable()
+    });
+}
+
+function unavailableInstances(extensionId: string): ExtensionInstanceCapability {
+    const unavailable = (): never => {
+        throw new Error(`Extension ${extensionId} requested instances but the host did not configure that capability.`);
+    };
+    return Object.freeze({
+        create: async () => unavailable(),
+        createSchema: async () => unavailable(),
+        delete: async () => unavailable(),
+        disable: async () => unavailable(),
+        enable: async () => unavailable(),
+        list: async () => unavailable(),
+        readLogs: async () => unavailable(),
+        refresh: async () => unavailable(),
+        snapshot: async () => unavailable(),
+        start: async () => unavailable(),
+        stop: async () => unavailable(),
+        validateCreate: async () => unavailable(),
+        watchEvents: async () => unavailable()
+    });
 }
 
 async function registrationsFromSandbox(

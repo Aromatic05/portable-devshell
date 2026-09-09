@@ -1,0 +1,19 @@
+{
+    "schemaVersion": 1,
+    "apiVersion": 4,
+    "id": "instance",
+    "name": "portable-devshell Instance",
+    "version": "0.1.0",
+    "entry": "index.ts",
+    "capabilities": ["instances"],
+    "extensions": {
+        "cli.model-commands": [
+            {
+                "id": "instance",
+                "title": "Instance",
+                "summary": "Inspect portable-devshell instances",
+                "usage": "instance <list|status|logs>"
+            }
+        ]
+    }
+}

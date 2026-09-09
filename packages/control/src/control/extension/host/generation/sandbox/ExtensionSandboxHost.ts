@@ -17,9 +17,12 @@ import type {
     ExtensionWorkerCapability,
     ExtensionWorkerSession
 } from "@portable-devshell/extension";
+import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
+import type { ExtensionInstanceCapability } from "@portable-devshell/extension/instance";
 
 import type {
     ExtensionPointSandboxBridge,
+    ExtensionPointSandboxInterfacePort,
     ExtensionPointSandboxInvokeOptions
 } from "../ExtensionPointRegistry.js";
 
@@ -36,7 +39,13 @@ import {
     type ExtensionSandboxToHostMessage,
     type ExtensionSandboxWorkerData,
     type ExtensionSandboxWorkerSessionDescriptor,
+    type SandboxArtifactShareInput,
+    type SandboxArtifactTransferInput,
     type SandboxAssetProjectInput,
+    type SandboxInstanceCreateInput,
+    type SandboxInstanceNameInput,
+    type SandboxInstanceReadLogsInput,
+    type SandboxInstanceWatchInput,
     type SandboxProcessSendInput,
     type SandboxProcessStartInput,
     type SandboxProcessTerminateInput,
@@ -61,6 +70,7 @@ interface SandboxManagedProcess {
 }
 
 export interface ExtensionSandboxHostOptions {
+    artifacts: ExtensionArtifactCapability;
     assets: ExtensionAssetCapability;
     capabilities: readonly ExtensionCapability[];
     codeDirectory: string;
@@ -73,6 +83,7 @@ export interface ExtensionSandboxHostOptions {
     hostCallbackTimeoutMs?: number;
     initializationTimeoutMs?: number;
     invocationAbortGraceMs?: number;
+    instances: ExtensionInstanceCapability;
     logger: ExtensionLogger;
     memoryWatchIntervalMs?: number;
     onFault?(error: Error): void;
@@ -105,13 +116,16 @@ const DEFAULT_DISPOSE_TIMEOUT_MS = 5_000;
 const WORKER_TERMINATE_WAIT_MS = 1_000;
 
 export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
+    readonly #artifactCapability: ExtensionArtifactCapability;
     readonly #assets: ExtensionAssetCapability;
     readonly #externalMemoryLimitBytes: number;
     readonly #healthCheckIntervalMs: number;
     readonly #healthCheckTimeoutMs: number;
     readonly #hostCallbackTimeoutMs: number;
     readonly #initializationTimeoutMs: number;
+    readonly #instanceCapability: ExtensionInstanceCapability;
     readonly #invocationAbortGraceMs: number;
+    readonly #invocationInterfaces = new Map<string, ExtensionPointSandboxInterfacePort>();
     readonly #logger: ExtensionLogger;
     readonly #memoryWatchIntervalMs: number;
     readonly #onFault?: (error: Error) => void;
@@ -140,6 +154,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     }
 
     constructor(options: ExtensionSandboxHostOptions) {
+        this.#artifactCapability = options.artifacts;
         this.#assets = options.assets;
         this.#externalMemoryLimitBytes = positiveMegabytes(
             options.externalMemoryLimitMb ?? DEFAULT_EXTENSION_SANDBOX_EXTERNAL_MEMORY_LIMIT_MB,
@@ -155,6 +170,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         );
         this.#hostCallbackTimeoutMs = options.hostCallbackTimeoutMs ?? DEFAULT_HOST_CALLBACK_TIMEOUT_MS;
         this.#initializationTimeoutMs = options.initializationTimeoutMs ?? DEFAULT_INITIALIZATION_TIMEOUT_MS;
+        this.#instanceCapability = options.instances;
         this.#invocationAbortGraceMs = options.invocationAbortGraceMs ?? DEFAULT_INVOCATION_ABORT_GRACE_MS;
         this.#logger = options.logger;
         this.#memoryWatchIntervalMs = positiveMilliseconds(
@@ -258,7 +274,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         if (options.timeoutLabel !== undefined) {
             return await this.#invokeHostCallback(operation, options.timeoutLabel);
         }
-        return await this.#invoke(operation, options.signal);
+        return await this.#invoke(operation, options);
     }
 
     async dispose(): Promise<void> {
@@ -343,6 +359,32 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                     deserializeSandboxError(message.error)
                 );
                 return;
+            case "interfaceRequest": {
+                const interfacePort = this.#invocationInterfaces.get(message.invocationId);
+                if (interfacePort === undefined) {
+                    this.#send({
+                        error: serializeSandboxError(new Error("Extension sandbox interface invocation is unavailable.")),
+                        id: message.id,
+                        type: "interfaceError"
+                    });
+                    return;
+                }
+                try {
+                    const value = await interfacePort.request(message.operation, message.input);
+                    this.#send({
+                        id: message.id,
+                        type: "interfaceResult",
+                        ...(value === undefined ? {} : { value })
+                    });
+                } catch (error) {
+                    this.#send({
+                        error: serializeSandboxError(error),
+                        id: message.id,
+                        type: "interfaceError"
+                    });
+                }
+                return;
+            }
             case "log":
                 this.#logger[message.level](message.message, message.details);
                 return;
@@ -377,6 +419,22 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         signal: AbortSignal
     ): Promise<unknown> {
         switch (operation) {
+            case "artifacts.cancelTransfer":
+                return await this.#artifactCapability.cancelTransfer(readStringField(input, "transferId"));
+            case "artifacts.createShare":
+                return await this.#artifactCapability.createShare(input as SandboxArtifactShareInput);
+            case "artifacts.getTransfer":
+                return await this.#artifactCapability.getTransfer(readStringField(input, "transferId"));
+            case "artifacts.listShares":
+                return await this.#artifactCapability.listShares();
+            case "artifacts.listTransfers":
+                return await this.#artifactCapability.listTransfers();
+            case "artifacts.revokeShare":
+                return await this.#artifactCapability.revokeShare(readStringField(input, "shareId"));
+            case "artifacts.startTransfer":
+                return await this.#artifactCapability.startTransfer(input as SandboxArtifactTransferInput);
+            case "artifacts.waitForTransfer":
+                return await this.#artifactCapability.waitForTransfer(readStringField(input, "transferId"));
             case "assets.installBundle":
                 return await this.#assets.installBundle(readStringField(input, "sourcePath"));
             case "assets.installDirectory":
@@ -397,6 +455,51 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                     target: { ...value.target }
                 });
             }
+            case "instances.create":
+                return await this.#instanceCapability.create((input as SandboxInstanceCreateInput).draft);
+            case "instances.createSchema":
+                return await this.#instanceCapability.createSchema();
+            case "instances.delete":
+                return await this.#instanceCapability.delete((input as SandboxInstanceNameInput).name);
+            case "instances.disable":
+                return await this.#instanceCapability.disable((input as SandboxInstanceNameInput).name);
+            case "instances.enable":
+                return await this.#instanceCapability.enable((input as SandboxInstanceNameInput).name);
+            case "instances.list":
+                return await this.#instanceCapability.list();
+            case "instances.readLogs": {
+                const value = input as SandboxInstanceReadLogsInput;
+                return await this.#instanceCapability.readLogs(value.name, value.query);
+            }
+            case "instances.refresh":
+                return await this.#instanceCapability.refresh((input as SandboxInstanceNameInput).name);
+            case "instances.snapshot":
+                return await this.#instanceCapability.snapshot((input as SandboxInstanceNameInput).name);
+            case "instances.start":
+                return await this.#instanceCapability.start((input as SandboxInstanceNameInput).name);
+            case "instances.stop":
+                return await this.#instanceCapability.stop((input as SandboxInstanceNameInput).name);
+            case "instances.validateCreate":
+                return await this.#instanceCapability.validateCreate((input as SandboxInstanceCreateInput).draft);
+            case "instances.watchEvents": {
+                const value = input as SandboxInstanceWatchInput;
+                await this.#instanceCapability.watchEvents(value.name, {
+                    ...(value.eventTypes === undefined ? {} : { eventTypes: [...value.eventTypes] }),
+                    fromSeq: value.fromSeq,
+                    onEvent: async (event) => this.#send({
+                        id,
+                        type: "capabilityProgress",
+                        value: { event: { ...event }, kind: "event" } as ExtensionJsonValue
+                    }),
+                    onGap: async (gap) => this.#send({
+                        id,
+                        type: "capabilityProgress",
+                        value: { gap: { ...gap }, kind: "gap" } as ExtensionJsonValue
+                    }),
+                    signal
+                });
+                return undefined;
+            }
             case "processes.start": {
                 const started = await this.#processCapability.start(input as SandboxProcessStartInput);
                 if (this.#faulted !== undefined || this.#closing) {
@@ -404,8 +507,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                     throw this.#faulted ?? new Error("Extension sandbox stopped accepting processes.");
                 }
                 const processId = randomUUID();
-                let registration!: SandboxManagedProcess;
-                registration = {
+                const registration: SandboxManagedProcess = {
                     process: started,
                     removeMessageListener: started.onMessage((message) => {
                         this.#send({ message, processId, type: "processMessage" });
@@ -480,8 +582,9 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
 
     async #invoke(
         operation: ExtensionSandboxInvokeOperation,
-        signal?: AbortSignal
+        options: ExtensionPointSandboxInvokeOptions = {}
     ): Promise<unknown> {
+        const signal = options.signal;
         await this.#ready;
         if (this.#faulted !== undefined) throw this.#faulted;
         if (this.#closing) throw new Error("Extension sandbox is closing.");
@@ -510,6 +613,9 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                 signal.addEventListener("abort", abort, { once: true });
             }
             this.#pending.set(id, pending);
+            if (options.interfacePort !== undefined) {
+                this.#invocationInterfaces.set(id, options.interfacePort);
+            }
             try {
                 this.#send({ id, operation, type: "invoke" });
             } catch (error) {
@@ -546,6 +652,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         const pending = this.#pending.get(id);
         if (pending === undefined) return undefined;
         this.#pending.delete(id);
+        this.#invocationInterfaces.delete(id);
         if (pending.graceTimer !== undefined) clearTimeout(pending.graceTimer);
         pending.cleanup?.();
         return pending;
@@ -589,6 +696,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         }
         for (const controller of this.#capabilityControllers.values()) controller.abort(error);
         this.#capabilityControllers.clear();
+        this.#invocationInterfaces.clear();
         this.#releaseProcessSubscriptions();
         void this.#closeSessions().catch((cleanupError: unknown) => {
             this.#logger.warn("Extension sandbox Worker sessions did not close cleanly after a fault.", {

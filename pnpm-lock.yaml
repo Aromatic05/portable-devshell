@@ -65,6 +65,18 @@ importers:
         specifier: 0.4.1
         version: 0.4.1(@earendil-works/pi-coding-agent@0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(ws@8.21.0)(zod@4.5.4))
 
+  extensions/artifact:
+    dependencies:
+      '@portable-devshell/extension':
+        specifier: workspace:*
+        version: link:../../packages/extension
+
+  extensions/instance:
+    dependencies:
+      '@portable-devshell/extension':
+        specifier: workspace:*
+        version: link:../../packages/extension
+
   extensions/mcp:
     dependencies:
       '@modelcontextprotocol/client':
@@ -98,9 +110,15 @@ importers:
 
   packages/cli:
     dependencies:
+      '@portable-devshell/artifact-extension':
+        specifier: workspace:*
+        version: link:../../extensions/artifact
       '@portable-devshell/control':
         specifier: workspace:*
         version: file:packages/control(react@18.3.1)
+      '@portable-devshell/instance-extension':
+        specifier: workspace:*
+        version: link:../../extensions/instance
       '@portable-devshell/mcp-extension':
         specifier: workspace:*
         version: link:../../extensions/mcp

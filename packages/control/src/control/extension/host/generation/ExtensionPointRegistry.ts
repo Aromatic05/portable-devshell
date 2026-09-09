@@ -10,8 +10,17 @@ export interface ExtensionPointValidationContext {
 }
 
 export interface ExtensionPointSandboxInvokeOptions {
+    readonly interfacePort?: ExtensionPointSandboxInterfacePort;
     readonly signal?: AbortSignal;
     readonly timeoutLabel?: string;
+}
+
+export interface ExtensionPointSandboxInterfacePort {
+    request(operation: string, input?: ExtensionJsonValue): Promise<ExtensionJsonValue | undefined>;
+}
+
+export interface ExtensionPointSandboxInvocationContext extends ExtensionPointValidationContext {
+    requestInterface(operation: string, input?: ExtensionJsonValue): Promise<ExtensionJsonValue | undefined>;
 }
 
 export interface ExtensionPointSandboxBridge {

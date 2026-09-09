@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import type {
@@ -15,6 +15,8 @@ import type {
     ExtensionWorkerCapability,
     ExtensionWorkerSession
 } from "@portable-devshell/extension";
+import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
+import type { ExtensionInstanceCapability } from "@portable-devshell/extension/instance";
 import type {
     CliNativeCommandInvocationContext,
     CliCommandResult
@@ -43,7 +45,7 @@ const CLI_POINT = "cli.native-commands";
 const CLI_ID = "test";
 
 async function setupSandbox(
-    t: Parameters<typeof test>[1] extends (context: infer Context) => unknown ? Context : never,
+    t: TestContext,
     name: string,
     source: string,
     options: Omit<Parameters<typeof createSandbox>[0], "codeDirectory" | "entryPath"> = {}
@@ -103,6 +105,73 @@ export function activate(context) {
         tools: ["echo"]
     });
     assert.deepEqual(calls, ["open:/workspace", "call:echo:sandbox-op", "close"]);
+});
+
+test("Extension sandbox bridges invocation-scoped CLI I/O", async (t) => {
+    const sandbox = await setupSandbox(t, "extension-sandbox-cli-io", `
+export function activate(context) {
+    context.register({ id: "cli.native-commands" }, "test", async (_argv, invocation) => {
+        if (!invocation.io) throw new Error("missing CLI I/O");
+        await invocation.io.writeStdout("out");
+        await invocation.io.writeStderr("err");
+        await invocation.io.requestInput({ raw: true });
+        const input = await invocation.io.readInput();
+        return { kind: "text", text: input === undefined ? "eof" : Buffer.from(input).toString("utf8") };
+    });
+}
+`);
+    await sandbox.start();
+    const calls: string[] = [];
+    const result = await sandboxCliCommand(sandbox, CLI_ID, [], {
+        ...invocation("cli-io"),
+        io: {
+            async readInput() {
+                calls.push("read");
+                return Buffer.from("input");
+            },
+            async requestInput(options) {
+                calls.push(`request:${options?.raw === true}`);
+            },
+            async writeStderr(chunk) {
+                calls.push(`stderr:${chunk}`);
+            },
+            async writeStdout(chunk) {
+                calls.push(`stdout:${chunk}`);
+            }
+        }
+    });
+    assert.deepEqual(result, { kind: "text", text: "input" });
+    assert.deepEqual(calls, ["stdout:out", "stderr:err", "request:true", "read"]);
+});
+
+test("Extension sandbox bridges declared Artifact and Instance management capabilities", async (t) => {
+    const calls: string[] = [];
+    const sandbox = await setupSandbox(t, "extension-sandbox-management-capabilities", `
+export function activate(context) {
+    context.register({ id: "cli.native-commands" }, "test", async () => {
+        const instances = await context.capabilities.instances.list();
+        const shares = await context.capabilities.artifacts.listShares();
+        const snapshot = await context.capabilities.instances.snapshot("local-test");
+        return { kind: "json", value: {
+            instanceNames: instances.map((value) => value.name),
+            shareIds: shares.map((value) => value.shareId),
+            status: snapshot.status
+        } };
+    });
+}
+`, {
+        artifacts: fakeArtifacts(calls),
+        capabilities: ["artifacts", "instances"],
+        instances: fakeInstances(calls)
+    });
+
+    await sandbox.start();
+    assert.deepEqual(await cliJson(sandbox, [], "management-capabilities"), {
+        instanceNames: ["local-test"],
+        shareIds: ["share-1"],
+        status: "ready"
+    });
+    assert.deepEqual(calls, ["instances.list", "artifacts.listShares", "instances.snapshot:local-test"]);
 });
 
 test("Extension sandbox loads the public CLI SDK leaf without exposing other portable-devshell internals", async (t) => {
@@ -603,6 +672,7 @@ export function activate(context) {
 });
 
 function createSandbox(options: {
+    artifacts?: ExtensionArtifactCapability;
     assets?: ExtensionAssetCapability;
     capabilities?: readonly ExtensionCapability[];
     codeDirectory: string;
@@ -610,6 +680,7 @@ function createSandbox(options: {
     externalMemoryLimitMb?: number;
     hostCallbackTimeoutMs?: number;
     invocationAbortGraceMs?: number;
+    instances?: ExtensionInstanceCapability;
     memoryWatchIntervalMs?: number;
     onFault?: (error: Error) => void;
     processes?: ExtensionProcessCapability;
@@ -618,6 +689,7 @@ function createSandbox(options: {
 }): ExtensionSandboxHost {
     const root = join(options.codeDirectory, "..", "runtime");
     return new ExtensionSandboxHost({
+        artifacts: options.artifacts ?? fakeArtifacts([]),
         assets: options.assets ?? fakeAssets(),
         capabilities: options.capabilities ?? [],
         codeDirectory: options.codeDirectory,
@@ -636,6 +708,7 @@ function createSandbox(options: {
         ...(options.externalMemoryLimitMb === undefined ? {} : { externalMemoryLimitMb: options.externalMemoryLimitMb }),
         ...(options.hostCallbackTimeoutMs === undefined ? {} : { hostCallbackTimeoutMs: options.hostCallbackTimeoutMs }),
         ...(options.invocationAbortGraceMs === undefined ? {} : { invocationAbortGraceMs: options.invocationAbortGraceMs }),
+        instances: options.instances ?? fakeInstances([]),
         logger: noopLogger,
         ...(options.memoryWatchIntervalMs === undefined ? {} : { memoryWatchIntervalMs: options.memoryWatchIntervalMs }),
         ...(options.onFault === undefined ? {} : { onFault: options.onFault }),
@@ -643,6 +716,97 @@ function createSandbox(options: {
         ...(options.resourceLimits === undefined ? {} : { resourceLimits: options.resourceLimits }),
         worker: options.worker ?? fakeWorker([])
     });
+}
+
+function fakeArtifacts(calls: string[]): ExtensionArtifactCapability {
+    return {
+        async cancelTransfer(transferId) {
+            calls.push(`artifacts.cancelTransfer:${transferId}`);
+            throw new Error("unused fake Artifact transfer");
+        },
+        async createShare() {
+            calls.push("artifacts.createShare");
+            throw new Error("unused fake Artifact share creation");
+        },
+        async getTransfer(transferId) {
+            calls.push(`artifacts.getTransfer:${transferId}`);
+            throw new Error("unused fake Artifact transfer");
+        },
+        async listShares() {
+            calls.push("artifacts.listShares");
+            return [{
+                blake3: "b3",
+                bytes: 1,
+                downloadName: "demo.txt",
+                expiresAtMs: 1,
+                mediaType: "text/plain",
+                shareId: "share-1",
+                source: { handle: "artifact-1", instance: "local-test" },
+                state: "active",
+                url: "http://example.invalid/share"
+            }];
+        },
+        async listTransfers() {
+            calls.push("artifacts.listTransfers");
+            return [];
+        },
+        async revokeShare(shareId) {
+            calls.push(`artifacts.revokeShare:${shareId}`);
+            return { revoked: true, shareId };
+        },
+        async startTransfer() {
+            calls.push("artifacts.startTransfer");
+            throw new Error("unused fake Artifact transfer");
+        },
+        async waitForTransfer(transferId) {
+            calls.push(`artifacts.waitForTransfer:${transferId}`);
+            throw new Error("unused fake Artifact transfer");
+        }
+    };
+}
+
+function fakeInstances(calls: string[]): ExtensionInstanceCapability {
+    const snapshot = {
+        connectionState: "connected" as const,
+        daemonState: "running" as const,
+        lastSeq: 4,
+        name: "local-test",
+        ready: true,
+        status: "ready" as const
+    };
+    return {
+        async create() { throw new Error("unused fake Instance create"); },
+        async createSchema() { return {}; },
+        async delete(name) { calls.push(`instances.delete:${name}`); },
+        async disable(name) { calls.push(`instances.disable:${name}`); },
+        async enable(name) { calls.push(`instances.enable:${name}`); },
+        async list() {
+            calls.push("instances.list");
+            return [{ enabled: true, mcpEnabled: true, name: "local-test", provider: "local", snapshot }];
+        },
+        async readLogs(name) {
+            calls.push(`instances.readLogs:${name}`);
+            return [];
+        },
+        async refresh(name) {
+            calls.push(`instances.refresh:${name}`);
+            return snapshot;
+        },
+        async snapshot(name) {
+            calls.push(`instances.snapshot:${name}`);
+            return snapshot;
+        },
+        async start(name) {
+            calls.push(`instances.start:${name}`);
+            return snapshot;
+        },
+        async stop(name) {
+            calls.push(`instances.stop:${name}`);
+            return snapshot;
+        },
+        async validateCreate() { return {}; },
+        async watchEvents() {}
+    };
 }
 
 function fakeAssets(): ExtensionAssetCapability {

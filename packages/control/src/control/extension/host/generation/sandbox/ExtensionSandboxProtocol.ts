@@ -9,6 +9,11 @@ import type {
     ExtensionWorkerToolDefinition,
     ExtensionWorkerOpenInput
 } from "@portable-devshell/extension";
+import type {
+    ExtensionArtifactShareInput,
+    ExtensionArtifactTransferInput
+} from "@portable-devshell/extension/artifact";
+import type { ExtensionInstanceLogQuery } from "@portable-devshell/extension/instance";
 import {
     createError,
     toControlErrorBody,
@@ -71,18 +76,45 @@ export type ExtensionSandboxInvokeOperation =
     | { kind: "deactivate" };
 
 export type ExtensionSandboxCapabilityOperation =
+    | "artifacts.cancelTransfer"
+    | "artifacts.createShare"
+    | "artifacts.getTransfer"
+    | "artifacts.listShares"
+    | "artifacts.listTransfers"
+    | "artifacts.revokeShare"
+    | "artifacts.startTransfer"
+    | "artifacts.waitForTransfer"
     | "assets.installBundle"
     | "assets.installDirectory"
     | "assets.listBundles"
     | "assets.projectBundle"
     | "assets.removeBundle"
     | "assets.resolveBundle"
+    | "instances.create"
+    | "instances.createSchema"
+    | "instances.delete"
+    | "instances.disable"
+    | "instances.enable"
+    | "instances.list"
+    | "instances.readLogs"
+    | "instances.refresh"
+    | "instances.snapshot"
+    | "instances.start"
+    | "instances.stop"
+    | "instances.validateCreate"
+    | "instances.watchEvents"
     | "processes.send"
     | "processes.start"
     | "processes.terminate"
     | "workers.callTool"
     | "workers.closeSession"
     | "workers.openSession";
+
+export type ExtensionSandboxInterfaceOperation =
+    | "cli.readInput"
+    | "cli.requestInput"
+    | "cli.writeStderr"
+    | "cli.writeStdout";
 
 export interface ExtensionSandboxWorkerSessionDescriptor {
     environment: ExtensionWorkerEnvironment;
@@ -138,6 +170,13 @@ export type ExtensionSandboxToHostMessage =
       }
     | {
           id: string;
+          input?: ExtensionJsonValue;
+          invocationId: string;
+          operation: ExtensionSandboxInterfaceOperation;
+          type: "interfaceRequest";
+      }
+    | {
+          id: string;
           type: "healthPong";
       }
     | {
@@ -172,6 +211,16 @@ export type ExtensionHostToSandboxMessage =
           id: string;
           type: "capabilityResult";
           value?: unknown;
+      }
+    | {
+          error: ExtensionSandboxError;
+          id: string;
+          type: "interfaceError";
+      }
+    | {
+          id: string;
+          type: "interfaceResult";
+          value?: ExtensionJsonValue;
       }
     | {
           id: string;
@@ -221,6 +270,23 @@ export interface SandboxProcessTerminateInput {
 }
 
 export type SandboxAssetProjectInput = Omit<ExtensionAssetProjectionInput, "signal">;
+export type SandboxArtifactShareInput = ExtensionArtifactShareInput;
+export type SandboxArtifactTransferInput = ExtensionArtifactTransferInput;
+export interface SandboxInstanceNameInput {
+    name: string;
+}
+export interface SandboxInstanceCreateInput {
+    draft: ExtensionJsonValue;
+}
+export interface SandboxInstanceReadLogsInput {
+    name: string;
+    query?: ExtensionInstanceLogQuery;
+}
+export interface SandboxInstanceWatchInput {
+    eventTypes?: readonly string[];
+    fromSeq: number;
+    name: string;
+}
 export type SandboxWorkerOpenInput = ExtensionWorkerOpenInput;
 
 /**

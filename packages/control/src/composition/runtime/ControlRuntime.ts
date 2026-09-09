@@ -7,8 +7,6 @@ import type { InstanceRegistry } from "../../control/instance/registry/InstanceR
 import { DebugPatchService } from "../../control/debug/DebugPatchService.js";
 import { CliExtensionCommandService } from "../../control/cli/CliExtensionCommandService.js";
 import { ModelDevshellBroker } from "../../control/cli/ModelDevshellBroker.js";
-import { createArtifactCliCommandProvider } from "../../control/artifact/cli/ArtifactCliCommandProvider.js";
-import { createInstanceModelCliCommandProvider } from "../../control/instance/cli/InstanceCliCommandProvider.js";
 import { RuntimeSubscriptionManager } from "../../instance/runtime/RuntimeSubscriptionManager.js";
 import { ExtensionControlService } from "../../control/extension/route/ExtensionControlService.js";
 import { WebApplicationCatalog } from "../../server/web/extension/WebApplicationCatalog.js";
@@ -39,6 +37,7 @@ export interface ControlRuntimeOptions {
     mcp: ControlRuntimeMcp;
     restart: () => Promise<void>;
     reverse: ControlRuntimeReverse;
+    runtimeSubscriptions?: RuntimeSubscriptionManager;
     shutdown: () => Promise<void>;
     socketPath: string;
 }
@@ -83,15 +82,8 @@ export class ControlRuntime {
         this.#mcp = options.mcp;
         this.#reverse = options.reverse;
         this.#debug = new DebugPatchService(options.instances);
-        const runtimeSubscriptions = new RuntimeSubscriptionManager();
+        const runtimeSubscriptions = options.runtimeSubscriptions ?? new RuntimeSubscriptionManager();
         const modelCliCommands = new CliExtensionCommandService(this.#extensions, {
-            providers: [
-                createArtifactCliCommandProvider(options.artifact.service, "model"),
-                createInstanceModelCliCommandProvider({
-                    instances: options.instances,
-                    subscriptions: runtimeSubscriptions
-                })
-            ],
             surface: "model"
         });
         options.mcp.instanceGateway.setModelCommandCatalog((instance) => {
@@ -112,7 +104,6 @@ export class ControlRuntime {
         this.#routes = new ControlRouteComposition({
             artifact: options.artifact.service,
             cliCommands: new CliExtensionCommandService(this.#extensions, {
-                providers: [createArtifactCliCommandProvider(options.artifact.service, "native")],
                 surface: "native"
             }),
             config: options.mcp.configEditor,

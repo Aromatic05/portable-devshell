@@ -1,3 +1,6 @@
+import type { ExtensionArtifactCapability } from "./domain/artifact.js";
+import type { ExtensionInstanceCapability } from "./domain/instance.js";
+
 export type ExtensionJsonPrimitive = boolean | number | string | null;
 export type ExtensionJsonValue =
     | ExtensionJsonPrimitive
@@ -5,10 +8,11 @@ export type ExtensionJsonValue =
     | { [key: string]: ExtensionJsonValue };
 
 /** Host-managed runtime resource categories granted to one Extension generation. */
-export type ExtensionCapability = "assets" | "processes" | "workers";
+export type ExtensionCapability = "artifacts" | "assets" | "instances" | "processes" | "workers";
 
 export interface ExtensionPointDeclaration {
     readonly id: string;
+    readonly [key: string]: ExtensionJsonValue | undefined;
 }
 
 export interface ExtensionManifest {
@@ -176,7 +180,9 @@ export interface ExtensionProcessCapability {
 
 /** Capabilities supplied by Control to an activated Extension generation. */
 export interface ExtensionCapabilities {
+    readonly artifacts?: ExtensionArtifactCapability;
     readonly assets?: ExtensionAssetCapability;
+    readonly instances?: ExtensionInstanceCapability;
     readonly processes?: ExtensionProcessCapability;
     readonly workers?: ExtensionWorkerCapability;
 }

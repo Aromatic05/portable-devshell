@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { McpContextRecord, ToolCallRecord } from "@portable-devshell/shared";
+import type { CliModelCommandBinding } from "@portable-devshell/extension/cli";
 
 import { CliExtensionCommandService } from "../../src/control/cli/CliExtensionCommandService.ts";
 import { ModelDevshellBroker } from "../../src/control/cli/ModelDevshellBroker.ts";
-import type { CliExtensionCommandProvider } from "../../src/control/cli/CliExtensionCommandProvider.ts";
 import type { InstanceDescriptor } from "../../src/control/instance/InstanceDescriptor.ts";
 import { InstanceRegistry } from "../../src/control/instance/registry/InstanceRegistry.ts";
 import type { ContextAdminPort } from "../../src/control/mcp/ContextRouteModule.ts";
@@ -67,33 +67,23 @@ function harness(options: { allow?: boolean; contextWorkspace?: string } = {}): 
         worker
     } as unknown as InstanceDescriptor;
     const registry = new InstanceRegistry([descriptor]);
-    const command: CliExtensionCommandProvider = {
-        binding: async (argv, invocation) => {
-            assert.equal(invocation.surface, "model");
-            if (argv[0] === "wait") {
-                await new Promise<void>((_resolve, reject) => {
-                    const onAbort = () => {
-                        aborts += 1;
-                        reject(invocation.signal.reason ?? new Error("aborted"));
-                    };
-                    if (invocation.signal.aborted) onAbort();
-                    else invocation.signal.addEventListener("abort", onAbort, { once: true });
-                });
-            }
-            return { kind: "text", text: `probe:${argv.join("|")}` };
-        },
-        declaration: {
-            id: "probe",
-            summary: "Probe model command",
-            title: "Probe"
-        },
-        extensionId: "probe-extension",
-        surface: "model"
+    const command: CliModelCommandBinding = async (argv, invocation) => {
+        assert.equal(invocation.instance, "demo-local");
+        assert.equal(invocation.workspace, options.contextWorkspace ?? "/repo");
+        assert.notEqual(invocation.io, undefined);
+        if (argv[0] === "wait") {
+            await new Promise<void>((_resolve, reject) => {
+                const onAbort = () => {
+                    aborts += 1;
+                    reject(invocation.signal.reason ?? new Error("aborted"));
+                };
+                if (invocation.signal.aborted) onAbort();
+                else invocation.signal.addEventListener("abort", onAbort, { once: true });
+            });
+        }
+        return { kind: "text", text: `probe:${argv.join("|")}` };
     };
-    const commands = new CliExtensionCommandService(emptyExtensionHost(), {
-        providers: [command],
-        surface: "model"
-    });
+    const commands = new CliExtensionCommandService(modelExtensionHost(command), { surface: "model" });
     const contextAdmin = {
         async validateForInstance(ctxId: string, instance: string) {
             assert.equal(ctxId, "ctx-a");
@@ -225,13 +215,34 @@ function toolRecord(overrides: Partial<ToolCallRecord> = {}): ToolCallRecord {
     };
 }
 
-function emptyExtensionHost() {
+function modelExtensionHost(binding: CliModelCommandBinding) {
     return {
-        async acquireRegistration() {
-            throw new Error("unexpected sandboxed command lookup");
+        async acquireRegistration(pointId: string, id: string) {
+            assert.equal(pointId, "cli.model-commands");
+            assert.equal(id, "probe");
+            return {
+                lease: { release() {} },
+                registration: {
+                    binding,
+                    declaration: {
+                        id: "probe",
+                        summary: "Probe model command",
+                        title: "Probe"
+                    },
+                    id: "probe",
+                    pointId
+                }
+            } as never;
         },
-        listDeclarations() {
-            return [];
+        listDeclarations(pointId: string) {
+            if (pointId !== "cli.model-commands") return [];
+            return [{
+                declaration: { id: "probe", summary: "Probe model command", title: "Probe" },
+                extensionId: "probe-extension",
+                generation: "test",
+                id: "probe",
+                pointId
+            }];
         }
     } as never;
 }

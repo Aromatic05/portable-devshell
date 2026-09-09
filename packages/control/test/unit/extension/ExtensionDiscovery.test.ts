@@ -9,6 +9,10 @@ import {
     errorCodes,
     toControlErrorBody
 } from "@portable-devshell/shared";
+import type {
+    CliModelCommandInvocationContext,
+    CliNativeCommandInvocationContext
+} from "@portable-devshell/extension/cli";
 
 import { CliExtensionCommandService } from "../../../src/control/cli/CliExtensionCommandService.ts";
 import { createCliRouteModule } from "../../../src/control/cli/CliRouteModule.ts";
@@ -17,7 +21,7 @@ import { WebApplicationCatalog } from "../../../src/server/web/extension/WebAppl
 import { createWebApplicationRouteModule } from "../../../src/server/web/extension/WebApplicationRouteModule.ts";
 
 function registration(
-    pointId: "cli.native-commands" | "web.applications",
+    pointId: "cli.model-commands" | "cli.native-commands" | "web.applications",
     extensionId: string,
     id: string,
     declaration: Record<string, unknown>
@@ -44,15 +48,23 @@ function extensionHost(entries: readonly ExtensionCatalogRegistration[], events:
                     }
                 },
                 registration: {
-                    binding: async (argv: readonly string[], invocation: {
-                        localOwner: boolean;
-                        requestId: string;
-                        workingDirectory?: string;
-                    }) => {
-                        events.push(
-                            `command:${id}:${argv.join("|")}:${invocation.requestId}:`
-                            + `${invocation.localOwner}:${invocation.workingDirectory ?? ""}`
-                        );
+                    binding: async (
+                        argv: readonly string[],
+                        invocation: CliModelCommandInvocationContext | CliNativeCommandInvocationContext
+                    ) => {
+                        if (pointId === "cli.model-commands") {
+                            const modelInvocation = invocation as CliModelCommandInvocationContext;
+                            events.push(
+                                `model:${id}:${argv.join("|")}:${modelInvocation.requestId}:`
+                                + `${modelInvocation.instance}:${modelInvocation.workspace}`
+                            );
+                        } else {
+                            const nativeInvocation = invocation as CliNativeCommandInvocationContext;
+                            events.push(
+                                `command:${id}:${argv.join("|")}:${nativeInvocation.requestId}:`
+                                + `${nativeInvocation.localOwner}:${nativeInvocation.workingDirectory ?? ""}`
+                            );
+                        }
                         if (argv[0] === "fail") throw new Error("binding failed");
                         return { kind: "text" as const, text: "ok" };
                     },
@@ -108,25 +120,15 @@ test("CLI discovery projects only cli.native-commands declaration metadata", () 
     assert.equal("binding" in service.list()[0]!, false);
 });
 
-test("model CLI discovery and dispatch include Control-resident Extension command providers", async () => {
+test("model CLI discovery and dispatch come from cli.model-commands registrations", async () => {
     const calls: string[] = [];
-    const service = new CliExtensionCommandService(extensionHost([]), {
-        providers: [{
-            binding: async (argv, invocation) => {
-                calls.push(`${argv.join("|")}:${invocation.requestId}:${invocation.surface}`);
-                return { kind: "text", text: "resident-ok" };
-            },
-            declaration: {
-                id: "artifact",
-                summary: "Manage artifacts",
-                title: "Artifact",
-                usage: "artifact <command>"
-            },
-            extensionId: "artifact",
-            surface: "model"
-        }],
-        surface: "model"
-    });
+    const service = new CliExtensionCommandService(extensionHost([
+        registration("cli.model-commands", "artifact", "artifact", {
+            summary: "Manage artifacts",
+            title: "Artifact",
+            usage: "artifact <command>"
+        })
+    ], calls), { surface: "model" });
 
     assert.deepEqual(service.list(), [{
         extensionId: "artifact",
@@ -136,10 +138,12 @@ test("model CLI discovery and dispatch include Control-resident Extension comman
         usage: "artifact <command>"
     }]);
     assert.deepEqual(await service.command("artifact", ["shares"], {
-        requestId: "req-resident",
-        signal: new AbortController().signal
-    }), { kind: "text", text: "resident-ok" });
-    assert.deepEqual(calls, ["shares:req-resident:model"]);
+        instance: "demo-local",
+        requestId: "req-model",
+        signal: new AbortController().signal,
+        workspace: "/repo"
+    }), { kind: "text", text: "ok" });
+    assert.deepEqual(calls, ["model:artifact:shares:req-model:demo-local:/repo", "release:artifact"]);
 });
 
 test("model CLI state never falls back to native Extension commands", async () => {
@@ -150,8 +154,10 @@ test("model CLI state never falls back to native Extension commands", async () =
     assert.deepEqual(service.list(), []);
     await assert.rejects(
         async () => await service.command("status", [], {
+            instance: "demo-local",
             requestId: "req-model",
-            signal: new AbortController().signal
+            signal: new AbortController().signal,
+            workspace: "/repo"
         }),
         (error: unknown) => {
             const body = toControlErrorBody(error);

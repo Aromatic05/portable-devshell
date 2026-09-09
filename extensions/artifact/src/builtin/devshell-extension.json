@@ -1,0 +1,27 @@
+{
+    "schemaVersion": 1,
+    "apiVersion": 4,
+    "id": "artifact",
+    "name": "portable-devshell Artifact",
+    "version": "0.1.0",
+    "entry": "index.ts",
+    "capabilities": ["artifacts"],
+    "extensions": {
+        "cli.native-commands": [
+            {
+                "id": "artifact",
+                "title": "Artifact",
+                "summary": "Manage artifact shares and transfers",
+                "usage": "artifact <command>"
+            }
+        ],
+        "cli.model-commands": [
+            {
+                "id": "artifact",
+                "title": "Artifact",
+                "summary": "Share and inspect artifacts in the current model Context",
+                "usage": "artifact <command>"
+            }
+        ]
+    }
+}

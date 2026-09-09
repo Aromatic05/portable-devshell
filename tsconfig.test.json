@@ -14,6 +14,12 @@
             "@portable-devshell/extension/cli": [
                 "./packages/extension/src/domain/cli.ts"
             ],
+            "@portable-devshell/extension/artifact": [
+                "./packages/extension/src/domain/artifact.ts"
+            ],
+            "@portable-devshell/extension/instance": [
+                "./packages/extension/src/domain/instance.ts"
+            ],
             "@portable-devshell/extension/web": [
                 "./packages/extension/src/domain/web.ts"
             ],
@@ -34,6 +40,12 @@
             ],
             "@portable-devshell/agent-extension": [
                 "./extensions/agent/src/index.ts"
+            ],
+            "@portable-devshell/artifact-extension": [
+                "./extensions/artifact/src/index.ts"
+            ],
+            "@portable-devshell/instance-extension": [
+                "./extensions/instance/src/index.ts"
             ],
             "@portable-devshell/skill-extension": [
                 "./extensions/skill/src/index.ts"

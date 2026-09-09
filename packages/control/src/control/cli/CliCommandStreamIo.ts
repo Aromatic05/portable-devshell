@@ -5,13 +5,9 @@ import {
     type PrefixRouteEvent,
     type PrefixRouteStream
 } from "@portable-devshell/shared";
+import type { CliCommandInputOptions, CliCommandIo } from "@portable-devshell/extension/cli";
 
-import type {
-    CliExtensionCommandInputOptions,
-    CliExtensionCommandIo
-} from "./CliExtensionCommandProvider.js";
-
-export class CliCommandStreamIo implements CliExtensionCommandIo {
+export class CliCommandStreamIo implements CliCommandIo {
     readonly #queue: Buffer[] = [];
     readonly #waiters: Array<(chunk: Buffer | undefined) => void> = [];
     #closed = false;
@@ -61,7 +57,7 @@ export class CliCommandStreamIo implements CliExtensionCommandIo {
         return await new Promise<Buffer | undefined>((resolve) => this.#waiters.push(resolve));
     }
 
-    async requestInput(options: CliExtensionCommandInputOptions = {}): Promise<void> {
+    async requestInput(options: CliCommandInputOptions = {}): Promise<void> {
         await this.#requireStream().emit("terminal", { raw: options.raw === true });
     }
 

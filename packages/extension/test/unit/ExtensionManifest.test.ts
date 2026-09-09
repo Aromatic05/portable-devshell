@@ -20,7 +20,7 @@ const base = {
 test("Extension manifest accepts only the resource capability taxonomy and static point declarations", () => {
     assert.deepEqual(parseExtensionManifest({
         ...base,
-        capabilities: ["assets", "workers", "processes"],
+        capabilities: ["artifacts", "assets", "instances", "workers", "processes"],
         extensions: {
             "cli.native-commands": [{ id: "example", summary: "Run the example", title: "Example" }],
             "web.applications": [{ id: "example", title: "Example" }]
@@ -28,7 +28,7 @@ test("Extension manifest accepts only the resource capability taxonomy and stati
         hostDependencies: ["@modelcontextprotocol/client"]
     }), {
         ...base,
-        capabilities: ["assets", "workers", "processes"],
+        capabilities: ["artifacts", "assets", "instances", "workers", "processes"],
         extensions: {
             "cli.native-commands": [{ id: "example", summary: "Run the example", title: "Example" }],
             "web.applications": [{ id: "example", title: "Example" }]

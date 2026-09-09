@@ -1,6 +1,9 @@
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
 
-import type { ExtensionPointValidationContext } from "../ExtensionPointRegistry.js";
+import type {
+    ExtensionPointSandboxInvocationContext,
+    ExtensionPointValidationContext
+} from "../ExtensionPointRegistry.js";
 
 export interface ExtensionSandboxPointCodec {
     describeBinding(binding: unknown, context: ExtensionPointValidationContext): ExtensionJsonValue;
@@ -9,7 +12,7 @@ export interface ExtensionSandboxPointCodec {
         binding: unknown,
         input: ExtensionJsonValue | undefined,
         signal: AbortSignal,
-        context: ExtensionPointValidationContext
+        context: ExtensionPointSandboxInvocationContext
     ): Promise<unknown> | unknown;
 }
 
@@ -46,7 +49,7 @@ export class ExtensionSandboxPointCodecRegistry {
         binding: unknown,
         input: ExtensionJsonValue | undefined,
         signal: AbortSignal,
-        context: ExtensionPointValidationContext
+        context: ExtensionPointSandboxInvocationContext
     ): Promise<unknown> {
         return await this.#require(pointId, context.extensionId).invokeBinding(binding, input, signal, context);
     }

@@ -15,7 +15,7 @@ import type { InstanceDescriptor } from "../instance/InstanceDescriptor.js";
 import type { InstanceRegistry } from "../instance/registry/InstanceRegistry.js";
 import type { ContextAdminPort } from "../mcp/ContextRouteModule.js";
 import type { CliExtensionCommandService } from "./CliExtensionCommandService.js";
-import type { CliExtensionCommandIo } from "./CliExtensionCommandProvider.js";
+import type { CliCommandIo } from "@portable-devshell/extension/cli";
 
 export interface ModelDevshellAccessInput {
     commandId: string;
@@ -166,7 +166,7 @@ export class ModelDevshellBroker {
             return;
         }
 
-        const io: CliExtensionCommandIo = {
+        const io: CliCommandIo = {
             async readInput() {
                 return undefined;
             },
@@ -181,8 +181,10 @@ export class ModelDevshellBroker {
                 commandId,
                 argv,
                 {
+                    instance: descriptor.name,
                     requestId: request.sessionId,
-                    signal
+                    signal,
+                    workspace: request.workspace
                 },
                 io
             );

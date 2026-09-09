@@ -15,8 +15,21 @@ export type CliCommandResult =
     | { kind: "json"; value: ExtensionJsonValue }
     | { kind: "text"; text: string };
 
+export interface CliCommandInputOptions {
+    readonly raw?: boolean;
+}
+
+/** Bidirectional I/O owned by one CLI command invocation. */
+export interface CliCommandIo {
+    readInput(): Promise<Uint8Array | undefined>;
+    requestInput(options?: CliCommandInputOptions): Promise<void>;
+    writeStderr(chunk: string): Promise<void>;
+    writeStdout(chunk: string): Promise<void>;
+}
+
 /** Invocation state for a human/native CLI command. */
 export interface CliNativeCommandInvocationContext {
+    readonly io?: CliCommandIo;
     /** True only for a request authenticated as the local Control owner. */
     readonly localOwner: boolean;
     readonly requestId: string;
@@ -27,8 +40,13 @@ export interface CliNativeCommandInvocationContext {
 
 /** Invocation state for a model-facing command. Builtin CLI authority is intentionally absent. */
 export interface CliModelCommandInvocationContext {
+    /** Authoritative managed instance resolved by the model command broker. */
+    readonly instance: string;
+    readonly io?: CliCommandIo;
     readonly requestId: string;
     readonly signal: AbortSignal;
+    /** Authoritative Workspace bound to the originating MCP Context. */
+    readonly workspace: string;
 }
 
 export type CliNativeCommandBinding = (

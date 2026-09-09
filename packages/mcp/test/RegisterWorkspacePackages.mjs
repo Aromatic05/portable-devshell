@@ -34,12 +34,14 @@ function installTestWatchdog() {
 }
 
 const workspacePackages = new Map([
+    ["@portable-devshell/artifact-extension", new URL("../../../extensions/artifact/src/index.ts", import.meta.url).href],
     ["@portable-devshell/control", new URL("../../control/src/index.ts", import.meta.url).href],
     ["@portable-devshell/control/testing", new URL("../../control/src/testing.ts", import.meta.url).href],
     ["@portable-devshell/core", new URL("../../core/src/index.ts", import.meta.url).href],
     ["@portable-devshell/core/testing", new URL("../../core/src/testing.ts", import.meta.url).href],
     ["@portable-devshell/mcp", new URL("../src/index.ts", import.meta.url).href],
     ["@portable-devshell/mcp/testing", new URL("../src/testing.ts", import.meta.url).href],
+    ["@portable-devshell/instance-extension", new URL("../../../extensions/instance/src/index.ts", import.meta.url).href],
     ["@portable-devshell/shared", new URL("../../shared/src/index.ts", import.meta.url).href],
     ["@portable-devshell/shared/browser", new URL("../../shared/src/browser.ts", import.meta.url).href],
     ["@portable-devshell/shared/transport/frame", new URL("../../shared/src/transport/protocol/Frame.ts", import.meta.url).href],

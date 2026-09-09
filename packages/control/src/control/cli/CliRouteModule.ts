@@ -1,6 +1,7 @@
 import { isAbsolute } from "node:path";
 
 import type {
+    CliCommandIo,
     CliCommandResult,
     CliNativeCommandInvocationContext
 } from "@portable-devshell/extension/cli";
@@ -17,14 +18,13 @@ import {
 
 import { routeModule } from "../../route/ControlRouteFactory.js";
 import { CliCommandStreamIo } from "./CliCommandStreamIo.js";
-import type { CliExtensionCommandIo } from "./CliExtensionCommandProvider.js";
 
 export interface CliCommandPort {
     command(
         commandId: string,
         argv: readonly string[],
         context: CliNativeCommandInvocationContext,
-        io?: CliExtensionCommandIo
+        io?: CliCommandIo
     ): Promise<CliCommandResult>;
     list(): readonly CliCommandDescriptor[];
 }

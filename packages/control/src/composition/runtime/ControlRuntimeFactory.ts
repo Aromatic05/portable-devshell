@@ -2,7 +2,9 @@ import { homedir } from "node:os";
 
 import { ControlPathHome } from "@portable-devshell/shared";
 import { ExtensionHost } from "../../control/extension/host/ExtensionHost.js";
+import { ExtensionArtifactCapabilityControl } from "../../control/extension/host/generation/capability/ExtensionArtifactCapabilityControl.js";
 import { ExtensionAssetCapabilityControl } from "../../control/extension/host/generation/capability/ExtensionAssetCapabilityControl.js";
+import { ExtensionInstanceCapabilityControl } from "../../control/extension/host/generation/capability/ExtensionInstanceCapabilityControl.js";
 import { readBuiltinExtensionSources, type BuiltinExtensionSource } from "../../control/extension/install/ExtensionBuiltinSource.js";
 import { ExtensionLoader } from "../../control/extension/host/generation/ExtensionLoader.js";
 import { ExtensionPathLayout } from "../../control/extension/state/ExtensionPathLayout.js";
@@ -14,6 +16,7 @@ import { ControlRuntime } from "./ControlRuntime.js";
 import type { ControlRuntimeState } from "./ControlRuntimeState.js";
 import { ControlRuntimeMcp } from "./ControlRuntimeMcp.js";
 import { ControlRuntimeReverse } from "./ControlRuntimeReverse.js";
+import { RuntimeSubscriptionManager } from "../../instance/runtime/RuntimeSubscriptionManager.js";
 
 export interface ControlRuntimeFactoryOptions {
     builtinExtensionSources?: readonly BuiltinExtensionSource[];
@@ -48,25 +51,45 @@ export class ControlRuntimeFactory {
         try {
             const extensionPaths = new ExtensionPathLayout({ homeDirectory: options.state.homeDirectory });
             const extensionPoints = createControlExtensionPointRegistry();
+            const runtimeSubscriptions = new RuntimeSubscriptionManager();
+            const mcp = new ControlRuntimeMcp({
+                artifact,
+                controlPaths,
+                factory: this.#mcpFactory,
+                state: options.state
+            });
             const extensions = new ExtensionHost({
                 loader: new ExtensionLoader({
+                    artifactFactory: ({ allowed, extensionId }) => new ExtensionArtifactCapabilityControl({
+                        allowed,
+                        extensionId,
+                        service: artifact.service
+                    }),
                     assetsFactory: ({ allowed, dataDirectory, extensionId }) => new ExtensionAssetCapabilityControl({
                         allowed,
                         dataDirectory,
                         extensionId,
                         project: async (input) => await artifact.projectExtensionAsset(extensionId, input)
                     }),
+                    instanceFactory: ({ allowed, extensionId }) => new ExtensionInstanceCapabilityControl({
+                        allowed,
+                        create: mcp.instanceCreate,
+                        editor: mcp.configEditor,
+                        extensionId,
+                        instances: options.state.instances,
+                        listConfigured: () => options.state.requireConfig().instances.map((instance) => ({
+                            enabled: instance.enabled,
+                            mcpEnabled: instance.mcp.enabled,
+                            name: instance.name,
+                            provider: instance.provider
+                        })),
+                        subscriptions: runtimeSubscriptions
+                    }),
                     instances: options.state.instances,
                     paths: extensionPaths,
                     points: extensionPoints
                 }),
                 registry: new ExtensionRegistryStore(extensionPaths.registryFile)
-            });
-            const mcp = new ControlRuntimeMcp({
-                artifact,
-                controlPaths,
-                factory: this.#mcpFactory,
-                state: options.state
             });
             const reverse = new ControlRuntimeReverse({ mcp, state: options.state });
             mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
@@ -81,6 +104,7 @@ export class ControlRuntimeFactory {
                 mcp,
                 restart: options.restart,
                 reverse,
+                runtimeSubscriptions,
                 shutdown: options.shutdown,
                 socketPath: options.socketPath
             });

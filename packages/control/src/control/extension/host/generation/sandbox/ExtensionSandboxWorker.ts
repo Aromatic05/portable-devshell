@@ -19,9 +19,22 @@ import type {
     ExtensionWorkerCapability,
     ExtensionWorkerSession
 } from "@portable-devshell/extension";
+import type {
+    ExtensionArtifactCapability,
+    ExtensionArtifactShareInput,
+    ExtensionArtifactTransferInput
+} from "@portable-devshell/extension/artifact";
+import type {
+    ExtensionInstanceCapability,
+    ExtensionInstanceEventWatch,
+    ExtensionInstanceLogQuery
+} from "@portable-devshell/extension/instance";
 
 import { createControlExtensionSandboxPointRegistry } from "../../../../../composition/ControlExtensionSandboxPointRegistry.js";
-import type { ExtensionPointValidationContext } from "../ExtensionPointRegistry.js";
+import type {
+    ExtensionPointSandboxInvocationContext,
+    ExtensionPointValidationContext
+} from "../ExtensionPointRegistry.js";
 import { ExtensionHostModuleResolver } from "../ExtensionHostModuleResolver.js";
 import {
     assertExtensionSandboxMessage,
@@ -29,6 +42,7 @@ import {
     serializeSandboxError,
     type ExtensionHostToSandboxMessage,
     type ExtensionSandboxCapabilityOperation,
+    type ExtensionSandboxInterfaceOperation,
     type ExtensionSandboxInvokeOperation,
     type ExtensionSandboxProcessDescriptor,
     type ExtensionSandboxReadyDescriptor,
@@ -36,7 +50,13 @@ import {
     type ExtensionSandboxToHostMessage,
     type ExtensionSandboxWorkerData,
     type ExtensionSandboxWorkerSessionDescriptor,
+    type SandboxArtifactShareInput,
+    type SandboxArtifactTransferInput,
     type SandboxAssetProjectInput,
+    type SandboxInstanceCreateInput,
+    type SandboxInstanceNameInput,
+    type SandboxInstanceReadLogsInput,
+    type SandboxInstanceWatchInput,
     type SandboxProcessSendInput,
     type SandboxProcessStartInput,
     type SandboxProcessTerminateInput,
@@ -49,6 +69,12 @@ interface PendingCapabilityRequest {
     onProgress?: (progress: ExtensionJsonValue) => void;
     reject(error: Error): void;
     resolve(value: unknown): void;
+}
+
+interface PendingInterfaceRequest {
+    invocationId: string;
+    reject(error: Error): void;
+    resolve(value: ExtensionJsonValue | undefined): void;
 }
 
 interface SandboxProcessRuntime {
@@ -66,6 +92,7 @@ interface PendingProcessEvents {
 
 const data = workerData as ExtensionSandboxWorkerData;
 const capabilityRequests = new Map<string, PendingCapabilityRequest>();
+const interfaceRequests = new Map<string, PendingInterfaceRequest>();
 const invocationControllers = new Map<string, AbortController>();
 const registrations = new Map<string, {
     binding: unknown;
@@ -150,6 +177,20 @@ async function acceptHostMessage(message: ExtensionHostToSandboxMessage): Promis
         case "capabilityProgress":
             capabilityRequests.get(message.id)?.onProgress?.(message.value);
             return;
+        case "interfaceResult": {
+            const pending = interfaceRequests.get(message.id);
+            if (pending === undefined) return;
+            interfaceRequests.delete(message.id);
+            pending.resolve(message.value);
+            return;
+        }
+        case "interfaceError": {
+            const pending = interfaceRequests.get(message.id);
+            if (pending === undefined) return;
+            interfaceRequests.delete(message.id);
+            pending.reject(deserializeSandboxError(message.error));
+            return;
+        }
         case "workerSessionClosed": {
             const close = workerSessionClosures.get(message.sessionId);
             if (close === undefined) return;
@@ -208,7 +249,7 @@ async function invoke(id: string, operation: ExtensionSandboxInvokeOperation): P
                     binding,
                     operation.input,
                     controller.signal,
-                    pointContext(operation.id)
+                    pointInvocationContext(operation.id, id, controller.signal)
                 );
                 break;
             }
@@ -224,12 +265,15 @@ async function invoke(id: string, operation: ExtensionSandboxInvokeOperation): P
         send({ error: serializeSandboxError(error), id, type: "invokeError" });
     } finally {
         invocationControllers.delete(id);
+        rejectInvocationInterfaceRequests(id, new Error("Extension sandbox invocation ended."));
     }
 }
 
 function createContext(): ExtensionContext {
     const capabilities: ExtensionCapabilities = Object.freeze({
+        ...(data.capabilities.includes("artifacts") ? { artifacts: createArtifactCapability() } : {}),
         ...(data.capabilities.includes("assets") ? { assets: createAssets() } : {}),
+        ...(data.capabilities.includes("instances") ? { instances: createInstanceCapability() } : {}),
         ...(data.capabilities.includes("processes") ? { processes: createProcessCapability() } : {}),
         ...(data.capabilities.includes("workers") ? { workers: createWorkerCapability() } : {})
     });
@@ -267,6 +311,127 @@ function createLogger(): ExtensionLogger {
         warn: (message, details) => write("warn", message, details)
     };
     return Object.freeze(logger);
+}
+
+function createArtifactCapability(): ExtensionArtifactCapability {
+    return Object.freeze({
+        cancelTransfer: async (transferId: string) => await requestCapability(
+            "artifacts.cancelTransfer",
+            { transferId }
+        ) as Awaited<ReturnType<ExtensionArtifactCapability["cancelTransfer"]>>,
+        createShare: async (input: ExtensionArtifactShareInput) => await requestCapability(
+            "artifacts.createShare",
+            { ...input, source: { ...input.source } } satisfies SandboxArtifactShareInput
+        ) as Awaited<ReturnType<ExtensionArtifactCapability["createShare"]>>,
+        getTransfer: async (transferId: string) => await requestCapability(
+            "artifacts.getTransfer",
+            { transferId }
+        ) as Awaited<ReturnType<ExtensionArtifactCapability["getTransfer"]>>,
+        listShares: async () => await requestCapability(
+            "artifacts.listShares"
+        ) as Awaited<ReturnType<ExtensionArtifactCapability["listShares"]>>,
+        listTransfers: async () => await requestCapability(
+            "artifacts.listTransfers"
+        ) as Awaited<ReturnType<ExtensionArtifactCapability["listTransfers"]>>,
+        revokeShare: async (shareId: string) => await requestCapability(
+            "artifacts.revokeShare",
+            { shareId }
+        ) as Awaited<ReturnType<ExtensionArtifactCapability["revokeShare"]>>,
+        startTransfer: async (input: ExtensionArtifactTransferInput) => await requestCapability(
+            "artifacts.startTransfer",
+            {
+                ...input,
+                source: { ...input.source },
+                target: { ...input.target }
+            } satisfies SandboxArtifactTransferInput
+        ) as Awaited<ReturnType<ExtensionArtifactCapability["startTransfer"]>>,
+        waitForTransfer: async (transferId: string) => await requestCapability(
+            "artifacts.waitForTransfer",
+            { transferId }
+        ) as Awaited<ReturnType<ExtensionArtifactCapability["waitForTransfer"]>>
+    });
+}
+
+function createInstanceCapability(): ExtensionInstanceCapability {
+    const nameInput = (name: string): SandboxInstanceNameInput => ({ name });
+    return Object.freeze({
+        create: async (draft: ExtensionJsonValue) => await requestCapability(
+            "instances.create",
+            { draft } satisfies SandboxInstanceCreateInput
+        ) as Awaited<ReturnType<ExtensionInstanceCapability["create"]>>,
+        createSchema: async () => await requestCapability(
+            "instances.createSchema"
+        ) as Awaited<ReturnType<ExtensionInstanceCapability["createSchema"]>>,
+        delete: async (name: string) => {
+            await requestCapability("instances.delete", nameInput(name));
+        },
+        disable: async (name: string) => {
+            await requestCapability("instances.disable", nameInput(name));
+        },
+        enable: async (name: string) => {
+            await requestCapability("instances.enable", nameInput(name));
+        },
+        list: async () => await requestCapability(
+            "instances.list"
+        ) as Awaited<ReturnType<ExtensionInstanceCapability["list"]>>,
+        readLogs: async (name: string, query?: ExtensionInstanceLogQuery) => await requestCapability(
+            "instances.readLogs",
+            { name, ...(query === undefined ? {} : { query: { ...query } }) } satisfies SandboxInstanceReadLogsInput
+        ) as Awaited<ReturnType<ExtensionInstanceCapability["readLogs"]>>,
+        refresh: async (name: string) => await requestCapability(
+            "instances.refresh",
+            nameInput(name)
+        ) as Awaited<ReturnType<ExtensionInstanceCapability["refresh"]>>,
+        snapshot: async (name: string) => await requestCapability(
+            "instances.snapshot",
+            nameInput(name)
+        ) as Awaited<ReturnType<ExtensionInstanceCapability["snapshot"]>>,
+        start: async (name: string) => await requestCapability(
+            "instances.start",
+            nameInput(name)
+        ) as Awaited<ReturnType<ExtensionInstanceCapability["start"]>>,
+        stop: async (name: string) => await requestCapability(
+            "instances.stop",
+            nameInput(name)
+        ) as Awaited<ReturnType<ExtensionInstanceCapability["stop"]>>,
+        validateCreate: async (draft: ExtensionJsonValue) => await requestCapability(
+            "instances.validateCreate",
+            { draft } satisfies SandboxInstanceCreateInput
+        ) as Awaited<ReturnType<ExtensionInstanceCapability["validateCreate"]>>,
+        watchEvents: async (name: string, watch: ExtensionInstanceEventWatch) => {
+            const deliveryAbort = new AbortController();
+            const signal = AbortSignal.any([watch.signal, deliveryAbort.signal]);
+            let delivery = Promise.resolve();
+            let deliveryFailure: Error | undefined;
+            try {
+                await requestCapability(
+                    "instances.watchEvents",
+                    {
+                        ...(watch.eventTypes === undefined ? {} : { eventTypes: [...watch.eventTypes] }),
+                        fromSeq: watch.fromSeq,
+                        name
+                    } satisfies SandboxInstanceWatchInput,
+                    {
+                        onProgress: (progress) => {
+                            delivery = delivery.then(async () => {
+                                await deliverInstanceWatchProgress(watch, progress);
+                            }).catch((error: unknown) => {
+                                deliveryFailure ??= error instanceof Error ? error : new Error(String(error));
+                                deliveryAbort.abort(deliveryFailure);
+                            });
+                        },
+                        signal
+                    }
+                );
+            } catch (error) {
+                await delivery;
+                if (deliveryFailure !== undefined) throw deliveryFailure;
+                throw error;
+            }
+            await delivery;
+            if (deliveryFailure !== undefined) throw deliveryFailure;
+        }
+    });
 }
 
 function createAssets(): ExtensionAssetCapability {
@@ -440,6 +605,46 @@ function closeProcessRuntime(
     runtime.resolveClosed(Object.freeze({ ...exit }));
 }
 
+async function deliverInstanceWatchProgress(
+    watch: ExtensionInstanceEventWatch,
+    progress: ExtensionJsonValue
+): Promise<void> {
+    if (!isRecord(progress)) throw new TypeError("Extension sandbox Instance watch progress must be an object.");
+    if (progress.kind === "event") {
+        const event = progress.event;
+        if (
+            !isRecord(event)
+            || typeof event.at !== "string"
+            || typeof event.instanceName !== "string"
+            || !Number.isSafeInteger(event.seq)
+            || typeof event.type !== "string"
+        ) {
+            throw new TypeError("Extension sandbox Instance watch event is invalid.");
+        }
+        await watch.onEvent({
+            at: event.at,
+            ...(event.data === undefined ? {} : { data: event.data as ExtensionJsonValue }),
+            instanceName: event.instanceName,
+            seq: event.seq as number,
+            type: event.type
+        });
+        return;
+    }
+    if (progress.kind === "gap") {
+        const gap = progress.gap;
+        if (
+            !isRecord(gap)
+            || !Number.isSafeInteger(gap.lastSeq)
+            || !Number.isSafeInteger(gap.nextSeq)
+        ) {
+            throw new TypeError("Extension sandbox Instance watch gap is invalid.");
+        }
+        await watch.onGap?.({ lastSeq: gap.lastSeq as number, nextSeq: gap.nextSeq as number });
+        return;
+    }
+    throw new TypeError("Extension sandbox Instance watch progress kind is invalid.");
+}
+
 async function requestCapability(
     operation: ExtensionSandboxCapabilityOperation,
     input?: unknown,
@@ -486,6 +691,57 @@ async function requestCapability(
     });
 }
 
+async function requestInterface(
+    invocationId: string,
+    operation: ExtensionSandboxInterfaceOperation,
+    input: ExtensionJsonValue | undefined,
+    signal: AbortSignal
+): Promise<ExtensionJsonValue | undefined> {
+    signal.throwIfAborted();
+    const id = randomUUID();
+    return await new Promise<ExtensionJsonValue | undefined>((resolve, reject) => {
+        const cleanup = () => signal.removeEventListener("abort", abort);
+        const abort = () => {
+            if (!interfaceRequests.delete(id)) return;
+            cleanup();
+            reject(abortError(signal));
+        };
+        interfaceRequests.set(id, {
+            invocationId,
+            reject: (error) => {
+                cleanup();
+                reject(error);
+            },
+            resolve: (value) => {
+                cleanup();
+                resolve(value);
+            }
+        });
+        signal.addEventListener("abort", abort, { once: true });
+        try {
+            send({
+                id,
+                ...(input === undefined ? {} : { input }),
+                invocationId,
+                operation,
+                type: "interfaceRequest"
+            });
+        } catch (error) {
+            interfaceRequests.delete(id);
+            cleanup();
+            reject(error instanceof Error ? error : new Error(String(error)));
+        }
+    });
+}
+
+function rejectInvocationInterfaceRequests(invocationId: string, error: Error): void {
+    for (const [id, pending] of interfaceRequests) {
+        if (pending.invocationId !== invocationId) continue;
+        interfaceRequests.delete(id);
+        pending.reject(error);
+    }
+}
+
 function registerBinding(pointId: string, id: string, binding: unknown): void {
     if (!/^[a-z][a-z0-9-]*$/u.test(id)) {
         throw new TypeError(`Extension registration id is invalid: ${id}.`);
@@ -515,6 +771,22 @@ function pointContext(id: string): ExtensionPointValidationContext {
         codeDirectory: data.codeDirectory,
         extensionId: data.context.id,
         id
+    });
+}
+
+function pointInvocationContext(
+    id: string,
+    invocationId: string,
+    signal: AbortSignal
+): ExtensionPointSandboxInvocationContext {
+    return Object.freeze({
+        ...pointContext(id),
+        requestInterface: async (operation: string, input?: ExtensionJsonValue) => await requestInterface(
+            invocationId,
+            operation as ExtensionSandboxInterfaceOperation,
+            input,
+            signal
+        )
     });
 }
 
@@ -585,9 +857,8 @@ function hardenSharedMemory(): void {
         writable: false
     });
     const memory = WebAssembly.Memory;
-    let guardedMemory!: typeof WebAssembly.Memory;
-    guardedMemory = new Proxy(memory, {
-        construct(target, argumentsList, newTarget) {
+    const guardedMemory: typeof WebAssembly.Memory = new Proxy(memory, {
+        construct(target, argumentsList, newTarget): WebAssembly.Memory {
             const descriptor = argumentsList[0] as WebAssembly.MemoryDescriptor | undefined;
             if (descriptor?.shared === true) {
                 throw new Error("Extension sandbox does not allow shared WebAssembly memory.");

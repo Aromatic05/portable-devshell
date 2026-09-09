@@ -32,7 +32,7 @@ import {
 } from "./ExtensionInstallPolicy.js";
 import type { ExtensionPathLayout } from "../state/ExtensionPathLayout.js";
 
-export const BUILTIN_EXTENSION_IDS = new Set(["mcp", "secret", "skill"]);
+export const BUILTIN_EXTENSION_IDS = new Set(["artifact", "instance", "mcp", "secret", "skill"]);
 
 export interface ExtensionInstallHost {
     disable(id: string): Promise<void>;

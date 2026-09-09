@@ -2,15 +2,19 @@ import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import {
     modelCommands,
     nativeCommands,
+    type CliCommandInputOptions,
+    type CliCommandIo,
+    type CliCommandResult,
     type CliModelCommandBinding,
     type CliModelCommandInvocationContext,
     type CliNativeCommandBinding,
-    type CliNativeCommandInvocationContext,
-    type CliCommandResult
+    type CliNativeCommandInvocationContext
 } from "@portable-devshell/extension/cli";
 
 import type {
     ExtensionPointSandboxBridge,
+    ExtensionPointSandboxInterfacePort,
+    ExtensionPointSandboxInvocationContext,
     ExtensionPointValidationContext
 } from "../extension/host/generation/ExtensionPointRegistry.js";
 import type { ExtensionSandboxPointCodec } from "../extension/host/generation/sandbox/ExtensionSandboxPointCodec.js";
@@ -25,13 +29,14 @@ export const cliNativeCommandsSandboxCodec: ExtensionSandboxPointCodec = Object.
         binding: unknown,
         input: ExtensionJsonValue | undefined,
         signal: AbortSignal,
-        context: ExtensionPointValidationContext
+        context: ExtensionPointSandboxInvocationContext
     ): Promise<unknown> {
         validateCliCommandBinding(binding, context, nativeCommands.id);
         const value = readRecord(input, `Extension ${context.extensionId} ${nativeCommands.id}/${context.id} invocation`);
         const argv = readStringArray(value.argv, "argv");
         const invocation = readRecord(value.context, "native CLI invocation context");
         return await (binding as CliNativeCommandBinding)(argv, Object.freeze({
+            ...(invocation.io === true ? { io: createCliSandboxIo(context) } : {}),
             localOwner: readBoolean(invocation.localOwner, "localOwner"),
             requestId: readString(invocation.requestId, "requestId"),
             signal,
@@ -52,15 +57,18 @@ export const cliModelCommandsSandboxCodec: ExtensionSandboxPointCodec = Object.f
         binding: unknown,
         input: ExtensionJsonValue | undefined,
         signal: AbortSignal,
-        context: ExtensionPointValidationContext
+        context: ExtensionPointSandboxInvocationContext
     ): Promise<unknown> {
         validateCliCommandBinding(binding, context, modelCommands.id);
         const value = readRecord(input, `Extension ${context.extensionId} ${modelCommands.id}/${context.id} invocation`);
         const argv = readStringArray(value.argv, "argv");
         const invocation = readRecord(value.context, "model CLI invocation context");
         return await (binding as CliModelCommandBinding)(argv, Object.freeze({
+            instance: readString(invocation.instance, "instance"),
+            ...(invocation.io === true ? { io: createCliSandboxIo(context) } : {}),
             requestId: readString(invocation.requestId, "requestId"),
-            signal
+            signal,
+            workspace: readString(invocation.workspace, "workspace")
         }));
     }
 });
@@ -75,13 +83,17 @@ export function createCliNativeSandboxBinding(
         await bridge.invokeBinding(nativeCommands.id, context.id, {
             argv: [...argv],
             context: {
+                io: invocation.io !== undefined,
                 localOwner: invocation.localOwner,
                 requestId: invocation.requestId,
                 ...(invocation.workingDirectory === undefined
                     ? {}
                     : { workingDirectory: invocation.workingDirectory })
             }
-        }, { signal: invocation.signal }) as CliCommandResult;
+        }, {
+            ...(invocation.io === undefined ? {} : { interfacePort: createCliInterfacePort(invocation.io) }),
+            signal: invocation.signal
+        }) as CliCommandResult;
 }
 
 export function createCliModelSandboxBinding(
@@ -93,8 +105,16 @@ export function createCliModelSandboxBinding(
     return async (argv: readonly string[], invocation: CliModelCommandInvocationContext): Promise<CliCommandResult> =>
         await bridge.invokeBinding(modelCommands.id, context.id, {
             argv: [...argv],
-            context: { requestId: invocation.requestId }
-        }, { signal: invocation.signal }) as CliCommandResult;
+            context: {
+                instance: invocation.instance,
+                io: invocation.io !== undefined,
+                requestId: invocation.requestId,
+                workspace: invocation.workspace
+            }
+        }, {
+            ...(invocation.io === undefined ? {} : { interfacePort: createCliInterfacePort(invocation.io) }),
+            signal: invocation.signal
+        }) as CliCommandResult;
 }
 
 export function validateCliCommandBinding(
@@ -107,6 +127,57 @@ export function validateCliCommandBinding(
             `Extension ${context.extensionId} ${pointId}/${context.id} binding must be a function.`
         );
     }
+}
+
+function createCliSandboxIo(context: ExtensionPointSandboxInvocationContext): CliCommandIo {
+    return Object.freeze({
+        readInput: async () => {
+            const value = await context.requestInterface("cli.readInput");
+            if (value === undefined) return undefined;
+            const result = readRecord(value, "cli.readInput result");
+            return new Uint8Array(Buffer.from(readString(result.data, "data"), "base64"));
+        },
+        requestInput: async (options: CliCommandInputOptions = {}) => {
+            await context.requestInterface("cli.requestInput", { raw: options.raw === true });
+        },
+        writeStderr: async (chunk: string) => {
+            await context.requestInterface("cli.writeStderr", { chunk });
+        },
+        writeStdout: async (chunk: string) => {
+            await context.requestInterface("cli.writeStdout", { chunk });
+        }
+    });
+}
+
+function createCliInterfacePort(io: CliCommandIo): ExtensionPointSandboxInterfacePort {
+    return Object.freeze({
+        async request(operation: string, input?: ExtensionJsonValue) {
+            switch (operation) {
+                case "cli.readInput": {
+                    const chunk = await io.readInput();
+                    return chunk === undefined ? undefined : { data: Buffer.from(chunk).toString("base64") };
+                }
+                case "cli.requestInput": {
+                    const value = readRecord(input ?? {}, "cli.requestInput");
+                    const raw = value.raw === undefined ? false : readBoolean(value.raw, "raw");
+                    await io.requestInput({ raw });
+                    return undefined;
+                }
+                case "cli.writeStderr": {
+                    const value = readRecord(input, "cli.writeStderr");
+                    await io.writeStderr(readString(value.chunk, "chunk"));
+                    return undefined;
+                }
+                case "cli.writeStdout": {
+                    const value = readRecord(input, "cli.writeStdout");
+                    await io.writeStdout(readString(value.chunk, "chunk"));
+                    return undefined;
+                }
+                default:
+                    throw new TypeError(`Unsupported CLI sandbox interface operation: ${operation}.`);
+            }
+        }
+    });
 }
 
 function assertCommandDescriptor(

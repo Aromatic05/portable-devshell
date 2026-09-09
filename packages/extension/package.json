@@ -14,6 +14,14 @@
             "types": "./dist/domain/cli.d.ts",
             "default": "./dist/domain/cli.js"
         },
+        "./artifact": {
+            "types": "./dist/domain/artifact.d.ts",
+            "default": "./dist/domain/artifact.js"
+        },
+        "./instance": {
+            "types": "./dist/domain/instance.d.ts",
+            "default": "./dist/domain/instance.js"
+        },
         "./web": {
             "types": "./dist/domain/web.d.ts",
             "default": "./dist/domain/web.js"
