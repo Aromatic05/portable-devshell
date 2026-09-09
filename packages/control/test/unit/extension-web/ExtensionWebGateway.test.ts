@@ -75,6 +75,10 @@ test("Extension Web proxy authenticates one generic namespace, strips credential
     let leases = 0;
     let releases = 0;
     const extensions = {
+        listDeclarations(pointId: string) {
+            assert.equal(pointId, "web.applications");
+            return [{ extensionId: "example", generation: "g1", id: "example" }];
+        },
         acquireRegistration(pointId: string, id: string) {
             assert.equal(pointId, "web.applications");
             assert.equal(id, "example");
@@ -225,6 +229,10 @@ test("Extension static Web contribution serves only files contained by the immut
     await writeFile(join(codeDirectory, "outside.txt"), "not web\n", "utf8");
     let leases = 0;
     const extensions = {
+        listDeclarations(pointId: string) {
+            assert.equal(pointId, "web.applications");
+            return [{ extensionId: "example", generation: "g1", id: "example" }];
+        },
         acquireRegistration(pointId: string, id: string) {
             assert.equal(pointId, "web.applications");
             assert.equal(id, "example");
@@ -288,6 +296,116 @@ test("Extension static Web contribution serves only files contained by the immut
     }
 });
 
+test("Extension Web gateway owns 404/502/503 semantics without leaking host or upstream failures", async () => {
+    const unavailableUpstream = await unusedLoopbackUrl();
+    let leases = 0;
+    let releases = 0;
+    const published = ["activation-fails", "source-fails", "upstream-fails"] as const;
+    const extensions = {
+        listDeclarations(pointId: string) {
+            assert.equal(pointId, "web.applications");
+            return published.map((id) => ({ extensionId: id, generation: "g1", id }));
+        },
+        acquireRegistration(pointId: string, id: string) {
+            assert.equal(pointId, "web.applications");
+            if (id === "activation-fails") {
+                throw new Error("ACTIVATION_SECRET /private/generation/path");
+            }
+            assert.ok(id === "source-fails" || id === "upstream-fails");
+            leases += 1;
+            let released = false;
+            return {
+                extensionId: id,
+                lease: {
+                    generation: "g1",
+                    release() {
+                        if (released) return;
+                        released = true;
+                        leases -= 1;
+                        releases += 1;
+                    }
+                },
+                registration: {
+                    binding: {
+                        source: {
+                            kind: "endpoint" as const,
+                            resolve: id === "source-fails"
+                                ? () => { throw new Error("SOURCE_SECRET /private/provider/socket"); }
+                                : () => unavailableUpstream
+                        }
+                    },
+                    declaration: { id, title: id },
+                    id,
+                    pointId: "web.applications"
+                }
+            };
+        }
+    };
+    const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: 0 });
+    const sessions = new ControlWebSessionService({ auth: { mode: "none" }, basePath: "/web" });
+    const removeSessions = sessions.install(http);
+    const removeGateway = new ExtensionWebGateway({
+        basePath: "/web/extensions",
+        extensions: extensions as never,
+        loginPath: "/web/",
+        paths: {} as never
+    }).install(http, sessions);
+
+    try {
+        await http.start();
+        const address = http.address;
+        assert.ok(typeof address === "object" && address !== null);
+        const baseUrl = `http://127.0.0.1:${address.port}`;
+        const sessionResponse = await fetch(`${baseUrl}/web/session`, { method: "POST" });
+        const cookie = sessionCookie(sessionResponse.headers.get("set-cookie"));
+
+        const missing = await fetch(`${baseUrl}/web/extensions/missing/api`, { headers: { cookie } });
+        assert.equal(missing.status, 404);
+        assert.deepEqual(await missing.json(), { error: "Extension WebUI not found" });
+
+        const activation = await fetch(`${baseUrl}/web/extensions/activation-fails/api`, { headers: { cookie } });
+        assert.equal(activation.status, 503);
+        const activationBody = await activation.text();
+        assert.equal(activationBody, JSON.stringify({ error: "Extension WebUI unavailable" }));
+        assert.doesNotMatch(activationBody, /ACTIVATION_SECRET|private\/generation/u);
+
+        const source = await fetch(`${baseUrl}/web/extensions/source-fails/api`, { headers: { cookie } });
+        assert.equal(source.status, 503);
+        const sourceBody = await source.text();
+        assert.equal(sourceBody, JSON.stringify({ error: "Extension WebUI unavailable" }));
+        assert.doesNotMatch(sourceBody, /SOURCE_SECRET|private\/provider/u);
+
+        const upstream = await fetch(`${baseUrl}/web/extensions/upstream-fails/api`, { headers: { cookie } });
+        assert.equal(upstream.status, 502);
+        const upstreamBody = await upstream.text();
+        assert.equal(upstreamBody, JSON.stringify({ error: "Extension WebUI upstream failed" }));
+        assert.doesNotMatch(upstreamBody, /ECONNREFUSED|127\.0\.0\.1:\d+/u);
+
+        const sourceUpgrade = await requestUpgradeFailure(
+            `${baseUrl}/web/extensions/source-fails/socket`,
+            cookie
+        );
+        assert.equal(sourceUpgrade.statusCode, 503);
+        assert.equal(sourceUpgrade.body, "Extension WebSocket unavailable\n");
+        assert.doesNotMatch(sourceUpgrade.body, /SOURCE_SECRET|private\/provider/u);
+
+        const upstreamUpgrade = await requestUpgradeFailure(
+            `${baseUrl}/web/extensions/upstream-fails/socket`,
+            cookie
+        );
+        assert.equal(upstreamUpgrade.statusCode, 502);
+        assert.equal(upstreamUpgrade.body, "Extension WebSocket upstream failed\n");
+        assert.doesNotMatch(upstreamUpgrade.body, /ECONNREFUSED|127\.0\.0\.1:\d+/u);
+
+        assert.equal(leases, 0);
+        assert.equal(releases, 4);
+    } finally {
+        removeGateway();
+        removeSessions();
+        await http.stop();
+    }
+});
+
 function sessionCookie(setCookie: string | null): string {
     assert.ok(setCookie !== null);
     return setCookie.split(";", 1)[0]!;
@@ -310,6 +428,49 @@ async function openStreamingResponse(url: string, cookie: string): Promise<Incom
                 response.pause();
                 resolve(response);
             });
+        });
+        request.once("error", reject);
+        request.end();
+    });
+}
+
+async function unusedLoopbackUrl(): Promise<URL> {
+    const server = createServer();
+    await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    assert.ok(typeof address === "object" && address !== null);
+    const url = new URL(`http://127.0.0.1:${address.port}/`);
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    return url;
+}
+
+async function requestUpgradeFailure(
+    url: string,
+    cookie: string
+): Promise<{ body: string; statusCode: number }> {
+    return await new Promise((resolve, reject) => {
+        const request = httpRequest(url, {
+            headers: {
+                connection: "Upgrade",
+                cookie,
+                upgrade: "websocket"
+            }
+        });
+        request.once("upgrade", (_response, socket) => {
+            socket.destroy();
+            reject(new Error("Expected Extension WebSocket upgrade to fail."));
+        });
+        request.once("response", (response) => {
+            const chunks: Buffer[] = [];
+            response.on("data", (chunk: Buffer) => chunks.push(chunk));
+            response.once("error", reject);
+            response.once("end", () => resolve({
+                body: Buffer.concat(chunks).toString("utf8"),
+                statusCode: response.statusCode ?? 0
+            }));
         });
         request.once("error", reject);
         request.end();
