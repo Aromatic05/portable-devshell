@@ -1155,6 +1155,8 @@ CLI command failure
 
 当前 Web owner 已落实该边界：static catalog 中不存在的 application 是 404；已发布但 binding activation/source 不可用是 503；endpoint upstream failure 是 502。ExtensionHost/generation failure 与 Node upstream exception 只作为宿主内部诊断信息，不能把原始 message/path/socket error 反射进 HTTP/WebSocket 响应。
 
+CLI owner 采用不同但同样明确的边界：command binding 已经开始执行后，它主动产生的 usage/business error 属于 CLI command contract；但在 binding 之前发生的 registration/generation acquisition failure 必须归一成固定 `control.cliCommandFailed`，不得把 `control.extension*` 或 Host cause 穿过 CLI route。这样不会为了 fault isolation 吞掉命令本身有意义的反馈，也不会让 ExtensionHost 变成 CLI error taxonomy 的隐式 owner。
+
 以下错误可由 Extension runtime 统一处理：
 
 ```text

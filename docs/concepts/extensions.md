@@ -268,6 +268,8 @@ Control 内部 static catalog 会由 CLI domain 投影成 command discovery DTO�
 
 Command invocation 也属于 CLI domain：Control 的 CLI route 负责 CLI-only access、`workingDirectory` authority、payload/result validation 和 binding dispatch；Extension management route 只负责 install/list/get/enable/disable/reload/remove，不再承载 `command` operation 或 command wire DTO。这样 discovery 与 execution 的 owner 一致，同时仍不把 RPC transport 暴露成 public Extension ABI。
 
+CLI command implementation 自己抛出的 usage/business error 仍属于 command contract，可以作为命令反馈呈现；但在执行实现之前如果 `cli.commands` registration/generation 无法取得，CLI owner 会翻译成固定 `control.cliCommandFailed` / `CLI command <id> is unavailable.`，只带 `commandId`，不把 ExtensionHost error code、generation path 或原始 cause 暴露到 CLI wire error。
+
 Local-owner CLI 可以在 invocation context 中提供 `workingDirectory`。依赖 Control 主机 project 路径的 Extension 必须使用这个字段，而不能读取 daemon 自己的 `process.cwd()` 猜调用者目录。
 
 ### web.applications
