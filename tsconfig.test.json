@@ -11,6 +11,12 @@
             "@portable-devshell/extension": [
                 "./packages/extension/src/index.ts"
             ],
+            "@portable-devshell/extension/cli": [
+                "./packages/extension/src/domain/cli.ts"
+            ],
+            "@portable-devshell/extension/web": [
+                "./packages/extension/src/domain/web.ts"
+            ],
             "@portable-devshell/shared": [
                 "./packages/shared/src/index.ts"
             ],
