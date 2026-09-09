@@ -247,6 +247,8 @@ Declaration 可以提供 `title`、`summary` 和 `usage`。Binding 当前由 CLI
 
 Control 内部 static catalog 会由 CLI domain 投影成 command discovery DTO。该 discovery 只包含 CLI presentation metadata，不包含 generation 或 runtime binding。`devshell <extension-command> --help` 使用这一静态数据生成 help，因此查看 Extension command 帮助不会 activation Extension；普通 argv 仍按需取得 generation lease 并调用真实 binding。全局 `devshell --help` 不依赖 Control，保持本地可用。
 
+Command invocation 也属于 CLI domain：Control 的 CLI route 负责 CLI-only access、`workingDirectory` authority、payload/result validation 和 binding dispatch；Extension management route 只负责 install/list/get/enable/disable/reload/remove，不再承载 `command` operation 或 command wire DTO。这样 discovery 与 execution 的 owner 一致，同时仍不把 RPC transport 暴露成 public Extension ABI。
+
 Local-owner CLI 可以在 invocation context 中提供 `workingDirectory`。依赖 Control 主机 project 路径的 Extension 必须使用这个字段，而不能读取 daemon 自己的 `process.cwd()` 猜调用者目录。
 
 ### web.applications

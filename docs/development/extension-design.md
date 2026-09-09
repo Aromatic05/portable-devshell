@@ -663,6 +663,8 @@ possibly subcommand metadata
 
 ### 8.3 Runtime binding
 
+> 实现状态：已落地。CLI discovery 和 invocation 现在由同一个 CLI domain owner 承担；Control 的 Extension management route 不再包含 command dispatch。CLI route 自己负责 caller authority、payload/result validation，并通过 generation-owned binding 执行 command。
+
 Runtime binding 只负责执行：
 
 ```text
