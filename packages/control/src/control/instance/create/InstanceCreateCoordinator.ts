@@ -8,7 +8,6 @@ import {
     formatConfigPath,
     normalizeConfigInstanceDraft,
     parseConfigInstanceDraft,
-    type ConfigInstanceDraft,
     type ControlConfig,
     type ControlInstanceConfig,
     type InstanceContainerPresetSchema,

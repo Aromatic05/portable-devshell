@@ -385,7 +385,7 @@ async function proxyUpgrade(
         proxyRequest.once("error", (error) => finish(error));
         socket.once("close", downstreamClosed);
         proxyRequest.end();
-    }).catch((error) => {
+    }).catch(() => {
         if (!socket.destroyed) {
             rejectUpgrade(socket, 502, "Extension WebSocket upstream failed");
         }

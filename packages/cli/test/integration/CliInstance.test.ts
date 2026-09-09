@@ -654,7 +654,7 @@ async function sendCliStreamEvent(
     codec: Codec,
     event: Event,
     streamId: string,
-    name: string,
+    name: `${string}.${string}`,
     payload: JsonValue
 ): Promise<void> {
     await codec.send({
