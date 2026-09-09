@@ -329,32 +329,17 @@ async function registrationsFromSandbox(
 ): Promise<import("./ExtensionRegistration.js").ExtensionRegistrationSet> {
     const registrations = new ExtensionRegistrationBuilder(manifest, codeDirectory, points);
     for (const registration of descriptor.registrations) {
-        switch (registration.runtime.kind) {
-            case "cli.command":
-                registrations.registerById(
-                    registration.pointId,
-                    registration.id,
-                    async (argv: readonly string[], context: import("@portable-devshell/extension").ExtensionInvocationContext) =>
-                        await sandbox.cliCommand(registration.id, argv, context)
-                );
-                break;
-            case "web.files":
-                registrations.registerById(registration.pointId, registration.id, Object.freeze({
-                    source: Object.freeze({
-                        directory: registration.runtime.directory,
-                        kind: "files" as const
-                    })
-                }));
-                break;
-            case "web.endpoint":
-                registrations.registerById(registration.pointId, registration.id, Object.freeze({
-                    source: Object.freeze({
-                        kind: "endpoint" as const,
-                        resolve: async () => await sandbox.webEndpoint(registration.id)
-                    })
-                }));
-                break;
-        }
+        const binding = points.createSandboxBinding(
+            registration.pointId,
+            registration.descriptor,
+            Object.freeze({
+                codeDirectory,
+                extensionId: manifest.id,
+                id: registration.id
+            }),
+            sandbox
+        );
+        registrations.registerById(registration.pointId, registration.id, binding);
     }
     return await registrations.finalize();
 }

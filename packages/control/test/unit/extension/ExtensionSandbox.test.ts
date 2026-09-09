@@ -16,12 +16,18 @@ import type {
     ExtensionWorkerCapability,
     ExtensionWorkerSession
 } from "@portable-devshell/extension";
+import type { CliCommandResult } from "@portable-devshell/extension/cli";
 
+import { createCliSandboxBinding } from "../../../src/control/cli/CliExtensionSandboxCodec.ts";
 import {
     ExtensionSandboxHost,
     type ExtensionSandboxHostOptions
 } from "../../../src/control/extension/host/generation/sandbox/ExtensionSandboxHost.ts";
-import { EXTENSION_SANDBOX_MAX_MESSAGE_BYTES } from "../../../src/control/extension/host/generation/sandbox/ExtensionSandboxProtocol.ts";
+import {
+    EXTENSION_SANDBOX_MAX_MESSAGE_BYTES,
+    type ExtensionSandboxRegistrationDescriptor
+} from "../../../src/control/extension/host/generation/sandbox/ExtensionSandboxProtocol.ts";
+import { createWebApplicationSandboxBinding } from "../../../src/server/web/extension/WebApplicationExtensionSandboxCodec.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 const noopLogger: ExtensionLogger = {
@@ -84,7 +90,7 @@ export function activate(context) {
     });
 
     const descriptor = await sandbox.start();
-    assert.deepEqual(descriptor.registrations, [{ id: CLI_ID, pointId: CLI_POINT, runtime: { kind: "cli.command" } }]);
+    assert.deepEqual(descriptor.registrations, [{ id: CLI_ID, pointId: CLI_POINT, descriptor: { kind: "command" } }]);
     const thread = await cliJson<{ id: string; threadId: number }>(sandbox, ["thread"], "thread");
     assert.equal(thread.id, "example");
     assert.ok(thread.threadId > 0);
@@ -111,13 +117,13 @@ export function activate(context) {
 test("Extension code cannot forge sandbox protocol messages through worker_threads parentPort", async (t) => {
     const sandbox = await setupSandbox(t, "extension-sandbox-private-port", `
 import { parentPort } from "node:worker_threads";
-parentPort?.postMessage({ descriptor: { registrations: [{ id: "forged", pointId: "cli.commands", runtime: { kind: "cli.command" } }] }, type: "ready" });
+parentPort?.postMessage({ descriptor: { registrations: [{ id: "forged", pointId: "cli.commands", descriptor: { kind: "command" } }] }, type: "ready" });
 export function activate(context) {
     context.register({ id: "cli.commands" }, "test", async () => ({ kind: "text", text: "actual" }));
 }
 `);
     const descriptor = await sandbox.start();
-    assert.deepEqual(descriptor.registrations, [{ id: CLI_ID, pointId: CLI_POINT, runtime: { kind: "cli.command" } }]);
+    assert.deepEqual(descriptor.registrations, [{ id: CLI_ID, pointId: CLI_POINT, descriptor: { kind: "command" } }]);
     assert.equal(await cliText(sandbox, [], "actual"), "actual");
 });
 
@@ -151,8 +157,8 @@ export function activate(context) {
     await sandbox.start();
     assert.equal(await cliJson(sandbox, ["probe"], "probe"), true);
     assert.equal(await cliJson(sandbox, ["named"], "named"), true);
-    await assert.rejects(sandbox.cliCommand(CLI_ID, ["self"], invocation("self")), /cannot signal the Control process/u);
-    await assert.rejects(sandbox.cliCommand(CLI_ID, ["group"], invocation("group")), /cannot signal the Control process/u);
+    await assert.rejects(sandboxCliCommand(sandbox, CLI_ID, ["self"], invocation("self")), /cannot signal the Control process/u);
+    await assert.rejects(sandboxCliCommand(sandbox, CLI_ID, ["group"], invocation("group")), /cannot signal the Control process/u);
     assert.equal(await cliText(sandbox, ["alive"], "alive"), "alive");
 });
 
@@ -255,7 +261,7 @@ export function activate(context) {
 `);
     await sandbox.start();
     await assert.rejects(
-        sandbox.cliCommand(CLI_ID, [], invocation("structured-error")),
+        sandboxCliCommand(sandbox, CLI_ID, [], invocation("structured-error")),
         (error: unknown) => {
             if (!(error instanceof Error)) return false;
             assert.equal((error as Error & { code?: string }).code, "instance_invalid");
@@ -286,7 +292,7 @@ export function activate(context) {
         worker: fakeWorker([])
     });
     await sandbox.start();
-    await assert.rejects(sandbox.cliCommand(CLI_ID, [], invocation("runtime-fault")), /runtime fault escaped handler/u);
+    await assert.rejects(sandboxCliCommand(sandbox, CLI_ID, [], invocation("runtime-fault")), /runtime fault escaped handler/u);
     await waitFor(() => faults.length === 1);
     assert.match(faults[0]!.message, /runtime fault escaped handler/u);
 });
@@ -304,14 +310,14 @@ export function activate(context) {
 }
 `);
     await sandbox.start();
-    await assert.rejects(sandbox.cliCommand(CLI_ID, ["cycle"], invocation("cycle")), /cyclic object graph/u);
+    await assert.rejects(sandboxCliCommand(sandbox, CLI_ID, ["cycle"], invocation("cycle")), /cyclic object graph/u);
     assert.equal(await cliText(sandbox, ["alive"], "after-cycle"), "alive");
-    await assert.rejects(sandbox.cliCommand(CLI_ID, ["binary"], invocation("binary")), /non-plain object/u);
+    await assert.rejects(sandboxCliCommand(sandbox, CLI_ID, ["binary"], invocation("binary")), /non-plain object/u);
     assert.equal(await cliText(sandbox, ["alive"], "after-binary"), "alive");
-    await assert.rejects(sandbox.cliCommand(CLI_ID, ["huge"], invocation("huge")), /sandbox message limit/u);
+    await assert.rejects(sandboxCliCommand(sandbox, CLI_ID, ["huge"], invocation("huge")), /sandbox message limit/u);
     assert.equal(await cliText(sandbox, ["alive"], "after-huge"), "alive");
     const oversizedInput = "y".repeat(EXTENSION_SANDBOX_MAX_MESSAGE_BYTES + 1024);
-    await assert.rejects(sandbox.cliCommand(CLI_ID, ["echo", oversizedInput], invocation("oversized-input")), /sandbox message limit/u);
+    await assert.rejects(sandboxCliCommand(sandbox, CLI_ID, ["echo", oversizedInput], invocation("oversized-input")), /sandbox message limit/u);
     assert.equal(await cliText(sandbox, ["alive"], "after-oversized-input"), "alive");
 });
 
@@ -336,7 +342,7 @@ export function activate(context) {
     await sandbox.start();
     await assert.rejects(
         Promise.race([
-            sandbox.cliCommand(CLI_ID, [], invocation("progress")),
+            sandboxCliCommand(sandbox, CLI_ID, [], invocation("progress")),
             new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("sandbox runtime fault was not reported")), 500))
         ]),
         /progress exploded|worker exited unexpectedly/u
@@ -369,7 +375,7 @@ export function activate(context) {
     await sandbox.start();
 
     const cooperativeController = new AbortController();
-    const cooperative = sandbox.cliCommand(CLI_ID, ["cooperative"], {
+    const cooperative = sandboxCliCommand(sandbox, CLI_ID, ["cooperative"], {
         ...invocation("cooperative"), signal: cooperativeController.signal
     });
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -378,19 +384,19 @@ export function activate(context) {
     assert.equal(faults.length, 0);
 
     const lateController = new AbortController();
-    const late = sandbox.cliCommand(CLI_ID, ["late"], { ...invocation("late"), signal: lateController.signal });
+    const late = sandboxCliCommand(sandbox, CLI_ID, ["late"], { ...invocation("late"), signal: lateController.signal });
     await new Promise<void>((resolve) => setImmediate(resolve));
     lateController.abort(new Error("late result cancelled"));
     await assert.rejects(late, /late result cancelled/u);
     assert.equal(faults.length, 0);
 
     const controller = new AbortController();
-    const pending = sandbox.cliCommand(CLI_ID, ["hang"], { ...invocation("hang"), signal: controller.signal });
+    const pending = sandboxCliCommand(sandbox, CLI_ID, ["hang"], { ...invocation("hang"), signal: controller.signal });
     await new Promise<void>((resolve) => setImmediate(resolve));
     controller.abort(new Error("cancel test"));
     await assert.rejects(pending, /did not stop after cancellation/u);
     assert.equal(faults.length, 1);
-    await assert.rejects(sandbox.cliCommand(CLI_ID, ["hang"], invocation("after-fault")), /did not stop after cancellation/u);
+    await assert.rejects(sandboxCliCommand(sandbox, CLI_ID, ["hang"], invocation("after-fault")), /did not stop after cancellation/u);
 });
 
 test("Extension sandbox memory limit terminates only the sandbox worker", { timeout: 15_000 }, async (t) => {
@@ -407,7 +413,7 @@ export function activate(context) {
         resourceLimits: { maxOldGenerationSizeMb: 64, maxYoungGenerationSizeMb: 16, stackSizeMb: 2 }
     });
     await sandbox.start();
-    await assert.rejects(sandbox.cliCommand(CLI_ID, [], invocation("memory")), /memory|heap|worker|allocation|terminated/i);
+    await assert.rejects(sandboxCliCommand(sandbox, CLI_ID, [], invocation("memory")), /memory|heap|worker|allocation|terminated/i);
     assert.equal(faults.length, 1);
     assert.equal(typeof process.pid, "number");
 });
@@ -431,7 +437,7 @@ export function activate(context) {
         resourceLimits: { maxOldGenerationSizeMb: 64, maxYoungGenerationSizeMb: 16, stackSizeMb: 2 }
     });
     await sandbox.start();
-    await assert.rejects(sandbox.cliCommand(CLI_ID, [], invocation("external-memory")), /external memory exceeded 24 MiB/u);
+    await assert.rejects(sandboxCliCommand(sandbox, CLI_ID, [], invocation("external-memory")), /external memory exceeded 24 MiB/u);
     assert.equal(faults.length, 1);
 });
 
@@ -470,7 +476,7 @@ export function activate(context) {
 `, { assets, capabilities: ["assets"] });
     await sandbox.start();
     const controller = new AbortController();
-    const pending = sandbox.cliCommand(CLI_ID, ["project"], {
+    const pending = sandboxCliCommand(sandbox, CLI_ID, ["project"], {
         ...invocation("asset-abort"),
         signal: controller.signal
     });
@@ -522,7 +528,7 @@ export function activate(context) {
     t.after(() => releaseOpen());
     await sandbox.start();
     const controller = new AbortController();
-    const pending = sandbox.cliCommand(CLI_ID, [], { ...invocation("open-race"), signal: controller.signal });
+    const pending = sandboxCliCommand(sandbox, CLI_ID, [], { ...invocation("open-race"), signal: controller.signal });
     await new Promise<void>((resolve) => setImmediate(resolve));
     controller.abort(new Error("cancel open"));
     await assert.rejects(pending, /did not stop after cancellation/u);
@@ -556,6 +562,31 @@ export function activate(context) {
     assert.deepEqual(await cliJson(sandbox, [], "process-close-race"), { code: 7 });
 });
 
+test("Extension sandbox preserves Web files bindings through the Web-owned descriptor codec", async (t) => {
+    const sandbox = await setupSandbox(t, "extension-sandbox-web-files", `
+export function activate(context) {
+    context.register({ id: "web.applications" }, "test", {
+        source: { directory: "web", kind: "files" }
+    });
+}
+`);
+    const descriptor = await sandbox.start();
+    assert.deepEqual(descriptor.registrations, [{
+        descriptor: { directory: "web", kind: "files" },
+        id: "test",
+        pointId: "web.applications"
+    }]);
+    const registration = await sandboxRegistration(sandbox, "web.applications", "test");
+    const binding = createWebApplicationSandboxBinding(
+        registration.descriptor,
+        sandboxPointContext("test"),
+        sandbox
+    );
+    assert.deepEqual(binding, {
+        source: { directory: "web", kind: "files" }
+    });
+});
+
 test("Extension sandbox bounds host-driven Web application endpoint resolution", async (t) => {
     const sandbox = await setupSandbox(t, "extension-sandbox-web-timeout", `
 export function activate(context) {
@@ -565,8 +596,8 @@ export function activate(context) {
 }
 `, { hostCallbackTimeoutMs: 50 });
     const descriptor = await sandbox.start();
-    assert.deepEqual(descriptor.registrations, [{ id: "test", pointId: "web.applications", runtime: { kind: "web.endpoint" } }]);
-    await assert.rejects(sandbox.webEndpoint("test"), /Web application endpoint resolution timed out/u);
+    assert.deepEqual(descriptor.registrations, [{ id: "test", pointId: "web.applications", descriptor: { kind: "endpoint" } }]);
+    await assert.rejects(sandboxWebEndpoint(sandbox, "test"), /Web application endpoint resolution timed out/u);
 });
 
 function createSandbox(options: {
@@ -691,14 +722,61 @@ function invocation(requestId: string): ExtensionInvocationContext {
     };
 }
 
+async function sandboxCliCommand(
+    sandbox: ExtensionSandboxHost,
+    id: string,
+    argv: readonly string[],
+    context: ExtensionInvocationContext
+): Promise<CliCommandResult> {
+    const registration = await sandboxRegistration(sandbox, CLI_POINT, id);
+    const binding = createCliSandboxBinding(registration.descriptor, sandboxPointContext(id), sandbox);
+    return await binding(argv, context);
+}
+
+async function sandboxWebEndpoint(
+    sandbox: ExtensionSandboxHost,
+    id: string
+): Promise<URL | undefined> {
+    const registration = await sandboxRegistration(sandbox, "web.applications", id);
+    const binding = createWebApplicationSandboxBinding(
+        registration.descriptor,
+        sandboxPointContext(id),
+        sandbox
+    );
+    if (binding.source.kind !== "endpoint") {
+        throw new TypeError(`Expected endpoint-backed Web application ${id}.`);
+    }
+    return await binding.source.resolve();
+}
+
+async function sandboxRegistration(
+    sandbox: ExtensionSandboxHost,
+    pointId: string,
+    id: string
+): Promise<ExtensionSandboxRegistrationDescriptor> {
+    const registration = (await sandbox.start()).registrations.find((candidate) =>
+        candidate.pointId === pointId && candidate.id === id
+    );
+    assert.ok(registration, `Missing sandbox registration ${pointId}/${id}.`);
+    return registration;
+}
+
+function sandboxPointContext(id: string) {
+    return Object.freeze({
+        codeDirectory: "/sandbox-test",
+        extensionId: "example",
+        id
+    });
+}
+
 async function cliJson<T = unknown>(sandbox: ExtensionSandboxHost, argv: readonly string[], requestId: string): Promise<T> {
-    const result = await sandbox.cliCommand(CLI_ID, argv, invocation(requestId));
+    const result = await sandboxCliCommand(sandbox, CLI_ID, argv, invocation(requestId));
     assert.equal(result.kind, "json");
     return result.value as T;
 }
 
 async function cliText(sandbox: ExtensionSandboxHost, argv: readonly string[], requestId: string): Promise<string> {
-    const result = await sandbox.cliCommand(CLI_ID, argv, invocation(requestId));
+    const result = await sandboxCliCommand(sandbox, CLI_ID, argv, invocation(requestId));
     assert.equal(result.kind, "text");
     return result.text;
 }

@@ -9,6 +9,10 @@ import type {
     ExtensionPointDefinition,
     ExtensionPointValidationContext
 } from "../extension/host/generation/ExtensionPointRegistry.js";
+import {
+    createCliSandboxBinding,
+    validateCliCommandBinding
+} from "./CliExtensionSandboxCodec.js";
 
 const BUILTIN_CLI_COMMAND_IDS = new Set([
     "approval",
@@ -33,6 +37,7 @@ const BUILTIN_CLI_COMMAND_IDS = new Set([
 ]);
 
 export const cliCommandsExtensionPointDefinition: ExtensionPointDefinition = Object.freeze({
+    createSandboxBinding: createCliSandboxBinding,
     id: commands.id,
     parseDeclaration(declaration: ExtensionPointDeclaration): CliCommandDeclaration {
         const parsed = parseCliCommandDeclaration(declaration);
@@ -42,10 +47,6 @@ export const cliCommandsExtensionPointDefinition: ExtensionPointDefinition = Obj
         return parsed;
     },
     validateBinding(binding: unknown, context: ExtensionPointValidationContext) {
-        if (typeof binding !== "function") {
-            throw new TypeError(
-                `Extension ${context.extensionId} cli.commands/${context.id} binding must be a function.`
-            );
-        }
+        validateCliCommandBinding(binding, context);
     }
 });

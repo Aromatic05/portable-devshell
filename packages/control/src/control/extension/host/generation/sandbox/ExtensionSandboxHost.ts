@@ -10,7 +10,6 @@ import {
 import type {
     ExtensionAssetCapability,
     ExtensionCapability,
-    ExtensionInvocationContext,
     ExtensionJsonValue,
     ExtensionLogger,
     ExtensionManagedProcess,
@@ -18,12 +17,15 @@ import type {
     ExtensionWorkerCapability,
     ExtensionWorkerSession
 } from "@portable-devshell/extension";
-import type { CliCommandResult } from "@portable-devshell/extension/cli";
+
+import type {
+    ExtensionPointSandboxBridge,
+    ExtensionPointSandboxInvokeOptions
+} from "../ExtensionPointRegistry.js";
 
 import {
     assertExtensionSandboxMessage,
     deserializeSandboxError,
-    invocationContextData,
     serializeSandboxError,
     type ExtensionHostToSandboxMessage,
     type ExtensionSandboxReadyDescriptor,
@@ -35,7 +37,6 @@ import {
     type ExtensionSandboxWorkerData,
     type ExtensionSandboxWorkerSessionDescriptor,
     type SandboxAssetProjectInput,
-    type SandboxCommandResult,
     type SandboxProcessSendInput,
     type SandboxProcessStartInput,
     type SandboxProcessTerminateInput,
@@ -103,7 +104,7 @@ const DEFAULT_MEMORY_WATCH_INTERVAL_MS = 25;
 const DEFAULT_DISPOSE_TIMEOUT_MS = 5_000;
 const WORKER_TERMINATE_WAIT_MS = 1_000;
 
-export class ExtensionSandboxHost {
+export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     readonly #assets: ExtensionAssetCapability;
     readonly #externalMemoryLimitBytes: number;
     readonly #healthCheckIntervalMs: number;
@@ -242,29 +243,22 @@ export class ExtensionSandboxHost {
         return await this.#ready;
     }
 
-    async cliCommand(
+    async invokeBinding(
+        pointId: string,
         id: string,
-        argv: readonly string[],
-        context: ExtensionInvocationContext
-    ): Promise<CliCommandResult> {
-        return await this.#invoke({
-            argv: [...argv],
-            context: invocationContextData(context),
+        input?: ExtensionJsonValue,
+        options: ExtensionPointSandboxInvokeOptions = {}
+    ): Promise<unknown> {
+        const operation: ExtensionSandboxInvokeOperation = {
             id,
-            kind: "cliCommand"
-        }, context.signal) as SandboxCommandResult;
-    }
-
-    async webEndpoint(id: string): Promise<URL | undefined> {
-        const value = await this.#invokeHostCallback(
-            { id, kind: "webEndpoint" },
-            "Web application endpoint resolution"
-        );
-        if (value === undefined) return undefined;
-        if (typeof value !== "string") {
-            throw new TypeError("Extension sandbox Web proxy returned a non-string URL.");
+            ...(input === undefined ? {} : { input }),
+            kind: "binding",
+            pointId
+        };
+        if (options.timeoutLabel !== undefined) {
+            return await this.#invokeHostCallback(operation, options.timeoutLabel);
         }
-        return new URL(value);
+        return await this.#invoke(operation, options.signal);
     }
 
     async dispose(): Promise<void> {

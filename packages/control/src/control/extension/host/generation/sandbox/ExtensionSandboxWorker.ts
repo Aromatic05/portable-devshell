@@ -9,7 +9,6 @@ import type {
     ExtensionAssetTransferResult,
     ExtensionCapabilities,
     ExtensionContext,
-    ExtensionInvocationContext,
     ExtensionJsonValue,
     ExtensionLogger,
     ExtensionManagedProcess,
@@ -20,9 +19,9 @@ import type {
     ExtensionWorkerCapability,
     ExtensionWorkerSession
 } from "@portable-devshell/extension";
-import type { CliCommandBinding } from "@portable-devshell/extension/cli";
-import type { WebApplicationBinding } from "@portable-devshell/extension/web";
 
+import { createControlExtensionSandboxPointRegistry } from "../../../../../composition/ControlExtensionSandboxPointRegistry.js";
+import type { ExtensionPointValidationContext } from "../ExtensionPointRegistry.js";
 import { ExtensionHostModuleResolver } from "../ExtensionHostModuleResolver.js";
 import {
     assertExtensionSandboxMessage,
@@ -68,7 +67,13 @@ interface PendingProcessEvents {
 const data = workerData as ExtensionSandboxWorkerData;
 const capabilityRequests = new Map<string, PendingCapabilityRequest>();
 const invocationControllers = new Map<string, AbortController>();
-const registrations = new Map<string, { binding: unknown; id: string; pointId: string }>();
+const registrations = new Map<string, {
+    binding: unknown;
+    descriptor: ExtensionJsonValue;
+    id: string;
+    pointId: string;
+}>();
+const sandboxPoints = createControlExtensionSandboxPointRegistry();
 const workerSessionClosures = new Map<string, () => void>();
 const processes = new Map<string, SandboxProcessRuntime>();
 const pendingProcessEvents = new Map<string, PendingProcessEvents>();
@@ -196,27 +201,15 @@ async function invoke(id: string, operation: ExtensionSandboxInvokeOperation): P
     try {
         let value: unknown;
         switch (operation.kind) {
-            case "cliCommand": {
-                const binding = requireRegistration("cli.commands", operation.id);
-                if (typeof binding !== "function") {
-                    throw new Error(`Extension CLI command binding is unavailable: ${operation.id}.`);
-                }
-                value = await (binding as CliCommandBinding)(
-                    operation.argv,
-                    createInvocationContext(operation.context, controller.signal)
+            case "binding": {
+                const binding = requireRegistration(operation.pointId, operation.id);
+                value = await sandboxPoints.invokeBinding(
+                    operation.pointId,
+                    binding,
+                    operation.input,
+                    controller.signal,
+                    pointContext(operation.id)
                 );
-                break;
-            }
-            case "webEndpoint": {
-                const binding = requireRegistration("web.applications", operation.id) as WebApplicationBinding;
-                if (binding.source.kind !== "endpoint") {
-                    throw new Error(`Extension Web application ${operation.id} is not endpoint-backed.`);
-                }
-                const upstream = await binding.source.resolve();
-                if (upstream !== undefined && !(upstream instanceof URL)) {
-                    throw new TypeError("Extension Web application endpoint resolve() must return a URL or undefined.");
-                }
-                value = upstream?.href;
                 break;
             }
             case "deactivate":
@@ -493,22 +486,6 @@ async function requestCapability(
     });
 }
 
-function createInvocationContext(
-    value: {
-        localOwner: boolean;
-        requestId: string;
-        workingDirectory?: string;
-    },
-    signal: AbortSignal
-): ExtensionInvocationContext {
-    return Object.freeze({
-        localOwner: value.localOwner,
-        requestId: value.requestId,
-        signal,
-        ...(value.workingDirectory === undefined ? {} : { workingDirectory: value.workingDirectory })
-    });
-}
-
 function registerBinding(pointId: string, id: string, binding: unknown): void {
     if (!/^[a-z][a-z0-9-]*$/u.test(id)) {
         throw new TypeError(`Extension registration id is invalid: ${id}.`);
@@ -517,46 +494,28 @@ function registerBinding(pointId: string, id: string, binding: unknown): void {
     if (registrations.has(key)) {
         throw new TypeError(`Extension ${data.context.id} registered ${pointId}/${id} more than once.`);
     }
-    describeRuntime(pointId, binding, id);
-    registrations.set(key, { binding, id, pointId });
+    const descriptor = sandboxPoints.describeBinding(pointId, binding, pointContext(id));
+    registrations.set(key, { binding, descriptor, id, pointId });
 }
 
 function describeRegistrations(): ExtensionSandboxReadyDescriptor {
     const descriptors: ExtensionSandboxRegistrationDescriptor[] = [];
     for (const registration of registrations.values()) {
         descriptors.push(Object.freeze({
+            descriptor: registration.descriptor,
             id: registration.id,
-            pointId: registration.pointId,
-            runtime: describeRuntime(registration.pointId, registration.binding, registration.id)
+            pointId: registration.pointId
         }));
     }
     return Object.freeze({ registrations: Object.freeze(descriptors) });
 }
 
-function describeRuntime(
-    pointId: string,
-    binding: unknown,
-    id: string
-): ExtensionSandboxRegistrationDescriptor["runtime"] {
-    if (pointId === "cli.commands") {
-        if (typeof binding !== "function") {
-            throw new TypeError(`Extension ${data.context.id} cli.commands/${id} binding must be a function.`);
-        }
-        return Object.freeze({ kind: "cli.command" });
-    }
-    if (pointId === "web.applications") {
-        if (!isRecord(binding) || !isRecord(binding.source)) {
-            throw new TypeError(`Extension ${data.context.id} web.applications/${id} binding must provide source.`);
-        }
-        if (binding.source.kind === "files" && typeof binding.source.directory === "string") {
-            return Object.freeze({ directory: binding.source.directory, kind: "web.files" });
-        }
-        if (binding.source.kind === "endpoint" && typeof binding.source.resolve === "function") {
-            return Object.freeze({ kind: "web.endpoint" });
-        }
-        throw new TypeError(`Extension ${data.context.id} web.applications/${id} source is invalid.`);
-    }
-    throw new TypeError(`Extension ${data.context.id} cannot bind unsupported Extension Point ${pointId}.`);
+function pointContext(id: string): ExtensionPointValidationContext {
+    return Object.freeze({
+        codeDirectory: data.codeDirectory,
+        extensionId: data.context.id,
+        id
+    });
 }
 
 function requireRegistration(pointId: string, id: string): unknown {

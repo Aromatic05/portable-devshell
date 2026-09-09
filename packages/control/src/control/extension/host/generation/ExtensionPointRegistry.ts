@@ -1,4 +1,7 @@
-import type { ExtensionPointDeclaration } from "@portable-devshell/extension";
+import type {
+    ExtensionJsonValue,
+    ExtensionPointDeclaration
+} from "@portable-devshell/extension";
 
 export interface ExtensionPointValidationContext {
     readonly codeDirectory: string;
@@ -6,7 +9,26 @@ export interface ExtensionPointValidationContext {
     readonly id: string;
 }
 
+export interface ExtensionPointSandboxInvokeOptions {
+    readonly signal?: AbortSignal;
+    readonly timeoutLabel?: string;
+}
+
+export interface ExtensionPointSandboxBridge {
+    invokeBinding(
+        pointId: string,
+        id: string,
+        input?: ExtensionJsonValue,
+        options?: ExtensionPointSandboxInvokeOptions
+    ): Promise<unknown>;
+}
+
 export interface ExtensionPointDefinition {
+    createSandboxBinding?(
+        descriptor: ExtensionJsonValue,
+        context: ExtensionPointValidationContext,
+        bridge: ExtensionPointSandboxBridge
+    ): unknown;
     readonly id: string;
     parseDeclaration(declaration: ExtensionPointDeclaration): ExtensionPointDeclaration;
     validateBinding(binding: unknown, context: ExtensionPointValidationContext): void;
@@ -38,6 +60,19 @@ export class ExtensionPointRegistry {
         extensionId: string
     ): ExtensionPointDeclaration {
         return this.#require(pointId, extensionId).parseDeclaration(declaration);
+    }
+
+    createSandboxBinding(
+        pointId: string,
+        descriptor: ExtensionJsonValue,
+        context: ExtensionPointValidationContext,
+        bridge: ExtensionPointSandboxBridge
+    ): unknown {
+        const create = this.#require(pointId, context.extensionId).createSandboxBinding;
+        if (create === undefined) {
+            throw new TypeError(`Extension Point ${pointId} does not support sandbox bindings.`);
+        }
+        return create(descriptor, context, bridge);
     }
 
     validateBinding(

@@ -1,7 +1,6 @@
 import type {
     ExtensionAssetProjectionInput,
     ExtensionCapability,
-    ExtensionInvocationContext,
     ExtensionJsonValue,
     ExtensionPaths,
     ExtensionProcessExit,
@@ -10,7 +9,6 @@ import type {
     ExtensionWorkerEnvironment,
     ExtensionWorkerOpenInput
 } from "@portable-devshell/extension";
-import type { CliCommandResult } from "@portable-devshell/extension/cli";
 import {
     createError,
     toControlErrorBody,
@@ -54,34 +52,21 @@ export interface ExtensionSandboxWorkerData {
 }
 
 export interface ExtensionSandboxRegistrationDescriptor {
+    descriptor: ExtensionJsonValue;
     id: string;
     pointId: string;
-    runtime:
-        | { kind: "cli.command" }
-        | { directory: string; kind: "web.files" }
-        | { kind: "web.endpoint" };
 }
 
 export interface ExtensionSandboxReadyDescriptor {
     registrations: readonly ExtensionSandboxRegistrationDescriptor[];
 }
 
-export interface ExtensionSandboxInvocationContextData {
-    localOwner: boolean;
-    requestId: string;
-    workingDirectory?: string;
-}
-
 export type ExtensionSandboxInvokeOperation =
     | {
-          argv: readonly string[];
-          context: ExtensionSandboxInvocationContextData;
           id: string;
-          kind: "cliCommand";
-      }
-    | {
-          id: string;
-          kind: "webEndpoint";
+          input?: ExtensionJsonValue;
+          kind: "binding";
+          pointId: string;
       }
     | { kind: "deactivate" };
 
@@ -237,19 +222,6 @@ export interface SandboxProcessTerminateInput {
 
 export type SandboxAssetProjectInput = Omit<ExtensionAssetProjectionInput, "signal">;
 export type SandboxWorkerOpenInput = ExtensionWorkerOpenInput;
-export type SandboxCommandResult = CliCommandResult;
-
-export function invocationContextData(
-    context: ExtensionInvocationContext
-): ExtensionSandboxInvocationContextData {
-    return {
-        localOwner: context.localOwner,
-        requestId: context.requestId,
-        ...(context.workingDirectory === undefined ? {} : {
-            workingDirectory: context.workingDirectory
-        })
-    };
-}
 
 /**
  * MessagePort does not impose the framed transport budget used elsewhere in
