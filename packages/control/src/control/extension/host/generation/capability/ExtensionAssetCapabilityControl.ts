@@ -7,7 +7,7 @@ import type {
     ExtensionAssetBundle,
     ExtensionAssetCapability,
     ExtensionAssetProjectionInput,
-    ExtensionAssetTransferResult
+    ExtensionAssetProjectionResult
 } from "@portable-devshell/extension";
 
 import {
@@ -28,7 +28,7 @@ export interface ExtensionAssetProjectionPortInput {
 
 export type ExtensionAssetProjectionPort = (
     input: ExtensionAssetProjectionPortInput
-) => Promise<ExtensionAssetTransferResult>;
+) => Promise<ExtensionAssetProjectionResult>;
 
 export interface ExtensionAssetCapabilityControlOptions {
     allowed: boolean;
@@ -166,7 +166,7 @@ export class ExtensionAssetCapabilityControl implements ExtensionAssetCapability
         await rm(bundle.directory, { force: true, recursive: true });
     }
 
-    async projectBundle(input: ExtensionAssetProjectionInput): Promise<ExtensionAssetTransferResult> {
+    async projectBundle(input: ExtensionAssetProjectionInput): Promise<ExtensionAssetProjectionResult> {
         this.#assertAllowed();
         input.signal?.throwIfAborted();
         const bundle = await this.resolveBundle(input.generation);

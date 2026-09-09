@@ -1,7 +1,7 @@
 import { isAbsolute, resolve } from "node:path";
 
 import type {
-    ExtensionAssetTransferResult,
+    ExtensionAssetProjectionResult,
     ExtensionContext,
     ExtensionJsonValue
 } from "@portable-devshell/extension";
@@ -89,7 +89,7 @@ async function getSkill(
     const assets = extension.capabilities.assets;
     if (assets === undefined) throw new Error("Skill Extension requires the assets capability.");
     const asset = await assets.installDirectory(selected.root);
-    const transfer = await assets.projectBundle({
+    const projection = await assets.projectBundle({
         generation: asset.generation,
         overwrite: true,
         signal: invocation.signal,
@@ -99,15 +99,15 @@ async function getSkill(
             key: name
         }
     });
-    return transferResult(name, selected.source, asset.generation, instance, transfer);
+    return projectionResult(name, selected.source, asset.generation, instance, projection);
 }
 
-function transferResult(
+function projectionResult(
     name: string,
     source: string,
     generation: string,
     instance: string,
-    transfer: ExtensionAssetTransferResult
+    projection: ExtensionAssetProjectionResult
 ): ExtensionJsonValue {
     return {
         generation,
@@ -118,9 +118,8 @@ function transferResult(
             instance,
             key: name
         },
-        transfer: {
-            transferId: transfer.transferId,
-            transferredBytes: transfer.transferredBytes
+        projection: {
+            transferredBytes: projection.transferredBytes
         }
     };
 }

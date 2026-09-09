@@ -6,7 +6,7 @@ import type {
     ExtensionAssetBundle,
     ExtensionAssetCapability,
     ExtensionAssetProjectionInput,
-    ExtensionAssetTransferResult,
+    ExtensionAssetProjectionResult,
     ExtensionCapabilities,
     ExtensionContext,
     ExtensionJsonValue,
@@ -288,7 +288,7 @@ function createAssets(): ExtensionAssetCapability {
                 target: { ...input.target }
             } satisfies SandboxAssetProjectInput,
             { signal: input.signal }
-        ) as ExtensionAssetTransferResult,
+        ) as ExtensionAssetProjectionResult,
         removeBundle: async (generation: string) => {
             await requestCapability("assets.removeBundle", { generation });
         },

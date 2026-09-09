@@ -37,7 +37,7 @@ function context(options: {
                         `asset.project:${input.target.instance}:${input.target.collection}:${input.target.key}:${input.overwrite}`
                     );
                     if (options.projectionFailure !== undefined) throw options.projectionFailure;
-                    return { transferId: "transfer-1", transferredBytes: 123 };
+                    return { transferredBytes: 123 };
                 },
                 async removeBundle() {},
                 async resolveBundle() { return undefined; }
@@ -106,7 +106,7 @@ test("Skill get snapshots one selected Skill and projects it as an instance-scop
             instance: "remote-one",
             key: "Review changes"
         },
-        transfer: { transferId: "transfer-1", transferredBytes: 123 }
+        projection: { transferredBytes: 123 }
     });
 });
 

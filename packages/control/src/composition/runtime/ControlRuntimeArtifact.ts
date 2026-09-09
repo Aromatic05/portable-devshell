@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { createError, errorCodes } from "@portable-devshell/shared";
-import type { ExtensionAssetProjectionInput, ExtensionAssetTransferResult } from "@portable-devshell/extension";
+import type { ExtensionAssetProjectionInput, ExtensionAssetProjectionResult } from "@portable-devshell/extension";
 
 import { ArtifactHttpRoute, artifactShareRoute } from "../../control/artifact/route/ArtifactHttpRoute.js";
 import { ArtifactHostBridge } from "../../control/artifact/host/ArtifactHostBridge.js";
@@ -76,7 +76,7 @@ export class ControlRuntimeArtifact {
             sourcePath: string;
             target: { instance: string; path: string; workspace: string };
         }
-    ): Promise<ExtensionAssetTransferResult> {
+    ): Promise<ExtensionAssetProjectionResult> {
         input.signal?.throwIfAborted();
         const authority = `@extension-asset:${randomUUID()}`;
         this.#extensionAssetAuthorities.add(authority);
@@ -105,10 +105,7 @@ export class ControlRuntimeArtifact {
                             ?? `Extension ${extensionId} asset transfer ${transferId} ended with status ${completed.status}.`
                     );
                 }
-                return Object.freeze({
-                    transferId,
-                    transferredBytes: completed.transferredBytes
-                });
+                return Object.freeze({ transferredBytes: completed.transferredBytes });
             } finally {
                 input.signal?.removeEventListener("abort", abort);
             }
@@ -125,7 +122,7 @@ export class ControlRuntimeArtifact {
             sourcePath: string;
             target: ExtensionAssetProjectionInput["target"];
         }
-    ): Promise<ExtensionAssetTransferResult> {
+    ): Promise<ExtensionAssetProjectionResult> {
         input.signal?.throwIfAborted();
         const descriptor = this.#instances.get(input.target.instance);
         if (descriptor === undefined) {

@@ -97,9 +97,9 @@ test("Extension assets use the Artifact core to transfer a Control-owned directo
         }
     });
 
-    assert.match(result.transferId, /^[0-9a-f-]{36}$/u);
     assert.equal(result.transferredBytes, Buffer.concat(h.target.chunks).length);
     assert.ok(result.transferredBytes > 0);
+    assert.equal("transferId" in result, false);
     assert.equal(h.target.events.includes("artifact.transferCompleted"), true);
 });
 

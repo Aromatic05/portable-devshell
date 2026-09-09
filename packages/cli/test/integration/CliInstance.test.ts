@@ -147,12 +147,11 @@ async function runRealWorkerSmoke(): Promise<void> {
             0
         );
         const skillGet = JSON.parse(stdout.flush()) as {
+            projection: { transferredBytes: number };
             target: { collection: string; instance: string; key: string };
-            transfer: { transferId: string; transferredBytes: number };
         };
         assert.deepEqual(skillGet.target, { collection: "managed", instance: "aromatic-pc", key: "review" });
-        assert.match(skillGet.transfer.transferId, /^[0-9a-f-]{36}$/u);
-        assert.ok(skillGet.transfer.transferredBytes > 0);
+        assert.ok(skillGet.projection.transferredBytes > 0);
         const installedSkill = join(
             homeDirectory,
             ".devshell",

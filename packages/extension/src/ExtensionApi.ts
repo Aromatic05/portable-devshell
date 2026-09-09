@@ -55,8 +55,7 @@ export interface ExtensionAssetBundle {
     readonly generation: string;
 }
 
-export interface ExtensionAssetTransferResult {
-    readonly transferId: string;
+export interface ExtensionAssetProjectionResult {
     readonly transferredBytes: number;
 }
 
@@ -81,7 +80,7 @@ export interface ExtensionAssetCapability {
     installBundle(sourcePath: string): Promise<ExtensionAssetBundle>;
     installDirectory(sourcePath: string): Promise<ExtensionAssetBundle>;
     listBundles(): Promise<readonly ExtensionAssetBundle[]>;
-    projectBundle(input: ExtensionAssetProjectionInput): Promise<ExtensionAssetTransferResult>;
+    projectBundle(input: ExtensionAssetProjectionInput): Promise<ExtensionAssetProjectionResult>;
     removeBundle(generation: string): Promise<void>;
     resolveBundle(generation: string): Promise<ExtensionAssetBundle | undefined>;
 }
