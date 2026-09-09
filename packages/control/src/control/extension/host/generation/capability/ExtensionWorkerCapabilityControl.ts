@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import type {
     ExtensionJsonValue,
-    ExtensionToolDefinition,
     ExtensionWorkerCapability,
+    ExtensionWorkerToolDefinition,
     ExtensionWorkerOpenInput,
     ExtensionWorkerEnvironment,
     ExtensionWorkerSession
@@ -128,7 +128,7 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
                     options.onProgress as ((progress: JsonValue) => void) | undefined
                 ) as ExtensionJsonValue,
                 close,
-                listTools: () => lease.worker.listTools().map(toExtensionToolDefinition)
+                listTools: () => lease.worker.listTools().map(toExtensionWorkerToolDefinition)
             };
             this.#sessions.set(sessionId, { instance, reference, session, sessionId });
             return session;
@@ -206,11 +206,11 @@ function extensionWorkerEnvironment(
     });
 }
 
-function toExtensionToolDefinition(tool: {
+function toExtensionWorkerToolDefinition(tool: {
     description: string;
     inputSchema: JsonValue;
     name: string;
-}): ExtensionToolDefinition {
+}): ExtensionWorkerToolDefinition {
     return {
         description: tool.description,
         inputSchema: tool.inputSchema as ExtensionJsonValue,

@@ -86,7 +86,7 @@ export interface ExtensionAssetCapability {
     resolveBundle(generation: string): Promise<ExtensionAssetBundle | undefined>;
 }
 
-export interface ExtensionToolDefinition {
+export interface ExtensionWorkerToolDefinition {
     description: string;
     inputSchema: ExtensionJsonValue;
     name: string;
@@ -141,7 +141,7 @@ export interface ExtensionWorkerSession {
         options?: ExtensionWorkerCallOptions
     ): Promise<ExtensionJsonValue>;
     close(): Promise<void>;
-    listTools(): readonly ExtensionToolDefinition[];
+    listTools(): readonly ExtensionWorkerToolDefinition[];
 }
 
 export interface ExtensionWorkerCapability {

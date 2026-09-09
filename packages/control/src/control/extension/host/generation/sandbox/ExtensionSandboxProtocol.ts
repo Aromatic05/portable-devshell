@@ -5,8 +5,8 @@ import type {
     ExtensionPaths,
     ExtensionProcessExit,
     ExtensionProcessStartInput,
-    ExtensionToolDefinition,
     ExtensionWorkerEnvironment,
+    ExtensionWorkerToolDefinition,
     ExtensionWorkerOpenInput
 } from "@portable-devshell/extension";
 import {
@@ -88,7 +88,7 @@ export interface ExtensionSandboxWorkerSessionDescriptor {
     environment: ExtensionWorkerEnvironment;
     instance: string;
     sessionId: string;
-    tools: readonly ExtensionToolDefinition[];
+    tools: readonly ExtensionWorkerToolDefinition[];
     workspace: string;
 }
 
