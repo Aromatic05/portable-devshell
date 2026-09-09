@@ -222,6 +222,8 @@ web.applications
 
 Registration 使用 Extension-local id；Host 结合 point id、Extension id 和 local id 建立全局 identity。Runtime registration 默认属于当前 generation，generation retirement 自动撤销。
 
+Extension id 与 point-local registration id 是独立 namespace。CLI 的内置 command name 只由 `cli.commands` point definition 保留：Extension `status` 可以存在并提供另一个 command id，但 `cli.commands/status` 会在 static declaration validation 阶段被拒绝，因为 CLI parser 永远优先解析内置 `status`。这与 install domain 对 builtin Extension identity（当前 `skill / secret / mcp`）的保护互不替代。
+
 Control 的 Extension runtime Host 对 point domain 保持中立：它负责 static catalog、lazy activation、registration acquisition 和 generation lease，但不 import CLI/Web point contract，也不提供 `dispatchCommand`、`dispatchWeb` 之类的 domain-specific dispatch API。取得 lease 后，binding 的类型校验、调用和结果语义由对应 domain service 自己负责。
 
 当前 Control 在 composition 层构造内部 `ExtensionPointRegistry`。CLI/Web 各自注册 point definition：declaration schema、binding shape 和 point-specific resource validation 留在 domain owner；`ExtensionRegistration`、`ExtensionCatalog`、`ExtensionLoader` 只通过 registry 委托。这个 registry 不导出给 Extension，也不是一个 central point-kind enum。

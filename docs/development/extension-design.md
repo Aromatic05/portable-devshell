@@ -443,6 +443,8 @@ Global identity 由 Host 组合：
 
 Extension 不允许注册到别人的 namespace。
 
+`extension-id` 与各 Extension Point 的 local id 是不同 namespace。CLI 内置 command name 的冲突检查属于 `cli.commands` owner，不能用一组 CLI 名称去全局禁止同名 Extension id。例如 Extension `status` 可以合法提供 `cli.commands/custom-command`；反过来任意 Extension 都不能声明实际被内置 CLI tree 截获的 `cli.commands/status`。
+
 ### 6.4 Registration ownership
 
 Runtime registration 默认属于当前 generation：
@@ -651,6 +653,8 @@ CLI 在 Extension 未 activation 时就应该能够：
 - 生成 help；
 - 检测 command id 冲突；
 - 知道哪个 Extension 需要按需 activation。
+
+CLI domain 还必须在 declaration validation 阶段拒绝与内置顶层 command 冲突的 local id。这个规则只约束 `cli.commands` registration id，不约束 Extension 自身 id；builtin Extension identity（当前 `skill / secret / mcp`）是 install domain 的另一条独立保护规则。
 
 因此 metadata 应尽可能 declarative。
 
