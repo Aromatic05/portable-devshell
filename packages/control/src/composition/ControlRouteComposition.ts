@@ -54,6 +54,7 @@ export interface ControlRouteCompositionOptions {
     overview?: OperationalOverviewPort;
     restart?: () => Promise<void> | void;
     reverse?: ReverseCredentialService;
+    runtimeSubscriptions?: RuntimeSubscriptionManager;
     shutdown(): Promise<void> | void;
     terminalMaxUnackedBytes?: number;
     toolProvenance?: ToolCallProvenanceStore;
@@ -63,7 +64,7 @@ export interface ControlRouteCompositionOptions {
 export class ControlRouteComposition {
     readonly #overview: OperationalOverviewPort;
     readonly #options: ControlRouteCompositionOptions;
-    readonly #subscriptions = new RuntimeSubscriptionManager();
+    readonly #subscriptions: RuntimeSubscriptionManager;
     readonly #terminalBackends = new Map<string, TerminalBackend>();
     readonly #terminals = new TerminalSessionService();
     readonly #unsubscribeInstances: () => void;
@@ -71,6 +72,7 @@ export class ControlRouteComposition {
 
     constructor(options: ControlRouteCompositionOptions) {
         this.#options = options;
+        this.#subscriptions = options.runtimeSubscriptions ?? new RuntimeSubscriptionManager();
         this.#overview = options.overview ?? new OperationalOverviewService({
             instances: options.instances,
             oauthApprovals: options.oauthApprovals

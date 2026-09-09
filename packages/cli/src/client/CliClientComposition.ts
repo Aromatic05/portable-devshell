@@ -16,6 +16,10 @@ import {
     createCliRuntimeAdapter,
     type CliClientRuntime,
 } from "./CliRuntimeAdapter.js";
+import {
+    createCliCommandAdapter,
+    type CliClientCommand
+} from "./CliCommandAdapter.js";
 
 export interface CliClientOptions extends ControlClientChannelOptions {}
 
@@ -23,7 +27,8 @@ export type CliClientTodo = Omit<ControlClients["todo"], "subscribe"> & {
     subscribe(instance: string, fromSeq: number): Promise<CliClientEventStream>;
 };
 
-export type CliClients = Omit<ControlClients, "runtime" | "todo"> & {
+export type CliClients = Omit<ControlClients, "cli" | "runtime" | "todo"> & {
+    cli: CliClientCommand;
     close?(): void;
     reconnect?(): Promise<void>;
     runtime: CliClientRuntime;
@@ -41,6 +46,7 @@ export function createCliClients(options: CliClientOptions = {}): CliClients {
     const clients = createControlClients(connection, { clientKind: "cli" });
     return {
         ...clients,
+        cli: createCliCommandAdapter(connection, clients.cli),
         close: () => connection.close(),
         reconnect: async () => await connection.reconnect(),
         runtime: createCliRuntimeAdapter(connection, clients.runtime),

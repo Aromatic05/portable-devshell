@@ -5,13 +5,13 @@
     { "argv": ["restart"], "expected": { "kind": "control.restart" } },
     { "argv": ["tui"], "expected": { "kind": "tui" } },
     { "argv": ["instance", "create"], "expected": { "kind": "instance.create" } },
-    { "argv": ["instance", "--help"], "expected": { "kind": "instance.help" } },
-    { "argv": ["instance", "list"], "expected": { "kind": "instance.list" } },
+    { "argv": ["instance", "--help"], "expected": { "args": ["--help"], "commandId": "instance", "kind": "cli.command" } },
+    { "argv": ["instance", "list"], "expected": { "args": ["list"], "commandId": "instance", "kind": "cli.command" } },
     { "argv": ["watch", "--help"], "expected": { "kind": "watch.help" } },
-    { "argv": ["instance", "status", "demo-local"], "expected": { "instance": "demo-local", "kind": "instance.status" } },
-    { "argv": ["instance", "logs", "demo-local", "-f"], "expected": { "follow": true, "instance": "demo-local", "kind": "instance.logs" } },
+    { "argv": ["instance", "status", "demo-local"], "expected": { "args": ["status", "demo-local"], "commandId": "instance", "kind": "cli.command" } },
+    { "argv": ["instance", "logs", "demo-local", "-f"], "expected": { "args": ["logs", "demo-local", "-f"], "commandId": "instance", "kind": "cli.command" } },
     {
         "argv": ["instance", "call", "demo-local", "/tmp/ws", "bash_run", "{\"command\":\"pwd\",\"timeoutMs\":30000}"],
-        "expected": { "input": { "command": "pwd", "timeoutMs": 30000 }, "instance": "demo-local", "kind": "instance.call", "toolName": "bash_run", "workspace": "/tmp/ws" }
+        "expected": { "args": ["call", "demo-local", "/tmp/ws", "bash_run", "{\"command\":\"pwd\",\"timeoutMs\":30000}"], "commandId": "instance", "kind": "cli.command" }
     }
 ]

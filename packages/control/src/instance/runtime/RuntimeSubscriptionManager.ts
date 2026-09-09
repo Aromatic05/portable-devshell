@@ -8,9 +8,23 @@ import {
 
 import type { RuntimeSubscription } from "./RuntimeSubscription.js";
 
+interface RuntimeEventWatch {
+    eventFilter?: (event: InstanceEvent) => boolean;
+    instance: RuntimeSubscription["instance"];
+    instanceName: string;
+    nextSeq: number;
+    onEvent(event: InstanceEvent): Promise<void> | void;
+    onGap(gap: { lastSeq: number; nextSeq: number }): Promise<number | void> | number | void;
+    reject(error: unknown): void;
+    resolve(): void;
+    signal: AbortSignal;
+}
+
 export class RuntimeSubscriptionManager {
     readonly #pollIntervalMs: number;
     readonly #subscriptions = new Map<string, RuntimeSubscription>();
+    readonly #watches = new Map<number, RuntimeEventWatch>();
+    #nextWatchId = 1;
     #timer?: NodeJS.Timeout;
     #pollPromise?: Promise<void>;
 
@@ -66,36 +80,77 @@ export class RuntimeSubscriptionManager {
         this.#ensurePolling();
     }
 
+    async watch(
+        instanceName: string,
+        instance: RuntimeSubscription["instance"],
+        fromSeq: number,
+        signal: AbortSignal,
+        handlers: {
+            eventFilter?: (event: InstanceEvent) => boolean;
+            onEvent(event: InstanceEvent): Promise<void> | void;
+            onGap(gap: { lastSeq: number; nextSeq: number }): Promise<number | void> | number | void;
+        }
+    ): Promise<void> {
+        signal.throwIfAborted();
+        const seed: RuntimeEventWatch = {
+            eventFilter: handlers.eventFilter,
+            instance,
+            instanceName,
+            nextSeq: fromSeq,
+            onEvent: handlers.onEvent,
+            onGap: handlers.onGap,
+            reject: () => undefined,
+            resolve: () => undefined,
+            signal
+        };
+        seed.nextSeq = await this.#deliverWatchSlice(seed);
+        signal.throwIfAborted();
+
+        await new Promise<void>((resolve, reject) => {
+            const id = this.#nextWatchId++;
+            const aborted = () => {
+                if (this.#watches.delete(id)) resolve();
+                this.#stopPollingWhenIdle();
+            };
+            const watch: RuntimeEventWatch = {
+                ...seed,
+                reject: (error) => {
+                    signal.removeEventListener("abort", aborted);
+                    reject(error);
+                },
+                resolve: () => {
+                    signal.removeEventListener("abort", aborted);
+                    resolve();
+                }
+            };
+            signal.addEventListener("abort", aborted, { once: true });
+            this.#watches.set(id, watch);
+            this.#ensurePolling();
+        });
+    }
+
     unsubscribeConnection(connectionId: string): void {
         for (const [key, subscription] of this.#subscriptions) {
-            if (subscription.connectionId === connectionId) {
-                this.#subscriptions.delete(key);
-            }
+            if (subscription.connectionId === connectionId) this.#subscriptions.delete(key);
         }
         this.#stopPollingWhenIdle();
     }
 
     #ensurePolling(): void {
-        if (this.#timer !== undefined) {
-            return;
-        }
+        if (this.#timer !== undefined) return;
         this.#timer = setInterval(() => {
             void this.#poll();
         }, this.#pollIntervalMs);
     }
 
     async #poll(): Promise<void> {
-        if (this.#pollPromise !== undefined) {
-            return await this.#pollPromise;
-        }
+        if (this.#pollPromise !== undefined) return await this.#pollPromise;
         const poll = this.#pollSubscriptions();
         this.#pollPromise = poll;
         try {
             await poll;
         } finally {
-            if (this.#pollPromise === poll) {
-                this.#pollPromise = undefined;
-            }
+            if (this.#pollPromise === poll) this.#pollPromise = undefined;
         }
     }
 
@@ -120,9 +175,7 @@ export class RuntimeSubscriptionManager {
                 }
 
                 for (const event of slice.events) {
-                    if (subscription.eventFilter !== undefined && !subscription.eventFilter(event)) {
-                        continue;
-                    }
+                    if (subscription.eventFilter !== undefined && !subscription.eventFilter(event)) continue;
                     const [module, operation] = splitEventType(event.type);
                     await subscription.stream.emit(operation, event as unknown as JsonValue, event.seq, module);
                 }
@@ -131,7 +184,35 @@ export class RuntimeSubscriptionManager {
                 this.#subscriptions.delete(key);
             }
         }
+
+        for (const [id, watch] of [...this.#watches]) {
+            try {
+                if (watch.signal.aborted) {
+                    this.#watches.delete(id);
+                    watch.resolve();
+                    continue;
+                }
+                watch.nextSeq = await this.#deliverWatchSlice(watch);
+            } catch (error) {
+                this.#watches.delete(id);
+                watch.reject(error);
+            }
+        }
+
         this.#stopPollingWhenIdle();
+    }
+
+    async #deliverWatchSlice(watch: RuntimeEventWatch): Promise<number> {
+        const slice = watch.instance.subscribe(watch.nextSeq);
+        if (slice.kind === "gap") {
+            const recovered = await watch.onGap({ lastSeq: slice.lastSeq, nextSeq: slice.nextSeq });
+            return recovered ?? slice.nextSeq;
+        }
+        for (const event of slice.events) {
+            if (watch.eventFilter !== undefined && !watch.eventFilter(event)) continue;
+            await watch.onEvent(event);
+        }
+        return slice.lastSeq + 1;
     }
 
     #key(connectionId: string, requestId: string): string {
@@ -139,9 +220,7 @@ export class RuntimeSubscriptionManager {
     }
 
     #stopPollingWhenIdle(): void {
-        if (this.#subscriptions.size > 0 || this.#timer === undefined) {
-            return;
-        }
+        if (this.#subscriptions.size > 0 || this.#watches.size > 0 || this.#timer === undefined) return;
         clearInterval(this.#timer);
         this.#timer = undefined;
     }
@@ -155,8 +234,6 @@ function splitEventType(type: string): [module: string, operation: string] {
     ) {
         throw new Error(`Invalid instance event type: ${type}`);
     }
-    if (segments.length === 2) {
-        return [segments[0]!, segments[1]!];
-    }
+    if (segments.length === 2) return [segments[0]!, segments[1]!];
     return ["instanceEvent", "published"];
 }

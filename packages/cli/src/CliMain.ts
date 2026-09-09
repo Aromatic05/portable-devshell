@@ -15,27 +15,17 @@ import {
     type CliClients,
 } from "./client/CliClientComposition.js";
 import { CliCommandInstanceCreate } from "./command/instance/CliCommandInstanceCreate.js";
-import { CliCommandInstanceTodo } from "./command/instance/CliCommandInstanceTodo.js";
 import { CliCommandWatchLogs } from "./command/watch/CliCommandWatchLogs.js";
 import { CliCommandWatchStatus } from "./command/watch/CliCommandWatchStatus.js";
 import { cliExitCodes } from "./exit/CliExitCode.js";
 import { CliExitMapper } from "./exit/CliExitMapper.js";
 import { renderCliError } from "./render/CliRenderError.js";
-import { renderCliTopicUsage, renderCliUsage, renderExtensionCommandUsage, renderExtensionUsage, renderInstanceUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
+import { renderCliTopicUsage, renderCliUsage, renderExtensionCommandUsage, renderExtensionUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
 import { renderControlLogs } from "./render/control/CliRenderControlLogs.js";
 import { renderControlStatus } from "./render/control/CliRenderControlStatus.js";
-import { renderInstanceList } from "./render/instance/CliRenderInstanceList.js";
 import { renderInstanceCreateResult } from "./render/instance/CliRenderInstanceCreate.js";
 import { renderInstanceLogs } from "./render/instance/CliRenderInstanceLogs.js";
 import { renderInstanceSnapshot } from "./render/instance/CliRenderInstanceSnapshot.js";
-import {
-    renderReverseDeviceCode,
-    renderReverseTokenRevocation,
-    renderReverseTokenRotation
-} from "./render/instance/CliRenderInstanceReverse.js";
-import { renderInstanceTodo } from "./render/instance/CliRenderInstanceTodo.js";
-import { renderToolCall } from "./render/tool/CliRenderToolCall.js";
-import { renderToolResult } from "./render/tool/CliRenderToolResult.js";
 import { CliWizardInstanceCreate } from "./wizard/CliWizardInstanceCreate.js";
 import { cliBuiltinExtensionSources } from "./extension/CliBuiltinExtensionSources.js";
 
@@ -297,23 +287,27 @@ export class CliMain {
                     }
                 }
                 const result = await this.#clients.cli.command(command.commandId, command.args, {
+                    relay: {
+                        input: this.#stdin,
+                        stderr: this.#stderr,
+                        stdout: this.#stdout
+                    },
                     workingDirectory: process.cwd()
                 });
                 if (result.kind === "text") {
                     const text = result.text ?? "";
-                    this.#stdout.write(text.endsWith("\n") ? text : `${text}\n`);
+                    if (text.length > 0) {
+                        this.#stdout.write(text.endsWith("\n") ? text : `${text}\n`);
+                    }
                 } else {
                     this.#writeJson(result.value ?? null);
                 }
                 return;
             }
-            case "instance.list":
-                this.#stdout.write(renderInstanceList(await this.#clients.instance.list()));
-                return;
             case "instance.create": {
                 const result = await new CliCommandInstanceCreate().execute(
                     this.#clients.instance,
-                    this.#clients.reverse,
+                    this.#clients.cli,
                     new CliWizardInstanceCreate({
                         input: this.#stdin,
                         output: this.#stdout
@@ -326,83 +320,6 @@ export class CliMain {
 
                 return;
             }
-            case "instance.delete":
-                this.#writeJson(await this.#clients.instance.delete(command.instance));
-                return;
-            case "instance.enable":
-                this.#writeJson(await this.#clients.instance.enable(command.instance));
-                return;
-            case "instance.disable":
-                this.#writeJson(await this.#clients.instance.disable(command.instance));
-                return;
-            case "instance.help":
-                this.#stdout.write(`${renderInstanceUsage()}\n`);
-                return;
-            case "instance.deviceCode":
-                this.#stdout.write(
-                    renderReverseDeviceCode(await this.#clients.reverse.createCode(command.instance))
-                );
-                return;
-            case "instance.rotateToken":
-                this.#stdout.write(
-                    renderReverseTokenRotation(await this.#clients.reverse.rotateToken(command.instance))
-                );
-                return;
-            case "instance.revokeToken":
-                this.#stdout.write(
-                    renderReverseTokenRevocation(await this.#clients.reverse.revokeToken(command.instance))
-                );
-                return;
-            case "instance.status":
-                this.#stdout.write(
-                    renderInstanceSnapshot((await this.#clients.runtime.snapshot(command.instance)).snapshot)
-                );
-                return;
-            case "instance.start":
-                this.#stdout.write(
-                    renderInstanceSnapshot(
-                        await this.#clients.runtime.start(command.instance, {
-                            input: this.#stdin,
-                            output: this.#stderr
-                        })
-                    )
-                );
-                return;
-            case "instance.stop":
-                this.#stdout.write(renderInstanceSnapshot(await this.#clients.runtime.stop(command.instance)));
-                return;
-            case "instance.logs":
-                if (command.follow) {
-                    await new CliCommandWatchLogs().execute(
-                        this.#clients.runtime,
-                        command.instance,
-                        async (entries) => {
-                            this.#stdout.write(renderInstanceLogs(entries));
-                        },
-                        this.#followEventLimit
-                    );
-                    return;
-                }
-
-                this.#stdout.write(renderInstanceLogs(await this.#clients.runtime.readLogs(command.instance)));
-                return;
-            case "instance.todo":
-                await new CliCommandInstanceTodo().execute(
-                    this.#clients.todo,
-                    command.instance,
-                    command.follow,
-                    async (todo) => {
-                        this.#stdout.write(renderInstanceTodo(todo));
-                    },
-                    this.#followEventLimit
-                );
-                return;
-            case "instance.call":
-                this.#stdout.write(renderToolCall(command.instance, command.toolName));
-                this.#stdout.write(
-                    renderToolResult(await this.#clients.tool.call(command.instance, command.toolName, command.input, command.workspace))
-                );
-                return;
             case "watch.logs":
                 await new CliCommandWatchLogs().execute(
                     this.#clients.runtime,
@@ -516,8 +433,7 @@ function commandUsesControlClient(command: CliParsedCommand): boolean {
     ) {
         return true;
     }
-    return (command.kind.startsWith("instance.") &&
-            command.kind !== "instance.help") ||
+    return command.kind.startsWith("instance.") ||
         (command.kind.startsWith("watch.") && command.kind !== "watch.help");
 }
 

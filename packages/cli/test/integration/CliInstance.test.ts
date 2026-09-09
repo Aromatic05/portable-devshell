@@ -488,6 +488,9 @@ async function handleHarnessEvent(codec: Codec, event: Event): Promise<void> {
                 protocolVersion: 1,
             });
             return;
+        case "cli.commandStream":
+            await handleCliCommandStream(codec, event);
+            return;
         case "instance.list":
             await reply(codec, event, [
                 {
@@ -572,6 +575,114 @@ async function handleHarnessEvent(codec: Codec, event: Event): Promise<void> {
                 }
             });
     }
+}
+
+async function handleCliCommandStream(codec: Codec, event: Event): Promise<void> {
+    const payload = isRecord(event.payload) ? event.payload : {};
+    const argv = Array.isArray(payload.argv) && payload.argv.every((value) => typeof value === "string")
+        ? payload.argv as string[]
+        : [];
+    const commandId = payload.commandId;
+    if (commandId !== "instance") {
+        await codec.send({
+            id: `error-${event.id}`,
+            replyTo: event.id,
+            destination: event.destination,
+            name: event.name,
+            error: {
+                code: "control.cliCommandFailed",
+                message: `unknown CLI command ${String(commandId)}`,
+                retryable: false
+            }
+        });
+        return;
+    }
+
+    const streamId = `stream-${event.id}`;
+    await codec.send({
+        id: `ack-${event.id}`,
+        replyTo: event.id,
+        streamId,
+        destination: event.destination,
+        name: event.name,
+        payload: { accepted: true }
+    });
+
+    const operation = argv[0];
+    if (operation === "logs" && argv[2] === "-f") {
+        await sendCliStreamEvent(codec, event, streamId, "cli.stdout", { chunk: "[1] stdout before\n" });
+        await sendCliStreamEvent(codec, event, streamId, "cli.stdout", { chunk: "[2] stdout after\n" });
+        await completeCliCommand(codec, event, streamId, "");
+        return;
+    }
+
+    const text = operation === "list"
+        ? "demo-local\tstopped\tready=false\n"
+        : operation === "status"
+            ? renderHarnessSnapshot(stoppedSnapshot())
+            : operation === "start"
+                ? renderHarnessSnapshot(readySnapshot())
+                : operation === "stop"
+                    ? renderHarnessSnapshot(stoppedSnapshot())
+                    : operation === "logs"
+                        ? "[1] stdout before\n"
+                        : operation === "call"
+                            ? "instance: demo-local\ntool: bash_run\nexitCode: 0\nstdout:\n/tmp/ws\n"
+                            : undefined;
+    if (text === undefined) {
+        await codec.send({
+            id: `cancel-${event.id}`,
+            streamId,
+            destination: event.destination,
+            name: "stream.cancelled",
+            error: {
+                code: "cli.usage",
+                message: `unsupported instance test command: ${String(operation)}`,
+                retryable: false
+            }
+        });
+        return;
+    }
+    await completeCliCommand(codec, event, streamId, text);
+}
+
+async function sendCliStreamEvent(
+    codec: Codec,
+    event: Event,
+    streamId: string,
+    name: string,
+    payload: JsonValue
+): Promise<void> {
+    await codec.send({
+        id: `${name}-${event.id}-${Math.random()}`,
+        streamId,
+        destination: event.destination,
+        name,
+        payload
+    });
+}
+
+async function completeCliCommand(codec: Codec, event: Event, streamId: string, text: string): Promise<void> {
+    await codec.send({
+        id: `complete-${event.id}`,
+        streamId,
+        destination: event.destination,
+        name: "stream.completed",
+        payload: { kind: "text", text }
+    });
+}
+
+function renderHarnessSnapshot(value: ReturnType<typeof stoppedSnapshot>): string {
+    return [
+        `instance: ${value.name}`,
+        `status: ${value.status}`,
+        `ready: ${value.ready}`,
+        `daemonState: ${value.daemonState}`,
+        `connectionState: ${value.connectionState}`,
+        `lastSeq: ${value.lastSeq}`,
+        "Todo: none",
+        ""
+    ].join("\n");
 }
 
 async function reply(codec: Codec, event: Event, payload: JsonValue): Promise<void> {

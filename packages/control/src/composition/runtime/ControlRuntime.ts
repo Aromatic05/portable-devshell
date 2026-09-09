@@ -7,6 +7,8 @@ import type { InstanceRegistry } from "../../control/instance/registry/InstanceR
 import { DebugPatchService } from "../../control/debug/DebugPatchService.js";
 import { CliExtensionCommandService } from "../../control/cli/CliExtensionCommandService.js";
 import { createArtifactCliCommandProvider } from "../../control/artifact/cli/ArtifactCliCommandProvider.js";
+import { createInstanceCliCommandProvider } from "../../control/instance/cli/InstanceCliCommandProvider.js";
+import { RuntimeSubscriptionManager } from "../../instance/runtime/RuntimeSubscriptionManager.js";
 import { ExtensionControlService } from "../../control/extension/route/ExtensionControlService.js";
 import { WebApplicationCatalog } from "../../server/web/extension/WebApplicationCatalog.js";
 import type { ExtensionHost } from "../../control/extension/host/ExtensionHost.js";
@@ -79,10 +81,18 @@ export class ControlRuntime {
         this.#mcp = options.mcp;
         this.#reverse = options.reverse;
         this.#debug = new DebugPatchService(options.instances);
+        const runtimeSubscriptions = new RuntimeSubscriptionManager();
         this.#routes = new ControlRouteComposition({
             artifact: options.artifact.service,
             cliCommands: new CliExtensionCommandService(this.#extensions, [
-                createArtifactCliCommandProvider(options.artifact.service)
+                createArtifactCliCommandProvider(options.artifact.service),
+                createInstanceCliCommandProvider({
+                    create: options.mcp.instanceCreate,
+                    editor: options.mcp.configEditor,
+                    instances: options.instances,
+                    reverse: options.reverse.service,
+                    subscriptions: runtimeSubscriptions
+                })
             ]),
             config: options.mcp.configEditor,
             contextAdmin: () => options.mcp.host?.contextAdmin,
@@ -98,6 +108,7 @@ export class ControlRuntime {
             }),
             restart: options.restart,
             reverse: options.reverse.service,
+            runtimeSubscriptions,
             shutdown: options.shutdown,
             toolProvenance: options.mcp.toolProvenance,
             webApplications: new WebApplicationCatalog(this.#extensions)

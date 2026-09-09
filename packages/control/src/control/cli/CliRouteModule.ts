@@ -7,6 +7,7 @@ import type {
 import {
     createError,
     errorCodes,
+    toControlErrorBody,
     type CliCommandDescriptor,
     type CliCommandWireResult,
     type JsonValue,
@@ -15,12 +16,15 @@ import {
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../../route/ControlRouteFactory.js";
+import { CliCommandStreamIo } from "./CliCommandStreamIo.js";
+import type { CliExtensionCommandIo } from "./CliExtensionCommandProvider.js";
 
 export interface CliCommandPort {
     command(
         commandId: string,
         argv: readonly string[],
-        context: CliCommandInvocationContext
+        context: CliCommandInvocationContext,
+        io?: CliExtensionCommandIo
     ): Promise<CliCommandResult>;
     list(): readonly CliCommandDescriptor[];
 }
@@ -33,28 +37,83 @@ export function createCliRouteModule(port: CliCommandPort): PrefixRouteModuleDef
         },
         command: async (request, context) => {
             requireCli(context);
-            const input = readCommand(request.payload);
-            const localOwner = isLocalOwnerCli(context);
-            if (input.workingDirectory !== undefined && !localOwner) {
-                throw createError({
-                    code: errorCodes.controlCliAccessDenied,
-                    message: "CLI command workingDirectory is restricted to the local owner CLI.",
-                    retryable: false
-                });
-            }
+            const input = readAuthorizedCommand(request.payload, context);
             return assertCommandResult(await port.command(
                 input.commandId,
                 input.argv,
-                {
-                    localOwner,
-                    requestId: context.requestId,
-                    signal: context.signal,
-                    ...(input.workingDirectory === undefined ? {} : {
-                        workingDirectory: input.workingDirectory
-                    })
-                }
+                invocationContext(input, context)
             ), input.commandId) as unknown as JsonValue;
+        },
+        commandStream: async (request, context) => {
+            requireCli(context);
+            const input = readAuthorizedCommand(request.payload, context);
+            const io = new CliCommandStreamIo();
+            const streamAbort = new AbortController();
+            const stream = await context.openStream(
+                { accepted: true },
+                {
+                    onClose: () => {
+                        io.closeInput();
+                        streamAbort.abort(new Error("CLI command stream was closed by the client."));
+                    },
+                    onEvent: (event) => io.accept(event)
+                }
+            );
+            io.bind(stream);
+            try {
+                const result = assertCommandResult(await port.command(
+                    input.commandId,
+                    input.argv,
+                    invocationContext(input, context, streamAbort.signal),
+                    io
+                ), input.commandId);
+                await stream.complete(result as unknown as JsonValue);
+            } catch (error) {
+                const body = toControlErrorBody(error) ?? createError({
+                    code: errorCodes.controlCliCommandFailed,
+                    details: { commandId: input.commandId },
+                    message: `CLI command ${input.commandId} failed.`,
+                    retryable: false
+                }).toBody();
+                await stream.cancel(body).catch(() => undefined);
+            } finally {
+                io.closeInput();
+            }
+            return undefined;
         }
+    });
+}
+
+function readAuthorizedCommand(
+    payload: JsonValue | undefined,
+    context: PrefixRouteContext
+): ReturnType<typeof readCommand> {
+    const input = readCommand(payload);
+    const localOwner = isLocalOwnerCli(context);
+    if (input.workingDirectory !== undefined && !localOwner) {
+        throw createError({
+            code: errorCodes.controlCliAccessDenied,
+            message: "CLI command workingDirectory is restricted to the local owner CLI.",
+            retryable: false
+        });
+    }
+    return input;
+}
+
+function invocationContext(
+    input: ReturnType<typeof readCommand>,
+    context: PrefixRouteContext,
+    streamSignal?: AbortSignal
+): CliCommandInvocationContext {
+    return Object.freeze({
+        localOwner: isLocalOwnerCli(context),
+        requestId: context.requestId,
+        signal: streamSignal === undefined
+            ? context.signal
+            : AbortSignal.any([context.signal, streamSignal]),
+        ...(input.workingDirectory === undefined ? {} : {
+            workingDirectory: input.workingDirectory
+        })
     });
 }
 

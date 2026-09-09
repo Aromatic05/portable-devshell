@@ -11,7 +11,10 @@ import {
 } from "@portable-devshell/shared";
 
 import type { ExtensionHost } from "../extension/host/ExtensionHost.js";
-import type { CliExtensionCommandProvider } from "./CliExtensionCommandProvider.js";
+import type {
+    CliExtensionCommandIo,
+    CliExtensionCommandProvider
+} from "./CliExtensionCommandProvider.js";
 
 export class CliExtensionCommandService {
     readonly #extensions: Pick<ExtensionHost, "acquireRegistration" | "listDeclarations">;
@@ -35,11 +38,15 @@ export class CliExtensionCommandService {
     async command(
         commandId: string,
         argv: readonly string[],
-        context: CliCommandInvocationContext
+        context: CliCommandInvocationContext,
+        io?: CliExtensionCommandIo
     ): Promise<CliCommandResult> {
         const provider = this.#providers.get(commandId);
         if (provider !== undefined) {
-            return await provider.binding(argv, context);
+            return await provider.binding(argv, Object.freeze({
+                ...context,
+                ...(io === undefined ? {} : { io })
+            }));
         }
 
         let acquired;

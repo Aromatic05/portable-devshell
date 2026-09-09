@@ -191,6 +191,33 @@ test("RuntimeSubscriptionManager isolates a throwing subscription poll", async (
     }
 });
 
+test("RuntimeSubscriptionManager shares the same polling owner with callback watches and stops on abort", async () => {
+    const manager = new RuntimeSubscriptionManager(5);
+    const worker = new FakeWorker("alpha");
+    await worker.start();
+    const controller = new AbortController();
+    const events: number[] = [];
+
+    const watch = manager.watch(
+        "alpha",
+        worker as unknown as WorkerInstance,
+        2,
+        controller.signal,
+        {
+            onEvent(event) {
+                events.push(event.seq);
+            },
+            onGap() {}
+        }
+    );
+    worker.emit("todo.updated", { taskId: "task-a" });
+    await waitFor(() => events.length === 1);
+    controller.abort();
+    await watch;
+
+    assert.deepEqual(events, [2]);
+});
+
 function createStreamContext(
     connectionId: string,
     requestId: string,

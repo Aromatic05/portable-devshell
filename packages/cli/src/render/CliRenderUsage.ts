@@ -127,26 +127,6 @@ export function renderExtensionCommandUsage(command: CliCommandDescriptor): stri
     ].join("\n");
 }
 
-export function renderInstanceUsage(): string {
-    return [
-        "Usage:",
-        "  devshell instance create",
-        "  devshell instance delete <instance>",
-        "  devshell instance enable <instance>",
-        "  devshell instance disable <instance>",
-        "  devshell instance list",
-        "  devshell instance status <instance>",
-        "  devshell instance start <instance>",
-        "  devshell instance stop <instance>",
-        "  devshell instance logs <instance> [-f]",
-        "  devshell instance todo <instance> [--follow|-f]",
-        "  devshell instance call <instance> <workspace> <toolName> <jsonInput>",
-        "  devshell instance device-code <instance>",
-        "  devshell instance rotate-token <instance>",
-        "  devshell instance revoke-token <instance>",
-    ].join("\n");
-}
-
 export function renderWatchUsage(): string {
     return [
         "Usage:",

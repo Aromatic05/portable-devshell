@@ -23,7 +23,6 @@ const CONTROL_CLI_COMMAND_IDS = new Set([
     "debug",
     "extension",
     "help",
-    "instance",
     "logs",
     "oauth",
     "overview",
@@ -38,7 +37,8 @@ const CONTROL_CLI_COMMAND_IDS = new Set([
 ]);
 
 const RESIDENT_EXTENSION_COMMAND_IDS = new Set([
-    "artifact"
+    "artifact",
+    "instance"
 ]);
 
 export const cliCommandsExtensionPointDefinition: ExtensionPointDefinition = Object.freeze({

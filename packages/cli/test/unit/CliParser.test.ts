@@ -21,13 +21,19 @@ test("CliParser parses Task 11 command fixture", async () => {
 test("CliParser rejects invalid command shapes", () => {
     const parser = new CliParser();
 
-    assert.throws(() => parser.parse(["instance", "call", "demo-local", "bash_run", "{bad"]));
-    assert.throws(() => parser.parse(["instance", "create", "demo-local"]));
-    assert.throws(() => parser.parse(["instance", "logs", "demo-local", "--bad"]));
     assert.throws(() => parser.parse(["debug", "load", "worker:demo-local"]));
     assert.throws(() => parser.parse(["watch", "status"]));
     assert.throws(() => parser.parse(["Bad_Command"]));
-    assert.throws(() => parser.parse(["instance", "unknown"]));
+    assert.deepEqual(parser.parse(["instance", "call", "demo-local", "bash_run", "{bad"]), {
+        args: ["call", "demo-local", "bash_run", "{bad"],
+        commandId: "instance",
+        kind: "cli.command"
+    });
+    assert.deepEqual(parser.parse(["instance", "logs", "demo-local", "--bad"]), {
+        args: ["logs", "demo-local", "--bad"],
+        commandId: "instance",
+        kind: "cli.command"
+    });
 });
 
 test("CliParser treats unknown top-level namespaces as cli.commands local ids", () => {
@@ -82,7 +88,11 @@ test("CliParser accepts trailing help consistently across command levels", () =>
     const parser = new CliParser();
 
     assert.deepEqual(parser.parse(["status", "--help"]), { kind: "help" });
-    assert.deepEqual(parser.parse(["instance", "status", "--help"]), { kind: "instance.help" });
+    assert.deepEqual(parser.parse(["instance", "status", "--help"]), {
+        args: ["status", "--help"],
+        commandId: "instance",
+        kind: "cli.command"
+    });
     assert.deepEqual(parser.parse(["artifact", "share", "--help"]), {
         args: ["share", "--help"],
         commandId: "artifact",

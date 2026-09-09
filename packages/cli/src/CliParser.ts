@@ -3,7 +3,6 @@ import type { JsonValue } from "@portable-devshell/shared";
 import { CliRenderError } from "./render/CliRenderError.js";
 import {
     renderCliTopicUsage,
-    renderInstanceUsage,
     renderWatchUsage,
     type CliHelpTopic,
 } from "./render/CliRenderUsage.js";
@@ -46,21 +45,7 @@ export type CliParsedCommand =
     | { kind: "extension.install"; source: string }
     | { extensionId: string; kind: "extension.remove"; purge: boolean }
     | { args: string[]; commandId: string; kind: "cli.command" }
-    | { input: JsonValue; instance: string; kind: "instance.call"; toolName: string; workspace: string }
     | { kind: "instance.create" }
-    | { instance: string; kind: "instance.delete" }
-    | { instance: string; kind: "instance.enable" }
-    | { instance: string; kind: "instance.disable" }
-    | { kind: "instance.help" }
-    | { instance: string; kind: "instance.deviceCode" }
-    | { kind: "instance.list" }
-    | { follow: boolean; instance: string; kind: "instance.logs" }
-    | { follow: boolean; instance: string; kind: "instance.todo" }
-    | { instance: string; kind: "instance.start" }
-    | { instance: string; kind: "instance.status" }
-    | { instance: string; kind: "instance.stop" }
-    | { instance: string; kind: "instance.revokeToken" }
-    | { instance: string; kind: "instance.rotateToken" }
     | { instance: string; kind: "watch.logs" }
     | { instance: string; kind: "watch.status" }
     | { kind: "watch.help" };
@@ -111,8 +96,12 @@ export class CliParser {
                 return this.#expectNoExtra(argv, { kind: "tui" });
             case "extension":
                 return this.#parseExtension(argv.slice(1));
-            case "instance":
-                return this.#parseInstance(argv.slice(1));
+            case "instance": {
+                const args = argv.slice(1);
+                return args.length === 1 && args[0] === "create"
+                    ? { kind: "instance.create" }
+                    : this.#parseCliCommand(argv);
+            }
             case "watch":
                 return this.#parseWatch(argv.slice(1));
             default:
@@ -126,8 +115,6 @@ export class CliParser {
         switch (argv[0]) {
             case "extension":
                 return { kind: "extension.help" };
-            case "instance":
-                return { kind: "instance.help" };
             case "watch":
                 return { kind: "watch.help" };
             case "config":
@@ -219,67 +206,6 @@ export class CliParser {
         const extensionId = this.#required(value, "extension id is required");
         if (/^[a-z][a-z0-9-]*$/u.test(extensionId)) return extensionId;
         throw CliRenderError.usage("extension id must match [a-z][a-z0-9-]*");
-    }
-
-    #parseInstance(argv: readonly string[]): CliParsedCommand {
-        switch (argv[0]) {
-            case "help":
-            case "--help":
-            case "-h":
-                return this.#expectNoExtra(argv, { kind: "instance.help" });
-            case "create":
-                return this.#expectNoExtra(argv, { kind: "instance.create" });
-            case "delete":
-                return this.#expectInstanceCommand(argv, "instance.delete");
-            case "enable":
-                return this.#expectInstanceCommand(argv, "instance.enable");
-            case "disable":
-                return this.#expectInstanceCommand(argv, "instance.disable");
-            case "device-code":
-                return this.#expectReverseInstanceCommand(argv, "instance.deviceCode");
-            case "list":
-                return this.#expectNoExtra(argv, { kind: "instance.list" });
-            case "status":
-                return this.#expectInstanceCommand(argv, "instance.status");
-            case "start":
-                return this.#expectInstanceCommand(argv, "instance.start");
-            case "stop":
-                return this.#expectInstanceCommand(argv, "instance.stop");
-            case "rotate-token":
-                return this.#expectReverseInstanceCommand(argv, "instance.rotateToken");
-            case "revoke-token":
-                return this.#expectReverseInstanceCommand(argv, "instance.revokeToken");
-            case "logs":
-                this.#expectLogsArgs(argv);
-                return {
-                    follow: argv.includes("-f"),
-                    instance: this.#required(argv[1], "instance name is required"),
-                    kind: "instance.logs"
-                };
-            case "todo":
-                this.#expectTodoArgs(argv);
-                return {
-                    follow: argv.includes("--follow") || argv.includes("-f"),
-                    instance: this.#required(argv[1], "instance name is required"),
-                    kind: "instance.todo"
-                };
-            case "call":
-                if (argv.length !== 5) {
-                    throw CliRenderError.usage("instance call requires <instance> <workspace> <toolName> <jsonInput>");
-                }
-
-                return {
-                    input: this.#parseJson(this.#required(argv[4], "tool input JSON is required")),
-                    instance: this.#required(argv[1], "instance name is required"),
-                    kind: "instance.call",
-                    toolName: this.#required(argv[3], "tool name is required"),
-                    workspace: this.#required(argv[2], "workspace is required")
-                };
-            default:
-                throw CliRenderError.usage(
-                    `${`Unknown instance command: ${argv[0] ?? ""}`.trim()}\n\n${renderInstanceUsage()}`,
-                );
-        }
     }
 
     #parseWatch(argv: readonly string[]): CliParsedCommand {
@@ -598,14 +524,7 @@ export class CliParser {
 
     #expectInstanceCommand(
         argv: readonly string[],
-        kind:
-            | "approval.list"
-            | "instance.delete"
-            | "instance.disable"
-            | "instance.enable"
-            | "instance.start"
-            | "instance.status"
-            | "instance.stop"
+        kind: "approval.list"
     ): Extract<CliParsedCommand, { kind: typeof kind }> {
         if (argv.length !== 2) {
             throw CliRenderError.usage(`${kind.split(".")[1]} requires <instance>`);
@@ -617,40 +536,4 @@ export class CliParser {
         } as Extract<CliParsedCommand, { kind: typeof kind }>;
     }
 
-    #expectReverseInstanceCommand(
-        argv: readonly string[],
-        kind: "instance.deviceCode" | "instance.rotateToken" | "instance.revokeToken"
-    ): Extract<CliParsedCommand, { kind: typeof kind }> {
-        if (argv.length !== 2) {
-            throw CliRenderError.usage(`${argv[0]} requires <instance>`);
-        }
-
-        return {
-            instance: this.#required(argv[1], "instance name is required"),
-            kind
-        } as Extract<CliParsedCommand, { kind: typeof kind }>;
-    }
-
-
-    #expectTodoArgs(argv: readonly string[]): void {
-        if (argv.length === 2) {
-            return;
-        }
-        if (argv.length === 3 && (argv[2] === "--follow" || argv[2] === "-f")) {
-            return;
-        }
-        throw CliRenderError.usage("instance todo requires <instance> [--follow]");
-    }
-
-    #expectLogsArgs(argv: readonly string[]): void {
-        if (argv.length === 2) {
-            return;
-        }
-
-        if (argv.length === 3 && argv[2] === "-f") {
-            return;
-        }
-
-        throw CliRenderError.usage("instance logs requires <instance> [-f]");
-    }
 }
