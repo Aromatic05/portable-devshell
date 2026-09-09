@@ -31,29 +31,6 @@ import {
 } from "./sandbox/ExtensionSandboxHost.js";
 import type { ExtensionSandboxReadyDescriptor } from "./sandbox/ExtensionSandboxProtocol.js";
 
-export const CORE_EXTENSION_RESERVED_IDS = new Set([
-    "approval",
-    "artifact",
-    "config",
-    "context",
-    "debug",
-    "extension",
-    "help",
-    "instance",
-    "logs",
-    "oauth",
-    "overview",
-    "restart",
-    "start",
-    "status",
-    "stop",
-    "todo",
-    "tool",
-    "tui",
-    "version",
-    "watch"
-]);
-
 export interface ExtensionWorkerRuntime extends ExtensionWorkerCapability {
     closeAll(): Promise<void>;
     retireInstance(instance: string): Promise<void>;
@@ -81,7 +58,6 @@ export interface ExtensionLoaderOptions {
         extensionId: string;
         generation: string;
     }) => ExtensionProcessRuntime;
-    reservedIds?: ReadonlySet<string>;
     sandboxFactory?: (options: ExtensionSandboxHostOptions) => ExtensionSandboxHost;
     sandboxResourceLimits?: ResourceLimits;
     workerFactory?: (input: {
@@ -100,7 +76,6 @@ export class ExtensionLoader {
     readonly #paths: ExtensionPathLayout;
     readonly points: ExtensionPointRegistry;
     readonly #processFactory?: ExtensionLoaderOptions["processFactory"];
-    readonly #reservedIds: ReadonlySet<string>;
     readonly #runtimeRoots = new Map<string, Promise<void>>();
     readonly #sandboxFactory: (options: ExtensionSandboxHostOptions) => ExtensionSandboxHost;
     readonly #sandboxResourceLimits?: ResourceLimits;
@@ -115,7 +90,6 @@ export class ExtensionLoader {
         this.#paths = options.paths;
         this.points = options.points;
         this.#processFactory = options.processFactory;
-        this.#reservedIds = options.reservedIds ?? CORE_EXTENSION_RESERVED_IDS;
         this.#sandboxFactory = options.sandboxFactory ?? ((sandboxOptions) => new ExtensionSandboxHost(sandboxOptions));
         this.#sandboxResourceLimits = options.sandboxResourceLimits;
         this.#workerFactory = options.workerFactory;
@@ -242,9 +216,6 @@ export class ExtensionLoader {
     }
 
     async readManifest(id: string, generation: string): Promise<ExtensionManifest> {
-        if (this.#reservedIds.has(id)) {
-            throw new Error(`Extension id ${id} is reserved by portable-devshell.`);
-        }
         const codeDirectory = this.#paths.generationDirectory(id, generation);
         await assertPlainDirectory(codeDirectory, `Extension generation directory for ${id}`);
         const manifestPath = this.#paths.manifestFile(id, generation);

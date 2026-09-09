@@ -65,6 +65,12 @@ test("Extension catalog rejects unsupported or invalid point declarations before
         })),
         /title must be a non-empty trimmed string/u
     );
+    assert.throws(
+        () => catalog.replace("example", "a", manifest("example", "a", {
+            "cli.commands": [{ id: "status", title: "Status replacement" }]
+        })),
+        /cli\.commands\/status conflicts with a built-in CLI command/u
+    );
     assert.equal(catalog.getExtension("example"), undefined);
 });
 

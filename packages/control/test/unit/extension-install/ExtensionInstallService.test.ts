@@ -22,6 +22,7 @@ interface Harness {
     service: ExtensionInstallService;
     source(name: string, options?: {
         body?: string;
+        commandId?: string;
         hostDependencies?: string[];
         id?: string;
         version?: string;
@@ -58,13 +59,14 @@ async function harness(t: test.TestContext, limits = {}): Promise<Harness> {
         async source(name, options = {}) {
             const source = join(root, name);
             const id = options.id ?? "example";
+            const commandId = options.commandId ?? id;
             await mkdir(source, { recursive: true });
             await writeFile(join(source, "devshell-extension.json"), `${JSON.stringify({
                 apiVersion: EXTENSION_API_VERSION,
                 capabilities: [],
                 entry: "extension.mjs",
                 extensions: {
-                    "cli.commands": [{ id, title: id }]
+                    "cli.commands": [{ id: commandId, title: commandId }]
                 },
                 ...(options.hostDependencies === undefined ? {} : { hostDependencies: options.hostDependencies }),
                 id,
@@ -74,7 +76,7 @@ async function harness(t: test.TestContext, limits = {}): Promise<Harness> {
             })}\n`, "utf8");
             await writeFile(join(source, "extension.mjs"), options.body ?? [
                 "export function activate(context) {",
-                `  context.register({ id: 'cli.commands' }, ${JSON.stringify(id)}, async () => ({ kind: 'json', value: { version: '1.0.0' } }));`,
+                `  context.register({ id: 'cli.commands' }, ${JSON.stringify(commandId)}, async () => ({ kind: 'json', value: { version: '1.0.0' } }));`,
                 "}",
                 ""
             ].join("\n"), "utf8");
@@ -147,6 +149,31 @@ test("builtin Extension identity cannot be replaced by ordinary install", async 
     await assert.rejects(
         h.service.installBuiltin("unknown", source),
         /is not a registered builtin/u
+    );
+});
+
+test("Extension identity is independent from the CLI command namespace", async (t) => {
+    const h = await harness(t);
+    const installed = await h.service.install(await h.source("status-extension", {
+        commandId: "custom-command",
+        id: "status"
+    }));
+
+    assert.equal(installed.id, "status");
+    assert.deepEqual(
+        await invokeCliRegistration(h.host, "custom-command", "status-extension"),
+        { kind: "json", value: { version: "1.0.0" } }
+    );
+});
+
+test("cli.commands rejects a built-in CLI command id regardless of Extension identity", async (t) => {
+    const h = await harness(t);
+    await assert.rejects(
+        h.service.install(await h.source("reserved-cli-command", {
+            commandId: "status",
+            id: "ordinary-extension"
+        })),
+        /cli\.commands\/status conflicts with a built-in CLI command/u
     );
 });
 

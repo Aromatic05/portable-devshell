@@ -211,10 +211,11 @@ test("Extension loader isolates runtime directories for overlapping loads of the
     await assert.rejects(access(harness.paths.runtimeDirectory(id, generation)));
 });
 
-test("Extension loader rejects incompatible API and reserved ids before importing code", async (t) => {
+test("Extension loader rejects incompatible API without owning the CLI command namespace", async (t) => {
     const harness = await createHarness();
     t.after(harness.cleanup);
     const incompatible = await harness.writeGeneration({ apiVersion: EXTENSION_API_VERSION + 1 });
+    const cliNamedExtension = await harness.writeGeneration({ id: "status" });
     let imports = 0;
     const loader = new ExtensionLoader({
         importer: async () => {
@@ -227,7 +228,7 @@ test("Extension loader rejects incompatible API and reserved ids before importin
     });
 
     await assert.rejects(loader.load(incompatible.id, incompatible.generation), /Unsupported Extension apiVersion/u);
-    await assert.rejects(loader.load("status", "1.0.0-a"), /reserved/u);
+    assert.equal((await loader.readManifest(cliNamedExtension.id, cliNamedExtension.generation)).id, "status");
     assert.equal(imports, 0);
 });
 

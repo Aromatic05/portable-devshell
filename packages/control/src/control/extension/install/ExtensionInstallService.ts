@@ -26,7 +26,6 @@ import {
     createArtifactDirectoryArchive,
     extractArtifactDirectoryArchive
 } from "../../artifact/host/ArtifactHostArchive.js";
-import { CORE_EXTENSION_RESERVED_IDS } from "../host/generation/ExtensionLoader.js";
 import {
     resolveExtensionInstallLimits,
     type ExtensionInstallLimits
@@ -199,9 +198,6 @@ async function readStagedManifest(directory: string): Promise<ExtensionManifest>
 }
 
 function assertInstallableManifest(manifest: ExtensionManifest, builtinId?: string): void {
-    if (CORE_EXTENSION_RESERVED_IDS.has(manifest.id)) {
-        throw extensionInstallError(`Extension id ${manifest.id} is reserved by portable-devshell.`);
-    }
     if (builtinId === undefined && BUILTIN_EXTENSION_IDS.has(manifest.id)) {
         throw extensionInstallError(`Extension id ${manifest.id} is reserved for a builtin Extension.`);
     }
