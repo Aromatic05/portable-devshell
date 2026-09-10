@@ -450,6 +450,8 @@ async function smoke() {
     const modelDevshell = await runTestspaceModelDevshellSmoke({
         endpoint: testspaceUrls(state).mcp,
         instance: TESTSPACE_INSTANCE,
+        remoteInstance: TESTSPACE_REVERSE_INSTANCE,
+        remoteWorkspace: paths.reverseWorkspace,
         workspace: paths.workspace,
     });
     const workspace = await runTestspaceWorkspaceSmoke({

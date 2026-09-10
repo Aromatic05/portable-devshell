@@ -20,9 +20,11 @@ export function createSafeAction(name, { ctxId, iteration, revision = 0 }) {
             return {
                 arguments: {
                     ctxId,
-                    path: "./README.md",
-                    selector: "1-40",
-                    view: "content",
+                    files: [{
+                        path: "./README.md",
+                        selector: "1-40",
+                        view: "content",
+                    }],
                 },
                 name,
             };
