@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -24,8 +24,14 @@ import {
 
 test("Pi provider implementation version is independent from the Pi runtime version", () => {
     assert.equal(PI_PROVIDER_VERSION, "0.1.1");
-    assert.equal(PI_RUNTIME_VERSION, "0.84.4");
     assert.notEqual(PI_PROVIDER_VERSION, PI_RUNTIME_VERSION);
+});
+
+test("Pi runtime version matches the bundled package dependency", async () => {
+    const manifest = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8")) as {
+        dependencies?: Record<string, string>;
+    };
+    assert.equal(manifest.dependencies?.[PI_PACKAGE_NAME], PI_RUNTIME_VERSION);
 });
 
 test("Pi runtime resolves from the provider bundle without host npm", async () => {

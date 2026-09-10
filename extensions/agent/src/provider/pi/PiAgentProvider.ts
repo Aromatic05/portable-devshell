@@ -12,7 +12,7 @@ import {
 
 export const PI_PROVIDER_ID = "pi";
 export const PI_PROVIDER_VERSION = "0.1.1";
-export const PI_RUNTIME_VERSION = "0.84.4";
+export const PI_RUNTIME_VERSION = "0.85.1";
 
 export interface PiProviderInstallerLike {
     ensureInstalled(runtime: AgentProviderStartContext["runtime"]): Promise<PiProviderInstallation>;
