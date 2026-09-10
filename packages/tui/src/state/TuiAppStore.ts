@@ -339,6 +339,7 @@ function emptyInstanceReadState(): ControlInstanceReadState {
         contextMessages: [],
         goals: [],
         logs: [],
+        reportCalls: [],
         sequence: 0,
         toolCalls: [],
     };

@@ -100,6 +100,54 @@ test("TuiControlSession does not load details for a stopped instance during star
     assert.deepEqual(worker.logReadQueries, []);
 });
 
+test("TuiControlSession loads exact todo_report inputs with Context message history", async (t) => {
+    const runtimeDir = await createTestTempDirectory("tui-report-history");
+    const socketPath = createTestIpcPath("tui-report-history", runtimeDir);
+    const worker = new FakeWorker("alpha");
+    const server = createServer(socketPath, worker, () => 7);
+    const session = new TuiControlSession({
+        clients: createTuiClients({ socketPath }),
+    });
+
+    await server.start();
+    t.after(async () => {
+        await session.stop();
+        await server.stop();
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    await session.start();
+    worker.addToolCall({
+        callId: "report-call",
+        completedAt: new Date(20).toISOString(),
+        ctxId: "ctx-alpha",
+        input: { message: "report text that must stay exact" },
+        inputSummary: '{"message":"report text that must stay exact"}',
+        instance: asInstanceName("alpha"),
+        source: "mcp",
+        startedAt: new Date(19).toISOString(),
+        status: "completed",
+        toolName: "todo_report",
+    });
+
+    await session.refreshAudit("alpha");
+
+    assert.equal(
+        worker.toolCallQueries.some(
+            (query) =>
+                query.toolName === "todo_report" && query.includeInput === true,
+        ),
+        true,
+        JSON.stringify(worker.toolCallQueries),
+    );
+    assert.deepEqual(
+        session.store.getState().readModel.instanceState.alpha?.reportCalls.map(
+            (call) => call.input,
+        ),
+        [{ message: "report text that must stay exact" }],
+    );
+});
+
 test("TuiControlSession becomes connected before slow instance hydration completes", async (t) => {
     const runtimeDir = await createTestTempDirectory("tui-fast-control-connect");
     const socketPath = createTestIpcPath("tui-fast-control-connect", runtimeDir);
@@ -662,6 +710,7 @@ class FakeWorker {
     subscribeFromSeqs: number[] = [];
     logReadQueries: Array<{ limit?: number }> = [];
     toolCallReadCount = 0;
+    toolCallQueries: ToolCallQuery[] = [];
     callToolCount = 0;
     decisions: Array<{ approvalId: string; decision: string }> = [];
 
@@ -761,6 +810,7 @@ class FakeWorker {
 
     async readToolCalls(query: ToolCallQuery = {}) {
         this.toolCallReadCount += 1;
+        this.toolCallQueries.push(query);
         const callIds = query.callIds === undefined ? undefined : new Set(query.callIds);
         const filtered = this.#toolCalls.filter((record) => {
             if (callIds !== undefined && !callIds.has(record.callId)) return false;

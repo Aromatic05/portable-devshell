@@ -36,6 +36,7 @@ export interface ControlInstanceReadState {
     contextMessages: ContextMessageRecord[];
     goals: GoalSnapshot[];
     logs: InstanceLogEntry[];
+    reportCalls: ToolCallRecord[];
     sequence: number;
     snapshot?: InstanceSnapshot;
     todo?: TodoReadResult;
@@ -87,7 +88,11 @@ type InstanceReadValue =
     | GoalSnapshot[]
     | TodoReadResult
     | ToolCallRecord[]
-    | { commentCalls: ToolCallRecord[]; contextMessages: ContextMessageRecord[] }
+    | {
+          commentCalls: ToolCallRecord[];
+          contextMessages: ContextMessageRecord[];
+          reportCalls: ToolCallRecord[];
+      }
     | { sequence: number; snapshot: InstanceSnapshot };
 
 export interface ControlReadModelOptions {
@@ -535,7 +540,11 @@ export class ControlReadModel {
         } catch (error) {
             if (!this.#valid(versionKey, version, epoch)) return;
             if (key === "comments" && methodNotFound(error)) {
-                this.#applyInstanceValue(instance, key, { commentCalls: [], contextMessages: [] });
+                this.#applyInstanceValue(instance, key, {
+                    commentCalls: [],
+                    contextMessages: [],
+                    reportCalls: [],
+                });
                 this.#clearFailure(this.failureKey(instance, key));
                 this.#emit();
                 return;
@@ -570,10 +579,22 @@ export class ControlReadModel {
                     maxBytes: 512 * 1024,
                 });
             case "comments": {
-                const contextMessages = await this.#clients.contextMessage.list(instance, {
-                    limit: 200,
-                    maxBytes: 256 * 1024,
-                });
+                const [contextMessages, reportCalls] = await Promise.all([
+                    this.#clients.contextMessage.list(instance, {
+                        limit: 200,
+                        maxBytes: 256 * 1024,
+                    }).catch((error) => {
+                        if (methodNotFound(error)) return [];
+                        throw error;
+                    }),
+                    this.#clients.tool.listCalls(instance, {
+                        includeInput: true,
+                        includeOutput: false,
+                        limit: 200,
+                        maxBytes: 1024 * 1024,
+                        toolName: "todo_report",
+                    }),
+                ]);
                 const callIds = [...new Set(contextMessages.flatMap((message) =>
                     message.status === "delivered" && message.callId !== undefined
                         ? [message.callId]
@@ -590,6 +611,7 @@ export class ControlReadModel {
                             maxBytes: 512 * 1024,
                         }),
                     contextMessages,
+                    reportCalls,
                 };
             }
         }
@@ -628,12 +650,14 @@ export class ControlReadModel {
                 const comments = value as {
                     commentCalls: ToolCallRecord[];
                     contextMessages: ContextMessageRecord[];
+                    reportCalls: ToolCallRecord[];
                 };
                 state.commentCalls = comments.commentCalls;
                 state.contextMessages = mergeContextMessageList(
                     state.contextMessages,
                     comments.contextMessages,
                 );
+                state.reportCalls = comments.reportCalls;
                 return;
             }
         }
@@ -931,6 +955,7 @@ export class ControlReadModel {
             contextMessages: [],
             goals: [],
             logs: [],
+            reportCalls: [],
             sequence: 1,
             toolCalls: [],
         };
@@ -1009,6 +1034,7 @@ function snapshotState(state: ControlReadModelState): ControlReadModelState {
                 contextMessages: [...value.contextMessages],
                 goals: [...value.goals],
                 logs: [...value.logs],
+                reportCalls: [...value.reportCalls],
                 toolCalls: [...value.toolCalls],
             }]),
         ),
