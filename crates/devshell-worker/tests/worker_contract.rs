@@ -329,12 +329,38 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         for name in ["tmux_input", "tmux_inspect", "tmux_close"] {
             let tool = catalog.iter().find(|tool| tool["name"] == name).unwrap();
             assert_eq!(
-                tool["inputSchema"]["anyOf"].as_array().map(Vec::len),
-                Some(2),
+                tool["inputSchema"]["type"], "object",
+                "{name}: {}",
+                tool["inputSchema"]
+            );
+            assert!(
+                tool["inputSchema"].get("anyOf").is_none(),
+                "{name}: {}",
+                tool["inputSchema"]
+            );
+            assert!(
+                tool["inputSchema"].get("oneOf").is_none(),
                 "{name}: {}",
                 tool["inputSchema"]
             );
         }
+        let tmux_input = catalog
+            .iter()
+            .find(|tool| tool["name"] == "tmux_input")
+            .unwrap();
+        for property in ["task", "pane", "input", "timeMs", "line"] {
+            assert!(
+                tmux_input["inputSchema"]["properties"]
+                    .get(property)
+                    .is_some(),
+                "tmux_input missing {property}: {}",
+                tmux_input["inputSchema"]
+            );
+        }
+        assert_eq!(
+            tmux_input["inputSchema"]["required"],
+            serde_json::json!(["input"])
+        );
         let tmux_run = catalog
             .iter()
             .find(|tool| tool["name"] == "tmux_run")
