@@ -2,7 +2,7 @@
 
 > 状态：核心元模型、static catalog、lazy activation 与第一批 CLI/Web domain discovery 已实现；后续章节继续约束未来 Extension Point 演进。
 >
-> API v4 已落地 `artifacts / assets / instances / processes / workers` capabilities、`cli.native-commands / cli.model-commands / web.applications` Extension Points、generation-owned registrations，以及最小 `activate / deactivate` module 生命周期。`docs/concepts/extensions.md` 描述当前运行时契约；本文保留设计推导、后续候选项和 public ABI 审查门禁。
+> API v4 已落地 `artifacts / assets / delegatedWorkers / instances / processes / workers` capabilities、`cli.native-commands / cli.model-commands / web.applications` Extension Points、generation-owned registrations，以及最小 `activate / deactivate` module 生命周期。`docs/concepts/extensions.md` 描述当前运行时契约；本文保留设计推导、后续候选项和 public ABI 审查门禁。
 
 ## 1. 设计目标
 
@@ -395,6 +395,7 @@ ExtensionContext
 ```text
 context.capabilities.artifacts
 context.capabilities.assets
+context.capabilities.delegatedWorkers
 context.capabilities.instances
 context.capabilities.processes
 context.capabilities.workers
@@ -1257,8 +1258,8 @@ make processes Control-owned
 
 ```text
 Agent
-    capabilities: assets, workers, processes
-    extensions: cli.native-commands, web.applications
+    capabilities: assets, delegatedWorkers, processes
+    extensions: cli.native-commands, cli.model-commands, web.applications
 
 Skill
     capabilities: assets

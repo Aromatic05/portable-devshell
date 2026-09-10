@@ -50,6 +50,7 @@ Manifest 在 activation 前描述静态事实：
 ```text
 artifacts
 assets
+delegatedWorkers
 instances
 processes
 workers
@@ -200,7 +201,13 @@ close
 
 `closed` 是 host-owned lifecycle signal。instance disabled/deleted、connection loss、generation cleanup 或 caller close 都会最终使 session 不再可用；依赖 Worker 的 Extension 应观察 session closure，而不是要求 generic lifecycle broadcast。
 
-工具调用仍经过正常 approval、scheduler 和 audit pipeline，并以 Extension 归因。Public ABI 不暴露 `WorkerInstance`、provider transport、Worker protocol client 或 raw Worker RPC。
+工具调用仍经过正常 approval、scheduler 和 host-owned audit pipeline，并以 Extension 归因。Public ABI 不暴露 `WorkerInstance`、provider transport、Worker protocol client 或 raw Worker RPC。
+
+### delegatedWorkers
+
+`context.capabilities.delegatedWorkers` 也是 Host-managed Worker execution，但用于“另一个 runtime 自己拥有完整 tool transcript”的委托执行，例如 Agent provider 内的 Pi session。它和 `workers` 是独立 grant；Extension 不能在 `openSession()` 参数中自行切换 recording ownership。
+
+委托调用仍经过相同的 Worker readiness、scheduler、approval 和 execution policy。区别只在记录 ownership：DevShell 不再把内部 subagent `file_* / bash_run / tmux_* / ...` 调用写入 `AuditToolCallHistory`、`toolCall.*` activity 或重复的 command log；provider 自己负责保存 prompt、tool call 与 tool result。Approval request/decision 仍属于 DevShell 的安全边界，因此 `approval.*` lifecycle 继续由 Host 保存和展示。
 
 ### processes
 
@@ -365,8 +372,8 @@ ExtensionActivation contribution object
 
 ```text
 Agent
-    capabilities: assets, workers, processes
-    extensions: cli.native-commands, web.applications
+    capabilities: assets, delegatedWorkers, processes
+    extensions: cli.native-commands, cli.model-commands, web.applications
 
 Skill
     capabilities: assets
@@ -382,6 +389,8 @@ MCP Client
 ```
 
 Builtin module 不应因为自身需求扩张 core taxonomy。
+
+Agent 的 `send / steer / follow-up` 只确认 provider 已接受消息。需要等待当前已接受工作（包括 retry、compaction 和 queued continuation）真正进入 idle 时，使用 `devshell agent wait <agentId>`；Pi provider 直接使用其 session 的 `waitForIdle()` completion boundary，不由 DevShell 轮询。
 
 ## 不属于 public ABI
 
