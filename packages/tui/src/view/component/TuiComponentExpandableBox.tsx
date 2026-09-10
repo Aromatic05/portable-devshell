@@ -12,6 +12,7 @@ export interface TuiComponentExpandableBoxRenderLine {
     color?: string;
     dimColor?: boolean;
     key: string;
+    lineId?: string;
     segments?: Array<{ text: string; underline?: boolean }>;
     text: string;
 }
@@ -43,6 +44,7 @@ export function renderExpandableBoxLines(box: TuiBoxModel, requestedInnerWidth: 
                     color: selected ? "black" : box.focused ? "white" : lineColor(line.tone),
                     dimColor: !selected && !box.focused && (line.tone === "muted" || line.disabled === true),
                     key: `${box.id}-${line.id ?? index}-0`,
+                    ...(line.id === undefined ? {} : { lineId: line.id }),
                     segments: rendered.segments,
                     text: rendered.text,
                 }];
@@ -53,6 +55,7 @@ export function renderExpandableBoxLines(box: TuiBoxModel, requestedInnerWidth: 
                 color: selected ? "black" : box.focused ? "white" : lineColor(line.tone),
                 dimColor: !selected && !box.focused && (line.tone === "muted" || line.disabled === true),
                 key: `${box.id}-${line.id ?? index}-${wrappedIndex}`,
+                ...(line.id === undefined ? {} : { lineId: line.id }),
                 text: renderBodyLine(wrapped, innerWidth),
             }));
         }),

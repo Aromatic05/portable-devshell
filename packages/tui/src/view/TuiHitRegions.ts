@@ -2,6 +2,7 @@ import { topTuiOverlay } from "../state/overlay/TuiOverlay.js";
 import type { TuiAppState } from "../state/reducer/TuiStoreModel.js";
 import { currentTuiRoute } from "../state/route/TuiRouteState.js";
 import type { TuiTerminalTab } from "../state/route/TuiRoute.js";
+import { renderExpandableBoxLines } from "./component/TuiComponentExpandableBox.js";
 import { tuiTerminalTabLabel, tuiTerminalTabs } from "./page/terminal/TuiTmuxPaneTerminalModel.js";
 import {
     selectErrorMessage,
@@ -145,10 +146,8 @@ export function buildTuiHitRegions(
     const layout = tuiLayoutMetrics(viewport.columns);
     const sidebar = selectSidebarModel(state);
     const main = selectMainScreenModel(state);
-    const metrics = selectMainBoxFlowMetrics(
-        state,
-        mainInnerWidth(viewport.columns),
-    );
+    const boxInnerWidth = mainInnerWidth(viewport.columns);
+    const metrics = selectMainBoxFlowMetrics(state, boxInnerWidth);
     const compact = layout.mode === "compact";
     const mainX = compact
         ? 2
@@ -258,34 +257,34 @@ export function buildTuiHitRegions(
             range.end <= scrollOffset
         )
             continue;
-        const startY = mainY + Math.max(0, range.start - scrollOffset);
+        const lines = renderExpandableBoxLines(box, boxInnerWidth);
         if (range.start >= scrollOffset) {
             regions.push({
                 height: 1,
                 target: { boxId: box.id, kind: "boxTitle" },
                 width: mainWidth,
                 x: mainX,
-                y: startY,
+                y: mainY + range.start - scrollOffset,
             });
         }
-        for (
-            let lineIndex = Math.max(range.start + 1, scrollOffset);
-            lineIndex < Math.min(range.end - 1, visibleEnd);
-            lineIndex += 1
-        ) {
-            const detail = box.expanded
-                ? box.expandedLines[lineIndex - range.start - 1]
-                : undefined;
+        const firstBodyOffset = Math.max(1, scrollOffset - range.start);
+        const endBodyOffset = Math.min(
+            lines.length - 1,
+            visibleEnd - range.start,
+        );
+        for (let offset = firstBodyOffset; offset < endBodyOffset; offset += 1) {
+            const line = lines[offset];
+            if (line === undefined) continue;
             regions.push({
                 height: 1,
                 target: {
                     boxId: box.id,
                     kind: "boxBody",
-                    ...(detail?.id === undefined ? {} : { lineId: detail.id }),
+                    ...(line.lineId === undefined ? {} : { lineId: line.lineId }),
                 },
                 width: mainWidth,
                 x: mainX,
-                y: mainY + lineIndex - scrollOffset,
+                y: mainY + range.start + offset - scrollOffset,
             });
         }
     }

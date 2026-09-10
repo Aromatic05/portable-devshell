@@ -23,6 +23,7 @@ import {
     mainInnerWidth,
     renderExpandableBoxLines,
     readContextConversationDraft,
+    type TuiHitTarget,
     TuiAppStore,
     TuiFocusManager,
     currentTuiRoute,
@@ -840,6 +841,50 @@ test("mouse hit regions follow the rendered sidebar, boxes, and overlays", () =>
             region.target.boxId === "create-instance",
     )!;
     assert.equal(shiftedBoxRegion.y, boxRegion.y + 3);
+});
+
+test("expanded box hit regions follow wrapped line ids", () => {
+    const harness = createHarness();
+    harness.store.setSelectedPage("help");
+    const navigation = selectMainScreenModel(harness.store.getState()).boxes.find(
+        (box) => box.id === "help-navigation",
+    )!;
+    harness.store.toggleExpanded(navigation.expandedKey);
+    const expanded = selectMainScreenModel(harness.store.getState()).boxes.find(
+        (box) => box.id === "help-navigation",
+    )!;
+    assert.equal(expanded.expanded, true);
+
+    const bodyTargets = buildTuiHitRegions(harness.store.getState(), {
+        columns: 70,
+        rows: 40,
+    })
+        .filter(
+            (region) =>
+                region.target.kind === "boxBody" &&
+                region.target.boxId === "help-navigation",
+        )
+        .sort((left, right) => left.y - right.y)
+        .map((region) => region.target as Extract<TuiHitTarget, { kind: "boxBody" }>);
+
+    assert.ok(bodyTargets.length > 0);
+    const knownLineIds = new Set(
+        expanded.expandedLines.map((line) => line.id),
+    );
+    for (const target of bodyTargets) {
+        assert.notEqual(target.lineId, undefined);
+        assert.equal(knownLineIds.has(target.lineId!), true);
+    }
+
+    const orderedLineIds = bodyTargets
+        .map((target) => target.lineId)
+        .filter((lineId, index, all) => lineId !== all[index - 1]);
+    assert.deepEqual(
+        orderedLineIds,
+        expanded.expandedLines
+            .slice(0, orderedLineIds.length)
+            .map((line) => line.id),
+    );
 });
 
 test("space expands a box without blocking main box navigation", async () => {
