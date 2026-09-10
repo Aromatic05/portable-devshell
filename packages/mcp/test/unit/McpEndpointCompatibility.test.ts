@@ -8,10 +8,6 @@ test("legacy MCP compatibility aliases only the semantic superset", () => {
         kind: "alias",
         replacement: "workspace_ask",
     });
-    assert.deepEqual(resolveMcpLegacyTool("instance_start"), {
-        kind: "alias",
-        replacement: "instance_connect",
-    });
     for (const [name, replacement] of [
         ["workspace_question_answer", "workspace_answer"],
         ["workspace_wait_interrupt", "workspace_interrupt"],
@@ -70,6 +66,16 @@ test("control-plane MCP tools removed in 0.6.17 point cached clients to CLI", ()
             help,
             kind: "tombstone",
             removedIn: "0.6.17",
+        }, name);
+    }
+});
+
+test("instance Context attachment removed from MCP points cached clients to the model CLI", () => {
+    for (const name of ["instance_connect", "instance_start"] as const) {
+        assert.deepEqual(resolveMcpLegacyTool(name), {
+            help: "Use devshell instance connect <instance> [workspace].",
+            kind: "tombstone",
+            removedIn: "0.7.1",
         }, name);
     }
 });

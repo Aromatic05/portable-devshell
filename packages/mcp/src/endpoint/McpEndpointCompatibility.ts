@@ -48,6 +48,11 @@ const legacyTools: Readonly<Record<string, McpLegacyToolCompatibility>> = {
         kind: "tombstone",
         removedIn: "0.6.17",
     },
+    instance_connect: {
+        help: "Use devshell instance connect <instance> [workspace].",
+        kind: "tombstone",
+        removedIn: "0.7.1",
+    },
     instance_list: {
         help: "Use devshell instance list.",
         kind: "tombstone",
@@ -64,8 +69,9 @@ const legacyTools: Readonly<Record<string, McpLegacyToolCompatibility>> = {
         removedIn: "0.6.17",
     },
     instance_start: {
-        kind: "alias",
-        replacement: "instance_connect",
+        help: "Use devshell instance connect <instance> [workspace].",
+        kind: "tombstone",
+        removedIn: "0.7.1",
     },
     workspace_approval_decide: {
         kind: "alias",

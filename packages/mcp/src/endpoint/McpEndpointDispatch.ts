@@ -22,7 +22,6 @@ import {
     type McpTmuxWaitGateway,
 } from "../instance/McpInstanceGateway.js";
 import type { McpToolCatalogArtifactName } from "../tool/catalog/McpToolCatalogArtifact.js";
-import type { McpToolCatalogInstanceName } from "../tool/catalog/McpToolCatalogInstance.js";
 import type { McpToolCatalogInteractionName } from "../tool/catalog/McpToolCatalogInteraction.js";
 import type { McpToolCatalogTodoName } from "../tool/catalog/McpToolCatalogTodo.js";
 import type { WorkspaceAppLeaseStore } from "../workspace/WorkspaceAppLeaseStore.js";
@@ -38,7 +37,6 @@ import { McpNativeToolResult, type McpEndpointResult } from "./McpEndpointResult
 import type { McpToolProvenanceRecorder } from "./McpToolProvenance.js";
 import { McpEndpointHandlerArtifact } from "./handler/McpEndpointHandlerArtifact.js";
 import { McpEndpointHandlerEnvironment } from "./handler/McpEndpointHandlerEnvironment.js";
-import { McpEndpointHandlerInstance } from "./handler/McpEndpointHandlerInstance.js";
 import { McpEndpointHandlerInteraction } from "./handler/McpEndpointHandlerInteraction.js";
 import { McpEndpointHandlerTodo } from "./handler/McpEndpointHandlerTodo.js";
 import { McpEndpointHandlerWorker } from "./handler/McpEndpointHandlerWorker.js";
@@ -81,7 +79,6 @@ export class McpEndpointDispatch {
     readonly #contextSelector: McpContextSelector;
     readonly #environment: McpEndpointHandlerEnvironment;
     readonly #gateway?: McpInstanceGateway;
-    readonly #instance: McpEndpointHandlerInstance;
     readonly #instanceName: string;
     readonly #interaction: McpEndpointHandlerInteraction;
     readonly #reentry: McpWorkspaceReentryArbiter;
@@ -125,10 +122,6 @@ export class McpEndpointDispatch {
             gateway: options.gateway,
             instanceName: options.instanceName,
             worker: options.worker
-        });
-        this.#instance = new McpEndpointHandlerInstance({
-            ...controlOptions,
-            contextRegistry: this.#contextRegistry
         });
         this.#interaction = new McpEndpointHandlerInteraction(controlOptions);
         this.#todo = new McpEndpointHandlerTodo(controlOptions);
@@ -274,7 +267,7 @@ export class McpEndpointDispatch {
 
             if (
                 selected.owner === "todo" || selected.owner === "artifact" ||
-                selected.owner === "instance" || selected.owner === "workspace"
+                selected.owner === "workspace"
             ) {
                 const owner = selected.owner;
                 this.#catalog.assertAdaptable(selected.definition);
@@ -1235,7 +1228,7 @@ export class McpEndpointDispatch {
     }
 
     async #auditControlTool(
-        owner: "artifact" | "instance" | "workspace" | "todo",
+        owner: "artifact" | "workspace" | "todo",
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
@@ -1273,7 +1266,7 @@ export class McpEndpointDispatch {
     }
 
     async #callControlTool(
-        owner: "artifact" | "instance" | "workspace" | "todo",
+        owner: "artifact" | "workspace" | "todo",
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
@@ -1283,8 +1276,6 @@ export class McpEndpointDispatch {
         switch (owner) {
             case "artifact":
                 return await this.#artifact.call(toolName as McpToolCatalogArtifactName, input, context, signal);
-            case "instance":
-                return await this.#instance.call(toolName as McpToolCatalogInstanceName, input, context, signal);
             case "workspace":
                 return await this.#interaction.call(
                     toolName as McpToolCatalogInteractionName,
@@ -1444,7 +1435,7 @@ function contextWorkspaceRequired(ctxId: string, instance: string) {
     return createError({
         code: errorCodes.mcpContextWorkspaceRequired,
         details: { ctxId, instance },
-        message: `No workspace is attached to ${instance} for the current Context. Call instance_connect with an absolute workspace.`,
+        message: `No workspace is attached to ${instance} for the current Context. Use devshell instance connect ${instance} <absolute-workspace>.`,
         retryable: false
     });
 }

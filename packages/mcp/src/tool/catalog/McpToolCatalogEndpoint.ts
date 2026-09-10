@@ -6,7 +6,7 @@ import {
     type ToolDefinition
 } from "@portable-devshell/shared";
 
-export type McpToolCatalogEndpointOwner = "worker" | "artifact" | "environment" | "instance" | "workspace" | "todo";
+export type McpToolCatalogEndpointOwner = "worker" | "artifact" | "environment" | "workspace" | "todo";
 
 export interface McpToolCatalogEndpointEntry {
     definition: ToolDefinition;

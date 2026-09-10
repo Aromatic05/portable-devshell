@@ -10,7 +10,6 @@ export * from "./endpoint/McpEndpointBinding.js";
 export * from "./tool/catalog/McpToolCatalogEndpoint.js";
 export * from "./endpoint/McpEndpointWorker.js";
 export * from "./instance/McpInstanceGateway.js";
-export * from "./tool/catalog/McpToolCatalogInstance.js";
 export * from "./tool/catalog/McpToolCatalogInteraction.js";
 export * from "./host/McpHost.js";
 export { HttpHost } from "./host/HttpHost.js";
@@ -23,6 +22,7 @@ export * from "./tool/McpToolTitle.js";
 export * from "./tool/catalog/McpToolCatalogTodo.js";
 
 export * from "./context/McpContextRegistry.js";
+export * from "./context/McpContextInstanceConnector.js";
 export * from "./tool/catalog/McpToolCatalogEnvironment.js";
 export * from "./endpoint/McpEndpointResult.js";
 export * from "./endpoint/handler/McpEndpointHandlerInteraction.js";

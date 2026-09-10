@@ -19,6 +19,7 @@ interface Harness {
     broker: ModelDevshellBroker;
     close(request: WorkerDevshellCommandClose): void;
     completions: Array<{ error?: string; exitCode: number; sessionId: string }>;
+    contextConnects: Array<{ ctxId: string; instance: string; workspace?: string }>;
     faults: unknown[];
     outputs: Array<{ data: string; sessionId: string; stream: string }>;
     open(request: WorkerDevshellCommandOpen): void;
@@ -32,6 +33,7 @@ function harness(options: { allow?: boolean; contextWorkspace?: string } = {}): 
     let record = toolRecord();
     const outputs: Harness["outputs"] = [];
     const completions: Harness["completions"] = [];
+    const contextConnects: Harness["contextConnects"] = [];
     const faults: unknown[] = [];
     const worker = {
         appendControlEvent(type: string, data: unknown) {
@@ -81,10 +83,20 @@ function harness(options: { allow?: boolean; contextWorkspace?: string } = {}): 
                 else invocation.signal.addEventListener("abort", onAbort, { once: true });
             });
         }
+        if (argv[0] === "connect") {
+            return {
+                kind: "json",
+                value: await invocation.context.connectInstance(argv[1]!, argv[2])
+            };
+        }
         return { kind: "text", text: `probe:${argv.join("|")}` };
     };
     const commands = new CliExtensionCommandService(modelExtensionHost(command), { surface: "model" });
     const contextAdmin = {
+        async connectInstance(ctxId: string, instance: string, workspace?: string) {
+            contextConnects.push({ ctxId, instance, ...(workspace === undefined ? {} : { workspace }) });
+            return { instance, workspace: workspace ?? null };
+        },
         async validateForInstance(ctxId: string, instance: string) {
             assert.equal(ctxId, "ctx-a");
             assert.equal(instance, "demo-local");
@@ -111,6 +123,7 @@ function harness(options: { allow?: boolean; contextWorkspace?: string } = {}): 
             closeListener!(request);
         },
         completions,
+        contextConnects,
         faults,
         outputs,
         open(request) {
@@ -130,6 +143,21 @@ test("model devshell executes an allowed command only under matching active bash
     await waitFor(() => h.completions.length === 1);
 
     assert.deepEqual(h.outputs, [{ data: "probe:alpha\n", sessionId: "session-a", stream: "stdout" }]);
+    assert.deepEqual(h.completions, [{ exitCode: 0, sessionId: "session-a" }]);
+    assert.deepEqual(h.faults, []);
+});
+
+test("model devshell Context operations use the authoritative audited ctxId", async (t) => {
+    const h = harness();
+    t.after(() => h.broker.dispose());
+    h.open(openRequest({ argv: ["probe", "connect", "remote-test", "/remote/workspace"] }));
+    await waitFor(() => h.completions.length === 1);
+
+    assert.deepEqual(h.contextConnects, [{
+        ctxId: "ctx-a",
+        instance: "remote-test",
+        workspace: "/remote/workspace"
+    }]);
     assert.deepEqual(h.completions, [{ exitCode: 0, sessionId: "session-a" }]);
     assert.deepEqual(h.faults, []);
 });

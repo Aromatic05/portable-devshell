@@ -21,7 +21,6 @@ import {
     isMcpEnvironmentToolName,
     McpToolCatalogEnvironment
 } from "../tool/catalog/McpToolCatalogEnvironment.js";
-import { McpToolCatalogInstance } from "../tool/catalog/McpToolCatalogInstance.js";
 import { McpToolCatalogInteraction } from "../tool/catalog/McpToolCatalogInteraction.js";
 import { McpToolCatalogTodo } from "../tool/catalog/McpToolCatalogTodo.js";
 import { withMcpCommentOutputSchema } from "./McpEndpointFeedback.js";
@@ -61,7 +60,6 @@ export class McpEndpointCatalog {
     readonly #environmentTools = new McpToolCatalogEnvironment();
     readonly #gateway?: McpInstanceGateway;
     readonly #instanceName: string;
-    readonly #instanceTools = new McpToolCatalogInstance();
     readonly #interactionTools = new McpToolCatalogInteraction();
     readonly #schemaAdapter = new McpToolSchemaAdapter();
     readonly #todoTools = new McpToolCatalogTodo();
@@ -84,7 +82,7 @@ export class McpEndpointCatalog {
         return {
             exposed,
             hasWorkerSchema,
-            instanceRoutingEnabled: exposed.some((entry) => entry.owner === "instance"),
+            instanceRoutingEnabled: this.#gateway !== undefined,
             merged
         };
     }
@@ -198,16 +196,10 @@ export class McpEndpointCatalog {
                     tools: workspaceTools
                 });
             }
-            sources.push(
-                {
-                    owner: "todo",
-                    tools: this.#todoTools.list()
-                },
-                {
-                    owner: "instance",
-                    tools: this.#instanceTools.list()
-                }
-            );
+            sources.push({
+                owner: "todo",
+                tools: this.#todoTools.list()
+            });
         }
 
         return sources;

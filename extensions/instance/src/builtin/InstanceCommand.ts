@@ -4,6 +4,7 @@ import type { CliCommandResult, CliModelCommandInvocationContext } from "@portab
 export const INSTANCE_USAGE = [
     "Usage:",
     "  devshell instance list",
+    "  devshell instance connect <instance> [workspace]",
     "  devshell instance status <instance>",
     "  devshell instance logs <instance> [-f]"
 ].join("\n");
@@ -24,6 +25,8 @@ export async function executeInstanceCommand(
         case "list":
             expect(args, 0, "instance list");
             return text(renderList(await instances.list()));
+        case "connect":
+            return await connect(args, invocation);
         case "status":
             return text(renderSnapshot(await instances.snapshot(one(args, "instance status <instance>"))));
         case "logs":
@@ -33,6 +36,19 @@ export async function executeInstanceCommand(
         default:
             throw usage(`Unknown instance model command: ${command}\n\n${INSTANCE_USAGE}`);
     }
+}
+
+async function connect(
+    args: readonly string[],
+    invocation: CliModelCommandInvocationContext
+): Promise<CliCommandResult> {
+    if (args.length < 1 || args.length > 2 || args[0] === undefined || args[0].length === 0) {
+        throw usage("instance connect <instance> [workspace]");
+    }
+    return {
+        kind: "json",
+        value: await invocation.context.connectInstance(args[0], args[1])
+    };
 }
 
 async function logs(

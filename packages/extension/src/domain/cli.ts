@@ -27,6 +27,11 @@ export interface CliCommandIo {
     writeStdout(chunk: string): Promise<void>;
 }
 
+/** Context-bound operations available only to a model CLI invocation. */
+export interface CliModelCommandContext {
+    connectInstance(instance: string, workspace?: string): Promise<ExtensionJsonValue>;
+}
+
 /** Invocation state for a human/native CLI command. */
 export interface CliNativeCommandInvocationContext {
     readonly io?: CliCommandIo;
@@ -40,6 +45,8 @@ export interface CliNativeCommandInvocationContext {
 
 /** Invocation state for a model-facing command. Builtin CLI authority is intentionally absent. */
 export interface CliModelCommandInvocationContext {
+    /** Operations scoped to the authoritative MCP Context without exposing its internal id. */
+    readonly context: CliModelCommandContext;
     /** Authoritative managed instance resolved by the model command broker. */
     readonly instance: string;
     readonly io?: CliCommandIo;

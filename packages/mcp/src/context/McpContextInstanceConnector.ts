@@ -1,47 +1,38 @@
-import { createError, errorCodes, type JsonValue, type McpContextEnvironment, type ToolCallContext } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    type JsonValue,
+    type McpContextEnvironment
+} from "@portable-devshell/shared";
 
-import type { McpContextRegistry } from "../../context/McpContextRegistry.js";
-import type { McpInstanceGateway } from "../../instance/McpInstanceGateway.js";
-import type { McpToolCatalogInstanceName } from "../../tool/catalog/McpToolCatalogInstance.js";
-import { waitForMcpEndpointAbortable } from "../McpEndpointCancellation.js";
-import { readMcpInstanceConnectInput } from "../McpEndpointInput.js";
-import { requireMcpEndpointGateway } from "./McpEndpointHandlerSupport.js";
+import type { McpInstanceGateway } from "../instance/McpInstanceGateway.js";
+import type { McpContextRegistry } from "./McpContextRegistry.js";
 
-export class McpEndpointHandlerInstance {
+export interface McpContextInstanceConnectorOptions {
+    contextRegistry: McpContextRegistry;
+    gateway(instance: string): McpInstanceGateway | undefined;
+}
+
+/** Attaches managed instances to an existing Context without exposing Context ids to Extensions. */
+export class McpContextInstanceConnector {
     readonly #contextRegistry: McpContextRegistry;
-    readonly #gateway?: McpInstanceGateway;
-    readonly #instanceName: string;
+    readonly #gateway: (instance: string) => McpInstanceGateway | undefined;
 
-    constructor(options: {
-        contextRegistry: McpContextRegistry;
-        gateway?: McpInstanceGateway;
-        instanceName: string;
-    }) {
+    constructor(options: McpContextInstanceConnectorOptions) {
         this.#contextRegistry = options.contextRegistry;
         this.#gateway = options.gateway;
-        this.#instanceName = options.instanceName;
     }
 
-    async call(
-        toolName: McpToolCatalogInstanceName,
-        input: JsonValue,
-        context: ToolCallContext,
+    async connect(
+        ctxId: string,
+        instance: string,
+        workspace?: string,
         signal?: AbortSignal
     ): Promise<JsonValue> {
-        const gateway = requireMcpEndpointGateway(this.#gateway, this.#instanceName);
-        return await this.#connect(gateway, input, context, signal);
-    }
-
-    async #connect(
-        gateway: McpInstanceGateway,
-        input: JsonValue,
-        context: ToolCallContext,
-        signal?: AbortSignal
-    ): Promise<JsonValue> {
-        const ctxId = requireCtxId(context);
-        const { instance, workspace } = readMcpInstanceConnectInput(input);
+        signal?.throwIfAborted();
+        const gateway = this.#requireGateway(instance);
         const previous = await this.#environment(ctxId, instance);
-        const connected = await waitForMcpEndpointAbortable(gateway.connectInstance(instance, ctxId), signal);
+        const connected = await waitAbortable(gateway.connectInstance(instance, ctxId), signal);
         if (workspace === undefined) {
             try {
                 await this.#contextRegistry.attachEnvironment(ctxId, { instance });
@@ -54,11 +45,11 @@ export class McpEndpointHandlerInstance {
 
         if (previous?.workspace === workspace && previous.temporaryDirectory !== undefined) {
             try {
-                await waitForMcpEndpointAbortable(
+                await waitAbortable(
                     gateway.touchTemporaryDirectory(instance, previous.temporaryDirectory),
                     signal
                 );
-                await waitForMcpEndpointAbortable(gateway.touchAlerts(instance, workspace), signal);
+                await waitAbortable(gateway.touchAlerts(instance, workspace), signal);
                 return {
                     ...(isRecord(connected) ? connected : { result: connected }),
                     temporaryDirectory: previous.temporaryDirectory,
@@ -71,9 +62,9 @@ export class McpEndpointHandlerInstance {
 
         let preparedWorkspace: string | undefined;
         try {
-            const prepared = await waitForMcpEndpointAbortable(gateway.prepareWorkspace(instance, workspace), signal);
+            const prepared = await waitAbortable(gateway.prepareWorkspace(instance, workspace), signal);
             preparedWorkspace = prepared.workspace;
-            const alerts = await waitForMcpEndpointAbortable(gateway.readAlerts(instance, prepared.workspace), signal);
+            const alerts = await waitAbortable(gateway.readAlerts(instance, prepared.workspace), signal);
             await this.#contextRegistry.attachEnvironment(ctxId, {
                 instance,
                 temporaryDirectory: prepared.temporaryDirectory,
@@ -89,7 +80,7 @@ export class McpEndpointHandlerInstance {
                     ...(prepared.projectMemoryPresent !== false
                         ? [
                               `Read ${prepared.projectMemoryAgentFile} before working.`,
-                              `Use ${prepared.projectMemoryDirectory} for durable project memory; keep it useful for future sessions.`,
+                              `Use ${prepared.projectMemoryDirectory} for durable project memory; keep it useful for future sessions.`
                           ]
                         : []),
                     `Use ${prepared.temporaryDirectory} for all temporary files.`,
@@ -98,7 +89,7 @@ export class McpEndpointHandlerInstance {
                 ...(prepared.projectMemoryPresent !== false
                     ? {
                           projectMemoryAgentFile: prepared.projectMemoryAgentFile,
-                          projectMemoryDirectory: prepared.projectMemoryDirectory,
+                          projectMemoryDirectory: prepared.projectMemoryDirectory
                       }
                     : {}),
                 temporaryDirectory: prepared.temporaryDirectory,
@@ -111,6 +102,17 @@ export class McpEndpointHandlerInstance {
             if (previous === undefined) await gateway.releaseInstanceReference?.(instance, ctxId);
             throw error;
         }
+    }
+
+    #requireGateway(instance: string): McpInstanceGateway {
+        const gateway = this.#gateway(instance);
+        if (gateway !== undefined) return gateway;
+        throw createError({
+            code: errorCodes.coreToolSchemaUnavailable,
+            details: { instance },
+            message: `Context instance attachment is not available for ${instance}.`,
+            retryable: false
+        });
     }
 
     async #environment(ctxId: string, instance: string): Promise<McpContextEnvironment | undefined> {
@@ -134,13 +136,19 @@ export class McpEndpointHandlerInstance {
     }
 }
 
-function requireCtxId(context: ToolCallContext): string {
-    if (context.ctxId !== undefined && context.ctxId.length > 0) return context.ctxId;
-    throw createError({
-        code: errorCodes.mcpContextInvalid,
-        message: "instance_connect requires a validated Context.",
-        retryable: false
+async function waitAbortable<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (signal === undefined) return await operation;
+    signal.throwIfAborted();
+    let abort: (() => void) | undefined;
+    const aborted = new Promise<never>((_resolve, reject) => {
+        abort = () => reject(signal.reason instanceof Error ? signal.reason : new Error("Model command was cancelled."));
+        signal.addEventListener("abort", abort, { once: true });
     });
+    try {
+        return await Promise.race([operation, aborted]);
+    } finally {
+        if (abort !== undefined) signal.removeEventListener("abort", abort);
+    }
 }
 
 function isRecord(value: JsonValue): value is Record<string, JsonValue> {

@@ -43,6 +43,11 @@ function fakeCapability(): ExtensionInstanceCapability {
 
 function invocation(output: string[] = []): CliModelCommandInvocationContext {
     return {
+        context: {
+            async connectInstance(instance, workspace) {
+                return { instance, workspace: workspace ?? null };
+            }
+        },
         instance: "local-test",
         io: {
             async readInput() { return undefined; },
@@ -65,6 +70,16 @@ test("Instance model command renders the public management capability", async ()
         kind: "text",
         text: "[3] stdout hello\n"
     });
+});
+
+test("Instance model connect uses the authoritative model Context interface", async () => {
+    assert.deepEqual(
+        await executeInstanceCommand(fakeCapability(), ["connect", "remote-test", "/remote/workspace"], invocation()),
+        {
+            kind: "json",
+            value: { instance: "remote-test", workspace: "/remote/workspace" }
+        }
+    );
 });
 
 test("Instance model logs follow streams through public CLI I/O and Instance watchEvents", async () => {

@@ -18,11 +18,15 @@ import type {
 import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
 import type { ExtensionInstanceCapability } from "@portable-devshell/extension/instance";
 import type {
+    CliModelCommandInvocationContext,
     CliNativeCommandInvocationContext,
     CliCommandResult
 } from "@portable-devshell/extension/cli";
 
-import { createCliNativeSandboxBinding } from "../../../src/control/cli/CliExtensionSandboxCodec.ts";
+import {
+    createCliModelSandboxBinding,
+    createCliNativeSandboxBinding
+} from "../../../src/control/cli/CliExtensionSandboxCodec.ts";
 import {
     ExtensionSandboxHost,
     type ExtensionSandboxHostOptions
@@ -142,6 +146,42 @@ export function activate(context) {
     });
     assert.deepEqual(result, { kind: "text", text: "input" });
     assert.deepEqual(calls, ["stdout:out", "stderr:err", "request:true", "read"]);
+});
+
+test("Extension sandbox bridges model Context operations without exposing ctxId", async (t) => {
+    const sandbox = await setupSandbox(t, "extension-sandbox-model-context", `
+export function activate(context) {
+    context.register({ id: "cli.model-commands" }, "connect", async (_argv, invocation) => ({
+        kind: "json",
+        value: await invocation.context.connectInstance("remote-test", "/remote/workspace")
+    }));
+}
+`);
+    const registration = await sandboxRegistration(sandbox, "cli.model-commands", "connect");
+    const binding = createCliModelSandboxBinding(
+        registration.descriptor,
+        sandboxPointContext("connect"),
+        sandbox
+    );
+    const calls: string[] = [];
+    const invocation: CliModelCommandInvocationContext = {
+        context: {
+            async connectInstance(instance, workspace) {
+                calls.push(`${instance}:${workspace ?? ""}`);
+                return { instance, workspace: workspace ?? null };
+            }
+        },
+        instance: "local-test",
+        requestId: "model-context",
+        signal: new AbortController().signal,
+        workspace: "/local/workspace"
+    };
+
+    assert.deepEqual(await binding([], invocation), {
+        kind: "json",
+        value: { instance: "remote-test", workspace: "/remote/workspace" }
+    });
+    assert.deepEqual(calls, ["remote-test:/remote/workspace"]);
 });
 
 test("Extension sandbox bridges declared Artifact and Instance management capabilities", async (t) => {

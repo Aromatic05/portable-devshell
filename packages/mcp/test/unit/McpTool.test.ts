@@ -60,12 +60,6 @@ test("MCP safety annotations are explicit for known semantics and conservative f
         openWorldHint: false,
         readOnlyHint: false,
     });
-    assert.deepEqual(mcpToolAnnotations("instance_connect"), {
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-        readOnlyHint: false,
-    });
     assert.deepEqual(mcpToolAnnotations("instance_create"), {
         destructiveHint: false,
         idempotentHint: false,

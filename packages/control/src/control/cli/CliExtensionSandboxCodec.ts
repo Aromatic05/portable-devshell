@@ -5,6 +5,7 @@ import {
     type CliCommandInputOptions,
     type CliCommandIo,
     type CliCommandResult,
+    type CliModelCommandContext,
     type CliModelCommandBinding,
     type CliModelCommandInvocationContext,
     type CliNativeCommandBinding,
@@ -64,6 +65,7 @@ export const cliModelCommandsSandboxCodec: ExtensionSandboxPointCodec = Object.f
         const argv = readStringArray(value.argv, "argv");
         const invocation = readRecord(value.context, "model CLI invocation context");
         return await (binding as CliModelCommandBinding)(argv, Object.freeze({
+            context: createCliSandboxModelContext(context),
             instance: readString(invocation.instance, "instance"),
             ...(invocation.io === true ? { io: createCliSandboxIo(context) } : {}),
             requestId: readString(invocation.requestId, "requestId"),
@@ -112,7 +114,7 @@ export function createCliModelSandboxBinding(
                 workspace: invocation.workspace
             }
         }, {
-            ...(invocation.io === undefined ? {} : { interfacePort: createCliInterfacePort(invocation.io) }),
+            interfacePort: createCliModelInterfacePort(invocation),
             signal: invocation.signal
         }) as CliCommandResult;
 }
@@ -149,6 +151,19 @@ function createCliSandboxIo(context: ExtensionPointSandboxInvocationContext): Cl
     });
 }
 
+function createCliSandboxModelContext(context: ExtensionPointSandboxInvocationContext): CliModelCommandContext {
+    return Object.freeze({
+        connectInstance: async (instance: string, workspace?: string) => {
+            const result = await context.requestInterface("cli.context.connectInstance", {
+                instance,
+                ...(workspace === undefined ? {} : { workspace })
+            });
+            if (result === undefined) throw new TypeError("cli.context.connectInstance returned no result.");
+            return result;
+        }
+    });
+}
+
 function createCliInterfacePort(io: CliCommandIo): ExtensionPointSandboxInterfacePort {
     return Object.freeze({
         async request(operation: string, input?: ExtensionJsonValue) {
@@ -176,6 +191,22 @@ function createCliInterfacePort(io: CliCommandIo): ExtensionPointSandboxInterfac
                 default:
                     throw new TypeError(`Unsupported CLI sandbox interface operation: ${operation}.`);
             }
+        }
+    });
+}
+
+function createCliModelInterfacePort(invocation: CliModelCommandInvocationContext): ExtensionPointSandboxInterfacePort {
+    const ioPort = invocation.io === undefined ? undefined : createCliInterfacePort(invocation.io);
+    return Object.freeze({
+        async request(operation: string, input?: ExtensionJsonValue) {
+            if (operation === "cli.context.connectInstance") {
+                const value = readRecord(input, "cli.context.connectInstance");
+                const instance = readString(value.instance, "instance");
+                const workspace = value.workspace === undefined ? undefined : readString(value.workspace, "workspace");
+                return await invocation.context.connectInstance(instance, workspace);
+            }
+            if (ioPort !== undefined) return await ioPort.request(operation, input);
+            throw new TypeError(`Unsupported CLI sandbox interface operation: ${operation}.`);
         }
     });
 }

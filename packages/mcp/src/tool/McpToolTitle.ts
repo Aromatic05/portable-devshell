@@ -9,7 +9,6 @@ const titles: Readonly<Record<string, string>> = {
     file_info: "Inspect file",
     file_read: "Read file",
     file_search: "Search files",
-    instance_connect: "Connect instance",
     instance_create: "Create instance",
     instance_list: "List instances",
     instance_status: "Read instance status",

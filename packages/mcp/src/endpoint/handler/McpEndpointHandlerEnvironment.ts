@@ -419,7 +419,7 @@ function contextWorkspaceRequired(ctxId: string, instance: string) {
     return createError({
         code: errorCodes.mcpContextWorkspaceRequired,
         details: { ctxId, instance },
-        message: `No workspace is attached to ${instance} for ${ctxId}. Call environ_info or instance_connect with an absolute workspace.`,
+        message: `No workspace is attached to ${instance} for ${ctxId}. Call environ_info or use devshell instance connect ${instance} <absolute-workspace>.`,
         retryable: false,
     });
 }

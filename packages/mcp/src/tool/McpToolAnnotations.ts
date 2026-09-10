@@ -28,7 +28,6 @@ const readOnlyTools = new Set([
 const nonDestructiveMutationTools = new Set([
     "artifact_share",
     "environ_info",
-    "instance_connect",
     "instance_create",
     "tmux_create",
     "tmux_read",
@@ -41,9 +40,7 @@ const nonDestructiveMutationTools = new Set([
     "workspace_recover",
 ]);
 
-const idempotentMutationTools = new Set([
-    "instance_connect",
-]);
+const idempotentMutationTools = new Set<string>();
 
 const closedWorldTools = new Set([
     "artifact_read",

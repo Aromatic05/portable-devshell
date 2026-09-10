@@ -5,7 +5,6 @@ import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
 import {
     McpToolCatalogArtifact,
     McpToolCatalogEnvironment,
-    McpToolCatalogInstance,
     McpToolCatalogInteraction,
     McpToolSchemaAdapter,
     workspaceAppResourceUri,
@@ -15,7 +14,6 @@ test("Control-owned MCP tools describe their structured output instead of generi
     const definitions = [
         ...new McpToolCatalogArtifact().list(),
         ...new McpToolCatalogEnvironment().list({ workspaceApp: true }),
-        ...new McpToolCatalogInstance().list(),
         ...new McpToolCatalogInteraction().list(),
     ];
 
@@ -35,10 +33,6 @@ test("Control-owned MCP tools describe their structured output instead of generi
     const distribution = property(platform, "distribution");
     assert.equal(record(distribution).additionalProperties, false);
     assert.deepEqual(required(distribution), ["id", "name"]);
-
-    assertProperties(definition(definitions, "instance_connect").outputSchema, [
-        "connectionState", "daemonState", "lastSeq", "name", "ready", "status", "workspace"
-    ]);
 
     assertProperties(definition(definitions, "workspace_open").outputSchema, [
         "ctxId", "instance"

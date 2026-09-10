@@ -141,15 +141,6 @@ export const instanceCreateOutputSchema = objectSchema({
     snapshot: instanceSnapshotOutputSchema,
 }, ["enabled", "name"]);
 
-export const instanceConnectOutputSchema = objectSchema({
-    ...instanceSnapshotProperties,
-    comment: arraySchema(stringValue),
-    projectMemoryAgentFile: nonEmptyString,
-    projectMemoryDirectory: nonEmptyString,
-    temporaryDirectory: nonEmptyString,
-    workspace: nonEmptyString,
-}, ["connectionState", "daemonState", "lastSeq", "name", "ready", "status"]);
-
 export const artifactSourceOutputSchema = objectSchema({
     handle: nonEmptyString,
     instance: nonEmptyString,

@@ -15,7 +15,7 @@ import type { InstanceDescriptor } from "../instance/InstanceDescriptor.js";
 import type { InstanceRegistry } from "../instance/registry/InstanceRegistry.js";
 import type { ContextAdminPort } from "../mcp/ContextRouteModule.js";
 import type { CliExtensionCommandService } from "./CliExtensionCommandService.js";
-import type { CliCommandIo } from "@portable-devshell/extension/cli";
+import type { CliCommandIo, CliModelCommandContext } from "@portable-devshell/extension/cli";
 
 export interface ModelDevshellAccessInput {
     commandId: string;
@@ -176,11 +176,19 @@ export class ModelDevshellBroker {
             writeStderr: async (chunk) => await this.#write(descriptor, request.sessionId, "stderr", chunk),
             writeStdout: async (chunk) => await this.#write(descriptor, request.sessionId, "stdout", chunk)
         };
+        const modelContext: CliModelCommandContext = Object.freeze({
+            connectInstance: async (instance: string, workspace?: string) => {
+                const admin = this.#contextAdmin();
+                if (admin === undefined) throw integrityError("MCP Context authority is unavailable.");
+                return await admin.connectInstance(request.ctxId, instance, workspace, signal);
+            }
+        });
         try {
             const result = await this.#commands.command(
                 commandId,
                 argv,
                 {
+                    context: modelContext,
                     instance: descriptor.name,
                     requestId: request.sessionId,
                     signal,
