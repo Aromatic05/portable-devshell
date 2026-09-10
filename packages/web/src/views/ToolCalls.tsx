@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
-import type { JsonValue, ToolCallRecord } from "@portable-devshell/shared/browser";
+import type { JsonValue, McpContextRecord, ToolCallRecord } from "@portable-devshell/shared/browser";
 
 import { ConfirmationDialog } from "../components/ConfirmationDialog.js";
 import { ContextBatchDisableDialog } from "../components/ContextBatchDisableDialog.js";
@@ -19,6 +19,7 @@ import type { WebState, WebStore } from "../state/WebStore.js";
 
 const toolCallPageSize = 20;
 const commentPageSize = 8;
+const activeContextWindowMs = 30 * 60 * 1_000;
 
 export function ToolCalls({
     disabled = false,
@@ -49,18 +50,20 @@ export function ToolCalls({
         () => Object.values(instanceState).flatMap((value) => value.commentCalls),
         [instanceState],
     );
-    const contextStatuses = useMemo(
-        () => new Map(state.readModel.contexts.map((context) => [context.ctxId, context.status])),
+    const contextRecords = useMemo(
+        () => new Map(state.readModel.contexts.map((context) => [context.ctxId, context])),
         [state.readModel.contexts],
     );
+    const now = Date.now();
     const calls = useMemo(
         () => allCalls.filter((call) =>
-            call.ctxId === undefined ||
-            filters.contextStatus === "all" ||
-            contextStatuses.get(call.ctxId) === undefined ||
-            contextStatuses.get(call.ctxId) === filters.contextStatus
+            call.ctxId === undefined || contextMatchesFilter(
+                contextRecords.get(call.ctxId),
+                filters.contextStatus,
+                now,
+            )
         ),
-        [allCalls, contextStatuses, filters.contextStatus],
+        [allCalls, contextRecords, filters.contextStatus, now],
     );
     const instances = useMemo(
         () => state.readModel.instances.map((instance) => instance.name).sort(),
@@ -90,11 +93,10 @@ export function ToolCalls({
     const contexts = useMemo(
         () => [...contextInstances.keys()]
             .filter((ctxId) =>
-                filters.contextStatus === "all" ||
-                contextStatuses.get(ctxId) === filters.contextStatus
+                contextMatchesFilter(contextRecords.get(ctxId), filters.contextStatus, now)
             )
             .sort(),
-        [contextInstances, contextStatuses, filters.contextStatus],
+        [contextInstances, contextRecords, filters.contextStatus, now],
     );
     const contextTargets = selectedCtxId === undefined
         ? undefined
@@ -439,6 +441,16 @@ function pageCount(total: number, size: number): number {
 
 function pageItems<T>(items: readonly T[], page: number, size: number): T[] {
     return items.slice(page * size, (page + 1) * size);
+}
+
+function contextMatchesFilter(
+    context: McpContextRecord | undefined,
+    filter: "all" | "active" | "expired" | "disabled",
+    now: number,
+): boolean {
+    if (filter === "all" || context === undefined) return true;
+    if (context.status !== filter) return false;
+    return filter !== "active" || Date.parse(context.lastAccessedAt) >= now - activeContextWindowMs;
 }
 
 function readCallComments(call: ToolCallRecord): string[] {

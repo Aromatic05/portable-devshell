@@ -22,26 +22,29 @@ const alphaCall = {
     workspace: "/projects/alpha",
 };
 
+const fixtureNow = Date.now();
+const fixtureAt = (offsetMs: number): string => new Date(fixtureNow + offsetMs).toISOString();
+
 const state: WebState = {
     connection: "online",
     operations: {},
     readModel: {
         ...createInitialControlReadModelState(),
         contexts: [{
-            createdAt: "2026-07-31T08:00:00Z",
+            createdAt: fixtureAt(-60 * 60 * 1_000),
             ctxId: "ctx-alpha",
-            expiresAt: "2026-08-01T08:00:00Z",
+            expiresAt: fixtureAt(60 * 60 * 1_000),
             instance: "alpha",
-            lastAccessedAt: "2026-07-31T09:00:00Z",
+            lastAccessedAt: fixtureAt(-5 * 60 * 1_000),
             principal: "client-alpha",
             status: "active",
             workspace: "/workspace/alpha",
         }, {
-            createdAt: "2026-07-31T08:00:00Z",
+            createdAt: fixtureAt(-60 * 60 * 1_000),
             ctxId: "ctx-beta",
-            expiresAt: "2026-08-01T08:00:00Z",
+            expiresAt: fixtureAt(60 * 60 * 1_000),
             instance: "beta",
-            lastAccessedAt: "2026-07-31T09:00:00Z",
+            lastAccessedAt: fixtureAt(-5 * 60 * 1_000),
             principal: "client-beta",
             status: "active",
             workspace: "/workspace/beta",
@@ -526,6 +529,44 @@ it("filters Contexts and tool calls by status, defaulting to active", () => {
     expect(screen.getByRole("option", { name: "ctx-expired" })).toBeInTheDocument();
     expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(1);
     expect(within(view.container.querySelector(".activity-feed")!).getByText("expired_tool")).toBeInTheDocument();
+});
+
+it("filters active Contexts and tool calls to the last 30 minutes", () => {
+    const staleContextState: WebState = {
+        ...state,
+        readModel: {
+            ...state.readModel,
+            contexts: state.readModel.contexts.map((context) => context.ctxId === "ctx-alpha"
+                ? { ...context, lastAccessedAt: new Date(Date.now() - 31 * 60 * 1_000).toISOString() }
+                : context),
+            instanceState: {
+                ...state.readModel.instanceState,
+                alpha: {
+                    ...state.readModel.instanceState.alpha!,
+                    toolCalls: [alphaCall],
+                },
+                beta: {
+                    ...state.readModel.instanceState.beta!,
+                    toolCalls: [],
+                },
+            },
+        },
+    };
+
+    const view = render(<ToolCalls
+        state={staleContextState}
+        store={{ queueContextMessage: vi.fn() } as unknown as WebStore}
+    />);
+
+    expect(screen.queryByRole("option", { name: "ctx-alpha" })).not.toBeInTheDocument();
+    expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(0);
+
+    fireEvent.change(screen.getByLabelText("Context status"), {
+        target: { value: "all" },
+    });
+
+    expect(screen.getByRole("option", { name: "ctx-alpha" })).toBeInTheDocument();
+    expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(1);
 });
 
 it("paginates queued Comments in groups of eight", () => {
