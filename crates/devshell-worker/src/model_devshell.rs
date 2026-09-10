@@ -98,7 +98,7 @@ impl ModelDevshellEnvironment {
                 env.insert(TASK_ID_ENV.to_string(), Some(task_id.clone()));
             }
             None => {
-                env.remove(TASK_ID_ENV);
+                env.insert(TASK_ID_ENV.to_string(), None);
             }
         }
         env.insert("PATH".to_string(), Some(self.path.clone()));
@@ -351,5 +351,25 @@ mod tests {
         assert_eq!(env[WORKSPACE_ENV].as_deref(), Some("/repo"));
         assert_eq!(env[BROKER_SOCKET_ENV].as_deref(), Some("/run/worker.sock"));
         assert_eq!(env["PATH"].as_deref(), Some("/run/model-bin:/usr/bin"));
+    }
+
+    #[test]
+    fn bash_model_environment_explicitly_clears_inherited_tmux_task_binding() {
+        let model = ModelDevshellEnvironment {
+            broker_socket: "/run/worker.sock".to_string(),
+            ctx_id: "ctx-real".to_string(),
+            parent_call_id: "call-real".to_string(),
+            path: "/run/model-bin:/usr/bin".to_string(),
+            task_id: None,
+            workspace: "/repo".to_string(),
+        };
+        let mut env = BTreeMap::from([(
+            TASK_ID_ENV.to_string(),
+            Some("task-inherited-from-outer-tmux".to_string()),
+        )]);
+
+        model.inject(&mut env);
+
+        assert_eq!(env.get(TASK_ID_ENV), Some(&None));
     }
 }

@@ -125,7 +125,7 @@ test(
             );
             assert.equal(status.error, undefined, JSON.stringify(status));
             assert.equal(status.result?.isError, false, JSON.stringify(status));
-            assert.equal(status.result?.structuredContent?.exitCode, 0);
+            assert.equal(status.result?.structuredContent?.exitCode, 0, JSON.stringify(status));
             assert.match(
                 String(status.result?.structuredContent?.stdout ?? ""),
                 new RegExp(`instance: ${instanceName}\\nstatus: ready`, "u")
