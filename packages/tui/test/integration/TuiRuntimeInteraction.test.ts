@@ -100,6 +100,41 @@ test("real Ink runtime handles keyboard navigation, search, redraw, and terminal
     assert.equal(terminal.output.includes("\u001B[?1049l"), true);
 });
 
+test("real Ink runtime strips bracketed paste markers from app input", async () => {
+    const terminal = createTerminal();
+    const clients = createClients();
+    const runtime = new TuiRuntime(
+        { stdin: terminal.stdin, stdout: terminal.stdout },
+        { clients: clients.value, inkDebug: true },
+    );
+    const running = runtime.run();
+
+    try {
+        await waitUntil(
+            () => runtime.store.getState().connection.status === "connected",
+        );
+        terminal.write("1");
+        await waitUntil(
+            () => runtime.store.getState().ui.selectedPage === "instances",
+        );
+        terminal.write("/");
+        await waitUntil(
+            () => runtime.store.getState().interaction.focusScope === "search",
+        );
+
+        terminal.write("\u001B[200~pasted\u001B[201~");
+        await waitUntil(
+            () =>
+                runtime.store.getState().ui.searchQueries.instances === "pasted",
+        );
+
+        terminal.write("\u0004");
+        await running;
+    } finally {
+        await runtime.stop();
+    }
+});
+
 test("serializes rapid Audit Input navigation and activation", async () => {
     const terminal = createTerminal();
     const clients = createClients({
