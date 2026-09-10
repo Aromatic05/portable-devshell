@@ -76,7 +76,8 @@ workspace 是操作级或 Context-level authority：
 
 * CLI `instance call` 显式传 worker 上的绝对 workspace；
 * MCP `environ_info` 在 Context 中为当前 instance 建立 environment attachment；
-* model-facing `devshell instance connect <instance> [workspace]` 可以在同一个 Context 下附着另一个 instance/workspace；
+* model-facing `devshell instance list/status` 为当前 Context 可见的 remote instance 返回 opaque handle；
+* fixed MCP `environ_remote(command="attach")` 使用 handle 在同一个 Context 下附着另一个 instance/workspace；`mask` 对当前 Context 永久撤销该 remote instance 的访问；
 * TUI 的人工 terminal 入口可以使用 worker handshake 报告的用户 home 作为交互起点，但这不写回 instance config。
 
 `[workspace].enabled` 只控制 Workspace App/Goal/Wait recovery 子系统，不是默认 workspace path。

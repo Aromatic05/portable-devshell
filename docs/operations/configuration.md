@@ -222,7 +222,7 @@ timeoutMs = 5000
 - `version`：全局配置当前为 `2`，实例配置当前为 `4`；
 - `name`：必须包含连字符；
 - `provider`：`local`、`ssh`、`docker`、`podman`、`reverse`；
-- instance 配置不包含持久化默认 workspace path。worker 启动与实例生命周期不绑定项目目录；CLI 工具调用显式传绝对 workspace，MCP Context 通过 `environ_info` 选择初始 worker 绝对目录，并通过 Instance Extension 的 `devshell instance connect <instance> [workspace]` 为当前 Context 附加其他 instance；
+- instance 配置不包含持久化默认 workspace path。worker 启动与实例生命周期不绑定项目目录；MCP Context 通过 `environ_info` 选择 primary instance 的绝对 workspace。其他 managed instance 由 model-facing `devshell instance list/status` 返回 Context-scoped opaque handle，再通过固定 MCP `environ_remote(command="attach", handle=..., workspace=...)` 附加；`mask` 会在当前 Context 中永久屏蔽该 remote instance，直到 Context 结束；
 - `[workspace].enabled`：是否启用该 instance 的 Workspace App、Goal/Question/Approval/Wait 交互与自动 re-entry。默认 `true`；设为 `false` 会 retire 已存在的 Workspace presentation/recovery state，但不会关闭 MCP endpoint、停止 Worker 或移除 bash/file/tmux runtime primitive；
 - `[mcp].enabled`：是否注册该 instance 的 MCP endpoint；
 - `[mcp].auth`：该 instance 独立使用 `none`、`token` 或 `oauth2`；

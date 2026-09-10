@@ -103,9 +103,11 @@ enabled = true
 model = ["artifact", "instance", "mcp", "secret", "skill"]
 ```
 
-跨 instance Context attachment 也走 model Extension command：
-`devshell instance connect <instance> [workspace]`。MCP 不再保留独立的 `instance_connect`
-tool；model command 不会 fallback 到 native/builtin CLI。
+跨 instance Context attachment 使用固定 MCP runtime primitive `environ_remote`。模型先通过
+`devshell instance list` / `devshell instance status <instance>` 获取当前 Context 下的 opaque
+instance handle，再调用 `environ_remote` 的 `attach` command。`mask` command 可以永久屏蔽当前
+Context 对某个 remote instance 的访问，直到该 Context 结束；不存在 unmask。旧
+`instance_connect` 不再暴露。model command 不会 fallback 到 native/builtin CLI。
 
 Workspace App/Goal/Wait recovery 可以按 instance 独立关闭，而不停止 Worker 或 MCP runtime：
 

@@ -89,9 +89,16 @@ temporaryDirectory
 
 workspace 必须是 **worker 机器上的绝对路径**。
 
-Instance Extension 的 model command
-`devshell instance connect <instance> [workspace]` 可以把另一个已就绪 instance 的 workspace
-附加到同一个 Context。`ctxId` 由 audited model-command broker 在服务端注入，Extension 不持有该内部 id。之后带 `instance` 路由的工具仍必须经过 Context 对该 instance 的 attachment 校验。
+跨 instance environment 使用 opaque handle bootstrap。Instance Extension 的 model `list/status`
+通过 audited Context projection 返回当前 Context 可见 remote instance 的 handle；随后
+`environ_remote(command="attach", handle=..., workspace=...)` 在 Control/MCP 侧直接建立 environment，
+不依赖 primary Worker 能否执行 shell。handle 只属于当前 Context，不暴露内部 `ctxId` 或 provider
+凭据。之后带 `instance` 路由的工具仍必须经过 Context attachment 校验。
+
+`environ_remote(command="mask", handle=...)` 是单调 self-confinement：mask 会撤销已有 remote
+environment，并永久拒绝该 Context 后续 discovery、attach 和 routed tool。该状态随 Context
+持久化且没有 unmask/clear/reset 操作；primary instance 不通过 remote handle 暴露，因此不能由
+`environ_remote` mask。
 
 ### 切换 workspace
 

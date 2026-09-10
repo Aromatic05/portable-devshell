@@ -139,17 +139,20 @@ MCP endpoint 不再用 instance 配置中的 group/capability 去动态裁剪 `t
 
 | Domain | MCP model-facing surface |
 | --- | --- |
-| Environment | `environ_info` |
+| Environment | `environ_info`、`environ_remote` |
 | Worker shell/file | `bash_run`、`file_read`、`file_edit`、`file_find`、`file_search`、`file_info` 等 Worker primitive |
 | Artifact | Worker `artifact_read`；Control `artifact_viewImage` |
 | tmux | `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_list`、`tmux_create`、`tmux_close` |
 | Todo | `todo_read`、`todo_write` |
 | Workspace | 小型 model-facing surface + App-only wire protocol |
-| Instance | 无固定 MCP 管理 tool；Context attachment 走 model Extension command |
+| Instance | 无固定 MCP 管理 tool；model Extension 只负责 discovery/status/logs 与 opaque handle projection |
 
-把另一个 managed instance/workspace 附着到当前 Context 时，模型使用
-`devshell instance connect <instance> [workspace]`。该命令属于 Instance Extension 的
-`cli.model-commands`；Extension 只拿到 Context-bound invocation interface，不会看到或自行提交内部 `ctxId`。创建、列出、状态、启动、停止、删除等 owner 管理仍由原生 `devshell instance ...` / TUI 负责。
+跨 instance bootstrap 分成两步：model-facing `devshell instance list/status` 只读取当前 Context
+可见的 managed instance，并为非 primary instance 返回 opaque handle；随后固定 MCP
+`environ_remote` 使用该 handle 修改 Context environment。它采用稳定的开放 command envelope，
+当前命令为 `help`、`attach`、`mask`，command 不写进 JSON Schema enum，因此以后增加子命令不要求
+刷新 tool schema。`mask` 对当前 Context 不可撤销，并从 model discovery 与所有 routed tool 中屏蔽
+对应 instance。创建、启动、停止、删除等 owner 管理仍由原生 `devshell instance ...` / TUI 负责。
 
 可扩展命令走另一条数据面。`bash_run` / `tmux_run` 启动的进程环境中存在 Context-bound `devshell` shim；它只解析 `cli.model-commands`，并按当前 instance 的 `[extensions].model` allowlist 授权。例如：
 
