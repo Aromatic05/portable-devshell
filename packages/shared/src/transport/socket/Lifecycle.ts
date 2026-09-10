@@ -369,7 +369,12 @@ export class ControlLifecycleManager {
             if (value !== undefined) {
                 return value;
             }
-            await sleep(50);
+            const remaining = deadline - Date.now();
+            if (remaining > 0) await sleep(Math.min(50, remaining));
+        }
+        const finalValue = await factory();
+        if (finalValue !== undefined) {
+            return finalValue;
         }
         throw new Error(timeoutMessage);
     }

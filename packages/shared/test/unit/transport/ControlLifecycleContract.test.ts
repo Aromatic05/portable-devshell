@@ -180,6 +180,63 @@ test("control lifecycle start is idempotent and stop tolerates the shutdown sock
     assert.deepEqual(socketActions, ["remove", "ensure", "remove"]);
 });
 
+test("control lifecycle performs one final readiness probe at the wait deadline", async () => {
+    const root = await createTestTempDirectory("shared-lifecycle-deadline");
+    let statusCalls = 0;
+    let childRunning = false;
+    let recordedPid: number | undefined;
+    try {
+        const lifecycle = new ControlLifecycleManager({
+            daemonModulePath: "/app/ControlDaemon.js",
+            pidFile: {
+                path: resolve(root, "control.pid"),
+                async read() {
+                    return recordedPid;
+                },
+                async remove() {
+                    recordedPid = undefined;
+                },
+                async write(pid) {
+                    recordedPid = pid;
+                }
+            },
+            processIsRunning: (pid) => pid === 4321 && childRunning,
+            rpcClient: {
+                async request(operation) {
+                    if (operation !== "status") throw new Error("unexpected operation");
+                    statusCalls += 1;
+                    if (statusCalls < 3) throw new Error("not ready yet");
+                    return { instanceCount: 1, pid: 4321 };
+                }
+            },
+            signalProcess() {
+                childRunning = false;
+            },
+            socketFile: {
+                path: resolve(root, "control.sock"),
+                runtimeDir: root,
+                async ensureRuntimeDir() {},
+                async remove() {}
+            },
+            spawnFunction() {
+                childRunning = true;
+                return Object.assign(new EventEmitter(), { pid: 4321, unref() {} }) as never;
+            },
+            startupLogPath: resolve(root, "control.startup.log"),
+            waitTimeoutMs: 1
+        });
+
+        assert.deepEqual(await lifecycle.start(), {
+            instanceCount: 1,
+            pid: 4321,
+            running: true
+        });
+        assert.equal(statusCalls, 3);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
 test("control lifecycle start failure includes only this startup attempt", async () => {
     const root = await createTestTempDirectory("shared-start-failure");
     const pidPath = resolve(root, "control.pid");
