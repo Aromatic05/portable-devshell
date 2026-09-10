@@ -31,7 +31,7 @@ test("Messages merges registered sessions with exact comment and report history"
                 environments: [{ instance: "alpha", workspace: "/workspace/empty" }],
                 expiresAt: "2099-09-10T10:00:00.000Z",
                 instance: "alpha",
-                lastAccessedAt: "2026-09-10T09:00:00.000Z",
+                lastAccessedAt: "2026-09-10T10:04:00.000Z",
                 principal: "client",
                 status: "active",
                 workspace: "/workspace/empty",
@@ -68,9 +68,10 @@ test("Messages merges registered sessions with exact comment and report history"
     });
     store.setSelectedInstance("alpha");
     store.setSelectedPage("messages");
+    const now = Date.parse("2026-09-10T10:05:00.000Z");
 
     assert.deepEqual(
-        selectTuiMessageSessions(store.getState(), "alpha").map((session) => session.ctxId),
+        selectTuiMessageSessions(store.getState(), "alpha", now).map((session) => session.ctxId),
         ["ctx-alpha", "ctx-empty"],
     );
     assert.deepEqual(
@@ -81,8 +82,51 @@ test("Messages merges registered sessions with exact comment and report history"
         ],
     );
     assert.deepEqual(
-        selectTuiMessagesSidebarEntries(store.getState(), true, { id: "messages:back", kind: "context" })
+        selectTuiMessagesSidebarEntries(store.getState(), true, { id: "messages:back", kind: "context" }, now)
             .map((entry) => entry.label),
         ["← messages", "project", "empty"],
+    );
+});
+
+test("Messages hides sessions that were inactive for more than 30 minutes", () => {
+    const store = new TuiAppStore();
+    store.patchControlReadModel({
+        contexts: [
+            {
+                createdAt: "2026-09-10T10:00:00.000Z",
+                ctxId: "ctx-recent",
+                environments: [{ instance: "alpha", workspace: "/workspace/recent" }],
+                expiresAt: "2099-09-10T10:00:00.000Z",
+                instance: "alpha",
+                lastAccessedAt: "2026-09-10T10:02:00.000Z",
+                principal: "client",
+                status: "active",
+                workspace: "/workspace/recent",
+            },
+            {
+                createdAt: "2026-09-10T09:00:00.000Z",
+                ctxId: "ctx-stale",
+                environments: [{ instance: "alpha", workspace: "/workspace/stale" }],
+                expiresAt: "2099-09-10T10:00:00.000Z",
+                instance: "alpha",
+                lastAccessedAt: "2026-09-10T09:20:00.000Z",
+                principal: "client",
+                status: "active",
+                workspace: "/workspace/stale",
+            },
+        ],
+    });
+    store.setSelectedInstance("alpha");
+    store.setSelectedPage("messages");
+    const now = Date.parse("2026-09-10T10:05:00.000Z");
+
+    assert.deepEqual(
+        selectTuiMessageSessions(store.getState(), "alpha", now).map((session) => session.ctxId),
+        ["ctx-recent"],
+    );
+    assert.deepEqual(
+        selectTuiMessagesSidebarEntries(store.getState(), true, { id: "messages:back", kind: "context" }, now)
+            .map((entry) => entry.label),
+        ["← messages", "recent"],
     );
 });
