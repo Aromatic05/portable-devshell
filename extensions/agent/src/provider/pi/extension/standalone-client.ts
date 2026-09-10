@@ -65,7 +65,7 @@ export async function openStandaloneDevshellPiToolSession(
                     toolName,
                     input,
                     opened.workspace,
-                    { onProgress, operationId, signal }
+                    { onProgress, operationId, recording: "caller", signal }
                 );
                 signal?.throwIfAborted();
                 return result;

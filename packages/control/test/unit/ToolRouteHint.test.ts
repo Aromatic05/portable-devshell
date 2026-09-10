@@ -88,6 +88,7 @@ test("control tool stream forwards progress before completing the unchanged fina
     const emitted: Array<{ name: string; payload?: JsonValue }> = [];
     let completed: JsonValue | undefined;
     let workerContext: Record<string, unknown> | undefined;
+    let workerRecording: "caller" | "host" | undefined;
     const module = createToolRouteModule({
         worker: {
             async callTool(
@@ -97,9 +98,11 @@ test("control tool stream forwards progress before completing the unchanged fina
                 _signal?: AbortSignal,
                 _transformResult?: unknown,
                 _invocationInput?: JsonValue,
-                onProgress?: (progress: JsonValue) => void
+                onProgress?: (progress: JsonValue) => void,
+                recording?: "caller" | "host"
             ) {
                 workerContext = context;
+                workerRecording = recording;
                 onProgress?.({ stdout: "one" });
                 onProgress?.({ stdout: "one\ntwo" });
                 return { exitCode: 0, stdout: "one\ntwo", stderr: "", termination: "exited" };
@@ -134,6 +137,7 @@ test("control tool stream forwards progress before completing the unchanged fina
         payload: {
             input: { command: "printf one; printf two" },
             operationId: "pi-call-1",
+            recording: "caller",
             toolName: "bash_run",
             workspace: "/workspace"
         }
@@ -146,6 +150,7 @@ test("control tool stream forwards progress before completing the unchanged fina
     assert.deepEqual(completed, { comment: [], exitCode: 0, stdout: "one\ntwo", stderr: "", termination: "exited" });
     assert.equal(workerContext?.operationId, "pi-call-1");
     assert.equal(workerContext?.requestId, "req-1");
+    assert.equal(workerRecording, "caller");
 });
 
 test("control tool route serves pending approval reads without scanning approval history", async () => {

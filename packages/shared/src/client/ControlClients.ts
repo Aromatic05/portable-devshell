@@ -236,6 +236,7 @@ export interface ControlClients {
             options?: {
                 onProgress?(progress: JsonValue): void;
                 operationId?: string;
+                recording?: "caller" | "host";
                 signal?: AbortSignal;
             },
         ): Promise<JsonValue>;
@@ -428,6 +429,7 @@ export function createControlClients(
                     async () => await tool.openStream(name, "callStream", {
                         input,
                         ...(callOptions.operationId === undefined ? {} : { operationId: callOptions.operationId }),
+                        ...(callOptions.recording === undefined ? {} : { recording: callOptions.recording }),
                         toolName,
                         workspace,
                     }),

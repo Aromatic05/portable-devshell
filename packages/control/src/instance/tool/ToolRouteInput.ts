@@ -13,7 +13,7 @@ const DEFAULT_TOOL_CALL_READ_LIMIT = 200;
 const MAX_TOOL_CALL_READ_LIMIT = 1_000;
 const MAX_TOOL_CALL_RESPONSE_BYTES = 8 * 1024 * 1024;
 
-export function readToolCall(payload?: JsonValue): { input: JsonValue; operationId?: string; toolName: string; workspace: string } {
+export function readToolCall(payload?: JsonValue): { input: JsonValue; operationId?: string; recording?: "caller" | "host"; toolName: string; workspace: string } {
     if (!isRecord(payload) || typeof payload.toolName !== "string" || payload.toolName.length === 0) {
         throw invalid("tool.call requires toolName.");
     }
@@ -23,9 +23,13 @@ export function readToolCall(payload?: JsonValue): { input: JsonValue; operation
     if (payload.operationId !== undefined && (typeof payload.operationId !== "string" || payload.operationId.length === 0)) {
         throw invalid("tool.call operationId must be a non-empty string.");
     }
+    if (payload.recording !== undefined && payload.recording !== "caller" && payload.recording !== "host") {
+        throw invalid("tool.call recording must be caller or host.");
+    }
     return {
         input: payload.input ?? null,
         ...(payload.operationId === undefined ? {} : { operationId: payload.operationId }),
+        ...(payload.recording === undefined ? {} : { recording: payload.recording }),
         toolName: payload.toolName,
         workspace: payload.workspace
     };

@@ -37,14 +37,14 @@ export function createToolRouteModule(
 ): PrefixRouteModuleDefinition {
     return routeModule("tool", {
         call: async (request, context) => {
-            const { input, toolName, workspace } = readToolCall(request.payload);
+            const { input, recording, toolName, workspace } = readToolCall(request.payload);
             try {
                 const result = await instance.worker.callTool(toolName, input, {
                     requestId: context.requestId,
                     ctxId: context.connectionId,
                     source: context.peer,
                     workspace,
-                });
+                }, undefined, undefined, undefined, undefined, recording);
                 return attachComments(result, mergeComments([], resolveResultHints(toolName, result)));
             } catch (error) {
                 const failure = error instanceof ControlError ? error : createError({
@@ -62,7 +62,7 @@ export function createToolRouteModule(
             }
         },
         callStream: async (request, context) => {
-            const { input, operationId, toolName, workspace } = readToolCall(request.payload);
+            const { input, operationId, recording, toolName, workspace } = readToolCall(request.payload);
             const controller = new AbortController();
             let closed = false;
             let sendTail = Promise.resolve();
@@ -99,7 +99,8 @@ export function createToolRouteModule(
                     controller.signal,
                     undefined,
                     undefined,
-                    emitProgress
+                    emitProgress,
+                    recording
                 );
                 result = attachComments(raw, mergeComments([], resolveResultHints(toolName, raw)));
             } catch (error) {
