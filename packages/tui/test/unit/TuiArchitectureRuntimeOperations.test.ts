@@ -224,6 +224,9 @@ function createHarness(options: {
         async refreshLogs() {
             refreshed.push("logs");
         },
+        async refreshMessages(instance: string) {
+            refreshed.push(`messages:${instance}`);
+        },
         async refreshOAuth() {
             refreshed.push("oauth");
         },
