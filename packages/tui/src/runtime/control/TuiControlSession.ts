@@ -165,10 +165,13 @@ export class TuiControlSession {
         signal?: AbortSignal,
     ): Promise<void> {
         if (!this.#canRefresh(generation, signal)) return;
-        await this.#model.refreshInstance(
-            instance,
-            ["toolCalls", "approvals", "comments"],
-        );
+        await Promise.all([
+            this.#model.refreshContexts(),
+            this.#model.refreshInstance(
+                instance,
+                ["toolCalls", "approvals", "comments"],
+            ),
+        ]);
     }
 
     async refreshMessages(

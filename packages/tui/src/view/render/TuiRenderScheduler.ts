@@ -107,7 +107,8 @@ export function isRenderRelevantChange(
                 before?.reportCalls !== after?.reportCalls ||
                 before?.snapshot !== after?.snapshot;
         case "audit":
-            return before?.commentCalls !== after?.commentCalls ||
+            return previous.readModel.contexts !== next.readModel.contexts ||
+                before?.commentCalls !== after?.commentCalls ||
                 before?.approvals !== after?.approvals ||
                 before?.logs !== after?.logs ||
                 before?.toolCalls !== after?.toolCalls ||

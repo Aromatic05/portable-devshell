@@ -15,17 +15,20 @@ export function selectInstanceAfterListReplace(state: TuiAppState): TuiAppState 
 
 export function withDerivedState(state: TuiAppState): TuiAppState {
     const instanceStates = Object.values(state.readModel.instanceState);
-    const pendingApprovalCount = instanceStates.reduce(
+    const pendingToolApprovalCount = instanceStates.reduce(
         (count, instance) => count + instance.approvals.filter((approval) => approval.status === "pending").length,
         0,
     );
+    const pendingOAuthApprovalCount = state.readModel.oauthApprovals.filter(
+        (approval) => approval.status === "pending",
+    ).length;
     return {
         ...state,
         globalDerived: {
             connectedInstanceCount: instanceStates.filter(
                 (instance) => instance.snapshot?.connectionState === "connected",
             ).length,
-            pendingApprovalCount,
+            pendingApprovalCount: pendingToolApprovalCount + pendingOAuthApprovalCount,
             totalEventCount: state.rawEvents.length,
         },
     };

@@ -7,6 +7,7 @@ import {
     type ApprovalRequest,
     type InstanceSnapshot,
     type JsonValue,
+    type McpContextRecord,
     type OAuthApprovalRequest,
     type ToolCallQuery,
     type ToolCallRecord
@@ -145,6 +146,41 @@ test("TuiControlSession loads exact todo_report inputs with Context message hist
             (call) => call.input,
         ),
         [{ message: "report text that must stay exact" }],
+    );
+});
+
+test("TuiControlSession refreshAudit refreshes Context registry authority", async (t) => {
+    const runtimeDir = await createTestTempDirectory("tui-audit-context-refresh");
+    const socketPath = createTestIpcPath("tui-audit-context-refresh", runtimeDir);
+    const worker = new FakeWorker("alpha");
+    let status: McpContextRecord["status"] = "active";
+    const server = createServer(socketPath, worker, () => 7, {
+        contextRecords: () => [contextRecord(status)],
+    });
+    const session = new TuiControlSession({
+        clients: createTuiClients({ socketPath }),
+    });
+
+    await server.start();
+    t.after(async () => {
+        await session.stop();
+        await server.stop();
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    await session.start();
+    await waitFor(() =>
+        session.store.getState().readModel.contexts[0]?.status === "active",
+    );
+    status = "disabled";
+    const readsBefore = server.contextReads();
+
+    await session.refreshAudit("alpha");
+
+    assert.equal(server.contextReads() > readsBefore, true);
+    assert.equal(
+        session.store.getState().readModel.contexts[0]?.status,
+        "disabled",
     );
 });
 
@@ -591,11 +627,13 @@ function createServer(
     worker: FakeWorker,
     getConfigVersion: () => number,
     options: {
+        contextRecords?: () => McpContextRecord[];
         onTodoRead?: () => void;
         restartable?: boolean;
         todoReadGate?: Promise<void>;
     } = {}
 ): {
+    contextReads(): number;
     oauthApprovalReads(): number;
     restartCount(): number;
     start(): Promise<void>;
@@ -643,6 +681,7 @@ function createServer(
         }
     ]);
     let server!: ControlSocketServer;
+    let contextReads = 0;
     let oauthApprovalReads = 0;
     let restartCount = 0;
     const routes = new ControlRouteComposition({
@@ -650,6 +689,14 @@ function createServer(
             listShares() { return []; },
             listTransfers() { return []; }
         } as never,
+        contextAdmin: options.contextRecords === undefined
+            ? undefined
+            : () => ({
+                  async list() {
+                      contextReads += 1;
+                      return options.contextRecords!();
+                  },
+              } as never),
         config: {
             getConfigView() {
                 return {
@@ -688,6 +735,7 @@ function createServer(
     });
     server = new ControlSocketServer({ routes, socketPath });
     return {
+        contextReads: () => contextReads,
         oauthApprovalReads: () => oauthApprovalReads,
         restartCount: () => restartCount,
         start: async () => await server.start(),
@@ -695,6 +743,20 @@ function createServer(
             await server.stop();
             routes.dispose();
         }
+    };
+}
+
+function contextRecord(status: McpContextRecord["status"]): McpContextRecord {
+    return {
+        createdAt: "2026-09-10T10:00:00.000Z",
+        ctxId: "ctx-alpha",
+        environments: [{ instance: "alpha", workspace: "/workspace/alpha" }],
+        expiresAt: "2099-09-10T10:00:00.000Z",
+        instance: "alpha",
+        lastAccessedAt: "2026-09-10T10:00:01.000Z",
+        principal: "test",
+        status,
+        workspace: "/workspace/alpha",
     };
 }
 

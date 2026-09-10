@@ -57,6 +57,43 @@ test("TuiAppStore keeps page, instance, and expanded boxes stable across events"
     assert.equal(state.globalDerived.connectedInstanceCount, 1);
 });
 
+test("global pending Approval count includes tool and OAuth approvals", () => {
+    const store = new TuiAppStore();
+    store.patchControlReadModel({
+        instanceState: {
+            alpha: {
+                approvals: [{
+                    approvalId: "tool-pending",
+                    callId: "call-1",
+                    createdAt: "2026-09-10T10:00:00.000Z",
+                    expiresAt: "2026-09-10T11:00:00.000Z",
+                    inputSummary: "{}",
+                    instance: asInstanceName("alpha"),
+                    reason: "test",
+                    riskLevel: "low",
+                    source: "mcp",
+                    status: "pending",
+                    toolName: "bash_run",
+                }],
+            },
+        },
+        oauthApprovals: [{
+            approvalId: "oauth-pending",
+            clientId: "client-1",
+            clientName: "Client",
+            createdAt: "2026-09-10T10:00:00.000Z",
+            expiresAt: "2026-09-10T11:00:00.000Z",
+            kind: "registration",
+            redirectUris: [],
+            requestedResources: [],
+            requestedScopes: [],
+            status: "pending",
+        }],
+    });
+
+    assert.equal(store.getState().globalDerived.pendingApprovalCount, 2);
+});
+
 test("TuiRenderScheduler batches multiple store updates into one render notification", (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const store = new TuiAppStore();
@@ -106,6 +143,22 @@ test("TuiRenderScheduler redraws visible Overview and Audit context message chan
     t.mock.timers.tick(2);
     renders = 0;
     store.patchControlReadModel({ instanceState: { ["alpha"]: { contextMessages: [contextMessage("message-1")] } } });
+    assert.equal(renders, 0);
+    t.mock.timers.tick(2);
+    assert.equal(renders, 1);
+
+    renders = 0;
+    store.patchControlReadModel({ contexts: [{
+        createdAt: "2026-07-31T00:00:00.000Z",
+        ctxId: "ctx-a",
+        environments: [{ instance: "alpha", workspace: "/workspace/alpha" }],
+        expiresAt: "2099-07-31T00:00:00.000Z",
+        instance: "alpha",
+        lastAccessedAt: "2026-07-31T00:00:01.000Z",
+        principal: "test",
+        status: "active",
+        workspace: "/workspace/alpha",
+    }] });
     assert.equal(renders, 0);
     t.mock.timers.tick(2);
     assert.equal(renders, 1);
