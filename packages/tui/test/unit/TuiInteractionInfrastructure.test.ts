@@ -517,7 +517,7 @@ test("Audit lists the newest Tool Calls first", () => {
     assert.deepEqual(callBoxes, ["audit-call:new-call", "audit-call:old-call"]);
 });
 
-test("Comment conversation blocks a stale ctxId instead of reporting a false queue success", async () => {
+test("Comment conversation can queue to any active Context on the selected instance", async () => {
     const sent: Array<{ ctxId: string; text: string }> = [];
     const harness = createHarness({
         onContextMessage: async (_instance, ctxId, text) => {
@@ -560,32 +560,31 @@ test("Comment conversation blocks a stale ctxId instead of reporting a false que
     enterAuditContext(harness, "ctx-old");
     await harness.press("m");
     await harness.dispatch({ type: "contextConversation.edit" });
-    await harness.press("must reach the current chat");
+    await harness.press("must reach this active chat");
     await harness.press("", { return: true });
 
-    assert.deepEqual(sent, []);
+    assert.deepEqual(sent, [{ ctxId: "ctx-old", text: "must reach this active chat" }]);
     assert.equal(
         readContextConversationDraft(
             harness.store.getState(),
             "alpha",
             "ctx-old",
         ),
-        "must reach the current chat",
+        "",
     );
-    assert.match(
-        harness.store.getState().interaction.screenStatusByPage.audit ?? "",
-        /not queued.*ctx-current/iu,
+    assert.equal(
+        harness.store.getState().interaction.screenStatusByPage.audit,
+        "Comment queued.",
     );
-    assert.match(conversationScreenText(harness), /sending blocked/iu);
     assert.equal(
         selectMainScreenModel(harness.store.getState()).boxes.find(
             (box) => box.id === "conversation-composer",
         )?.status,
-        "disabled",
+        "normal",
     );
 });
 
-test("Comment conversation disables editing for the latest observed disabled Context", async () => {
+test("Comment conversation disables editing for a disabled Context", async () => {
     const sent: Array<{ ctxId: string; text: string }> = [];
     const harness = createHarness({
         onContextMessage: async (_instance, ctxId, text) => { sent.push({ ctxId, text }); },

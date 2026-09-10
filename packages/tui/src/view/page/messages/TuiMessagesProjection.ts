@@ -20,12 +20,9 @@ export interface TuiMessageSession {
     workspace?: string;
 }
 
-const activeSessionWindowMs = 30 * 60 * 1_000;
-
 export function selectTuiMessageSessions(
     state: TuiAppState,
     instance: string,
-    now: number = Date.now(),
 ): TuiMessageSession[] {
     const sessions = new Map<string, TuiMessageSession>();
     const touch = (
@@ -64,7 +61,6 @@ export function selectTuiMessageSessions(
     }
 
     return [...sessions.values()]
-        .filter((session) => Date.parse(session.latestAt) >= now - activeSessionWindowMs)
         .sort((left, right) =>
             right.latestAt.localeCompare(left.latestAt),
         );
@@ -74,13 +70,12 @@ export function selectTuiMessagesSidebarEntries(
     state: TuiAppState,
     focused: boolean,
     cursor: TuiAppState["interaction"]["sidebarCursor"],
-    now: number = Date.now(),
 ): TuiSidebarContextEntry[] {
     const route = currentTuiRoute(state);
     const instance = state.ui.selectedInstance;
     const sessions = instance === undefined
         ? []
-        : selectTuiMessageSessions(state, instance, now);
+        : selectTuiMessageSessions(state, instance);
     const baseLabels = sessions.map((session) =>
         session.workspace === undefined
             ? compactContextId(session.ctxId)

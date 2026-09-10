@@ -1,97 +1,38 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-    asInstanceName,
-    type ApprovalRequest,
-    type ToolCallRecord,
-} from "@portable-devshell/shared";
-
 import { TuiAppStore } from "../../src/state/TuiAppStore.js";
-import { latestObservedContextId } from "../../src/state/audit/TuiAuditContextActivity.js";
+import { isActiveContextForInstance } from "../../src/state/audit/TuiAuditContextActivity.js";
 
-test("latest observed Context follows call start order instead of completion order", () => {
+test("Context activity authority follows registry status and instance binding", () => {
     const store = new TuiAppStore();
     store.patchControlReadModel({
-        instanceState: {
-            alpha: { toolCalls: [
-                toolCall({
-                    callId: "old-slow",
-                    completedAt: "2026-08-07T00:10:00.000Z",
-                    ctxId: "ctx-old",
-                    startedAt: "2026-08-07T00:00:00.000Z",
-                }),
-                toolCall({
-                    callId: "new-fast",
-                    completedAt: "2026-08-07T00:06:00.000Z",
-                    ctxId: "ctx-new",
-                    startedAt: "2026-08-07T00:05:00.000Z",
-                }),
-                ],
-            },
-        },
+        contexts: [
+            context("ctx-active", "active", "alpha"),
+            context("ctx-disabled", "disabled", "alpha"),
+            context("ctx-other-instance", "active", "beta"),
+        ],
     });
 
-    assert.equal(latestObservedContextId(store.getState(), "alpha"), "ctx-new");
+    assert.equal(isActiveContextForInstance(store.getState(), "alpha", "ctx-active"), true);
+    assert.equal(isActiveContextForInstance(store.getState(), "alpha", "ctx-disabled"), false);
+    assert.equal(isActiveContextForInstance(store.getState(), "alpha", "ctx-other-instance"), false);
 });
 
-test("latest observed Context includes a newer pending approval before its tool call starts", () => {
-    const store = new TuiAppStore();
-    store.patchControlReadModel({
-        instanceState: {
-            alpha: {
-                approvals: [approval("approval-new", "ctx-new", "2026-08-07T00:05:00.000Z")],
-                toolCalls: [
-                toolCall({
-                    callId: "old-call",
-                    completedAt: "2026-08-07T00:04:00.000Z",
-                    ctxId: "ctx-old",
-                    startedAt: "2026-08-07T00:00:00.000Z",
-                }),
-            ] },
-        },
-    });
-
-    assert.equal(latestObservedContextId(store.getState(), "alpha"), "ctx-new");
-});
-
-function toolCall(input: {
-    callId: string;
-    completedAt: string;
-    ctxId: string;
-    startedAt: string;
-}): ToolCallRecord {
-    return {
-        callId: input.callId,
-        completedAt: input.completedAt,
-        ctxId: input.ctxId,
-        inputSummary: "{}",
-        instance: asInstanceName("alpha"),
-        output: {},
-        source: "mcp",
-        startedAt: input.startedAt,
-        status: "completed",
-        toolName: "bash_run",
-    };
-}
-
-function approval(
-    approvalId: string,
+function context(
     ctxId: string,
-    createdAt: string,
-): ApprovalRequest {
+    status: "active" | "disabled",
+    instance: string,
+) {
     return {
-        approvalId,
-        callId: `${approvalId}-call`,
-        createdAt,
+        createdAt: "2026-08-07T00:00:00.000Z",
         ctxId,
-        expiresAt: "2026-08-07T01:00:00.000Z",
-        inputSummary: "{}",
-        instance: asInstanceName("alpha"),
-        reason: "test",
-        riskLevel: "low",
-        source: "mcp",
-        status: "pending",
-        toolName: "bash_run",
+        environments: [{ instance, workspace: `/workspace/${ctxId}` }],
+        expiresAt: "2099-08-07T00:00:00.000Z",
+        instance,
+        lastAccessedAt: "2026-08-07T00:05:00.000Z",
+        principal: "test",
+        status,
+        workspace: `/workspace/${ctxId}`,
     };
 }

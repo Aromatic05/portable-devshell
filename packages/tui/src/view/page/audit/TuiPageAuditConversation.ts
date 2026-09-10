@@ -5,8 +5,6 @@ import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
 import { readContextConversationDraft } from "../../../state/TuiContextConversationDraft.js";
 import {
     isActiveContextForInstance,
-    isLatestObservedContext,
-    latestObservedContextId,
 } from "../../../state/audit/TuiAuditContextActivity.js";
 import { compactSummary, formatField, makeBox } from "../TuiPageBoxSupport.js";
 
@@ -119,8 +117,6 @@ function composerBox(
 ): BoxModel {
     const draft = readContextConversationDraft(state, instance, ctxId);
     const active = isActiveContextForInstance(state, instance, ctxId);
-    const current = active && isLatestObservedContext(state, instance, ctxId);
-    const latest = latestObservedContextId(state, instance);
     const prefix = "Draft              ";
     const display = draft.length === 0 ? "<empty>" : draft;
     return makeBox(state, "audit", instance, {
@@ -128,11 +124,9 @@ function composerBox(
             formatField("Context", ctxId),
             formatField(
                 "Delivery",
-                current
+                active
                     ? "next tool call in this context"
-                    : !active
-                      ? "blocked; context is not active on this instance"
-                      : `blocked; latest observed context is ${latest ?? "unknown"}`,
+                    : "blocked; context is not active on this instance",
             ),
             {
                 editable: true,
@@ -145,24 +139,20 @@ function composerBox(
                 id: "draft",
                 text: `${prefix}${display}`,
             },
-            current
+            active
                 ? "Enter queues this Comment for the next tool call."
-                : !active
-                  ? "Sending is blocked because this context is not active on this instance."
-                  : "Sending is blocked because this context is no longer current.",
+                : "Sending is blocked because this context is not active on this instance.",
             "Esc or Ctrl+[ returns to the Audit Context.",
         ],
         expandedKey: `audit-conversation:${instance}:${ctxId}:composer`,
         editable: true,
         id: "conversation-composer",
-        status: current ? (draft.length === 0 ? "normal" : "running") : "disabled",
+        status: active ? (draft.length === 0 ? "normal" : "running") : "disabled",
         summaryLines: [
             draft.length === 0 ? "draft=<empty>" : `draft=${draft}`,
-            current
+            active
                 ? "Space expand · ↑/↓ Draft · Enter edit · Esc back"
-                : !active
-                  ? "sending blocked · context is not active"
-                  : `sending blocked · latest=${latest ?? "unknown"}`,
+                : "sending blocked · context is not active",
         ],
         title: "Write Comment",
     });

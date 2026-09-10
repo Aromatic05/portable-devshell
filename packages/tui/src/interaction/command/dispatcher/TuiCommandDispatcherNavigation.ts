@@ -15,8 +15,6 @@ import {
 } from "../../../state/route/TuiRouteState.js";
 import {
     isActiveContextForInstance,
-    isLatestObservedContext,
-    latestObservedContextId,
 } from "../../../state/audit/TuiAuditContextActivity.js";
 import {
     contextConversationDraftKey,
@@ -161,11 +159,6 @@ export class TuiCommandDispatcherNavigation {
                         if (
                             state.ui.selectedInstance !== undefined &&
                             isActiveContextForInstance(
-                                state,
-                                state.ui.selectedInstance,
-                                entry.target.route.ctxId,
-                            ) &&
-                            isLatestObservedContext(
                                 state,
                                 state.ui.selectedInstance,
                                 entry.target.route.ctxId,
@@ -397,14 +390,6 @@ export class TuiCommandDispatcherNavigation {
             this.#store.setScreenStatus(
                 target.page,
                 "Comment not queued: this context is not active on this instance.",
-            );
-            return false;
-        }
-        if (!isLatestObservedContext(state, target.instance, target.ctxId)) {
-            const latest = latestObservedContextId(state, target.instance);
-            this.#store.setScreenStatus(
-                target.page,
-                `Comment not queued: this context is no longer the latest observed context${latest === undefined ? "." : `; open ${latest}.`}`,
             );
             return false;
         }
