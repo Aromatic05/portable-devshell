@@ -182,9 +182,12 @@ pnpm testspace web
 
 ```bash
 pnpm testspace smoke
+pnpm testspace long-smoke
 ```
 
-Smoke 是自动诊断，不等于最终 acceptance。根据入口还可以分别运行：
+`smoke` 是快速自动诊断，不等于最终 acceptance。`long-smoke` 专门验证真实 180 秒 tmux 同步交接边界：请求必须在边界处返回 detached、后台 task 继续存活，并可通过 `tmux_read` 取得最终终态。这个入口显式把 MCP SDK request timeout 设置到同步边界之外，不依赖 SDK 默认值。
+
+根据入口还可以分别运行：
 
 ```text
 terminal smoke

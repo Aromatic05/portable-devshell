@@ -34,6 +34,7 @@ import {
 import { runTestspaceTerminalSmoke } from "./testspace/TestspaceTerminalSmoke.mjs";
 import { runTestspaceCommentSmoke } from "./testspace/TestspaceCommentSmoke.mjs";
 import { runTestspaceModelDevshellSmoke } from "./testspace/TestspaceModelDevshellSmoke.mjs";
+import { runTestspaceLongWaitSmoke } from "./testspace/TestspaceLongWaitSmoke.mjs";
 import { runTestspaceWebSmoke } from "./testspace/TestspaceWebSmoke.mjs";
 import { runTestspaceWorkspaceSmoke } from "./testspace/TestspaceWorkspaceSmoke.mjs";
 import {
@@ -110,6 +111,9 @@ switch (command) {
         break;
     case "smoke":
         await smoke();
+        break;
+    case "long-smoke":
+        await longSmoke();
         break;
     case "stop":
         await stop();
@@ -461,6 +465,15 @@ async function smoke() {
     });
     const web = await runTestspaceWebSmoke({ webPort: state.webPort });
     process.stdout.write(`${JSON.stringify({ comment, modelDevshell, reverse, terminals, web, workspace }, null, 2)}\n`);
+}
+
+async function longSmoke() {
+    const state = await requireRunningState();
+    const result = await runTestspaceLongWaitSmoke({
+        endpoint: testspaceUrls(state).mcp,
+        workspace: paths.workspace,
+    });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
 async function stop() {
@@ -861,6 +874,7 @@ function printCommands(state) {
         "Open Web:     pnpm testspace web",
         "Smoke Web:    pnpm testspace web-smoke",
         "Smoke Comment: pnpm testspace comment-smoke",
+        "Long wait:     pnpm testspace long-smoke",
         "Status:       pnpm testspace status",
         "Protocol probes: pnpm testspace smoke",
         "Stop/remove:   pnpm testspace stop",
@@ -877,6 +891,6 @@ function printUrls(state) {
 
 function usage(message) {
     process.stderr.write(`${message}\n`);
-    process.stderr.write("Usage: pnpm testspace [start|comment-smoke|exec|status|smoke|tui|web|web-smoke|stop] [options]\n");
+    process.stderr.write("Usage: pnpm testspace [start|comment-smoke|exec|long-smoke|status|smoke|tui|web|web-smoke|stop] [options]\n");
     process.exit(2);
 }

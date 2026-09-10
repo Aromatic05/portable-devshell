@@ -19,6 +19,7 @@ cargo test --locked --workspace
 pnpm test:worker:tmux           # 非 Windows
 real Worker smoke
 MCP smoke
+long tmux handoff smoke           # 非 Windows，真实跨过 180s 同步边界
 Web browser smoke
 ```
 
@@ -31,6 +32,7 @@ bash acceptance/run-typecheck.sh
 bash acceptance/run-unit-tests.sh
 bash acceptance/run-real-worker-smoke.sh
 bash acceptance/run-mcp-smoke.sh
+pnpm acceptance:tmux-handoff
 ```
 
 需要只运行最终 integration 链时，可以直接调用 `run-final-acceptance.mjs --integration-only`。

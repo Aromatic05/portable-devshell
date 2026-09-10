@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 import { runCiSteps } from "../scripts/run-development-ci.mjs";
 import { resolvePreparedWorker, runCommand } from "./AcceptanceSupport.mjs";
 
-function createIntegrationSteps(state) {
+export function createIntegrationSteps(state, platform = process.platform) {
     return [
         {
             name: "Resolve prepared Worker",
@@ -30,6 +30,14 @@ function createIntegrationSteps(state) {
                 { env: state.env, inherit: true },
             ),
         },
+        ...(platform === "win32" ? [] : [{
+            name: "Long tmux handoff smoke",
+            run: () => runCommand(
+                process.execPath,
+                ["acceptance/run-testspace-long-wait-smoke.mjs"],
+                { env: state.env, inherit: true, timeoutMs: 300_000 },
+            ),
+        }]),
         {
             name: "Web browser smoke",
             run: () => runCommand(

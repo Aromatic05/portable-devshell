@@ -47,6 +47,11 @@ import {
     runConnectorLoop,
 } from "./testspace/TestspaceConnector.mjs";
 import {
+    TESTSPACE_LONG_WAIT_REQUEST_TIMEOUT_MS,
+    TESTSPACE_LONG_WAIT_TASK_DURATION_MS,
+    TESTSPACE_LONG_WAIT_TOOL_TIMEOUT_MS,
+} from "./testspace/TestspaceLongWaitSmoke.mjs";
+import {
     assertWebSmokeState,
     chromiumLaunchArguments,
     resolveChromiumExecutable,
@@ -138,6 +143,7 @@ test("testspace starts when invoked without a subcommand", () => {
     assert.equal(resolveTestspaceCommand(undefined), "start");
     assert.equal(resolveTestspaceCommand("start"), "start");
     assert.equal(resolveTestspaceCommand("--skip-build"), "start");
+    assert.equal(resolveTestspaceCommand("long-smoke"), "long-smoke");
     assert.equal(resolveTestspaceCommand("tui"), "tui");
     assert.equal(resolveTestspaceCommand("web"), "web");
     assert.equal(resolveTestspaceCommand("web-smoke"), "web-smoke");
@@ -368,6 +374,13 @@ test("testspace tmux activity uses the public tmux_run timeout contract", () => 
             name: "tmux_run",
         },
     );
+});
+
+test("testspace long wait smoke outlives the 180 second synchronous boundary and SDK default timeout", () => {
+    assert.equal(TESTSPACE_LONG_WAIT_TASK_DURATION_MS > 180_000, true);
+    assert.equal(TESTSPACE_LONG_WAIT_TOOL_TIMEOUT_MS > TESTSPACE_LONG_WAIT_TASK_DURATION_MS, true);
+    assert.equal(TESTSPACE_LONG_WAIT_REQUEST_TIMEOUT_MS > TESTSPACE_LONG_WAIT_TOOL_TIMEOUT_MS, true);
+    assert.equal(TESTSPACE_LONG_WAIT_REQUEST_TIMEOUT_MS > 60_000, true);
 });
 
 test("a connector tool error is exposed as degraded rather than active", async (t) => {
