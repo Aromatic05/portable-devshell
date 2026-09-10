@@ -1092,11 +1092,16 @@ export class TuiRuntime {
             return;
         }
         if (target.kind === "scrollViewport") {
-            return;
-        }
-        if (target.kind === "boxTitle") {
-            this.focusManager.setFocus({ id: target.boxId, kind: "box" });
-            await this.commandDispatcher.dispatch({ type: "screen.toggle" });
+            const state = this.store.getState();
+            const scope = state.interaction.focusScope;
+            if (
+                scope === "mainBoxes" ||
+                scope === "boxDetail" ||
+                scope === "sidebarContext" ||
+                scope === "sidebarInstances"
+            ) {
+                this.focusManager.syncPanel(state.ui.selectedPage, "mainBoxes");
+            }
             return;
         }
 
@@ -1107,15 +1112,29 @@ export class TuiRuntime {
         if (box === undefined) {
             return;
         }
+        if (target.kind === "boxTitle") {
+            this.focusManager.focusMainBox(box.id);
+            await this.commandDispatcher.dispatch({ type: "screen.toggle" });
+            return;
+        }
         if (!box.expanded) {
-            this.focusManager.setFocus({ id: box.id, kind: "box" });
+            this.focusManager.focusMainBox(box.id);
             return;
         }
         if (target.lineId === undefined) {
+            this.focusManager.focusMainBox(box.id);
             return;
         }
-        this.focusManager.setFocus({ id: box.id, kind: "box" });
-        this.store.setSelectedDetailLine(box.expandedKey, target.lineId);
+        if (
+            !this.focusManager.setFocus({
+                boxId: box.id,
+                id: target.lineId,
+                kind: "line",
+            })
+        ) {
+            this.focusManager.focusMainBox(box.id);
+            return;
+        }
         await this.commandDispatcher.dispatch({ type: "focus.activate" });
     }
 

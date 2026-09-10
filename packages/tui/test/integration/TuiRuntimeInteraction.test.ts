@@ -586,6 +586,62 @@ test("real Ink runtime handles sidebar mouse buttons and viewport wheel scrollin
     }
 });
 
+test("real Ink runtime moves mouse focus into an expanded main box from the sidebar", async () => {
+    const terminal = createTerminal();
+    const clients = createClients();
+    const runtime = new TuiRuntime(
+        { stdin: terminal.stdin, stdout: terminal.stdout },
+        { clients: clients.value, inkDebug: true },
+    );
+    const running = runtime.run();
+
+    try {
+        await waitUntil(
+            () => runtime.store.getState().connection.status === "connected",
+        );
+        terminal.write("8");
+        await waitUntil(
+            () => runtime.store.getState().ui.selectedPage === "help",
+        );
+
+        const navigation = selectMainScreenModel(
+            runtime.store.getState(),
+        ).boxes.find((box) => box.id === "help-navigation");
+        assert.ok(navigation);
+        runtime.store.toggleExpanded(navigation.expandedKey);
+        runtime.store.setSidebarCursor({ id: "config", kind: "context" });
+        runtime.store.setFocusScope("sidebarContext");
+
+        const region = buildTuiHitRegions(runtime.store.getState(), {
+            columns: runtime.columns,
+            rows: runtime.rows,
+        }).find(
+            (candidate) =>
+                candidate.target.kind === "boxBody" &&
+                candidate.target.boxId === "help-navigation" &&
+                candidate.target.lineId !== undefined,
+        );
+        assert.ok(region);
+
+        terminal.write(mouseSequence(0, region.x, region.y, "press"));
+        terminal.write(mouseSequence(0, region.x, region.y, "release"));
+
+        await waitUntil(
+            () =>
+                runtime.store.getState().interaction.focusScope ===
+                "mainBoxes",
+        );
+        await waitUntil(
+            () => runtime.store.getState().ui.mainFocusId === "help-navigation",
+        );
+
+        terminal.write("\u0004");
+        await running;
+    } finally {
+        await runtime.stop();
+    }
+});
+
 test("real Ink runtime drag-selects ordinary TUI text and copies it without activating the row", async () => {
     const terminal = createTerminal();
     const clients = createClients();

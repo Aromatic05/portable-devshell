@@ -192,6 +192,24 @@ export class TuiFocusManager {
         return true;
     }
 
+    focusMainBox(boxId: string): boolean {
+        const page = this.currentPage();
+        const graph = this.#context.graphFor(page, "mainBoxes");
+        const boxItem: TuiFocusItem = { id: boxId, kind: "box" };
+        const next = graph.includes(boxItem)
+            ? boxItem
+            : graph.firstLineInBox(boxId);
+        if (next === undefined) {
+            this.#store.setFocusScope("mainBoxes");
+            this.#store.setMainFocusId(boxId);
+            this.#pageMemory.set(page, boxItem);
+            return true;
+        }
+        this.#applyFocus(next);
+        this.#pageMemory.set(page, next);
+        return true;
+    }
+
     pushRestore(mode: TuiMode): void {
         this.#restoreStack.push({
             focus: this.currentFocus(),
