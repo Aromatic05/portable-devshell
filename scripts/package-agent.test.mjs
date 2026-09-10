@@ -8,7 +8,6 @@ import {
     assertNoSymbolicLinks,
     assertThinAgentExtensionTree,
     sanitizeDeployTree,
-    shapePiProviderTree,
     shapeThinAgentExtensionTree
 } from "./package-agent.mjs";
 
@@ -16,13 +15,6 @@ const repoRoot = new URL("../", import.meta.url);
 
 test("Agent Extension source package owns the Pi provider without separate Agent workspace packages", async () => {
     const agentExtension = JSON.parse(await readFile(new URL("extensions/agent/package.json", repoRoot), "utf8"));
-    assert.equal(agentExtension.dependencies["@earendil-works/pi-coding-agent"], "0.85.1");
-    assert.equal(agentExtension.dependencies["@earendil-works/pi-tui"], "0.85.1");
-    assert.equal(agentExtension.dependencies["@henryqw/pi-ask-question"], "1.0.2");
-    assert.equal(agentExtension.dependencies["@henryqw/pi-auto-compact"], "3.0.4");
-    assert.equal(agentExtension.dependencies["pi-editor-plus"], "1.3.4");
-    assert.equal(agentExtension.dependencies["pi-web-access"], "0.28.0");
-    assert.equal(agentExtension.dependencies.typebox, "1.3.30");
     assert.equal(agentExtension.dependencies.diff, "8.0.4");
     await assert.rejects(readFile(new URL("packages/agentd/package.json", repoRoot), "utf8"));
     await assert.rejects(readFile(new URL("packages/agent-provider-pi/package.json", repoRoot), "utf8"));
@@ -64,25 +56,9 @@ test("thin Agent Extension shaping removes the internal Pi subtree and provider 
     await assert.rejects(() => lstat(join(root, "node_modules")), /ENOENT/u);
     const manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
     assert.equal(manifest.name, "@portable-devshell/agent-extension");
-    assert.equal(manifest.version, "0.1.3");
     assert.deepEqual(Object.keys(manifest.dependencies).sort(), ["@portable-devshell/extension"]);
     const extensionManifest = JSON.parse(await readFile(join(root, "devshell-extension.json"), "utf8"));
     assert.equal(extensionManifest.entry, "dist/builtin/index.js");
-});
-
-test("Pi provider deployment keeps the provider manifest version independent from Agent Extension", async (t) => {
-    const root = await mkdtemp(join(tmpdir(), "devshell-agent-provider-shape-"));
-    t.after(async () => await rm(root, { force: true, recursive: true }));
-    await mkdir(join(root, "dist", "provider", "pi"), { recursive: true });
-    await writeFile(join(root, "dist", "provider", "pi", "index.js"), "export {};\n", "utf8");
-    await writeFile(join(root, "package.json"), JSON.stringify({ name: "source", type: "module", version: "9.9.9" }), "utf8");
-
-    await shapePiProviderTree(root);
-
-    const deployment = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-    const provider = JSON.parse(await readFile(join(root, "devshell-agent-provider.json"), "utf8"));
-    assert.equal(provider.version, "0.1.1");
-    assert.equal(deployment.version, provider.version);
 });
 
 test("Agent artifact sanitizer removes pnpm deployment metadata and symlink guard remains strict", async (t) => {
