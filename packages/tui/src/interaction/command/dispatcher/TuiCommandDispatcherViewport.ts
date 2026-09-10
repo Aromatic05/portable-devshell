@@ -77,7 +77,7 @@ export class TuiCommandDispatcherViewport {
     returnToSidebar(): void {
         const cursor = this.#store.getState().interaction.sidebarCursor;
         this.#store.setFocusScope(
-            cursor?.kind === "instance" ? "sidebarInstances" : "sidebarPages",
+            cursor?.kind === "instance" ? "sidebarInstances" : "sidebarContext",
         );
     }
 
@@ -161,7 +161,7 @@ export class TuiCommandDispatcherViewport {
             }
             return moved;
         }
-        if (scope === "sidebarPages" || scope === "sidebarInstances") {
+        if (scope === "sidebarContext" || scope === "sidebarInstances") {
             if (this.#store.getState().ui.selectedPage === "terminal") {
                 this.#store.setFocusScope("terminal");
                 return true;
@@ -215,7 +215,7 @@ export class TuiCommandDispatcherViewport {
             return moved;
         }
         if (
-            (scope === "sidebarPages" || scope === "sidebarInstances") &&
+            (scope === "sidebarContext" || scope === "sidebarInstances") &&
             direction === "right"
         ) {
             if (this.#store.getState().ui.selectedPage === "terminal") {

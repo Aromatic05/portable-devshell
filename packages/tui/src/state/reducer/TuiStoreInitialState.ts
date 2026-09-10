@@ -35,7 +35,8 @@ export function createInitialTuiAppState(): TuiAppState {
             searchQueries: {},
             selectedInstance: undefined,
             selectedPage: "instances",
-            sidebarFocus: "pages",
+            sidebarFocus: "context",
+            sidebarLevel: "root",
         },
     };
 }

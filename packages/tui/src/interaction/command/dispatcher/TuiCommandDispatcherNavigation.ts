@@ -7,6 +7,7 @@ import type { TuiCommandDispatcherFocus } from "./TuiCommandDispatcherFocus.js";
 import { TuiCommandDispatcherOverlay } from "./TuiCommandDispatcherOverlay.js";
 import { TuiCommandDispatcherViewport } from "./TuiCommandDispatcherViewport.js";
 import { selectTuiOverviewInstanceName } from "../../../view/page/TuiOverviewPresentation.js";
+import { selectSidebarModel } from "../../../view/model/TuiViewProjection.js";
 import { topTuiOverlay } from "../../../state/overlay/TuiOverlay.js";
 import { currentTuiRoute } from "../../../state/route/TuiRouteState.js";
 import {
@@ -111,8 +112,36 @@ export class TuiCommandDispatcherNavigation {
 
     async activateSidebarSelection(): Promise<boolean> {
         const cursor = this.#store.getState().interaction.sidebarCursor;
-        if (cursor?.kind === "page") {
-            this.#store.setSelectedPage(cursor.id);
+        if (cursor?.kind === "context") {
+            const entry = selectSidebarModel(this.#store.getState()).context.items.find(
+                (candidate) => candidate.id === cursor.id,
+            );
+            if (entry === undefined) return false;
+            switch (entry.target.kind) {
+                case "page":
+                    return await this.#selectPage(entry.target.page);
+                case "root":
+                    this.#store.setSidebarLevel("root");
+                    this.#store.setSidebarCursor({
+                        id: this.#store.getState().ui.selectedPage,
+                        kind: "context",
+                    });
+                    this.#store.setFocusScope("sidebarContext");
+                    return true;
+                case "route": {
+                    const current = currentTuiRoute(this.#store.getState());
+                    if (current.page !== entry.target.route.page) return false;
+                    if (current.view === "contexts") {
+                        this.#store.pushRoute(entry.target.route);
+                    } else {
+                        this.#store.replaceRoute(entry.target.route);
+                    }
+                    this.#store.setSidebarCursor(cursor);
+                    this.#store.setFocusScope("sidebarContext");
+                    this.#focus.syncMainFocus();
+                    return true;
+                }
+            }
         } else if (cursor?.kind === "instance") {
             this.#store.setSelectedInstance(cursor.id);
         } else {
@@ -128,6 +157,17 @@ export class TuiCommandDispatcherNavigation {
         }
         if (this.#store.popRoute()) {
             this.#focus.syncMainFocus();
+            return true;
+        }
+        if (
+            this.#store.getState().interaction.focusScope === "sidebarContext" &&
+            this.#store.getState().ui.sidebarLevel === "section"
+        ) {
+            this.#store.setSidebarLevel("root");
+            this.#store.setSidebarCursor({
+                id: this.#store.getState().ui.selectedPage,
+                kind: "context",
+            });
             return true;
         }
         return this.#viewport.cancelPassiveScope();
@@ -163,7 +203,13 @@ export class TuiCommandDispatcherNavigation {
 
     async #selectPage(page: TuiPageId): Promise<boolean> {
         this.#store.setSelectedPage(page);
-        this.#store.setSidebarCursor({ id: page, kind: "page" });
+        this.#store.setFocusScope("sidebarContext");
+        this.#store.setSidebarFocus("context");
+        const context = selectSidebarModel(this.#store.getState()).context.items;
+        const cursor = context.find((entry) => entry.selected) ?? context[0];
+        this.#store.setSidebarCursor(
+            cursor === undefined ? undefined : { id: cursor.id, kind: "context" },
+        );
         this.#focus.syncMainFocus();
         return true;
     }

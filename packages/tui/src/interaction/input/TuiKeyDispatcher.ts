@@ -55,7 +55,7 @@ export class TuiKeyDispatcher {
             case "form":
             case "wizard":
                 return this.#forEditor(press, mode);
-            case "sidebarPages":
+            case "sidebarContext":
             case "sidebarInstances":
             case "mainBoxes":
             case "boxDetail":

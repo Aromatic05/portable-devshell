@@ -22,7 +22,6 @@ import {
     tuiViewProjection,
 } from "../view/model/TuiViewProjection.js";
 import { nextTuiTerminalTab } from "../view/page/terminal/TuiTmuxPaneTerminalModel.js";
-import type { TuiPageId } from "../state/TuiUiState.js";
 import type { TuiTerminalTab } from "../state/route/TuiRoute.js";
 import { TuiApp } from "../view/TuiApp.js";
 import type { TuiAppKey } from "../view/TuiAppController.js";
@@ -697,7 +696,7 @@ export class TuiRuntime {
                 this.store.setFocusScope(
                     cursor?.kind === "instance"
                         ? "sidebarInstances"
-                        : "sidebarPages",
+                        : "sidebarContext",
                 );
                 continue;
             }
@@ -720,7 +719,7 @@ export class TuiRuntime {
                     this.store.setFocusScope(
                         cursor?.kind === "instance"
                             ? "sidebarInstances"
-                            : "sidebarPages",
+                            : "sidebarContext",
                     );
                     continue;
                 }
@@ -965,15 +964,9 @@ export class TuiRuntime {
     }
 
     async #handleHitTarget(target: TuiHitTarget): Promise<void> {
-        if (target.kind === "page") {
-            await this.commandDispatcher.dispatch({
-                page: target.id as TuiPageId,
-                type: "page.select",
-            });
-            this.focusManager.setFocus({
-                id: target.id as TuiPageId,
-                kind: "page",
-            });
+        if (target.kind === "context") {
+            this.focusManager.setFocus({ id: target.id, kind: "context" });
+            await this.commandDispatcher.dispatch({ type: "focus.activate" });
             return;
         }
         if (target.kind === "instance") {

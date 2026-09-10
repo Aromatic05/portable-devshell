@@ -351,9 +351,9 @@ test("Logs groups one instance by context and Enter opens only the focused conte
 
 test("page changes made from the sidebar preserve sidebar focus until the user enters the page", () => {
     const store = createStore();
-    store.setFocusScope("sidebarPages");
+    store.setFocusScope("sidebarContext");
 
     store.setSelectedPage("terminal");
 
-    assert.equal(store.getState().interaction.focusScope, "sidebarPages");
+    assert.equal(store.getState().interaction.focusScope, "sidebarContext");
 });

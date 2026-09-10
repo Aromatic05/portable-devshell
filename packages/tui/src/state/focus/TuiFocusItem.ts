@@ -1,7 +1,5 @@
-import type { TuiPageId } from "../TuiUiState.js";
-
 export type TuiFocusItem =
-    | { kind: "page"; id: TuiPageId }
+    | { kind: "context"; id: string }
     | { kind: "instance"; id: string }
     | { kind: "box"; id: string }
     | { boxId: string; kind: "line"; id: string }

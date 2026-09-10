@@ -14,6 +14,7 @@ import type {
     TuiPageId,
     TuiSidebarCursor,
     TuiSidebarFocus,
+    TuiUiState,
 } from "./TuiUiState.js";
 import { createInitialTuiAppState } from "./reducer/TuiStoreInitialState.js";
 import { tuiAppReducer } from "./reducer/TuiStoreReducer.js";
@@ -143,6 +144,10 @@ export class TuiAppStore {
             sidebarFocus,
             type: "sidebar.focus.set",
         });
+    }
+
+    setSidebarLevel(level: TuiUiState["sidebarLevel"]): void {
+        this.dispatch({ level, type: "sidebar.level.set" });
     }
 
     setMainFocusId(mainFocusId?: string): void {

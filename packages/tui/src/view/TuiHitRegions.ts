@@ -27,9 +27,9 @@ import { tuiTextDetailImageRows } from "./TuiTextDetailLayout.js";
 export type TuiHitTarget =
     | { boxId: string; kind: "boxBody"; lineId?: string }
     | { boxId: string; kind: "boxTitle" }
+    | { id: string; kind: "context" }
     | { id: string; kind: "instance" }
     | { instance: string; kind: "overviewInstance" }
-    | { id: string; kind: "page" }
     | { kind: "scrollViewport" }
     | { kind: "terminalTab"; tab: TuiTerminalTab };
 
@@ -166,10 +166,10 @@ export function buildTuiHitRegions(
             sidebar.instances,
             sectionRows.instanceRows,
         );
-        for (const [index, page] of contextViewport.items.entries()) {
+        for (const [index, entry] of contextViewport.items.entries()) {
             regions.push({
                 height: 1,
-                target: { id: page.id, kind: "page" },
+                target: { id: entry.id, kind: "context" },
                 width: layout.sidebarWidth - 2,
                 x: layout.outerGap + 2,
                 y: contentY + index,

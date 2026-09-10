@@ -7,7 +7,7 @@ test("terminal kill shortcut is available only after leaving raw terminal input"
     const dispatcher = new TuiKeyDispatcher();
 
     assert.deepEqual(
-        dispatcher.dispatch("sidebarPages", {
+        dispatcher.dispatch("sidebarContext", {
             input: "K",
             key: { shift: true },
         }),

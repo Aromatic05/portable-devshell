@@ -147,7 +147,7 @@ export type TuiUiIntent =
 export function createEmptyInteractionState(): TuiInteractionState {
     return {
         dirty: false,
-        focusScope: "sidebarPages",
+        focusScope: "sidebarContext",
         overlays: [],
         redrawNonce: 0,
         screenStatusByPage: {},

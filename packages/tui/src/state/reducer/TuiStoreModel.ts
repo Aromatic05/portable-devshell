@@ -114,6 +114,7 @@ export type TuiAppAction =
     | { key: string; lineId?: string; type: "detailLine.select" }
     | { cursor?: TuiSidebarCursor; type: "sidebar.cursor.set" }
     | { sidebarFocus: TuiSidebarFocus; type: "sidebar.focus.set" }
+    | { level: TuiUiState["sidebarLevel"]; type: "sidebar.level.set" }
     | { page: TuiPageId; query: string; type: "search.setQuery" }
     | { editor?: TuiEditorState; type: "editor.set" }
     | { dirty: boolean; key: string; value: unknown; type: "formDraft.set" }

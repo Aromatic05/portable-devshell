@@ -13,6 +13,7 @@ import type {
     TuiMainBoxFlowMetrics,
     TuiMainScreenModel,
     TuiPageLoadState,
+    TuiSidebarContextEntry,
     TuiSidebarModel,
 } from "../../state/TuiViewModel.js";
 import {
@@ -24,8 +25,10 @@ import type { TuiTerminalTab } from "../../state/route/TuiRoute.js";
 import {
     isTuiSearchablePage,
     tuiPageEntries,
+    tuiPageShortcut,
 } from "../../state/TuiPageCatalog.js";
 import { topTuiOverlay } from "../../state/overlay/TuiOverlay.js";
+import { selectTuiAuditSidebarEntries } from "../page/audit/TuiAuditSidebarProjection.js";
 
 export function selectActivePage(state: TuiAppState): TuiActivePage {
     return {
@@ -57,32 +60,44 @@ export function selectHeaderSummary(state: TuiAppState): string {
 
 export function selectSidebarModel(state: TuiAppState): TuiSidebarModel {
     const cursor = state.interaction.sidebarCursor;
-    const sidebarFocused =
-        state.interaction.focusScope === "sidebarPages" ||
-        state.interaction.focusScope === "sidebarInstances";
+    const contextFocused = state.interaction.focusScope === "sidebarContext";
+    const instanceFocused = state.interaction.focusScope === "sidebarInstances";
 
     return {
-        context: {
-            items: tuiPageEntries.map((page) => ({
-                focused:
-                    sidebarFocused &&
-                    cursor?.kind === "page" &&
-                    cursor.id === page.id,
-                id: page.id,
-                label: page.label,
-                selected: state.ui.selectedPage === page.id,
-            })),
-            kind: "pages",
-        },
+        context: selectSidebarContext(state, contextFocused, cursor),
         instances: state.instances.map((instance) => ({
             focused:
-                sidebarFocused &&
+                instanceFocused &&
                 cursor?.kind === "instance" &&
                 cursor.id === instance.name,
             id: instance.name,
             label: instance.name,
             selected: state.ui.selectedInstance === instance.name,
         })),
+    };
+}
+
+function selectSidebarContext(
+    state: TuiAppState,
+    focused: boolean,
+    cursor: TuiAppState["interaction"]["sidebarCursor"],
+): TuiSidebarModel["context"] {
+    if (state.ui.sidebarLevel === "section" && state.ui.selectedPage === "audit") {
+        return {
+            items: selectTuiAuditSidebarEntries(state, focused, cursor),
+            kind: "audit",
+        };
+    }
+    return {
+        items: tuiPageEntries.map((page): TuiSidebarContextEntry => ({
+            focused: focused && cursor?.kind === "context" && cursor.id === page.id,
+            id: page.id,
+            label: page.label,
+            selected: state.ui.selectedPage === page.id,
+            shortcut: tuiPageShortcut(page.id),
+            target: { kind: "page", page: page.id },
+        })),
+        kind: "pages",
     };
 }
 
@@ -219,7 +234,7 @@ export function selectFooterText(state: TuiAppState): string {
 export function selectFooterShortcuts(state: TuiAppState): string[] {
     const route = currentTuiRoute(state);
     switch (state.interaction.focusScope) {
-        case "sidebarPages":
+        case "sidebarContext":
         case "sidebarInstances":
             return ["→ main", "enter", "0-8 pages", "shift+1-9 instances"];
         case "mainBoxes":

@@ -37,12 +37,12 @@ export class TuiFocusManager {
 
     currentFocus(): TuiFocusItem | undefined {
         const scope = this.#store.getState().interaction.focusScope;
-        if (scope === "sidebarPages") {
+        if (scope === "sidebarContext") {
             const cursor = this.#store.getState().interaction.sidebarCursor;
-            if (cursor?.kind === "page") {
+            if (cursor?.kind === "context") {
                 return cursor;
             }
-            return { id: this.#store.getState().ui.selectedPage, kind: "page" };
+            return undefined;
         }
         if (scope === "sidebarInstances") {
             const cursor = this.#store.getState().interaction.sidebarCursor;
@@ -242,9 +242,9 @@ export class TuiFocusManager {
         }
 
         switch (item.kind) {
-            case "page":
-                this.#store.setFocusScope("sidebarPages");
-                this.#store.setSidebarFocus("pages");
+            case "context":
+                this.#store.setFocusScope("sidebarContext");
+                this.#store.setSidebarFocus("context");
                 this.#store.setSidebarCursor(item);
                 return;
             case "instance":
@@ -329,8 +329,8 @@ export class TuiFocusManager {
 
 function focusModeFor(item: TuiFocusItem, current: TuiMode): TuiMode {
     switch (item.kind) {
-        case "page":
-            return "sidebarPages";
+        case "context":
+            return "sidebarContext";
         case "instance":
             return "sidebarInstances";
         case "box":

@@ -1,5 +1,5 @@
 import type { TuiRoute } from "./route/TuiRoute.js";
-import type { TuiActivePage, TuiExpandableBoxStatus } from "./TuiUiState.js";
+import type { TuiActivePage, TuiExpandableBoxStatus, TuiPageId } from "./TuiUiState.js";
 
 export type TuiBoxLineTone = "normal" | "muted" | "accent" | "success" | "warning" | "danger";
 
@@ -52,10 +52,20 @@ export interface TuiSidebarEntry {
     selected: boolean;
 }
 
+export type TuiSidebarContextTarget =
+    | { kind: "page"; page: TuiPageId }
+    | { kind: "root" }
+    | { kind: "route"; route: TuiRoute };
+
+export interface TuiSidebarContextEntry extends TuiSidebarEntry {
+    shortcut?: string;
+    target: TuiSidebarContextTarget;
+}
+
 export interface TuiSidebarModel {
     context: {
-        items: TuiSidebarEntry[];
-        kind: "pages";
+        items: TuiSidebarContextEntry[];
+        kind: "audit" | "pages";
     };
     instances: TuiSidebarEntry[];
 }

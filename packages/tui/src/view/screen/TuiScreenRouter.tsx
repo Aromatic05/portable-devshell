@@ -2,16 +2,12 @@ import { Box, Text } from "ink";
 
 import { TuiFocusItem } from "../../state/focus/TuiFocusItem.js";
 import { TuiFocusGraph, type TuiFocusNode } from "../../state/focus/TuiFocusGraph.js";
-import type { TuiPageId } from "../../state/TuiUiState.js";
-import { tuiPageOrder } from "../../state/TuiPageCatalog.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import type { TuiBoxModel } from "../../state/TuiViewModel.js";
 import { renderExpandableBoxLines, type TuiComponentExpandableBoxRenderLine } from "../component/TuiComponentExpandableBox.js";
 import { TuiComponentErrorBanner } from "../component/TuiComponentErrorBanner.js";
-import { measureMainBoxFlowMetrics, selectMainBoxIds, selectMainScreenModel, selectMainScrollKey } from "../model/TuiViewProjection.js";
+import { measureMainBoxFlowMetrics, selectMainBoxIds, selectMainScreenModel, selectMainScrollKey, selectSidebarModel } from "../model/TuiViewProjection.js";
 import { TuiOverviewView } from "../page/TuiOverviewView.js";
-
-export const orderedPages: TuiPageId[] = [...tuiPageOrder];
 
 export interface TuiScreenRouterProps {
     boxInnerWidth: number;
@@ -165,12 +161,14 @@ export function buildFocusGraphForState(state: TuiAppState): TuiFocusGraph {
                 })),
             );
         }
-        case "sidebarPages":
-        case "sidebarInstances":
+        case "sidebarContext":
+        case "sidebarInstances": {
+            const sidebar = selectSidebarModel(state);
             return buildLinearGraph([
-                ...orderedPages.map((page) => ({ id: page, kind: "page" as const })),
+                ...sidebar.context.items.map((entry) => ({ id: entry.id, kind: "context" as const })),
                 ...state.instances.map((instance) => ({ id: instance.name, kind: "instance" as const }))
             ]);
+        }
         case "mainBoxes":
         case "contextConversation":
             if (state.ui.selectedPage === "overview") {

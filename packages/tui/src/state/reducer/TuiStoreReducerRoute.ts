@@ -9,8 +9,16 @@ import type { TuiAppAction, TuiAppState } from "./TuiStoreModel.js";
 
 export function reduceTuiStoreReducerRoute(state: TuiAppState, action: TuiAppAction): TuiAppState | undefined {
     switch (action.type) {
-        case "ui.selectPage":
-            return transitionTuiRouteContext(state, action.page, state.ui.selectedInstance);
+        case "ui.selectPage": {
+            const next = transitionTuiRouteContext(state, action.page, state.ui.selectedInstance);
+            return {
+                ...next,
+                ui: {
+                    ...next.ui,
+                    sidebarLevel: action.page === "audit" ? "section" : "root",
+                },
+            };
+        }
         case "ui.selectInstance":
             return transitionTuiRouteContext(state, state.ui.selectedPage, action.instance);
         case "route.push":

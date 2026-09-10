@@ -108,7 +108,7 @@ test("navigation controller owns page selection and the two-stage sidebar/main c
 
     assert.equal(
         harness.store.getState().interaction.focusScope,
-        "sidebarPages",
+        "sidebarContext",
     );
     assert.equal(
         await harness.navigation.dispatch({
@@ -129,7 +129,7 @@ test("navigation controller owns page selection and the two-stage sidebar/main c
     );
     assert.equal(
         harness.store.getState().interaction.focusScope,
-        "sidebarPages",
+        "sidebarContext",
     );
 
     assert.equal(
@@ -142,7 +142,7 @@ test("navigation controller owns page selection and the two-stage sidebar/main c
     assert.equal(harness.store.getState().ui.selectedPage, "config");
     assert.deepEqual(harness.store.getState().interaction.sidebarCursor, {
         id: "config",
-        kind: "page",
+        kind: "context",
     });
 
     assert.equal(
@@ -185,7 +185,7 @@ test("navigation controller preserves and restores focus around search and confi
     );
     assert.equal(
         harness.store.getState().interaction.focusScope,
-        "sidebarPages",
+        "sidebarContext",
     );
 
     assert.equal(
@@ -219,7 +219,7 @@ test("navigation controller preserves and restores focus around search and confi
     );
     assert.equal(
         harness.store.getState().interaction.focusScope,
-        "sidebarPages",
+        "sidebarContext",
     );
 });
 

@@ -480,14 +480,14 @@ test("real Ink runtime handles sidebar mouse buttons and viewport wheel scrollin
             () => runtime.store.getState().connection.status === "connected",
         );
 
-        runtime.store.setSidebarCursor({ id: "help", kind: "page" });
-        runtime.store.setFocusScope("sidebarPages");
+        runtime.store.setSidebarCursor({ id: "help", kind: "context" });
+        runtime.store.setFocusScope("sidebarContext");
         const helpRegion = buildTuiHitRegions(runtime.store.getState(), {
             columns: runtime.columns,
             rows: runtime.rows,
         }).find(
             (region) =>
-                region.target.kind === "page" && region.target.id === "help",
+                region.target.kind === "context" && region.target.id === "help",
         );
         assert.ok(helpRegion);
 
@@ -990,7 +990,7 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
             rows: runtime.rows,
         }).find(
             (region) =>
-                region.target.kind === "page" && region.target.id === "help",
+                region.target.kind === "context" && region.target.id === "help",
         );
         assert.ok(helpRegion);
         const beforePageChange = host.output.length;
@@ -1152,7 +1152,7 @@ test("real Ink runtime switches terminal sources and drives tmux View and Attach
         assert.equal(
             fullScreenRegions.some(
                 (region) =>
-                    region.target.kind === "page" ||
+                    region.target.kind === "context" ||
                     region.target.kind === "instance",
             ),
             true,

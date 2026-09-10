@@ -43,12 +43,12 @@ test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab 
     await harness.press("", { leftArrow: true });
     assert.equal(
         harness.store.getState().interaction.focusScope,
-        "sidebarPages",
+        "sidebarContext",
     );
     await harness.press("", { rightArrow: true });
     assert.equal(harness.store.getState().interaction.focusScope, "mainBoxes");
 
-    harness.store.setFocusScope("sidebarPages");
+    harness.store.setFocusScope("sidebarContext");
     await harness.dispatch({ page: "audit", type: "page.select" });
     assert.equal(harness.store.getState().ui.selectedPage, "audit");
     assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
@@ -60,6 +60,50 @@ test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab 
     await harness.press("", { return: true });
     assert.equal(harness.store.getState().ui.selectedInstance, "beta");
 });
+
+test("Audit replaces upper Context navigation with workspace sessions while Instances stays fixed", async () => {
+    const harness = createHarness();
+    const rootSidebar = selectSidebarModel(harness.store.getState());
+    const rootInstances = rootSidebar.instances.map((entry) => entry.id);
+
+    assert.equal(rootSidebar.context.kind, "pages");
+    await harness.dispatch({ page: "audit", type: "page.select" });
+
+    const auditSidebar = selectSidebarModel(harness.store.getState());
+    assert.equal(auditSidebar.context.kind, "audit");
+    assert.equal(auditSidebar.context.items[0]?.id, "audit:back");
+    assert.deepEqual(
+        auditSidebar.instances.map((entry) => entry.id),
+        rootInstances,
+    );
+
+    const session = auditSidebar.context.items.find(
+        (entry) => entry.id === "audit:context:ctx-alpha",
+    );
+    assert.ok(session);
+    assert.equal(session.label, "alpha");
+    assert.equal(
+        harness.focusManager.setFocus({ id: session.id, kind: "context" }),
+        true,
+    );
+    await harness.dispatch({ type: "focus.activate" });
+    assert.deepEqual(currentTuiRoute(harness.store.getState()), {
+        ctxId: "ctx-alpha",
+        page: "audit",
+        scope: "context",
+        view: "context",
+    });
+    assert.equal(harness.store.getState().interaction.focusScope, "sidebarContext");
+
+    assert.equal(
+        harness.focusManager.setFocus({ id: "audit:back", kind: "context" }),
+        true,
+    );
+    await harness.dispatch({ type: "focus.activate" });
+    assert.equal(selectSidebarModel(harness.store.getState()).context.kind, "pages");
+    assert.equal(harness.store.getState().ui.selectedPage, "audit");
+});
+
 test("reload works on every current page", async () => {
     const harness = createHarness();
     const pages = tuiPageEntries.map((entry) => entry.id);
@@ -753,7 +797,7 @@ test("mouse hit regions follow the rendered sidebar, boxes, and overlays", () =>
     );
     const pageRegion = initialRegions.find(
         (region) =>
-            region.target.kind === "page" && region.target.id === "config",
+            region.target.kind === "context" && region.target.id === "config",
     )!;
     const instanceRegion = initialRegions.find(
         (region) =>
@@ -1005,7 +1049,7 @@ test("left and right arrows switch between the sidebar and main panel", async ()
     await harness.press("", { leftArrow: true });
     assert.equal(
         harness.store.getState().interaction.focusScope,
-        "sidebarPages",
+        "sidebarContext",
     );
 });
 

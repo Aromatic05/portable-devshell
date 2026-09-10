@@ -87,7 +87,7 @@ export function transitionTuiRouteContext(
     instance: string | undefined,
 ): TuiAppState {
     const sidebarScope =
-        state.interaction.focusScope === "sidebarPages" ||
+        state.interaction.focusScope === "sidebarContext" ||
         state.interaction.focusScope === "sidebarInstances"
             ? state.interaction.focusScope
             : undefined;
@@ -376,7 +376,7 @@ function isPersistentFocusScope(
     scope: TuiAppState["interaction"]["focusScope"],
 ): boolean {
     return (
-        scope === "sidebarPages" ||
+        scope === "sidebarContext" ||
         scope === "sidebarInstances" ||
         scope === "mainBoxes" ||
         scope === "boxDetail" ||

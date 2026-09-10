@@ -11,10 +11,12 @@ export type TuiPageId =
     | "help"
     | "terminal";
 
-export type TuiSidebarFocus = "pages" | "instances";
+export type TuiSidebarFocus = "context" | "instances";
+
+export type TuiSidebarLevel = "root" | "section";
 
 export type TuiFocusScope =
-    | "sidebarPages"
+    | "sidebarContext"
     | "sidebarInstances"
     | "mainBoxes"
     | "boxDetail"
@@ -30,7 +32,7 @@ export type TuiFocusScope =
     | "terminal";
 
 export type TuiSidebarCursor =
-    { id: TuiPageId; kind: "page" } | { id: string; kind: "instance" };
+    { id: string; kind: "context" } | { id: string; kind: "instance" };
 
 export type TuiExpandableBoxStatus =
     | "normal"
@@ -45,6 +47,7 @@ export type TuiUiState = {
     selectedPage: TuiPageId;
     selectedInstance?: string;
     sidebarFocus: TuiSidebarFocus;
+    sidebarLevel: TuiSidebarLevel;
     mainFocusId?: string;
     routeStacks: Record<string, readonly TuiRoute[]>;
     routeViewStates: Record<string, TuiRouteViewState>;

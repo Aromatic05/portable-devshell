@@ -56,6 +56,14 @@ export function reduceTuiStoreReducerInteraction(
                     sidebarFocus: action.sidebarFocus,
                 },
             };
+        case "sidebar.level.set":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    sidebarLevel: action.level,
+                },
+            };
         case "search.setQuery":
             return {
                 ...state,
