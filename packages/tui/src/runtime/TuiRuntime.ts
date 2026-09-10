@@ -204,7 +204,6 @@ export class TuiRuntime {
         });
         this.tmuxPanes = new TuiTmuxPaneTerminalSession({
             operations: this.#operations.tmuxOperations,
-            viewportRows: Math.max(1, this.rows - 8),
         });
         const routeDataLoader = new TuiRouteDataLoader({
             session: this.session,
@@ -850,7 +849,6 @@ export class TuiRuntime {
             }
             return;
         }
-        this.tmuxPanes.setViewportRows(Math.max(1, this.rows - 8));
         if (!this.#tmuxPanesActive || this.#tmuxPanesInstance !== instance) {
             this.#tmuxPanesActive = true;
             this.#tmuxPanesInstance = instance;

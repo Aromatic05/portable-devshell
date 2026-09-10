@@ -171,6 +171,29 @@ test("activating a view-only pane opens an unattached panel without a warning", 
     assert.equal(harness.calls.some((call) => call.method === "inspectPane" && call.args[2] === "%0"), true);
 });
 
+test("component viewport updates recompute the exact visible pane rows", async () => {
+    const harness = createOperationsHarness();
+    harness.setPanes([idlePane]);
+    harness.inspectByPane.set("%0", {
+        id: "%0",
+        lines: ["one", "two", "three", "four", "five"],
+        name: "main",
+        status: "idle",
+    });
+    const session = new TuiTmuxPaneTerminalSession({
+        operations: harness.operations,
+        viewportRows: 5,
+    });
+    await session.bind("alpha");
+    await session.activate();
+    assert.deepEqual(viewLines(session), ["one", "two", "three", "four", "five"]);
+
+    session.setViewportRows(3);
+
+    assert.deepEqual(viewLines(session), ["three", "four", "five"]);
+    assert.equal(session.getSnapshot().active?.scroll.offset, 2);
+});
+
 test("activating a running pane attaches and surfaces the multi-writer warning", async () => {
     const harness = createOperationsHarness();
     harness.setPanes([runningPane]);

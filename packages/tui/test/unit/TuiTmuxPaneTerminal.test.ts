@@ -8,6 +8,7 @@ import {
     routeTmuxAttachInput,
     routeTmuxPaneBrowseInput,
     scrollTmuxInspectView,
+    tuiTmuxPaneContentRows,
     type TuiTerminalLine,
     type TuiTmuxListPane,
 } from "../../src/testing.ts";
@@ -19,6 +20,12 @@ function plainLines(values: readonly string[]): TuiTerminalLine[] {
 function visibleText(view: { visibleLines: TuiTerminalLine[] }): string[] {
     return view.visibleLines.map((line) => line.segments.map((segment) => segment.text).join(""));
 }
+
+test("Tmux pane layout reserves exactly two fixed chrome rows", () => {
+    assert.equal(tuiTmuxPaneContentRows(31), 29);
+    assert.equal(tuiTmuxPaneContentRows(12), 10);
+    assert.equal(tuiTmuxPaneContentRows(2), 1);
+});
 
 test("only panes whose task.status is exactly running support Attach; other tasks stay View-only", () => {
     const panes: TuiTmuxListPane[] = [

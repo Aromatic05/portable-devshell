@@ -1,10 +1,12 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { Box, Text } from "ink";
 
 import type { TuiTmuxPaneTerminalSnapshot } from "../../runtime/terminal/TuiTmuxPaneTerminalSession.js";
+import { tuiTmuxPaneContentRows } from "../page/terminal/TuiTmuxPaneTerminalModel.js";
 
 export interface TuiTmuxPanesRenderSource {
     getSnapshot(): TuiTmuxPaneTerminalSnapshot;
+    setViewportRows(rows: number): void;
     subscribe(listener: () => void): () => void;
 }
 
@@ -32,15 +34,29 @@ export function TuiComponentTmuxPanes(props: TuiComponentTmuxPanesProps) {
     const paneLabel = pane === undefined
         ? "no pane"
         : `${snapshot.selectedIndex + 1}/${snapshot.panes.length} · ${pane.name} · ${pane.status} · ${workspaceLabel(pane.workspace)}`;
-    const header = `tmux · ${props.instance ?? "no instance"} · ${snapshot.status} · ${paneLabel} · ${help}`;
-    const bodyRows = Math.max(0, props.rows - 2);
+    const header = `tmux · ${props.instance ?? "no instance"} · ${snapshot.status} · ${paneLabel}`;
+    const bodyRows = tuiTmuxPaneContentRows(props.rows);
+    const position = active === undefined
+        ? ""
+        : `line ${active.scroll.offset + 1}/${active.scroll.totalLines}${active.scroll.atBottom ? " (bottom)" : ""} · latest ${active.historyLimit} max`;
+    const status = snapshot.error ?? [active?.warning, help, position].filter((value) => value !== undefined && value.length > 0).join(" · ");
+
+    useEffect(() => {
+        props.source.setViewportRows(bodyRows);
+    }, [bodyRows, props.source]);
 
     return (
-        <Box flexDirection="column" height={props.rows + 1} overflow="hidden">
+        <Box flexDirection="column" height={props.rows} overflow="hidden">
             <Text bold color={props.focused ? "cyan" : undefined} wrap="truncate-end">
                 {header}
             </Text>
-            {snapshot.error !== undefined ? <Text color="red" wrap="truncate-end">{snapshot.error}</Text> : undefined}
+            <Text
+                color={snapshot.error !== undefined ? "red" : active?.warning !== undefined ? "yellow" : undefined}
+                dimColor={snapshot.error === undefined && active?.warning === undefined}
+                wrap="truncate-end"
+            >
+                {status}
+            </Text>
             <Box flexDirection="column" flexGrow={1} overflow="hidden" width={Math.max(1, props.columns)}>
                 {active === undefined ? (
                     snapshot.panes.length === 0 ? (
@@ -59,7 +75,6 @@ export function TuiComponentTmuxPanes(props: TuiComponentTmuxPanesProps) {
                     )
                 ) : (
                     <>
-                        {active.warning !== undefined ? <Text color="yellow" wrap="wrap">{active.warning}</Text> : undefined}
                         {active.scroll.visibleLines.slice(0, bodyRows).map((line, row) => (
                             <Box height={1} key={row} overflow="hidden" width={Math.max(1, props.columns)}>
                                 <Text wrap="truncate-end">
@@ -81,9 +96,6 @@ export function TuiComponentTmuxPanes(props: TuiComponentTmuxPanesProps) {
                                 </Text>
                             </Box>
                         ))}
-                        <Text dimColor wrap="truncate-end">
-                            {`line ${active.scroll.offset + 1}/${active.scroll.totalLines}${active.scroll.atBottom ? " (bottom)" : ""} · latest ${active.historyLimit} max`}
-                        </Text>
                     </>
                 )}
             </Box>

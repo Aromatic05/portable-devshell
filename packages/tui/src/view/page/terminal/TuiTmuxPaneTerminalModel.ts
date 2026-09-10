@@ -4,6 +4,10 @@ import type { TuiTerminalLine } from "../../../runtime/terminal/TuiTerminalModel
 export const tuiTerminalTabs: readonly TuiTerminalTab[] = ["instances", "tmuxPanes"];
 export const TUI_TMUX_INSPECT_MAX_LINES = 200;
 
+export function tuiTmuxPaneContentRows(rows: number): number {
+    return Math.max(1, Math.floor(rows) - 2);
+}
+
 export function tuiTerminalTabLabel(tab: TuiTerminalTab): string {
     return tab === "instances" ? "Instances" : "Tmux Panes";
 }
@@ -79,7 +83,7 @@ export function scrollTmuxInspectView(
 }
 
 export const TUI_TMUX_MULTI_WRITER_WARNING =
-    "Attached via tmux_input. The pane mutex atomically serializes each input batch; when multiple clients write concurrently, batch order is nondeterministic, so shell command order is uncoordinated. Esc exits Attach.";
+    "Concurrent tmux_input writers are serialized per batch; batch order is nondeterministic.";
 
 export type TuiTmuxAttachAction =
     | { kind: "exit" }

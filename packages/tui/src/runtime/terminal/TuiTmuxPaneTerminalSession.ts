@@ -106,9 +106,19 @@ export class TuiTmuxPaneTerminalSession {
         if (active === undefined) {
             return;
         }
+        const offset = active.scroll.atBottom
+            ? active.lines.length
+            : active.scroll.offset;
         this.#replace({
             ...this.#snapshot,
-            active: { ...active, scroll: renderTmuxInspectView(active.lines, this.#viewportRows, active.scroll.offset) },
+            active: {
+                ...active,
+                scroll: renderTmuxInspectView(
+                    active.lines,
+                    this.#viewportRows,
+                    offset,
+                ),
+            },
         });
     }
 
