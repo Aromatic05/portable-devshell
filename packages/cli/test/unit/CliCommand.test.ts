@@ -276,6 +276,8 @@ test("CliMain keeps Extension management separate from cli.commands dispatch", a
     assert.match(stdout.flush(), /"id": "agent"/u);
     assert.equal(await cli.run(["extension", "install", "./bundle.dsext"]), 0);
     stdout.flush();
+    assert.equal(await cli.run(["extension", "update", "./bundle-v2.dsext"]), 0);
+    stdout.flush();
     assert.equal(await cli.run(["extension", "remove", "agent", "--purge"]), 0);
     stdout.flush();
     assert.equal(await cli.run(["extension", "inspect", "agent"]), 0);
@@ -304,6 +306,7 @@ test("CliMain keeps Extension management separate from cli.commands dispatch", a
     assert.deepEqual(calls.filter((call) => call !== "cli.commands"), [
         "list",
         `install:${resolve("./bundle.dsext")}`,
+        `install:${resolve("./bundle-v2.dsext")}`,
         "remove:agent:true",
         "get:agent",
         "enable:agent",
@@ -311,7 +314,7 @@ test("CliMain keeps Extension management separate from cli.commands dispatch", a
         "reload:agent",
         "command:agent:json"
     ]);
-    assert.equal(calls.filter((call) => call === "cli.commands").length, 10);
+    assert.equal(calls.filter((call) => call === "cli.commands").length, 11);
     assert.equal(stderr.flush(), "");
 });
 

@@ -49,6 +49,10 @@ test("CliParser treats unknown top-level namespaces as cli.commands local ids", 
         kind: "extension.install",
         source: "./example.dsext"
     });
+    assert.deepEqual(parser.parse(["extension", "update", "./example.dsext"]), {
+        kind: "extension.install",
+        source: "./example.dsext"
+    });
     assert.deepEqual(parser.parse(["extension", "remove", "agent"]), {
         extensionId: "agent",
         kind: "extension.remove",

@@ -24,6 +24,7 @@ const usage = [
     "  devshell agent list",
     "  devshell agent provider list",
     "  devshell agent provider install <absolute-bundle-path>",
+    "  devshell agent provider update <absolute-bundle-path>",
     "  devshell agent provider enable <id>",
     "  devshell agent provider disable <id>",
     "  devshell agent provider remove <id>",
@@ -114,8 +115,9 @@ async function providerCommand(
     }
     switch (argv[0]) {
         case "install":
+        case "update":
             requireLocalOwner(context);
-            expectLength(argv, 2, "agent provider install <absolute-bundle-path>");
+            expectLength(argv, 2, `agent provider ${argv[0]} <absolute-bundle-path>`);
             return json(providerRecordToJson(await providers.install(required(argv[1], "provider bundle path is required"))));
         case "enable":
         case "disable": {

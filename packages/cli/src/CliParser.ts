@@ -160,10 +160,11 @@ export class CliParser {
             case "list":
                 return this.#expectNoExtra(argv, { kind: "extension.list" });
             case "install":
-                if (argv.length !== 2) throw CliRenderError.usage("extension install requires <bundle-or-directory>");
+            case "update":
+                if (argv.length !== 2) throw CliRenderError.usage(`extension ${argv[0]} requires <bundle-or-directory>`);
                 return {
                     kind: "extension.install",
-                    source: this.#required(argv[1], "extension install source is required")
+                    source: this.#required(argv[1], `extension ${argv[0]} source is required`)
                 };
             case "remove": {
                 if (argv.length < 2 || argv.length > 3) {

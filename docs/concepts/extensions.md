@@ -89,9 +89,9 @@ CLI/Web request
 
 如果 selected generation 在首次 activation 时失败，Host 可以按 registry 中已经验证过的 last-known-good generation 回退。Host 自身的 registry persistence failure 不会被误判成 candidate failure，也不会因此盲目切换 generation。
 
-Install 仍然保留强验证：新的 immutable generation 会实际执行一次 activation、binding/resource validation，然后立即 retire 这次验证 runtime；只有验证和 cleanup 都成功后，才提交 selected / last-known-good generation 和静态 catalog。因此安装成功不会留下常驻 sandbox，第一次真实调用仍然是独立的 runtime activation。重复安装当前已经选择且健康的同一 content generation 是幂等操作。
+Install/update 都保留强验证：新的 immutable generation 会实际执行一次 activation、binding/resource validation，然后立即 retire 这次验证 runtime；只有验证和 cleanup 都成功后，才提交 selected / last-known-good generation 和静态 catalog。因此安装成功不会留下常驻 sandbox，第一次真实调用仍然是独立的 runtime activation。`devshell extension update <bundle-or-directory>` 是已安装 Extension 更新 generation 的显式用户入口，与 install 复用同一个原子验证/切换事务；重复提交当前已经选择且健康的同一 content generation 是幂等操作。
 
-显式 `reload` 与 ordinary first-use 不同：它是管理操作，要求立即重新 activation 当前 selected generation。`enable` 只恢复并校验静态 catalog；`disable` 立即撤销静态路由，并让已经存在的 generation leases 按正常 retirement 语义 drain。
+显式 `reload` 与 `update` 不同：`reload` 只要求立即重新 activation **当前 selected generation**，不会读取新的 bundle；`update` 会验证、安装并选择新的 generation。`enable` 只恢复并校验静态 catalog；`disable` 立即撤销静态路由，并让已经存在的 generation leases 按正常 retirement 语义 drain。
 
 ## ExtensionContext
 
@@ -209,6 +209,8 @@ close
 
 委托调用仍经过相同的 Worker readiness、scheduler、approval 和 execution policy。区别只在记录 ownership：DevShell 不再把内部 subagent `file_* / bash_run / tmux_* / ...` 调用写入 `AuditToolCallHistory`、`toolCall.*` activity 或重复的 command log；provider 自己负责保存 prompt、tool call 与 tool result。Approval request/decision 仍属于 DevShell 的安全边界，因此 `approval.*` lifecycle 继续由 Host 保存和展示。
 
+Agent provider 自己也使用 immutable generation。`devshell agent provider update <absolute-bundle-path>` 是已安装 provider 的显式更新入口，与 provider install 复用同一个 candidate validation / selected-generation 切换事务；已经运行的 Agent 继续持有启动时的 provider handle，新 generation 只影响后续 Agent start。
+
 ### processes
 
 `context.capabilities.processes` 创建 **Control-owned managed process**，不是授予 Node `child_process` 权限：
@@ -283,7 +285,7 @@ CliCommandResult
 
 Control 内部 static catalog 由 CLI domain 按 state 分别投影。Native discovery 只包含 `cli.native-commands` 的 presentation metadata，不包含 generation 或 runtime binding；本地 CLI 用它在 builtin parser 之前判断 overlay。`devshell <native-extension-command> --help` 因而可以只靠静态 declaration 生成帮助，普通 argv 仍按需取得 generation lease。全局 `devshell --help` 仍不依赖 Control。
 
-Native command invocation 仍由 Control 的 CLI route 负责 CLI-only access、`workingDirectory` authority、payload/result validation 和 binding dispatch；Extension management route 只负责 install/list/get/enable/disable/reload/remove。Model command state不复用这条 native route。
+Native command invocation 仍由 Control 的 CLI route 负责 CLI-only access、`workingDirectory` authority、payload/result validation 和 binding dispatch；Extension management route 负责 install/update/list/get/enable/disable/reload/remove，其中 update 在 CLI 层复用 install 的 generation transaction。Model command state不复用这条 native route。
 
 MCP `bash_run` / managed `tmux_run` 当前通过 Worker-owned executable shim 暴露 restricted `devshell`：Worker 只在 `source=mcp` 的 ToolCall 环境前置私有 `devshell` executable 到 `PATH`，由 shell 自己完成 quoting、pipeline、redirection 和 executable resolution；Control 不解析 command string。shim 通过 Worker local broker 取得 model command stdout/stderr/exit status，远端 Worker↔Control 仍复用已有 Worker RPC channel。
 

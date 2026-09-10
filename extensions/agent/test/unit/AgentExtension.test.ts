@@ -141,6 +141,7 @@ test("Agent Extension command owns the legacy devshell agent grammar", async () 
         if (providerHelp.kind === "text") {
             assert.match(providerHelp.text, /devshell agent provider list/u);
             assert.match(providerHelp.text, /devshell agent provider install/u);
+            assert.match(providerHelp.text, /devshell agent provider update/u);
         }
     }
 
@@ -188,6 +189,10 @@ test("Agent provider mutations require local-owner Extension command authority",
         () => executeAgentCommand(runtime, providers, ["provider", "install", "/provider.dsprovider"], invocationContext(false)),
         /local owner/u
     );
+    await assert.rejects(
+        () => executeAgentCommand(runtime, providers, ["provider", "update", "/provider-v2.dsprovider"], invocationContext(false)),
+        /local owner/u
+    );
     const installed = await executeAgentCommand(
         runtime,
         providers,
@@ -196,6 +201,14 @@ test("Agent provider mutations require local-owner Extension command authority",
     );
     assert.equal(installed.kind, "json");
     assert.equal(events.includes("provider.install:/provider.dsprovider"), true);
+    const updated = await executeAgentCommand(
+        runtime,
+        providers,
+        ["provider", "update", "/provider-v2.dsprovider"],
+        invocationContext(true)
+    );
+    assert.equal(updated.kind, "json");
+    assert.equal(events.includes("provider.install:/provider-v2.dsprovider"), true);
 });
 
 test("Agent Extension activation binds CLI and Web points without a generic RPC surface", async () => {
