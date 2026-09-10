@@ -32,6 +32,7 @@ import {
     hitTargetAt,
     type TuiHitTarget,
 } from "../view/TuiHitRegions.js";
+import { tuiSidebarSectionAt } from "../view/TuiSidebarPresentation.js";
 import { TuiRuntimeOperations } from "./TuiRuntimeOperations.js";
 import { TuiRouteDataLoader } from "./route/TuiRouteDataLoader.js";
 import { TuiRouteLifecycleController } from "./route/TuiRouteLifecycleController.js";
@@ -961,15 +962,49 @@ export class TuiRuntime {
         });
         if ((event.button & 64) !== 0) {
             if (event.kind !== "press") return;
-            const target = hitTargetAt(regions, event.x, event.y);
-            if (target?.kind === "scrollViewport") {
+            const delta = (event.button & 1) === 0 ? -3 : 3;
+            const state = this.store.getState();
+            const overlay = topTuiOverlay(state.interaction.overlays);
+            this.selection.clearSelection();
+            this.#screenMouseGesture = undefined;
+            if (overlay?.kind === "text-detail") {
                 await this.commandDispatcher.dispatch({
-                    type:
-                        (event.button & 1) === 0
-                            ? "screen.pageUp"
-                            : "screen.pageDown",
+                    delta,
+                    type: "textDetail.scroll",
                 });
+                return;
             }
+            const sidebarSection = tuiSidebarSectionAt(
+                { columns: this.columns, rows: this.rows },
+                event.x,
+                event.y,
+            );
+            if (sidebarSection !== undefined) {
+                await this.commandDispatcher.dispatch({
+                    delta,
+                    section: sidebarSection,
+                    type: "sidebar.scroll",
+                });
+                return;
+            }
+            const scrollRegion = regions.find(
+                (region) =>
+                    region.target.kind === "scrollViewport" &&
+                    event.x >= region.x &&
+                    event.x < region.x + region.width &&
+                    event.y >= region.y &&
+                    event.y < region.y + region.height,
+            );
+            if (scrollRegion === undefined) return;
+            if (state.ui.selectedPage === "terminal") {
+                if (selectTerminalTab(state) === "instances") {
+                    this.terminal.scrollLines(delta);
+                } else {
+                    this.tmuxPanes.scroll(delta);
+                }
+                return;
+            }
+            await this.commandDispatcher.dispatch({ delta, type: "screen.scroll" });
             return;
         }
 

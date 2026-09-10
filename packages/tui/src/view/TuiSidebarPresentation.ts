@@ -1,4 +1,18 @@
 import type { TuiSidebarEntry } from "../state/TuiViewModel.js";
+import { tuiLayoutMetrics } from "./TuiRootLayout.js";
+
+export interface TuiSidebarRegion {
+    height: number;
+    width: number;
+    x: number;
+    y: number;
+}
+
+export interface TuiSidebarRegions {
+    context: TuiSidebarRegion;
+    instances: TuiSidebarRegion;
+    sidebar: TuiSidebarRegion;
+}
 
 export interface TuiSidebarViewport<T extends TuiSidebarEntry = TuiSidebarEntry> {
     items: readonly T[];
@@ -15,6 +29,56 @@ export function tuiSidebarSectionRows(sidebarRows: number): {
         contextRows,
         instanceRows: innerRows - contextRows,
     };
+}
+
+export function tuiSidebarRegions(viewport: {
+    columns: number;
+    rows: number;
+}): TuiSidebarRegions | undefined {
+    const layout = tuiLayoutMetrics(viewport.columns);
+    if (layout.mode === "compact") return undefined;
+
+    const sidebarRows = Math.max(0, viewport.rows - 6);
+    const sectionRows = tuiSidebarSectionRows(sidebarRows);
+    const sidebar = {
+        height: sidebarRows,
+        width: layout.sidebarWidth,
+        x: layout.outerGap + 1,
+        y: 4,
+    };
+    const contentX = sidebar.x + 2;
+    const contentWidth = Math.max(0, sidebar.width - 4);
+    const contextY = sidebar.y + 1;
+
+    return {
+        context: {
+            height: sectionRows.contextRows,
+            width: contentWidth,
+            x: contentX,
+            y: contextY,
+        },
+        instances: {
+            height: sectionRows.instanceRows,
+            width: contentWidth,
+            x: contentX,
+            y: contextY + sectionRows.contextRows + 1,
+        },
+        sidebar,
+    };
+}
+
+export function tuiSidebarSectionAt(
+    viewport: { columns: number; rows: number },
+    x: number,
+    y: number,
+): "context" | "instances" | undefined {
+    const regions = tuiSidebarRegions(viewport);
+    if (regions === undefined || !containsPoint(regions.sidebar, x, y)) {
+        return undefined;
+    }
+    if (containsPoint(regions.context, x, y)) return "context";
+    if (containsPoint(regions.instances, x, y)) return "instances";
+    return undefined;
 }
 
 export function selectTuiSidebarViewport<T extends TuiSidebarEntry>(
@@ -44,4 +108,13 @@ export function selectTuiSidebarViewport<T extends TuiSidebarEntry>(
         items: items.slice(startIndex, startIndex + visibleRows),
         startIndex,
     };
+}
+
+function containsPoint(region: TuiSidebarRegion, x: number, y: number): boolean {
+    return (
+        x >= region.x &&
+        x < region.x + region.width &&
+        y >= region.y &&
+        y < region.y + region.height
+    );
 }

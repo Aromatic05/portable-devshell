@@ -492,43 +492,55 @@ test("real Ink runtime handles sidebar mouse buttons and viewport wheel scrollin
         );
         assert.ok(helpRegion);
 
-        terminal.write(mouseSequence(0, helpRegion.x, helpRegion.y, "release"));
-        terminal.write(mouseSequence(1, helpRegion.x, helpRegion.y, "press"));
+        terminal.write(mouseSequence(64, helpRegion.x, helpRegion.y, "press"));
+        await waitUntil(() =>
+            runtime.store.getState().interaction.sidebarCursor?.id === "audit",
+        );
+        assert.equal(runtime.store.getState().ui.selectedPage, "overview");
+        runtime.store.setSidebarCursor({ id: "help", kind: "context" });
+        const refreshedHelpRegion = buildTuiHitRegions(runtime.store.getState(), {
+            columns: runtime.columns,
+            rows: runtime.rows,
+        }).find(
+            (region) =>
+                region.target.kind === "context" && region.target.id === "help",
+        );
+        assert.ok(refreshedHelpRegion);
+
+        terminal.write(mouseSequence(0, refreshedHelpRegion.x, refreshedHelpRegion.y, "release"));
+        terminal.write(mouseSequence(1, refreshedHelpRegion.x, refreshedHelpRegion.y, "press"));
         await yieldEventLoop();
         assert.equal(runtime.store.getState().ui.selectedPage, "overview");
 
-        terminal.write(mouseSequence(0, helpRegion.x, helpRegion.y, "press"));
-        terminal.write(mouseSequence(0, helpRegion.x, helpRegion.y, "release"));
+        terminal.write(mouseSequence(0, refreshedHelpRegion.x, refreshedHelpRegion.y, "press"));
+        terminal.write(mouseSequence(0, refreshedHelpRegion.x, refreshedHelpRegion.y, "release"));
         await waitUntil(
             () => runtime.store.getState().ui.selectedPage === "help",
+        );
+
+        const navigationBox = selectMainScreenModel(runtime.store.getState()).boxes.find(
+            (box) => box.id === "help-navigation",
+        );
+        assert.ok(navigationBox);
+        runtime.store.toggleExpanded(navigationBox.expandedKey);
+        const helpRegions = buildTuiHitRegions(runtime.store.getState(), {
+            columns: runtime.columns,
+            rows: runtime.rows,
+        });
+        const contentRegion = helpRegions.find(
+            (region) => region.target.kind === "boxBody",
+        );
+        assert.ok(contentRegion);
+        const scrollKey = selectMainScrollKey(runtime.store.getState());
+        runtime.store.setScrollOffset(scrollKey, 0);
+        terminal.write(mouseSequence(65, contentRegion.x, contentRegion.y, "press"));
+        await waitUntil(
+            () => runtime.store.getState().ui.scrollOffsets[scrollKey] === 3,
         );
 
         terminal.write("1");
         await waitUntil(
             () => runtime.store.getState().ui.selectedPage === "instances",
-        );
-        const regions = buildTuiHitRegions(runtime.store.getState(), {
-            columns: runtime.columns,
-            rows: runtime.rows,
-        });
-        const viewport = regions.find(
-            (region) => region.target.kind === "scrollViewport",
-        );
-        assert.ok(viewport);
-        const bareViewportY = Array.from(
-            { length: viewport.height },
-            (_, offset) => viewport.y + offset,
-        ).find((y) => {
-            return (
-                hitTargetAt(regions, viewport.x, y)?.kind === "scrollViewport"
-            );
-        });
-        assert.notEqual(bareViewportY, undefined);
-        const scrollKey = selectMainScrollKey(runtime.store.getState());
-        runtime.store.setScrollOffset(scrollKey, 5);
-        terminal.write(mouseSequence(64, viewport.x, bareViewportY!, "press"));
-        await waitUntil(
-            () => runtime.store.getState().ui.scrollOffsets[scrollKey] === 0,
         );
 
         terminal.write("\u0004");
@@ -562,6 +574,23 @@ test("real Ink runtime drag-selects ordinary TUI text and copies it without acti
         }
         runtime.selection.clearSelection();
         assert.notEqual(helpRow, undefined);
+        runtime.selection.clearSelection();
+
+        const helpRegion = buildTuiHitRegions(runtime.store.getState(), {
+            columns: runtime.columns,
+            rows: runtime.rows,
+        }).find(
+            (region) =>
+                region.target.kind === "context" && region.target.id === "help",
+        );
+        assert.ok(helpRegion);
+        assert.equal(helpRegion.y, helpRow);
+        await runtime.selection.beginSelection(helpRegion.x, helpRow!);
+        runtime.selection.updateSelection(
+            helpRegion.x + helpRegion.width - 1,
+            helpRow!,
+        );
+        assert.match(runtime.selection.getSelectionText(), /help/u);
         runtime.selection.clearSelection();
 
         const outputStart = terminal.output.length;

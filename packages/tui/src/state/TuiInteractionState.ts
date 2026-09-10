@@ -82,6 +82,7 @@ export type TuiUiIntent =
     | { type: "confirm.cancel" }
     | { type: "screen.pageUp" }
     | { type: "screen.pageDown" }
+    | { delta: number; type: "screen.scroll" }
     | { type: "screen.home" }
     | { type: "screen.end" }
     | { type: "screen.toggle" }
@@ -93,6 +94,11 @@ export type TuiUiIntent =
       }
     | { type: "textDetail.close" }
     | { delta: number; type: "textDetail.scroll" }
+    | {
+          delta: number;
+          section: "context" | "instances";
+          type: "sidebar.scroll";
+      }
     | { type: "logs.toggleFollow" }
     | { type: "logs.clearBuffer" }
     | {

@@ -40,6 +40,9 @@ export class TuiCommandDispatcherViewport {
                 return this.#focus.scrollMainColumn(
                     Math.max(1, this.#focus.boxViewportRows() - 1),
                 );
+            case "screen.scroll":
+                if (intent.delta < 0) this.#focus.pauseLogFollow();
+                return this.#focus.scrollMainColumn(intent.delta);
             case "screen.home":
                 this.#focus.pauseLogFollow();
                 return this.#focus.setMainColumnOffset(0);

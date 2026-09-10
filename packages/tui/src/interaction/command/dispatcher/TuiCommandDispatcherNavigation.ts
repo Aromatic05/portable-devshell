@@ -30,6 +30,7 @@ export interface TuiCommandDispatcherNavigationOptions {
 
 export class TuiCommandDispatcherNavigation {
     readonly #focus: TuiCommandDispatcherFocus;
+    readonly #focusManager: TuiFocusManager;
     readonly #onContextMessage?: TuiCommandDispatcherNavigationOptions["onContextMessage"];
     readonly #onLogsReload: () => Promise<void>;
     readonly #onPageReload: TuiCommandDispatcherNavigationOptions["onPageReload"];
@@ -41,6 +42,7 @@ export class TuiCommandDispatcherNavigation {
 
     constructor(options: TuiCommandDispatcherNavigationOptions) {
         this.#focus = options.focus;
+        this.#focusManager = options.focusManager;
         this.#onContextMessage = options.onContextMessage;
         this.#onLogsReload = options.onLogsReload;
         this.#onPageReload = options.onPageReload;
@@ -67,6 +69,8 @@ export class TuiCommandDispatcherNavigation {
                 return await this.#selectPage(intent.page);
             case "instance.selectIndex":
                 return this.#selectInstanceIndex(intent.index);
+            case "sidebar.scroll":
+                return this.#scrollSidebar(intent.section, intent.delta);
             case "page.reload":
                 return await this.#reloadPage();
             case "ui.help":
@@ -227,6 +231,39 @@ export class TuiCommandDispatcherNavigation {
         this.#store.setSidebarCursor({ id: entry.name, kind: "instance" });
         this.#focus.syncMainFocus();
         return true;
+    }
+
+    #scrollSidebar(
+        section: "context" | "instances",
+        delta: number,
+    ): boolean {
+        const state = this.#store.getState();
+        const sidebar = selectSidebarModel(state);
+        const items = section === "context" ? sidebar.context.items : sidebar.instances;
+        if (items.length === 0) return false;
+
+        const cursor = state.interaction.sidebarCursor;
+        const cursorIndex = items.findIndex((item) =>
+            section === "context"
+                ? cursor?.kind === "context" && cursor.id === item.id
+                : cursor?.kind === "instance" && cursor.id === item.id,
+        );
+        const selectedIndex = items.findIndex((item) => item.selected);
+        const currentIndex = cursorIndex >= 0
+            ? cursorIndex
+            : selectedIndex >= 0
+              ? selectedIndex
+              : 0;
+        const nextIndex = Math.min(
+            Math.max(0, currentIndex + Math.trunc(delta)),
+            items.length - 1,
+        );
+        const item = items[nextIndex]!;
+        return this.#focusManager.setFocus(
+            section === "context"
+                ? { id: item.id, kind: "context" }
+                : { id: item.id, kind: "instance" },
+        );
     }
 
     #openContextConversation(): boolean {

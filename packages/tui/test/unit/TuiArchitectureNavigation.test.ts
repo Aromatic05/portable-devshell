@@ -168,6 +168,44 @@ test("navigation controller owns page selection and the two-stage sidebar/main c
     });
 });
 
+test("sidebar wheel moves viewport focus without activating the Context or Instance", async () => {
+    const harness = createHarness();
+    harness.store.setSelectedPage("instances");
+    harness.store.setSidebarCursor({ id: "instances", kind: "context" });
+    harness.store.setFocusScope("sidebarContext");
+
+    assert.equal(
+        await harness.navigation.dispatch({
+            delta: 1,
+            section: "context",
+            type: "sidebar.scroll",
+        }),
+        true,
+    );
+    assert.equal(harness.store.getState().ui.selectedPage, "instances");
+    assert.deepEqual(harness.store.getState().interaction.sidebarCursor, {
+        id: "config",
+        kind: "context",
+    });
+
+    harness.store.setSelectedInstance("alpha");
+    harness.store.setSidebarCursor({ id: "alpha", kind: "instance" });
+    harness.store.setFocusScope("sidebarInstances");
+    assert.equal(
+        await harness.navigation.dispatch({
+            delta: 1,
+            section: "instances",
+            type: "sidebar.scroll",
+        }),
+        true,
+    );
+    assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
+    assert.deepEqual(harness.store.getState().interaction.sidebarCursor, {
+        id: "beta",
+        kind: "instance",
+    });
+});
+
 test("navigation controller preserves and restores focus around search and confirm overlays", async () => {
     const harness = createHarness();
     await harness.navigation.dispatch({ page: "logs", type: "page.select" });

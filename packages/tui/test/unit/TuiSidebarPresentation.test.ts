@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
     selectTuiSidebarViewport,
+    tuiSidebarRegions,
+    tuiSidebarSectionAt,
     tuiSidebarSectionRows,
 } from "../../src/view/TuiSidebarPresentation.ts";
 
@@ -32,4 +34,37 @@ test("sidebar viewport follows focus without changing the underlying list", () =
         ["item-6", "item-7", "item-8"],
     );
     assert.equal(items.length, 9);
+});
+
+test("sidebar geometry reserves the divider between independently scrollable sections", () => {
+    const regions = tuiSidebarRegions({ columns: 120, rows: 40 });
+    assert.ok(regions);
+    assert.equal(
+        regions.instances.y,
+        regions.context.y + regions.context.height + 1,
+    );
+    assert.equal(
+        tuiSidebarSectionAt(
+            { columns: 120, rows: 40 },
+            regions.context.x,
+            regions.context.y,
+        ),
+        "context",
+    );
+    assert.equal(
+        tuiSidebarSectionAt(
+            { columns: 120, rows: 40 },
+            regions.instances.x,
+            regions.instances.y,
+        ),
+        "instances",
+    );
+    assert.equal(
+        tuiSidebarSectionAt(
+            { columns: 120, rows: 40 },
+            regions.context.x,
+            regions.context.y + regions.context.height,
+        ),
+        undefined,
+    );
 });
