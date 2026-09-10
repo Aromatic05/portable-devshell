@@ -888,6 +888,12 @@ test("expanded box hit regions follow wrapped line ids", () => {
         (box) => box.id === "help-navigation",
     )!;
     assert.equal(expanded.expanded, true);
+    assert.equal(
+        expanded.expandedLines.some((line) =>
+            line.text.includes("1-9 open feature pages"),
+        ),
+        true,
+    );
 
     const bodyTargets = buildTuiHitRegions(harness.store.getState(), {
         columns: 70,
@@ -3210,17 +3216,8 @@ async function openCreateWizard(
     harness: ReturnType<typeof createHarness>,
 ): Promise<void> {
     await harness.press("", { tab: true });
-    await harness.press(" ");
-    const createBox = selectMainScreenModel(
-        harness.store.getState(),
-    ).boxes.find((box) => box.id === "create-instance");
-    const createButton = createBox?.expandedLines.find((line) =>
-        line.id?.endsWith(":button:create"),
-    );
-    assert.ok(createBox?.expandedKey);
-    assert.ok(createButton?.id);
-    harness.store.setSelectedDetailLine(createBox.expandedKey, createButton.id);
-    await harness.dispatch({ type: "focus.activate" });
+    assert.equal(harness.store.getState().ui.mainFocusId, "create-instance");
+    await harness.press("", { return: true });
 }
 
 function instanceCreateSummary(

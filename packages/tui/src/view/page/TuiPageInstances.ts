@@ -32,7 +32,10 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
             ],
             id: "create-instance",
             status: "normal",
-            summaryLines: ["create local / ssh / docker / podman / reverse devshell"],
+            summaryLines: [
+                "Enter create · Space provider details",
+                "local / ssh / docker / podman / reverse",
+            ],
             title: "Create Instance"
         }),
         ...state.instances.map((entry) => {

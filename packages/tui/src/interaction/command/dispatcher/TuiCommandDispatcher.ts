@@ -393,6 +393,12 @@ export class TuiCommandDispatcher {
                 .boxes.find(
                     (candidate) => candidate.id === this.#store.getState().ui.mainFocusId,
                 );
+            if (
+                this.#store.getState().ui.selectedPage === "instances" &&
+                box?.id === "create-instance"
+            ) {
+                return await this.#editor.openCreateWizard();
+            }
             if (box?.primaryAction?.kind === "navigate" && box.disabled !== true) {
                 return this.#navigation.openFocusedRoute();
             }

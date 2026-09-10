@@ -25,7 +25,7 @@ export function buildHelpPageBoxes(state: TuiAppState): BoxModel[] {
                 "Up/Down moves sidebar focus without selecting.",
                 "Enter selects the focused item or activates its action.",
                 "Space expands or collapses the focused box.",
-                "0 opens Overview; 1-8 open feature pages; Shift+1-9 switch instances.",
+                "0 opens Overview; 1-9 open feature pages; Shift+1-9 switch instances.",
                 "Overview is read-only and prioritizes alerts, unhealthy instances, recent activity, and actionable todos.",
                 "Terminal uses the selected instance; Right/Tab enters it, Ctrl+T switches Instances/Tmux Panes, and Ctrl+] returns to the sidebar. From the sidebar, K confirms and kills the persistent PTY; leaving the page only detaches.",
                 "Terminal: drag selects and copies with OSC 52; hold Shift when the application owns mouse input.",
@@ -42,7 +42,7 @@ export function buildHelpPageBoxes(state: TuiAppState): BoxModel[] {
         }),
         makeBox(state, "help", undefined, {
             detailLines: [
-                "Expand an instance to create, attach, start, restart, stop, or delete.",
+                "On Instances, Enter on Create Instance opens the wizard; Space shows provider details. Expand an existing instance to attach, start, restart, stop, or delete.",
                 "Configuration and Connections fields can be edited and saved with Ctrl+S.",
                 "Stop, delete, and other destructive actions open a confirmation dialog with Cancel focused.",
                 "Approval detail starts with Back focused; Enter never approves a list item.",
