@@ -724,7 +724,8 @@ test("real Ink runtime drag-selects ordinary TUI text and copies it without acti
         );
         const clipboard = terminal.output
             .slice(outputStart)
-            .match(/\u001B\]52;c;([A-Za-z0-9+/=]+)\u0007/u)?.[1];
+            .split("\u001B]52;c;", 2)[1]
+            ?.split("\u0007", 1)[0];
         assert.ok(clipboard);
         assert.match(Buffer.from(clipboard, "base64").toString("utf8"), /help/u);
         assert.equal(runtime.store.getState().ui.selectedPage, "overview");

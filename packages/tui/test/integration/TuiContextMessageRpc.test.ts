@@ -201,9 +201,14 @@ test("Messages renders comment and report history and sends a Comment from the f
             harness.runtime.store.getState().interaction.focusScope ===
             "contextConversation",
     );
-    await waitUntil(() =>
-        /\u001B\[\d+;\d+H\u001B\[\?25h/u.test(harness.terminal.output),
-    );
+    await waitUntil(() => {
+        const output = harness.terminal.output;
+        const showCursor = output.lastIndexOf("\u001B[?25h");
+        if (showCursor < 0) return false;
+        const moveCursor = output.lastIndexOf("\u001B[", showCursor - 1);
+        if (moveCursor < 0) return false;
+        return /^\d+;\d+H$/u.test(output.slice(moveCursor + 2, showCursor));
+    });
     await waitUntil(() => harness.terminal.output.includes("agent progress report"));
     assert.match(harness.terminal.output, /existing user comment/u);
 
