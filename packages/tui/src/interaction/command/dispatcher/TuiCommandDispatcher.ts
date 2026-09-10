@@ -23,6 +23,7 @@ import { TuiCommandDispatcherNavigation } from "./TuiCommandDispatcherNavigation
 
 export interface TuiCommandDispatcherOptions {
     focusManager: TuiFocusManager;
+    mainViewportColumns?(): number;
     onApprovalDecision(
         instance: string,
         approvalId: string,
@@ -88,6 +89,7 @@ export class TuiCommandDispatcher {
         this.#options = options;
         this.#store = options.store;
         this.#focus = new TuiCommandDispatcherFocus({
+            mainViewportColumns: options.mainViewportColumns,
             mainViewportRows: options.mainViewportRows,
             projection: options.projection,
             store: this.#store

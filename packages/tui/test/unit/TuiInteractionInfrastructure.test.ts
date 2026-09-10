@@ -14,6 +14,7 @@ import {
 import {
     buildFocusGraphForState,
     buildTuiHitRegions,
+    contextConversationDraftKey,
     TuiCommandDispatcher,
     TuiKeyDispatcher,
     selectMainScreenModel,
@@ -31,10 +32,12 @@ import {
     tuiPageEntries,
     topTuiOverlay,
     tuiLayoutMetrics,
+    tuiMessagesComposerCursorPosition,
     tuiViewProjection,
     wrapTerminalText,
 } from "../../src/testing.ts";
 import { choiceLine, fieldLine } from "../../src/view/editor/TuiEditorView.ts";
+import { tuiMessagesHistoryRows } from "../../src/view/page/messages/TuiMessagesProjection.ts";
 
 test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab cycle", async () => {
     const harness = createHarness();
@@ -840,6 +843,38 @@ test("mouse hit regions follow the rendered sidebar, boxes, and overlays", () =>
             region.target.boxId === "create-instance",
     )!;
     assert.equal(shiftedBoxRegion.y, boxRegion.y + 3);
+});
+
+test("Messages composer hardware cursor follows Unicode display width", () => {
+    const harness = createHarness();
+    harness.store.setSelectedPage("messages");
+    harness.store.replaceRoute({
+        ctxId: "ctx-alpha",
+        page: "messages",
+        view: "thread",
+    });
+    const draftKey = contextConversationDraftKey("alpha", "ctx-alpha");
+    harness.store.setFormDraft(draftKey, "中文", true);
+    harness.store.setEditor({
+        cursor: 2,
+        editing: true,
+        key: draftKey,
+        kind: "comment",
+    });
+    harness.store.setFocusScope("contextConversation");
+
+    const viewport = { columns: 120, rows: 40 };
+    const region = buildTuiHitRegions(harness.store.getState(), viewport).find(
+        (candidate) => candidate.target.kind === "messagesViewport",
+    );
+    assert.ok(region);
+    assert.deepEqual(
+        tuiMessagesComposerCursorPosition(harness.store.getState(), viewport),
+        {
+            column: region.x + 7,
+            row: region.y + tuiMessagesHistoryRows(region.height) + 1,
+        },
+    );
 });
 
 test("expanded box hit regions follow wrapped line ids", () => {
@@ -2670,6 +2705,48 @@ test("Main viewport scrolling uses one page-instance offset instead of per-box o
         20,
     );
 });
+
+test("Messages scrolling measures wrapped history with the actual main viewport width", async () => {
+    const harness = createHarness({ mainViewportColumns: 20 });
+    harness.store.patchControlReadModel({
+        instanceState: {
+            alpha: {
+                contextMessages: [{
+                    createdAt: "2026-09-10T10:00:00.000Z",
+                    ctxId: "ctx-alpha",
+                    id: "long-message",
+                    instance: "alpha",
+                    status: "delivered",
+                    text: "wrapped message ".repeat(24),
+                }],
+            },
+        },
+    });
+    harness.store.setSelectedPage("messages");
+    harness.store.replaceRoute({
+        ctxId: "ctx-alpha",
+        page: "messages",
+        view: "thread",
+    });
+    const key = selectMainScrollKey(harness.store.getState());
+
+    await harness.dispatch({ type: "screen.end" });
+
+    const state = harness.store.getState();
+    const actualMax = Math.max(
+        0,
+        tuiViewProjection.selectMainBoxFlowMetrics(state, 20).totalLines -
+            tuiMessagesHistoryRows(12),
+    );
+    const legacyWidthMax = Math.max(
+        0,
+        tuiViewProjection.selectMainBoxFlowMetrics(state, 80).totalLines -
+            tuiMessagesHistoryRows(12),
+    );
+    assert.equal(state.ui.scrollOffsets[key], actualMax);
+    assert.notEqual(actualMax, legacyWidthMax);
+});
+
 test("Moving focus down advances the shared main viewport to keep the focused box visible", async () => {
     const harness = createHarness();
     harness.store.patchControlReadModel({ instances: [
@@ -3171,6 +3248,7 @@ function createHarness(
         onValidateInstanceCreateDraft?: (
             draft: InstanceCreateDraft,
         ) => Promise<InstanceCreateSummary>;
+        mainViewportColumns?: number;
     } = {},
 ) {
     const store = new TuiAppStore();
@@ -3216,6 +3294,7 @@ function createHarness(
     });
     const commandDispatcher = new TuiCommandDispatcher({
         focusManager,
+        mainViewportColumns: () => options.mainViewportColumns ?? 80,
         mainViewportRows: () => 12,
         projection: tuiViewProjection,
         onApprovalDecision: async (instance, approvalId, decision) => {

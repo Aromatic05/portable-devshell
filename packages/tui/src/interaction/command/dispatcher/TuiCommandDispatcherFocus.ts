@@ -4,17 +4,20 @@ import { overviewInstanceViewportRows } from "../../../view/page/TuiOverviewPres
 import { tuiMessagesHistoryRows } from "../../../view/page/messages/TuiMessagesProjection.js";
 
 interface CommandFocusOptions {
+    mainViewportColumns?(): number;
     mainViewportRows(): number;
     projection: TuiInteractionProjection;
     store: TuiAppStore;
 }
 
 export class TuiCommandDispatcherFocus {
+    readonly #mainViewportColumns: () => number;
     readonly #mainViewportRows: CommandFocusOptions["mainViewportRows"];
     readonly #projection: TuiInteractionProjection;
     readonly #store: TuiAppStore;
 
     constructor(options: CommandFocusOptions) {
+        this.#mainViewportColumns = options.mainViewportColumns ?? (() => 80);
         this.#mainViewportRows = options.mainViewportRows;
         this.#projection = options.projection;
         this.#store = options.store;
@@ -77,7 +80,10 @@ export class TuiCommandDispatcherFocus {
             return;
         }
 
-        const metrics = this.#projection.selectMainBoxFlowMetrics(state);
+        const metrics = this.#projection.selectMainBoxFlowMetrics(
+            state,
+            this.#mainViewportColumns(),
+        );
         const range = metrics.boxRanges[boxId];
         if (range === undefined) {
             return;
@@ -111,7 +117,10 @@ export class TuiCommandDispatcherFocus {
     }
 
     maxMainScrollOffset(): number {
-        const metrics = this.#projection.selectMainBoxFlowMetrics(this.#store.getState());
+        const metrics = this.#projection.selectMainBoxFlowMetrics(
+            this.#store.getState(),
+            this.#mainViewportColumns(),
+        );
         return Math.max(0, metrics.totalLines - this.boxViewportRows());
     }}
 

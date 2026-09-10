@@ -36,6 +36,7 @@ export interface TuiAppController {
     readonly tmuxPanes: TuiTmuxPanesRenderSource;
     handleInput(input: string, key: TuiAppKey): Promise<void>;
     openTerminal(instance: string | undefined, columns: number, rows: number): Promise<void>;
+    renderInputCursor(): void;
     renderTextDetailImage(visible: boolean): void;
     renderTerminalGraphics(visible: boolean): void;
     selectTerminalTab(tab: TuiTerminalTab): void;

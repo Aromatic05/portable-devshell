@@ -30,10 +30,12 @@ import {
     buildTuiTextDetailImageRegion,
     buildTuiTerminalViewportRegion,
     hitTargetAt,
+    tuiMessagesComposerCursorPosition,
     tuiScreenSelectionColumnBounds,
     type TuiHitTarget,
 } from "../view/TuiHitRegions.js";
 import { tuiSidebarSectionAt } from "../view/TuiSidebarPresentation.js";
+import { mainInnerWidth } from "../view/TuiRootLayout.js";
 import { TuiRuntimeOperations } from "./TuiRuntimeOperations.js";
 import { TuiRouteDataLoader } from "./route/TuiRouteDataLoader.js";
 import { TuiRouteLifecycleController } from "./route/TuiRouteLifecycleController.js";
@@ -220,6 +222,7 @@ export class TuiRuntime {
         });
         this.commandDispatcher = new TuiCommandDispatcher({
             focusManager: this.focusManager,
+            mainViewportColumns: () => mainInnerWidth(this.columns),
             mainViewportRows: () => Math.max(0, this.rows - 7),
             onApprovalDecision: async (instance, approvalId, decision) => {
                 await this.#operations.decideApproval(
@@ -525,6 +528,18 @@ export class TuiRuntime {
             this.renderTextDetailImage(true);
             this.renderTerminalGraphics(true);
         });
+    }
+
+    renderInputCursor(): void {
+        const cursor = tuiMessagesComposerCursorPosition(this.store.getState(), {
+            columns: this.columns,
+            rows: this.rows,
+        });
+        if (cursor === undefined) {
+            this.#stdout.write("\u001B[?25l");
+            return;
+        }
+        this.#stdout.write(`\u001B[${cursor.row};${cursor.column}H\u001B[?25h`);
     }
 
     renderTextDetailImage(visible: boolean): void {
@@ -997,7 +1012,8 @@ export class TuiRuntime {
             }
             const scrollRegion = regions.find(
                 (region) =>
-                    region.target.kind === "scrollViewport" &&
+                    (region.target.kind === "scrollViewport" ||
+                        region.target.kind === "messagesViewport") &&
                     event.x >= region.x &&
                     event.x < region.x + region.width &&
                     event.y >= region.y &&

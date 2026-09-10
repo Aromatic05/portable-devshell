@@ -22,6 +22,7 @@ import { createTuiClients } from "../../src/runtime/client/TuiClientComposition.
 import { TuiRuntime } from "../../src/runtime/TuiRuntime.js";
 import {
     currentTuiRoute,
+    currentTuiRouteScrollKey,
     readContextConversationDraft,
     selectSidebarModel,
 } from "../../src/testing.ts";
@@ -200,6 +201,9 @@ test("Messages renders comment and report history and sends a Comment from the f
             harness.runtime.store.getState().interaction.focusScope ===
             "contextConversation",
     );
+    await waitUntil(() =>
+        /\u001B\[\d+;\d+H\u001B\[\?25h/u.test(harness.terminal.output),
+    );
     await waitUntil(() => harness.terminal.output.includes("agent progress report"));
     assert.match(harness.terminal.output, /existing user comment/u);
 
@@ -227,6 +231,51 @@ test("Messages renders comment and report history and sends a Comment from the f
     harness.terminal.write("\u001b");
     await waitUntil(
         () => harness.runtime.store.getState().interaction.focusScope === "sidebarContext",
+    );
+});
+
+test("Messages mouse wheel scrolls the history viewport", async (t) => {
+    const harness = await createHarness();
+    t.after(async () => await harness.close());
+    for (let index = 0; index < 24; index += 1) {
+        await harness.messages.queue({
+            ctxId: "ctx-alpha",
+            text: `history ${index} ${"content ".repeat(8)}`,
+        });
+    }
+    await harness.start();
+
+    harness.terminal.write("4");
+    await waitUntil(
+        () => harness.runtime.store.getState().ui.selectedPage === "messages",
+    );
+    harness.terminal.write("!");
+    await waitUntil(
+        () => harness.runtime.store.getState().ui.selectedInstance === "alpha",
+    );
+    await waitUntil(() =>
+        selectSidebarModel(harness.runtime.store.getState()).context.items.some(
+            (entry) => entry.id === "messages:context:ctx-alpha",
+        ),
+    );
+    harness.runtime.focusManager.setFocus({
+        id: "messages:context:ctx-alpha",
+        kind: "context",
+    });
+    harness.terminal.write("\r");
+    await waitUntil(() => currentTuiRoute(harness.runtime.store.getState()).view === "thread");
+
+    const state = harness.runtime.store.getState();
+    const key = currentTuiRouteScrollKey(state);
+    assert.equal(state.ui.scrollOffsets[key], Number.MAX_SAFE_INTEGER);
+    const region = buildTuiHitRegions(state, { columns: 120, rows: 40 }).find(
+        (candidate) => candidate.target.kind === "messagesViewport",
+    );
+    assert.ok(region);
+    harness.terminal.write(`\u001B[<64;${region.x};${region.y}M`);
+    await waitUntil(() =>
+        (harness.runtime.store.getState().ui.scrollOffsets[key] ?? Number.MAX_SAFE_INTEGER) <
+        Number.MAX_SAFE_INTEGER,
     );
 });
 

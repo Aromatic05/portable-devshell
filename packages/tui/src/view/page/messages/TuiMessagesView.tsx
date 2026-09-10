@@ -51,7 +51,7 @@ export function TuiMessagesView(props: {
 
     return (
         <Box flexDirection="column" height={props.viewportRows}>
-            <Box flexDirection="column" height={historyRows} overflow="hidden">
+            <Box flexDirection="column" height={historyRows} justifyContent="flex-end" overflow="hidden">
                 {visible.length === 0 ? <Text dimColor>No messages yet.</Text> : null}
                 {visible.map((line, index) => (
                     <Text dimColor={line.kind === "meta"} key={`${offset + index}:${line.text}`}>
@@ -63,7 +63,7 @@ export function TuiMessagesView(props: {
             <Box>
                 <Text>{active ? "> " : "× "}</Text>
                 {editing ? (
-                    <ComposerText draft={draft} cursor={editor.cursor ?? draft.length} />
+                    <ComposerText draft={draft} />
                 ) : (
                     <Text dimColor={!active}>
                         {draft || (active ? "Write a comment…" : "Comment unavailable")}
@@ -77,13 +77,6 @@ export function TuiMessagesView(props: {
     );
 }
 
-function ComposerText(props: { cursor: number; draft: string }) {
-    const cursor = Math.min(Math.max(0, props.cursor), props.draft.length);
-    return (
-        <Text>
-            {props.draft.slice(0, cursor)}
-            <Text inverse>{props.draft[cursor] ?? " "}</Text>
-            {props.draft.slice(cursor + (cursor < props.draft.length ? 1 : 0))}
-        </Text>
-    );
+function ComposerText(props: { draft: string }) {
+    return <Text>{props.draft.length === 0 ? " " : props.draft}</Text>;
 }
