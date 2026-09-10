@@ -19,6 +19,7 @@ import {
     buildTuiHitRegions,
     buildTuiTerminalViewportRegion,
     hitTargetAt,
+    tuiScreenSelectionColumnBounds,
 } from "../../src/view/TuiHitRegions.ts";
 import {
     selectMainScreenModel,
@@ -585,6 +586,35 @@ test("real Ink runtime drag-selects ordinary TUI text and copies it without acti
         );
         assert.ok(helpRegion);
         assert.equal(helpRegion.y, helpRow);
+
+        const viewport = { columns: runtime.columns, rows: runtime.rows };
+        const sidebarBounds = tuiScreenSelectionColumnBounds(
+            runtime.store.getState(),
+            viewport,
+            helpRegion.x,
+            helpRow!,
+        );
+        const mainBounds = tuiScreenSelectionColumnBounds(
+            runtime.store.getState(),
+            viewport,
+            runtime.columns,
+            helpRow!,
+        );
+        assert.ok(sidebarBounds);
+        assert.ok(mainBounds);
+        assert.ok(sidebarBounds.end <= mainBounds.start);
+        assert.ok(sidebarBounds.start <= helpRegion.x - 1);
+        assert.ok(helpRegion.x - 1 < sidebarBounds.end);
+        assert.equal(
+            tuiScreenSelectionColumnBounds(
+                runtime.store.getState(),
+                viewport,
+                1,
+                1,
+            ),
+            undefined,
+        );
+
         await runtime.selection.beginSelection(helpRegion.x, helpRow!);
         runtime.selection.updateSelection(
             helpRegion.x + helpRegion.width - 1,

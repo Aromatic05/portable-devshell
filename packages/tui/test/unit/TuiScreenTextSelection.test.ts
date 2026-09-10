@@ -27,3 +27,30 @@ test("screen text selection projects visible spans and exact clipboard text", as
         selection.dispose();
     }
 });
+
+test("column bounds keep selection inside one pane and never leak the other column", async () => {
+    const selection = new TuiScreenTextSelection({ columns: 30, rows: 3 });
+    try {
+        const line = (left: string, right: string): string =>
+            left.padEnd(20) + right;
+        selection.write(
+            [line("L0", "R0"), line("L1", "R1"), line("L2", "R2")].join("\r\n"),
+        );
+        await selection.flush();
+
+        await selection.beginSelection(21, 1);
+        selection.updateSelection(22, 3);
+        assert.ok(selection.getSelectionText().includes("L1"));
+
+        await selection.beginSelection(21, 1, { end: 22, start: 20 });
+        selection.updateSelection(22, 3);
+        assert.equal(selection.getSelectionText(), "R0\nR1\nR2");
+        assert.deepEqual(selection.getSnapshot().spans, [
+            { column: 20, row: 0, text: "R0" },
+            { column: 20, row: 1, text: "R1" },
+            { column: 20, row: 2, text: "R2" },
+        ]);
+    } finally {
+        selection.dispose();
+    }
+});
