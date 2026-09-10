@@ -135,6 +135,15 @@ test("Agent Extension command owns the legacy devshell agent grammar", async () 
     assert.equal(help.kind, "text");
     if (help.kind === "text") assert.match(help.text, /devshell agent .*<instance:\/workspace>/u);
 
+    for (const providerHelpArg of ["help", "--help", "-h"]) {
+        const providerHelp = await executeAgentCommand(runtime, providers, ["provider", providerHelpArg], invocation);
+        assert.equal(providerHelp.kind, "text");
+        if (providerHelp.kind === "text") {
+            assert.match(providerHelp.text, /devshell agent provider list/u);
+            assert.match(providerHelp.text, /devshell agent provider install/u);
+        }
+    }
+
     const started = await executeAgentCommand(runtime, providers, ["--provider", "test", "worker-a:/repo"], invocation);
     assert.equal(started.kind, "json");
     if (started.kind !== "json" || typeof started.value !== "object" || started.value === null || Array.isArray(started.value)) {

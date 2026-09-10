@@ -105,6 +105,9 @@ async function providerCommand(
     argv: readonly string[],
     context: CliNativeCommandInvocationContext
 ): Promise<CliCommandResult> {
+    if (argv.length === 1 && ["help", "--help", "-h"].includes(argv[0] ?? "")) {
+        return { kind: "text", text: usage };
+    }
     if (argv.length === 0 || argv[0] === "list") {
         expectLength(argv, argv.length === 0 ? 0 : 1, "agent provider list");
         return json((await providers.list()).map(providerRecordToJson));

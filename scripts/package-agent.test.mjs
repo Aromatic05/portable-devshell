@@ -47,7 +47,7 @@ test("thin Agent Extension shaping removes the internal Pi subtree and provider 
         id: "agent",
         name: "portable-devshell Agent",
         schemaVersion: 1,
-        version: "0.1.2"
+        version: "0.1.3"
     }), "utf8");
     await mkdir(join(root, "node_modules", "@portable-devshell", "extension"), { recursive: true });
     await mkdir(join(root, "node_modules", "@portable-devshell", "shared"), { recursive: true });
@@ -59,7 +59,7 @@ test("thin Agent Extension shaping removes the internal Pi subtree and provider 
     await assert.rejects(() => lstat(join(root, "node_modules")), /ENOENT/u);
     const manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
     assert.equal(manifest.name, "@portable-devshell/agent-extension");
-    assert.equal(manifest.version, "0.1.2");
+    assert.equal(manifest.version, "0.1.3");
     assert.deepEqual(Object.keys(manifest.dependencies).sort(), ["@portable-devshell/extension"]);
     const extensionManifest = JSON.parse(await readFile(join(root, "devshell-extension.json"), "utf8"));
     assert.equal(extensionManifest.entry, "dist/builtin/index.js");
