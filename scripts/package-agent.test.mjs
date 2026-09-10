@@ -7,6 +7,7 @@ import test from "node:test";
 import {
     assertNoSymbolicLinks,
     assertThinAgentExtensionTree,
+    pruneProviderRuntimeTree,
     sanitizeDeployTree,
     shapeThinAgentExtensionTree
 } from "./package-agent.mjs";
@@ -68,10 +69,34 @@ test("Agent artifact sanitizer removes pnpm deployment metadata and symlink guar
     await mkdir(join(root, "node_modules", ".pnpm"), { recursive: true });
     await writeFile(join(root, "node_modules", ".modules.yaml"), "x", "utf8");
     await writeFile(join(root, "pnpm-lock.yaml"), "x", "utf8");
+    await writeFile(join(root, "plain"), "x", "utf8");
+    const nestedBin = join(root, "node_modules", "esbuild", "node_modules", ".bin");
+    await mkdir(nestedBin, { recursive: true });
+    await symlink(join(root, "plain"), join(nestedBin, "esbuild"));
     await sanitizeDeployTree(root);
     await assert.rejects(readFile(join(root, "pnpm-lock.yaml"), "utf8"));
+    await assert.rejects(() => lstat(nestedBin), /ENOENT/u);
 
-    await writeFile(join(root, "plain"), "x", "utf8");
     await symlink(join(root, "plain"), join(root, "link"));
     await assert.rejects(() => assertNoSymbolicLinks(root), /symbolic link/u);
+});
+
+test("Pi provider runtime pruning removes type, map, and test payloads while preserving executable sources", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "devshell-agent-provider-prune-"));
+    t.after(async () => await rm(root, { force: true, recursive: true }));
+    const pkg = join(root, "node_modules", "plugin");
+    await mkdir(join(pkg, "tests"), { recursive: true });
+    await writeFile(join(pkg, "index.js"), "export {};\n", "utf8");
+    await writeFile(join(pkg, "extension.ts"), "export {};\n", "utf8");
+    await writeFile(join(pkg, "index.d.ts"), "export {};\n", "utf8");
+    await writeFile(join(pkg, "index.js.map"), "{}\n", "utf8");
+    await writeFile(join(pkg, "tests", "fixture.js"), "export {};\n", "utf8");
+
+    await pruneProviderRuntimeTree(root);
+
+    assert.equal((await readFile(join(pkg, "index.js"), "utf8")).length > 0, true);
+    assert.equal((await readFile(join(pkg, "extension.ts"), "utf8")).length > 0, true);
+    await assert.rejects(() => lstat(join(pkg, "index.d.ts")), /ENOENT/u);
+    await assert.rejects(() => lstat(join(pkg, "index.js.map")), /ENOENT/u);
+    await assert.rejects(() => lstat(join(pkg, "tests")), /ENOENT/u);
 });

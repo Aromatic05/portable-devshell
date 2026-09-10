@@ -11,7 +11,7 @@ import {
     rm,
     writeFile
 } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { resolvePnpmCommand } from "./PnpmCommand.mjs";
@@ -41,6 +41,7 @@ export async function packageAgentArtifacts(options = {}) {
             sanitizeDeployTree(extensionDirectory),
             sanitizeDeployTree(providerDirectory)
         ]);
+        await pruneProviderRuntimeTree(providerDirectory);
         await Promise.all([
             shapeThinAgentExtensionTree(extensionDirectory),
             shapePiProviderTree(providerDirectory)
@@ -74,13 +75,54 @@ export async function packageAgentArtifacts(options = {}) {
 }
 
 export async function sanitizeDeployTree(root) {
-    await Promise.all([
-        rm(join(root, "node_modules", ".bin"), { force: true, recursive: true }),
-        rm(join(root, "node_modules", ".pnpm"), { force: true, recursive: true }),
-        rm(join(root, "node_modules", ".modules.yaml"), { force: true }),
-        rm(join(root, "node_modules", ".pnpm-workspace-state-v1.json"), { force: true }),
-        rm(join(root, "pnpm-lock.yaml"), { force: true })
-    ]);
+    await removeNodeModulesDeploymentMetadata(root);
+    await rm(join(root, "pnpm-lock.yaml"), { force: true });
+}
+
+async function removeNodeModulesDeploymentMetadata(directory) {
+    const entries = await readdir(directory, { withFileTypes: true });
+    const insideNodeModules = basename(directory) === "node_modules";
+    for (const entry of entries) {
+        const path = join(directory, entry.name);
+        if (insideNodeModules && entry.isDirectory() && (entry.name === ".bin" || entry.name === ".pnpm")) {
+            await rm(path, { force: true, recursive: true });
+            continue;
+        }
+        if (
+            insideNodeModules
+            && entry.isFile()
+            && (entry.name === ".modules.yaml" || entry.name === ".pnpm-workspace-state-v1.json")
+        ) {
+            await rm(path, { force: true });
+            continue;
+        }
+        if (entry.isDirectory() && !entry.isSymbolicLink()) {
+            await removeNodeModulesDeploymentMetadata(path);
+        }
+    }
+}
+
+export async function pruneProviderRuntimeTree(root) {
+    await pruneNodeModulesRuntimeTree(join(root, "node_modules"));
+}
+
+async function pruneNodeModulesRuntimeTree(directory) {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+        const path = join(directory, entry.name);
+        if (entry.isSymbolicLink()) continue;
+        if (entry.isDirectory()) {
+            if (entry.name === "test" || entry.name === "tests" || entry.name === "__tests__") {
+                await rm(path, { force: true, recursive: true });
+                continue;
+            }
+            await pruneNodeModulesRuntimeTree(path);
+            continue;
+        }
+        if (entry.isFile() && (entry.name.endsWith(".d.ts") || entry.name.endsWith(".map"))) {
+            await rm(path, { force: true });
+        }
+    }
 }
 
 export async function shapeThinAgentExtensionTree(root) {
