@@ -75,6 +75,7 @@ export interface ExtensionSandboxHostOptions {
     capabilities: readonly ExtensionCapability[];
     codeDirectory: string;
     context: ExtensionSandboxContextData;
+    delegatedWorker: ExtensionWorkerCapability;
     entryUrl: string;
     externalMemoryLimitMb?: number;
     healthCheckIntervalMs?: number;
@@ -134,6 +135,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     readonly #processCapability: ExtensionProcessCapability;
     readonly #processes = new Map<string, SandboxManagedProcess>();
     readonly #capabilityControllers = new Map<string, AbortController>();
+    readonly #delegatedWorkerCapability: ExtensionWorkerCapability;
     readonly #ready: Promise<ExtensionSandboxReadyDescriptor>;
     readonly #sessions = new Map<string, ExtensionWorkerSession>();
     readonly #worker: Worker;
@@ -156,6 +158,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     constructor(options: ExtensionSandboxHostOptions) {
         this.#artifactCapability = options.artifacts;
         this.#assets = options.assets;
+        this.#delegatedWorkerCapability = options.delegatedWorker;
         this.#externalMemoryLimitBytes = positiveMegabytes(
             options.externalMemoryLimitMb ?? DEFAULT_EXTENSION_SANDBOX_EXTERNAL_MEMORY_LIMIT_MB,
             "Extension sandbox external memory limit"
@@ -538,24 +541,13 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
             }
             case "workers.openSession": {
                 const opened = await this.#workerCapability.openSession(input as SandboxWorkerOpenInput);
-                if (this.#faulted !== undefined || this.#closing || this.#sessionCleanup !== undefined) {
-                    await opened.close();
-                    throw this.#faulted ?? new Error("Extension sandbox stopped accepting Worker sessions.");
-                }
-                const sessionId = randomUUID();
-                this.#sessions.set(sessionId, opened);
-                void opened.closed.then(() => {
-                    this.#sessions.delete(sessionId);
-                    this.#send({ sessionId, type: "workerSessionClosed" });
-                }).catch(() => undefined);
-                return {
-                    environment: opened.environment,
-                    instance: opened.instance,
-                    sessionId,
-                    tools: opened.listTools(),
-                    workspace: opened.workspace
-                } satisfies ExtensionSandboxWorkerSessionDescriptor;
+                return await this.#registerWorkerSession(opened);
             }
+            case "delegatedWorkers.openSession": {
+                const opened = await this.#delegatedWorkerCapability.openSession(input as SandboxWorkerOpenInput);
+                return await this.#registerWorkerSession(opened);
+            }
+            case "delegatedWorkers.callTool":
             case "workers.callTool": {
                 const value = input as SandboxWorkerCallInput;
                 const session = this.#requireSession(value.sessionId);
@@ -569,6 +561,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                     signal
                 });
             }
+            case "delegatedWorkers.closeSession":
             case "workers.closeSession": {
                 const value = input as SandboxWorkerCloseInput;
                 const session = this.#sessions.get(value.sessionId);
@@ -656,6 +649,26 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         if (pending.graceTimer !== undefined) clearTimeout(pending.graceTimer);
         pending.cleanup?.();
         return pending;
+    }
+
+    async #registerWorkerSession(opened: ExtensionWorkerSession): Promise<ExtensionSandboxWorkerSessionDescriptor> {
+        if (this.#faulted !== undefined || this.#closing || this.#sessionCleanup !== undefined) {
+            await opened.close();
+            throw this.#faulted ?? new Error("Extension sandbox stopped accepting Worker sessions.");
+        }
+        const sessionId = randomUUID();
+        this.#sessions.set(sessionId, opened);
+        void opened.closed.then(() => {
+            this.#sessions.delete(sessionId);
+            this.#send({ sessionId, type: "workerSessionClosed" });
+        }).catch(() => undefined);
+        return {
+            environment: opened.environment,
+            instance: opened.instance,
+            sessionId,
+            tools: opened.listTools(),
+            workspace: opened.workspace
+        };
     }
 
     #requireSession(id: string): ExtensionWorkerSession {

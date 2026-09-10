@@ -166,6 +166,9 @@ async function commandAgent(message: PiChildAgentCommandMessage): Promise<void> 
         case "followUp":
             await deliverPiAgentMessage(active, "followUp", requireMessage(message));
             return;
+        case "wait":
+            await active.waitForIdle();
+            return;
         case "abort":
             await active.abort();
             return;

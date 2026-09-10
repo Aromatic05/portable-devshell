@@ -73,8 +73,18 @@ export class WorkerInstanceTool {
         transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
         invocationInput?: JsonValue,
         onProgress?: (progress: JsonValue) => void,
+        recording: "caller" | "host" = "host",
     ): Promise<JsonValue> {
-        return await this.#execution.call(toolName, input, context, signal, transformResult, invocationInput, onProgress);
+        return await this.#execution.call(
+            toolName,
+            input,
+            context,
+            signal,
+            transformResult,
+            invocationInput,
+            onProgress,
+            recording
+        );
     }
 
     async auditToolCall<T extends JsonValue>(

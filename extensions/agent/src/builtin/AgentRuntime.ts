@@ -69,6 +69,10 @@ export class AgentExtensionRuntime {
         await this.#host.followUp(input.agentId, input.message);
     }
 
+    async waitForIdle(value: ExtensionJsonValue | undefined): Promise<void> {
+        await this.#host.waitForIdle(readAgentId(value));
+    }
+
     async abort(value: ExtensionJsonValue | undefined): Promise<void> {
         await this.#host.abort(readAgentId(value));
     }

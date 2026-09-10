@@ -537,6 +537,66 @@ test("WorkerInstance waits for approval before invoking tools and records approv
     }
 });
 
+test("caller-recorded Worker calls keep approval enforcement without host tool audit", async () => {
+    const homeDirectory = await createTestTempDirectory("instance-delegated-approval");
+    const harness = createWorkerInstanceHarness();
+    const instance = new WorkerInstanceFactory().create({
+        approvalPolicy: { mode: "ask" },
+        homeDirectory,
+        name: asInstanceName("task-6-delegated-approval"),
+        transport: harness.transport
+    });
+
+    try {
+        await instance.start();
+        const beforeInvokeCount = harness.requestedMethods();
+        const callPromise = instance.callTool(
+            "bash_run",
+            { command: "pwd" },
+            { ctxId: "agent-session", extensionId: "agent", source: "extension", workspace: homeDirectory },
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            "caller"
+        );
+
+        const pendingApproval = await waitForPendingApproval(instance);
+        assert.equal(harness.requestedMethods(), beforeInvokeCount);
+        assert.equal((await instance.getApproval(pendingApproval.approvalId)).status, "pending");
+        assert.deepEqual(await instance.readToolCalls(), []);
+
+        const pendingReplay = instance.subscribe(1);
+        assert.equal(pendingReplay.kind, "events");
+        assert.equal(pendingReplay.events.some((event) => event.type === "approval.requested"), true);
+        assert.equal(pendingReplay.events.some((event) => event.type.startsWith("toolCall.")), false);
+
+        await instance.decideApproval(pendingApproval.approvalId, {
+            decidedBy: "cli",
+            decision: "approve",
+            reason: "approved delegated Agent call"
+        });
+        await harness.waitForMethod("bash_run");
+        harness.respond("bash_run", {
+            exitCode: 0,
+            stderr: "",
+            stdout: "/tmp/workspace\n"
+        });
+        const result = await callPromise;
+        assert.equal(jsonRecord(result)?.stdout, "/tmp/workspace\n");
+
+        assert.deepEqual(await instance.readToolCalls(), []);
+        assert.deepEqual(await instance.readLogs(), []);
+        const replay = instance.subscribe(1);
+        assert.equal(replay.kind, "events");
+        assert.equal(replay.events.some((event) => event.type === "approval.approved"), true);
+        assert.equal(replay.events.some((event) => event.type.startsWith("toolCall.")), false);
+    } finally {
+        await instance.close();
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
 test("WorkerInstance cancels a pending approval when the caller aborts", async () => {
     const homeDirectory = await createTestTempDirectory("instance-approval-cancel");
     const harness = createWorkerInstanceHarness();

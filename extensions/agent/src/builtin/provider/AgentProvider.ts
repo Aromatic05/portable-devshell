@@ -32,6 +32,7 @@ export interface AgentProviderHandle {
     reload?(): Promise<void>;
     steer?(message: string): Promise<void>;
     stop(): Promise<void>;
+    waitForIdle?(): Promise<void>;
 }
 
 /**

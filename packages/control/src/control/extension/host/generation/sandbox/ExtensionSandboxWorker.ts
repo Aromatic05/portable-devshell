@@ -273,9 +273,10 @@ function createContext(): ExtensionContext {
     const capabilities: ExtensionCapabilities = Object.freeze({
         ...(data.capabilities.includes("artifacts") ? { artifacts: createArtifactCapability() } : {}),
         ...(data.capabilities.includes("assets") ? { assets: createAssets() } : {}),
+        ...(data.capabilities.includes("delegatedWorkers") ? { delegatedWorkers: createWorkerCapability("delegatedWorkers") } : {}),
         ...(data.capabilities.includes("instances") ? { instances: createInstanceCapability() } : {}),
         ...(data.capabilities.includes("processes") ? { processes: createProcessCapability() } : {}),
-        ...(data.capabilities.includes("workers") ? { workers: createWorkerCapability() } : {})
+        ...(data.capabilities.includes("workers") ? { workers: createWorkerCapability("workers") } : {})
     });
     const register: ExtensionContext["register"] = (point, id, binding) => {
         registerBinding(point.id, id, binding);
@@ -534,11 +535,11 @@ function createProcessCapability(): ExtensionProcessCapability {
     });
 }
 
-function createWorkerCapability(): ExtensionWorkerCapability {
+function createWorkerCapability(capability: "delegatedWorkers" | "workers"): ExtensionWorkerCapability {
     return Object.freeze({
         openSession: async (input: SandboxWorkerOpenInput): Promise<ExtensionWorkerSession> => {
             const opened = await requestCapability(
-                "workers.openSession",
+                `${capability}.openSession`,
                 { ...input }
             ) as ExtensionSandboxWorkerSessionDescriptor;
             const tools = opened.tools.map((tool) => Object.freeze({ ...tool }));
@@ -555,7 +556,7 @@ function createWorkerCapability(): ExtensionWorkerCapability {
                 instance: opened.instance,
                 workspace: opened.workspace,
                 callTool: async (toolName, toolInput, options = {}) => await requestCapability(
-                    "workers.callTool",
+                    `${capability}.callTool`,
                     {
                         input: toolInput,
                         ...(options.operationId === undefined ? {} : { operationId: options.operationId }),
@@ -569,7 +570,7 @@ function createWorkerCapability(): ExtensionWorkerCapability {
                     closed = true;
                     try {
                         await requestCapability(
-                            "workers.closeSession",
+                            `${capability}.closeSession`,
                             { sessionId: opened.sessionId } satisfies SandboxWorkerCloseInput
                         );
                     } finally {

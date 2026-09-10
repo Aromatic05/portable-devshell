@@ -3,12 +3,12 @@
     "apiVersion": 4,
     "id": "agent",
     "name": "portable-devshell Agent",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "entry": "index.ts",
     "capabilities": [
         "assets",
-        "processes",
-        "workers"
+        "delegatedWorkers",
+        "processes"
     ],
     "extensions": {
         "cli.native-commands": [

@@ -106,6 +106,9 @@ export type ExtensionSandboxCapabilityOperation =
     | "processes.send"
     | "processes.start"
     | "processes.terminate"
+    | "delegatedWorkers.callTool"
+    | "delegatedWorkers.closeSession"
+    | "delegatedWorkers.openSession"
     | "workers.callTool"
     | "workers.closeSession"
     | "workers.openSession";

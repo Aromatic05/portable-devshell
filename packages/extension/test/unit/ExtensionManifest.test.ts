@@ -20,7 +20,7 @@ const base = {
 test("Extension manifest accepts only the resource capability taxonomy and static point declarations", () => {
     assert.deepEqual(parseExtensionManifest({
         ...base,
-        capabilities: ["artifacts", "assets", "instances", "workers", "processes"],
+        capabilities: ["artifacts", "assets", "delegatedWorkers", "instances", "workers", "processes"],
         extensions: {
             "cli.native-commands": [{ id: "example", summary: "Run the example", title: "Example" }],
             "web.applications": [{ id: "example", title: "Example" }]
@@ -28,13 +28,20 @@ test("Extension manifest accepts only the resource capability taxonomy and stati
         hostDependencies: ["@modelcontextprotocol/client"]
     }), {
         ...base,
-        capabilities: ["artifacts", "assets", "instances", "workers", "processes"],
+        capabilities: ["artifacts", "assets", "delegatedWorkers", "instances", "workers", "processes"],
         extensions: {
             "cli.native-commands": [{ id: "example", summary: "Run the example", title: "Example" }],
             "web.applications": [{ id: "example", title: "Example" }]
         },
         hostDependencies: ["@modelcontextprotocol/client"]
     });
+});
+
+test("delegatedWorkers is an independent controlled Worker capability", () => {
+    assert.deepEqual(
+        parseExtensionManifest({ ...base, capabilities: ["delegatedWorkers"] }).capabilities,
+        ["delegatedWorkers"]
+    );
 });
 
 test("Extension manifest does not preserve the unreleased v2 or contribution-as-capability ABI", () => {

@@ -725,6 +725,7 @@ function createSandbox(options: {
     onFault?: (error: Error) => void;
     processes?: ExtensionProcessCapability;
     resourceLimits?: ExtensionSandboxHostOptions["resourceLimits"];
+    delegatedWorker?: ExtensionWorkerCapability;
     worker?: ExtensionWorkerCapability;
 }): ExtensionSandboxHost {
     const root = join(options.codeDirectory, "..", "runtime");
@@ -754,6 +755,7 @@ function createSandbox(options: {
         ...(options.onFault === undefined ? {} : { onFault: options.onFault }),
         processes: options.processes ?? fakeProcesses([]),
         ...(options.resourceLimits === undefined ? {} : { resourceLimits: options.resourceLimits }),
+        delegatedWorker: options.delegatedWorker ?? fakeWorker([]),
         worker: options.worker ?? fakeWorker([])
     });
 }

@@ -26,6 +26,7 @@ test("AgentHost binds provider lifecycle, target, runtime prefix, tools, and one
     const followUps: string[] = [];
     let aborts = 0;
     let reloads = 0;
+    let waits = 0;
     let toolCloses = 0;
     const provider: AgentProvider = {
         id: "pi",
@@ -40,6 +41,7 @@ test("AgentHost binds provider lifecycle, target, runtime prefix, tools, and one
                 async reload() { reloads += 1; },
                 async steer(message) { steers.push(message); },
                 async stop() { stopped.push(context.agentId); },
+                async waitForIdle() { waits += 1; },
                 web: { upstream: new URL("http://127.0.0.1:43123/") }
             };
         }
@@ -82,11 +84,13 @@ test("AgentHost binds provider lifecycle, target, runtime prefix, tools, and one
     await host.followUp(record.agentId, "review after");
     await host.abort(record.agentId);
     await host.reload(record.agentId);
+    await host.waitForIdle(record.agentId);
     assert.deepEqual(prompts, ["implement"]);
     assert.deepEqual(steers, ["focus tests"]);
     assert.deepEqual(followUps, ["review after"]);
     assert.equal(aborts, 1);
     assert.equal(reloads, 1);
+    assert.equal(waits, 1);
 
     const stoppedRecord = await host.stop(record.agentId);
     assert.equal(stoppedRecord.state, "stopped");
@@ -94,6 +98,39 @@ test("AgentHost binds provider lifecycle, target, runtime prefix, tools, and one
     assert.equal(toolCloses, 1);
     assert.deepEqual(host.list(), []);
     assert.equal(host.webEndpoint(), undefined);
+});
+
+test("AgentHost waitForIdle blocks until the provider idle boundary resolves", async () => {
+    let resolveIdle!: () => void;
+    const idle = new Promise<void>((resolve) => { resolveIdle = resolve; });
+    const target = parseAgentWorkerTarget("worker-a:/repo");
+    const host = new AgentHost({
+        idFactory: () => "ag-wait-idle",
+        processes: testProcesses,
+        providers: [{
+            id: "pi",
+            version: "1",
+            async start() {
+                return {
+                    closed: neverClosed,
+                    async prompt() {},
+                    async stop() {},
+                    async waitForIdle() { await idle; }
+                };
+            }
+        }],
+        runtimeRootDirectory
+    });
+    const record = await host.start({ provider: "pi", target, tools: toolSession(target) });
+    let settled = false;
+    const waiting = host.waitForIdle(record.agentId).then(() => { settled = true; });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(settled, false);
+    resolveIdle();
+    await waiting;
+    assert.equal(settled, true);
+    await host.stop(record.agentId);
 });
 
 test("AgentHost closes the tool session when provider startup fails", async () => {

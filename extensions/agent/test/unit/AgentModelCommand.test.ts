@@ -55,7 +55,8 @@ function fixtures(events: string[]) {
             const agentId = (value as { agentId: string }).agentId;
             events.push(`stop:${agentId}`);
             return records.get(agentId)!;
-        }
+        },
+        async waitForIdle(value) { events.push(`wait:${(value as { agentId: string }).agentId}`); }
     };
     const providers: AgentModelProviderPort = {
         async list() { return []; }
@@ -88,4 +89,14 @@ test("Agent model lifecycle cannot control an Agent outside the current Context"
         /unavailable in the current model Context/u
     );
     assert.deepEqual(events, []);
+});
+
+test("Agent model wait blocks through the scoped runtime idle boundary", async () => {
+    const events: string[] = [];
+    const { providers, runtime } = fixtures(events);
+    assert.deepEqual(await executeAgentModelCommand(runtime, providers, ["wait", "mine"], invocation()), {
+        kind: "json",
+        value: { agentId: "mine", idle: true, webPath: "extensions/agent/" }
+    });
+    assert.deepEqual(events, ["wait:mine"]);
 });

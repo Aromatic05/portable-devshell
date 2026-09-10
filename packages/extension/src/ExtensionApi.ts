@@ -8,7 +8,7 @@ export type ExtensionJsonValue =
     | { [key: string]: ExtensionJsonValue };
 
 /** Host-managed runtime resource categories granted to one Extension generation. */
-export type ExtensionCapability = "artifacts" | "assets" | "instances" | "processes" | "workers";
+export type ExtensionCapability = "artifacts" | "assets" | "delegatedWorkers" | "instances" | "processes" | "workers";
 
 export interface ExtensionPointDeclaration {
     readonly id: string;
@@ -182,6 +182,8 @@ export interface ExtensionProcessCapability {
 export interface ExtensionCapabilities {
     readonly artifacts?: ExtensionArtifactCapability;
     readonly assets?: ExtensionAssetCapability;
+    /** Controlled Worker execution whose tool transcript is owned by the delegating Extension. */
+    readonly delegatedWorkers?: ExtensionWorkerCapability;
     readonly instances?: ExtensionInstanceCapability;
     readonly processes?: ExtensionProcessCapability;
     readonly workers?: ExtensionWorkerCapability;

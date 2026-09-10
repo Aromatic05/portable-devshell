@@ -18,6 +18,7 @@ export interface AgentModelRuntimePort {
     start(value: ExtensionJsonValue | undefined): Promise<AgentHostRecord>;
     steer(value: ExtensionJsonValue | undefined): Promise<void>;
     stop(value: ExtensionJsonValue | undefined): Promise<AgentHostRecord>;
+    waitForIdle(value: ExtensionJsonValue | undefined): Promise<void>;
 }
 
 export interface AgentModelProviderPort {
@@ -33,6 +34,7 @@ export const AGENT_MODEL_USAGE = [
     "  devshell agent send <agentId> <message>",
     "  devshell agent steer <agentId> <message>",
     "  devshell agent follow-up <agentId> <message>",
+    "  devshell agent wait <agentId>",
     "  devshell agent abort <agentId>",
     "  devshell agent reload <agentId>",
     "  devshell agent stop <agentId>",
@@ -86,6 +88,13 @@ export async function executeAgentModelCommand(
             if (argv[0] === "abort") await runtime.abort({ agentId });
             else await runtime.reload({ agentId });
             return json({ accepted: true, agentId, webPath: AGENT_WEB_RELATIVE_PATH });
+        }
+        case "wait": {
+            expectLength(argv, 2, "agent wait <agentId>");
+            const agentId = required(argv[1], "agent id is required");
+            requireScoped(runtime, agentId, context);
+            await runtime.waitForIdle({ agentId });
+            return json({ agentId, idle: true, webPath: AGENT_WEB_RELATIVE_PATH });
         }
         case "stop": {
             expectLength(argv, 2, "agent stop <agentId>");

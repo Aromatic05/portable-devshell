@@ -288,7 +288,7 @@ test("Extension loader deactivates a module before rejecting an undeclared runti
     });
 
     await assert.rejects(loader.load(target.id, target.generation), /registered undeclared cli\.native-commands\/example/u);
-    assert.deepEqual(events, ["module.deactivate", "worker.closeAll"]);
+    assert.deepEqual(events, ["module.deactivate"]);
 });
 
 test("Extension loader keeps internal Worker retirement active without an Extension lifecycle callback", async (t) => {
@@ -335,5 +335,5 @@ test("Extension loader rejects Web file bindings escaping the immutable generati
     });
 
     await assert.rejects(loader.load(target.id, target.generation), /escapes the Extension code directory/u);
-    assert.deepEqual(events, ["module.deactivate", "worker.closeAll"]);
+    assert.deepEqual(events, ["module.deactivate"]);
 });

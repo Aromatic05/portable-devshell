@@ -11,6 +11,7 @@ export const EXTENSION_MANIFEST_SCHEMA_VERSION = 1;
 const capabilities = new Set<ExtensionCapability>([
     "artifacts",
     "assets",
+    "delegatedWorkers",
     "instances",
     "processes",
     "workers"
@@ -54,7 +55,6 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest {
     if (new Set(parsedCapabilities).size !== parsedCapabilities.length) {
         throw new TypeError("Extension capabilities must not contain duplicates.");
     }
-
     return {
         apiVersion,
         capabilities: parsedCapabilities,

@@ -37,6 +37,7 @@ test("Pi process factory shares one child across live Agents and stops it only a
         assert.equal(first.web?.upstream.toString(), "http://127.0.0.1:43199/");
         assert.equal(second.web?.upstream.toString(), first.web?.upstream.toString());
         await first.prompt("first");
+        await first.waitForIdle?.();
         await first.reload?.();
         await second.steer?.("second");
         await first.stop();
@@ -45,6 +46,7 @@ test("Pi process factory shares one child across live Agents and stops it only a
         assert.equal(new Set(entries.map((entry) => entry.pid)).size, 1);
         assert.equal(entries.filter((entry) => entry.type === "init").length, 1);
         assert.equal(entries.filter((entry) => entry.type === "agent.start").length, 2);
+        assert.equal(entries.filter((entry) => entry.command === "wait").length, 1);
         assert.equal(entries.filter((entry) => entry.command === "reload").length, 1);
         assert.equal(entries.some((entry) => entry.type === "shutdown"), false);
         assert.ok(entries.every((entry) => entry.agentDir === piAgentDir));

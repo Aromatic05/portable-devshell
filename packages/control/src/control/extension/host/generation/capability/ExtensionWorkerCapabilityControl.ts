@@ -37,6 +37,7 @@ export interface ExtensionWorkerCapabilityControlOptions {
     extensionId: string;
     generation: string;
     instances: InstanceRegistry;
+    recording?: "caller" | "host";
 }
 
 export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapability {
@@ -46,6 +47,7 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
     readonly #generation: string;
     readonly #instanceEpochs = new Map<string, number>();
     readonly #instances: InstanceRegistry;
+    readonly #recording: "caller" | "host";
     readonly #retiringInstances = new Set<string>();
     readonly #sessions = new Map<string, ManagedExtensionWorkerSession>();
     #closed = false;
@@ -56,6 +58,7 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
         this.#extensionId = options.extensionId;
         this.#generation = options.generation;
         this.#instances = options.instances;
+        this.#recording = options.recording ?? "host";
     }
 
     async openSession(input: ExtensionWorkerOpenInput): Promise<ExtensionWorkerSession> {
@@ -125,7 +128,8 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
                     options.signal,
                     undefined,
                     undefined,
-                    options.onProgress as ((progress: JsonValue) => void) | undefined
+                    options.onProgress as ((progress: JsonValue) => void) | undefined,
+                    this.#recording
                 ) as ExtensionJsonValue,
                 close,
                 listTools: () => lease.worker.listTools().map(toExtensionWorkerToolDefinition)

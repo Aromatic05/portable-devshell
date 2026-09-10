@@ -171,6 +171,10 @@ class PiAgentSessionHandle implements AgentProviderHandle {
         await this.#command("reload");
     }
 
+    async waitForIdle(): Promise<void> {
+        await this.#command("wait");
+    }
+
     async stop(): Promise<void> {
         if (this.#stopped) return;
         this.#stopped = true;

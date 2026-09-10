@@ -17,7 +17,7 @@ export interface PiChildAgentStartMessage {
     type: "agent.start";
 }
 
-export type PiChildCommandName = "abort" | "followUp" | "prompt" | "reload" | "steer" | "stop";
+export type PiChildCommandName = "abort" | "followUp" | "prompt" | "reload" | "steer" | "stop" | "wait";
 
 export interface PiChildAgentCommandMessage {
     agentId: string;

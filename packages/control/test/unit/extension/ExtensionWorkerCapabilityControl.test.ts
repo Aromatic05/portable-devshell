@@ -32,6 +32,7 @@ test("Extension worker session uses the audited WorkerInstance call path and gen
         context: ToolCallContext;
         input: JsonValue;
         onProgress?: (progress: JsonValue) => void;
+        recording?: "caller" | "host";
         signal?: AbortSignal;
         toolName: string;
     }> = [];
@@ -59,9 +60,10 @@ test("Extension worker session uses the audited WorkerInstance call path and gen
             signal?: AbortSignal,
             _transformResult?: unknown,
             _invocationInput?: JsonValue,
-            onProgress?: (progress: JsonValue) => void
+            onProgress?: (progress: JsonValue) => void,
+            recording?: "caller" | "host"
         ) {
-            calls.push({ context, input, onProgress, signal, toolName });
+            calls.push({ context, input, onProgress, recording, signal, toolName });
             onProgress?.({ phase: "running" });
             return { ok: true };
         },
@@ -141,6 +143,7 @@ test("Extension worker session uses the audited WorkerInstance call path and gen
     assert.equal(calls[0]?.context.requestId, "operation-1");
     assert.equal(calls[0]?.context.workspace, "/canonical");
     assert.match(calls[0]?.context.ctxId ?? "", /^ext-/u);
+    assert.equal(calls[0]?.recording, "host");
     assert.deepEqual(progress, [{ phase: "running" }]);
 
     await session.close();
@@ -148,6 +151,64 @@ test("Extension worker session uses the audited WorkerInstance call path and gen
     assert.equal(closedToolSessions.length, 1);
     assert.equal(released.length, 1);
     assert.equal(released[0]?.instance, "local");
+});
+
+test("delegated Worker capability fixes caller-owned recording at the host boundary", async () => {
+    const recordings: Array<"caller" | "host" | undefined> = [];
+    const worker = {
+        handshake: {
+            capabilities: { cancel: true, streaming: true, tools: true },
+            homeDirectory: "/home/dev",
+            instance: "local",
+            platform: { arch: "x64", os: "linux" },
+            protocolVersion: 5,
+            workerVersion: "0.7.0"
+        },
+        async callTool(
+            _toolName: string,
+            _input: JsonValue,
+            _context: ToolCallContext,
+            _signal?: AbortSignal,
+            _transformResult?: unknown,
+            _invocationInput?: JsonValue,
+            _onProgress?: (progress: JsonValue) => void,
+            recording?: "caller" | "host"
+        ) {
+            recordings.push(recording);
+            return { ok: true };
+        },
+        listTools() { return []; },
+        async prepareWorkspace(workspace: string) {
+            return {
+                projectMemoryAgentFile: `${workspace}/AGENTS.md`,
+                projectMemoryDirectory: workspace,
+                temporaryDirectory: `${workspace}/tmp`,
+                workspace
+            };
+        },
+        async releaseToolSession() {}
+    };
+    const common = {
+        allowed: true,
+        connections: {
+            async acquire() { return { handle: {} as never, snapshot: {} as never, worker: worker as never }; },
+            async release() {}
+        },
+        extensionId: "example",
+        generation: "g1",
+        instances: { list: () => [{ enabled: true, name: "local", provider: "local" }] } as never
+    };
+    const ordinary = new ExtensionWorkerCapabilityControl(common);
+    const ordinarySession = await ordinary.openSession({ workspace: "/repo" });
+    await ordinarySession.callTool("file_read", {});
+    await ordinarySession.close();
+
+    const delegated = new ExtensionWorkerCapabilityControl({ ...common, recording: "caller" });
+    const delegatedSession = await delegated.openSession({ workspace: "/repo" });
+    await delegatedSession.callTool("file_read", {});
+    await delegatedSession.close();
+
+    assert.deepEqual(recordings, ["host", "caller"]);
 });
 
 test("Extension worker capability refuses undeclared access before acquiring an instance", async () => {

@@ -23,7 +23,7 @@ import {
 } from "../../src/provider/pi/PiProviderInstaller.ts";
 
 test("Pi provider implementation version is independent from the Pi runtime version", () => {
-    assert.equal(PI_PROVIDER_VERSION, "0.1.0");
+    assert.equal(PI_PROVIDER_VERSION, "0.1.1");
     assert.equal(PI_RUNTIME_VERSION, "0.84.4");
     assert.notEqual(PI_PROVIDER_VERSION, PI_RUNTIME_VERSION);
 });

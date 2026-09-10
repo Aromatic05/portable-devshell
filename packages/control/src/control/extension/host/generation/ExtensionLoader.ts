@@ -76,6 +76,7 @@ export interface ExtensionLoaderOptions {
         allowed: boolean;
         extensionId: string;
         generation: string;
+        recording: "caller" | "host";
     }) => ExtensionWorkerRuntime;
 }
 
@@ -151,16 +152,34 @@ export class ExtensionLoader {
             generation
         }) ?? unavailableInstances(id);
 
-        const worker = this.#workerFactory?.({
-            allowed: manifest.capabilities.includes("workers"),
-            extensionId: id,
-            generation
-        }) ?? new ExtensionWorkerCapabilityControl({
-            allowed: manifest.capabilities.includes("workers"),
-            extensionId: id,
-            generation,
-            instances: this.#instances
-        });
+        const worker = manifest.capabilities.includes("workers")
+            ? this.#workerFactory?.({
+                  allowed: true,
+                  extensionId: id,
+                  generation,
+                  recording: "host"
+              }) ?? new ExtensionWorkerCapabilityControl({
+                  allowed: true,
+                  extensionId: id,
+                  generation,
+                  instances: this.#instances,
+                  recording: "host"
+              })
+            : unavailableWorkerRuntime(id, this.#instances);
+        const delegatedWorker = manifest.capabilities.includes("delegatedWorkers")
+            ? this.#workerFactory?.({
+                  allowed: true,
+                  extensionId: id,
+                  generation,
+                  recording: "caller"
+              }) ?? new ExtensionWorkerCapabilityControl({
+                  allowed: true,
+                  extensionId: id,
+                  generation,
+                  instances: this.#instances,
+                  recording: "caller"
+              })
+            : unavailableWorkerRuntime(id, this.#instances);
         const processes = this.#processFactory?.({
             allowed: manifest.capabilities.includes("processes"),
             extensionId: id,
@@ -179,6 +198,7 @@ export class ExtensionLoader {
             capabilities: Object.freeze({
                 ...(manifest.capabilities.includes("artifacts") ? { artifacts } : {}),
                 ...(manifest.capabilities.includes("assets") ? { assets } : {}),
+                ...(manifest.capabilities.includes("delegatedWorkers") ? { delegatedWorkers: delegatedWorker } : {}),
                 ...(manifest.capabilities.includes("instances") ? { instances: instanceManagement } : {}),
                 ...(manifest.capabilities.includes("processes") ? { processes } : {}),
                 ...(manifest.capabilities.includes("workers") ? { workers: worker } : {})
@@ -206,6 +226,7 @@ export class ExtensionLoader {
                 processes,
                 runtimeRoot,
                 runtimeDirectory,
+                delegatedWorker,
                 worker
             });
         }
@@ -220,6 +241,7 @@ export class ExtensionLoader {
                 dispose: async () => await disposeGeneration(
                     module!,
                     processes,
+                    delegatedWorker,
                     worker,
                     runtimeRoot,
                     runtimeDirectory,
@@ -228,12 +250,18 @@ export class ExtensionLoader {
                 generation,
                 manifest,
                 registrations: bindings,
-                retireInstanceResources: async (instance) => await worker.retireInstance(instance)
+                retireInstanceResources: async (instance) => {
+                    await Promise.all([
+                        delegatedWorker.retireInstance(instance),
+                        worker.retireInstance(instance)
+                    ]);
+                }
             });
         } catch (error) {
             const cleanupFailures: unknown[] = [];
             await Promise.resolve(module?.deactivate?.()).catch((cleanupError: unknown) => cleanupFailures.push(cleanupError));
             await processes.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
+            await delegatedWorker.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
             await worker.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
             await cleanupRuntimeDirectory(runtimeRoot, runtimeDirectory)
                 .catch((cleanupError) => cleanupFailures.push(cleanupError));
@@ -286,6 +314,7 @@ export class ExtensionLoader {
         processes: ExtensionProcessRuntime;
         runtimeRoot: string;
         runtimeDirectory: string;
+        delegatedWorker: ExtensionWorkerRuntime;
         worker: ExtensionWorkerRuntime;
     }): Promise<ExtensionGeneration> {
         let candidate: ExtensionGeneration | undefined;
@@ -307,12 +336,14 @@ export class ExtensionLoader {
             onFault: (error) => {
                 candidate?.fault(error);
                 void input.processes.closeAll().catch(() => undefined);
+                void input.delegatedWorker.closeAll().catch(() => undefined);
                 void input.worker.closeAll().catch(() => undefined);
             },
             processes: input.processes,
             ...(this.#sandboxResourceLimits === undefined ? {} : {
                 resourceLimits: this.#sandboxResourceLimits
             }),
+            delegatedWorker: input.delegatedWorker,
             worker: input.worker
         });
         try {
@@ -328,6 +359,7 @@ export class ExtensionLoader {
                 dispose: async () => await disposeSandboxGeneration(
                     sandbox,
                     input.processes,
+                    input.delegatedWorker,
                     input.worker,
                     input.runtimeRoot,
                     input.runtimeDirectory
@@ -335,7 +367,12 @@ export class ExtensionLoader {
                 generation: input.generation,
                 manifest: input.manifest,
                 registrations: bindings,
-                retireInstanceResources: async (instance) => await input.worker.retireInstance(instance)
+                retireInstanceResources: async (instance) => {
+                    await Promise.all([
+                        input.delegatedWorker.retireInstance(instance),
+                        input.worker.retireInstance(instance)
+                    ]);
+                }
             });
             if (sandbox.faultError !== undefined) throw sandbox.faultError;
             return candidate;
@@ -343,6 +380,7 @@ export class ExtensionLoader {
             const cleanupFailures: unknown[] = [];
             await sandbox.dispose().catch((cleanupError) => cleanupFailures.push(cleanupError));
             await input.processes.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
+            await input.delegatedWorker.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
             await input.worker.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
             await cleanupRuntimeDirectory(input.runtimeRoot, input.runtimeDirectory)
                 .catch((cleanupError) => cleanupFailures.push(cleanupError));
@@ -392,6 +430,15 @@ function unavailableInstances(extensionId: string): ExtensionInstanceCapability 
     });
 }
 
+function unavailableWorkerRuntime(extensionId: string, instances: InstanceRegistry): ExtensionWorkerRuntime {
+    return new ExtensionWorkerCapabilityControl({
+        allowed: false,
+        extensionId,
+        generation: "unavailable",
+        instances
+    });
+}
+
 async function registrationsFromSandbox(
     descriptor: ExtensionSandboxReadyDescriptor,
     manifest: ExtensionManifest,
@@ -432,6 +479,7 @@ function readExtensionModule(value: unknown, id: string): ExtensionModule {
 async function disposeGeneration(
     module: ExtensionModule,
     processes: ExtensionProcessRuntime,
+    delegatedWorker: ExtensionWorkerRuntime,
     worker: ExtensionWorkerRuntime,
     runtimeRoot: string,
     runtimeDirectory: string,
@@ -440,6 +488,7 @@ async function disposeGeneration(
     const failures: unknown[] = [];
     await Promise.resolve(module.deactivate?.()).catch((error) => failures.push(error));
     await processes.closeAll().catch((error) => failures.push(error));
+    await delegatedWorker.closeAll().catch((error) => failures.push(error));
     await worker.closeAll().catch((error) => failures.push(error));
     await cleanupRuntimeDirectory(runtimeRoot, runtimeDirectory).catch((error) => failures.push(error));
     try { releaseHostModules(); } catch (error) { failures.push(error); }
@@ -450,6 +499,7 @@ async function disposeGeneration(
 async function disposeSandboxGeneration(
     sandbox: ExtensionSandboxHost,
     processes: ExtensionProcessRuntime,
+    delegatedWorker: ExtensionWorkerRuntime,
     worker: ExtensionWorkerRuntime,
     runtimeRoot: string,
     runtimeDirectory: string
@@ -457,6 +507,7 @@ async function disposeSandboxGeneration(
     const failures: unknown[] = [];
     await sandbox.dispose().catch((error) => failures.push(error));
     await processes.closeAll().catch((error) => failures.push(error));
+    await delegatedWorker.closeAll().catch((error) => failures.push(error));
     await worker.closeAll().catch((error) => failures.push(error));
     await cleanupRuntimeDirectory(runtimeRoot, runtimeDirectory).catch((error) => failures.push(error));
     if (failures.length === 1) throw failures[0];

@@ -48,7 +48,7 @@ async function harness(t: test.TestContext) {
             processes: {
                 async start() { throw new Error("not used"); }
             },
-            workers: {
+            delegatedWorkers: {
                 async openSession(input) {
                     let resolveClosed!: () => void;
                     const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });

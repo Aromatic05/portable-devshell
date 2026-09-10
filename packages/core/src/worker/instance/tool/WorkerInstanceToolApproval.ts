@@ -61,7 +61,8 @@ export class WorkerInstanceToolApproval {
         context: ToolCallContext,
         startedAt: string,
         onPendingApproval: () => void,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        recording: "caller" | "host" = "host"
     ): Promise<{ approvalId?: string; decision?: ToolCallApprovalDecision }> {
         let evaluation: Awaited<ReturnType<ApprovalManager["evaluate"]>>;
 
@@ -73,7 +74,7 @@ export class WorkerInstanceToolApproval {
                 toolName
             });
         } catch (error) {
-            return await this.#failBeforeInvoke(callId, toolName, context, startedAt, error);
+            return await this.#failBeforeInvoke(callId, toolName, context, startedAt, error, recording);
         }
 
         if (evaluation.decision === "allow") {
@@ -81,32 +82,36 @@ export class WorkerInstanceToolApproval {
         }
 
         if (evaluation.decision === "deny") {
-            return await this.#denyToolCall(callId, toolName, context, startedAt, evaluation.error);
+            return await this.#denyToolCall(callId, toolName, context, startedAt, evaluation.error, undefined, recording);
         }
 
         try {
             onPendingApproval();
-            await this.#toolCallHistory.pendingApproval(callId, evaluation.request.approvalId);
+            if (recording === "host") {
+                await this.#toolCallHistory.pendingApproval(callId, evaluation.request.approvalId);
+            }
             await this.#appendEvent("approval.requested", toApprovalEventData(evaluation.request));
-            await this.#appendEvent(
-                "toolCall.pendingApproval",
-                toEventData({
-                    approvalId: evaluation.request.approvalId,
-                    callId,
-                    createdAt: evaluation.request.createdAt,
-                    expiresAt: evaluation.request.expiresAt,
-                    inputSummary,
-                    reason: evaluation.request.reason,
-                    requestId: context.requestId,
-                    riskLevel: evaluation.request.riskLevel,
-                    ctxId: context.ctxId,
-                    extensionId: context.extensionId,
-                    source: context.source,
-                    startedAt,
-                    status: "pendingApproval",
-                    toolName
-                })
-            );
+            if (recording === "host") {
+                await this.#appendEvent(
+                    "toolCall.pendingApproval",
+                    toEventData({
+                        approvalId: evaluation.request.approvalId,
+                        callId,
+                        createdAt: evaluation.request.createdAt,
+                        expiresAt: evaluation.request.expiresAt,
+                        inputSummary,
+                        reason: evaluation.request.reason,
+                        requestId: context.requestId,
+                        riskLevel: evaluation.request.riskLevel,
+                        ctxId: context.ctxId,
+                        extensionId: context.extensionId,
+                        source: context.source,
+                        startedAt,
+                        status: "pendingApproval",
+                        toolName
+                    })
+                );
+            }
         } catch (error) {
             try {
                 await this.#approvalManager.cancel(
@@ -153,18 +158,18 @@ export class WorkerInstanceToolApproval {
         if (resolution.status === "denied") {
             const deniedRequest = await this.#approvalManager.getApproval(evaluation.request.approvalId);
             await this.#appendEvent("approval.denied", toApprovalEventData(deniedRequest, resolution.decision));
-            return await this.#denyToolCall(callId, toolName, context, startedAt, resolution.error, evaluation.request.approvalId);
+            return await this.#denyToolCall(callId, toolName, context, startedAt, resolution.error, evaluation.request.approvalId, recording);
         }
 
         if (resolution.status === "cancelled") {
             const cancelledRequest = await this.#approvalManager.getApproval(evaluation.request.approvalId);
             await this.#appendEvent("approval.cancelled", toApprovalEventData(cancelledRequest));
-            return await this.#cancelToolCall(callId, toolName, context, startedAt, resolution.error, evaluation.request.approvalId);
+            return await this.#cancelToolCall(callId, toolName, context, startedAt, resolution.error, evaluation.request.approvalId, recording);
         }
 
         const expiredRequest = await this.#approvalManager.getApproval(evaluation.request.approvalId);
         await this.#appendEvent("approval.expired", toApprovalEventData(expiredRequest));
-        return await this.#expireToolCall(callId, toolName, context, startedAt, resolution.error, evaluation.request.approvalId);
+        return await this.#expireToolCall(callId, toolName, context, startedAt, resolution.error, evaluation.request.approvalId, recording);
     }
 
     async #failBeforeInvoke(
@@ -172,27 +177,30 @@ export class WorkerInstanceToolApproval {
         toolName: string,
         context: ToolCallContext,
         startedAt: string,
-        error: unknown
+        error: unknown,
+        recording: "caller" | "host"
     ): Promise<never> {
         const completedAt = new Date().toISOString();
         const errorCode = getErrorCode(error, errorCodes.coreProviderFailed);
 
-        await this.#toolCallHistory.failed(callId, errorCode, completedAt);
-        await this.#appendEvent(
-            "toolCall.failed",
-            toEventData({
-                callId,
-                completedAt,
-                errorCode,
-                requestId: context.requestId,
-                ctxId: context.ctxId,
-                extensionId: context.extensionId,
-                source: context.source,
-                startedAt,
-                status: "failed",
-                toolName
-            })
-        );
+        if (recording === "host") {
+            await this.#toolCallHistory.failed(callId, errorCode, completedAt);
+            await this.#appendEvent(
+                "toolCall.failed",
+                toEventData({
+                    callId,
+                    completedAt,
+                    errorCode,
+                    requestId: context.requestId,
+                    ctxId: context.ctxId,
+                    extensionId: context.extensionId,
+                    source: context.source,
+                    startedAt,
+                    status: "failed",
+                    toolName
+                })
+            );
+        }
 
         throw error;
     }
@@ -203,28 +211,31 @@ export class WorkerInstanceToolApproval {
         context: ToolCallContext,
         startedAt: string,
         error: unknown,
-        approvalId?: string
+        approvalId: string | undefined,
+        recording: "caller" | "host"
     ): Promise<never> {
         const completedAt = new Date().toISOString();
         const errorCode = getErrorCode(error, errorCodes.coreApprovalDenied);
 
-        await this.#toolCallHistory.denied(callId, errorCode, completedAt);
-        await this.#appendEvent(
-            "toolCall.denied",
-            toEventData({
-                ...(approvalId === undefined ? {} : { approvalId }),
-                callId,
-                completedAt,
-                errorCode,
-                requestId: context.requestId,
-                ctxId: context.ctxId,
-                extensionId: context.extensionId,
-                source: context.source,
-                startedAt,
-                status: "denied",
-                toolName
-            })
-        );
+        if (recording === "host") {
+            await this.#toolCallHistory.denied(callId, errorCode, completedAt);
+            await this.#appendEvent(
+                "toolCall.denied",
+                toEventData({
+                    ...(approvalId === undefined ? {} : { approvalId }),
+                    callId,
+                    completedAt,
+                    errorCode,
+                    requestId: context.requestId,
+                    ctxId: context.ctxId,
+                    extensionId: context.extensionId,
+                    source: context.source,
+                    startedAt,
+                    status: "denied",
+                    toolName
+                })
+            );
+        }
 
         throw error;
     }
@@ -235,28 +246,31 @@ export class WorkerInstanceToolApproval {
         context: ToolCallContext,
         startedAt: string,
         error: unknown,
-        approvalId: string
+        approvalId: string,
+        recording: "caller" | "host"
     ): Promise<never> {
         const completedAt = new Date().toISOString();
         const errorCode = getErrorCode(error, errorCodes.coreToolCallCancelled);
 
-        await this.#toolCallHistory.cancelled(callId, errorCode, completedAt);
-        await this.#appendEvent(
-            "toolCall.cancelled",
-            toEventData({
-                approvalId,
-                callId,
-                completedAt,
-                errorCode,
-                requestId: context.requestId,
-                ctxId: context.ctxId,
-                extensionId: context.extensionId,
-                source: context.source,
-                startedAt,
-                status: "cancelled",
-                toolName
-            })
-        );
+        if (recording === "host") {
+            await this.#toolCallHistory.cancelled(callId, errorCode, completedAt);
+            await this.#appendEvent(
+                "toolCall.cancelled",
+                toEventData({
+                    approvalId,
+                    callId,
+                    completedAt,
+                    errorCode,
+                    requestId: context.requestId,
+                    ctxId: context.ctxId,
+                    extensionId: context.extensionId,
+                    source: context.source,
+                    startedAt,
+                    status: "cancelled",
+                    toolName
+                })
+            );
+        }
 
         throw error;
     }
@@ -267,28 +281,31 @@ export class WorkerInstanceToolApproval {
         context: ToolCallContext,
         startedAt: string,
         error: unknown,
-        approvalId: string
+        approvalId: string,
+        recording: "caller" | "host"
     ): Promise<never> {
         const completedAt = new Date().toISOString();
         const errorCode = getErrorCode(error, errorCodes.coreApprovalExpired);
 
-        await this.#toolCallHistory.expired(callId, errorCode, completedAt);
-        await this.#appendEvent(
-            "toolCall.expired",
-            toEventData({
-                approvalId,
-                callId,
-                completedAt,
-                errorCode,
-                requestId: context.requestId,
-                ctxId: context.ctxId,
-                extensionId: context.extensionId,
-                source: context.source,
-                startedAt,
-                status: "expired",
-                toolName
-            })
-        );
+        if (recording === "host") {
+            await this.#toolCallHistory.expired(callId, errorCode, completedAt);
+            await this.#appendEvent(
+                "toolCall.expired",
+                toEventData({
+                    approvalId,
+                    callId,
+                    completedAt,
+                    errorCode,
+                    requestId: context.requestId,
+                    ctxId: context.ctxId,
+                    extensionId: context.extensionId,
+                    source: context.source,
+                    startedAt,
+                    status: "expired",
+                    toolName
+                })
+            );
+        }
 
         throw error;
     }

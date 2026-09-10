@@ -23,7 +23,7 @@ test("Agent Extension manifest declares host-managed capabilities and domain Ext
     assert.equal(manifest.id, "agent");
     assert.equal(manifest.entry, "index.ts");
     assert.equal(manifest.apiVersion, 4);
-    assert.deepEqual(manifest.capabilities, ["assets", "processes", "workers"]);
+    assert.deepEqual(manifest.capabilities, ["assets", "delegatedWorkers", "processes"]);
     assert.deepEqual(manifest.extensions, {
         "cli.native-commands": [{
             id: "agent",
@@ -55,7 +55,7 @@ test("Agent Extension start opens one canonical Worker session and owns it until
     assert.equal(record.target.instance, "worker-a");
     assert.equal(record.target.workspace, "/repo/canonical");
     assert.deepEqual(events.slice(0, 2), [
-        "worker.open:worker-a:/repo/requested",
+        "worker.open:worker-a:/repo/requested:caller",
         `provider.start:${record.agentId}:/state/extensions/agent`
     ]);
     assert.equal(starts[0]?.tools.tools[0]?.name, "file_read");
@@ -89,7 +89,7 @@ test("Agent Extension startup failure closes the already acquired Worker session
         /provider failed/u
     );
     assert.deepEqual(events, [
-        "worker.open:worker-a:/repo",
+        "worker.open:worker-a:/repo:caller",
         "provider.start:broken",
         "worker.close:/repo"
     ]);
@@ -148,6 +148,10 @@ test("Agent Extension command owns the legacy devshell agent grammar", async () 
     await executeAgentCommand(runtime, providers, ["follow-up", agentId, "finish"], invocation);
     await executeAgentCommand(runtime, providers, ["abort", agentId], invocation);
     await executeAgentCommand(runtime, providers, ["reload", agentId], invocation);
+    assert.deepEqual(await executeAgentCommand(runtime, providers, ["wait", agentId], invocation), {
+        kind: "json",
+        value: { agentId, idle: true, webPath: "extensions/agent/" }
+    });
     const listed = await executeAgentCommand(runtime, providers, ["list"], invocation);
     assert.equal(listed.kind, "json");
     const web = await executeAgentCommand(runtime, providers, ["web"], invocation);
@@ -159,6 +163,7 @@ test("Agent Extension command owns the legacy devshell agent grammar", async () 
     assert.equal(events.includes("provider.followUp:finish"), true);
     assert.equal(events.includes("provider.abort"), true);
     assert.equal(events.includes("provider.reload"), true);
+    assert.equal(events.includes("provider.wait"), true);
     await assert.rejects(
         () => executeAgentCommand(runtime, providers, ["--unknown", "worker-a:/repo"], invocation),
         /Unknown agent option/u
@@ -237,9 +242,9 @@ function extensionContext(options: {
             processes: {
                 async start() { throw new Error("not used"); }
             },
-            workers: {
+            delegatedWorkers: {
                 async openSession(input) {
-                    options.events.push(`worker.open:${input.instance ?? ""}:${input.workspace}`);
+                    options.events.push(`worker.open:${input.instance ?? ""}:${input.workspace}:caller`);
                     const workspace = options.canonicalWorkspace ?? input.workspace;
                     let closed = false;
                     let resolveClosed!: () => void;
@@ -323,6 +328,7 @@ function handleFixture(agentId: string, events: string[], _ordinal = 0): AgentPr
         async reload() { events.push("provider.reload"); },
         async steer(message) { events.push(`provider.steer:${message}`); },
         async stop() { events.push(`provider.stop:${agentId}`); },
+        async waitForIdle() { events.push("provider.wait"); },
         web: { upstream: new URL("http://127.0.0.1:43123/") }
     };
 }

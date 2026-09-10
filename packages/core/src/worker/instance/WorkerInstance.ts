@@ -387,8 +387,9 @@ export class WorkerInstance {
         transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
         invocationInput?: JsonValue,
         onProgress?: (progress: JsonValue) => void,
+        recording: "caller" | "host" = "host",
     ): Promise<JsonValue> {
-        return await this.#tool.call(toolName, input, context, signal, transformResult, invocationInput, onProgress);
+        return await this.#tool.call(toolName, input, context, signal, transformResult, invocationInput, onProgress, recording);
     }
 
     async invokeToolInternal(

@@ -32,6 +32,7 @@ const usage = [
     "  devshell agent send <agentId> <message>",
     "  devshell agent steer <agentId> <message>",
     "  devshell agent follow-up <agentId> <message>",
+    "  devshell agent wait <agentId>",
     "  devshell agent abort <agentId>",
     "  devshell agent reload <agentId>",
     "  devshell agent stop <agentId>"
@@ -83,6 +84,12 @@ export async function executeAgentCommand(
             if (argv[0] === "abort") await runtime.abort({ agentId });
             else await runtime.reload({ agentId });
             return json({ accepted: true, agentId, webPath: AGENT_WEB_RELATIVE_PATH });
+        }
+        case "wait": {
+            expectLength(argv, 2, "agent wait <agentId>");
+            const agentId = required(argv[1], "agent id is required");
+            await runtime.waitForIdle({ agentId });
+            return json({ agentId, idle: true, webPath: AGENT_WEB_RELATIVE_PATH });
         }
         case "stop": {
             expectLength(argv, 2, "agent stop <agentId>");

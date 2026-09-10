@@ -117,6 +117,14 @@ export class AgentHost {
         await runtime.handle.followUp(message);
     }
 
+    async waitForIdle(agentId: string): Promise<void> {
+        const runtime = this.#requireRuntime(agentId);
+        if (runtime.handle.waitForIdle === undefined) {
+            throw new Error(`Agent provider ${runtime.record.provider} does not support waiting for idle.`);
+        }
+        await runtime.handle.waitForIdle();
+    }
+
     async reload(agentId: string): Promise<void> {
         const runtime = this.#requireRuntime(agentId);
         if (runtime.handle.reload === undefined) {

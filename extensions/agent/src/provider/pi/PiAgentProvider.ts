@@ -11,7 +11,7 @@ import {
 } from "./PiAgentProcess.js";
 
 export const PI_PROVIDER_ID = "pi";
-export const PI_PROVIDER_VERSION = "0.1.0";
+export const PI_PROVIDER_VERSION = "0.1.1";
 export const PI_RUNTIME_VERSION = "0.84.4";
 
 export interface PiProviderInstallerLike {

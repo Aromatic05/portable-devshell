@@ -16,7 +16,8 @@ function fakeSession(events: string[], abortError?: Error): PiSessionLike {
         },
         async followUp() {},
         async prompt() {},
-        async reload() {}
+        async reload() {},
+        async waitForIdle() {}
     };
 }
 
