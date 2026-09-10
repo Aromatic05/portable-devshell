@@ -1329,6 +1329,7 @@ const OBSERVATION_TOOLS = new Set([
     "tmux_inspect",
     "tmux_list",
     "todo_read",
+    "todo_report",
     "workspace_open",
 ]);
 

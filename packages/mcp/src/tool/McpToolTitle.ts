@@ -22,6 +22,7 @@ const titles: Readonly<Record<string, string>> = {
     tmux_read: "Read tmux task",
     tmux_run: "Run tmux task",
     todo_read: "Read task plan",
+    todo_report: "Report task progress",
     todo_write: "Update task plan",
     workspace_ask: "Ask user",
     workspace_approval: "Decide approval",

@@ -130,6 +130,7 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
             tools.tools.some((tool) => tool.name === "context_message_read"),
             false,
         );
+        assert.equal(tools.tools.some((tool) => tool.name === "todo_report"), true);
 
         const ctxId = await readContextId(client, workspacePath);
         const queued = await messages.queue({
@@ -207,6 +208,17 @@ test("a real MCP SDK client receives a queued Comment in the next ordinary tool 
             (await instance.readToolCalls({ callIds: [audited.callId], ctxId: "ctx-other" })).length,
             0,
         );
+        await messages.queue({ ctxId, text: "Use the runtime comment before the next action" });
+        const report = await client.callTool({
+            arguments: { ctxId, message: "Reached the MCP client acceptance boundary." },
+            name: "todo_report",
+        });
+        assert.equal(report.isError, false);
+        assert.deepEqual(report.content, [{ type: "text", text: "Reached the MCP client acceptance boundary." }]);
+        assert.deepEqual(report.structuredContent, {
+            comment: ["Use the runtime comment before the next action"],
+            reported: true,
+        });
         await client.close();
     } finally {
         await teardownFrozenWorker(host, instance, cleanupDirs);

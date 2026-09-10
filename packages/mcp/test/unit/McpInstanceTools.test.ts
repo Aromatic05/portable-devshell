@@ -755,6 +755,14 @@ test("todo tools are fixed control-side primitives and remain available while th
     assert.equal(todoWriteSchema.properties?.todos?.contains, undefined);
     assert.equal(todoWriteSchema.properties?.todos?.minContains, undefined);
     assert.equal(todoWriteSchema.properties?.todos?.maxContains, undefined);
+    const todoReport = endpoint.listTools().find((tool) => tool.name === "todo_report");
+    assert.match(todoReport?.description ?? "", /Always follow tool-call `comment`/u);
+    const report = await endpoint.callTool("todo_report", withContext({ message: "Finished the first acceptance stage." }), context) as {
+        content?: unknown;
+        structuredContent?: unknown;
+    };
+    assert.deepEqual(report.content, [{ type: "text", text: "Finished the first acceptance stage." }]);
+    assert.deepEqual(report.structuredContent, { reported: true });
     await endpoint.callTool("todo_read", withContext({ title: "Recover" }), context);
     await endpoint.callTool("todo_read", withContext({ taskId: "task-recover" }), context);
     await endpoint.callTool("todo_write", withContext({ revision: 0, title: "Recover", todos: [] }), context);

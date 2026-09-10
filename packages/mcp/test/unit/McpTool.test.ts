@@ -72,6 +72,12 @@ test("MCP safety annotations are explicit for known semantics and conservative f
         openWorldHint: false,
         readOnlyHint: false,
     });
+    assert.deepEqual(mcpToolAnnotations("todo_report"), {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+        readOnlyHint: false,
+    });
     assert.deepEqual(mcpToolAnnotations("workspace_approval"), {
         destructiveHint: true,
         idempotentHint: false,
@@ -90,6 +96,7 @@ test("MCP tools expose concise human-readable titles with a safe fallback", () =
     assert.equal(mcpToolTitle("bash_run"), "Run shell command");
     assert.equal(mcpToolTitle("workspace_open"), "Open Workspace");
     assert.equal(mcpToolTitle("artifact_viewImage"), "View image");
+    assert.equal(mcpToolTitle("todo_report"), "Report task progress");
     assert.equal(mcpToolTitle("future_unknown"), "Future unknown");
 });
 

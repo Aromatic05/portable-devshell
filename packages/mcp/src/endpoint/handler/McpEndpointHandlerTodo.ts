@@ -1,8 +1,9 @@
-import type { JsonValue, TodoReadInput, ToolCallContext } from "@portable-devshell/shared";
+import { TODO_MAX_TEXT_LENGTH, type JsonValue, type TodoReadInput, type ToolCallContext } from "@portable-devshell/shared";
 
 import type { McpInstanceGateway } from "../../instance/McpInstanceGateway.js";
 import type { McpToolCatalogTodoName } from "../../tool/catalog/McpToolCatalogTodo.js";
 import { waitForMcpEndpointAbortable } from "../McpEndpointCancellation.js";
+import { McpNativeToolResult, type McpEndpointResult } from "../McpEndpointResult.js";
 import { requireMcpEndpointGateway } from "./McpEndpointHandlerSupport.js";
 
 export class McpEndpointHandlerTodo {
@@ -11,7 +12,7 @@ export class McpEndpointHandlerTodo {
         instanceName: string;
     }) {}
 
-    async call(toolName: McpToolCatalogTodoName, input: JsonValue, context: ToolCallContext, signal?: AbortSignal): Promise<JsonValue> {
+    async call(toolName: McpToolCatalogTodoName, input: JsonValue, context: ToolCallContext, signal?: AbortSignal): Promise<McpEndpointResult> {
         const gateway = requireMcpEndpointGateway(this.options.gateway, this.options.instanceName);
         switch (toolName) {
             case "todo_read":
@@ -19,6 +20,13 @@ export class McpEndpointHandlerTodo {
                     gateway.readTodo(this.options.instanceName, readTodoInput(input)),
                     signal
                 );
+            case "todo_report": {
+                const message = readTodoReportMessage(input);
+                return new McpNativeToolResult({
+                    content: [{ type: "text", text: message }],
+                    structuredContent: { reported: true }
+                });
+            }
             case "todo_write": {
                 const written = await waitForMcpEndpointAbortable(
                     gateway.writeTodo(this.options.instanceName, input, context),
@@ -32,6 +40,25 @@ export class McpEndpointHandlerTodo {
             }
         }
     }
+}
+
+function readTodoReportMessage(input: JsonValue): string {
+    if (typeof input !== "object" || input === null || Array.isArray(input)) {
+        throw new Error("todo_report requires an object input.");
+    }
+    const keys = Object.keys(input);
+    if (keys.length !== 1 || keys[0] !== "message") {
+        throw new Error("todo_report accepts only message.");
+    }
+    const value = input.message;
+    if (typeof value !== "string" || value.trim().length === 0) {
+        throw new Error("todo_report message must be a non-empty string.");
+    }
+    const message = value.trim();
+    if (message.length > TODO_MAX_TEXT_LENGTH) {
+        throw new Error(`todo_report message must be at most ${TODO_MAX_TEXT_LENGTH} characters.`);
+    }
+    return message;
 }
 
 async function disableTaskWaitRecoveries(
