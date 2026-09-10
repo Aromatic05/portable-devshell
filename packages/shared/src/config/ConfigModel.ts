@@ -62,6 +62,10 @@ export interface ControlInstanceExtensionsConfig {
     model: string[];
 }
 
+export interface ControlInstanceWorkspaceConfig {
+    enabled: boolean;
+}
+
 export interface ControlInstanceSecurityConfig {
     mode: ControlSecurityMode;
 }
@@ -81,6 +85,7 @@ interface ControlInstanceConfigBase {
     name: string;
     security: ControlInstanceSecurityConfig;
     tools?: ControlInstanceToolsConfig;
+    workspace: ControlInstanceWorkspaceConfig;
 }
 
 export interface ControlLocalInstanceConfig extends ControlInstanceConfigBase {
@@ -251,6 +256,9 @@ export interface ConfigInstanceDraft {
         command?: string;
     };
     tools?: ControlInstanceToolsConfig;
+    workspace?: {
+        enabled?: boolean;
+    };
 }
 
 export interface ConfigMcpOAuth2Draft {
@@ -326,6 +334,9 @@ export interface ConfigInstancePatch {
         command?: string;
     }>;
     tools?: ConfigNullable<ControlInstanceToolsConfig>;
+    workspace?: {
+        enabled?: boolean;
+    };
 }
 
 export interface ConfigMcpPatch {

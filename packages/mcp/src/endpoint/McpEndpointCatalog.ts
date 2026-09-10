@@ -42,6 +42,7 @@ export interface McpEndpointCatalogOptions {
     gateway?: McpInstanceGateway;
     instanceName: string;
     worker: McpEndpointCatalogWorker;
+    workspaceAppEnabled?: boolean;
 }
 
 export interface McpEndpointCatalogSnapshot {
@@ -64,6 +65,7 @@ export class McpEndpointCatalog {
     readonly #schemaAdapter = new McpToolSchemaAdapter();
     readonly #todoTools = new McpToolCatalogTodo();
     readonly #worker: McpEndpointCatalogWorker;
+    readonly #workspaceAppEnabled: boolean;
 
     constructor(options: McpEndpointCatalogOptions) {
         this.#auth = options.auth ?? { enabled: false, provider: "none" };
@@ -72,6 +74,7 @@ export class McpEndpointCatalog {
         this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
         this.#worker = options.worker;
+        this.#workspaceAppEnabled = options.workspaceAppEnabled !== false;
     }
 
     snapshot(): McpEndpointCatalogSnapshot {
@@ -161,7 +164,7 @@ export class McpEndpointCatalog {
     }
 
     #sources(hasWorkerSchema: boolean): McpToolCatalogEndpointSource[] {
-        const workspaceTools = this.#gateway !== undefined && isMcpInteractionGateway(this.#gateway)
+        const workspaceTools = this.#workspaceAppEnabled && this.#gateway !== undefined && isMcpInteractionGateway(this.#gateway)
             ? this.#interactionTools.list()
             : [];
         const workspaceApp = workspaceTools.some((tool) => tool.name === "workspace_open");

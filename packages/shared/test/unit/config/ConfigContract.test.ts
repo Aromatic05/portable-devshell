@@ -74,7 +74,8 @@ test("config parser trims values and preserves explicit patch removals", () => {
         provider: undefined,
         security: undefined,
         ssh: null,
-        tools: null
+        tools: null,
+        workspace: undefined
     });
 });
 
@@ -96,13 +97,23 @@ test("instance MCP context mode defaults to explicit and accepts openai-session"
     assert.equal(normalizeConfigInstanceDraft(patched).mcp.contextMode, "openai-session");
 });
 
-test("instance configuration has no persistent workspace authority", () => {
+test("Workspace switch defaults enabled without restoring persistent workspace path authority", () => {
     const instance = normalizeConfigInstanceDraft({
         name: "local-one",
         provider: "local"
     });
 
-    assert.equal("workspace" in instance, false);
+    assert.deepEqual(instance.workspace, { enabled: true });
+    const parsed = parseConfigDraft({
+        instances: [{
+            name: "workspace-disabled",
+            provider: "local",
+            workspace: { enabled: false }
+        }]
+    });
+    assert.equal(normalizeConfigDraft(parsed).instances[0]?.workspace.enabled, false);
+    const patched = applyConfigInstancePatch(instance, { workspace: { enabled: false } });
+    assert.equal(normalizeConfigInstanceDraft(patched).workspace.enabled, false);
     assertConfigIssue(
         () => parseConfigDraft({
             instances: [{
@@ -113,7 +124,7 @@ test("instance configuration has no persistent workspace authority", () => {
         }),
         "parse",
         ["instances", 0, "workspace"],
-        "config.field.unknown"
+        "config.type.object"
     );
 });
 

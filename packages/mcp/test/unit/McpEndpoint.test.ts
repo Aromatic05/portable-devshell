@@ -142,6 +142,42 @@ test("HTTP tools/list keeps Workspace actions app-only while advertising host au
     }
 });
 
+test("Workspace disable removes only Workspace tools and app metadata", () => {
+    const harness = createWorkerHarness();
+    const unused = async () => { throw new Error("unused"); };
+    const gateway = {
+        consumeWait: unused,
+        createWait: unused,
+        decideApproval: unused,
+        detachWait: unused,
+        listApprovals: async () => [],
+        listTools: () => [],
+        listWaits: async () => [],
+        resolveWait: unused,
+        waitForWait: unused,
+    } as unknown as McpInstanceGateway;
+    const tools = new McpEndpointWorker({
+        gateway,
+        instanceName: "demo",
+        worker: harness.worker,
+        workspaceAppEnabled: false,
+    }).listTools();
+
+    assert.equal(tools.some((tool) => tool.name.startsWith("workspace_")), false);
+    const environment = tools.find((tool) => tool.name === "environ_info");
+    assert.notEqual(environment, undefined);
+    assert.equal(
+        (environment?._meta as Record<string, JsonValue> | undefined)?.["openai/outputTemplate"],
+        undefined,
+    );
+    const bash = tools.find((tool) => tool.name === "bash_run");
+    assert.notEqual(bash, undefined);
+    assert.notEqual(
+        (bash?.inputSchema as { properties?: Record<string, unknown> }).properties?.instance,
+        undefined,
+    );
+});
+
 test("tmux_run does not render a Workspace App", () => {
     const harness = createWorkerHarness({
         tools: [{
@@ -579,7 +615,6 @@ test("environment and control-owned tools execute through the endpoint audit pat
     );
     const ctxId = String(structuredResult<{ ctxId?: string }>(environment).ctxId);
     await endpoint.callTool("todo_read", { ctxId }, requestContext);
-    await endpoint.callTool("instance_connect", { ctxId, instance: "demo-local" }, requestContext);
 
     assert.deepEqual(
         harness.auditedCalls.map((call) => ({
@@ -603,13 +638,6 @@ test("environment and control-owned tools execute through the endpoint audit pat
                 requestId: "request-control-tools",
                 source: "mcp",
                 toolName: "todo_read",
-            },
-            {
-                ctxId,
-                input: { instance: "demo-local" },
-                requestId: "request-control-tools",
-                source: "mcp",
-                toolName: "instance_connect",
             },
         ],
     );
@@ -1179,7 +1207,7 @@ test("closing the HTTP request aborts an in-flight tools/call handler", async ()
     }
 });
 
-test("instance_connect returns object structured content through SDK transport", async () => {
+test("retired instance_connect returns an actionable tombstone through SDK transport", async () => {
     const harness = createWorkerHarness({ hasToolSchemaCache: false, ready: false, tools: [] });
     const gateway = {
         assertReady() {},
@@ -1236,7 +1264,14 @@ test("instance_connect returns object structured content through SDK transport",
 
         assert.equal(response.status, 200);
         assert.equal(response.body.error, undefined);
-        assert.deepEqual(response.body.result?.structuredContent, { instance: "demo" });
+        assert.deepEqual(response.body.result?.structuredContent, {
+            staleToolSnapshot: {
+                assistantInstruction: "Use devshell instance connect <instance> [workspace].",
+                help: "Use devshell instance connect <instance> [workspace].",
+                name: "instance_connect",
+                removedIn: "0.7.1"
+            }
+        });
     } finally {
         await server.close();
     }

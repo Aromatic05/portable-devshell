@@ -44,7 +44,8 @@ const instanceKeys = [
     "provider",
     "security",
     "ssh",
-    "tools"
+    "tools",
+    "workspace"
 ] as const;
 
 const instancePatchKeys = instanceKeys.filter((key) => key !== "name");
@@ -111,7 +112,8 @@ export function parseConfigInstanceDraft(
                 ? undefined
                 : parseSecurityDraft(record.security, [...path, "security"]),
         ssh: record.ssh === undefined ? undefined : parseSshDraft(record.ssh, [...path, "ssh"]),
-        tools: record.tools === undefined ? undefined : parseTools(record.tools, [...path, "tools"])
+        tools: record.tools === undefined ? undefined : parseTools(record.tools, [...path, "tools"]),
+        workspace: record.workspace === undefined ? undefined : parseWorkspaceDraft(record.workspace, [...path, "workspace"])
     };
 }
 
@@ -169,7 +171,8 @@ export function parseConfigInstancePatch(
                 ? undefined
                 : parseSecurityDraft(record.security, [...path, "security"]),
         ssh: readNullable(record.ssh, (entry) => parseSshDraft(entry, [...path, "ssh"])),
-        tools: readNullable(record.tools, (entry) => parseTools(entry, [...path, "tools"]))
+        tools: readNullable(record.tools, (entry) => parseTools(entry, [...path, "tools"])),
+        workspace: record.workspace === undefined ? undefined : parseWorkspaceDraft(record.workspace, [...path, "workspace"])
     };
 }
 
@@ -440,6 +443,17 @@ function parseInstanceExtensions(
     assertKnownKeys(record, ["model"], path);
     return {
         model: record.model === undefined ? undefined : readStringArray(record.model, [...path, "model"])
+    };
+}
+
+function parseWorkspaceDraft(
+    value: unknown,
+    path: readonly ConfigPathSegment[]
+): NonNullable<ConfigInstanceDraft["workspace"]> {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["enabled"], path);
+    return {
+        enabled: readOptionalBoolean(record.enabled, [...path, "enabled"])
     };
 }
 

@@ -4,14 +4,20 @@ import type { ControlMcpAuthConfig } from "@portable-devshell/shared";
 import type { InstanceDescriptor } from "../control/instance/InstanceDescriptor.js";
 
 export class McpEndpointFactory {
-    map(descriptor: InstanceDescriptor, gateway?: McpInstanceGateway, auth: ControlMcpAuthConfig = { mode: "none" }): McpHostInstanceConfig {
+    map(
+        descriptor: InstanceDescriptor,
+        gateway?: McpInstanceGateway,
+        auth: ControlMcpAuthConfig = { mode: "none" },
+        workspaceEnabled = true
+    ): McpHostInstanceConfig {
         return {
             auth: toMcpAuthConfig(auth),
             contextMode: descriptor.mcpContextMode ?? "explicit",
             ...(gateway === undefined ? {} : { gateway }),
             name: descriptor.name,
             path: descriptor.mcpPath,
-            worker: descriptor.worker
+            worker: descriptor.worker,
+            workspaceEnabled
         };
     }
 }

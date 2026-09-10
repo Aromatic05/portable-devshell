@@ -51,7 +51,8 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
         contextMode: "explicit",
         name: "demo-local",
         path: "/demo-local/mcp",
-        worker: descriptor.worker
+        worker: descriptor.worker,
+        workspaceEnabled: true
     });
 
     const host = new McpRuntimeFactory().wire(config, registry);

@@ -58,6 +58,7 @@ export interface McpHostInstanceConfig {
     name: string;
     path?: string;
     worker: WorkerInstanceLike;
+    workspaceEnabled?: boolean;
 }
 
 export interface McpHostConfig {
@@ -143,7 +144,7 @@ export class McpHost {
         this.#liveRouteCleanups.delete(instance.name);
         this.#gateways.set(instance.name, instance.gateway);
         this.#workers.set(instance.name, instance.worker);
-        const workspaceApp = isMcpInteractionGateway(instance.gateway);
+        const workspaceApp = instance.workspaceEnabled !== false && isMcpInteractionGateway(instance.gateway);
         if (!workspaceApp) this.#workspaceAppPresence.revokeInstance(instance.name);
         const liveBaseUrl = workspaceApp
             ? workspaceLiveBaseUrl(this.#config.publicBaseUrl, instance.name)
@@ -157,6 +158,7 @@ export class McpHost {
                 instanceName: instance.name,
                 toolProvenance: this.#config.toolProvenance,
                 worker: instance.worker,
+                workspaceAppEnabled: workspaceApp,
                 ...(workspaceApp ? {
                     workspaceAppLeases: this.#workspaceAppLeases,
                     workspaceAppPresence: this.#workspaceAppPresence,

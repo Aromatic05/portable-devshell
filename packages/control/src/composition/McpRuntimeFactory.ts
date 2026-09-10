@@ -40,7 +40,7 @@ export class McpRuntimeFactory {
                   .map((descriptor) => {
                       const instance = config.instances.find((entry) => entry.name === descriptor.name);
                       if (instance === undefined) throw new Error(`Missing config for MCP instance ${descriptor.name}.`);
-                      return this.#mapper.map(descriptor, options?.gateway, instance.mcp.auth);
+                      return this.#mapper.map(descriptor, options?.gateway, instance.mcp.auth, instance.workspace.enabled);
                   })
             : [];
 

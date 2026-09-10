@@ -54,6 +54,7 @@ test("instance config mapper passes effective security mode, worker env, and app
         security: {
             mode: "workspace"
         },
+        workspace: { enabled: true },
     });
 
     assert.equal(capturedConfig?.effectiveSecurityMode, "workspace");
@@ -136,6 +137,7 @@ test("controller-managed terminals use the instance Worker RPC surface", async (
         name: "demo-local",
         provider: "local",
         security: { mode: "workspace" },
+        workspace: { enabled: true },
     });
 
     const opened = await descriptor.terminal!.open({ cols: 80, rows: 24, workspace: "/workspace" });

@@ -77,6 +77,20 @@ test("instance TOML preserves MCP context selection mode", () => {
     );
 });
 
+test("instance TOML preserves Workspace feature enablement", () => {
+    const instance = normalizeConfigInstanceDraft({
+        name: "workspace-local",
+        provider: "local",
+        workspace: { enabled: false }
+    });
+    const encoded = toml.encode(instanceDocument.encode(instance));
+    assert.match(encoded, /\[workspace\][\s\S]*enabled = false/u);
+    assert.equal(
+        instanceDocument.decode(toml.decode(encoded)).workspace?.enabled,
+        false
+    );
+});
+
 test("version 1 global MCP auth migrates to each enabled namespace and writes version 2", async () => {
     const homeDirectory = await createTestTempDirectory("control-home");
     const token = "0123456789abcdef0123456789abcdef";
@@ -163,12 +177,13 @@ test("version 2 instance documents migrate to version 4 without workspace or MCP
         for (const source of [migratedDefault, migratedCustom]) {
             assert.match(source, /^version = 4$/mu);
             assert.doesNotMatch(source, /^workspace\s*=/mu);
+            assert.match(source, /\[workspace\][\s\S]*enabled = true/u);
             assert.doesNotMatch(source, /\[mcp\.tools\]|groups\s*=|capabilities\s*=/u);
             assert.match(source, /\[extensions\]/u);
             assert.match(source, /model\s*=\s*\[\s*"artifact",\s*"instance",\s*"mcp",\s*"secret",\s*"skill"\s*\]/u);
         }
-        assert.equal("workspace" in config.instances[0]!, false);
-        assert.equal("workspace" in config.instances[1]!, false);
+        assert.deepEqual(config.instances[0]!.workspace, { enabled: true });
+        assert.deepEqual(config.instances[1]!.workspace, { enabled: true });
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
     }

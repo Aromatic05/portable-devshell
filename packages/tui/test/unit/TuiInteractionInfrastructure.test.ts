@@ -1473,6 +1473,24 @@ test("config separates model Extension access and hot-applies it without a worke
     );
 });
 
+test("config exposes Workspace enablement as a hot-applied choice", async () => {
+    const harness = createHarness();
+    harness.store.setSelectedPage("config");
+    openEditorForBox(harness, "config", "workspace");
+    const workspace = expandBox(harness, "workspace");
+    const enabled = workspace.expandedLines.find((line) => line.id?.includes(":field:workspace.enabled"));
+    assert.equal(enabled?.editableValue?.value, "true");
+    assert.ok(enabled?.id);
+    harness.store.setMainFocusId("workspace");
+    harness.store.setFocusScope("form");
+    harness.store.setSelectedDetailLine(workspace.expandedKey, enabled.id);
+    await harness.dispatch({ direction: "right", type: "editor.cursorMove" });
+    const draft = harness.store.getState().ui.formDrafts["config:alpha"] as {
+        workspace?: { enabled?: boolean };
+    };
+    assert.equal(draft.workspace?.enabled, false);
+});
+
 test("MCP context mode is selectable in create and config editors", async () => {
     const harness = createHarness();
     await openCreateWizard(harness);
@@ -2938,6 +2956,7 @@ function openEditorForBox(
                 name: "alpha",
                 provider: "local",
                 security: { mode: "disabled" },
+                workspace: { enabled: true },
             },
             false,
         );

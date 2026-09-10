@@ -73,10 +73,16 @@ export class ControlInstanceTomlDocument {
         rejectLegacyField(record, "host", "is not supported; use ssh.command");
         rejectLegacyField(record, "remoteCwd", "is not supported");
         rejectLegacyField(record, "sshBinary", "is not supported; use ssh.command");
-        if (version >= 3) {
+        if (version === 3) {
             rejectLegacyField(record, "workspace", "is not supported; select an absolute workspace when creating an environment context");
         }
-        const { version: _version, workspace: _legacyWorkspace, ...config } = record;
+        const { version: _version, ...versionless } = record;
+        const config = version === 4
+            ? versionless
+            : (() => {
+                  const { workspace: _legacyWorkspace, ...legacy } = versionless;
+                  return legacy;
+              })();
         const draft = parseConfigInstanceDraft(version === 4 ? config : stripLegacyMcpTools(config));
         return version === 4
             ? draft
@@ -109,7 +115,8 @@ export class ControlInstanceTomlDocument {
             logs: instance.logs,
             approvalPolicy: instance.approvalPolicy,
             tools: instance.tools,
-            security: instance.security
+            security: instance.security,
+            workspace: instance.workspace
         });
     }
 }

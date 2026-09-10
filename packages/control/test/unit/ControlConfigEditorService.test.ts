@@ -1078,7 +1078,16 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
         patch: { mcp: { contextMode: "openai-session" } }
     });
     assert.equal(registered[1]?.contextMode, "openai-session");
+    assert.equal(registered[1]?.workspaceEnabled, true);
     assert.equal(registry.get("demo-local")?.mcpContextMode, "openai-session");
+
+    await service.updateInstanceConfig({
+        instanceName: "demo-local",
+        patch: { workspace: { enabled: false } }
+    });
+    assert.deepEqual(retiredWorkspaceApps, ["demo-local"]);
+    assert.equal(registered[2]?.workspaceEnabled, false);
+    assert.equal(config.instances[0]?.workspace.enabled, false);
 
     const authUpdate = await service.updateInstanceConfig({
         instanceName: "demo-local",
@@ -1090,8 +1099,8 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
             }
         }
     }) as { appliedChanges: Array<{ kind: string; target: string }> };
-    assert.equal(registered[2]?.contextMode, "explicit");
-    assert.deepEqual(registered[2]?.auth, {
+    assert.equal(registered[3]?.contextMode, "explicit");
+    assert.deepEqual(registered[3]?.auth, {
         enabled: true,
         provider: "token",
         token: "0123456789abcdef0123456789abcdef"
@@ -1102,8 +1111,16 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
 
     await service.disableInstance({ instanceName: "demo-local" });
     assert.deepEqual(unregistered, ["demo-local"]);
+    assert.deepEqual(retiredWorkspaceApps, ["demo-local", "demo-local"]);
     await service.enableInstance({ instanceName: "demo-local" });
-    assert.equal(registered.length, 4);
+    assert.equal(registered.length, 5);
+    assert.equal(registered[4]?.workspaceEnabled, false);
+    await service.updateInstanceConfig({
+        instanceName: "demo-local",
+        patch: { workspace: { enabled: true } }
+    });
+    assert.equal(registered.length, 6);
+    assert.equal(registered[5]?.workspaceEnabled, true);
     await service.deleteInstance({ instanceName: "demo-local" });
     assert.deepEqual(unregistered, ["demo-local", "demo-local"]);
     assert.equal(registry.get("demo-local"), undefined);

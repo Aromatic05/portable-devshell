@@ -99,7 +99,10 @@ export function normalizeConfigInstanceDraft(
         security: {
             mode: draft.security?.mode ?? context.defaultSecurityMode
         },
-        tools: cloneTools(draft.tools)
+        tools: cloneTools(draft.tools),
+        workspace: {
+            enabled: draft.workspace?.enabled ?? true
+        }
     };
 
     switch (draft.provider) {
@@ -219,7 +222,10 @@ export function applyConfigInstancePatch(
                       mode: patch.security.mode ?? base.security?.mode
                   },
         ssh: providerChanged ? applyNullable(patch.ssh, undefined) : applyNullable(patch.ssh, base.ssh),
-        tools: applyNullable(patch.tools, base.tools)
+        tools: applyNullable(patch.tools, base.tools),
+        workspace: patch.workspace === undefined
+            ? base.workspace
+            : { enabled: patch.workspace.enabled ?? base.workspace?.enabled }
     };
 }
 
@@ -321,7 +327,8 @@ export function toConfigInstanceDraft(instance: ControlInstanceConfig): ConfigIn
         provider: instance.provider,
         security: { ...instance.security },
         ssh: instance.ssh === undefined ? undefined : { ...instance.ssh },
-        tools: cloneTools(instance.tools)
+        tools: cloneTools(instance.tools),
+        workspace: { ...instance.workspace }
     };
 }
 

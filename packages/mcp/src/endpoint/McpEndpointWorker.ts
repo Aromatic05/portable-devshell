@@ -35,6 +35,7 @@ export interface McpEndpointWorkerOptions {
     readyWaitMs?: number;
     toolProvenance?: McpToolProvenanceRecorder;
     worker: McpEndpointWorkerPort;
+    workspaceAppEnabled?: boolean;
     workspaceAppLeases?: WorkspaceAppLeaseStore;
     workspaceAppPresence?: WorkspaceAppPresenceStore;
     workspaceLiveBaseUrl?: string;
@@ -53,7 +54,8 @@ export class McpEndpointWorker {
             contextSelector,
             gateway: options.gateway,
             instanceName: options.instanceName,
-            worker: options.worker
+            worker: options.worker,
+            workspaceAppEnabled: options.workspaceAppEnabled
         });
         this.#dispatch = new McpEndpointDispatch({
             catalog: this.#catalog,

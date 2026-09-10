@@ -464,10 +464,16 @@ export class ConfigEditorCoordinator {
         next: ControlConfig["instances"][number] | undefined,
         descriptor: ReturnType<InstanceRegistry["get"]>,
     ): Promise<void> {
-        if (
-            existing === undefined || next === undefined || descriptor === undefined ||
-            !existing.enabled || next.enabled
-        ) return;
+        if (existing === undefined || next === undefined || descriptor === undefined || !existing.enabled) return;
+
+        const instanceDisabled = !next.enabled;
+        const workspaceDisabled = existing.workspace.enabled && !next.workspace.enabled;
+        if (!instanceDisabled && !workspaceDisabled) return;
+
+        if (workspaceDisabled || instanceDisabled) {
+            await this.#getMcpHost()?.retireWorkspaceApp(existing.name);
+        }
+        if (!instanceDisabled) return;
 
         for (const retire of [...this.#instanceDisableRetirements]) {
             await retire(existing);
@@ -661,7 +667,12 @@ export class ConfigEditorCoordinator {
             host.unregisterInstance(instanceName);
             return;
         }
-        host.registerInstance(this.#mcpEndpointConfigMapper.map(descriptor, this.#getMcpInstanceGateway(), instance.mcp.auth));
+        host.registerInstance(this.#mcpEndpointConfigMapper.map(
+            descriptor,
+            this.#getMcpInstanceGateway(),
+            instance.mcp.auth,
+            instance.workspace.enabled
+        ));
     }
 
     #assertInstanceStopped(instanceName: string, operation: "delete" | "disable" | "update"): void {

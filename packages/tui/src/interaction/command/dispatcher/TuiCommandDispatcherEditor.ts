@@ -276,6 +276,7 @@ export class TuiCommandDispatcherEditor {
                 return editableProviderChoices();
             case "enabled":
             case "mcp.enabled":
+            case "workspace.enabled":
                 return [true, false];
             case "mcp.contextMode":
                 return ["explicit", "openai-session"];

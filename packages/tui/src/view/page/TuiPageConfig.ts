@@ -63,6 +63,23 @@ export function buildConfigPageBoxes(state: TuiAppState, instanceName: string): 
         }),
         makeBox(state, "config", instanceName, {
             detailLines: [
+                choiceLine("workspace.enabled", "workspace.enabled", readPath(draft, "workspace.enabled")),
+                "Disabling Workspace retires app presence, wait recovery, and Goal continuation without stopping the Worker.",
+                ...editorErrorLine(state, "config", "workspace", ["workspace"])
+            ],
+            id: "workspace",
+            status: configStatus(
+                state,
+                ["workspace"],
+                readPath(draft, "workspace.enabled") === false ? "disabled" : "normal"
+            ),
+            summaryLines: [
+                compactSummary(["enabled", stringValue(readPath(draft, "workspace.enabled"), "true")])
+            ],
+            title: "Workspace"
+        }),
+        makeBox(state, "config", instanceName, {
+            detailLines: [
                 fieldLine("extensions.model", "model", readPath(draft, "extensions.model")),
                 ...editorErrorLine(state, "config", "model-extensions", ["extensions"])
             ],
@@ -292,7 +309,8 @@ function instanceDraft(state: TuiAppState, instanceName: string): Record<string,
         mcp: { auth: "none", contextMode: "explicit", enabled: true, path: `/${instanceName}/mcp` },
         name: instanceName,
         provider: "local",
-        security: { mode: "disabled" }
+        security: { mode: "disabled" },
+        workspace: { enabled: true }
     } : toTuiInstanceEditorRecord(record);
 }
 
