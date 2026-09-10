@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { createDevshellPiExtension } from "./extension/index.js";
 import { PiChildToolSession } from "./PiChildToolSession.js";
@@ -114,6 +115,7 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
             hidden: true,
             name: "portable-devshell"
         }],
+        additionalExtensionPaths: bundledPiExtensionPaths(),
         noExtensions: true,
         settingsManager
     });
@@ -148,6 +150,15 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
         }
         throw error;
     }
+}
+
+function bundledPiExtensionPaths(): string[] {
+    return [
+        "pi-web-access/index.ts",
+        "pi-editor-plus/index.ts",
+        "@henryqw/pi-auto-compact/extensions/auto-compact.ts",
+        "@henryqw/pi-ask-question/extensions/ask-question.ts"
+    ].map((specifier) => fileURLToPath(import.meta.resolve(specifier)));
 }
 
 async function commandAgent(message: PiChildAgentCommandMessage): Promise<void> {
