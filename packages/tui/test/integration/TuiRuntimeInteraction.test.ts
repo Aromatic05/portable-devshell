@@ -366,6 +366,7 @@ test("real Ink runtime buffers split mouse input and enters then discards the cr
         await yieldEventLoop();
         assert.equal(runtime.store.getState().interaction.editor, undefined);
         terminal.write(mouse.slice(5));
+        terminal.write(mouseSequence(0, createRegion.x, createRegion.y, "release"));
 
         await waitUntil(
             () =>
@@ -497,6 +498,7 @@ test("real Ink runtime handles sidebar mouse buttons and viewport wheel scrollin
         assert.equal(runtime.store.getState().ui.selectedPage, "overview");
 
         terminal.write(mouseSequence(0, helpRegion.x, helpRegion.y, "press"));
+        terminal.write(mouseSequence(0, helpRegion.x, helpRegion.y, "release"));
         await waitUntil(
             () => runtime.store.getState().ui.selectedPage === "help",
         );
@@ -528,6 +530,61 @@ test("real Ink runtime handles sidebar mouse buttons and viewport wheel scrollin
         await waitUntil(
             () => runtime.store.getState().ui.scrollOffsets[scrollKey] === 0,
         );
+
+        terminal.write("\u0004");
+        await running;
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("real Ink runtime drag-selects ordinary TUI text and copies it without activating the row", async () => {
+    const terminal = createTerminal();
+    const clients = createClients();
+    const runtime = new TuiRuntime(
+        { stdin: terminal.stdin, stdout: terminal.stdout },
+        { clients: clients.value },
+    );
+    const running = runtime.run();
+
+    try {
+        await waitUntil(
+            () => runtime.store.getState().connection.status === "connected",
+        );
+        let helpRow: number | undefined;
+        for (let row = 1; row <= runtime.rows; row += 1) {
+            await runtime.selection.beginSelection(1, row);
+            runtime.selection.updateSelection(runtime.columns, row);
+            if (runtime.selection.getSelectionText().includes("help")) {
+                helpRow = row;
+                break;
+            }
+        }
+        runtime.selection.clearSelection();
+        assert.notEqual(helpRow, undefined);
+        runtime.selection.clearSelection();
+
+        const outputStart = terminal.output.length;
+        terminal.write(mouseSequence(0, 1, helpRow!, "press"));
+        terminal.write(mouseSequence(32, runtime.columns, helpRow!, "press"));
+        terminal.write(mouseSequence(0, runtime.columns, helpRow!, "release"));
+
+        await waitUntil(() =>
+            terminal.output.slice(outputStart).includes("\u001B]52;c;"),
+        );
+        const clipboard = terminal.output
+            .slice(outputStart)
+            .match(/\u001B\]52;c;([A-Za-z0-9+/=]+)\u0007/u)?.[1];
+        assert.ok(clipboard);
+        assert.match(Buffer.from(clipboard, "base64").toString("utf8"), /help/u);
+        assert.equal(runtime.store.getState().ui.selectedPage, "overview");
+        assert.ok(runtime.selection.getSnapshot().characters > 0);
+
+        terminal.write("1");
+        await waitUntil(
+            () => runtime.store.getState().ui.selectedPage === "instances",
+        );
+        assert.equal(runtime.selection.getSnapshot().characters, 0);
 
         terminal.write("\u0004");
         await running;
@@ -995,6 +1052,7 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
         assert.ok(helpRegion);
         const beforePageChange = host.output.length;
         host.write(mouseSequence(0, helpRegion.x, helpRegion.y, "press"));
+        host.write(mouseSequence(0, helpRegion.x, helpRegion.y, "release"));
         await waitUntil(
             () => runtime.store.getState().ui.selectedPage === "help",
         );
@@ -1165,6 +1223,7 @@ test("real Ink runtime switches terminal sources and drives tmux View and Attach
                 region.target.tab === "instances",
         )!;
         host.write(mouseSequence(0, instancesTabRegion.x, instancesTabRegion.y, "press"));
+        host.write(mouseSequence(0, instancesTabRegion.x, instancesTabRegion.y, "release"));
         await waitUntil(() => {
             const route = currentTuiRoute(runtime.store.getState());
             return route.page === "terminal" && route.tab === "instances";
@@ -1184,6 +1243,7 @@ test("real Ink runtime switches terminal sources and drives tmux View and Attach
                 region.target.tab === "tmuxPanes",
         )!;
         host.write(mouseSequence(0, tmuxTabRegion.x, tmuxTabRegion.y, "press"));
+        host.write(mouseSequence(0, tmuxTabRegion.x, tmuxTabRegion.y, "release"));
         await waitUntil(() => {
             const route = currentTuiRoute(runtime.store.getState());
             return route.page === "terminal" && route.tab === "tmuxPanes";

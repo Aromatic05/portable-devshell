@@ -9,6 +9,7 @@ import { TuiComponentHeader } from "./component/TuiComponentHeader.js";
 import { TuiComponentSidebar } from "./component/TuiComponentSidebar.js";
 import { TuiComponentTerminal } from "./component/TuiComponentTerminal.js";
 import { TuiComponentTerminalTabs } from "./component/TuiComponentTerminalTabs.js";
+import { TuiComponentTextSelection } from "./component/TuiComponentTextSelection.js";
 import { TuiComponentTmuxPanes } from "./component/TuiComponentTmuxPanes.js";
 import { TuiOverlayView } from "./overlay/TuiOverlayView.js";
 import { TuiScreenRouter } from "./screen/TuiScreenRouter.js";
@@ -34,6 +35,11 @@ export function TuiApp(props: TuiAppProps) {
         (listener) => props.runtime.scheduler.subscribe(listener),
         () => props.runtime.scheduler.getSnapshot(),
         () => props.runtime.scheduler.getSnapshot()
+    );
+    const selection = useSyncExternalStore(
+        (listener) => props.runtime.selection.subscribe(listener),
+        () => props.runtime.selection.getSnapshot(),
+        () => props.runtime.selection.getSnapshot(),
     );
     const connection = selectConnectionState(state);
     const errorLines = selectErrorMessage(state);
@@ -66,7 +72,8 @@ export function TuiApp(props: TuiAppProps) {
     });
 
     return (
-        <TuiRootLayout
+        <Box height={props.runtime.rows} width={props.runtime.columns}>
+            <TuiRootLayout
             columns={props.runtime.columns}
             footer={<TuiComponentFooter text={footer.text} />}
             header={<TuiComponentHeader stateLabel={connection.status} summary={selectHeaderSummary(state)} title={selectHeaderTitle()} />}
@@ -123,6 +130,8 @@ export function TuiApp(props: TuiAppProps) {
                         rows={Math.max(0, props.runtime.rows - 6)}
                     />
             }
-        />
+            />
+            <TuiComponentTextSelection snapshot={selection} />
+        </Box>
     );
 }

@@ -2,6 +2,7 @@ import type { TuiAppState } from "../state/reducer/TuiStoreModel.js";
 import type { TuiTerminalTab } from "../state/route/TuiRoute.js";
 import type { TuiTerminalRenderSource } from "./component/TuiComponentTerminal.js";
 import type { TuiTmuxPanesRenderSource } from "./component/TuiComponentTmuxPanes.js";
+import type { TuiTextSelectionRenderSource } from "./TuiTextSelectionModel.js";
 
 export interface TuiAppKey {
     backspace?: boolean;
@@ -30,6 +31,7 @@ export interface TuiAppController {
     readonly columns: number;
     readonly rows: number;
     readonly scheduler: TuiAppRenderSource;
+    readonly selection: TuiTextSelectionRenderSource;
     readonly terminal: TuiTerminalRenderSource;
     readonly tmuxPanes: TuiTmuxPanesRenderSource;
     handleInput(input: string, key: TuiAppKey): Promise<void>;

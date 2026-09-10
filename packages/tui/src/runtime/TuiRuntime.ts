@@ -52,6 +52,10 @@ import { TuiTerminalInputRouter } from "./terminal/TuiTerminalInputRouter.js";
 import { TuiControlTerminalPtyFactory } from "./terminal/TuiControlTerminalPty.js";
 import { TuiTerminalSession } from "./terminal/TuiTerminalSession.js";
 import { TuiTmuxPaneTerminalSession } from "./terminal/TuiTmuxPaneTerminalSession.js";
+import {
+    createTuiScreenCaptureStdout,
+    TuiScreenTextSelection,
+} from "./TuiScreenTextSelection.js";
 
 const TERMINAL_ESCAPE_TIMEOUT_MS = 100;
 
@@ -77,6 +81,7 @@ export class TuiRuntime {
     readonly keyDispatcher: TuiKeyDispatcher;
     readonly routeLifecycle: TuiRouteLifecycleController;
     readonly scheduler: TuiRenderScheduler;
+    readonly selection: TuiScreenTextSelection;
     readonly session: TuiControlSession;
     readonly store: TuiAppStore;
     readonly terminal: TuiTerminalSession;
@@ -97,6 +102,11 @@ export class TuiRuntime {
     #inputStarted = false;
     #inputQueue: Promise<void> = Promise.resolve();
     #mouseBuffer = "";
+    #screenMouseGesture?: {
+        anchor: { x: number; y: number };
+        selecting: boolean;
+        target?: TuiHitTarget;
+    };
     #stopped = false;
     #terminalColumns = 1;
     #terminalEscapeTimer?: ReturnType<typeof setTimeout>;
@@ -113,7 +123,12 @@ export class TuiRuntime {
         dependencies: TuiRuntimeDependencies = {},
     ) {
         this.#stdin = options.stdin ?? process.stdin;
-        this.#stdout = options.stdout ?? process.stdout;
+        const stdout = options.stdout ?? process.stdout;
+        this.selection = new TuiScreenTextSelection({
+            columns: stdout.columns ?? 120,
+            rows: stdout.rows ?? 40,
+        });
+        this.#stdout = createTuiScreenCaptureStdout(stdout, this.selection);
         this.#inkDebug = dependencies.inkDebug ?? false;
         this.#terminalGraphicsSupport = detectTerminalGraphicsSupport(
             process.env,
@@ -391,6 +406,7 @@ export class TuiRuntime {
     }
 
     handleInput(input: string, key: TuiAppKey): Promise<void> {
+        this.selection.clearSelection();
         const handled = this.#inputQueue.then(async () => {
             const intents = this.keyDispatcher.dispatch(
                 this.store.getState().interaction.focusScope,
@@ -496,6 +512,7 @@ export class TuiRuntime {
         this.#ink = undefined;
         this.#stopInput();
         this.#alternateScreen.exit();
+        this.selection.dispose();
     }
 
     redraw(): void {
@@ -921,7 +938,10 @@ export class TuiRuntime {
     }
 
     #copyTerminalSelection(): void {
-        const text = this.terminal.getSelectionText();
+        this.#copyText(this.terminal.getSelectionText());
+    }
+
+    #copyText(text: string): void {
         if (text.length === 0) {
             return;
         }
@@ -935,14 +955,12 @@ export class TuiRuntime {
         x: number;
         y: number;
     }): Promise<void> {
-        if (event.kind !== "press") {
-            return;
-        }
         const regions = buildTuiHitRegions(this.store.getState(), {
             columns: this.columns,
             rows: this.rows,
         });
         if ((event.button & 64) !== 0) {
+            if (event.kind !== "press") return;
             const target = hitTargetAt(regions, event.x, event.y);
             if (target?.kind === "scrollViewport") {
                 await this.commandDispatcher.dispatch({
@@ -954,11 +972,50 @@ export class TuiRuntime {
             }
             return;
         }
-        if ((event.button & 3) !== 0) {
+
+        const motion = (event.button & 32) !== 0;
+        const leftButton = (event.button & 3) === 0;
+        if (event.kind === "press" && leftButton && !motion) {
+            this.selection.clearSelection();
+            this.#screenMouseGesture = {
+                anchor: { x: event.x, y: event.y },
+                selecting: false,
+                target: hitTargetAt(regions, event.x, event.y),
+            };
             return;
         }
+
+        const gesture = this.#screenMouseGesture;
+        if (gesture === undefined) {
+            return;
+        }
+        const moved =
+            event.x !== gesture.anchor.x || event.y !== gesture.anchor.y;
+        if ((motion || event.kind === "release") && moved) {
+            if (!gesture.selecting) {
+                await this.selection.beginSelection(
+                    gesture.anchor.x,
+                    gesture.anchor.y,
+                );
+                gesture.selecting = true;
+            }
+            this.selection.updateSelection(event.x, event.y);
+        }
+        if (event.kind !== "release") {
+            return;
+        }
+
+        this.#screenMouseGesture = undefined;
+        if (gesture.selecting || moved) {
+            this.#copyText(this.selection.getSelectionText());
+            return;
+        }
+
         const target = hitTargetAt(regions, event.x, event.y);
-        if (target !== undefined) {
+        if (
+            target !== undefined &&
+            sameTuiHitTarget(gesture.target, target)
+        ) {
             await this.#handleHitTarget(target);
         }
     }
@@ -1014,6 +1071,34 @@ export class TuiRuntime {
     }
 
 
+}
+
+function sameTuiHitTarget(
+    left: TuiHitTarget | undefined,
+    right: TuiHitTarget | undefined,
+): boolean {
+    if (left === undefined || right === undefined || left.kind !== right.kind) {
+        return false;
+    }
+    switch (left.kind) {
+        case "context":
+        case "instance":
+            return right.kind === left.kind && right.id === left.id;
+        case "overviewInstance":
+            return right.kind === "overviewInstance" && right.instance === left.instance;
+        case "terminalTab":
+            return right.kind === "terminalTab" && right.tab === left.tab;
+        case "boxTitle":
+            return right.kind === "boxTitle" && right.boxId === left.boxId;
+        case "boxBody":
+            return (
+                right.kind === "boxBody" &&
+                right.boxId === left.boxId &&
+                right.lineId === left.lineId
+            );
+        case "scrollViewport":
+            return right.kind === "scrollViewport";
+    }
 }
 
 function readErrorMessage(error: unknown): string {
