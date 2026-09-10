@@ -62,6 +62,18 @@ export function selectSidebarModel(state: TuiAppState): TuiSidebarModel {
         state.interaction.focusScope === "sidebarInstances";
 
     return {
+        context: {
+            items: tuiPageEntries.map((page) => ({
+                focused:
+                    sidebarFocused &&
+                    cursor?.kind === "page" &&
+                    cursor.id === page.id,
+                id: page.id,
+                label: page.label,
+                selected: state.ui.selectedPage === page.id,
+            })),
+            kind: "pages",
+        },
         instances: state.instances.map((instance) => ({
             focused:
                 sidebarFocused &&
@@ -70,15 +82,6 @@ export function selectSidebarModel(state: TuiAppState): TuiSidebarModel {
             id: instance.name,
             label: instance.name,
             selected: state.ui.selectedInstance === instance.name,
-        })),
-        pages: tuiPageEntries.map((page) => ({
-            focused:
-                sidebarFocused &&
-                cursor?.kind === "page" &&
-                cursor.id === page.id,
-            id: page.id,
-            label: page.label,
-            selected: state.ui.selectedPage === page.id,
         })),
     };
 }

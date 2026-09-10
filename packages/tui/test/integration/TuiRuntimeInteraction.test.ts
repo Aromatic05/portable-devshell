@@ -480,6 +480,8 @@ test("real Ink runtime handles sidebar mouse buttons and viewport wheel scrollin
             () => runtime.store.getState().connection.status === "connected",
         );
 
+        runtime.store.setSidebarCursor({ id: "help", kind: "page" });
+        runtime.store.setFocusScope("sidebarPages");
         const helpRegion = buildTuiHitRegions(runtime.store.getState(), {
             columns: runtime.columns,
             rows: runtime.rows,

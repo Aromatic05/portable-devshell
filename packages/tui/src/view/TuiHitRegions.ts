@@ -15,6 +15,10 @@ import {
     tuiLayoutMetrics,
 } from "./TuiRootLayout.js";
 import {
+    selectTuiSidebarViewport,
+    tuiSidebarSectionRows,
+} from "./TuiSidebarPresentation.js";
+import {
     selectTuiOverviewInstanceViewport,
     selectTuiOverviewPresentation,
 } from "./page/TuiOverviewPresentation.js";
@@ -152,26 +156,32 @@ export function buildTuiHitRegions(
         ? Math.max(0, viewport.columns - 4)
         : Math.max(0, layout.mainPanelWidth - 2);
     const contentY = compact ? 6 : 5;
-    let sidebarY = contentY;
-
     if (!compact) {
-        for (const page of sidebar.pages) {
+        const sectionRows = tuiSidebarSectionRows(Math.max(0, viewport.rows - 6));
+        const contextViewport = selectTuiSidebarViewport(
+            sidebar.context.items,
+            sectionRows.contextRows,
+        );
+        const instanceViewport = selectTuiSidebarViewport(
+            sidebar.instances,
+            sectionRows.instanceRows,
+        );
+        for (const [index, page] of contextViewport.items.entries()) {
             regions.push({
                 height: 1,
                 target: { id: page.id, kind: "page" },
                 width: layout.sidebarWidth - 2,
                 x: layout.outerGap + 2,
-                y: sidebarY++,
+                y: contentY + index,
             });
         }
-        sidebarY += 1;
-        for (const instance of sidebar.instances) {
+        for (const [index, instance] of instanceViewport.items.entries()) {
             regions.push({
                 height: 1,
                 target: { id: instance.id, kind: "instance" },
                 width: layout.sidebarWidth - 2,
                 x: layout.outerGap + 2,
-                y: sidebarY++,
+                y: contentY + sectionRows.contextRows + index,
             });
         }
     }

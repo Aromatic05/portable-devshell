@@ -53,8 +53,11 @@ export interface TuiSidebarEntry {
 }
 
 export interface TuiSidebarModel {
+    context: {
+        items: TuiSidebarEntry[];
+        kind: "pages";
+    };
     instances: TuiSidebarEntry[];
-    pages: TuiSidebarEntry[];
 }
 
 export type TuiPageLoadState =

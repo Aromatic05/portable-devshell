@@ -117,7 +117,11 @@ export function TuiApp(props: TuiAppProps) {
             sidebar={
                 fullWidth
                     ? undefined
-                    : <TuiComponentSidebar compact={layout.mode === "compact"} model={selectSidebarModel(state)} />
+                    : <TuiComponentSidebar
+                        compact={layout.mode === "compact"}
+                        model={selectSidebarModel(state)}
+                        rows={Math.max(0, props.runtime.rows - 6)}
+                    />
             }
         />
     );
