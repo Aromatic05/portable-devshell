@@ -33,6 +33,15 @@ export function TuiComponentSidebar(props: TuiComponentSidebarProps) {
                 kind="page"
                 rows={sectionRows.contextRows}
             />
+            <Box
+                borderBottom={false}
+                borderLeft={false}
+                borderRight={false}
+                borderStyle="single"
+                borderTop
+                height={1}
+                width="100%"
+            />
             <SidebarViewport
                 items={props.model.instances}
                 kind="instance"

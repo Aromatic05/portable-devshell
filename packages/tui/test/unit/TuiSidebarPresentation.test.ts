@@ -6,14 +6,14 @@ import {
     tuiSidebarSectionRows,
 } from "../../src/view/TuiSidebarPresentation.ts";
 
-test("sidebar splits its inner height evenly between Context and Instances", () => {
+test("sidebar reserves a divider row and splits the remaining height between Context and Instances", () => {
     assert.deepEqual(tuiSidebarSectionRows(8), {
-        contextRows: 3,
+        contextRows: 2,
         instanceRows: 3,
     });
     assert.deepEqual(tuiSidebarSectionRows(9), {
         contextRows: 3,
-        instanceRows: 4,
+        instanceRows: 3,
     });
 });
 

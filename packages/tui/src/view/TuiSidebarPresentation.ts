@@ -9,7 +9,7 @@ export function tuiSidebarSectionRows(sidebarRows: number): {
     contextRows: number;
     instanceRows: number;
 } {
-    const innerRows = Math.max(0, sidebarRows - 2);
+    const innerRows = Math.max(0, sidebarRows - 3);
     const contextRows = Math.floor(innerRows / 2);
     return {
         contextRows,
