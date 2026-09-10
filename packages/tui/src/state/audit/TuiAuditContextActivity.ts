@@ -16,6 +16,9 @@ export function latestObservedContextId(
     for (const call of state.readModel.instanceState[instance]?.commentCalls ?? []) {
         calls.set(call.callId, call);
     }
+    for (const call of state.readModel.instanceState[instance]?.reportCalls ?? []) {
+        calls.set(call.callId, call);
+    }
     const activities = [
         ...[...calls.values()].flatMap(callActivity),
         ...(state.readModel.instanceState[instance]?.approvals ?? []).flatMap(approvalActivity),

@@ -101,6 +101,11 @@ export function isRenderRelevantChange(
         case "config":
             return previous.readModel.configView !== next.readModel.configView ||
                 before?.snapshot !== after?.snapshot;
+        case "messages":
+            return previous.readModel.contexts !== next.readModel.contexts ||
+                before?.contextMessages !== after?.contextMessages ||
+                before?.reportCalls !== after?.reportCalls ||
+                before?.snapshot !== after?.snapshot;
         case "audit":
             return before?.commentCalls !== after?.commentCalls ||
                 before?.approvals !== after?.approvals ||

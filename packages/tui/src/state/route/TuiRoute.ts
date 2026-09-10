@@ -10,6 +10,8 @@ export type TuiRoute =
     | { connectorId: string; page: "connections"; view: "connector" }
     | { page: "connections"; providerId: string; view: "oauth" }
     | { instanceId: string; page: "connections"; view: "reverse" }
+    | { page: "messages"; view: "contexts" }
+    | { ctxId: string; page: "messages"; view: "thread" }
     | { page: "audit"; view: "contexts" }
     | { page: "audit"; scope: "unscoped"; view: "context" }
     | { ctxId: string; page: "audit"; scope: "context"; view: "context" }
@@ -40,6 +42,7 @@ export function rootTuiRoute(page: TuiRoute["page"]): TuiRoute {
         case "connections":
         case "todo":
             return { page, view: "overview" };
+        case "messages":
         case "audit":
         case "logs":
             return { page, view: "contexts" };
@@ -57,6 +60,10 @@ export function tuiRouteIdentity(route: TuiRoute): string {
         case "config":
         case "help":
             return `${route.page}/${route.view}`;
+        case "messages":
+            return route.view === "contexts"
+                ? "messages/contexts"
+                : `messages/context/${encodeURIComponent(route.ctxId)}`;
         case "terminal":
             return route.pane === undefined
                 ? `terminal/${route.tab}`

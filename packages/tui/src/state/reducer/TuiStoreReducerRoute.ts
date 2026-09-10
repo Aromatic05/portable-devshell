@@ -15,7 +15,10 @@ export function reduceTuiStoreReducerRoute(state: TuiAppState, action: TuiAppAct
                 ...next,
                 ui: {
                     ...next.ui,
-                    sidebarLevel: action.page === "audit" ? "section" : "root",
+                    sidebarLevel:
+                        action.page === "audit" || action.page === "messages"
+                            ? "section"
+                            : "root",
                 },
             };
         }

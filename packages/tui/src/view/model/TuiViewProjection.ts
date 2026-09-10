@@ -29,6 +29,10 @@ import {
 } from "../../state/TuiPageCatalog.js";
 import { topTuiOverlay } from "../../state/overlay/TuiOverlay.js";
 import { selectTuiAuditSidebarEntries } from "../page/audit/TuiAuditSidebarProjection.js";
+import {
+    renderTuiMessageHistoryLines,
+    selectTuiMessagesSidebarEntries,
+} from "../page/messages/TuiMessagesProjection.js";
 
 export function selectActivePage(state: TuiAppState): TuiActivePage {
     return {
@@ -86,6 +90,12 @@ function selectSidebarContext(
         return {
             items: selectTuiAuditSidebarEntries(state, focused, cursor),
             kind: "audit",
+        };
+    }
+    if (state.ui.sidebarLevel === "section" && state.ui.selectedPage === "messages") {
+        return {
+            items: selectTuiMessagesSidebarEntries(state, focused, cursor),
+            kind: "messages",
         };
     }
     return {
@@ -175,6 +185,23 @@ export function selectMainBoxFlowMetrics(
     state: TuiAppState,
     boxInnerWidth = 80,
 ): TuiMainBoxFlowMetrics {
+    const route = currentTuiRoute(state);
+    if (
+        route.page === "messages" &&
+        route.view === "thread" &&
+        state.ui.selectedInstance !== undefined
+    ) {
+        return {
+            boxRanges: {},
+            scrollKey: selectMainScrollKey(state),
+            totalLines: renderTuiMessageHistoryLines(
+                state,
+                state.ui.selectedInstance,
+                route.ctxId,
+                boxInnerWidth,
+            ).length,
+        };
+    }
     if (state.ui.selectedPage === "overview") {
         const scrollKey = selectMainScrollKey(state);
         const ids = selectTuiOverviewFocusIds(state);
@@ -236,7 +263,7 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
     switch (state.interaction.focusScope) {
         case "sidebarContext":
         case "sidebarInstances":
-            return ["→ main", "enter", "0-8 pages", "shift+1-9 instances"];
+            return ["→ main", "enter", "0-9 pages", "shift+1-9 instances"];
         case "mainBoxes":
             if (state.ui.selectedPage === "overview") {
                 return [

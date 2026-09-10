@@ -2,7 +2,7 @@ import type { ContextMessageRecord, JsonValue, ToolCallRecord } from "@portable-
 
 import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
-import { readContextConversationDraft } from "../../../interaction/command/dispatcher/TuiCommandDispatcherNavigation.js";
+import { readContextConversationDraft } from "../../../state/TuiContextConversationDraft.js";
 import {
     isActiveContextForInstance,
     isLatestObservedContext,

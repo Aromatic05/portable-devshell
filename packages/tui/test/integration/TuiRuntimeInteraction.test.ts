@@ -50,7 +50,7 @@ test("real Ink runtime handles keyboard navigation, search, redraw, and terminal
         assert.match(terminal.output, /instances 0 \| live 0/u);
         assert.match(terminal.output, /Create Instance/u);
 
-        terminal.write("7");
+        terminal.write("8");
         await waitUntil(
             () => runtime.store.getState().ui.selectedPage === "help",
         );
@@ -453,7 +453,7 @@ test("real Ink runtime renders connection failure and remains interactive until 
             terminal.output.includes("control server is not running."),
         );
 
-        terminal.write("7");
+        terminal.write("8");
         await waitUntil(
             () => runtime.store.getState().ui.selectedPage === "help",
         );
@@ -704,6 +704,7 @@ test("real Ink runtime routes every page and drives approval and text detail scr
             "instances",
             "config",
             "connections",
+            "messages",
             "audit",
             "logs",
             "todo",
@@ -981,7 +982,7 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
         runtime.store.setSelectedInstance("alpha");
         runtime.store.setSelectedPage("instances");
 
-        host.write("8");
+        host.write("9");
         await waitUntil(
             () => runtime.store.getState().ui.selectedPage === "terminal",
         );
@@ -1207,7 +1208,7 @@ test("real Ink runtime switches terminal sources and drives tmux View and Attach
         await waitUntil(() => runtime.store.getState().instances.length === 1);
         runtime.store.setSelectedInstance("alpha");
 
-        host.write("8");
+        host.write("9");
         await waitUntil(
             () => runtime.store.getState().ui.selectedPage === "terminal",
         );

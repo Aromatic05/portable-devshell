@@ -51,7 +51,7 @@ test("real TuiRuntime drives Todo overview to detail through the control socket"
         );
         await waitUntil(() => runtime.store.getState().instances.length === 1);
 
-        await runtime.handleInput("6", {});
+        await runtime.handleInput("7", {});
         await waitUntil(
             () => runtime.store.getState().ui.selectedPage === "todo",
         );

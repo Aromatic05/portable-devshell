@@ -250,6 +250,11 @@ export function selectBreadcrumbSegments(state: TuiAppState): string[] {
     const route = currentTuiRoute(state);
     const segments: string[] = [route.page];
     switch (route.page) {
+        case "messages":
+            if (route.view === "thread") {
+                segments.push(truncateTuiBreadcrumbSegment(route.ctxId));
+            }
+            break;
         case "audit":
             if (route.view === "context" || route.view === "conversation" || route.view === "call") {
                 segments.push(
@@ -391,6 +396,24 @@ function isTuiRouteResourceValid(
     route: TuiRoute,
     instance: string | undefined,
 ): boolean {
+    if (route.page === "messages" && route.view === "thread") {
+        if (instance === undefined) return false;
+        const registered = state.readModel.contexts.some(
+            (context) =>
+                context.ctxId === route.ctxId &&
+                context.environments.some(
+                    (environment) => environment.instance === instance,
+                ),
+        );
+        const instanceState = state.readModel.instanceState[instance];
+        return registered ||
+            (instanceState?.contextMessages ?? []).some(
+                (message) => message.ctxId === route.ctxId,
+            ) ||
+            (instanceState?.reportCalls ?? []).some(
+                (call) => call.ctxId === route.ctxId,
+            );
+    }
     if (route.page === "audit" && route.view !== "contexts") {
         if (instance === undefined) return false;
         const calls = mergeCalls(

@@ -23,6 +23,7 @@ import { TuiRuntime } from "../../src/runtime/TuiRuntime.js";
 import {
     currentTuiRoute,
     readContextConversationDraft,
+    selectSidebarModel,
 } from "../../src/testing.ts";
 import { renderExpandableBoxLines } from "../../src/view/component/TuiComponentExpandableBox.js";
 import { selectMainScreenModel } from "../../src/view/model/TuiViewProjection.js";
@@ -144,6 +145,88 @@ test(
     );
     assert.equal(harness.routeCalls.contextQueue >= 2, true, "Comment sends must cross the real control RPC route");
 
+});
+
+test("Messages renders comment and report history and sends a Comment from the fixed composer", async (t) => {
+    const report: ToolCallRecord = {
+        callId: "report-call",
+        completedAt: "2026-08-03T00:06:00.000Z",
+        ctxId: "ctx-alpha",
+        input: { message: "agent progress report" },
+        inputSummary: '{"message":"agent progress report"}',
+        instance: "alpha" as never,
+        source: "mcp",
+        startedAt: "2026-08-03T00:05:59.000Z",
+        status: "completed",
+        toolName: "todo_report",
+        workspace: "/workspace/alpha",
+    };
+    const harness = await createHarness([report]);
+    t.after(async () => await harness.close());
+    await harness.messages.queue({
+        ctxId: "ctx-alpha",
+        text: "existing user comment",
+    });
+    await harness.start();
+
+    harness.terminal.write("4");
+    await waitUntil(
+        () => harness.runtime.store.getState().ui.selectedPage === "messages",
+    );
+    harness.terminal.write("!");
+    await waitUntil(
+        () => harness.runtime.store.getState().ui.selectedInstance === "alpha",
+    );
+    await waitUntil(() =>
+        selectSidebarModel(harness.runtime.store.getState()).context.items.some(
+            (entry) => entry.id === "messages:context:ctx-alpha",
+        ),
+    );
+    assert.equal(
+        harness.runtime.focusManager.setFocus({
+            id: "messages:context:ctx-alpha",
+            kind: "context",
+        }),
+        true,
+    );
+    harness.terminal.write("\r");
+    await waitUntil(() => {
+        const route = currentTuiRoute(harness.runtime.store.getState());
+        return route.page === "messages" && route.view === "thread";
+    });
+    await waitUntil(
+        () =>
+            harness.runtime.store.getState().interaction.focusScope ===
+            "contextConversation",
+    );
+    await waitUntil(() => harness.terminal.output.includes("agent progress report"));
+    assert.match(harness.terminal.output, /existing user comment/u);
+
+    harness.terminal.write("follow up\r");
+    await waitUntil(async () =>
+        (await harness.messages.list("ctx-alpha")).some(
+            (message) => message.text === "follow up",
+        ),
+    );
+    await waitUntil(
+        () =>
+            harness.runtime.store.getState().interaction.screenStatusByPage.messages ===
+            "Comment queued.",
+    );
+    assert.equal(
+        harness.runtime.store.getState().interaction.screenStatusByPage.messages,
+        "Comment queued.",
+    );
+    assert.deepEqual(currentTuiRoute(harness.runtime.store.getState()), {
+        ctxId: "ctx-alpha",
+        page: "messages",
+        view: "thread",
+    });
+
+    harness.terminal.write("\u001b");
+    await waitUntil(
+        () => harness.runtime.store.getState().interaction.focusScope === "sidebarContext",
+    );
 });
 
 test("real Ink keeps Space, Enter, route hierarchy, logical focus and rendered highlight consistent", async (t) => {
@@ -475,7 +558,7 @@ function overview(): JsonValue {
 }
 
 async function selectAudit(harness: Harness): Promise<void> {
-    harness.terminal.write("4");
+    harness.terminal.write("5");
     await waitUntil(() => harness.runtime.store.getState().ui.selectedPage === "audit");
     harness.terminal.write("!");
     await waitUntil(() => harness.runtime.store.getState().ui.selectedInstance === "alpha");

@@ -7,6 +7,7 @@ import type { TuiBoxModel } from "../../state/TuiViewModel.js";
 import { renderExpandableBoxLines, type TuiComponentExpandableBoxRenderLine } from "../component/TuiComponentExpandableBox.js";
 import { TuiComponentErrorBanner } from "../component/TuiComponentErrorBanner.js";
 import { measureMainBoxFlowMetrics, selectMainBoxIds, selectMainScreenModel, selectMainScrollKey, selectSidebarModel } from "../model/TuiViewProjection.js";
+import { TuiMessagesView } from "../page/messages/TuiMessagesView.js";
 import { TuiOverviewView } from "../page/TuiOverviewView.js";
 
 export interface TuiScreenRouterProps {
@@ -17,6 +18,15 @@ export interface TuiScreenRouterProps {
 
 export function TuiScreenRouter(props: TuiScreenRouterProps) {
     const model = selectMainScreenModel(props.state);
+    if (props.state.ui.selectedPage === "messages") {
+        return (
+            <TuiMessagesView
+                state={props.state}
+                viewportRows={props.viewportRows}
+                width={props.boxInnerWidth}
+            />
+        );
+    }
     if (props.state.ui.selectedPage === "overview") {
         const showOverview = model.loadState.kind === "ready" || model.loadState.kind === "stale";
         return (

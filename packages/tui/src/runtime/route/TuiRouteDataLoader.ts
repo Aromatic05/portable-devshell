@@ -28,6 +28,9 @@ export class TuiRouteDataLoader {
             case "audit":
                 if (instance !== undefined) await this.options.session.refreshAudit(instance, undefined, signal);
                 return;
+            case "messages":
+                if (instance !== undefined) await this.options.session.refreshMessages(instance, undefined, signal);
+                return;
             case "todo":
                 if (instance !== undefined) {
                     const input = route.view === "detail" ? { taskId: route.todoId } : undefined;

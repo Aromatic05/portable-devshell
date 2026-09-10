@@ -171,6 +171,18 @@ export class TuiControlSession {
         );
     }
 
+    async refreshMessages(
+        instance: string,
+        generation = this.#generation,
+        signal?: AbortSignal,
+    ): Promise<void> {
+        if (!this.#canRefresh(generation, signal)) return;
+        await Promise.all([
+            this.#model.refreshContexts(),
+            this.#model.refreshInstance(instance, ["comments"]),
+        ]);
+    }
+
     async refreshToolCallsForInstance(
         instance: string,
         generation = this.#generation,

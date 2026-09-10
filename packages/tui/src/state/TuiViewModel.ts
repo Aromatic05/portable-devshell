@@ -65,7 +65,7 @@ export interface TuiSidebarContextEntry extends TuiSidebarEntry {
 export interface TuiSidebarModel {
     context: {
         items: TuiSidebarContextEntry[];
-        kind: "audit" | "pages";
+        kind: "audit" | "messages" | "pages";
     };
     instances: TuiSidebarEntry[];
 }

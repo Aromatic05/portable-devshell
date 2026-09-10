@@ -9,12 +9,19 @@ import { TuiCommandDispatcherViewport } from "./TuiCommandDispatcherViewport.js"
 import { selectTuiOverviewInstanceName } from "../../../view/page/TuiOverviewPresentation.js";
 import { selectSidebarModel } from "../../../view/model/TuiViewProjection.js";
 import { topTuiOverlay } from "../../../state/overlay/TuiOverlay.js";
-import { currentTuiRoute } from "../../../state/route/TuiRouteState.js";
+import {
+    currentTuiRoute,
+    currentTuiRouteScrollKey,
+} from "../../../state/route/TuiRouteState.js";
 import {
     isActiveContextForInstance,
     isLatestObservedContext,
     latestObservedContextId,
 } from "../../../state/audit/TuiAuditContextActivity.js";
+import {
+    contextConversationDraftKey,
+    readContextConversationDraft,
+} from "../../../state/TuiContextConversationDraft.js";
 
 export interface TuiCommandDispatcherNavigationOptions {
     dispatch?(intent: TuiUiIntent): Promise<boolean>;
@@ -141,6 +148,38 @@ export class TuiCommandDispatcherNavigation {
                         this.#store.replaceRoute(entry.target.route);
                     }
                     this.#store.setSidebarCursor(cursor);
+                    if (
+                        entry.target.route.page === "messages" &&
+                        entry.target.route.view === "thread"
+                    ) {
+                        this.#store.setScrollOffset(
+                            currentTuiRouteScrollKey(this.#store.getState()),
+                            Number.MAX_SAFE_INTEGER,
+                        );
+                        this.#store.setFocusScope("sidebarContext");
+                        const state = this.#store.getState();
+                        if (
+                            state.ui.selectedInstance !== undefined &&
+                            isActiveContextForInstance(
+                                state,
+                                state.ui.selectedInstance,
+                                entry.target.route.ctxId,
+                            ) &&
+                            isLatestObservedContext(
+                                state,
+                                state.ui.selectedInstance,
+                                entry.target.route.ctxId,
+                            )
+                        ) {
+                            this.#startContextConversationEditing();
+                        } else {
+                            this.#store.setScreenStatus(
+                                "messages",
+                                "This session is read-only.",
+                            );
+                        }
+                        return true;
+                    }
                     this.#store.setFocusScope("sidebarContext");
                     this.#focus.syncMainFocus();
                     return true;
@@ -298,7 +337,10 @@ export class TuiCommandDispatcherNavigation {
         if (target === undefined) return false;
         const state = this.#store.getState();
         if (!isActiveContextForInstance(state, target.instance, target.ctxId)) {
-            this.#store.setScreenStatus("audit", "Comment editing is blocked because this context is not active on this instance.");
+            this.#store.setScreenStatus(
+                target.page,
+                "Comment editing is blocked because this context is not active on this instance.",
+            );
             return false;
         }
         const draft = readContextConversationDraft(state, target.instance, target.ctxId);
@@ -330,7 +372,7 @@ export class TuiCommandDispatcherNavigation {
             ...editor,
             cursor: backspace ? Math.max(0, cursor - 1) : cursor + input.length,
         });
-        this.#store.setScreenStatus("audit", undefined);
+        this.#store.setScreenStatus(target.page, undefined);
         return true;
     }
 
@@ -353,7 +395,7 @@ export class TuiCommandDispatcherNavigation {
         const state = this.#store.getState();
         if (!isActiveContextForInstance(state, target.instance, target.ctxId)) {
             this.#store.setScreenStatus(
-                "audit",
+                target.page,
                 "Comment not queued: this context is not active on this instance.",
             );
             return false;
@@ -361,7 +403,7 @@ export class TuiCommandDispatcherNavigation {
         if (!isLatestObservedContext(state, target.instance, target.ctxId)) {
             const latest = latestObservedContextId(state, target.instance);
             this.#store.setScreenStatus(
-                "audit",
+                target.page,
                 `Comment not queued: this context is no longer the latest observed context${latest === undefined ? "." : `; open ${latest}.`}`,
             );
             return false;
@@ -372,11 +414,11 @@ export class TuiCommandDispatcherNavigation {
             target.ctxId,
         ).trim();
         if (text.length === 0) {
-            this.#store.setScreenStatus("audit", "Comment cannot be empty.");
+            this.#store.setScreenStatus(target.page, "Comment cannot be empty.");
             return false;
         }
         if (this.#onContextMessage === undefined) {
-            this.#store.setScreenStatus("audit", "Context Comment service is unavailable.");
+            this.#store.setScreenStatus(target.page, "Context Comment service is unavailable.");
             return false;
         }
         try {
@@ -392,23 +434,40 @@ export class TuiCommandDispatcherNavigation {
                 key: contextConversationDraftKey(target.instance, target.ctxId),
                 kind: "comment",
             });
-            this.#store.setScreenStatus("audit", "Comment queued.");
+            this.#store.setScreenStatus(target.page, "Comment queued.");
             this.#store.setFocusScope("contextConversation");
             return true;
         } catch (error) {
-            this.#store.setScreenStatus("audit", `Comment failed: ${readErrorMessage(error)}`);
+            this.#store.setScreenStatus(target.page, `Comment failed: ${readErrorMessage(error)}`);
             return false;
         }
     }
 
-    #contextConversationTarget(): { ctxId: string; instance: string } | undefined {
+    #contextConversationTarget(): {
+        ctxId: string;
+        instance: string;
+        page: "audit" | "messages";
+    } | undefined {
         const state = this.#store.getState();
         const route = currentTuiRoute(state);
-        return state.ui.selectedInstance !== undefined &&
+        if (state.ui.selectedInstance === undefined) return undefined;
+        if (
             route.page === "audit" &&
             route.view === "conversation" &&
             route.scope === "context"
-            ? { ctxId: route.ctxId, instance: state.ui.selectedInstance }
+        ) {
+            return {
+                ctxId: route.ctxId,
+                instance: state.ui.selectedInstance,
+                page: "audit",
+            };
+        }
+        return route.page === "messages" && route.view === "thread"
+            ? {
+                  ctxId: route.ctxId,
+                  instance: state.ui.selectedInstance,
+                  page: "messages",
+              }
             : undefined;
     }
 
@@ -435,18 +494,4 @@ export class TuiCommandDispatcherNavigation {
 
 function readErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
-}
-
-
-export function contextConversationDraftKey(instance: string, ctxId: string): string {
-    return `contextConversation:${instance}:${ctxId}`;
-}
-
-export function readContextConversationDraft(
-    state: import("../../../state/reducer/TuiStoreModel.js").TuiAppState,
-    instance: string,
-    ctxId: string,
-): string {
-    const value = state.ui.formDrafts[contextConversationDraftKey(instance, ctxId)];
-    return typeof value === "string" ? value : "";
 }

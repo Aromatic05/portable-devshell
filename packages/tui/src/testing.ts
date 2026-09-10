@@ -17,6 +17,7 @@ export * from "./state/focus/TuiFocusGraph.js";
 export * from "./interaction/input/TuiKeyDispatcher.js";
 export * from "./interaction/focus/TuiFocusManager.js";
 export * from "./state/TuiInteractionState.js";
+export * from "./state/TuiContextConversationDraft.js";
 export * from "./state/TuiPageNavigation.js";
 export * from "./state/route/TuiRoute.js";
 export * from "./state/route/TuiRouteState.js";

@@ -355,7 +355,11 @@ export class TuiCommandDispatcher {
         const scope = this.#store.getState().interaction.focusScope;
         if (scope === "contextConversation") {
             this.#store.setEditor(undefined);
-            this.#store.setFocusScope("mainBoxes");
+            this.#store.setFocusScope(
+                this.#store.getState().ui.selectedPage === "messages"
+                    ? "sidebarContext"
+                    : "mainBoxes",
+            );
             return true;
         }
         if (scope === "approvalDetail" || scope === "denyConfirm") {

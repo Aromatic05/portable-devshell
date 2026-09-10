@@ -73,6 +73,8 @@ function buildUnfilteredBoxes(
             return instanceName === undefined
                 ? []
                 : buildConnectionsPageBoxes(state, instanceName);
+        case "messages":
+            return [];
         case "audit":
             return instanceName === undefined
                 ? []

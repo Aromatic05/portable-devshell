@@ -1,6 +1,7 @@
 import type { TuiAppStore } from "../../../state/TuiAppStore.js";
 import type { TuiInteractionProjection } from "../../TuiInteractionProjection.js";
 import { overviewInstanceViewportRows } from "../../../view/page/TuiOverviewPresentation.js";
+import { tuiMessagesHistoryRows } from "../../../view/page/messages/TuiMessagesProjection.js";
 
 interface CommandFocusOptions {
     mainViewportRows(): number;
@@ -56,8 +57,9 @@ export class TuiCommandDispatcherFocus {
 
     scrollMainColumn(delta: number): boolean {
         const key = this.#projection.selectMainScrollKey(this.#store.getState());
-        const current = this.#store.getState().ui.scrollOffsets[key] ?? 0;
-        const next = clamp(delta === 0 ? current : current + delta, 0, this.maxMainScrollOffset());
+        const max = this.maxMainScrollOffset();
+        const current = clamp(this.#store.getState().ui.scrollOffsets[key] ?? 0, 0, max);
+        const next = clamp(delta === 0 ? current : current + delta, 0, max);
         this.#store.setScrollOffset(key, next);
         return true;
     }
@@ -100,6 +102,9 @@ export class TuiCommandDispatcherFocus {
     boxViewportRows(): number {
         if (this.#store.getState().ui.selectedPage === "overview") {
             return overviewInstanceViewportRows(this.#mainViewportRows());
+        }
+        if (this.#store.getState().ui.selectedPage === "messages") {
+            return tuiMessagesHistoryRows(this.#mainViewportRows());
         }
         const model = this.#projection.selectMainScreenModel(this.#store.getState());
         return Math.max(0, this.#mainViewportRows() - 1 - (model.statusLine === undefined ? 0 : 1) - (model.emptyState === undefined ? 0 : 1));

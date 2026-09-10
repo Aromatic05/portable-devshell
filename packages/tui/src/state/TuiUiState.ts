@@ -6,6 +6,7 @@ export type TuiPageId =
     | "todo"
     | "config"
     | "connections"
+    | "messages"
     | "audit"
     | "logs"
     | "help"

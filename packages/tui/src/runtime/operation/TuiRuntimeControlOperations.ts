@@ -241,6 +241,9 @@ export class TuiRuntimeControlOperations {
                 await this.options.session.refreshConfig();
                 await this.options.session.refreshOAuth();
                 return;
+            case "messages":
+                if (instance !== undefined) await this.options.session.refreshMessages(instance);
+                return;
             case "audit":
                 if (instance !== undefined) await this.options.session.refreshAudit(instance);
                 return;
