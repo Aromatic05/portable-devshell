@@ -65,6 +65,9 @@ test("Secret model command scans the authoritative Worker workspace without retu
         context(events),
         ["scan"],
         {
+            context: {
+                async connectInstance() { throw new Error("unused"); }
+            },
             instance: "remote-one",
             requestId: "model-secret",
             signal: new AbortController().signal,

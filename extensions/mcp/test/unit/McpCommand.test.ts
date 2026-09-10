@@ -19,6 +19,9 @@ function invocation(localOwner = true) {
 
 function modelInvocation() {
     return {
+        context: {
+            async connectInstance() { throw new Error("unused"); }
+        },
         instance: "local-test",
         requestId: "model-request",
         signal: new AbortController().signal,

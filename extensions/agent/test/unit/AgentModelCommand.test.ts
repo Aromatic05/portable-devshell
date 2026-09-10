@@ -10,6 +10,9 @@ import {
 
 function invocation() {
     return {
+        context: {
+            async connectInstance() { throw new Error("unused"); }
+        },
         instance: "worker-a",
         requestId: "model-agent",
         signal: new AbortController().signal,

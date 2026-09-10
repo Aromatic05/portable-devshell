@@ -22,6 +22,7 @@ function record(ctxId: string): McpContextRecord {
 test("context routes resolve the current admin port for every request", async () => {
     let current = "first";
     const port = (): ContextAdminPort => ({
+        async connectInstance() { throw new Error("unused"); },
         async disable(ctxId) { return record(`${current}:disable:${ctxId}`); },
         async list() { return [record(`${current}:list`)]; },
         async renew(ctxId) { return record(`${current}:renew:${ctxId}`); },

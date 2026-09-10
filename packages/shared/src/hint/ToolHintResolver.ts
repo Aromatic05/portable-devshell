@@ -45,7 +45,7 @@ const resultResolvers: Record<string, ResultResolver> = {
 const fileTools = new Set(["file_read", "file_edit", "file_find", "file_search", "file_info"]);
 const tmuxTools = new Set(["tmux_run", "tmux_input", "tmux_read", "tmux_inspect", "tmux_list", "tmux_create", "tmux_close"]);
 const artifactControlTools = new Set(["artifact_viewImage", "artifact_share"]);
-const instanceTools = new Set(["instance_list", "instance_status", "instance_create", "instance_connect", "instance_stop"]);
+const instanceTools = new Set(["instance_list", "instance_status", "instance_create", "instance_stop"]);
 const todoTools = new Set(["todo_read", "todo_write"]);
 
 function errorResolverFor(toolName: string): ErrorResolver | undefined {

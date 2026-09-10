@@ -43,7 +43,7 @@ const crossToolHints: Record<string, string> = {
     [errorCodes.mcpContextExpired]: "Call environ_info to renew the current Context, adding workspace only if it is not already attached.",
     [errorCodes.mcpContextDisabled]: "Call environ_info with workspace to establish a new active Context.",
     [errorCodes.mcpContextInvalid]: "Call environ_info with workspace to establish or recover the current Context.",
-    [errorCodes.mcpContextWorkspaceRequired]: "Call instance_connect with this instance and an absolute workspace.",
+    [errorCodes.mcpContextWorkspaceRequired]: "Use devshell instance connect <instance> <absolute-workspace>.",
     [errorCodes.targetInvalid]: "Use a valid instance target.",
     [errorCodes.controlClientIdentityRequired]: "Supply the required client identity.",
     [errorCodes.controlClientIdentityInvalid]: "Correct the client identity."

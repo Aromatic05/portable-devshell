@@ -180,7 +180,7 @@ test("McpEndpointCatalog keeps control tools available without a worker schema",
     });
 
     const tools = catalog.listTools();
-    assert.equal(tools.some((tool) => tool.name === "instance_connect"), true);
+    assert.equal(tools.some((tool) => tool.name === "instance_connect"), false);
     assert.equal(tools.some((tool) => tool.name === "instance_list"), false);
     assert.equal(tools.some((tool) => tool.name === "bash_run"), false);
     assert.equal(catalog.snapshot().hasWorkerSchema, false);
@@ -375,12 +375,21 @@ test("cached MCP tool names stay callable without re-exposing stale recipients",
         { workspace: "/workspace" },
         { principal: "tester", requestId: "request-environment" },
     ));
-    assert.deepEqual(await dispatch.callTool(
+    const instanceStart = await dispatch.callTool(
         "instance_start",
         { ctxId: environment.ctxId, instance: "remote" },
         { principal: "tester", requestId: "request-start" },
-    ), { state: "ready" });
-    assert.deepEqual(connected, ["remote"]);
+    );
+    assert.ok(instanceStart instanceof McpNativeToolResult);
+    assert.deepEqual(instanceStart.structuredContent, {
+        staleToolSnapshot: {
+            assistantInstruction: "Use devshell instance connect <instance> [workspace].",
+            help: "Use devshell instance connect <instance> [workspace].",
+            name: "instance_start",
+            removedIn: "0.7.1"
+        }
+    });
+    assert.deepEqual(connected, []);
 
     const tombstone = await dispatch.callTool(
         "context_message_read",

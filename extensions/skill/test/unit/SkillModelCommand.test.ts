@@ -12,6 +12,9 @@ import { executeSkillModelCommand } from "../../src/builtin/SkillModelCommand.ts
 
 function invocation(): CliModelCommandInvocationContext {
     return {
+        context: {
+            async connectInstance() { throw new Error("unused"); }
+        },
         instance: "remote-one",
         requestId: "model-skill",
         signal: new AbortController().signal,

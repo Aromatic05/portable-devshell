@@ -11,6 +11,8 @@ import type {
 import { McpEndpointCatalog } from "../../src/endpoint/McpEndpointCatalog.ts";
 import { McpEndpointDispatch } from "../../src/endpoint/McpEndpointDispatch.ts";
 import { McpNativeToolResult } from "../../src/endpoint/McpEndpointResult.ts";
+import { McpContextInstanceConnector } from "../../src/context/McpContextInstanceConnector.ts";
+import { McpContextRegistry } from "../../src/context/McpContextRegistry.ts";
 
 function structuredResult<T>(result: JsonValue | McpNativeToolResult): T {
     return (result instanceof McpNativeToolResult ? result.structuredContent : result) as T;
@@ -165,6 +167,7 @@ test("a routed artifact result consumes Comments from the routed instance Contex
     const audited: Array<{ instance: string; toolName: string }> = [];
     const called: Array<{ instance: string; toolName: string }> = [];
     const worker = createHarness().worker;
+    const contextRegistry = new McpContextRegistry();
     const gateway = {
         async appendMcpToolCalled(instance: string, toolName: string) {
             called.push({ instance, toolName });
@@ -239,6 +242,7 @@ test("a routed artifact result consumes Comments from the routed instance Contex
     });
     const dispatch = new McpEndpointDispatch({
         catalog,
+        contextRegistry,
         gateway: gateway as never,
         instanceName: "alpha",
         worker: worker as never,
@@ -248,11 +252,10 @@ test("a routed artifact result consumes Comments from the routed instance Contex
         { workspace: "/projects/alpha" },
         { principal: "tester", requestId: "environment-alpha" },
     ));
-    await dispatch.callTool(
-        "instance_connect",
-        { ctxId: environment.ctxId, instance: "beta", workspace: "/projects/beta" },
-        { principal: "tester", requestId: "connect-beta" },
-    );
+    await new McpContextInstanceConnector({
+        contextRegistry,
+        gateway: () => gateway as never
+    }).connect(environment.ctxId, "beta", "/projects/beta");
 
     const result = await dispatch.callTool(
         "artifact_viewImage",

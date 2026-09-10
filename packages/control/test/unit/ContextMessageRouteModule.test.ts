@@ -23,6 +23,7 @@ function contextRecord(ctxId: string, instance: string): McpContextRecord {
 test("contextMessage.queue validates the Context against the destination instance before persisting", async () => {
     const calls: string[] = [];
     const admin: ContextAdminPort = {
+        async connectInstance() { throw new Error("unused"); },
         async disable(ctxId) { return contextRecord(ctxId, "alpha"); },
         async list() { return []; },
         async renew(ctxId) { return contextRecord(ctxId, "alpha"); },

@@ -7,6 +7,9 @@ import type { CliModelCommandInvocationContext } from "@portable-devshell/extens
 import { executeArtifactModelCommand } from "../../src/builtin/ArtifactModelCommand.ts";
 
 const invocation: CliModelCommandInvocationContext = {
+    context: {
+        async connectInstance() { throw new Error("unused"); }
+    },
     instance: "instance-a",
     requestId: "request-1",
     signal: new AbortController().signal,
