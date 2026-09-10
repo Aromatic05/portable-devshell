@@ -89,7 +89,9 @@ temporaryDirectory
 
 workspace 必须是 **worker 机器上的绝对路径**。
 
-`instance_connect` 可以把另一个已就绪 instance 的 workspace 附加到同一个 Context。之后带 `instance` 路由的工具仍必须经过 Context 对该 instance 的 attachment 校验。
+Instance Extension 的 model command
+`devshell instance connect <instance> [workspace]` 可以把另一个已就绪 instance 的 workspace
+附加到同一个 Context。`ctxId` 由 audited model-command broker 在服务端注入，Extension 不持有该内部 id。之后带 `instance` 路由的工具仍必须经过 Context 对该 instance 的 attachment 校验。
 
 ### 切换 workspace
 

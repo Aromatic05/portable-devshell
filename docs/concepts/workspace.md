@@ -39,6 +39,19 @@ environ_info
 
 它不应该成为每次 Agent 工作的固定第一步。
 
+## 启用与关闭
+
+Workspace 是 instance 级可关闭子系统，默认启用：
+
+```toml
+[workspace]
+enabled = false
+```
+
+关闭不是简单地从 `tools/list` 隐藏入口。Control 会先执行完整的 Workspace retirement：撤销 App presence/capability、停止 wait recovery、回收 automatic re-entry/Goal continuation claim，并终止仍等待 Workspace 人机交互的状态，然后以 Workspace-disabled endpoint 重新注册该 instance。
+
+这个开关只关闭 Workspace 交互与恢复层。MCP endpoint、Context、Worker、`bash_run`、file/tmux primitive 和跨 instance routing 仍可继续使用。TUI 的 instance Config 页面可以直接切换 `workspace.enabled`；重新设为 `true` 会热恢复 Workspace surface，不要求重启 Worker。
+
 ## MCP App 生命周期
 
 Workspace UI 使用官方 MCP Apps SDK，而不是自定义 postMessage bridge。

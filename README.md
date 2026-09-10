@@ -103,8 +103,16 @@ enabled = true
 model = ["artifact", "instance", "mcp", "secret", "skill"]
 ```
 
-`instance_connect` 是 MCP 中保留的 instance Context attach primitive；instance 生命周期管理仍使用
-原生 `devshell instance ...`。model command 不会 fallback 到 native/builtin CLI。
+跨 instance Context attachment 也走 model Extension command：
+`devshell instance connect <instance> [workspace]`。MCP 不再保留独立的 `instance_connect`
+tool；model command 不会 fallback 到 native/builtin CLI。
+
+Workspace App/Goal/Wait recovery 可以按 instance 独立关闭，而不停止 Worker 或 MCP runtime：
+
+```toml
+[workspace]
+enabled = false
+```
 
 普通 MCP 客户端可以使用 `explicit` Context；支持稳定 Host metadata 的 ChatGPT endpoint 可使用 `openai-session`，让 model-facing 工具不携带内部 `ctxId`。两种模式最终都解析到 portable-devshell 自己的 Context。
 

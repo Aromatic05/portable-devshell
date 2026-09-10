@@ -222,7 +222,8 @@ timeoutMs = 5000
 - `version`：全局配置当前为 `2`，实例配置当前为 `4`；
 - `name`：必须包含连字符；
 - `provider`：`local`、`ssh`、`docker`、`podman`、`reverse`；
-- instance 配置不包含 `workspace`。worker 启动与实例生命周期不绑定项目目录；CLI 工具调用显式传绝对 workspace，MCP Context 通过 `environ_info` 选择初始 worker 绝对目录，并通过 `instance_connect` 为同一 `ctxId` 附加其他 instance 的绝对 workspace；
+- instance 配置不包含持久化默认 workspace path。worker 启动与实例生命周期不绑定项目目录；CLI 工具调用显式传绝对 workspace，MCP Context 通过 `environ_info` 选择初始 worker 绝对目录，并通过 Instance Extension 的 `devshell instance connect <instance> [workspace]` 为当前 Context 附加其他 instance；
+- `[workspace].enabled`：是否启用该 instance 的 Workspace App、Goal/Question/Approval/Wait 交互与自动 re-entry。默认 `true`；设为 `false` 会 retire 已存在的 Workspace presentation/recovery state，但不会关闭 MCP endpoint、停止 Worker 或移除 bash/file/tmux runtime primitive；
 - `[mcp].enabled`：是否注册该 instance 的 MCP endpoint；
 - `[mcp].auth`：该 instance 独立使用 `none`、`token` 或 `oauth2`；
 - `[mcp].contextMode`：选择 MCP 边界如何解析 portable-devshell Context。`explicit`（默认）允许 model-facing 工具显式携带 `ctxId`；`openai-session` 使用稳定 Host metadata 绑定内部 Context，并把 `ctxId` 留在模型 schema 之外。两种模式内部都继续使用 `ctxId` 作为 runtime key；完整语义见 [Context](../concepts/context.md)；
@@ -237,7 +238,7 @@ timeoutMs = 5000
 
 Web auth 和 instance MCP auth 完全独立：修改 `[web]` 不会改变任何 instance endpoint；不同 instance 也可以使用不同认证模式和 token。
 
-全局 version 1 配置仅作为旧格式迁移入口读取。旧 `[mcp.auth]` 会在迁移时下沉到 instance，写回后成为全局 version 2；旧 instance version 2/3 会迁移为 version 4，删除持久化 `workspace`，并丢弃已经退役的 `[mcp.tools]` group/capability policy。新配置不要继续使用这些旧结构。
+全局 version 1 配置仅作为旧格式迁移入口读取。旧 `[mcp.auth]` 会在迁移时下沉到 instance，写回后成为全局 version 2；旧 instance version 2/3 会迁移为 version 4，删除旧的持久化 workspace path，并丢弃已经退役的 `[mcp.tools]` group/capability policy。version 4 的 `[workspace]` 是新的 feature switch namespace，只接受 `enabled`，不是项目路径。
 
 ## SSH 实例
 

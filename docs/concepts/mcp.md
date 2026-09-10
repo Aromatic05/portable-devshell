@@ -145,9 +145,11 @@ MCP endpoint 不再用 instance 配置中的 group/capability 去动态裁剪 `t
 | tmux | `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_list`、`tmux_create`、`tmux_close` |
 | Todo | `todo_read`、`todo_write` |
 | Workspace | 小型 model-facing surface + App-only wire protocol |
-| Instance | 仅 `instance_connect` |
+| Instance | 无固定 MCP 管理 tool；Context attachment 走 model Extension command |
 
-`instance_connect` 不是 instance 管理面，而是“把一个已经存在的 managed instance，以及可选 workspace，附着到当前 Context”的 bootstrap primitive。创建、列出、状态、启动、停止、删除等 instance 生命周期仍由原生 `devshell instance ...` / TUI 管理。
+把另一个 managed instance/workspace 附着到当前 Context 时，模型使用
+`devshell instance connect <instance> [workspace]`。该命令属于 Instance Extension 的
+`cli.model-commands`；Extension 只拿到 Context-bound invocation interface，不会看到或自行提交内部 `ctxId`。创建、列出、状态、启动、停止、删除等 owner 管理仍由原生 `devshell instance ...` / TUI 负责。
 
 可扩展命令走另一条数据面。`bash_run` / `tmux_run` 启动的进程环境中存在 Context-bound `devshell` shim；它只解析 `cli.model-commands`，并按当前 instance 的 `[extensions].model` allowlist 授权。例如：
 
