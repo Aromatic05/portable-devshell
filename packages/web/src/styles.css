@@ -9,8 +9,9 @@ button:disabled { cursor: wait; opacity: .65; }
 button.selected, button.primary, .actions button.primary { background: #2865d7; }
 button.danger { background: #a23848; }
 .app { min-height: 100dvh; }
+aside, .bottom { -webkit-user-select: none; user-select: none; }
+main { min-width: 0; max-width: 1100px; margin: auto; padding: 1rem 1rem calc(6rem + env(safe-area-inset-bottom)); -webkit-user-select: text; user-select: text; }
 aside { display: none; }
-main { min-width: 0; max-width: 1100px; margin: auto; padding: 1rem 1rem calc(6rem + env(safe-area-inset-bottom)); }
 h1, h2, h3, h4 { margin-top: 0; }
 .connection { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: flex-end; align-items: center; border-radius: 9px; padding: .6rem .8rem; margin-bottom: 1rem; background: #6b5014; }
 .connection span { margin-right: auto; }
