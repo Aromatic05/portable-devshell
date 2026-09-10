@@ -15,8 +15,8 @@
         "dist"
     ],
     "dependencies": {
-        "@earendil-works/pi-coding-agent": "0.84.4",
-        "@earendil-works/pi-tui": "0.84.4",
+        "@earendil-works/pi-coding-agent": "0.85.1",
+        "@earendil-works/pi-tui": "0.85.1",
         "@portable-devshell/extension": "workspace:*",
         "@portable-devshell/shared": "workspace:*",
         "diff": "8.0.4",
