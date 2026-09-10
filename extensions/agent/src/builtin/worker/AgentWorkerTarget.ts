@@ -1,7 +1,5 @@
-import { asInstanceName, type InstanceName } from "@portable-devshell/shared";
-
 export interface AgentWorkerTarget {
-    instance: InstanceName;
+    instance: string;
     workspace: string;
 }
 
@@ -32,7 +30,7 @@ export function parseAgentWorkerTarget(value: string): AgentWorkerTarget {
     }
 
     return {
-        instance: asInstanceName(instance),
+        instance,
         workspace
     };
 }

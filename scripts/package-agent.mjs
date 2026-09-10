@@ -91,27 +91,19 @@ export async function shapeThinAgentExtensionTree(root) {
         `${JSON.stringify({ ...builtinManifest, entry: "dist/builtin/index.js" }, null, 4)}\n`,
         "utf8"
     );
-    const nodeModules = join(root, "node_modules");
-    for (const name of await readdir(nodeModules).catch(() => [])) {
-        if (name === "@portable-devshell") continue;
-        await rm(join(nodeModules, name), { force: true, recursive: true });
-    }
-    const portable = join(nodeModules, "@portable-devshell");
-    for (const name of await readdir(portable).catch(() => [])) {
-        if (name === "extension" || name === "shared") continue;
-        await rm(join(portable, name), { force: true, recursive: true });
-    }
+    await rm(join(root, "node_modules"), { force: true, recursive: true });
     await rewriteDeploymentPackage(root, {
         dependencies: {
-            "@portable-devshell/extension": "workspace:*",
-            "@portable-devshell/shared": "workspace:*"
+            "@portable-devshell/extension": "workspace:*"
         },
         entry: "./dist/index.js",
-        name: "@portable-devshell/agent-extension"
+        name: "@portable-devshell/agent-extension",
+        version: builtinManifest.version
     });
 }
 
 export async function shapePiProviderTree(root) {
+    const providerManifest = JSON.parse(await readFile(piProviderManifest, "utf8"));
     const providerTree = join(root, ".pi-provider-dist");
     await rename(join(root, "dist", "provider", "pi"), providerTree);
     await rm(join(root, "dist"), { force: true, recursive: true });
@@ -129,7 +121,8 @@ export async function shapePiProviderTree(root) {
             "pi-gui-extension": "0.4.1"
         },
         entry: "./dist/provider/pi/index.js",
-        name: "@portable-devshell-internal/agent-provider-pi"
+        name: "@portable-devshell-internal/agent-provider-pi",
+        version: providerManifest.version
     });
 }
 
@@ -142,16 +135,12 @@ export async function assertNoSymbolicLinks(root) {
 }
 
 export async function assertThinAgentExtensionTree(root) {
-    const forbidden = [
-        "dist/provider/pi",
-        "node_modules/pi-gui-extension"
-    ];
     await walk(root, async (_path, relativePath) => {
         const normalized = relativePath.replaceAll("\\", "/");
-        if (
-            forbidden.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`))
-            || normalized.startsWith("node_modules/@earendil-works/pi-")
-        ) {
+        if (normalized === "node_modules" || normalized.startsWith("node_modules/")) {
+            throw new Error(`Agent Extension payload must not contain private node_modules: ${normalized}`);
+        }
+        if (normalized === "dist/provider/pi" || normalized.startsWith("dist/provider/pi/")) {
             throw new Error(`Agent Extension payload must not contain Pi provider/runtime content: ${normalized}`);
         }
     });
@@ -168,6 +157,7 @@ async function rewriteDeploymentPackage(root, options) {
     const path = join(root, "package.json");
     const manifest = JSON.parse(await readFile(path, "utf8"));
     manifest.name = options.name;
+    manifest.version = options.version;
     manifest.main = options.entry;
     manifest.types = options.entry.replace(/\.js$/u, ".d.ts");
     manifest.exports = {

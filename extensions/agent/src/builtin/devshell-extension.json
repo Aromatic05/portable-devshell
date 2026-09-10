@@ -3,7 +3,7 @@
     "apiVersion": 4,
     "id": "agent",
     "name": "portable-devshell Agent",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "entry": "index.ts",
     "capabilities": [
         "assets",

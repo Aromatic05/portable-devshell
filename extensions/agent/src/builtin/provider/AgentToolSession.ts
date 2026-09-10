@@ -1,10 +1,10 @@
-import type { JsonValue } from "@portable-devshell/shared";
+import type { ExtensionJsonValue } from "@portable-devshell/extension";
 
 import type { AgentWorkerTarget } from "../worker/AgentWorkerTarget.js";
 
 export interface AgentToolDefinition {
     description: string;
-    inputSchema: JsonValue;
+    inputSchema: ExtensionJsonValue;
     name: string;
 }
 
@@ -22,11 +22,11 @@ export interface AgentToolSession {
     readonly tools: readonly AgentToolDefinition[];
     callTool(
         toolName: string,
-        input: JsonValue,
+        input: ExtensionJsonValue,
         operationId: string,
         signal?: AbortSignal,
-        onProgress?: (progress: JsonValue) => void
-    ): Promise<JsonValue>;
+        onProgress?: (progress: ExtensionJsonValue) => void
+    ): Promise<ExtensionJsonValue>;
     /** Close is required to be idempotent. */
     close(): Promise<void> | void;
 }
