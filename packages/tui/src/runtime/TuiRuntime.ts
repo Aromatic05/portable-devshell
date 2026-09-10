@@ -1070,6 +1070,12 @@ export class TuiRuntime {
     }
 
     async #handleHitTarget(target: TuiHitTarget): Promise<void> {
+        if (target.kind === "messagesViewport") {
+            await this.commandDispatcher.dispatch({
+                type: "contextConversation.edit",
+            });
+            return;
+        }
         if (target.kind === "context") {
             this.focusManager.setFocus({ id: target.id, kind: "context" });
             await this.commandDispatcher.dispatch({ type: "focus.activate" });
@@ -1154,6 +1160,8 @@ function sameTuiHitTarget(
             return right.kind === left.kind && right.id === left.id;
         case "overviewInstance":
             return right.kind === "overviewInstance" && right.instance === left.instance;
+        case "messagesViewport":
+            return right.kind === "messagesViewport";
         case "terminalTab":
             return right.kind === "terminalTab" && right.tab === left.tab;
         case "boxTitle":

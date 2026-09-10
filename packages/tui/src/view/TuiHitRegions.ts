@@ -31,6 +31,7 @@ export type TuiHitTarget =
     | { boxId: string; kind: "boxTitle" }
     | { id: string; kind: "context" }
     | { id: string; kind: "instance" }
+    | { kind: "messagesViewport" }
     | { instance: string; kind: "overviewInstance" }
     | { kind: "scrollViewport" }
     | { kind: "terminalTab"; tab: TuiTerminalTab };
@@ -193,6 +194,23 @@ export function buildTuiHitRegions(
             globalErrorHeight -
             (state.connection.status === "connecting" ? 1 : 0),
     );
+    if (state.ui.selectedPage === "messages") {
+        const route = currentTuiRoute(state);
+        if (
+            route.page === "messages" &&
+            route.view === "thread" &&
+            state.ui.selectedInstance !== undefined
+        ) {
+            regions.push({
+                height: Math.max(1, viewportRows),
+                target: { kind: "messagesViewport" },
+                width: mainWidth,
+                x: mainX,
+                y: contentY + globalErrorHeight,
+            });
+        }
+        return regions;
+    }
     if (state.ui.selectedPage === "overview") {
         const overview = selectTuiOverviewPresentation(state);
         const overviewViewport = selectTuiOverviewInstanceViewport(

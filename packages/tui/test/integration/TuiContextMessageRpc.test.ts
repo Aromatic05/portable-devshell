@@ -26,6 +26,7 @@ import {
     selectSidebarModel,
 } from "../../src/testing.ts";
 import { renderExpandableBoxLines } from "../../src/view/component/TuiComponentExpandableBox.js";
+import { buildTuiHitRegions } from "../../src/view/TuiHitRegions.js";
 import { selectMainScreenModel } from "../../src/view/model/TuiViewProjection.js";
 
 test(
@@ -226,6 +227,58 @@ test("Messages renders comment and report history and sends a Comment from the f
     harness.terminal.write("\u001b");
     await waitUntil(
         () => harness.runtime.store.getState().interaction.focusScope === "sidebarContext",
+    );
+});
+
+test("Messages main panel mouse focus enters the Comment composer", async (t) => {
+    const harness = await createHarness();
+    t.after(async () => await harness.close());
+    await harness.messages.queue({ ctxId: "ctx-alpha", text: "existing comment" });
+    await harness.start();
+
+    harness.terminal.write("4");
+    await waitUntil(
+        () => harness.runtime.store.getState().ui.selectedPage === "messages",
+    );
+    harness.terminal.write("!");
+    await waitUntil(
+        () => harness.runtime.store.getState().ui.selectedInstance === "alpha",
+    );
+    await waitUntil(() =>
+        selectSidebarModel(harness.runtime.store.getState()).context.items.some(
+            (entry) => entry.id === "messages:context:ctx-alpha",
+        ),
+    );
+    harness.runtime.focusManager.setFocus({
+        id: "messages:context:ctx-alpha",
+        kind: "context",
+    });
+    harness.terminal.write("\r");
+    await waitUntil(
+        () =>
+            harness.runtime.store.getState().interaction.focusScope ===
+            "contextConversation",
+    );
+
+    harness.terminal.write("\u001b");
+    await waitUntil(
+        () =>
+            harness.runtime.store.getState().interaction.focusScope ===
+            "sidebarContext",
+    );
+
+    const region = buildTuiHitRegions(harness.runtime.store.getState(), {
+        columns: 120,
+        rows: 40,
+    }).find((candidate) => candidate.target.kind === "messagesViewport");
+    assert.ok(region);
+    harness.terminal.write(`\u001B[<0;${region.x};${region.y}M`);
+    harness.terminal.write(`\u001B[<0;${region.x};${region.y}m`);
+
+    await waitUntil(
+        () =>
+            harness.runtime.store.getState().interaction.focusScope ===
+            "contextConversation",
     );
 });
 
