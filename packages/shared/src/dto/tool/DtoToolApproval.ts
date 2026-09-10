@@ -19,6 +19,7 @@ export interface ApprovalRequest {
     inputSummary: string;
     instance: InstanceName;
     reason: string;
+    recording?: "caller" | "host";
     requestId?: string;
     riskLevel: ApprovalRiskLevel;
     ctxId?: string;

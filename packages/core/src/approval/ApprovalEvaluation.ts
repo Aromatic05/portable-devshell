@@ -6,6 +6,7 @@ export interface ApprovalEvaluationInput {
     callId: string;
     context: ToolCallContext;
     inputSummary: string;
+    recording?: "caller" | "host";
     toolName: string;
 }
 

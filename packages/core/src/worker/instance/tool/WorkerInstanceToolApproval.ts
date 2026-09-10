@@ -71,6 +71,7 @@ export class WorkerInstanceToolApproval {
                 callId,
                 context,
                 inputSummary,
+                recording,
                 toolName
             });
         } catch (error) {

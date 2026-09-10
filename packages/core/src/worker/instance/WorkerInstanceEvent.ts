@@ -19,6 +19,7 @@ export function toApprovalEventData(request: ApprovalRequest, decision?: Approva
         expiresAt: request.expiresAt,
         inputSummary: request.inputSummary,
         reason: decision?.reason ?? request.reason,
+        recording: request.recording,
         requestId: request.requestId,
         remember: decision?.remember,
         riskLevel: request.riskLevel,

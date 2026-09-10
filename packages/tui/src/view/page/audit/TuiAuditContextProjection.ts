@@ -65,6 +65,7 @@ export function projectAuditContexts(
         resolve(call.ctxId).calls.push(call);
     }
     for (const approval of state.readModel.instanceState[instance]?.approvals ?? []) {
+        if (approval.recording === "caller") continue;
         resolve(approval.ctxId).approvals.push(approval);
     }
     return [...contexts.values()]

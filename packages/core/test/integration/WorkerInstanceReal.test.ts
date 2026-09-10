@@ -563,6 +563,7 @@ test("caller-recorded Worker calls keep approval enforcement without host tool a
 
         const pendingApproval = await waitForPendingApproval(instance);
         assert.equal(harness.requestedMethods(), beforeInvokeCount);
+        assert.equal((await instance.getApproval(pendingApproval.approvalId)).recording, "caller");
         assert.equal((await instance.getApproval(pendingApproval.approvalId)).status, "pending");
         assert.deepEqual(await instance.readToolCalls(), []);
 

@@ -79,6 +79,7 @@ export class ApprovalManager {
             inputSummary: input.inputSummary,
             instance: this.#instanceName,
             reason: `Approval required before running ${input.toolName}.`,
+            recording: input.recording ?? "host",
             ...(input.context.requestId === undefined ? {} : { requestId: input.context.requestId }),
             riskLevel: "medium",
             ...(input.context.ctxId === undefined ? {} : { ctxId: input.context.ctxId }),
