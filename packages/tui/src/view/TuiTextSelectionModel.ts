@@ -4,6 +4,11 @@ export interface TuiTextSelectionSpan {
     text: string;
 }
 
+export interface TuiTextSelectionColumnBounds {
+    end: number;
+    start: number;
+}
+
 export interface TuiTextSelectionSnapshot {
     characters: number;
     spans: readonly TuiTextSelectionSpan[];

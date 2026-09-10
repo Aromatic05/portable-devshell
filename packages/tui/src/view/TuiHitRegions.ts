@@ -18,6 +18,7 @@ import {
     selectTuiSidebarViewport,
     tuiSidebarRegions,
 } from "./TuiSidebarPresentation.js";
+import type { TuiTextSelectionColumnBounds } from "./TuiTextSelectionModel.js";
 import {
     selectTuiOverviewInstanceViewport,
     selectTuiOverviewPresentation,
@@ -294,6 +295,44 @@ export function buildTuiHitRegions(
     }
 
     return regions;
+}
+
+export function tuiScreenSelectionColumnBounds(
+    state: TuiAppState,
+    viewport: { columns: number; rows: number },
+    x: number,
+    y: number,
+): TuiTextSelectionColumnBounds | undefined {
+    if (topTuiOverlay(state.interaction.overlays) !== undefined) {
+        return undefined;
+    }
+    const layout = tuiLayoutMetrics(viewport.columns);
+    if (layout.mode !== "full") {
+        return undefined;
+    }
+    const sidebar = tuiSidebarRegions(viewport);
+    if (sidebar === undefined) {
+        return undefined;
+    }
+    const row = Math.floor(y);
+    if (
+        row < sidebar.sidebar.y ||
+        row >= sidebar.sidebar.y + sidebar.sidebar.height
+    ) {
+        return undefined;
+    }
+    const mainStart =
+        layout.outerGap + layout.sidebarWidth + layout.panelGap + 2;
+    if (Math.floor(x) < mainStart) {
+        return {
+            end: sidebar.context.x + sidebar.context.width - 1,
+            start: sidebar.context.x - 1,
+        };
+    }
+    return {
+        end: mainStart + Math.max(0, layout.mainPanelWidth - 2) - 1,
+        start: mainStart - 1,
+    };
 }
 
 export function hitTargetAt(

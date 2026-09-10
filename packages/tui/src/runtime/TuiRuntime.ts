@@ -30,6 +30,7 @@ import {
     buildTuiTextDetailImageRegion,
     buildTuiTerminalViewportRegion,
     hitTargetAt,
+    tuiScreenSelectionColumnBounds,
     type TuiHitTarget,
 } from "../view/TuiHitRegions.js";
 import { tuiSidebarSectionAt } from "../view/TuiSidebarPresentation.js";
@@ -1031,6 +1032,12 @@ export class TuiRuntime {
                 await this.selection.beginSelection(
                     gesture.anchor.x,
                     gesture.anchor.y,
+                    tuiScreenSelectionColumnBounds(
+                        this.store.getState(),
+                        { columns: this.columns, rows: this.rows },
+                        gesture.anchor.x,
+                        gesture.anchor.y,
+                    ),
                 );
                 gesture.selecting = true;
             }

@@ -3,6 +3,7 @@ import type { WriteStream } from "node:tty";
 import headless from "@xterm/headless";
 
 import type {
+    TuiTextSelectionColumnBounds,
     TuiTextSelectionRenderSource,
     TuiTextSelectionSnapshot,
     TuiTextSelectionSpan,
@@ -26,6 +27,7 @@ export class TuiScreenTextSelection implements TuiTextSelectionRenderSource {
     #rows: number;
     #pendingWrite: Promise<void> = Promise.resolve();
     #selection?: { anchor: SelectionPoint; focus: SelectionPoint };
+    #columnBounds?: TuiTextSelectionColumnBounds;
     #snapshot = EMPTY_SNAPSHOT;
 
     constructor(options: { columns: number; rows: number }) {
@@ -40,8 +42,13 @@ export class TuiScreenTextSelection implements TuiTextSelectionRenderSource {
         });
     }
 
-    async beginSelection(x: number, y: number): Promise<void> {
+    async beginSelection(
+        x: number,
+        y: number,
+        bounds?: TuiTextSelectionColumnBounds,
+    ): Promise<void> {
         await this.flush();
+        this.#columnBounds = clampBounds(bounds, this.#columns);
         const point = this.#selectionPoint(x, y);
         this.#selection = { anchor: point, focus: point };
         this.#publish();
@@ -52,6 +59,7 @@ export class TuiScreenTextSelection implements TuiTextSelectionRenderSource {
             return;
         }
         this.#selection = undefined;
+        this.#columnBounds = undefined;
         this.#snapshot = EMPTY_SNAPSHOT;
         this.#notify();
     }
@@ -68,7 +76,8 @@ export class TuiScreenTextSelection implements TuiTextSelectionRenderSource {
     getSelectionText(): string {
         return this.#selection === undefined
             ? ""
-            : buildSelection(this.#terminal, this.#selection).text;
+            : buildSelection(this.#terminal, this.#selection, this.#columnBounds)
+                  .text;
     }
 
     getSnapshot(): TuiTextSelectionSnapshot {
@@ -125,7 +134,11 @@ export class TuiScreenTextSelection implements TuiTextSelectionRenderSource {
         if (this.#selection === undefined) {
             this.#snapshot = EMPTY_SNAPSHOT;
         } else {
-            const selection = buildSelection(this.#terminal, this.#selection);
+            const selection = buildSelection(
+                this.#terminal,
+                this.#selection,
+                this.#columnBounds,
+            );
             this.#snapshot = {
                 characters: [...selection.text].length,
                 spans: selection.spans,
@@ -136,8 +149,10 @@ export class TuiScreenTextSelection implements TuiTextSelectionRenderSource {
 
     #selectionPoint(x: number, y: number): SelectionPoint {
         const buffer = this.#terminal.buffer.active;
+        const min = this.#columnBounds?.start ?? 0;
+        const max = (this.#columnBounds?.end ?? this.#columns) - 1;
         return {
-            column: clamp(Math.floor(x) - 1, 0, this.#columns - 1),
+            column: clamp(Math.floor(x) - 1, min, Math.max(min, max)),
             line:
                 buffer.viewportY +
                 clamp(Math.floor(y) - 1, 0, this.#rows - 1),
@@ -175,17 +190,20 @@ export function createTuiScreenCaptureStdout(
 function buildSelection(
     terminal: InstanceType<typeof Terminal>,
     selection: { anchor: SelectionPoint; focus: SelectionPoint },
+    bounds?: TuiTextSelectionColumnBounds,
 ): { spans: TuiTextSelectionSpan[]; text: string } {
     const buffer = terminal.buffer.active;
     const [start, end] = orderedSelection(selection.anchor, selection.focus);
+    const rangeStart = bounds?.start ?? 0;
+    const rangeEnd = bounds?.end ?? terminal.cols;
     const spans: TuiTextSelectionSpan[] = [];
     let text = "";
 
     for (let lineIndex = start.line; lineIndex <= end.line; lineIndex += 1) {
         const line = buffer.getLine(lineIndex);
         if (line === undefined) continue;
-        const startColumn = lineIndex === start.line ? start.column : 0;
-        const endColumn = lineIndex === end.line ? end.column + 1 : terminal.cols;
+        const startColumn = lineIndex === start.line ? start.column : rangeStart;
+        const endColumn = lineIndex === end.line ? end.column + 1 : rangeEnd;
         const lineText = line.translateToString(true, startColumn, endColumn);
         if (lineText.length > 0) {
             spans.push({
@@ -225,4 +243,16 @@ function clamp(value: number, min: number, max: number): number {
 
 function clampDimension(value: number): number {
     return Math.max(1, Math.floor(value));
+}
+
+function clampBounds(
+    bounds: TuiTextSelectionColumnBounds | undefined,
+    columns: number,
+): TuiTextSelectionColumnBounds | undefined {
+    if (bounds === undefined) {
+        return undefined;
+    }
+    const start = clamp(bounds.start, 0, Math.max(0, columns - 1));
+    const end = clamp(bounds.end, start + 1, columns);
+    return { end, start };
 }
