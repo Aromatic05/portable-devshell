@@ -371,13 +371,22 @@ test("real Ink keeps Space, Enter, route hierarchy, logical focus and rendered h
     const callBox = () => box(harness.runtime, "audit-call:call-1");
     await focusBox(harness, "audit-call:call-1");
     await waitUntil(() => callBox()?.focused === true);
-    assert.equal(callBox()?.enterable, false);
-    assert.equal(callBox()?.primaryAction, undefined);
+    assert.equal(callBox()?.enterable, true);
+    assert.deepEqual(callBox()?.primaryAction, {
+        kind: "navigate",
+        route: {
+            callId: "call-1",
+            ctxId: "ctx-alpha",
+            page: "audit",
+            scope: "context",
+            view: "call",
+        },
+    });
     assert.equal(callBox()?.expandable, true);
     assert.equal(callBox()?.expanded, false);
     assert.equal(currentTuiRoute(harness.runtime.store.getState()).view, "context");
 
-    await harness.runtime.handleInput("", { return: true });
+    harness.terminal.write(" ");
     await waitUntil(() => callBox()?.expanded === true);
     assert.equal(currentTuiRoute(harness.runtime.store.getState()).view, "context");
     assert.equal(callBox()?.focused, true);
@@ -403,6 +412,26 @@ test("real Ink keeps Space, Enter, route hierarchy, logical focus and rendered h
     );
     harness.terminal.write(" ");
     await waitUntil(() => callBox()?.expanded === false);
+
+    await harness.runtime.handleInput("", { return: true });
+    await waitUntil(() => currentTuiRoute(harness.runtime.store.getState()).view === "call");
+    assert.deepEqual(currentTuiRoute(harness.runtime.store.getState()), {
+        callId: "call-1",
+        ctxId: "ctx-alpha",
+        page: "audit",
+        scope: "context",
+        view: "call",
+    });
+    assert.equal(
+        harness.runtime.store.getState().ui.mainFocusId,
+        "audit-call-detail:call-1",
+    );
+
+    await harness.runtime.handleInput("", { escape: true });
+    await waitUntil(() => currentTuiRoute(harness.runtime.store.getState()).view === "context");
+    await waitUntil(() => callBox()?.focused === true);
+    assert.equal(harness.runtime.store.getState().ui.mainFocusId, "audit-call:call-1");
+
     harness.terminal.write("\u001b[B");
     await waitUntil(() => harness.runtime.store.getState().ui.mainFocusId !== "audit-call:call-1");
     const nextFocused = selectMainScreenModel(harness.runtime.store.getState()).boxes.find((candidate) => candidate.focused);

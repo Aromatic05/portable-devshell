@@ -147,6 +147,50 @@ test("resource refresh removes invalid trailing routes instead of retaining a bl
     });
 });
 
+test("scoped Audit call routes survive refresh while their call exists and prune when it disappears", () => {
+    const store = createStore();
+    store.setSelectedPage("audit");
+    store.pushRoute({
+        ctxId: "ctx-a",
+        page: "audit",
+        scope: "context",
+        view: "context",
+    });
+    store.pushRoute({
+        callId: "call-2",
+        ctxId: "ctx-a",
+        page: "audit",
+        scope: "context",
+        view: "call",
+    });
+
+    store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [
+        {
+            callId: "call-2",
+            ctxId: "ctx-a",
+            inputSummary: "{}",
+            instance: "alpha" as never,
+            source: "mcp",
+            startedAt: "2026-07-31T00:00:00.000Z",
+            status: "completed",
+            toolName: "bash_run",
+        },
+    ] } } });
+    assert.deepEqual(currentTuiRoute(store.getState()), {
+        callId: "call-2",
+        ctxId: "ctx-a",
+        page: "audit",
+        scope: "context",
+        view: "call",
+    });
+
+    store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [] } } });
+    assert.deepEqual(currentTuiRoute(store.getState()), {
+        page: "audit",
+        view: "contexts",
+    });
+});
+
 test("footer breadcrumb follows the route stack and excludes overlay state", () => {
     const store = createStore();
     store.setSelectedPage("audit");

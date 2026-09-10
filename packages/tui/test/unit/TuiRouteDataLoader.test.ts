@@ -33,6 +33,7 @@ test("Logs context route loads logs and owns follow cleanup", async () => {
                 logs: [{
                     at: "2026-09-10T10:00:00.000Z",
                     ctxId: "ctx-alpha",
+                    instanceName: "alpha",
                     message: "ready",
                     seq: 9,
                     stream: "stdout",

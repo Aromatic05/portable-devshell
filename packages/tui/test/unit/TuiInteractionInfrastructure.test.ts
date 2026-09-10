@@ -2678,6 +2678,7 @@ test("Logs linked call opens the matching scoped Audit call route", async () => 
             at: "2026-07-11T12:34:56.000Z",
             callId: "call-linked",
             ctxId: "ctx-alpha",
+            instanceName: "alpha",
             message: "linked output",
             seq: 1,
             source: "mcp",
