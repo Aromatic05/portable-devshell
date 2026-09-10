@@ -34,7 +34,7 @@ export function createIntegrationSteps(state, platform = process.platform) {
             name: "Long tmux handoff smoke",
             run: () => runCommand(
                 process.execPath,
-                ["acceptance/run-testspace-long-wait-smoke.mjs"],
+                ["acceptance/run-long-tmux-handoff-smoke.mjs"],
                 { env: state.env, inherit: true, timeoutMs: 300_000 },
             ),
         }]),

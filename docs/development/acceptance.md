@@ -24,6 +24,7 @@ Web browser smoke
 ```
 
 其中 integration smoke 复用同一 prepared worker，不应该以 mock transport 代替最终 Worker 行为。
+长 tmux handoff smoke 也复用 acceptance 自己的临时 Control/Worker fixture；它不会在 CI 内再次启动 Testspace。`pnpm testspace long-smoke` 保留为 Testspace 环境下的同一协议检查。
 
 ## 分项入口
 
