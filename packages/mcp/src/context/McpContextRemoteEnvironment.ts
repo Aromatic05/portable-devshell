@@ -8,35 +8,39 @@ import {
 import type { McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import type { McpContextRegistry } from "./McpContextRegistry.js";
 
-export interface McpContextInstanceConnectorOptions {
+export interface McpContextRemoteEnvironmentOptions {
     contextRegistry: McpContextRegistry;
     gateway(instance: string): McpInstanceGateway | undefined;
 }
 
-/** Attaches managed instances to an existing Context without exposing Context ids to Extensions. */
-export class McpContextInstanceConnector {
+/** Context-owned remote environment attach/mask operations over opaque instance handles. */
+export class McpContextRemoteEnvironment {
     readonly #contextRegistry: McpContextRegistry;
     readonly #gateway: (instance: string) => McpInstanceGateway | undefined;
 
-    constructor(options: McpContextInstanceConnectorOptions) {
+    constructor(options: McpContextRemoteEnvironmentOptions) {
         this.#contextRegistry = options.contextRegistry;
         this.#gateway = options.gateway;
     }
 
-    async connect(
+    async attach(
         ctxId: string,
-        instance: string,
+        handle: string,
         workspace?: string,
         signal?: AbortSignal
     ): Promise<JsonValue> {
         signal?.throwIfAborted();
+        const instance = await this.#contextRegistry.resolveRemoteInstanceHandle(ctxId, handle);
         const gateway = this.#requireGateway(instance);
         const previous = await this.#environment(ctxId, instance);
         const connected = await waitAbortable(gateway.connectInstance(instance, ctxId), signal);
         if (workspace === undefined) {
             try {
                 await this.#contextRegistry.attachEnvironment(ctxId, { instance });
-                return connected;
+                return {
+                    ...(isRecord(connected) ? connected : { result: connected }),
+                    instance
+                };
             } catch (error) {
                 if (previous === undefined) await gateway.releaseInstanceReference?.(instance, ctxId);
                 throw error;
@@ -52,6 +56,7 @@ export class McpContextInstanceConnector {
                 await waitAbortable(gateway.touchAlerts(instance, workspace), signal);
                 return {
                     ...(isRecord(connected) ? connected : { result: connected }),
+                    instance,
                     temporaryDirectory: previous.temporaryDirectory,
                     workspace
                 };
@@ -86,6 +91,7 @@ export class McpContextInstanceConnector {
                     `Use ${prepared.temporaryDirectory} for all temporary files.`,
                     ...alerts.advice.map((advice) => advice.text)
                 ],
+                instance,
                 ...(prepared.projectMemoryPresent !== false
                     ? {
                           projectMemoryAgentFile: prepared.projectMemoryAgentFile,
@@ -104,13 +110,31 @@ export class McpContextInstanceConnector {
         }
     }
 
+    async mask(ctxId: string, handle: string): Promise<{ instance: string; masked: true }> {
+        const masked = await this.#contextRegistry.maskRemoteInstance(ctxId, handle);
+        if (masked.environment !== undefined) {
+            const gateway = this.#gateway(masked.instance);
+            if (gateway !== undefined) {
+                await gateway.releaseInstanceReference?.(masked.instance, ctxId).catch(() => undefined);
+                if (masked.environment.workspace !== undefined) {
+                    await this.#releaseAlertsIfUnused(
+                        gateway,
+                        masked.instance,
+                        masked.environment.workspace
+                    ).catch(() => undefined);
+                }
+            }
+        }
+        return { instance: masked.instance, masked: true };
+    }
+
     #requireGateway(instance: string): McpInstanceGateway {
         const gateway = this.#gateway(instance);
         if (gateway !== undefined) return gateway;
         throw createError({
             code: errorCodes.coreToolSchemaUnavailable,
             details: { instance },
-            message: `Context instance attachment is not available for ${instance}.`,
+            message: `Remote environment attachment is not available for ${instance}.`,
             retryable: false
         });
     }
@@ -141,7 +165,7 @@ async function waitAbortable<T>(operation: Promise<T>, signal?: AbortSignal): Pr
     signal.throwIfAborted();
     let abort: (() => void) | undefined;
     const aborted = new Promise<never>((_resolve, reject) => {
-        abort = () => reject(signal.reason instanceof Error ? signal.reason : new Error("Model command was cancelled."));
+        abort = () => reject(signal.reason instanceof Error ? signal.reason : new Error("Remote environment operation was cancelled."));
         signal.addEventListener("abort", abort, { once: true });
     });
     try {

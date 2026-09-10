@@ -2,50 +2,69 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ExtensionInstanceCapability } from "@portable-devshell/extension/instance";
-import type { CliModelCommandInvocationContext } from "@portable-devshell/extension/cli";
+import type {
+    CliModelCommandInvocationContext,
+    CliModelInstanceReference
+} from "@portable-devshell/extension/cli";
 
 import { executeInstanceCommand } from "../../src/builtin/InstanceCommand.ts";
 
-function fakeCapability(): ExtensionInstanceCapability {
-    const snapshot = {
+function snapshot(name: string) {
+    return {
         connectionState: "connected" as const,
         daemonState: "running" as const,
         lastSeq: 3,
-        name: "local-test",
+        name,
         ready: true,
         status: "ready" as const
     };
+}
+
+function fakeCapability(): ExtensionInstanceCapability {
     return {
         async create() { throw new Error("unused"); },
         async createSchema() { return {}; },
         async delete() {},
         async disable() {},
         async enable() {},
-        async list() { return [{ enabled: true, mcpEnabled: true, name: "local-test", provider: "local", snapshot }]; },
-        async readLogs(_name, query) {
-            if (query?.fromSeq === 4) {
-                return [{ at: "later", instanceName: "local-test", message: "next\n", seq: 4, stream: "stderr" }];
-            }
-            return [{ at: "now", instanceName: "local-test", message: "hello\n", seq: 3, stream: "stdout" }];
+        async list() {
+            return [
+                { enabled: true, mcpEnabled: true, name: "local-test", provider: "local", snapshot: snapshot("local-test") },
+                { enabled: true, mcpEnabled: true, name: "remote-test", provider: "ssh", snapshot: snapshot("remote-test") },
+                { enabled: true, mcpEnabled: true, name: "masked-test", provider: "ssh", snapshot: snapshot("masked-test") }
+            ];
         },
-        async refresh() { return snapshot; },
-        async snapshot() { return snapshot; },
-        async start() { return snapshot; },
-        async stop() { return snapshot; },
+        async readLogs(name, query) {
+            if (query?.fromSeq === 4) {
+                return [{ at: "later", instanceName: name, message: "next\n", seq: 4, stream: "stderr" }];
+            }
+            return [{ at: "now", instanceName: name, message: "hello\n", seq: 3, stream: "stdout" }];
+        },
+        async refresh(name) { return snapshot(name); },
+        async snapshot(name) { return snapshot(name); },
+        async start(name) { return snapshot(name); },
+        async stop(name) { return snapshot(name); },
         async validateCreate() { return {}; },
-        async watchEvents(_name, watch) {
+        async watchEvents(name, watch) {
             assert.deepEqual(watch.eventTypes, ["log.appended"]);
             assert.equal(watch.fromSeq, 4);
-            await watch.onEvent({ at: "later", instanceName: "local-test", seq: 4, type: "log.appended" });
+            await watch.onEvent({ at: "later", instanceName: name, seq: 4, type: "log.appended" });
         }
     };
 }
 
-function invocation(output: string[] = []): CliModelCommandInvocationContext {
+function invocation(
+    output: string[] = [],
+    references: Readonly<Record<string, CliModelInstanceReference | undefined>> = {
+        "local-test": { current: true },
+        "remote-test": { current: false, handle: "ih-remote" },
+        "masked-test": undefined
+    }
+): CliModelCommandInvocationContext {
     return {
         context: {
-            async connectInstance(instance, workspace) {
-                return { instance, workspace: workspace ?? null };
+            async instanceReference(instance) {
+                return references[instance];
             }
         },
         instance: "local-test",
@@ -61,24 +80,41 @@ function invocation(output: string[] = []): CliModelCommandInvocationContext {
     };
 }
 
-test("Instance model command renders the public management capability", async () => {
+test("Instance model list is Context-filtered and exposes handles only for remote instances", async () => {
     assert.deepEqual(await executeInstanceCommand(fakeCapability(), ["list"], invocation()), {
         kind: "text",
-        text: "local-test\tready\tready=true\n"
-    });
-    assert.deepEqual(await executeInstanceCommand(fakeCapability(), ["logs", "local-test"], invocation()), {
-        kind: "text",
-        text: "[3] stdout hello\n"
+        text: [
+            "local-test\tready\tready=true\tcurrent=true",
+            "remote-test\tready\tready=true\thandle=ih-remote",
+            ""
+        ].join("\n")
     });
 });
 
-test("Instance model connect uses the authoritative model Context interface", async () => {
-    assert.deepEqual(
-        await executeInstanceCommand(fakeCapability(), ["connect", "remote-test", "/remote/workspace"], invocation()),
-        {
-            kind: "json",
-            value: { instance: "remote-test", workspace: "/remote/workspace" }
-        }
+test("Instance model status exposes a remote handle and rejects masked instances", async () => {
+    assert.deepEqual(await executeInstanceCommand(fakeCapability(), ["status", "remote-test"], invocation()), {
+        kind: "text",
+        text: [
+            "instance: remote-test",
+            "status: ready",
+            "ready: true",
+            "daemonState: running",
+            "connectionState: connected",
+            "lastSeq: 3",
+            "handle: ih-remote",
+            ""
+        ].join("\n")
+    });
+    await assert.rejects(
+        executeInstanceCommand(fakeCapability(), ["status", "masked-test"], invocation()),
+        /unavailable in the current Context/u
+    );
+});
+
+test("Instance model command has no Context-mutating connect subcommand", async () => {
+    await assert.rejects(
+        executeInstanceCommand(fakeCapability(), ["connect", "remote-test"], invocation()),
+        /Unknown instance model command: connect/u
     );
 });
 

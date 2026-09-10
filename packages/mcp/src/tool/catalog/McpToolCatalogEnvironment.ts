@@ -3,10 +3,14 @@ import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
 import { workspaceAppResourceUri } from "../../workspace/McpWorkspaceApp.js";
 
 export const mcpEnvironmentToolName = "environ_info" as const;
+export const mcpRemoteEnvironmentToolName = "environ_remote" as const;
 
-export type McpToolCatalogEnvironmentName = typeof mcpEnvironmentToolName;
+export type McpToolCatalogEnvironmentName =
+    | typeof mcpEnvironmentToolName
+    | typeof mcpRemoteEnvironmentToolName;
 
 export interface McpToolCatalogEnvironmentListOptions {
+    remoteEnvironment?: boolean;
     requireExplicitContextId?: boolean;
     workspaceApp?: boolean;
 }
@@ -26,7 +30,7 @@ const contextStateProperties: Record<string, JsonValue> = {
 export function isMcpEnvironmentToolName(
     name: string,
 ): name is McpToolCatalogEnvironmentName {
-    return name === mcpEnvironmentToolName;
+    return name === mcpEnvironmentToolName || name === mcpRemoteEnvironmentToolName;
 }
 
 export class McpToolCatalogEnvironment {
@@ -88,6 +92,18 @@ export class McpToolCatalogEnvironment {
                     minLength: 1,
                     type: "string",
                 },
+                remoteEnvironment: {
+                    additionalProperties: false,
+                    description: "Current environ_remote command vocabulary. Use environ_remote command='help' for authoritative argument details.",
+                    properties: {
+                        commands: {
+                            items: { minLength: 1, type: "string" },
+                            type: "array",
+                        },
+                    },
+                    required: ["commands"],
+                    type: "object",
+                },
                 skillsDirectory: { minLength: 1, type: "string" },
                 temporaryDirectory: { minLength: 1, type: "string" },
                 workspace: { minLength: 1, type: "string" },
@@ -105,11 +121,60 @@ export class McpToolCatalogEnvironment {
         },
         requiredCapabilities: [],
     };
+    readonly #remoteDefinition: ToolDefinition = {
+        description:
+            "Manage remote environments for the current portable-devshell Context. The command vocabulary is runtime-extensible and is not encoded as a JSON Schema enum. Use command='help' when the current operations or arguments are unknown. Obtain opaque instance handles from model-facing `devshell instance list` or `devshell instance status <instance>`. Masking is irreversible for the lifetime of this Context.",
+        group: "environ",
+        inputSchema: {
+            additionalProperties: false,
+            properties: {
+                command: {
+                    description:
+                        "Operation to perform. Current operations are advertised by environ_info; use 'help' for the authoritative current command catalog.",
+                    minLength: 1,
+                    type: "string",
+                },
+                handle: {
+                    description:
+                        "Opaque Context-scoped managed-instance handle obtained from model-facing devshell instance list/status. Required by commands that target a remote instance.",
+                    minLength: 1,
+                    type: "string",
+                },
+                workspace: {
+                    description:
+                        "Absolute workspace path for commands that attach a remote environment.",
+                    minLength: 1,
+                    type: "string",
+                },
+            },
+            required: ["command"],
+            type: "object",
+        },
+        name: mcpRemoteEnvironmentToolName,
+        outputSchema: {
+            additionalProperties: false,
+            properties: {
+                command: { minLength: 1, type: "string" },
+                details: {
+                    additionalProperties: true,
+                    type: "object",
+                },
+                message: { minLength: 1, type: "string" },
+            },
+            required: ["command", "message"],
+            type: "object",
+        },
+        requiredCapabilities: [],
+    };
 
     list(options: McpToolCatalogEnvironmentListOptions = {}): ToolDefinition[] {
-        const definition = structuredClone(this.#definition);
+        const definitions = [structuredClone(this.#definition)];
+        if (options.remoteEnvironment === true) {
+            definitions.push(structuredClone(this.#remoteDefinition));
+        }
         const requireExplicitContextId = options.requireExplicitContextId !== false;
         if (requireExplicitContextId) {
+            for (const definition of definitions) {
             const inputSchema = definition.inputSchema as {
                 properties?: Record<string, JsonValue>;
             };
@@ -134,20 +199,21 @@ export class McpToolCatalogEnvironment {
             if (outputSchema.required !== undefined) {
                 outputSchema.required = ["ctxId", ...outputSchema.required];
             }
+            }
         }
-        definition.description = environmentDescription(
+        definitions[0]!.description = environmentDescription(
             options.workspaceApp === true,
             requireExplicitContextId,
         );
         if (options.workspaceApp === true) {
-            definition._meta = {
+            definitions[0]!._meta = {
                 ui: { resourceUri: workspaceAppResourceUri, visibility: ["model", "app"] },
                 "ui/resourceUri": workspaceAppResourceUri,
                 "openai/outputTemplate": workspaceAppResourceUri,
                 "openai/widgetAccessible": true,
             };
         }
-        return [definition];
+        return definitions;
     }
 }
 

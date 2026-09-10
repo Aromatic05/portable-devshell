@@ -49,7 +49,7 @@ const legacyTools: Readonly<Record<string, McpLegacyToolCompatibility>> = {
         removedIn: "0.6.17",
     },
     instance_connect: {
-        help: "Use devshell instance connect <instance> [workspace].",
+        help: "Obtain a handle with devshell instance list/status, then use environ_remote command='attach'.",
         kind: "tombstone",
         removedIn: "0.7.1",
     },
@@ -69,7 +69,7 @@ const legacyTools: Readonly<Record<string, McpLegacyToolCompatibility>> = {
         removedIn: "0.6.17",
     },
     instance_start: {
-        help: "Use devshell instance connect <instance> [workspace].",
+        help: "Obtain a handle with devshell instance list/status, then use environ_remote command='attach'.",
         kind: "tombstone",
         removedIn: "0.7.1",
     },

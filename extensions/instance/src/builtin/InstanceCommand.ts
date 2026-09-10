@@ -1,10 +1,13 @@
-import type { ExtensionInstanceCapability, ExtensionInstanceSnapshot } from "@portable-devshell/extension/instance";
-import type { CliCommandResult, CliModelCommandInvocationContext } from "@portable-devshell/extension/cli";
+import type { ExtensionInstanceCapability, ExtensionInstanceRecord, ExtensionInstanceSnapshot } from "@portable-devshell/extension/instance";
+import type {
+    CliCommandResult,
+    CliModelCommandInvocationContext,
+    CliModelInstanceReference
+} from "@portable-devshell/extension/cli";
 
 export const INSTANCE_USAGE = [
     "Usage:",
     "  devshell instance list",
-    "  devshell instance connect <instance> [workspace]",
     "  devshell instance status <instance>",
     "  devshell instance logs <instance> [-f]"
 ].join("\n");
@@ -24,11 +27,9 @@ export async function executeInstanceCommand(
             return text(INSTANCE_USAGE);
         case "list":
             expect(args, 0, "instance list");
-            return text(renderList(await instances.list()));
-        case "connect":
-            return await connect(args, invocation);
+            return await list(instances, invocation);
         case "status":
-            return text(renderSnapshot(await instances.snapshot(one(args, "instance status <instance>"))));
+            return await status(instances, one(args, "instance status <instance>"), invocation);
         case "logs":
             return await logs(instances, args, invocation);
         case undefined:
@@ -38,17 +39,25 @@ export async function executeInstanceCommand(
     }
 }
 
-async function connect(
-    args: readonly string[],
+async function list(
+    instances: ExtensionInstanceCapability,
     invocation: CliModelCommandInvocationContext
 ): Promise<CliCommandResult> {
-    if (args.length < 1 || args.length > 2 || args[0] === undefined || args[0].length === 0) {
-        throw usage("instance connect <instance> [workspace]");
-    }
-    return {
-        kind: "json",
-        value: await invocation.context.connectInstance(args[0], args[1])
-    };
+    const values = await instances.list();
+    const projected = await Promise.all(values.map(async (value) => {
+        const reference = await invocation.context.instanceReference(value.name);
+        return reference === undefined ? undefined : { reference, value };
+    }));
+    return text(renderList(projected.filter((value): value is InstanceProjection => value !== undefined)));
+}
+
+async function status(
+    instances: ExtensionInstanceCapability,
+    name: string,
+    invocation: CliModelCommandInvocationContext
+): Promise<CliCommandResult> {
+    const reference = await requireReference(invocation, name);
+    return text(renderSnapshot(await instances.snapshot(name), reference));
 }
 
 async function logs(
@@ -57,6 +66,7 @@ async function logs(
     invocation: CliModelCommandInvocationContext
 ): Promise<CliCommandResult> {
     const { follow, name } = parseFollow(args);
+    await requireReference(invocation, name);
     if (!follow) return text(renderLogs(await instances.readLogs(name)));
     const io = invocation.io;
     if (io === undefined) throw usage("instance logs -f requires streaming CLI I/O");
@@ -81,29 +91,47 @@ async function logs(
     return text("");
 }
 
-function renderList(values: Awaited<ReturnType<ExtensionInstanceCapability["list"]>>): string {
+interface InstanceProjection {
+    reference: CliModelInstanceReference;
+    value: ExtensionInstanceRecord;
+}
+
+function renderList(values: readonly InstanceProjection[]): string {
     if (values.length === 0) return "no instances\n";
-    return `${values.map((value) => {
+    return `${values.map(({ reference, value }) => {
         const status = value.snapshot?.status ?? (value.enabled ? "unavailable" : "disabled");
         const ready = value.snapshot?.ready ?? false;
-        return `${value.name}\t${status}\tready=${ready}`;
+        const projection = reference.current
+            ? "current=true"
+            : `handle=${reference.handle ?? "-"}`;
+        return `${value.name}\t${status}\tready=${ready}\t${projection}`;
     }).join("\n")}\n`;
 }
 
-function renderSnapshot(value: ExtensionInstanceSnapshot): string {
+function renderSnapshot(value: ExtensionInstanceSnapshot, reference: CliModelInstanceReference): string {
     const lines = [
         `instance: ${value.name}`,
         `status: ${value.status}`,
         `ready: ${value.ready}`,
         `daemonState: ${value.daemonState}`,
         `connectionState: ${value.connectionState}`,
-        `lastSeq: ${value.lastSeq}`
+        `lastSeq: ${value.lastSeq}`,
+        ...(reference.current ? ["current: true"] : [`handle: ${reference.handle ?? "-"}`])
     ];
     if (value.lastErrorCode !== undefined || value.lastErrorMessage !== undefined) {
         lines.push(`lastErrorCode: ${value.lastErrorCode ?? "-"}`);
         lines.push(`lastErrorMessage: ${value.lastErrorMessage ?? "-"}`);
     }
     return `${lines.join("\n")}\n`;
+}
+
+async function requireReference(
+    invocation: CliModelCommandInvocationContext,
+    name: string
+): Promise<CliModelInstanceReference> {
+    const reference = await invocation.context.instanceReference(name);
+    if (reference !== undefined) return reference;
+    throw usage(`Instance ${name} is unavailable in the current Context.`);
 }
 
 function renderLogs(entries: Awaited<ReturnType<ExtensionInstanceCapability["readLogs"]>>): string {

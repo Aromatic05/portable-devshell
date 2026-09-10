@@ -138,7 +138,7 @@ test("model CLI discovery and dispatch come from cli.model-commands registration
         usage: "artifact <command>"
     }]);
     assert.deepEqual(await service.command("artifact", ["shares"], {
-        context: { async connectInstance() { throw new Error("unused"); } },
+        context: { async instanceReference() { return { current: true }; } },
         instance: "demo-local",
         requestId: "req-model",
         signal: new AbortController().signal,
@@ -155,7 +155,7 @@ test("model CLI state never falls back to native Extension commands", async () =
     assert.deepEqual(service.list(), []);
     await assert.rejects(
         async () => await service.command("status", [], {
-            context: { async connectInstance() { throw new Error("unused"); } },
+            context: { async instanceReference() { return { current: true }; } },
             instance: "demo-local",
             requestId: "req-model",
             signal: new AbortController().signal,

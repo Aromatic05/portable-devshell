@@ -77,6 +77,86 @@ test("McpContextRegistry persists active contexts and renews their sliding expir
     }
 });
 
+test("McpContextRegistry keeps remote handles private and makes masking durable and irreversible", async () => {
+    const root = await createTestTempDirectory("context-remote-mask");
+    const filePath = join(root, "contexts.json");
+    try {
+        const registry = new McpContextRegistry({
+            filePath,
+            idFactory: () => "ctx-remote-mask",
+        });
+        await registry.initialize();
+        await registry.create({
+            instance: "alpha",
+            principal: "subject",
+            workspace: "/alpha",
+        });
+
+        assert.deepEqual(await registry.referenceInstance("ctx-remote-mask", "alpha"), { current: true });
+        const first = await registry.referenceInstance("ctx-remote-mask", "beta");
+        const second = await registry.referenceInstance("ctx-remote-mask", "beta");
+        assert.equal(first?.current, false);
+        assert.match(first?.handle ?? "", /^ih-/u);
+        assert.deepEqual(second, first);
+        const unused = await registry.referenceInstance("ctx-remote-mask", "gamma");
+        assert.match(unused?.handle ?? "", /^ih-/u);
+        await registry.detachInstance("gamma");
+        await assert.rejects(
+            registry.resolveRemoteInstanceHandle("ctx-remote-mask", unused!.handle!),
+            hasCode("mcp.contextInvalid"),
+        );
+        await registry.attachEnvironment("ctx-remote-mask", {
+            instance: "beta",
+            temporaryDirectory: "/tmp/beta",
+            workspace: "/beta",
+        });
+        assert.equal((await registry.validateForInstance("ctx-remote-mask", "beta")).ctxId, "ctx-remote-mask");
+
+        const masked = await registry.maskRemoteInstance("ctx-remote-mask", first!.handle!);
+        assert.deepEqual(masked, {
+            environment: {
+                instance: "beta",
+                temporaryDirectory: "/tmp/beta",
+                workspace: "/beta",
+            },
+            instance: "beta",
+        });
+        assert.equal(await registry.referenceInstance("ctx-remote-mask", "beta"), undefined);
+        await assert.rejects(
+            registry.resolveRemoteInstanceHandle("ctx-remote-mask", first!.handle!),
+            hasCode("mcp.contextInstanceMasked"),
+        );
+        await assert.rejects(
+            registry.validateForInstance("ctx-remote-mask", "beta"),
+            hasCode("mcp.contextInstanceMasked"),
+        );
+        await assert.rejects(
+            registry.attachEnvironment("ctx-remote-mask", { instance: "beta", workspace: "/beta" }),
+            hasCode("mcp.contextInstanceMasked"),
+        );
+        const publicRecord = (await registry.list())[0]!;
+        assert.equal("maskedInstances" in publicRecord, false);
+        assert.equal("remoteInstanceHandles" in publicRecord, false);
+
+        const persisted = JSON.parse(await readFile(filePath, "utf8")) as {
+            contexts?: Array<{ maskedInstances?: string[]; remoteInstanceHandles?: Array<{ handle: string; instance: string }> }>;
+        };
+        assert.deepEqual(persisted.contexts?.[0]?.maskedInstances, ["beta"]);
+        assert.deepEqual(persisted.contexts?.[0]?.remoteInstanceHandles, [{ handle: first!.handle!, instance: "beta" }]);
+
+        const reloaded = new McpContextRegistry({ filePath });
+        await reloaded.initialize();
+        assert.equal(await reloaded.referenceInstance("ctx-remote-mask", "beta"), undefined);
+        assert.deepEqual(await reloaded.maskRemoteInstance("ctx-remote-mask", first!.handle!), { instance: "beta" });
+        await assert.rejects(
+            reloaded.validateForInstance("ctx-remote-mask", "beta"),
+            hasCode("mcp.contextInstanceMasked"),
+        );
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
 test("McpContextRegistry batches sliding lease persistence until the durable lease reaches half TTL", async () => {
     const root = await createTestTempDirectory("context-touch-batch-");
     const filePath = join(root, "contexts.json");

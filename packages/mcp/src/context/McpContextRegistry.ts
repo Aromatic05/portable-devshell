@@ -42,6 +42,21 @@ export interface McpContextExternalBinding {
     value: string;
 }
 
+export interface McpContextInstanceReference {
+    current: boolean;
+    handle?: string;
+}
+
+export interface McpContextMaskedInstance {
+    environment?: McpContextEnvironment;
+    instance: string;
+}
+
+interface McpContextRemoteInstanceHandle {
+    handle: string;
+    instance: string;
+}
+
 type McpContextAutomaticReentryMode = "automatic" | "user_owned" | "paused";
 
 interface McpContextStoredRecord extends McpContextRecord {
@@ -59,6 +74,8 @@ interface McpContextStoredRecord extends McpContextRecord {
     automaticReentrySourceId?: string;
     automaticReentrySourceKind?: "goal" | "goal-resume" | "goal-retry" | "task-resume" | "wait";
     externalBindings?: McpContextExternalBinding[];
+    maskedInstances?: string[];
+    remoteInstanceHandles?: McpContextRemoteInstanceHandle[];
 }
 
 export interface McpContextAutomaticReentryState {
@@ -400,11 +417,24 @@ export class McpContextRegistry {
                 }
                 throw expiredContext(ctxId, record.expiresAt);
             }
+            if ((record.maskedInstances ?? []).includes(instance)) {
+                throw maskedInstance(ctxId, instance);
+            }
             if (contextEnvironment(record, instance) === undefined) {
                 throw invalidContext(ctxId);
             }
             if (options.execution === true) this.#hydrateExecution(record);
             return cloneRecord(record);
+        });
+    }
+
+    async assertInstanceAvailable(ctxId: string, instance: string): Promise<void> {
+        await this.#run(async () => {
+            this.#assertInitialized();
+            const record = this.#activeRecord(ctxId);
+            if ((record.maskedInstances ?? []).includes(instance)) {
+                throw maskedInstance(ctxId, instance);
+            }
         });
     }
 
@@ -811,7 +841,8 @@ export class McpContextRegistry {
         return await this.#run(async () => {
             this.#assertInitialized();
             const affected = [...this.#contexts.values()].filter((record) =>
-                record.environments.some((environment) => environment.instance === instance),
+                record.environments.some((environment) => environment.instance === instance) ||
+                record.remoteInstanceHandles?.some((reference) => reference.instance === instance) === true,
             );
             if (affected.length === 0) return [];
             await this.#mutateAndPersist(() => {
@@ -819,6 +850,12 @@ export class McpContextRegistry {
                     record.environments = record.environments.filter(
                         (environment) => environment.instance !== instance,
                     );
+                    record.remoteInstanceHandles = record.remoteInstanceHandles?.filter(
+                        (reference) => reference.instance !== instance,
+                    );
+                    if (record.remoteInstanceHandles?.length === 0) {
+                        record.remoteInstanceHandles = undefined;
+                    }
                     if (record.environments.length === 0) {
                         record.status = "disabled";
                     }
@@ -853,6 +890,9 @@ export class McpContextRegistry {
                 }
                 throw expiredContext(ctxId, record.expiresAt);
             }
+            if ((record.maskedInstances ?? []).includes(binding.instance)) {
+                throw maskedInstance(ctxId, binding.instance);
+            }
             await this.#mutateAndPersist(() => {
                 const index = record.environments.findIndex(
                     (environment) => environment.instance === binding.instance,
@@ -881,6 +921,84 @@ export class McpContextRegistry {
                 }
             });
             return cloneRecord(record);
+        });
+    }
+
+    async referenceInstance(
+        ctxId: string,
+        instance: string,
+    ): Promise<McpContextInstanceReference | undefined> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            const record = this.#activeRecord(ctxId);
+            if ((record.maskedInstances ?? []).includes(instance)) return undefined;
+            if (record.instance === instance) return { current: true };
+            const existing = record.remoteInstanceHandles?.find(
+                (reference) => reference.instance === instance,
+            );
+            if (existing !== undefined) {
+                return { current: false, handle: existing.handle };
+            }
+            const handle = `ih-${randomUUID()}`;
+            await this.#mutateAndPersist(() => {
+                record.remoteInstanceHandles = [
+                    ...(record.remoteInstanceHandles ?? []),
+                    { handle, instance },
+                ];
+            });
+            return { current: false, handle };
+        });
+    }
+
+    async resolveRemoteInstanceHandle(ctxId: string, handle: string): Promise<string> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            const record = this.#activeRecord(ctxId);
+            const reference = record.remoteInstanceHandles?.find(
+                (candidate) => candidate.handle === handle,
+            );
+            if (reference === undefined) throw invalidRemoteHandle(ctxId);
+            if ((record.maskedInstances ?? []).includes(reference.instance)) {
+                throw maskedInstance(ctxId, reference.instance);
+            }
+            return reference.instance;
+        });
+    }
+
+    async maskRemoteInstance(ctxId: string, handle: string): Promise<McpContextMaskedInstance> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            const record = this.#activeRecord(ctxId);
+            const reference = record.remoteInstanceHandles?.find(
+                (candidate) => candidate.handle === handle,
+            );
+            if (reference === undefined) throw invalidRemoteHandle(ctxId);
+            if (reference.instance === record.instance) {
+                throw createError({
+                    code: errorCodes.mcpContextInvalid,
+                    details: { ctxId },
+                    message: "The primary instance cannot be masked through environ_remote.",
+                    retryable: false,
+                });
+            }
+            const environment = record.environments.find(
+                (candidate) => candidate.instance === reference.instance,
+            );
+            if (!(record.maskedInstances ?? []).includes(reference.instance) || environment !== undefined) {
+                await this.#mutateAndPersist(() => {
+                    record.maskedInstances = [...new Set([
+                        ...(record.maskedInstances ?? []),
+                        reference.instance,
+                    ])];
+                    record.environments = record.environments.filter(
+                        (candidate) => candidate.instance !== reference.instance,
+                    );
+                });
+            }
+            return {
+                ...(environment === undefined ? {} : { environment: { ...environment } }),
+                instance: reference.instance,
+            };
         });
     }
 
@@ -1011,6 +1129,17 @@ export class McpContextRegistry {
             });
             return cloneRecord(record);
         });
+    }
+
+    #activeRecord(ctxId: string): McpContextStoredRecord {
+        if (!isCtxId(ctxId)) throw invalidContext(ctxId);
+        const record = this.#contexts.get(ctxId);
+        if (record === undefined) throw invalidContext(ctxId);
+        if (record.status === "disabled") throw disabledContext(ctxId);
+        if (record.status === "expired" || Date.parse(record.expiresAt) <= this.#now()) {
+            throw expiredContext(ctxId, record.expiresAt);
+        }
+        return record;
     }
 
     #externalMatches(
@@ -1204,6 +1333,24 @@ function invalidContext(ctxId: string) {
     });
 }
 
+function invalidRemoteHandle(ctxId: string) {
+    return createError({
+        code: errorCodes.mcpContextInvalid,
+        details: { ctxId },
+        message: "Remote instance handle is invalid for the current Context. Obtain a current handle with devshell instance list or status.",
+        retryable: false,
+    });
+}
+
+function maskedInstance(ctxId: string, instance: string) {
+    return createError({
+        code: errorCodes.mcpContextInstanceMasked,
+        details: { ctxId, instance },
+        message: "This remote instance is permanently masked for the lifetime of the current Context.",
+        retryable: false,
+    });
+}
+
 function invalidExternalBinding() {
     return createError({
         code: errorCodes.mcpContextInvalid,
@@ -1251,6 +1398,8 @@ function cloneRecord(record: McpContextStoredRecord): McpContextRecord {
         automaticReentrySourceId: _automaticReentrySourceId,
         automaticReentrySourceKind: _automaticReentrySourceKind,
         externalBindings: _externalBindings,
+        maskedInstances: _maskedInstances,
+        remoteInstanceHandles: _remoteInstanceHandles,
         ...publicRecord
     } = record;
     return {
@@ -1276,6 +1425,8 @@ function cloneStoredRecord(
         externalBindings: record.externalBindings?.map((binding) => ({
             ...binding,
         })),
+        maskedInstances: record.maskedInstances === undefined ? undefined : [...record.maskedInstances],
+        remoteInstanceHandles: record.remoteInstanceHandles?.map((reference) => ({ ...reference })),
         environments: record.environments.map((environment) => ({
             ...environment,
         })),
@@ -1355,6 +1506,14 @@ function parseRecord(value: unknown): McpContextStoredRecord | undefined {
         ...(legacySelector === undefined ? [] : [legacySelector]),
         ...(legacyOpenAiSession === undefined ? [] : [legacyOpenAiSession]),
     ]);
+    const remoteInstanceHandles = Array.isArray(raw.remoteInstanceHandles)
+        ? raw.remoteInstanceHandles.map(parseRemoteInstanceHandle)
+        : [];
+    if (remoteInstanceHandles.some((reference) => reference === undefined)) return undefined;
+    const maskedInstances = Array.isArray(raw.maskedInstances)
+        ? raw.maskedInstances.map((instance) => typeof instance === "string" && instance.length > 0 ? instance : undefined)
+        : [];
+    if (maskedInstances.some((instance) => instance === undefined)) return undefined;
     if (
         typeof record.ctxId !== "string" ||
         !isCtxId(record.ctxId) ||
@@ -1436,6 +1595,10 @@ function parseRecord(value: unknown): McpContextStoredRecord | undefined {
         ctxId: record.ctxId,
         environments: [...byInstance.values()],
         ...(externalBindings.length === 0 ? {} : { externalBindings }),
+        ...(maskedInstances.length === 0 ? {} : { maskedInstances: [...new Set(maskedInstances as string[])] }),
+        ...(remoteInstanceHandles.length === 0
+            ? {}
+            : { remoteInstanceHandles: remoteInstanceHandles as McpContextRemoteInstanceHandle[] }),
         expiresAt: record.expiresAt,
         instance: record.instance,
         lastAccessedAt: record.lastAccessedAt,
@@ -1444,6 +1607,16 @@ function parseRecord(value: unknown): McpContextStoredRecord | undefined {
         temporaryDirectory: record.temporaryDirectory,
         workspace: record.workspace,
     };
+}
+
+function parseRemoteInstanceHandle(value: unknown): McpContextRemoteInstanceHandle | undefined {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+    const handle = (value as { handle?: unknown }).handle;
+    const instance = (value as { instance?: unknown }).instance;
+    return typeof handle === "string" && handle.startsWith("ih-") && handle.length > 3 &&
+        typeof instance === "string" && instance.length > 0
+        ? { handle, instance }
+        : undefined;
 }
 
 function automaticReentryState(record: McpContextStoredRecord, now = Date.now()): McpContextAutomaticReentryState {

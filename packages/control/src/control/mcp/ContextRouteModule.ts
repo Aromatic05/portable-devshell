@@ -4,7 +4,7 @@ import { createError, errorCodes } from "@portable-devshell/shared";
 import { requirePort, routeModule } from "../../route/ControlRouteFactory.js";
 
 export interface ContextAdminPort {
-    connectInstance(ctxId: string, instance: string, workspace?: string, signal?: AbortSignal): Promise<JsonValue>;
+    referenceInstance(ctxId: string, instance: string): Promise<{ current: boolean; handle?: string } | undefined>;
     disable(ctxId: string): Promise<McpContextRecord>;
     list(): Promise<McpContextRecord[]>;
     renew(ctxId: string): Promise<McpContextRecord>;

@@ -11,8 +11,8 @@
             {
                 "id": "instance",
                 "title": "Instance",
-                "summary": "Inspect and attach portable-devshell instances",
-                "usage": "instance <list|connect|status|logs>"
+                "summary": "Inspect portable-devshell instances and obtain Context-scoped remote handles",
+                "usage": "instance <list|status|logs>"
             }
         ]
     }

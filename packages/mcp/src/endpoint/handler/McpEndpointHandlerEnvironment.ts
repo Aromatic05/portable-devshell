@@ -10,10 +10,17 @@ import {
     McpContextRegistry,
     type McpContextExternalBinding,
 } from "../../context/McpContextRegistry.js";
+import { McpContextRemoteEnvironment } from "../../context/McpContextRemoteEnvironment.js";
 import type { McpContextSelector } from "../../context/McpContextSelector.js";
 import { isMcpGoalGateway, type McpInstanceGateway } from "../../instance/McpInstanceGateway.js";
-import { mcpEnvironmentToolName } from "../../tool/catalog/McpToolCatalogEnvironment.js";
-import { readMcpEnvironmentInfoInput } from "../McpEndpointInput.js";
+import {
+    mcpEnvironmentToolName,
+    mcpRemoteEnvironmentToolName,
+} from "../../tool/catalog/McpToolCatalogEnvironment.js";
+import {
+    readMcpEnvironmentInfoInput,
+    readMcpRemoteEnvironmentInput,
+} from "../McpEndpointInput.js";
 import type {
     McpEndpointCallContext,
     McpEndpointWorkerPort,
@@ -39,6 +46,7 @@ export class McpEndpointHandlerEnvironment {
     readonly #contextSelector: McpContextSelector;
     readonly #gateway?: McpInstanceGateway;
     readonly #instanceName: string;
+    readonly #remoteEnvironment?: McpContextRemoteEnvironment;
     readonly #worker: McpEndpointWorkerPort;
 
     constructor(options: {
@@ -52,6 +60,12 @@ export class McpEndpointHandlerEnvironment {
         this.#contextSelector = options.contextSelector;
         this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
+        this.#remoteEnvironment = options.gateway === undefined
+            ? undefined
+            : new McpContextRemoteEnvironment({
+                  contextRegistry: this.#contextRegistry,
+                  gateway: () => options.gateway,
+              });
         this.#worker = options.worker;
     }
 
@@ -72,8 +86,84 @@ export class McpEndpointHandlerEnvironment {
                     requestContext,
                     signal,
                 );
+            case mcpRemoteEnvironmentToolName:
+                return await this.#remoteEnvironmentCommand(
+                    input,
+                    requestContext,
+                    signal,
+                );
             default:
                 throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
+        }
+    }
+
+    async #remoteEnvironmentCommand(
+        input: JsonValue,
+        requestContext: McpEndpointCallContext,
+        signal?: AbortSignal,
+    ): Promise<McpEnvironmentHandlerResult> {
+        const remote = this.#remoteEnvironment;
+        if (remote === undefined) {
+            throw mcpEndpointToolNotExposed(mcpRemoteEnvironmentToolName, this.#instanceName);
+        }
+        const commandInput = readMcpRemoteEnvironmentInput(input, {
+            allowContextId: this.#contextSelector.requiresExplicitContextId,
+        });
+        const resolution = await this.#resolveEnvironmentContext(
+            commandInput.ctxId === undefined ? {} : { ctxId: commandInput.ctxId },
+            requestContext,
+        );
+        const record = resolution.record;
+        const base = this.#contextSelector.expose(record);
+        switch (commandInput.command) {
+            case "help":
+                assertRemoteArguments(commandInput, { handle: false, workspace: false });
+                return {
+                    ctxId: record.ctxId,
+                    structuredContent: {
+                        ...base,
+                        command: "help",
+                        details: { commands: remoteEnvironmentCommandCatalog() },
+                        message: "Current environ_remote command catalog.",
+                    },
+                };
+            case "attach": {
+                assertRemoteArguments(commandInput, { handle: true, workspace: "optional" });
+                const details = await remote.attach(
+                    record.ctxId,
+                    commandInput.handle!,
+                    commandInput.workspace,
+                    signal,
+                );
+                return {
+                    ctxId: record.ctxId,
+                    structuredContent: {
+                        ...base,
+                        command: "attach",
+                        details: isJsonRecord(details) ? details : { result: details },
+                        message: "Remote environment attached to the current Context.",
+                    },
+                };
+            }
+            case "mask": {
+                assertRemoteArguments(commandInput, { handle: true, workspace: false });
+                const details = await remote.mask(record.ctxId, commandInput.handle!);
+                return {
+                    ctxId: record.ctxId,
+                    structuredContent: {
+                        ...base,
+                        command: "mask",
+                        details,
+                        message: "Remote instance is permanently masked for the lifetime of the current Context.",
+                    },
+                };
+            }
+            default:
+                throw createError({
+                    code: errorCodes.targetInvalid,
+                    message: `Unknown environ_remote command ${JSON.stringify(commandInput.command)}. Use command='help' for the current command catalog.`,
+                    retryable: false,
+                });
         }
     }
 
@@ -162,6 +252,9 @@ export class McpEndpointHandlerEnvironment {
                               projectMemoryDirectory: prepared.projectMemoryDirectory,
                           }
                         : {}),
+                    ...(this.#remoteEnvironment === undefined
+                        ? {}
+                        : { remoteEnvironment: { commands: remoteEnvironmentCommandHints() } }),
                     skillsDirectory,
                     temporaryDirectory: prepared.temporaryDirectory,
                     workspace: prepared.workspace,
@@ -419,7 +512,7 @@ function contextWorkspaceRequired(ctxId: string, instance: string) {
     return createError({
         code: errorCodes.mcpContextWorkspaceRequired,
         details: { ctxId, instance },
-        message: `No workspace is attached to ${instance} for ${ctxId}. Call environ_info or use devshell instance connect ${instance} <absolute-workspace>.`,
+        message: `No workspace is attached to ${instance} for ${ctxId}. Use environ_remote command='attach' with its handle and an absolute workspace.`,
         retryable: false,
     });
 }
@@ -467,4 +560,63 @@ function modelDevshellComments(commands: readonly string[]): string[] {
         `Model devshell commands available through bash_run/tmux_run: ${commands.join(", ")}.`,
         "Use devshell --help or devshell <command> --help to inspect the allowed model command surface.",
     ];
+}
+
+function remoteEnvironmentCommandHints(): string[] {
+    return [
+        "help",
+        "attach handle [workspace]",
+        "mask handle",
+    ];
+}
+
+function remoteEnvironmentCommandCatalog(): JsonValue[] {
+    return [
+        {
+            command: "help",
+            summary: "Return the authoritative current environ_remote command catalog.",
+            usage: "help",
+        },
+        {
+            command: "attach",
+            summary: "Attach a remote managed instance and optional absolute workspace to the current Context.",
+            usage: "attach handle [workspace]",
+        },
+        {
+            command: "mask",
+            summary: "Permanently hide a remote instance from this Context and revoke any existing attachment.",
+            usage: "mask handle",
+        },
+    ];
+}
+
+function assertRemoteArguments(
+    input: { handle?: string; workspace?: string },
+    expected: { handle: boolean; workspace: boolean | "optional" },
+): void {
+    if (expected.handle && input.handle === undefined) {
+        throw createError({
+            code: errorCodes.targetInvalid,
+            message: "This environ_remote command requires handle. Use command='help' for the current command catalog.",
+            retryable: false,
+        });
+    }
+    if (!expected.handle && input.handle !== undefined) {
+        throw createError({
+            code: errorCodes.targetInvalid,
+            message: "handle is not valid for this environ_remote command. Use command='help' for the current command catalog.",
+            retryable: false,
+        });
+    }
+    if (expected.workspace === false && input.workspace !== undefined) {
+        throw createError({
+            code: errorCodes.targetInvalid,
+            message: "workspace is not valid for this environ_remote command. Use command='help' for the current command catalog.",
+            retryable: false,
+        });
+    }
+}
+
+function isJsonRecord(value: JsonValue): value is Record<string, JsonValue> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

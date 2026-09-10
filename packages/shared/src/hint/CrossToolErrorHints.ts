@@ -42,8 +42,9 @@ const crossToolHints: Record<string, string> = {
     [errorCodes.streamGap]: "Fetch a fresh snapshot and resubscribe.",
     [errorCodes.mcpContextExpired]: "Call environ_info to renew the current Context, adding workspace only if it is not already attached.",
     [errorCodes.mcpContextDisabled]: "Call environ_info with workspace to establish a new active Context.",
+    [errorCodes.mcpContextInstanceMasked]: "This instance is permanently unavailable for the lifetime of the current Context; do not retry or attempt to unmask it.",
     [errorCodes.mcpContextInvalid]: "Call environ_info with workspace to establish or recover the current Context.",
-    [errorCodes.mcpContextWorkspaceRequired]: "Use devshell instance connect <instance> <absolute-workspace>.",
+    [errorCodes.mcpContextWorkspaceRequired]: "Obtain the instance handle with devshell instance list/status, then use environ_remote command='attach' with an absolute workspace.",
     [errorCodes.targetInvalid]: "Use a valid instance target.",
     [errorCodes.controlClientIdentityRequired]: "Supply the required client identity.",
     [errorCodes.controlClientIdentityInvalid]: "Correct the client identity."

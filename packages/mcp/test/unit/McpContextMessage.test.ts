@@ -11,7 +11,7 @@ import type {
 import { McpEndpointCatalog } from "../../src/endpoint/McpEndpointCatalog.ts";
 import { McpEndpointDispatch } from "../../src/endpoint/McpEndpointDispatch.ts";
 import { McpNativeToolResult } from "../../src/endpoint/McpEndpointResult.ts";
-import { McpContextInstanceConnector } from "../../src/context/McpContextInstanceConnector.ts";
+import { McpContextRemoteEnvironment } from "../../src/context/McpContextRemoteEnvironment.ts";
 import { McpContextRegistry } from "../../src/context/McpContextRegistry.ts";
 
 function structuredResult<T>(result: JsonValue | McpNativeToolResult): T {
@@ -252,10 +252,12 @@ test("a routed artifact result consumes Comments from the routed instance Contex
         { workspace: "/projects/alpha" },
         { principal: "tester", requestId: "environment-alpha" },
     ));
-    await new McpContextInstanceConnector({
+    const handle = (await contextRegistry.referenceInstance(environment.ctxId, "beta"))?.handle;
+    assert.equal(typeof handle, "string");
+    await new McpContextRemoteEnvironment({
         contextRegistry,
         gateway: () => gateway as never
-    }).connect(environment.ctxId, "beta", "/projects/beta");
+    }).attach(environment.ctxId, handle!, "/projects/beta");
 
     const result = await dispatch.callTool(
         "artifact_viewImage",

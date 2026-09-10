@@ -383,8 +383,8 @@ test("cached MCP tool names stay callable without re-exposing stale recipients",
     assert.ok(instanceStart instanceof McpNativeToolResult);
     assert.deepEqual(instanceStart.structuredContent, {
         staleToolSnapshot: {
-            assistantInstruction: "Use devshell instance connect <instance> [workspace].",
-            help: "Use devshell instance connect <instance> [workspace].",
+            assistantInstruction: "Obtain a handle with devshell instance list/status, then use environ_remote command='attach'.",
+            help: "Obtain a handle with devshell instance list/status, then use environ_remote command='attach'.",
             name: "instance_start",
             removedIn: "0.7.1"
         }

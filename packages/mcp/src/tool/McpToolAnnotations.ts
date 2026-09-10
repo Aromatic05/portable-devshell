@@ -46,6 +46,7 @@ const closedWorldTools = new Set([
     "artifact_read",
     "artifact_viewImage",
     "environ_info",
+    "environ_remote",
     "file_edit",
     "file_find",
     "file_info",

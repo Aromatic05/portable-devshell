@@ -7,7 +7,7 @@ import type {
     ToolDefinition
 } from "@portable-devshell/shared";
 import {
-    McpContextInstanceConnector,
+    McpContextRemoteEnvironment,
     McpContextRegistry,
     McpEndpointWorker,
     type McpInstanceGateway
@@ -56,6 +56,21 @@ test("instance attachment is absent from MCP while gateway routing remains avail
     for (const name of ["instance_connect", "instance_list", "instance_status", "instance_create", "instance_stop"]) {
         assert.equal(tools.some((tool) => tool.name === name), false, name);
     }
+    const remote = tools.find((tool) => tool.name === "environ_remote");
+    assert.notEqual(remote, undefined);
+    const remoteSchema = remote?.inputSchema as {
+        anyOf?: unknown;
+        oneOf?: unknown;
+        properties?: Record<string, { enum?: unknown; type?: unknown }>;
+        required?: string[];
+        type?: unknown;
+    };
+    assert.equal(remoteSchema.type, "object");
+    assert.equal(remoteSchema.anyOf, undefined);
+    assert.equal(remoteSchema.oneOf, undefined);
+    assert.equal(remoteSchema.properties?.command?.type, "string");
+    assert.equal(remoteSchema.properties?.command?.enum, undefined);
+    assert.deepEqual(remoteSchema.required, ["command", "ctxId"]);
     assert.notEqual(
         (tools.find((tool) => tool.name === "bash_run")?.inputSchema as { properties?: Record<string, unknown> }).properties?.instance,
         undefined
@@ -88,6 +103,131 @@ test("environ_info never accepts a cross-instance target", async () => {
         ),
         /environ_info accepts only optional ctxId and workspace/u
     );
+});
+
+test("environ_remote attach remains callable without a ready owner Worker", async () => {
+    const registry = new McpContextRegistry({ idFactory: () => "ctx-environ-remote-bootstrap" });
+    const created = await registry.create({
+        instance: "main-pc",
+        principal: "local",
+        workspace: "/workspace"
+    });
+    const endpoint = new McpEndpointWorker({
+        contextRegistry: registry,
+        gateway: createGateway(),
+        instanceName: "main-pc",
+        worker: createWorker({ hasSchema: false, ready: false })
+    });
+    const handle = await requireRemoteHandle(registry, created.ctxId, "remote-server");
+    const attached = await endpoint.callTool(
+        "environ_remote",
+        { command: "attach", ctxId: created.ctxId, handle, workspace: "/remote-workspace" },
+        context
+    ) as { details?: { instance?: string; workspace?: string } };
+
+    assert.equal(attached.details?.instance, "remote-server");
+    assert.equal(attached.details?.workspace, "/remote-workspace");
+    assert.equal(
+        (await registry.validateForInstance(created.ctxId, "remote-server")).environments
+            .find((environment) => environment.instance === "remote-server")?.workspace,
+        "/remote-workspace"
+    );
+});
+
+test("environ_remote bootstraps and irreversibly masks remote routing", async () => {
+    const registry = new McpContextRegistry({ idFactory: () => "ctx-environ-remote" });
+    const created = await registry.create({
+        instance: "main-pc",
+        principal: "local",
+        workspace: "/workspace"
+    });
+    const remoteCalls: string[] = [];
+    const gateway = createGateway({
+        async callTool(instance) {
+            remoteCalls.push(instance);
+            return { remote: true };
+        },
+        async releaseInstanceReference() {
+            throw new Error("remote cleanup unavailable");
+        }
+    });
+    const endpoint = new McpEndpointWorker({
+        contextRegistry: registry,
+        gateway,
+        instanceName: "main-pc",
+        worker: createWorker()
+    });
+    const handle = await requireRemoteHandle(registry, created.ctxId, "remote-server");
+
+    assert.deepEqual(await endpoint.callTool(
+        "environ_remote",
+        { command: "help", ctxId: created.ctxId },
+        context
+    ), {
+        command: "help",
+        ctxId: created.ctxId,
+        details: {
+            commands: [
+                { command: "help", summary: "Return the authoritative current environ_remote command catalog.", usage: "help" },
+                { command: "attach", summary: "Attach a remote managed instance and optional absolute workspace to the current Context.", usage: "attach handle [workspace]" },
+                { command: "mask", summary: "Permanently hide a remote instance from this Context and revoke any existing attachment.", usage: "mask handle" }
+            ]
+        },
+        message: "Current environ_remote command catalog."
+    });
+
+    const attached = await endpoint.callTool(
+        "environ_remote",
+        { command: "attach", ctxId: created.ctxId, handle, workspace: "/remote-workspace" },
+        context
+    ) as { command?: string; details?: { instance?: string; workspace?: string } };
+    assert.equal(attached.command, "attach");
+    assert.equal(attached.details?.instance, "remote-server");
+    assert.equal(attached.details?.workspace, "/remote-workspace");
+    assert.deepEqual(
+        await endpoint.callTool(
+            "bash_run",
+            { command: "pwd", ctxId: created.ctxId, instance: "remote-server" },
+            context
+        ),
+        { remote: true }
+    );
+
+    const masked = await endpoint.callTool(
+        "environ_remote",
+        { command: "mask", ctxId: created.ctxId, handle },
+        context
+    ) as { command?: string; details?: { instance?: string; masked?: boolean } };
+    assert.equal(masked.command, "mask");
+    assert.deepEqual(masked.details, { instance: "remote-server", masked: true });
+    assert.equal(await registry.referenceInstance(created.ctxId, "remote-server"), undefined);
+    await assert.rejects(
+        endpoint.callTool(
+            "bash_run",
+            { command: "pwd", ctxId: created.ctxId, instance: "remote-server" },
+            context
+        ),
+        (error: unknown) => (error as { code?: string }).code === "mcp.contextInstanceMasked"
+    );
+    assert.deepEqual(await endpoint.callTool(
+        "environ_remote",
+        { command: "mask", ctxId: created.ctxId, handle },
+        context
+    ), {
+        command: "mask",
+        ctxId: created.ctxId,
+        details: { instance: "remote-server", masked: true },
+        message: "Remote instance is permanently masked for the lifetime of the current Context."
+    });
+    await assert.rejects(
+        endpoint.callTool(
+            "environ_remote",
+            { command: "unmask", ctxId: created.ctxId, handle },
+            context
+        ),
+        /Unknown environ_remote command "unmask".*command='help'/u
+    );
+    assert.deepEqual(remoteCalls, ["remote-server"]);
 });
 
 test("routing fields are injected into strict worker schema union branches", () => {
@@ -154,11 +294,12 @@ test("worker calls default to the endpoint instance and route explicit targets t
             return true;
         }
     );
-    const connector = new McpContextInstanceConnector({
+    const remote = new McpContextRemoteEnvironment({
         contextRegistry,
         gateway: () => gateway
     });
-    await connector.connect(activeContext.ctxId, "remote-server", "/remote-workspace");
+    const handle = await requireRemoteHandle(contextRegistry, activeContext.ctxId, "remote-server");
+    await remote.attach(activeContext.ctxId, handle, "/remote-workspace");
     assert.deepEqual(
         await endpoint.callTool("bash_run", withContext({ command: "pwd", instance: "remote-server" }), context),
         { remote: true }
@@ -178,7 +319,7 @@ test("worker calls default to the endpoint instance and route explicit targets t
 
 });
 
-test("Context instance connector reuses a live workspace attachment and releases a replaced alert lease", async () => {
+test("remote environment attach reuses a live workspace attachment and releases a replaced alert lease", async () => {
     const registry = new McpContextRegistry({ idFactory: () => "ctx-connect-idempotent" });
     const created = await registry.create({
         instance: "main-pc",
@@ -210,11 +351,12 @@ test("Context instance connector reuses a live workspace attachment and releases
             touchedTemporary.push(path);
         }
     });
-    const connector = new McpContextInstanceConnector({
+    const remote = new McpContextRemoteEnvironment({
         contextRegistry: registry,
         gateway: () => gateway
     });
-    const call = async (workspace: string) => await connector.connect(created.ctxId, "remote-server", workspace);
+    const handle = await requireRemoteHandle(registry, created.ctxId, "remote-server");
+    const call = async (workspace: string) => await remote.attach(created.ctxId, handle, workspace);
 
     await call("/remote-a");
     await call("/remote-a");
@@ -226,7 +368,7 @@ test("Context instance connector reuses a live workspace attachment and releases
     assert.deepEqual(releasedAlerts, ["/remote-a"]);
 });
 
-test("Context instance connector cleans an unused alert lease and reference when workspace preparation fails", async () => {
+test("remote environment attach cleans an unused alert lease and reference when workspace preparation fails", async () => {
     const registry = new McpContextRegistry({ idFactory: () => "ctx-connect-failure" });
     const created = await registry.create({
         instance: "main-pc",
@@ -255,13 +397,14 @@ test("Context instance connector cleans an unused alert lease and reference when
             releasedReferences.push(`${instance}:${reference}`);
         }
     });
-    const connector = new McpContextInstanceConnector({
+    const remote = new McpContextRemoteEnvironment({
         contextRegistry: registry,
         gateway: () => gateway
     });
+    const handle = await requireRemoteHandle(registry, created.ctxId, "remote-server");
 
     await assert.rejects(
-        connector.connect(created.ctxId, "remote-server", "/remote-fail"),
+        remote.attach(created.ctxId, handle, "/remote-fail"),
         /alerts failed/u
     );
     assert.deepEqual(releasedAlerts, ["/remote-fail"]);
@@ -371,7 +514,7 @@ test("worker tools missing from the endpoint catalog cannot be recovered from a 
     assert.equal(remoteCalled, false);
 });
 
-test("cancelling Context instance attachment stops model waiting while the gateway operation continues", async () => {
+test("cancelling remote environment attach stops MCP waiting while the gateway operation continues", async () => {
     let resolveStart!: (value: JsonValue) => void;
     const start = new Promise<JsonValue>((resolve) => {
         resolveStart = resolve;
@@ -381,12 +524,13 @@ test("cancelling Context instance attachment stops model waiting while the gatew
             return await start;
         }
     });
-    const connector = new McpContextInstanceConnector({
+    const remote = new McpContextRemoteEnvironment({
         contextRegistry,
         gateway: () => gateway
     });
+    const handle = await requireRemoteHandle(contextRegistry, activeContext.ctxId, "remote-server");
     const controller = new AbortController();
-    const pending = connector.connect(activeContext.ctxId, "remote-server", undefined, controller.signal);
+    const pending = remote.attach(activeContext.ctxId, handle, undefined, controller.signal);
 
     controller.abort(new Error("gateway timeout"));
     await assert.rejects(pending, /gateway timeout/u);
@@ -394,7 +538,7 @@ test("cancelling Context instance attachment stops model waiting while the gatew
     await start;
 });
 
-test("Context instance attachment is independent from local Worker readiness", async () => {
+test("remote environment attach service is independent from local Worker readiness", async () => {
     const calls: string[] = [];
     const gateway = createGateway({
         connectInstance: async (instance) => {
@@ -402,14 +546,22 @@ test("Context instance attachment is independent from local Worker readiness", a
             return { instance };
         }
     });
-    const connector = new McpContextInstanceConnector({
+    const remote = new McpContextRemoteEnvironment({
         contextRegistry,
         gateway: () => gateway
     });
+    const handle = await requireRemoteHandle(contextRegistry, activeContext.ctxId, "remote-server");
 
-    await connector.connect(activeContext.ctxId, "remote-server");
+    await remote.attach(activeContext.ctxId, handle);
     assert.deepEqual(calls, ["connect:remote-server"]);
 });
+
+async function requireRemoteHandle(registry: McpContextRegistry, ctxId: string, instance: string): Promise<string> {
+    const reference = await registry.referenceInstance(ctxId, instance);
+    assert.equal(reference?.current, false);
+    assert.equal(typeof reference?.handle, "string");
+    return reference!.handle!;
+}
 
 function createManagedEndpoint(
     worker = createWorker(),

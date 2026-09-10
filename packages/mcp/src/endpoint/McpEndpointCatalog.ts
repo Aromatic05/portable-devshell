@@ -171,6 +171,7 @@ export class McpEndpointCatalog {
         const sources: McpToolCatalogEndpointSource[] = [{
             owner: "environment",
             tools: this.#environmentTools.list({
+                remoteEnvironment: this.#gateway !== undefined,
                 requireExplicitContextId: this.#contextSelector.requiresExplicitContextId,
                 workspaceApp,
             })

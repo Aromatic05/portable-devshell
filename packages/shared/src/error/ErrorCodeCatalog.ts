@@ -60,6 +60,7 @@ export const errorCodes = {
     instanceAlreadyExists: "control.instanceAlreadyExists",
     instanceMissing: "control.instanceNotFound",
     mcpContextExpired: "mcp.contextExpired",
+    mcpContextInstanceMasked: "mcp.contextInstanceMasked",
     mcpContextInvalid: "mcp.contextInvalid",
     mcpContextDisabled: "mcp.contextDisabled",
     mcpContextWorkspaceRequired: "mcp.contextWorkspaceRequired",

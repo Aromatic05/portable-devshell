@@ -70,10 +70,10 @@ test("control-plane MCP tools removed in 0.6.17 point cached clients to CLI", ()
     }
 });
 
-test("instance Context attachment removed from MCP points cached clients to the model CLI", () => {
+test("legacy instance Context attachment points cached clients to environ_remote", () => {
     for (const name of ["instance_connect", "instance_start"] as const) {
         assert.deepEqual(resolveMcpLegacyTool(name), {
-            help: "Use devshell instance connect <instance> [workspace].",
+            help: "Obtain a handle with devshell instance list/status, then use environ_remote command='attach'.",
             kind: "tombstone",
             removedIn: "0.7.1",
         }, name);

@@ -11,7 +11,7 @@ import {
 function invocation() {
     return {
         context: {
-            async connectInstance() { throw new Error("unused"); }
+            async instanceReference() { return { current: true }; }
         },
         instance: "worker-a",
         requestId: "model-agent",

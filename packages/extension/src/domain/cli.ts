@@ -27,9 +27,14 @@ export interface CliCommandIo {
     writeStdout(chunk: string): Promise<void>;
 }
 
-/** Context-bound operations available only to a model CLI invocation. */
+export interface CliModelInstanceReference {
+    readonly current: boolean;
+    readonly handle?: string;
+}
+
+/** Read-only Context projection available only to a model CLI invocation. */
 export interface CliModelCommandContext {
-    connectInstance(instance: string, workspace?: string): Promise<ExtensionJsonValue>;
+    instanceReference(instance: string): Promise<CliModelInstanceReference | undefined>;
 }
 
 /** Invocation state for a human/native CLI command. */

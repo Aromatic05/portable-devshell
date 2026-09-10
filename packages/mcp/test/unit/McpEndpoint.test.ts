@@ -1266,8 +1266,8 @@ test("retired instance_connect returns an actionable tombstone through SDK trans
         assert.equal(response.body.error, undefined);
         assert.deepEqual(response.body.result?.structuredContent, {
             staleToolSnapshot: {
-                assistantInstruction: "Use devshell instance connect <instance> [workspace].",
-                help: "Use devshell instance connect <instance> [workspace].",
+                assistantInstruction: "Obtain a handle with devshell instance list/status, then use environ_remote command='attach'.",
+                help: "Obtain a handle with devshell instance list/status, then use environ_remote command='attach'.",
                 name: "instance_connect",
                 removedIn: "0.7.1"
             }

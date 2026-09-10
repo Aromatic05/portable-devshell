@@ -111,7 +111,7 @@ export type ExtensionSandboxCapabilityOperation =
     | "workers.openSession";
 
 export type ExtensionSandboxInterfaceOperation =
-    | "cli.context.connectInstance"
+    | "cli.context.instanceReference"
     | "cli.readInput"
     | "cli.requestInput"
     | "cli.writeStderr"

@@ -19,7 +19,7 @@ interface Harness {
     broker: ModelDevshellBroker;
     close(request: WorkerDevshellCommandClose): void;
     completions: Array<{ error?: string; exitCode: number; sessionId: string }>;
-    contextConnects: Array<{ ctxId: string; instance: string; workspace?: string }>;
+    contextReferences: Array<{ ctxId: string; instance: string }>;
     faults: unknown[];
     outputs: Array<{ data: string; sessionId: string; stream: string }>;
     open(request: WorkerDevshellCommandOpen): void;
@@ -33,7 +33,7 @@ function harness(options: { allow?: boolean; contextWorkspace?: string } = {}): 
     let record = toolRecord();
     const outputs: Harness["outputs"] = [];
     const completions: Harness["completions"] = [];
-    const contextConnects: Harness["contextConnects"] = [];
+    const contextReferences: Harness["contextReferences"] = [];
     const faults: unknown[] = [];
     const worker = {
         appendControlEvent(type: string, data: unknown) {
@@ -83,19 +83,23 @@ function harness(options: { allow?: boolean; contextWorkspace?: string } = {}): 
                 else invocation.signal.addEventListener("abort", onAbort, { once: true });
             });
         }
-        if (argv[0] === "connect") {
+        if (argv[0] === "reference") {
+            const reference = await invocation.context.instanceReference(argv[1]!);
             return {
                 kind: "json",
-                value: await invocation.context.connectInstance(argv[1]!, argv[2])
+                value: reference === undefined ? null : {
+                    current: reference.current,
+                    ...(reference.handle === undefined ? {} : { handle: reference.handle })
+                }
             };
         }
         return { kind: "text", text: `probe:${argv.join("|")}` };
     };
     const commands = new CliExtensionCommandService(modelExtensionHost(command), { surface: "model" });
     const contextAdmin = {
-        async connectInstance(ctxId: string, instance: string, workspace?: string) {
-            contextConnects.push({ ctxId, instance, ...(workspace === undefined ? {} : { workspace }) });
-            return { instance, workspace: workspace ?? null };
+        async referenceInstance(ctxId: string, instance: string) {
+            contextReferences.push({ ctxId, instance });
+            return { current: false, handle: "ih-remote" };
         },
         async validateForInstance(ctxId: string, instance: string) {
             assert.equal(ctxId, "ctx-a");
@@ -123,7 +127,7 @@ function harness(options: { allow?: boolean; contextWorkspace?: string } = {}): 
             closeListener!(request);
         },
         completions,
-        contextConnects,
+        contextReferences,
         faults,
         outputs,
         open(request) {
@@ -147,16 +151,15 @@ test("model devshell executes an allowed command only under matching active bash
     assert.deepEqual(h.faults, []);
 });
 
-test("model devshell Context operations use the authoritative audited ctxId", async (t) => {
+test("model devshell Context projections use the authoritative audited ctxId", async (t) => {
     const h = harness();
     t.after(() => h.broker.dispose());
-    h.open(openRequest({ argv: ["probe", "connect", "remote-test", "/remote/workspace"] }));
+    h.open(openRequest({ argv: ["probe", "reference", "remote-test"] }));
     await waitFor(() => h.completions.length === 1);
 
-    assert.deepEqual(h.contextConnects, [{
+    assert.deepEqual(h.contextReferences, [{
         ctxId: "ctx-a",
-        instance: "remote-test",
-        workspace: "/remote/workspace"
+        instance: "remote-test"
     }]);
     assert.deepEqual(h.completions, [{ exitCode: 0, sessionId: "session-a" }]);
     assert.deepEqual(h.faults, []);

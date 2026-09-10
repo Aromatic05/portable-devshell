@@ -153,13 +153,16 @@ function createCliSandboxIo(context: ExtensionPointSandboxInvocationContext): Cl
 
 function createCliSandboxModelContext(context: ExtensionPointSandboxInvocationContext): CliModelCommandContext {
     return Object.freeze({
-        connectInstance: async (instance: string, workspace?: string) => {
-            const result = await context.requestInterface("cli.context.connectInstance", {
-                instance,
-                ...(workspace === undefined ? {} : { workspace })
-            });
-            if (result === undefined) throw new TypeError("cli.context.connectInstance returned no result.");
-            return result;
+        instanceReference: async (instance: string) => {
+            const result = await context.requestInterface("cli.context.instanceReference", { instance });
+            if (result === undefined) return undefined;
+            const value = readRecord(result, "cli.context.instanceReference result");
+            const current = readBoolean(value.current, "current");
+            const handle = value.handle === undefined ? undefined : readString(value.handle, "handle");
+            return {
+                current,
+                ...(handle === undefined ? {} : { handle })
+            };
         }
     });
 }
@@ -199,11 +202,14 @@ function createCliModelInterfacePort(invocation: CliModelCommandInvocationContex
     const ioPort = invocation.io === undefined ? undefined : createCliInterfacePort(invocation.io);
     return Object.freeze({
         async request(operation: string, input?: ExtensionJsonValue) {
-            if (operation === "cli.context.connectInstance") {
-                const value = readRecord(input, "cli.context.connectInstance");
+            if (operation === "cli.context.instanceReference") {
+                const value = readRecord(input, "cli.context.instanceReference");
                 const instance = readString(value.instance, "instance");
-                const workspace = value.workspace === undefined ? undefined : readString(value.workspace, "workspace");
-                return await invocation.context.connectInstance(instance, workspace);
+                const reference = await invocation.context.instanceReference(instance);
+                return reference === undefined ? undefined : {
+                    current: reference.current,
+                    ...(reference.handle === undefined ? {} : { handle: reference.handle })
+                };
             }
             if (ioPort !== undefined) return await ioPort.request(operation, input);
             throw new TypeError(`Unsupported CLI sandbox interface operation: ${operation}.`);

@@ -1,6 +1,5 @@
 import type { ControlMcpContextMode, JsonValue, McpContextRecord, ToolCallContext, ToolDefinition } from "@portable-devshell/shared";
 import { type McpAuthConfig } from "../auth/McpAuthConfig.js";
-import { McpContextInstanceConnector } from "../context/McpContextInstanceConnector.js";
 import { McpContextRegistry } from "../context/McpContextRegistry.js";
 import { isMcpGoalGateway, isMcpInteractionGateway, type McpInstanceGateway } from "../instance/McpInstanceGateway.js";
 import { McpOAuthProtectedResource } from "../auth/oauth/McpOAuthProtectedResource.js";
@@ -75,7 +74,6 @@ export interface McpHostConfig {
 
 export class McpHost {
     readonly #config: McpHostConfig;
-    readonly #contextInstanceConnector: McpContextInstanceConnector;
     readonly #contextRegistry: McpContextRegistry;
     readonly #httpServer: HttpHost;
     readonly #oauth?: McpOAuthProtectedResource;
@@ -90,12 +88,6 @@ export class McpHost {
     constructor(config: McpHostConfig) {
         this.#config = config;
         this.#contextRegistry = new McpContextRegistry({ filePath: config.contextFile });
-        this.#contextInstanceConnector = new McpContextInstanceConnector({
-            contextRegistry: this.#contextRegistry,
-            gateway: (instance) => this.#gateways.get(instance) ?? [...this.#gateways.values()].find(
-                (candidate): candidate is McpInstanceGateway => candidate !== undefined
-            )
-        });
         this.#workspaceAppLeases = new WorkspaceAppLeaseStore({ filePath: config.workspaceAppLeaseFile });
         const configuredOAuth = oauthConfig(config.instances);
         this.#oauth =
@@ -291,7 +283,7 @@ export class McpHost {
     }
 
     get contextAdmin(): {
-        connectInstance(ctxId: string, instance: string, workspace?: string, signal?: AbortSignal): Promise<JsonValue>;
+        referenceInstance(ctxId: string, instance: string): Promise<{ current: boolean; handle?: string } | undefined>;
         detachInstance(instance: string): Promise<McpContextRecord[]>;
         disable(ctxId: string): Promise<McpContextRecord>;
         list(): Promise<McpContextRecord[]>;
@@ -299,8 +291,8 @@ export class McpHost {
         validateForInstance(ctxId: string, instance: string): Promise<McpContextRecord>;
     } {
         return {
-            connectInstance: async (ctxId, instance, workspace, signal) =>
-                await this.#contextInstanceConnector.connect(ctxId, instance, workspace, signal),
+            referenceInstance: async (ctxId, instance) =>
+                await this.#contextRegistry.referenceInstance(ctxId, instance),
             detachInstance: async (instance) => {
                 await this.#workspaceAppLeases.revokeInstance(instance);
                 this.#workspaceAppPresence.revokeInstance(instance);

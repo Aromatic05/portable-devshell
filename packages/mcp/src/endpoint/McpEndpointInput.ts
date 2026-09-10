@@ -158,6 +158,30 @@ export function readMcpEnvironmentInfoInput(
     };
 }
 
+export function readMcpRemoteEnvironmentInput(
+    input: JsonValue,
+    options: { allowContextId?: boolean } = {},
+): { command: string; ctxId?: string; handle?: string; workspace?: string } {
+    const allowContextId = options.allowContextId !== false;
+    if (!isRecord(input) || Object.keys(input).some((key) =>
+        key !== "command" && key !== "handle" && key !== "workspace" && (!allowContextId || key !== "ctxId")
+    )) {
+        throw invalidArguments(allowContextId
+            ? "environ_remote accepts command plus optional ctxId, handle, and workspace."
+            : "environ_remote accepts command plus optional handle and workspace when Context authority is externally bound.");
+    }
+    const command = requiredString(input.command, "command");
+    const ctxId = allowContextId ? optionalString(input.ctxId, "ctxId") : undefined;
+    const handle = optionalString(input.handle, "handle");
+    const workspace = optionalString(input.workspace, "workspace");
+    return {
+        command,
+        ...(ctxId === undefined ? {} : { ctxId }),
+        ...(handle === undefined ? {} : { handle }),
+        ...(workspace === undefined ? {} : { workspace })
+    };
+}
+
 function withInputProperty(
     tool: ToolDefinition,
     name: string,

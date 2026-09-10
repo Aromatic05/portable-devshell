@@ -22,6 +22,7 @@ import {
     type McpTmuxWaitGateway,
 } from "../instance/McpInstanceGateway.js";
 import type { McpToolCatalogArtifactName } from "../tool/catalog/McpToolCatalogArtifact.js";
+import { mcpEnvironmentToolName } from "../tool/catalog/McpToolCatalogEnvironment.js";
 import type { McpToolCatalogInteractionName } from "../tool/catalog/McpToolCatalogInteraction.js";
 import type { McpToolCatalogTodoName } from "../tool/catalog/McpToolCatalogTodo.js";
 import type { WorkspaceAppLeaseStore } from "../workspace/WorkspaceAppLeaseStore.js";
@@ -175,7 +176,7 @@ export class McpEndpointDispatch {
             const workspaceApp = snapshot.exposed.some((entry) =>
                 entry.owner === "workspace" && entry.definition.name === "workspace_open"
             );
-            if (!workspaceApp) return environment.structuredContent;
+            if (!workspaceApp || toolName !== mcpEnvironmentToolName) return environment.structuredContent;
             return await this.#interaction.bootstrapWorkspace(
                 environment.ctxId,
                 environment.structuredContent,
@@ -1106,6 +1107,9 @@ export class McpEndpointDispatch {
         recordMcpCall: boolean,
         signal?: AbortSignal
     ): Promise<ToolCallContext> {
+        if (instance !== this.#instanceName) {
+            await this.#contextRegistry.assertInstanceAvailable(record.ctxId, instance);
+        }
         const environment = prepareWorkerState
             ? await this.#ensureContextWorkerState(record, instance)
             : contextEnvironment(record, instance);
@@ -1435,7 +1439,7 @@ function contextWorkspaceRequired(ctxId: string, instance: string) {
     return createError({
         code: errorCodes.mcpContextWorkspaceRequired,
         details: { ctxId, instance },
-        message: `No workspace is attached to ${instance} for the current Context. Use devshell instance connect ${instance} <absolute-workspace>.`,
+        message: `No workspace is attached to ${instance} for the current Context. Obtain its handle with devshell instance list/status, then use environ_remote command='attach' with an absolute workspace.`,
         retryable: false
     });
 }

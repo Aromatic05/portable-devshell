@@ -177,10 +177,10 @@ export class ModelDevshellBroker {
             writeStdout: async (chunk) => await this.#write(descriptor, request.sessionId, "stdout", chunk)
         };
         const modelContext: CliModelCommandContext = Object.freeze({
-            connectInstance: async (instance: string, workspace?: string) => {
+            instanceReference: async (instance: string) => {
                 const admin = this.#contextAdmin();
                 if (admin === undefined) throw integrityError("MCP Context authority is unavailable.");
-                return await admin.connectInstance(request.ctxId, instance, workspace, signal);
+                return await admin.referenceInstance(request.ctxId, instance);
             }
         });
         try {

@@ -8,7 +8,7 @@ import { executeArtifactModelCommand } from "../../src/builtin/ArtifactModelComm
 
 const invocation: CliModelCommandInvocationContext = {
     context: {
-        async connectInstance() { throw new Error("unused"); }
+        async instanceReference() { return { current: true }; }
     },
     instance: "instance-a",
     requestId: "request-1",
