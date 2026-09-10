@@ -114,11 +114,16 @@ export async function shapePiProviderTree(root) {
     await rm(join(root, "node_modules", "@portable-devshell", "extension"), { force: true, recursive: true });
     await rewriteDeploymentPackage(root, {
         dependencies: {
-            "@earendil-works/pi-coding-agent": "0.84.4",
-            "@earendil-works/pi-tui": "0.84.4",
+            "@earendil-works/pi-coding-agent": "0.85.1",
+            "@earendil-works/pi-tui": "0.85.1",
+            "@henryqw/pi-ask-question": "1.0.2",
+            "@henryqw/pi-auto-compact": "3.0.4",
             "@portable-devshell/shared": "workspace:*",
             "diff": "8.0.4",
-            "pi-gui-extension": "0.4.1"
+            "pi-editor-plus": "1.3.4",
+            "pi-gui-extension": "0.4.1",
+            "pi-web-access": "0.28.0",
+            "typebox": "1.3.30"
         },
         entry: "./dist/provider/pi/index.js",
         name: "@portable-devshell-internal/agent-provider-pi",
