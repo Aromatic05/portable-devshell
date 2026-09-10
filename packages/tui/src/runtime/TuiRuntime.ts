@@ -50,6 +50,7 @@ import {
     terminalImageClearSequence,
     type TuiTerminalImageSupport,
 } from "./terminal/TuiTerminalImageRenderer.js";
+import { stripBracketedPasteMarkers } from "./terminal/TuiBracketedPaste.js";
 import { TuiTerminalInputRouter } from "./terminal/TuiTerminalInputRouter.js";
 import { TuiControlTerminalPtyFactory } from "./terminal/TuiControlTerminalPty.js";
 import { TuiTerminalSession } from "./terminal/TuiTerminalSession.js";
@@ -104,6 +105,7 @@ export class TuiRuntime {
     #inputStarted = false;
     #inputQueue: Promise<void> = Promise.resolve();
     #mouseBuffer = "";
+    #pasteBuffer = "";
     #screenMouseGesture?: {
         anchor: { x: number; y: number };
         selecting: boolean;
@@ -651,6 +653,7 @@ export class TuiRuntime {
             this.store.getState().interaction.focusScope === "terminal"
         ) {
             this.#mouseBuffer = "";
+            this.#pasteBuffer = "";
             this.#clearTerminalEscapeTimer();
             this.#dispatchTerminalInputActions(
                 this.#terminalInputRouter.push(chunk.toString()),
@@ -667,7 +670,11 @@ export class TuiRuntime {
         }
         this.#clearTerminalEscapeTimer();
         this.#terminalInputRouter.reset();
-        const input = this.#mouseBuffer + chunk.toString();
+        const stripped = stripBracketedPasteMarkers(
+            this.#pasteBuffer + this.#mouseBuffer + chunk.toString(),
+        );
+        this.#pasteBuffer = stripped.partial;
+        const input = stripped.text;
         const pattern = new RegExp(
             `${String.fromCharCode(27)}\\[<(\\d+);(\\d+);(\\d+)([Mm])`,
             "g",
