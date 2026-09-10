@@ -207,9 +207,24 @@ export class TuiCommandDispatcherDetail {
                     return false;
                 }
                 this.#store.setSelectedPage("audit");
+                this.#store.replaceRoute(
+                    entry.ctxId === undefined || entry.ctxId.length === 0
+                        ? {
+                              callId: entry.callId,
+                              page: "audit",
+                              scope: "unscoped",
+                              view: "call",
+                          }
+                        : {
+                              callId: entry.callId,
+                              ctxId: entry.ctxId,
+                              page: "audit",
+                              scope: "context",
+                              view: "call",
+                          },
+                );
                 this.#store.setFocusScope("mainBoxes");
-                this.#store.setMainFocusId(`audit-${entry.callId}`);
-                this.#focus.ensureMainFocusVisible();
+                this.#focus.syncMainFocus();
                 return true;
             }
             if (button !== undefined && state.ui.selectedPage === "instances") {

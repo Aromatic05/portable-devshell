@@ -2665,6 +2665,52 @@ test("logs render timestamps and correlation metadata", () => {
         assert.equal(rendered.includes(value), true, value);
     }
 });
+test("Logs linked call opens the matching scoped Audit call route", async () => {
+    const harness = createHarness();
+    harness.store.patchControlReadModel({ instanceState: { alpha: {
+        logs: [{
+            at: "2026-07-11T12:34:56.000Z",
+            callId: "call-linked",
+            ctxId: "ctx-alpha",
+            message: "linked output",
+            seq: 1,
+            source: "mcp",
+            stream: "stdout",
+            toolName: "bash_run",
+        }],
+        toolCalls: [{
+            callId: "call-linked",
+            ctxId: "ctx-alpha",
+            inputSummary: "{}",
+            instance: asInstanceName("alpha"),
+            output: {},
+            source: "mcp",
+            startedAt: "2026-07-11T12:34:55.000Z",
+            status: "completed",
+            toolName: "bash_run",
+        }],
+    } } });
+    enterLogContext(harness, "ctx-alpha");
+    const logs = expandBox(harness, "logs");
+    harness.store.setMainFocusId(logs.id);
+    harness.store.setFocusScope("boxDetail");
+    harness.store.setSelectedDetailLine(logs.expandedKey, "logs:log:1");
+
+    await harness.dispatch({ type: "focus.activate" });
+
+    assert.equal(harness.store.getState().ui.selectedPage, "audit");
+    assert.deepEqual(currentTuiRoute(harness.store.getState()), {
+        callId: "call-linked",
+        ctxId: "ctx-alpha",
+        page: "audit",
+        scope: "context",
+        view: "call",
+    });
+    assert.equal(
+        harness.store.getState().ui.mainFocusId,
+        "audit-call-detail:call-linked",
+    );
+});
 test("Logs controls drive follow state", async () => {
     const harness = createHarness();
     enterLogContext(harness, "ctx-alpha");

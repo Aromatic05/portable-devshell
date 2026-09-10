@@ -39,9 +39,9 @@ export class TuiRouteDataLoader {
                 return;
             case "logs":
                 if (instance === undefined) return;
+                await this.options.session.refreshLogsForInstance(instance, undefined, signal);
                 if (route.view === "context") {
                     this.options.store.setLogsFollow(instance, true);
-                    await this.options.session.refreshLogsForInstance(instance, undefined, signal);
                     return () => {
                         const logs = selectTuiLogs(this.options.store.getState(), instance);
                         this.options.store.setLogsFollow(instance, false);
