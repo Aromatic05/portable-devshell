@@ -5,6 +5,7 @@ import { asInstanceName } from "@portable-devshell/shared";
 
 import { TuiAppStore } from "../../src/state/TuiAppStore.ts";
 import {
+    renderTuiMessageComposerSegments,
     selectTuiMessageEntries,
     selectTuiMessageSessions,
     selectTuiMessagesSidebarEntries,
@@ -174,4 +175,17 @@ test("Messages keeps short history at the top while reserving composer space at 
     const history = view.props.children[0];
     assert.equal(history.props.height, 26);
     assert.equal(history.props.justifyContent, "flex-start");
+});
+
+test("Messages composer owns an inline cursor cell", () => {
+    assert.deepEqual(renderTuiMessageComposerSegments("中文", 1, true), [
+        { text: "中" },
+        { text: "文", underline: true },
+        { text: "" },
+    ]);
+    assert.deepEqual(renderTuiMessageComposerSegments("中文", 2, false), [
+        { text: "中文" },
+        { text: " ", underline: undefined },
+        { text: "" },
+    ]);
 });

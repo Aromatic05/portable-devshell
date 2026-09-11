@@ -32,7 +32,6 @@ import {
     tuiPageEntries,
     topTuiOverlay,
     tuiLayoutMetrics,
-    tuiMessagesComposerCursorPosition,
     tuiViewProjection,
     wrapTerminalText,
 } from "../../src/testing.ts";
@@ -916,38 +915,6 @@ test("mouse hit regions follow the rendered sidebar, boxes, and overlays", () =>
             region.target.boxId === "create-instance",
     )!;
     assert.equal(shiftedBoxRegion.y, boxRegion.y + 3);
-});
-
-test("Messages composer hardware cursor follows Unicode display width", () => {
-    const harness = createHarness();
-    harness.store.setSelectedPage("messages");
-    harness.store.replaceRoute({
-        ctxId: "ctx-alpha",
-        page: "messages",
-        view: "thread",
-    });
-    const draftKey = contextConversationDraftKey("alpha", "ctx-alpha");
-    harness.store.setFormDraft(draftKey, "中文", true);
-    harness.store.setEditor({
-        cursor: 2,
-        editing: true,
-        key: draftKey,
-        kind: "comment",
-    });
-    harness.store.setFocusScope("contextConversation");
-
-    const viewport = { columns: 120, rows: 40 };
-    const region = buildTuiHitRegions(harness.store.getState(), viewport).find(
-        (candidate) => candidate.target.kind === "messagesViewport",
-    );
-    assert.ok(region);
-    assert.deepEqual(
-        tuiMessagesComposerCursorPosition(harness.store.getState(), viewport),
-        {
-            column: region.x + 7,
-            row: region.y + tuiMessagesHistoryRows(region.height) + 1,
-        },
-    );
 });
 
 test("expanded box hit regions follow wrapped line ids", () => {

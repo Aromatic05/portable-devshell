@@ -201,14 +201,12 @@ test("Messages renders comment and report history and sends a Comment from the f
             harness.runtime.store.getState().interaction.focusScope ===
             "contextConversation",
     );
-    await waitUntil(() => {
-        const output = harness.terminal.output;
-        const showCursor = output.lastIndexOf("\u001B[?25h");
-        if (showCursor < 0) return false;
-        const moveCursor = output.lastIndexOf("\u001B[", showCursor - 1);
-        if (moveCursor < 0) return false;
-        return /^\d+;\d+H$/u.test(output.slice(moveCursor + 2, showCursor));
-    });
+    await waitUntil(() => harness.terminal.output.includes("\u001B[4m"));
+    assert.equal(
+        harness.terminal.output.includes("\u001B[?25h"),
+        false,
+        "Messages must not re-enable the terminal hardware cursor while Ink owns stdout",
+    );
     await waitUntil(() => harness.terminal.output.includes("agent progress report"));
     assert.match(harness.terminal.output, /existing user comment/u);
 

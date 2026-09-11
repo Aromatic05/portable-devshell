@@ -1,9 +1,6 @@
-import stringWidth from "string-width";
-
 import { topTuiOverlay } from "../state/overlay/TuiOverlay.js";
 import type { TuiAppState } from "../state/reducer/TuiStoreModel.js";
 import { currentTuiRoute } from "../state/route/TuiRouteState.js";
-import { readContextConversationDraft } from "../state/TuiContextConversationDraft.js";
 import type { TuiTerminalTab } from "../state/route/TuiRoute.js";
 import { renderExpandableBoxLines } from "./component/TuiComponentExpandableBox.js";
 import { tuiTerminalTabLabel, tuiTerminalTabs } from "./page/terminal/TuiTmuxPaneTerminalModel.js";
@@ -27,7 +24,6 @@ import {
     selectTuiOverviewInstanceViewport,
     selectTuiOverviewPresentation,
 } from "./page/TuiOverviewPresentation.js";
-import { tuiMessagesHistoryRows } from "./page/messages/TuiMessagesProjection.js";
 import { tuiTextDetailImageRows } from "./TuiTextDetailLayout.js";
 
 export type TuiHitTarget =
@@ -316,41 +312,6 @@ export function buildTuiHitRegions(
     }
 
     return regions;
-}
-
-export function tuiMessagesComposerCursorPosition(
-    state: TuiAppState,
-    viewport: { columns: number; rows: number },
-): { column: number; row: number } | undefined {
-    const route = currentTuiRoute(state);
-    const editor = state.interaction.editor;
-    const instance = state.ui.selectedInstance;
-    if (
-        route.page !== "messages" ||
-        route.view !== "thread" ||
-        instance === undefined ||
-        state.interaction.focusScope !== "contextConversation" ||
-        editor?.kind !== "comment" ||
-        editor.editing !== true
-    ) {
-        return undefined;
-    }
-    const region = buildTuiHitRegions(state, viewport).find(
-        (candidate) => candidate.target.kind === "messagesViewport",
-    );
-    if (region === undefined) return undefined;
-
-    const draft = readContextConversationDraft(state, instance, route.ctxId);
-    const cursor = Math.min(
-        Math.max(editor.cursor ?? draft.length, 0),
-        draft.length,
-    );
-    const draftColumn = region.x + 3 + stringWidth(draft.slice(0, cursor));
-    const maxColumn = region.x + Math.max(3, region.width - 1);
-    return {
-        column: Math.min(draftColumn, maxColumn),
-        row: region.y + tuiMessagesHistoryRows(region.height) + 1,
-    };
 }
 
 export function tuiScreenSelectionColumnBounds(

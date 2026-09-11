@@ -7,6 +7,7 @@ import {
     currentTuiRouteScrollKey,
 } from "../../../state/route/TuiRouteState.js";
 import {
+    renderTuiMessageComposerSegments,
     renderTuiMessageHistoryLines,
     tuiMessagesHistoryRows,
 } from "./TuiMessagesProjection.js";
@@ -61,7 +62,11 @@ export function TuiMessagesView(props: {
             <Box>
                 <Text>{"> "}</Text>
                 {editing ? (
-                    <ComposerText draft={draft} />
+                    <ComposerText
+                        cursor={editor.cursor ?? draft.length}
+                        cursorVisible={props.state.interaction.redrawNonce % 2 === 0}
+                        draft={draft}
+                    />
                 ) : (
                     <Text>{draft || "Write a comment…"}</Text>
                 )}
@@ -71,6 +76,19 @@ export function TuiMessagesView(props: {
     );
 }
 
-function ComposerText(props: { draft: string }) {
-    return <Text>{props.draft.length === 0 ? " " : props.draft}</Text>;
+function ComposerText(props: { cursor: number; cursorVisible: boolean; draft: string }) {
+    const segments = renderTuiMessageComposerSegments(
+        props.draft,
+        props.cursor,
+        props.cursorVisible,
+    );
+    return (
+        <Text>
+            {segments.map((segment, index) => (
+                <Text key={index} underline={segment.underline}>
+                    {segment.text}
+                </Text>
+            ))}
+        </Text>
+    );
 }

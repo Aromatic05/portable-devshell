@@ -20,6 +20,11 @@ export interface TuiMessageSession {
     workspace?: string;
 }
 
+export interface TuiMessageComposerSegment {
+    text: string;
+    underline?: boolean;
+}
+
 const activeSessionWindowMs = 30 * 60 * 1_000;
 
 export function selectTuiMessageSessions(
@@ -165,6 +170,19 @@ export function renderTuiMessageHistoryLines(
 
 export function tuiMessagesHistoryRows(viewportRows: number): number {
     return Math.max(0, viewportRows - 4);
+}
+
+export function renderTuiMessageComposerSegments(
+    draft: string,
+    requestedCursor: number,
+    visible: boolean,
+): TuiMessageComposerSegment[] {
+    const cursor = Math.min(Math.max(0, requestedCursor), draft.length);
+    return [
+        { text: draft.slice(0, cursor) },
+        { text: draft[cursor] ?? " ", underline: visible || undefined },
+        { text: draft.slice(cursor + (cursor < draft.length ? 1 : 0)) },
+    ];
 }
 
 function laterTimestamp(left: string | undefined, right: string | undefined): string {

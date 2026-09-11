@@ -30,7 +30,6 @@ import {
     buildTuiTextDetailImageRegion,
     buildTuiTerminalViewportRegion,
     hitTargetAt,
-    tuiMessagesComposerCursorPosition,
     tuiScreenSelectionColumnBounds,
     type TuiHitTarget,
 } from "../view/TuiHitRegions.js";
@@ -527,18 +526,6 @@ export class TuiRuntime {
             this.renderTextDetailImage(true);
             this.renderTerminalGraphics(true);
         });
-    }
-
-    renderInputCursor(): void {
-        const cursor = tuiMessagesComposerCursorPosition(this.store.getState(), {
-            columns: this.columns,
-            rows: this.rows,
-        });
-        if (cursor === undefined) {
-            this.#stdout.write("\u001B[?25l");
-            return;
-        }
-        this.#stdout.write(`\u001B[${cursor.row};${cursor.column}H\u001B[?25h`);
     }
 
     renderTextDetailImage(visible: boolean): void {

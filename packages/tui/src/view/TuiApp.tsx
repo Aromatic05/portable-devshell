@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { Box, Text, useInput } from "ink";
 
 import { topTuiOverlay } from "../state/overlay/TuiOverlay.js";
@@ -70,10 +70,6 @@ export function TuiApp(props: TuiAppProps) {
     useInput((input, key) => {
         void props.runtime.handleInput(input, key);
     });
-    useEffect(() => {
-        props.runtime.renderInputCursor();
-    });
-
     return (
         <Box height={props.runtime.rows} width={props.runtime.columns}>
             <TuiRootLayout
