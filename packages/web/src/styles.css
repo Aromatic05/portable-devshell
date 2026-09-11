@@ -23,6 +23,7 @@ h1, h2, h3, h4 { margin-top: 0; }
 .card span, .card p { color: #b9c5d8; }.card strong { display: block; font-size: 1.05rem; overflow-wrap: anywhere; }
 .instance { display: grid; gap: .25rem; }.instance.selected { border-color: #8ab4ff; }.instances.has-selection { display: none; }.detail { margin-top: 1rem; border-top: 1px solid #34445c; padding-top: 1rem; }.worker-diagnostics { margin: 1rem 0; }.diagnostic-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; margin: 0; }.diagnostic-list div { min-width: 0; }.diagnostic-list dt { color: #93a4bd; font-size: .8rem; }.diagnostic-list dd { margin: 0; overflow-wrap: anywhere; }
 .actions { display: flex; flex-wrap: wrap; gap: .6rem; margin: .75rem 0; }
+.approval-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }.approval-heading h3 { margin-bottom: 0; }.approval-risk { white-space: nowrap; }.approval-risk.risk-high { background: #7f2837; }.approval-risk.risk-medium { background: #6b5014; }.approval-risk.risk-low { background: #175f46; }
 pre { overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: .75rem; border-radius: 8px; background: #090d14; font-size: .8rem; }
 .alerts { padding-left: 1.2rem; }.alerts li { margin-bottom: .45rem; }.alerts .critical { color: #ffb4bd; }.alerts .attention { color: #f3ce82; }
 .feed { margin: 0; padding-left: 1.2rem; }.feed li { padding: .45rem 0; border-bottom: 1px solid #263247; }.feed time { display: block; color: #93a4bd; font-size: .8rem; }.feed strong { margin-right: .4rem; }

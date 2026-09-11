@@ -81,8 +81,11 @@ function ToolApproval({
     onDecide(selection: Selection): void;
 }) {
     return <article className="card">
-        <h3>{item.toolName}</h3>
-        <p>{item.instance} · {item.reason}</p>
+        <div className="approval-heading">
+            <h3>{item.toolName}</h3>
+            <span className={`result approval-risk risk-${item.riskLevel}`}>{item.riskLevel} risk</span>
+        </div>
+        <p>{item.instance} · {item.workspace ?? "no workspace"} · {item.reason}</p>
         <details>
             <summary>Open details</summary>
             <p>Risk: {item.riskLevel}; expires: {item.expiresAt}</p>

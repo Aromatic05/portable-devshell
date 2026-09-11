@@ -35,6 +35,8 @@ it("shows the workspace authority for a pending tool approval", () => {
 
     render(<Approvals store={store} />);
 
+    expect(screen.getByText("high risk")).toBeInTheDocument();
+    expect(screen.getByText(/alpha · \/projects\/alpha · needs review/u)).toBeInTheDocument();
     expect(screen.getByText(/Workspace: \/projects\/alpha/u)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
     const dialog = screen.getByRole("dialog", { name: "Confirm approve" });
