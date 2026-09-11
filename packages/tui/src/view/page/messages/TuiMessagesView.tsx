@@ -49,7 +49,7 @@ export function TuiMessagesView(props: {
 
     return (
         <Box flexDirection="column" height={props.viewportRows}>
-            <Box flexDirection="column" height={historyRows} justifyContent="flex-end" overflow="hidden">
+            <Box flexDirection="column" height={historyRows} justifyContent="flex-start" overflow="hidden">
                 {visible.length === 0 ? <Text dimColor>No messages yet.</Text> : null}
                 {visible.map((line, index) => (
                     <Text dimColor={line.kind === "meta"} key={`${offset + index}:${line.text}`}>

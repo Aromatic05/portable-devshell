@@ -9,6 +9,7 @@ import {
     selectTuiMessageSessions,
     selectTuiMessagesSidebarEntries,
 } from "../../src/view/page/messages/TuiMessagesProjection.ts";
+import { TuiMessagesView } from "../../src/view/page/messages/TuiMessagesView.tsx";
 
 test("Messages merges registered sessions with exact comment and report history", () => {
     const store = new TuiAppStore();
@@ -129,4 +130,30 @@ test("Messages hides sessions that were inactive for more than 30 minutes", () =
             .map((entry) => entry.label),
         ["← messages", "recent"],
     );
+});
+
+test("Messages keeps short history at the top while reserving composer space at the bottom", () => {
+    const store = new TuiAppStore();
+    store.patchControlReadModel({
+        instanceState: {
+            alpha: {
+                contextMessages: [{
+                    createdAt: "2026-09-10T10:03:00.000Z",
+                    ctxId: "ctx-alpha",
+                    id: "comment-1",
+                    instance: "alpha",
+                    status: "delivered",
+                    text: "short history",
+                }],
+            },
+        },
+    });
+    store.setSelectedInstance("alpha");
+    store.setSelectedPage("messages");
+    store.replaceRoute({ ctxId: "ctx-alpha", page: "messages", view: "thread" });
+
+    const view = TuiMessagesView({ state: store.getState(), viewportRows: 30, width: 80 });
+    const history = view.props.children[0];
+    assert.equal(history.props.height, 26);
+    assert.equal(history.props.justifyContent, "flex-start");
 });
