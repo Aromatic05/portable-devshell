@@ -281,6 +281,14 @@ test("View opens anchored to the latest output and scrolling up pauses follow", 
     session.scroll(1_000_000);
     assert.equal(session.getSnapshot().active?.scroll.atBottom, true);
     assert.deepEqual(viewLines(session), ["d", "e"]);
+
+    let notifications = 0;
+    const unsubscribe = session.subscribe(() => { notifications += 1; });
+    const bottom = session.getSnapshot();
+    session.scroll(3);
+    assert.equal(session.getSnapshot(), bottom);
+    assert.equal(notifications, 0);
+    unsubscribe();
 });
 
 test("refresh keeps following the bottom when anchored and holds position after scrolling up", async () => {

@@ -295,9 +295,21 @@ export class TuiTmuxPaneTerminalSession {
         if (active === undefined) {
             return;
         }
+        const scroll = scrollTmuxInspectView(
+            active.lines,
+            this.#viewportRows,
+            active.scroll.offset,
+            delta,
+        );
+        if (
+            scroll.offset === active.scroll.offset &&
+            scroll.atBottom === active.scroll.atBottom
+        ) {
+            return;
+        }
         this.#replace({
             ...this.#snapshot,
-            active: { ...active, scroll: scrollTmuxInspectView(active.lines, this.#viewportRows, active.scroll.offset, delta) },
+            active: { ...active, scroll },
         });
     }
 

@@ -6,6 +6,8 @@ import {
     type TuiTextDetailOverlay,
 } from "../../../state/overlay/TuiOverlay.js";
 import { isTuiSearchablePage } from "../../../state/TuiPageCatalog.js";
+import { wrapTerminalText } from "../../../view/component/TuiComponentExpandableBox.js";
+import { tuiTextDetailBodyRows } from "../../../view/TuiTextDetailLayout.js";
 import type { TuiFocusManager } from "../../focus/TuiFocusManager.js";
 import type { TuiCommandDispatcherFocus } from "./TuiCommandDispatcherFocus.js";
 
@@ -146,9 +148,23 @@ export class TuiCommandDispatcherOverlay {
             this.#store.getState().interaction.overlays,
         );
         if (overlay?.kind !== "text-detail") return false;
+        const width = Math.max(20, this.#focus.mainViewportColumns());
+        const viewportRows = tuiTextDetailBodyRows(
+            this.#focus.mainViewportRows(),
+            overlay.image !== undefined,
+        );
+        const maxOffset = Math.max(
+            0,
+            wrapTerminalText(overlay.body, width).length - viewportRows,
+        );
+        const nextOffset = Math.min(
+            Math.max(0, overlay.scrollOffset + delta),
+            maxOffset,
+        );
+        if (nextOffset === overlay.scrollOffset) return true;
         this.#store.replaceTopOverlay({
             ...overlay,
-            scrollOffset: Math.max(0, overlay.scrollOffset + delta),
+            scrollOffset: nextOffset,
         });
         return true;
     }

@@ -160,6 +160,9 @@ export function reduceTuiStoreReducerInteraction(
                 },
             };
         case "ui.setScrollOffset":
+            if (state.ui.scrollOffsets[action.key] === action.offset) {
+                return state;
+            }
             return {
                 ...state,
                 ui: {

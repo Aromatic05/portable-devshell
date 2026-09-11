@@ -37,6 +37,7 @@ import {
 } from "../../src/testing.ts";
 import { choiceLine, fieldLine } from "../../src/view/editor/TuiEditorView.ts";
 import { tuiMessagesHistoryRows } from "../../src/view/page/messages/TuiMessagesProjection.ts";
+import { tuiTextDetailBodyRows } from "../../src/view/TuiTextDetailLayout.ts";
 
 test("Prompt 3 urgent fix uses page + instance coordinates with a two-stage Tab cycle", async () => {
     const harness = createHarness();
@@ -2804,6 +2805,69 @@ test("Messages scrolling measures wrapped history with the actual main viewport 
         harness.store.getState().ui.scrollOffsets[key],
         Math.max(0, actualMax - 1),
         "scrolling up from the sticky bottom must leave follow mode and preserve a concrete offset",
+    );
+});
+
+test("scrolling at main viewport boundaries is a true no-op", async () => {
+    const harness = createHarness({ mainViewportColumns: 20 });
+    harness.store.patchControlReadModel({
+        instanceState: {
+            alpha: {
+                conversationEntries: [{
+                    createdAt: "2026-09-10T10:00:00.000Z",
+                    ctxId: "ctx-alpha",
+                    id: "long-message",
+                    kind: "comment",
+                    status: "delivered",
+                    text: "wrapped message ".repeat(24),
+                }],
+            },
+        },
+    });
+    harness.store.setSelectedPage("messages");
+    harness.store.replaceRoute({ ctxId: "ctx-alpha", page: "messages", view: "thread" });
+    const key = selectMainScrollKey(harness.store.getState());
+    harness.store.setScrollOffset(key, 0);
+
+    let notifications = 0;
+    const unsubscribe = harness.store.subscribe(() => { notifications += 1; });
+    await harness.dispatch({ delta: -3, type: "screen.scroll" });
+    assert.equal(notifications, 0);
+    unsubscribe();
+
+    await harness.dispatch({ type: "screen.end" });
+    notifications = 0;
+    const unsubscribeBottom = harness.store.subscribe(() => { notifications += 1; });
+    await harness.dispatch({ delta: 3, type: "screen.scroll" });
+    assert.equal(notifications, 0);
+    unsubscribeBottom();
+});
+
+test("sidebar wheel input at the first item is a true no-op", async () => {
+    const harness = createHarness();
+    harness.store.setFocusScope("sidebarContext");
+    harness.store.setSidebarCursor({ id: "overview", kind: "context" });
+
+    let notifications = 0;
+    const unsubscribe = harness.store.subscribe(() => { notifications += 1; });
+    await harness.dispatch({ delta: -3, section: "context", type: "sidebar.scroll" });
+    assert.equal(notifications, 0);
+    unsubscribe();
+});
+
+test("text detail scroll state clamps to the rendered upper boundary", async () => {
+    const harness = createHarness({ mainViewportColumns: 80 });
+    const body = Array.from({ length: 40 }, (_, index) => `line-${index}`).join("\n");
+    harness.store.pushOverlay({ body, kind: "text-detail", scrollOffset: 0, title: "detail" });
+    harness.store.setFocusScope("textDetail");
+
+    await harness.dispatch({ delta: 1_000_000, type: "textDetail.scroll" });
+
+    const overlay = topTuiOverlay(harness.store.getState().interaction.overlays);
+    assert.equal(overlay?.kind, "text-detail");
+    assert.equal(
+        overlay?.kind === "text-detail" ? overlay.scrollOffset : undefined,
+        40 - tuiTextDetailBodyRows(12, false),
     );
 });
 

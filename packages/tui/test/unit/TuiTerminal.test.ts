@@ -442,6 +442,41 @@ test("terminal session connects PTY output, input, resize, and disposal", async 
     assert.equal(killed, true);
 });
 
+test("terminal session does not publish when scrolling beyond a boundary", async () => {
+    let dataListener: ((data: string) => void) | undefined;
+    const pty: TuiTerminalPty = {
+        kill() {},
+        onData(listener) {
+            dataListener = listener;
+            return { dispose() {} };
+        },
+        onExit() {
+            return { dispose() {} };
+        },
+        resize() {},
+        write() {},
+    };
+    const session = new TuiTerminalSession({ ptyFactory: () => pty });
+    await session.start({
+        columns: 8,
+        command: { args: [], command: "/bin/sh" },
+        instance: "alpha",
+        rows: 3,
+    });
+    dataListener?.("zero\r\none\r\ntwo\r\nthree\r\nfour");
+    await waitUntil(() => session.getSnapshot().scroll.historyLines > 0);
+    assert.equal(session.getSnapshot().scroll.atBottom, true);
+
+    let notifications = 0;
+    const unsubscribe = session.subscribe(() => { notifications += 1; });
+    const bottom = session.getSnapshot();
+    session.scrollLines(3);
+    assert.equal(session.getSnapshot(), bottom);
+    assert.equal(notifications, 0);
+    unsubscribe();
+    session.dispose();
+});
+
 async function waitUntil(predicate: () => boolean): Promise<void> {
     for (let attempt = 0; attempt < 50; attempt += 1) {
         if (predicate()) {

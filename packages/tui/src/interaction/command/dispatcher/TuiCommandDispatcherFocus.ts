@@ -58,30 +58,44 @@ export class TuiCommandDispatcherFocus {
         return action?.id?.slice(`${boxId}:approval.open:`.length);
     }
 
+    mainViewportColumns(): number {
+        return this.#mainViewportColumns();
+    }
+
+    mainViewportRows(): number {
+        return this.#mainViewportRows();
+    }
+
     scrollMainColumn(delta: number): boolean {
-        const key = this.#projection.selectMainScrollKey(this.#store.getState());
+        const state = this.#store.getState();
+        const key = this.#projection.selectMainScrollKey(state);
         const max = this.maxMainScrollOffset();
-        const current = clamp(this.#store.getState().ui.scrollOffsets[key] ?? 0, 0, max);
+        const stored = state.ui.scrollOffsets[key];
+        const current = clamp(stored ?? 0, 0, max);
         const next = clamp(delta === 0 ? current : current + delta, 0, max);
-        this.#store.setScrollOffset(
-            key,
-            this.#store.getState().ui.selectedPage === "messages" && next === max
-                ? Number.MAX_SAFE_INTEGER
-                : next,
-        );
+        const target = state.ui.selectedPage === "messages" && next === max
+            ? Number.MAX_SAFE_INTEGER
+            : next;
+        if (stored === target || (stored === undefined && target === 0)) {
+            return true;
+        }
+        this.#store.setScrollOffset(key, target);
         return true;
     }
 
     setMainColumnOffset(offset: number): boolean {
-        const key = this.#projection.selectMainScrollKey(this.#store.getState());
+        const state = this.#store.getState();
+        const key = this.#projection.selectMainScrollKey(state);
         const max = this.maxMainScrollOffset();
         const next = clamp(offset, 0, max);
-        this.#store.setScrollOffset(
-            key,
-            this.#store.getState().ui.selectedPage === "messages" && next === max
-                ? Number.MAX_SAFE_INTEGER
-                : next,
-        );
+        const target = state.ui.selectedPage === "messages" && next === max
+            ? Number.MAX_SAFE_INTEGER
+            : next;
+        const stored = state.ui.scrollOffsets[key];
+        if (stored === target || (stored === undefined && target === 0)) {
+            return true;
+        }
+        this.#store.setScrollOffset(key, target);
         return true;
     }
 

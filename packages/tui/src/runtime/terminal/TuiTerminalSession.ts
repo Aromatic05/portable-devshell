@@ -146,23 +146,27 @@ export class TuiTerminalSession {
     }
 
     scrollPages(amount: number): void {
-        this.#buffer?.scrollPages(amount);
-        this.#syncBuffer();
+        if (this.#buffer?.scrollPages(amount) === true) {
+            this.#syncBuffer();
+        }
     }
 
     scrollLines(amount: number): void {
-        this.#buffer?.scrollLines(amount);
-        this.#syncBuffer();
+        if (this.#buffer?.scrollLines(amount) === true) {
+            this.#syncBuffer();
+        }
     }
 
     scrollToBottom(): void {
-        this.#buffer?.scrollToBottom();
-        this.#syncBuffer();
+        if (this.#buffer?.scrollToBottom() === true) {
+            this.#syncBuffer();
+        }
     }
 
     scrollToTop(): void {
-        this.#buffer?.scrollToTop();
-        this.#syncBuffer();
+        if (this.#buffer?.scrollToTop() === true) {
+            this.#syncBuffer();
+        }
     }
 
     sendMouse(event: TuiTerminalMouseEvent): boolean {

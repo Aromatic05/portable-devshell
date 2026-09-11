@@ -211,20 +211,28 @@ export class TuiTerminalBuffer {
         }
     }
 
-    scrollLines(amount: number): void {
+    scrollLines(amount: number): boolean {
+        const before = this.#terminal.buffer.active.viewportY;
         this.#terminal.scrollLines(Math.trunc(amount));
+        return this.#terminal.buffer.active.viewportY !== before;
     }
 
-    scrollPages(amount: number): void {
+    scrollPages(amount: number): boolean {
+        const before = this.#terminal.buffer.active.viewportY;
         this.#terminal.scrollPages(Math.trunc(amount));
+        return this.#terminal.buffer.active.viewportY !== before;
     }
 
-    scrollToBottom(): void {
+    scrollToBottom(): boolean {
+        const before = this.#terminal.buffer.active.viewportY;
         this.#terminal.scrollToBottom();
+        return this.#terminal.buffer.active.viewportY !== before;
     }
 
-    scrollToTop(): void {
+    scrollToTop(): boolean {
+        const before = this.#terminal.buffer.active.viewportY;
         this.#terminal.scrollToTop();
+        return this.#terminal.buffer.active.viewportY !== before;
     }
 
     sendMouse(event: TuiTerminalMouseEvent): boolean {

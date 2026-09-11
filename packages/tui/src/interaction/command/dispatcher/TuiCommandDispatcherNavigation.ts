@@ -288,6 +288,7 @@ export class TuiCommandDispatcherNavigation {
             Math.max(0, currentIndex + Math.trunc(delta)),
             items.length - 1,
         );
+        if (nextIndex === currentIndex) return true;
         const item = items[nextIndex]!;
         return this.#focusManager.setFocus(
             section === "context"
