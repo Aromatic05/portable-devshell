@@ -1145,6 +1145,25 @@ export class TuiRuntime {
             this.selectTerminalTab(target.tab);
             return;
         }
+        if (target.kind === "overlayAction") {
+            if (target.overlay === "confirmation") {
+                await this.commandDispatcher.dispatch({
+                    button: target.action,
+                    type: "confirm.focus",
+                });
+                await this.commandDispatcher.dispatch({ type: "confirm.accept" });
+                return;
+            }
+            if (
+                this.focusManager.setFocus({
+                    id: target.action,
+                    kind: "approvalAction",
+                })
+            ) {
+                await this.commandDispatcher.dispatch({ type: "focus.activate" });
+            }
+            return;
+        }
         if (target.kind === "scrollViewport") {
             const state = this.store.getState();
             const scope = state.interaction.focusScope;
@@ -1212,6 +1231,12 @@ function sameTuiHitTarget(
             return right.kind === "messagesViewport";
         case "terminalTab":
             return right.kind === "terminalTab" && right.tab === left.tab;
+        case "overlayAction":
+            return (
+                right.kind === "overlayAction" &&
+                right.overlay === left.overlay &&
+                right.action === left.action
+            );
         case "boxTitle":
             return right.kind === "boxTitle" && right.boxId === left.boxId;
         case "boxBody":

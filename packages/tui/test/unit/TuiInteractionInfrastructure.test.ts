@@ -929,6 +929,57 @@ test("mouse hit regions follow the rendered sidebar, boxes, and overlays", () =>
     )!;
     assert.equal(shiftedBoxRegion.y, boxRegion.y + 4);
     assert.equal(erroredScrollRegion.height, scrollRegion.height - 4);
+
+    harness.store.pushOverlay({
+        body: "Proceed with this operation?",
+        cancelLabel: "Cancel",
+        confirmIntent: { type: "screen.toggle" },
+        confirmLabel: "Proceed",
+        kind: "confirmation",
+        selectedAction: "cancel",
+        title: "Confirm operation",
+    });
+    const confirmationRegions = buildTuiHitRegions(
+        harness.store.getState(),
+        viewport,
+    );
+    assert.deepEqual(
+        confirmationRegions
+            .filter((region) => region.target.kind === "overlayAction")
+            .map((region) =>
+                region.target.kind === "overlayAction"
+                    ? `${region.target.overlay}:${region.target.action}`
+                    : "",
+            ),
+        ["confirmation:cancel", "confirmation:confirm"],
+    );
+
+    harness.store.popOverlay();
+    harness.store.pushOverlay({
+        approvalId: "approval-1",
+        instance: "alpha",
+        kind: "approval",
+        selectedAction: "back",
+    });
+    const approvalRegions = buildTuiHitRegions(
+        harness.store.getState(),
+        viewport,
+    );
+    assert.deepEqual(
+        approvalRegions
+            .filter((region) => region.target.kind === "overlayAction")
+            .map((region) =>
+                region.target.kind === "overlayAction"
+                    ? `${region.target.overlay}:${region.target.action}`
+                    : "",
+            ),
+        [
+            "approval:back",
+            "approval:input",
+            "approval:deny",
+            "approval:approve",
+        ],
+    );
 });
 
 test("expanded box hit regions follow wrapped line ids", () => {

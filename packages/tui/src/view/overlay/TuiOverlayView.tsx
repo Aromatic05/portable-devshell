@@ -8,6 +8,11 @@ import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
 import { topTuiOverlay } from "../../state/overlay/TuiOverlay.js";
 import { TuiComponentConfirmDialog } from "../component/TuiComponentConfirmDialog.js";
 import { TuiComponentTextDetail } from "../component/TuiComponentTextDetail.js";
+import {
+    tuiApprovalActions,
+    tuiApprovalActionText,
+    tuiApprovalFields,
+} from "./TuiOverlayPresentation.js";
 
 export interface TuiOverlayViewProps {
     onTextDetailImageVisibility?(visible: boolean): void;
@@ -31,6 +36,7 @@ export function TuiOverlayView(props: TuiOverlayViewProps) {
                     confirmLabel={overlay.confirmLabel}
                     open={true}
                     title={overlay.title}
+                    width={props.width}
                 />
             );
         case "text-detail":
@@ -65,6 +71,7 @@ export function TuiOverlayView(props: TuiOverlayViewProps) {
                     approval={approval}
                     selectedAction={overlay.selectedAction}
                     toolCall={toolCall}
+                    width={props.width}
                 />
             );
         }
@@ -94,6 +101,7 @@ function ApprovalOverlay(props: {
     approval?: ApprovalRequest;
     selectedAction: "back" | "input" | "deny" | "approve";
     toolCall?: ToolCallRecord;
+    width: number;
 }) {
     if (props.approval === undefined) {
         return (
@@ -105,23 +113,7 @@ function ApprovalOverlay(props: {
         );
     }
 
-    const fields = [
-        ["instance", props.approval.instance],
-        ["approval", props.approval.approvalId],
-        ["call", props.approval.callId],
-        ["source", props.approval.source],
-        ["tool", props.approval.toolName],
-        ["workspace", props.approval.workspace ?? "-"],
-        ["risk", props.approval.riskLevel],
-        ["policy reason", props.approval.reason],
-        ["requested", props.approval.createdAt],
-        ["expires", props.approval.expiresAt],
-        [
-            "input summary",
-            props.toolCall?.inputSummary ?? props.approval.inputSummary,
-        ],
-    ] as const;
-    const actions = ["back", "input", "deny", "approve"] as const;
+    const fields = tuiApprovalFields(props.approval, props.toolCall);
 
     return (
         <Box
@@ -129,19 +121,20 @@ function ApprovalOverlay(props: {
             borderStyle="round"
             flexDirection="column"
             paddingX={1}
+            width={props.width}
         >
             <Text bold>Approval</Text>
             {fields.map(([label, value]) => (
                 <Text key={label}>{`${label}: ${value}`}</Text>
             ))}
             <Box marginTop={1}>
-                {actions.map((action) => (
+                {tuiApprovalActions.map((action) => (
                     <Text
                         backgroundColor={
                             props.selectedAction === action ? "cyan" : undefined
                         }
                         key={action}
-                    >{` ${action[0]!.toUpperCase()}${action.slice(1)} `}</Text>
+                    >{tuiApprovalActionText(action)}</Text>
                 ))}
             </Box>
         </Box>

@@ -612,6 +612,107 @@ test("real Ink runtime handles sidebar mouse buttons and viewport wheel scrollin
     }
 });
 
+test("real Ink runtime activates confirmation and approval overlay actions with mouse", async () => {
+    const terminal = createTerminal();
+    const toolCall: ToolCallRecord = {
+        callId: "call-overlay",
+        input: { command: "pwd" },
+        inputSummary: '{"command":"pwd"}',
+        instance: asInstanceName("alpha"),
+        source: "tui",
+        startedAt: "2026-07-17T00:00:00.000Z",
+        status: "running",
+        toolName: "bash_run",
+    };
+    const approval: ApprovalRequest = {
+        approvalId: "approval-overlay",
+        callId: toolCall.callId,
+        createdAt: "2026-07-17T00:00:00.000Z",
+        expiresAt: "2099-07-17T00:10:00.000Z",
+        inputSummary: toolCall.inputSummary,
+        instance: asInstanceName("alpha"),
+        reason: "needs review",
+        riskLevel: "high",
+        source: "tui",
+        status: "pending",
+        toolName: toolCall.toolName,
+        workspace: "/workspace/alpha",
+    };
+    const clients = createClients({
+        approvalRecords: [approval],
+        instanceList: [
+            {
+                enabled: true,
+                mcpEnabled: true,
+                name: "alpha",
+                provider: "local",
+            },
+        ],
+        toolCallRecords: [toolCall],
+    });
+    const runtime = new TuiRuntime(
+        { stdin: terminal.stdin, stdout: terminal.stdout },
+        { clients: clients.value, inkDebug: true },
+    );
+    const running = runtime.run();
+
+    try {
+        await waitUntil(() => runtime.store.getState().connection.status === "connected");
+        await runtime.commandDispatcher.dispatch({
+            body: "Move to Help?",
+            confirmIntent: { page: "help", type: "page.select" },
+            confirmLabel: "Move",
+            title: "Confirm navigation",
+            type: "overlay.openConfirm",
+        });
+        let regions = buildTuiHitRegions(runtime.store.getState(), {
+            columns: runtime.columns,
+            rows: runtime.rows,
+        });
+        const confirm = regions.find(
+            (region) =>
+                region.target.kind === "overlayAction" &&
+                region.target.overlay === "confirmation" &&
+                region.target.action === "confirm",
+        );
+        assert.ok(confirm);
+        terminal.write(mouseSequence(0, confirm.x, confirm.y, "press"));
+        terminal.write(mouseSequence(0, confirm.x, confirm.y, "release"));
+        await waitUntil(() => runtime.store.getState().ui.selectedPage === "help");
+        assert.equal(topTuiOverlay(runtime.store.getState().interaction.overlays), undefined);
+
+        runtime.store.setSelectedInstance("alpha");
+        runtime.store.setSelectedPage("audit");
+        await runtime.session.refreshAudit("alpha");
+        await runtime.commandDispatcher.dispatch({
+            approvalId: approval.approvalId,
+            instance: "alpha",
+            type: "approval.open",
+        });
+        regions = buildTuiHitRegions(runtime.store.getState(), {
+            columns: runtime.columns,
+            rows: runtime.rows,
+        });
+        const approve = regions.find(
+            (region) =>
+                region.target.kind === "overlayAction" &&
+                region.target.overlay === "approval" &&
+                region.target.action === "approve",
+        );
+        assert.ok(approve);
+        terminal.write(mouseSequence(0, approve.x, approve.y, "press"));
+        terminal.write(mouseSequence(0, approve.x, approve.y, "release"));
+        await waitUntil(() => {
+            const overlay = topTuiOverlay(runtime.store.getState().interaction.overlays);
+            return overlay?.kind === "confirmation" && overlay.title === "Confirm Approval";
+        });
+    } finally {
+        terminal.write("\u0004");
+        await running;
+        await runtime.stop();
+    }
+});
+
 test("production Ink scrolling does not clear and repaint the whole terminal", async () => {
     const terminal = createTerminal({ columns: 120, rows: 14 });
     const clients = createClients();

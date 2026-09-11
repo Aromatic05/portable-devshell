@@ -28,6 +28,12 @@ import {
 import {
     tuiMessagesHistoryRows,
 } from "./page/messages/TuiMessagesProjection.js";
+import {
+    projectTuiApprovalActions,
+    projectTuiConfirmationActions,
+    type TuiApprovalAction,
+    type TuiConfirmationAction,
+} from "./overlay/TuiOverlayPresentation.js";
 import { tuiTextDetailImageRows } from "./TuiTextDetailLayout.js";
 
 export type TuiHitTarget =
@@ -36,6 +42,8 @@ export type TuiHitTarget =
     | { id: string; kind: "context" }
     | { id: string; kind: "instance" }
     | { kind: "messagesViewport" }
+    | { action: TuiApprovalAction; kind: "overlayAction"; overlay: "approval" }
+    | { action: TuiConfirmationAction; kind: "overlayAction"; overlay: "confirmation" }
     | { instance: string; kind: "overviewInstance" }
     | { kind: "scrollViewport" }
     | { kind: "terminalTab"; tab: TuiTerminalTab };
@@ -126,11 +134,11 @@ export function buildTuiHitRegions(
     state: TuiAppState,
     viewport: { columns: number; rows: number },
 ): TuiHitRegion[] {
-    if (
-        !isTerminalSizeSupported(viewport.columns, viewport.rows) ||
-        topTuiOverlay(state.interaction.overlays) !== undefined
-    ) {
+    if (!isTerminalSizeSupported(viewport.columns, viewport.rows)) {
         return [];
+    }
+    if (topTuiOverlay(state.interaction.overlays) !== undefined) {
+        return buildTuiOverlayHitRegions(state, viewport);
     }
 
     const regions: TuiHitRegion[] = [];
@@ -346,6 +354,55 @@ export function buildTuiHitRegions(
     }
 
     return regions;
+}
+
+function buildTuiOverlayHitRegions(
+    state: TuiAppState,
+    viewport: { columns: number; rows: number },
+): TuiHitRegion[] {
+    const overlay = topTuiOverlay(state.interaction.overlays);
+    if (overlay === undefined) return [];
+    const geometry = tuiMainLayoutMetrics(viewport.columns, viewport.rows);
+    const frame = {
+        width: geometry.contentWidth,
+        x: geometry.contentX,
+        y: geometry.contentY + tuiBlockHeight(selectErrorMessage(state)),
+    };
+
+    if (overlay.kind === "confirmation") {
+        return projectTuiConfirmationActions(overlay, frame).map((action) => ({
+            height: 1,
+            target: {
+                action: action.action,
+                kind: "overlayAction" as const,
+                overlay: "confirmation" as const,
+            },
+            width: action.width,
+            x: action.x,
+            y: action.y,
+        }));
+    }
+    if (overlay.kind !== "approval") return [];
+
+    const instanceState = state.readModel.instanceState[overlay.instance];
+    const approval = instanceState?.approvals.find(
+        (candidate) => candidate.approvalId === overlay.approvalId,
+    );
+    if (approval === undefined) return [];
+    const toolCall = instanceState?.toolCalls.find(
+        (candidate) => candidate.callId === approval.callId,
+    );
+    return projectTuiApprovalActions(approval, toolCall, frame).map((action) => ({
+        height: 1,
+        target: {
+            action: action.action,
+            kind: "overlayAction" as const,
+            overlay: "approval" as const,
+        },
+        width: action.width,
+        x: action.x,
+        y: action.y,
+    }));
 }
 
 export function tuiScreenSelectionColumnBounds(
