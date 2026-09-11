@@ -114,22 +114,20 @@ export class TuiApplicationInputRouter {
 }
 
 function escapeSequenceLength(value: string): number | undefined {
-    let prefixLength = 0;
-    while (value[prefixLength] === ESCAPE) prefixLength += 1;
-    if (prefixLength === value.length) return undefined;
-
-    const introducer = value[prefixLength]!;
+    if (value.length === 1) return undefined;
+    const introducer = value[1]!;
+    if (introducer === ESCAPE) return 1;
     if (introducer === "[") {
-        for (let index = prefixLength + 1; index < value.length; index += 1) {
+        for (let index = 2; index < value.length; index += 1) {
             const code = value.charCodeAt(index);
             if (code >= 0x40 && code <= 0x7e) return index + 1;
         }
         return undefined;
     }
     if (introducer === "O" || introducer === "N") {
-        return value.length > prefixLength + 1 ? prefixLength + 2 : undefined;
+        return value.length > 2 ? 3 : undefined;
     }
-    return prefixLength + 1;
+    return 2;
 }
 
 function firstControlIndex(value: string): number {

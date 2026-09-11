@@ -18,6 +18,12 @@ test("application input router splits burst and partial escape sequences", () =>
     ]);
 
     router.reset();
+    assert.deepEqual(router.push("\u001B\u001B[A"), [
+        { data: "\u001B", type: "ink" },
+        { data: "\u001B[A", type: "ink" },
+    ]);
+
+    router.reset();
     assert.deepEqual(router.push("\u001B["), []);
     assert.deepEqual(router.push("C"), [
         { data: "\u001B[C", type: "ink" },
