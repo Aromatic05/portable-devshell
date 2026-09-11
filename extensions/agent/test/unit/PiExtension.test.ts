@@ -649,11 +649,9 @@ test("Pi devshell renderer explicitly covers the current Agent model tool surfac
         "file_glob",
         "file_grep",
         "file_read",
-        "tmux_close",
-        "tmux_create",
         "tmux_input",
         "tmux_inspect",
-        "tmux_list",
+        "tmux_manage",
         "tmux_read",
         "tmux_run"
     ];

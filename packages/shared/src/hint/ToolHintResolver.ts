@@ -14,8 +14,6 @@ import {
     fileReadResultHints,
 } from "./worker/FileHints.js";
 import {
-    tmuxCloseResultHints,
-    tmuxCreateResultHints,
     tmuxErrorHints,
     tmuxInspectResultHints,
     tmuxListResultHints,
@@ -31,17 +29,15 @@ const resultResolvers: Record<string, ResultResolver> = {
     file_glob: (_toolName, result) => fileGlobResultHints(result),
     file_grep: (_toolName, result) => fileGrepResultHints(result),
     file_read: (_toolName, result) => fileReadResultHints(result),
-    tmux_close: (_toolName, result) => tmuxCloseResultHints(result),
-    tmux_create: (_toolName, result) => tmuxCreateResultHints(result),
     tmux_input: (toolName, result) => tmuxTaskResultHints(toolName, result),
     tmux_inspect: (_toolName, result) => tmuxInspectResultHints(result),
-    tmux_list: (_toolName, result) => tmuxListResultHints(result),
+    tmux_manage: (_toolName, result) => tmuxListResultHints(result),
     tmux_read: (toolName, result) => tmuxTaskResultHints(toolName, result),
     tmux_run: (toolName, result) => tmuxTaskResultHints(toolName, result)
 };
 
 const fileTools = new Set(["file_read", "file_edit", "file_glob", "file_grep"]);
-const tmuxTools = new Set(["tmux_run", "tmux_input", "tmux_read", "tmux_inspect", "tmux_list", "tmux_create", "tmux_close"]);
+const tmuxTools = new Set(["tmux_run", "tmux_input", "tmux_read", "tmux_inspect", "tmux_manage"]);
 const artifactControlTools = new Set(["artifact_viewImage", "artifact_share"]);
 const instanceTools = new Set(["instance_list", "instance_status", "instance_create", "instance_stop"]);
 const todoTools = new Set(["todo_read", "todo_write"]);

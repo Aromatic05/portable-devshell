@@ -44,12 +44,17 @@ export function formatTmuxCall(toolName: string, record: Record<string, unknown>
             ], theme);
         case "tmux_inspect":
             return joinCall(style(theme, "toolTitle", "tmux inspect", true), [stringField(record, "pane") ?? stringField(record, "panes") ?? "main"], theme);
-        case "tmux_list":
-            return style(theme, "toolTitle", "tmux list", true);
-        case "tmux_create":
-            return joinCall(style(theme, "toolTitle", "tmux create", true), [stringField(record, "name"), stringField(record, "cwd")], theme);
-        case "tmux_close":
-            return joinCall(style(theme, "toolTitle", "tmux close", true), [stringField(record, "task") ?? stringField(record, "pane")], theme);
+        case "tmux_manage": {
+            const command = stringField(record, "command") ?? "manage";
+            if (command === "list") return style(theme, "toolTitle", "tmux list", true);
+            if (command === "create") {
+                return joinCall(style(theme, "toolTitle", "tmux create", true), [stringField(record, "name"), stringField(record, "cwd")], theme);
+            }
+            if (command === "close") {
+                return joinCall(style(theme, "toolTitle", "tmux close", true), [stringField(record, "task") ?? stringField(record, "pane")], theme);
+            }
+            return joinCall(style(theme, "toolTitle", "tmux manage", true), [command], theme);
+        }
         default:
             return style(theme, "toolTitle", toolName, true);
     }
@@ -86,14 +91,13 @@ export function renderTmuxResult(toolName: string, value: JsonValue | undefined,
         }
         case "tmux_inspect":
             return renderTmuxInspect(record, expanded);
-        case "tmux_list":
-            return renderTmuxList(record);
-        case "tmux_create": {
+        case "tmux_manage": {
+            if (Array.isArray(record.panes)) return renderTmuxList(record);
             const pane = asRecord(record.pane);
-            const summary = pane === undefined ? undefined : formatPaneRef(pane);
-            return [...(summary === undefined ? [] : [`created ${summary}`]), ...warningLines(record)];
-        }
-        case "tmux_close": {
+            if (pane !== undefined) {
+                const summary = formatPaneRef(pane);
+                return [...(summary === undefined ? [] : [`created ${summary}`]), ...warningLines(record)];
+            }
             const closed = stringField(record, "closedTaskId") ?? stringField(record, "closedPaneId");
             return [...(closed === undefined ? [] : [`closed ${closed}`]), ...warningLines(record)];
         }

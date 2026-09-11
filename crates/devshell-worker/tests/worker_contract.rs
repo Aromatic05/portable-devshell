@@ -188,11 +188,9 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             .is_ok_and(|output| output.status.success())
     {
         expected_tools.extend([
-            "tmux_close",
-            "tmux_create",
             "tmux_input",
             "tmux_inspect",
-            "tmux_list",
+            "tmux_manage",
             "tmux_read",
             "tmux_run",
         ]);
@@ -343,7 +341,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     }
 
     if expected_tools.contains(&"tmux_input") {
-        for name in ["tmux_input", "tmux_inspect", "tmux_close"] {
+        for name in ["tmux_input", "tmux_inspect", "tmux_manage"] {
             let tool = catalog.iter().find(|tool| tool["name"] == name).unwrap();
             assert_eq!(
                 tool["inputSchema"]["type"], "object",
@@ -414,13 +412,26 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
                 .as_str()
                 .is_some_and(|value| value.contains("Set it long enough for the expected runtime"))
         );
-        let tmux_create = catalog
+        let tmux_manage = catalog
             .iter()
-            .find(|tool| tool["name"] == "tmux_create")
+            .find(|tool| tool["name"] == "tmux_manage")
             .unwrap();
-        assert!(tmux_create["description"].as_str().is_some_and(|value| {
-            value.contains("main already provides one built-in persistent pane")
-        }));
+        assert_eq!(
+            tmux_manage["inputSchema"]["required"],
+            serde_json::json!(["command"])
+        );
+        for property in ["command", "name", "cwd", "task", "pane", "force"] {
+            assert!(
+                tmux_manage["inputSchema"]["properties"]
+                    .get(property)
+                    .is_some(),
+                "tmux_manage missing {property}: {}",
+                tmux_manage["inputSchema"]
+            );
+        }
+        for retired in ["tmux_list", "tmux_create", "tmux_close"] {
+            assert!(catalog.iter().all(|tool| tool["name"] != retired));
+        }
     }
 
     #[cfg(unix)]

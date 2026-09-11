@@ -37,7 +37,7 @@ export class TuiRuntimeTmuxOperations {
         let successfulCalls = 0;
         for (const workspace of workspaces) {
             try {
-                const result = await this.call(instance, workspace, "tmux_list", {});
+                const result = await this.call(instance, workspace, "tmux_manage", { command: "list" });
                 successfulCalls += 1;
                 panes.push(...readPanes(result, workspace));
             } catch (error) {

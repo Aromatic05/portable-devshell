@@ -164,11 +164,11 @@ test("Agent model result projection keeps tmux identities and transcript recover
     assert.match(inspect, /pane=pane-a name=main status=running cwd=\/repo size=120x40/u);
     assert.match(inspect, /rerun tmux_inspect pane=pane-a with narrower start\/end/u);
 
-    assert.match(projectAgentModelToolResult("tmux_list", {
+    assert.match(projectAgentModelToolResult("tmux_manage", {
         panes: [{ id: "pane-a", name: "main", status: "running", task: { id: "task-a", status: "running" } }]
     }), /pane=pane-a name=main status=running task=task-a taskStatus=running/u);
-    assert.equal(projectAgentModelToolResult("tmux_create", { pane: { id: "pane-b", name: "shell" } }), "pane=pane-b name=shell");
-    assert.equal(projectAgentModelToolResult("tmux_close", { closedTaskId: "task-a" }), "closedTask=task-a");
+    assert.equal(projectAgentModelToolResult("tmux_manage", { pane: { id: "pane-b", name: "shell" } }), "pane=pane-b name=shell");
+    assert.equal(projectAgentModelToolResult("tmux_manage", { closedTaskId: "task-a" }), "closedTask=task-a");
 });
 
 test("Agent model file_edit projection preserves failures without echoing full diffs", () => {
@@ -195,7 +195,7 @@ test("Agent model file_edit projection preserves failures without echoing full d
 });
 
 test("Agent model result hard ceiling remains a final backstop", () => {
-    const result = projectAgentModelToolResult("tmux_list", {
+    const result = projectAgentModelToolResult("tmux_manage", {
         panes: Array.from({ length: 1_000 }, (_, index) => ({
             id: `pane-${index}`,
             name: `terminal-${index}-${"x".repeat(20)}`,

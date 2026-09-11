@@ -45,7 +45,7 @@ test("MCP tmux supports a complete interactive lifecycle when JSON-RPC request i
         assert.equal(tools.some((entry) => entry.name === "tmux_run"), true);
         const ctxId = await createContext();
         const requestId = "reused-tools-call-id";
-        const created = await callTool(requestId, "tmux_create", { ctxId, name: "interactive" });
+        const created = await callTool(requestId, "tmux_manage", { command: "create", ctxId, name: "interactive" });
         assert.equal(created.error, undefined, JSON.stringify(created));
 
         const run = await callTool(requestId, "tmux_run", {
@@ -75,7 +75,8 @@ test("MCP tmux supports a complete interactive lifecycle when JSON-RPC request i
             JSON.stringify({ finished, output })
         );
 
-        const closed = await callTool(requestId, "tmux_close", {
+        const closed = await callTool(requestId, "tmux_manage", {
+            command: "close",
             ctxId,
             pane: "interactive"
         });
@@ -124,7 +125,7 @@ test("MCP tmux block timeout returns current transcript without a follow-up read
         assert.equal(output.some((line) => line === "EARLY"), true, JSON.stringify(result));
 
         const task = readString(result.result?.structuredContent?.task?.id, "tmux_run task id");
-        const closed = await callTool("block-timeout-close", "tmux_close", { ctxId, force: true, task });
+        const closed = await callTool("block-timeout-close", "tmux_manage", { command: "close", ctxId, force: true, task });
         assert.equal(closed.error, undefined, JSON.stringify(closed));
 
         const toolCalls = await readToolCalls();
@@ -138,7 +139,8 @@ test("MCP tmux lets a refreshed context continue a task while preserving busy ch
         const firstCtxId = await createContext();
         const refreshedCtxId = await createContext();
         const requestId = "reused-tools-call-id";
-        const created = await callTool(requestId, "tmux_create", {
+        const created = await callTool(requestId, "tmux_manage", {
+            command: "create",
             ctxId: firstCtxId,
             name: "continued"
         });
@@ -174,7 +176,8 @@ test("MCP tmux lets a refreshed context continue a task while preserving busy ch
         assert.equal(foreground.error, undefined, JSON.stringify(foreground));
         await new Promise((resolve) => setTimeout(resolve, 100));
 
-        const busyClose = await callTool(requestId, "tmux_close", {
+        const busyClose = await callTool(requestId, "tmux_manage", {
+            command: "close",
             ctxId: refreshedCtxId,
             pane: "continued"
         });
@@ -198,7 +201,8 @@ test("MCP tmux lets a refreshed context continue a task while preserving busy ch
         assert.equal(stopForeground.error, undefined, JSON.stringify(stopForeground));
         await new Promise((resolve) => setTimeout(resolve, 100));
 
-        const closed = await callTool(requestId, "tmux_close", {
+        const closed = await callTool(requestId, "tmux_manage", {
+            command: "close",
             ctxId: refreshedCtxId,
             force: true,
             pane: "continued"

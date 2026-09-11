@@ -35,7 +35,7 @@ function createHarness(responder: (call: RecordedCall) => JsonValue) {
     return { calls, operations, store };
 }
 
-test("listPanes records a tmux_list call and preserves each task's actual status", async () => {
+test("listPanes records a tmux_manage list call and preserves each task's actual status", async () => {
     const harness = createHarness((): JsonValue => ({
         panes: [
             { id: "%0", name: "main", status: "idle" },
@@ -48,12 +48,12 @@ test("listPanes records a tmux_list call and preserves each task's actual status
             alpha: {
                 toolCalls: [{
                     callId: "call-home-tmux",
-                    inputSummary: "{}",
+                    inputSummary: "{\"command\":\"list\"}",
                     instance: "alpha",
                     source: "mcp",
                     startedAt: "2026-08-29T08:00:00.000Z",
                     status: "completed",
-                    toolName: "tmux_list",
+                    toolName: "tmux_manage",
                     workspace: "/home/alpha"
                 } as never]
             }
@@ -62,7 +62,7 @@ test("listPanes records a tmux_list call and preserves each task's actual status
 
     const panes = await harness.operations.listPanes("alpha");
 
-    assert.deepEqual(harness.calls, [{ input: {}, instance: "alpha", toolName: "tmux_list", workspace: "/home/alpha" }]);
+    assert.deepEqual(harness.calls, [{ input: { command: "list" }, instance: "alpha", toolName: "tmux_manage", workspace: "/home/alpha" }]);
     assert.deepEqual(panes, [
         { id: "%1", name: "server", status: "running", task: { id: "task-9", status: "running" }, workspace: "/home/alpha" },
         { id: "%2", name: "done", status: "0", task: { id: "task-5", status: "0" }, workspace: "/home/alpha" },

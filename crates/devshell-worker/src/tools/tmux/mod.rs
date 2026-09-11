@@ -24,9 +24,9 @@ use crate::storage::InstancePaths;
 use crate::tools::tmux::backend::TmuxBackend;
 use crate::tools::tmux::state::TmuxState;
 use crate::tools::tmux::types::{
-    TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams, TmuxInputOutput,
-    TmuxInputParams, TmuxInspectParams, TmuxListOutput, TmuxListParams, TmuxPaneOperationOutput,
-    TmuxReadOutput, TmuxReadParams, TmuxRunOutput, TmuxRunParams, TmuxWarning,
+    TmuxInputOutput, TmuxInputParams, TmuxInspectParams, TmuxManageOutput, TmuxManageParams,
+    TmuxPaneOperationOutput, TmuxReadOutput, TmuxReadParams, TmuxRunOutput, TmuxRunParams,
+    TmuxWarning,
 };
 use crate::tools::{
     ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName, ToolRegistry,
@@ -189,26 +189,12 @@ pub fn register_tools(
         Arc::clone(&states),
         TmuxState::inspect,
     ))?;
-    registry.register(tool::<TmuxListParams, TmuxListOutput>(
-        ToolName::parse("tmux_list").unwrap(),
-        "List current pane resources and active managed tasks. Completed tasks are not listed but remain readable with tmux_read during transcript retention.",
-        ToolCapability::Read,
-        Arc::clone(&states),
-        |state, call, _| state.list(call),
-    ))?;
-    registry.register(tool::<TmuxCreateParams, TmuxCreateOutput>(
-        ToolName::parse("tmux_create").unwrap(),
-        "Create an additional persistent interactive pane using the user's configured shell and shell rc files. main already provides one built-in persistent pane. Exiting the shell restarts it inside the same pane; the pane remains until tmux_close.",
-        ToolCapability::Execute,
-        Arc::clone(&states),
-        TmuxState::create,
-    ))?;
-    registry.register(tool::<TmuxCloseParams, TmuxCloseOutput>(
-        ToolName::parse("tmux_close").unwrap(),
-        "Close one tmux-owned resource: terminate a running managed task by task id, or close a persistent interactive pane by pane id/name. Running resources require force=true. The built-in main pane cannot be closed.",
+    registry.register(tool::<TmuxManageParams, TmuxManageOutput>(
+        ToolName::parse("tmux_manage").unwrap(),
+        "Manage tmux-owned resources. command=list returns current panes and active tasks and may initialize the managed tmux session; command=create creates a persistent interactive pane; command=close closes a persistent pane or terminates a managed task.",
         ToolCapability::Execute,
         states,
-        TmuxState::close,
+        TmuxState::manage,
     ))?;
     Ok(())
 }

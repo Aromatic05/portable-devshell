@@ -57,7 +57,7 @@ interface ToolSchedulerEntry {
 
 const terminalStates = new Set<ToolSchedulerEntryState>(["completed", "failed", "cancelled", "queueTimeout"]);
 
-const urgentToolNames = new Set(["tmux_input", "tmux_inspect", "tmux_list"]);
+const urgentToolNames = new Set(["tmux_input", "tmux_inspect", "tmux_manage"]);
 
 function isUrgentTool(toolName: string): boolean {
     return urgentToolNames.has(toolName);

@@ -499,10 +499,7 @@ impl Drop for ControlCallPermit {
 }
 
 fn is_urgent_tool(method: &str) -> bool {
-    matches!(
-        method,
-        "tmux_input" | "tmux_inspect" | "tmux_list" | "tmux_close"
-    )
+    matches!(method, "tmux_input" | "tmux_inspect" | "tmux_manage")
 }
 
 fn is_tmux_wait_observation(request: &RpcRequest) -> bool {
@@ -628,7 +625,7 @@ mod tests {
         let urgent_one = registry
             .acquire(&RpcRequest::request(
                 "3",
-                "tmux_close",
+                "tmux_manage",
                 serde_json::json!({}),
             ))
             .unwrap();
@@ -704,7 +701,7 @@ mod tests {
         let urgent_one = registry
             .acquire(&RpcRequest::request(
                 "urgent-with-observation-1",
-                "tmux_close",
+                "tmux_manage",
                 serde_json::json!({}),
             ))
             .unwrap();

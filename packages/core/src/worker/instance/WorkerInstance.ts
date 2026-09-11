@@ -404,7 +404,7 @@ export class WorkerInstance {
 
     async observeTmuxTask(taskId: string, context: ToolCallContext, signal?: AbortSignal): Promise<JsonValue> {
         this.#assertReady();
-        const listed = await this.#toolInvoker.invoke("tmux_list", {}, context, signal);
+        const listed = await this.#toolInvoker.invoke("tmux_manage", { command: "list" }, context, signal);
         const active = findTmuxTask(listed, taskId);
         if (active !== undefined) return { task: active };
         return await this.#toolInvoker.invoke(

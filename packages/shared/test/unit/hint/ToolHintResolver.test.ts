@@ -240,11 +240,11 @@ test("tmux_run start-unconfirmed forbids an immediate relaunch", () => {
 });
 
 test("tmux cwd errors explain the supported path namespaces", () => {
-    assert.match(resolveErrorHints("tmux_create", body("tmux.invalidCwd"))[0]?.text ?? "", /\.\/.*workspace-relative/u);
+    assert.match(resolveErrorHints("tmux_manage", body("tmux.invalidCwd"))[0]?.text ?? "", /\.\/.*workspace-relative/u);
 });
 
-test("tmux_list full capacity is a diagnostic, not a list failure", () => {
-    const hints = resolveResultHints("tmux_list", { capacity: { max: 4, used: 4 }, panes: [], warnings: [] });
+test("tmux_manage list full capacity is a diagnostic, not a list failure", () => {
+    const hints = resolveResultHints("tmux_manage", { capacity: { max: 4, used: 4 }, panes: [], warnings: [] });
     assert.deepEqual(codes(hints), ["tmux.capacityFull"]);
 });
 

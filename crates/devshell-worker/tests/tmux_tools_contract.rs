@@ -103,6 +103,12 @@ fn call_with_identity(
     params: Value,
     identity: CallIdentity<'_>,
 ) -> Value {
+    let (method, params) = match method {
+        "tmux_list" => ("tmux_manage", merge_manage_command(params, "list")),
+        "tmux_create" => ("tmux_manage", merge_manage_command(params, "create")),
+        "tmux_close" => ("tmux_manage", merge_manage_command(params, "close")),
+        _ => (method, params),
+    };
     let mut context = json!({
         "ctxId": identity.ctx_id,
         "requestId": identity.request_id,
@@ -122,6 +128,14 @@ fn call_with_identity(
             "context": context
         }),
     )
+}
+
+fn merge_manage_command(mut params: Value, command: &str) -> Value {
+    let object = params
+        .as_object_mut()
+        .expect("tmux contract params must be an object");
+    object.insert("command".to_string(), json!(command));
+    params
 }
 
 fn kill_tmux_server(env: &TestEnv, instance: &str) {
@@ -289,6 +303,39 @@ fn wait_for_terminal(env: &TestEnv, instance: &str, task: &str, ctx_id: &str) ->
         }
         assert!(Instant::now() < deadline, "task did not finish: {response}");
     }
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
+fn tmux_manage_rejects_command_specific_argument_mixups() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-manage-validation";
+    start(&env, instance);
+
+    for (id, params) in [
+        (
+            "list-extra",
+            json!({ "command": "list", "name": "unexpected" }),
+        ),
+        ("create-missing", json!({ "command": "create" })),
+        ("close-missing", json!({ "command": "close" })),
+        (
+            "close-ambiguous",
+            json!({ "command": "close", "task": "task-a", "pane": "main" }),
+        ),
+    ] {
+        let response = call(&env, instance, id, "tmux_manage", params, "ctx-a", id);
+        assert_eq!(
+            response["error"]["code"], "tool.invalidArguments",
+            "{response}"
+        );
+    }
+
+    stop(&env, instance);
 }
 
 #[test]

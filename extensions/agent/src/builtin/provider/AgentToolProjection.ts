@@ -29,11 +29,9 @@ const AGENT_MODEL_TOOL_RESULT_PROJECTORS = new Map<string, AgentModelToolResultP
     ["file_glob", renderFileGlobModelToolResult],
     ["file_grep", renderFileGrepModelToolResult],
     ["file_read", renderFileReadModelToolResult],
-    ["tmux_close", renderTmuxCloseModelToolResult],
-    ["tmux_create", renderTmuxCreateModelToolResult],
     ["tmux_input", renderTmuxTaskModelToolResult],
     ["tmux_inspect", renderTmuxInspectModelToolResult],
-    ["tmux_list", renderTmuxListModelToolResult],
+    ["tmux_manage", renderTmuxManageModelToolResult],
     ["tmux_read", renderTmuxTaskModelToolResult],
     ["tmux_run", renderTmuxTaskModelToolResult]
 ]);
@@ -307,6 +305,15 @@ function renderTmuxListModelToolResult(value: Record<string, ExtensionJsonValue>
     if (lines.length === 0) lines.push("No panes or active tasks.");
     lines.push(...renderTmuxWarnings(value.warnings));
     return lines.join("\n");
+}
+
+function renderTmuxManageModelToolResult(value: Record<string, ExtensionJsonValue>): string {
+    if (Array.isArray(value.panes)) return renderTmuxListModelToolResult(value);
+    if (isRecord(value.pane)) return renderTmuxCreateModelToolResult(value);
+    if (typeof value.closedTaskId === "string" || typeof value.closedPaneId === "string") {
+        return renderTmuxCloseModelToolResult(value);
+    }
+    return renderToolResult(value);
 }
 
 function renderTmuxCreateModelToolResult(value: Record<string, ExtensionJsonValue>): string {

@@ -32,6 +32,7 @@ import { throwIfMcpEndpointAborted, waitForMcpEndpointAbortable } from "./McpEnd
 import {
     adaptMcpLegacyFileToolInput,
     adaptMcpLegacyFileToolResult,
+    adaptMcpLegacyTmuxToolInput,
     mcpLegacyToolTombstone,
     resolveMcpLegacyTool
 } from "./McpEndpointCompatibility.js";
@@ -165,12 +166,16 @@ export class McpEndpointDispatch {
             : undefined;
         if (
             compatibility?.kind === "alias" || compatibility?.kind === "file-v07-alias" ||
+            compatibility?.kind === "tmux-v07-alias" ||
             compatibility?.kind === "workspace-app-v0615"
         ) {
             toolName = compatibility.replacement;
         }
         if (compatibility?.kind === "file-v07-alias") {
             input = adaptMcpLegacyFileToolInput(requestedToolName, input);
+        }
+        if (compatibility?.kind === "tmux-v07-alias") {
+            input = adaptMcpLegacyTmuxToolInput(compatibility, input);
         }
         const snapshot = this.#catalog.snapshot();
         const known = snapshot.merged.find((entry) => entry.definition.name === toolName);
@@ -1340,7 +1345,6 @@ const OBSERVATION_TOOLS = new Set([
     "instance_list",
     "instance_status",
     "tmux_inspect",
-    "tmux_list",
     "todo_read",
     "todo_report",
     "workspace_open",
@@ -1355,6 +1359,7 @@ function workspaceGoalActivity(toolName: string, input: JsonValue, tmuxBlockSync
     if (toolName === "workspace_ask") return "wait";
     if (toolName === "tmux_run") return readTmuxBlock(input) ? "wait" : "execution";
     if (toolName === "tmux_read") return readTmuxReadTimeMs(input) >= tmuxBlockSyncMs ? "wait" : "observation";
+    if (toolName === "tmux_manage" && isRecord(input) && input.command === "list") return "observation";
     if (OBSERVATION_TOOLS.has(toolName)) return "observation";
     if (MUTATION_TOOLS.has(toolName)) return "mutation";
     return "execution";

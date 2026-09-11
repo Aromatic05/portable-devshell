@@ -1564,11 +1564,11 @@ test("real Ink runtime switches terminal sources and drives tmux View and Attach
             source: "mcp",
             startedAt: "2026-08-30T00:00:00.000Z",
             status: "completed",
-            toolName: "tmux_list",
+            toolName: "tmux_manage",
             workspace: process.cwd(),
         } as ToolCallRecord],
         toolCall(_instance, toolName, input) {
-            if (toolName === "tmux_list") {
+            if (toolName === "tmux_manage" && (input as { command?: string }).command === "list") {
                 return {
                     panes: [
                         {

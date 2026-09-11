@@ -147,24 +147,12 @@ export function tmuxListResultHints(result: JsonValue): ToolDiagnosticHint[] {
     return hints;
 }
 
-export function tmuxCreateResultHints(result: JsonValue): ToolDiagnosticHint[] {
-    const record = asRecord(result);
-    if (record === undefined) return [];
-    return warningHints(asArray(record.warnings));
-}
-
-export function tmuxCloseResultHints(result: JsonValue): ToolDiagnosticHint[] {
-    const record = asRecord(result);
-    if (record === undefined) return [];
-    return warningHints(asArray(record.warnings));
-}
-
 export function tmuxErrorHints(toolName: string, body: ControlErrorBody): ToolDiagnosticHint[] {
     switch (body.code) {
         case "tmux.taskStartUnconfirmed":
             return [errorHint(
                 "tmux.taskStartUnconfirmed",
-                "Check tmux_list or tmux_inspect before retrying."
+                "Check tmux_manage command=list or tmux_inspect before retrying."
             )];
         case "tmux.taskNotRunning":
             return [errorHint(
@@ -174,7 +162,7 @@ export function tmuxErrorHints(toolName: string, body: ControlErrorBody): ToolDi
         case "tmux.taskExpired":
             return [errorHint(
                 "tmux.taskExpired",
-                "Refresh tmux_list or tmux_inspect."
+                "Refresh tmux_manage command=list or tmux_inspect."
             )];
         case "tmux.capacityReached":
             return [errorHint(
@@ -194,7 +182,7 @@ export function tmuxErrorHints(toolName: string, body: ControlErrorBody): ToolDi
         case "tmux.paneNotFound":
             return [errorHint(
                 "tmux.paneNotFound",
-                "Refresh tmux_list and use a current pane."
+                "Refresh tmux_manage command=list and use a current pane."
             )];
         case "tmux.paneNameExists":
             return [errorHint(
@@ -231,7 +219,7 @@ export function tmuxErrorHints(toolName: string, body: ControlErrorBody): ToolDi
         case "tmux.createFailed":
             return [errorHint(
                 body.code,
-                "Check tmux_list and the tmux runtime."
+                "Check tmux_manage command=list and the tmux runtime."
             )];
         case "tmux.unavailable":
             return [errorHint(

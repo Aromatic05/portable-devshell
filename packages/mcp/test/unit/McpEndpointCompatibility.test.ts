@@ -4,6 +4,7 @@ import test from "node:test";
 import {
     adaptMcpLegacyFileToolInput,
     adaptMcpLegacyFileToolResult,
+    adaptMcpLegacyTmuxToolInput,
     resolveMcpLegacyTool
 } from "../../src/endpoint/McpEndpointCompatibility.ts";
 
@@ -85,6 +86,29 @@ test("v0.7 file aliases adapt inputs and preserve legacy file_info detail semant
         adaptMcpLegacyFileToolResult("file_info", current, { details: true, paths: ["./a.ts"] }),
         { entries: [{ mode: 420, modifiedAtMs: 123, path: "./a.ts", sizeBytes: 7, type: "file" }] }
     );
+});
+
+test("v0.7 tmux lifecycle names remain hidden aliases through v0.7.3", () => {
+    for (const [name, command] of [
+        ["tmux_list", "list"],
+        ["tmux_create", "create"],
+        ["tmux_close", "close"],
+    ] as const) {
+        const compatibility = resolveMcpLegacyTool(name);
+        assert.deepEqual(compatibility, {
+            command,
+            kind: "tmux-v07-alias",
+            removeIn: "0.7.4",
+            replacement: "tmux_manage",
+        }, name);
+        assert.deepEqual(
+            compatibility?.kind === "tmux-v07-alias"
+                ? adaptMcpLegacyTmuxToolInput(compatibility, { ctxId: "ctx-a", name: "pane-a" })
+                : undefined,
+            { command, ctxId: "ctx-a", name: "pane-a" },
+            name
+        );
+    }
 });
 
 test("incompatible legacy MCP schemas stay tombstoned", () => {

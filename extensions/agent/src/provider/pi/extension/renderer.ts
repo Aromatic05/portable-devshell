@@ -51,11 +51,9 @@ export const devshellPiRendererToolNames = Object.freeze([
     "file_glob",
     "file_grep",
     "file_read",
-    "tmux_close",
-    "tmux_create",
     "tmux_input",
     "tmux_inspect",
-    "tmux_list",
+    "tmux_manage",
     "tmux_read",
     "tmux_run"
 ] as const);
@@ -122,11 +120,9 @@ export function formatPiToolCall(toolName: string, args: unknown, theme?: PiThem
             return formatGrepCall(record, theme);
         case "file_read":
             return formatReadCall(record, theme);
-        case "tmux_close":
-        case "tmux_create":
         case "tmux_input":
         case "tmux_inspect":
-        case "tmux_list":
+        case "tmux_manage":
         case "tmux_read":
         case "tmux_run":
             return formatTmuxCall(toolName, record, theme);
@@ -155,11 +151,9 @@ export function formatPiToolResult(
             return joinStyled(renderFileGrep(result.details, expanded), theme);
         case "file_read":
             return joinStyled(renderFileRead(result.details, expanded), theme);
-        case "tmux_close":
-        case "tmux_create":
         case "tmux_input":
         case "tmux_inspect":
-        case "tmux_list":
+        case "tmux_manage":
         case "tmux_read":
         case "tmux_run":
             return joinStyled(renderTmuxResult(toolName, result.details, expanded), theme);

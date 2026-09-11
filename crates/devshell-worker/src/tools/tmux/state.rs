@@ -24,9 +24,10 @@ use crate::tools::tmux::task::{
 };
 use crate::tools::tmux::types::{
     TmuxCloseOutput, TmuxCloseParams, TmuxCreateOutput, TmuxCreateParams, TmuxInputOutput,
-    TmuxInputParams, TmuxInspectParams, TmuxListOutput, TmuxPaneDetail, TmuxPaneOperationOutput,
-    TmuxReadOutput, TmuxReadParams, TmuxReadWaitReason, TmuxRunOutput, TmuxRunParams, TmuxWaitMode,
-    TmuxWarning,
+    TmuxInputParams, TmuxInspectParams, TmuxListOutput, TmuxManageCommand, TmuxManageOutput,
+    TmuxManageParams, TmuxPaneCloseParams, TmuxPaneDetail, TmuxPaneOperationOutput, TmuxReadOutput,
+    TmuxReadParams, TmuxReadWaitReason, TmuxRunOutput, TmuxRunParams, TmuxTaskCloseParams,
+    TmuxWaitMode, TmuxWarning,
 };
 use crate::tools::{ToolCall, ToolError};
 
@@ -563,14 +564,80 @@ impl TmuxState {
         })
     }
 
-    pub fn create(
+    pub fn manage(
         &self,
         call: &ToolCall,
-        params: TmuxCreateParams,
-    ) -> Result<TmuxCreateOutput, ToolError> {
+        params: TmuxManageParams,
+    ) -> Result<TmuxManageOutput, ToolError> {
         call.check_cancelled()?;
-        self.replays
-            .execute(call, "tmux_create", || self.create_once(call, params))
+        require_execute(call)?;
+        match params.command {
+            TmuxManageCommand::List => {
+                if params.name.is_some()
+                    || params.cwd.is_some()
+                    || params.task.is_some()
+                    || params.pane.is_some()
+                    || params.force.is_some()
+                {
+                    return Err(ToolError::new(
+                        "tool.invalidArguments",
+                        "tmux_manage command=list accepts only command",
+                    ));
+                }
+                self.list(call).map(Into::into)
+            }
+            TmuxManageCommand::Create => {
+                if params.task.is_some() || params.pane.is_some() || params.force.is_some() {
+                    return Err(ToolError::new(
+                        "tool.invalidArguments",
+                        "tmux_manage command=create accepts command, name, and optional cwd",
+                    ));
+                }
+                let name = params.name.ok_or_else(|| {
+                    ToolError::new(
+                        "tool.invalidArguments",
+                        "tmux_manage command=create requires name",
+                    )
+                })?;
+                self.replays.execute(call, "tmux_manage", || {
+                    self.create_once(
+                        call,
+                        TmuxCreateParams {
+                            name,
+                            cwd: params.cwd,
+                        },
+                    )
+                    .map(Into::into)
+                })
+            }
+            TmuxManageCommand::Close => {
+                if params.name.is_some() || params.cwd.is_some() {
+                    return Err(ToolError::new(
+                        "tool.invalidArguments",
+                        "tmux_manage command=close accepts command, exactly one of task or pane, and optional force",
+                    ));
+                }
+                let target = match (params.task, params.pane) {
+                    (Some(task), None) => TmuxCloseParams::Task(TmuxTaskCloseParams {
+                        task,
+                        force: params.force.unwrap_or(false),
+                    }),
+                    (None, Some(pane)) => TmuxCloseParams::Pane(TmuxPaneCloseParams {
+                        pane,
+                        force: params.force.unwrap_or(false),
+                    }),
+                    _ => {
+                        return Err(ToolError::new(
+                            "tool.invalidArguments",
+                            "tmux_manage command=close requires exactly one of task or pane",
+                        ));
+                    }
+                };
+                self.replays.execute(call, "tmux_manage", || {
+                    self.close_once(call, target).map(Into::into)
+                })
+            }
+        }
     }
 
     fn create_once(
@@ -611,16 +678,6 @@ impl TmuxState {
             pane: pane_ref(&pane),
             warnings: non_empty(self.output_warnings(&after)?),
         })
-    }
-
-    pub fn close(
-        &self,
-        call: &ToolCall,
-        params: TmuxCloseParams,
-    ) -> Result<TmuxCloseOutput, ToolError> {
-        call.check_cancelled()?;
-        self.replays
-            .execute(call, "tmux_close", || self.close_once(call, params))
     }
 
     fn close_once(

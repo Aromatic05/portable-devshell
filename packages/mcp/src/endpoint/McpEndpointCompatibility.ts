@@ -18,6 +18,13 @@ interface McpLegacyFileToolAlias {
     replacement: "file_glob" | "file_grep" | "file_read";
 }
 
+interface McpLegacyTmuxToolAlias {
+    command: "list" | "create" | "close";
+    kind: "tmux-v07-alias";
+    removeIn: "0.7.4";
+    replacement: "tmux_manage";
+}
+
 interface McpLegacyToolTombstone {
     help: string;
     kind: "tombstone";
@@ -28,6 +35,7 @@ interface McpLegacyToolTombstone {
 export type McpLegacyToolCompatibility =
     | McpLegacyToolAlias
     | McpLegacyFileToolAlias
+    | McpLegacyTmuxToolAlias
     | McpLegacyToolTombstone
     | McpLegacyWorkspaceAppV0615;
 
@@ -137,6 +145,24 @@ const legacyTools: Readonly<Record<string, McpLegacyToolCompatibility>> = {
         kind: "workspace-app-v0615",
         replacement: "workspace_recover",
     },
+    tmux_list: {
+        command: "list",
+        kind: "tmux-v07-alias",
+        removeIn: "0.7.4",
+        replacement: "tmux_manage",
+    },
+    tmux_create: {
+        command: "create",
+        kind: "tmux-v07-alias",
+        removeIn: "0.7.4",
+        replacement: "tmux_manage",
+    },
+    tmux_close: {
+        command: "close",
+        kind: "tmux-v07-alias",
+        removeIn: "0.7.4",
+        replacement: "tmux_manage",
+    },
     tmux_capture: {
         help: "Use tmux_inspect for pane history. If you already have a durable task id, tmux_read reads that task instead. The old pane-scoped capture call is not translated automatically.",
         kind: "tombstone",
@@ -144,7 +170,7 @@ const legacyTools: Readonly<Record<string, McpLegacyToolCompatibility>> = {
         replacement: "tmux_inspect",
     },
     tmux_reclaim: {
-        help: "Task adoption after worker restart is automatic now. Inspect current state with tmux_list or tmux_inspect instead of reclaiming manually.",
+        help: "Task adoption after worker restart is automatic now. Inspect current state with tmux_manage command=list or tmux_inspect instead of reclaiming manually.",
         kind: "tombstone",
         removedIn: "0.4.9",
     },
@@ -178,6 +204,15 @@ export function adaptMcpLegacyFileToolInput(toolName: string, input: JsonValue):
             ? paths.map((path) => ({ path, view: "metadata" }))
             : paths,
     };
+}
+
+export function adaptMcpLegacyTmuxToolInput(
+    compatibility: McpLegacyTmuxToolAlias,
+    input: JsonValue
+): JsonValue {
+    const record = asRecord(input);
+    if (record === undefined) return input;
+    return { ...record, command: compatibility.command };
 }
 
 export function adaptMcpLegacyFileToolResult(

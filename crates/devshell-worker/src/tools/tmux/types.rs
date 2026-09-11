@@ -71,7 +71,7 @@ pub struct TmuxTaskInputParams {
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxPaneInputParams {
-    /// Persistent pane name or id returned by tmux_list or tmux_create.
+    /// Persistent pane name or id returned by tmux_manage.
     #[schemars(length(min = 1))]
     pub pane: String,
     #[schemars(length(min = 1))]
@@ -144,9 +144,38 @@ pub struct TmuxInspectAllParams {
     pub end: Option<i64>,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TmuxManageCommand {
+    List,
+    Create,
+    Close,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct TmuxListParams {}
+#[serde(rename_all = "camelCase")]
+pub struct TmuxManageParams {
+    /// Lifecycle operation to perform.
+    pub command: TmuxManageCommand,
+    /// Persistent pane name. Required for command=create.
+    #[schemars(
+        length(min = 1, max = 64),
+        regex(pattern = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+    )]
+    pub name: Option<String>,
+    /// Initial pane directory for command=create.
+    #[schemars(length(min = 1))]
+    pub cwd: Option<String>,
+    /// Managed task id to terminate for command=close. Mutually exclusive with pane.
+    #[schemars(length(min = 1))]
+    pub task: Option<String>,
+    /// Persistent pane name or id to close for command=close. Mutually exclusive with task.
+    #[schemars(length(min = 1))]
+    pub pane: Option<String>,
+    /// Allow command=close to terminate a running task or busy pane. Defaults to false.
+    pub force: Option<bool>,
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -186,7 +215,7 @@ pub struct TmuxTaskCloseParams {
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxPaneCloseParams {
-    /// Persistent pane name or id returned by tmux_list or tmux_create.
+    /// Persistent pane name or id returned by tmux_manage.
     #[schemars(length(min = 1))]
     pub pane: String,
     #[serde(default)]
@@ -348,12 +377,63 @@ pub struct TmuxCloseOutput {
     pub warnings: Option<Vec<TmuxWarning>>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TmuxManageOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub panes: Option<Vec<TmuxPaneSummary>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pane: Option<TmuxPaneRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closed_task_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closed_pane_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warnings: Option<Vec<TmuxWarning>>,
+}
+
+impl From<TmuxListOutput> for TmuxManageOutput {
+    fn from(value: TmuxListOutput) -> Self {
+        Self {
+            panes: Some(value.panes),
+            pane: None,
+            closed_task_id: None,
+            closed_pane_id: None,
+            warnings: value.warnings,
+        }
+    }
+}
+
+impl From<TmuxCreateOutput> for TmuxManageOutput {
+    fn from(value: TmuxCreateOutput) -> Self {
+        Self {
+            panes: None,
+            pane: Some(value.pane),
+            closed_task_id: None,
+            closed_pane_id: None,
+            warnings: value.warnings,
+        }
+    }
+}
+
+impl From<TmuxCloseOutput> for TmuxManageOutput {
+    fn from(value: TmuxCloseOutput) -> Self {
+        Self {
+            panes: None,
+            pane: None,
+            closed_task_id: value.closed_task_id,
+            closed_pane_id: value.closed_pane_id,
+            warnings: value.warnings,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use schemars::schema_for;
     use serde_json::json;
 
-    use super::{TmuxCloseParams, TmuxInputParams, TmuxInspectParams};
+    use super::{TmuxCloseParams, TmuxInputParams, TmuxInspectParams, TmuxManageParams};
 
     #[test]
     fn target_inputs_are_schema_unions() {
@@ -389,5 +469,20 @@ mod tests {
                 .is_err()
         );
         assert!(serde_json::from_value::<TmuxInspectParams>(json!({})).is_ok());
+    }
+
+    #[test]
+    fn manage_schema_is_one_command_object() {
+        let schema = serde_json::to_value(schema_for!(TmuxManageParams)).unwrap();
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["required"], json!(["command"]));
+        assert!(schema.get("oneOf").is_none());
+        assert!(schema.get("anyOf").is_none());
+        for property in ["command", "name", "cwd", "task", "pane", "force"] {
+            assert!(
+                schema["properties"].get(property).is_some(),
+                "missing {property}: {schema}"
+            );
+        }
     }
 }

@@ -7,9 +7,7 @@ tmux_run
 tmux_input
 tmux_read
 tmux_inspect
-tmux_list
-tmux_create
-tmux_close
+tmux_manage
 ```
 
 核心模型只有两类 terminal resource：
@@ -22,10 +20,10 @@ managed task
     task metadata 与 transcript 继续保留
 
 persistent interaction
-    main 或 tmux_create 创建的 pane
+    main 或 tmux_manage command=create 创建的 pane
     使用用户真实交互 shell
     pane 独立于其中运行的程序而持续存在
-    只有显式 tmux_close 才销毁
+    只有显式 tmux_manage command=close 才销毁
 ```
 
 一句话概括：task owns its terminal；interaction owns the terminal itself。
@@ -55,16 +53,17 @@ Task 不绑定创建它的 `ctxId`。MCP/RPC transport session 关闭、上下�
 
 每个受管 session 始终有一个名为 `main` 的 persistent interactive pane。`main` 是 agent 的默认交互终端，不能关闭。
 
-`tmux_create` 创建额外的 persistent interactive pane：
+`tmux_manage command=create` 创建额外的 persistent interactive pane：
 
 ```json
 {
+    "command": "create",
     "name": "debug",
     "cwd": "./backend"
 }
 ```
 
-`main` 和 `tmux_create` pane 都启动用户配置的 `$SHELL`，并读取用户正常的交互 shell 配置。prompt、fastfetch、alias、shell function、virtualenv hook 等都属于 persistent interaction 的真实状态。
+`main` 和 `tmux_manage command=create` pane 都启动用户配置的 `$SHELL`，并读取用户正常的交互 shell 配置。prompt、fastfetch、alias、shell function、virtualenv hook 等都属于 persistent interaction 的真实状态。
 
 程序从 persistent pane 中退出后，pane 本身仍存在：
 
@@ -72,7 +71,7 @@ Task 不绑定创建它的 `ctxId`。MCP/RPC transport session 关闭、上下�
 shell -> python -> shell -> vim -> shell
 ```
 
-用户 shell 本身执行 `exit` / EOF 也不会销毁 pane；runtime 会在同一个 pane identity 中启动一个新的用户 shell。只有显式 `tmux_close` 才结束额外 persistent pane，`main` 则始终保留。
+用户 shell 本身执行 `exit` / EOF 也不会销毁 pane；runtime 会在同一个 pane identity 中启动一个新的用户 shell。只有显式 `tmux_manage command=close` 才结束额外 persistent pane，`main` 则始终保留。
 
 worker 不尝试把其中每条命令识别为 managed task。
 
@@ -117,7 +116,7 @@ Unix task runner 使用 clean Bash：
 
 ```text
 tmux_run     clean Bash execution environment
-tmux_create  user's interactive shell environment
+tmux_manage command=create  user's interactive shell environment
 main         user's interactive shell environment
 ```
 
@@ -273,11 +272,11 @@ MCP 调用 `tmux_run` 时传入 `wait: block`，会立即启动 managed task 并
 
 ```text
 main
-显式 tmux_create pane
+显式 tmux_manage command=create pane
 仍在运行的 task pane
 ```
 
-running task 的 pane ref 来自 `tmux_run` 或 `tmux_list`。task 结束以后临时 pane 已不存在，此时应使用 `tmux_read` 查看 retained transcript。
+running task 的 pane ref 来自 `tmux_run` 或 `tmux_manage command=list`。task 结束以后临时 pane 已不存在，此时应使用 `tmux_read` 查看 retained transcript。
 
 `start` / `end` 使用相对 terminal history 坐标，`0` 表示当前底部，负数表示更早位置。单次最多请求 200 行。受管 tmux session 的 history limit 为 10000 行，因此 persistent interaction 可以像普通终端一样通过不同 offset 向上查看较长历史。
 
@@ -285,13 +284,23 @@ running task 的 pane ref 来自 `tmux_run` 或 `tmux_list`。task 结束以后�
 
 `tmux_inspect` 不消费任何 task transcript。
 
-## `tmux_list`
+## `tmux_manage`
 
-`tmux_list` 返回当前仍存在的 pane：
+`tmux_manage` 统一管理 tmux resource lifecycle，`command` 为 `list`、`create` 或 `close`。
+
+### List
+
+```json
+{
+    "command": "list"
+}
+```
+
+`command=list` 返回当前仍存在的 pane，并在受管 tmux session 尚不存在时初始化 session 与 `main` pane：
 
 ```text
 main
-persistent tmux_create panes
+persistent panes
 running task panes
 ```
 
@@ -309,18 +318,29 @@ unknown
 130
 ```
 
-persistent pane 只使用 `idle` / `running`；上一条交互命令的 exit code 不是 pane lifecycle state。数字字符串只表示 managed task 的退出状态。`terminated` 表示 managed task 被显式 `tmux_close(force=true)` 终止；`unknown` 保留给 pane 身份丢失等无法确定最终状态的情况。
+persistent pane 只使用 `idle` / `running`；上一条交互命令的 exit code 不是 pane lifecycle state。数字字符串只表示 managed task 的退出状态。`terminated` 表示 managed task 被显式 `tmux_manage command=close` 且 `force=true` 终止；`unknown` 保留给 pane 身份丢失等无法确定最终状态的情况。
 
-`tmux_list` 只返回 compact summary；cwd、command、terminal size 和 history 由 `tmux_inspect` 提供。
+`command=list` 只返回 compact summary；cwd、command、terminal size 和 history 由 `tmux_inspect` 提供。
 
-## `tmux_close`
+### Create
 
-`tmux_close` 必须指定且只指定一个 target。
+```json
+{
+    "command": "create",
+    "name": "debug",
+    "cwd": "./backend"
+}
+```
+
+### Close
+
+`command=close` 必须指定且只指定一个 target。
 
 ### Close task
 
 ```json
 {
+    "command": "close",
     "task": "task-...",
     "force": true
 }
@@ -332,6 +352,7 @@ running task 不设置 `force` 时返回 `tmux.taskBusy`。`force=true` 终止 t
 
 ```json
 {
+    "command": "close",
     "pane": "debug",
     "force": true
 }
@@ -358,7 +379,7 @@ tmux_input(task=..., input="^C")
 需要无条件销毁 managed execution resource 时使用：
 
 ```text
-tmux_close(task=..., force=true)
+tmux_manage(command=close, task=..., force=true)
 ```
 
 ## 并发与 replay
@@ -367,7 +388,7 @@ tmux_close(task=..., force=true)
 
 等待 task 输出或 task 退出时不会长期持有 pane operation lock，其他有效上下文仍可 inspect、read 或 input。
 
-`tmux_run`、`tmux_input`、`tmux_create`、`tmux_close` 保持 request replay protection：相同 request identity 和参数返回首次执行结果；同一 request identity 携带不同参数返回 `tmux.requestIdConflict`。
+`tmux_run`、`tmux_input`、`tmux_manage command=create/close` 保持 request replay protection：相同 request identity 和参数返回首次执行结果；同一 request identity 携带不同参数返回 `tmux.requestIdConflict`。
 
 ## 容量
 
@@ -376,8 +397,8 @@ tmux_close(task=..., force=true)
 容量已满时：
 
 ```text
-tmux_create -> tmux.capacityReached
-tmux_run    -> tmux.capacityReached
+tmux_manage command=create -> tmux.capacityReached
+tmux_run                   -> tmux.capacityReached
 ```
 
 task 正常结束后，其临时 pane 立即释放容量。
