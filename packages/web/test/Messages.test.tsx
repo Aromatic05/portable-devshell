@@ -12,7 +12,7 @@ import {
 import type { WebRoute } from "../src/routing/hashRoute.js";
 import type { WebState } from "../src/state/WebState.js";
 import type { WebStore } from "../src/state/WebStore.js";
-import { Messages } from "../src/views/Messages.js";
+import { buildConversationMarkdown, Messages } from "../src/views/Messages.js";
 
 const state: WebState = {
     connection: "online",
@@ -138,6 +138,80 @@ describe("Messages", () => {
         ]);
     });
 
+    it("exports the current conversation as readable Markdown", () => {
+        expect(buildConversationMarkdown({
+            ctxId: "ctx-old-active",
+            entries: selectWebMessageEntries(state, "alpha", "ctx-old-active"),
+            instance: "alpha",
+            title: "portable-devshell",
+        })).toBe([
+            "# portable-devshell",
+            "",
+            "- Instance: `alpha`",
+            "- Context: `ctx-old-active`",
+            "",
+            "## You",
+            "",
+            "_2026-09-02T10:00:00Z_",
+            "",
+            "Check the route model.",
+            "",
+            "## Agent",
+            "",
+            "_2026-09-02T10:01:00Z_",
+            "",
+            "Route model is now green.",
+            "",
+        ].join("\n"));
+    });
+
+    it("downloads the current conversation from the composer", () => {
+        const createObjectURLDescriptor = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+        const revokeObjectURLDescriptor = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+        const createObjectURL = vi.fn(() => "blob:conversation");
+        const revokeObjectURL = vi.fn();
+        const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function () {
+            expect(this.download).toBe("portable-devshell-alpha-ctx-old-active.md");
+            expect(this.href).toBe("blob:conversation");
+        });
+        Object.defineProperty(URL, "createObjectURL", {
+            configurable: true,
+            value: createObjectURL,
+        });
+        Object.defineProperty(URL, "revokeObjectURL", {
+            configurable: true,
+            value: revokeObjectURL,
+        });
+
+        try {
+            render(<Messages
+                navigate={vi.fn()}
+                route={threadRoute}
+                state={state}
+                store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+            />);
+
+            fireEvent.click(screen.getByRole("button", { name: "Export Markdown" }));
+
+            expect(createObjectURL).toHaveBeenCalledTimes(1);
+            expect(createObjectURL.mock.calls[0]?.[0]).toBeInstanceOf(Blob);
+            expect(revokeObjectURL).toHaveBeenCalledWith("blob:conversation");
+            expect(click).toHaveBeenCalledTimes(1);
+        } finally {
+            click.mockRestore();
+            if (createObjectURLDescriptor === undefined) {
+                Reflect.deleteProperty(URL, "createObjectURL");
+            } else {
+                Object.defineProperty(URL, "createObjectURL", createObjectURLDescriptor);
+            }
+            if (revokeObjectURLDescriptor === undefined) {
+                Reflect.deleteProperty(URL, "revokeObjectURL");
+            } else {
+                Object.defineProperty(URL, "revokeObjectURL", revokeObjectURLDescriptor);
+            }
+        }
+    });
+
     it("renders conversation history, a floating Comment composer, and deep-links to Audit", async () => {
         const queueContextMessage = vi.fn(async () => true);
         render(<Messages
@@ -151,6 +225,7 @@ describe("Messages", () => {
         expect(screen.getByRole("log", { name: "Conversation history" })).toHaveTextContent("Route model is now green.");
         const composer = screen.getByRole("textbox", { name: "Comment" });
         expect(composer.closest("form")).toHaveClass("messages-composer");
+        expect(screen.getByRole("button", { name: "Export Markdown" })).toBeEnabled();
         fireEvent.click(screen.getByRole("button", { name: "Open conversations" }));
         expect(document.querySelector(".messages-sidebar")).toHaveClass("open");
         fireEvent.focus(composer);

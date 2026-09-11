@@ -13,6 +13,7 @@ import {
     selectWebMessageEntries,
     selectWebMessageSession,
     selectWebMessageSessions,
+    type WebMessageEntry,
 } from "../selectors/messages.js";
 import type { WebState } from "../state/WebState.js";
 import type { WebStore } from "../state/WebStore.js";
@@ -89,6 +90,20 @@ export function Messages({
         if (text.length === 0) return;
         const queued = await store.queueContextMessage(route.instance, route.ctxId, text);
         if (queued) setDraft("");
+    }
+
+    function exportMarkdown(): void {
+        if (route.view !== "thread") return;
+        const title = selected?.title ?? route.ctxId;
+        downloadMarkdown(
+            markdownExportFilename(title, route.instance, route.ctxId),
+            buildConversationMarkdown({
+                ctxId: route.ctxId,
+                entries,
+                instance: route.instance,
+                title,
+            }),
+        );
     }
 
     return <section className="messages-page">
@@ -211,6 +226,13 @@ export function Messages({
                     value={draft}
                 />
                 <button
+                    aria-label="Export Markdown"
+                    className="messages-export"
+                    onClick={exportMarkdown}
+                    title="Export Markdown"
+                    type="button"
+                >MD</button>
+                <button
                     aria-label="Send Comment"
                     className="primary"
                     disabled={draft.trim().length === 0 || state.operations[`context-message:${route.instance}:${route.ctxId}`] !== undefined}
@@ -228,4 +250,61 @@ function formatMessageDate(value: string): string {
         dateStyle: "medium",
         timeStyle: "short",
     }).format(date);
+}
+
+export function buildConversationMarkdown({
+    ctxId,
+    entries,
+    instance,
+    title,
+}: {
+    ctxId: string;
+    entries: readonly WebMessageEntry[];
+    instance: string;
+    title: string;
+}): string {
+    const lines = [
+        `# ${title}`,
+        "",
+        `- Instance: \`${instance}\``,
+        `- Context: \`${ctxId}\``,
+    ];
+
+    for (const entry of entries) {
+        lines.push(
+            "",
+            `## ${entry.kind === "comment" ? "You" : "Agent"}`,
+            "",
+            `_${entry.at}_`,
+            "",
+            entry.text,
+        );
+    }
+
+    return `${lines.join("\n")}\n`;
+}
+
+function markdownExportFilename(title: string, instance: string, ctxId: string): string {
+    const stem = `${title}-${instance}-${ctxId}`
+        .replace(/[<>:"/\\|?*]+/g, "-")
+        .replace(/\s+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 120);
+    return `${stem || "conversation"}.md`;
+}
+
+function downloadMarkdown(filename: string, markdown: string): void {
+    const url = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.download = filename;
+    link.href = url;
+    link.style.display = "none";
+    document.body.append(link);
+    try {
+        link.click();
+    } finally {
+        link.remove();
+        URL.revokeObjectURL(url);
+    }
 }
