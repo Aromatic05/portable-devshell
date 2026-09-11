@@ -78,7 +78,7 @@ export function Application({
             {route.page === "instances" ? <Instances disabled={interactionDisabled} store={store} /> : null}
             {route.page === "approvals" ? <Approvals disabled={interactionDisabled} store={store} /> : null}
             {route.page === "audit" ? <Audit disabled={interactionDisabled} navigate={navigate} route={route} state={state} store={store} /> : null}
-            {route.page === "messages" ? <Messages navigate={navigate} route={route} state={state} /> : null}
+            {route.page === "messages" ? <Messages navigate={navigate} route={route} state={state} store={store} /> : null}
             {route.page === "todos" ? <Todos disabled={interactionDisabled} state={state} store={store} /> : null}
         </main>
     </div>;

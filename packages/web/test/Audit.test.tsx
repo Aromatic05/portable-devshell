@@ -229,69 +229,16 @@ describe("Audit", () => {
         expect(screen.getByRole("group", { name: "Active filters" })).toHaveTextContent("Workspace: projects/alpha");
     });
 
-    it("scopes tool calls and exposes Context intervention only in Context scope", () => {
+    it("scopes tool calls without exposing a Comment composer in Audit", () => {
         const view = renderAudit({ route: alphaContextRoute });
 
-        expect(screen.getByRole("heading", { name: "Context intervention" })).toBeInTheDocument();
-        expect(screen.getByText("Check the failing command.")).toBeInTheDocument();
-        expect(screen.getByText("Review the previous failure.")).toBeInTheDocument();
+        expect(screen.getByRole("heading", { name: "Context controls" })).toBeInTheDocument();
+        expect(screen.queryByLabelText("Comment")).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Queue Comment" })).not.toBeInTheDocument();
+        expect(screen.queryByText("Check the failing command.")).not.toBeInTheDocument();
+        expect(screen.queryByText("Review the previous failure.")).not.toBeInTheDocument();
         expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(1);
         expect(screen.queryByText("file_read", { selector: "strong" })).not.toBeInTheDocument();
-    });
-
-    it("queues Comment from Context intervention", async () => {
-        const queueContextMessage = vi.fn(async () => true);
-        renderAudit({ route: alphaContextRoute, store: { queueContextMessage } });
-
-        fireEvent.change(screen.getByLabelText("Comment"), {
-            target: { value: "Retry after checking the environment." },
-        });
-        fireEvent.click(screen.getByRole("button", { name: "Queue Comment" }));
-
-        await waitFor(() => expect(queueContextMessage).toHaveBeenCalledWith(
-            "alpha",
-            "ctx-alpha",
-            "Retry after checking the environment.",
-        ));
-    });
-
-    it("keeps Comment composition writable for a disabled Context", async () => {
-        const queueContextMessage = vi.fn(async () => true);
-        const disabledState: WebState = {
-            ...state,
-            readModel: {
-                ...state.readModel,
-                contexts: state.readModel.contexts.map((context) =>
-                    context.ctxId === "ctx-alpha" ? { ...context, status: "disabled" as const } : context
-                ),
-            },
-        };
-        renderAudit({ route: alphaContextRoute, state: disabledState, store: { queueContextMessage } });
-
-        fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "message after disable" } });
-        fireEvent.click(screen.getByRole("button", { name: "Queue Comment" }));
-        await waitFor(() => expect(queueContextMessage).toHaveBeenCalledWith(
-            "alpha",
-            "ctx-alpha",
-            "message after disable",
-        ));
-    });
-
-    it("keeps Comment composition writable when the Context registry record is absent", async () => {
-        const queueContextMessage = vi.fn(async () => true);
-        const historyOnlyState: WebState = {
-            ...state,
-            readModel: { ...state.readModel, contexts: [] },
-        };
-        renderAudit({ route: alphaContextRoute, state: historyOnlyState, store: { queueContextMessage } });
-
-        fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "history-only message" } });
-        fireEvent.click(screen.getByRole("button", { name: "Queue Comment" }));
-        await waitFor(() => expect(queueContextMessage).toHaveBeenCalledWith(
-            "alpha",
-            "ctx-alpha",
-            "history-only message",
-        ));
     });
 
     it("retains Context lifecycle controls with pending renewal and disable confirmation", async () => {

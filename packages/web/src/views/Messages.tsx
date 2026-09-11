@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { webRouteHref, type WebRoute } from "../routing/hashRoute.js";
 import {
@@ -8,17 +8,21 @@ import {
     selectWebMessageSessions,
 } from "../selectors/messages.js";
 import type { WebState } from "../state/WebState.js";
+import type { WebStore } from "../state/WebStore.js";
 
 export function Messages({
     navigate,
     route,
     state,
+    store,
 }: {
     navigate(route: WebRoute): void;
     route: Extract<WebRoute, { page: "messages" }>;
     state: WebState;
+    store: WebStore;
 }) {
     const [drawerOpen, setDrawerOpen] = useState(false);
+    const [draft, setDraft] = useState("");
     const [query, setQuery] = useState("");
     const sessions = useMemo(() => selectWebMessageSessions(state), [state]);
     const visibleSessions = useMemo(
@@ -33,7 +37,19 @@ export function Messages({
         : [];
     const sidebarOpen = drawerOpen;
 
-    useEffect(() => setDrawerOpen(false), [route]);
+    useEffect(() => {
+        setDrawerOpen(false);
+        setDraft("");
+    }, [route]);
+
+    async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+        event.preventDefault();
+        if (route.view !== "thread") return;
+        const text = draft.trim();
+        if (text.length === 0) return;
+        const queued = await store.queueContextMessage(route.instance, route.ctxId, text);
+        if (queued) setDraft("");
+    }
 
     return <section className="messages-page">
         <button
@@ -100,28 +116,25 @@ export function Messages({
                     <span aria-hidden="true" className="two-line-menu"><i /><i /></span>
                 </button>
                 <div>
-                    <h2>{selected?.title ?? "Messages"}</h2>
-                    {selected === undefined ? null : <p>{selected.instance} · {selected.ctxId}</p>}
+                    <h2>{selected?.title ?? (route.view === "thread" ? route.ctxId : "Messages")}</h2>
+                    {route.view === "thread" ? <p>{route.instance} · {route.ctxId}</p> : null}
                 </div>
-                {selected === undefined ? null : <a
+                {route.view === "thread" ? <a
                     className="messages-audit-link"
                     href={webRouteHref({
                         page: "audit",
                         view: "timeline",
                         scope: {
                             kind: "context",
-                            instance: selected.instance,
-                            ctxId: selected.ctxId,
+                            instance: route.instance,
+                            ctxId: route.ctxId,
                         },
                     })}
-                >Open in Audit</a>}
+                >Open in Audit</a> : null}
             </header>
             {route.view === "contexts" ? <div className="messages-placeholder">
                 <h3>Messages</h3>
                 <p className="empty">Choose a conversation to read its Comment and Report history.</p>
-            </div> : selected === undefined ? <div className="messages-placeholder">
-                <h3>Conversation unavailable</h3>
-                <p className="empty">This Context is no longer present in the current read model.</p>
             </div> : <div aria-label="Conversation history" className="message-history" role="log">
                 {entries.length === 0 ? <p className="empty">No Comments or Reports yet.</p> : entries.map((entry) => <article
                     className={`message-entry ${entry.kind}`}
@@ -137,6 +150,32 @@ export function Messages({
                     <p>{entry.text}</p>
                 </article>)}
             </div>}
+            {route.view === "thread" ? <form className="messages-composer" onSubmit={(event) => void submit(event)}>
+                <label className="sr-only" htmlFor="messages-comment">Comment</label>
+                <textarea
+                    id="messages-comment"
+                    maxLength={20_000}
+                    onChange={(event) => {
+                        setDrawerOpen(false);
+                        setDraft(event.target.value);
+                    }}
+                    onFocus={() => setDrawerOpen(false)}
+                    onKeyDown={(event) => {
+                        if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+                        event.preventDefault();
+                        event.currentTarget.form?.requestSubmit();
+                    }}
+                    placeholder="Send a Comment"
+                    rows={1}
+                    value={draft}
+                />
+                <button
+                    aria-label="Send Comment"
+                    className="primary"
+                    disabled={draft.trim().length === 0 || state.operations[`context-message:${route.instance}:${route.ctxId}`] !== undefined}
+                    type="submit"
+                >{state.operations[`context-message:${route.instance}:${route.ctxId}`] !== undefined ? "…" : "↑"}</button>
+            </form> : null}
         </div>
     </section>;
 }

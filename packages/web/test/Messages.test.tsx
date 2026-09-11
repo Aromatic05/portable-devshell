@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
     asInstanceName,
     createInitialControlReadModelState,
@@ -11,6 +11,7 @@ import {
 } from "../src/selectors/messages.js";
 import type { WebRoute } from "../src/routing/hashRoute.js";
 import type { WebState } from "../src/state/WebState.js";
+import type { WebStore } from "../src/state/WebStore.js";
 import { Messages } from "../src/views/Messages.js";
 
 const state: WebState = {
@@ -118,16 +119,87 @@ describe("Messages", () => {
         ]);
     });
 
-    it("renders a read-only conversation and deep-links to Audit", () => {
-        render(<Messages navigate={vi.fn()} route={threadRoute} state={state} />);
+    it("renders conversation history, a floating Comment composer, and deep-links to Audit", async () => {
+        const queueContextMessage = vi.fn(async () => true);
+        render(<Messages
+            navigate={vi.fn()}
+            route={threadRoute}
+            state={state}
+            store={{ queueContextMessage } as WebStore}
+        />);
 
         expect(screen.getByRole("log", { name: "Conversation history" })).toHaveTextContent("Check the route model.");
         expect(screen.getByRole("log", { name: "Conversation history" })).toHaveTextContent("Route model is now green.");
-        expect(screen.queryByRole("textbox", { name: /Comment/i })).not.toBeInTheDocument();
+        const composer = screen.getByRole("textbox", { name: "Comment" });
+        expect(composer.closest("form")).toHaveClass("messages-composer");
+        fireEvent.click(screen.getByRole("button", { name: "Open conversations" }));
+        expect(document.querySelector(".messages-sidebar")).toHaveClass("open");
+        fireEvent.focus(composer);
+        expect(document.querySelector(".messages-sidebar")).not.toHaveClass("open");
+        fireEvent.change(composer, { target: { value: "Continue from Messages." } });
+        fireEvent.submit(composer.closest("form")!);
+        await waitFor(() => expect(queueContextMessage).toHaveBeenCalledWith(
+            "alpha",
+            "ctx-old-active",
+            "Continue from Messages.",
+        ));
         expect(screen.getByRole("link", { name: "Open in Audit" })).toHaveAttribute(
             "href",
             "#/audit/context/alpha/ctx-old-active",
         );
+    });
+
+    it("keeps the floating composer writable when the Context registry record is absent", async () => {
+        const queueContextMessage = vi.fn(async () => true);
+        const historyOnlyState: WebState = {
+            ...state,
+            readModel: { ...state.readModel, contexts: [] },
+        };
+        render(<Messages
+            navigate={vi.fn()}
+            route={threadRoute}
+            state={historyOnlyState}
+            store={{ queueContextMessage } as WebStore}
+        />);
+
+        const composer = screen.getByRole("textbox", { name: "Comment" });
+        expect(composer).not.toBeDisabled();
+        fireEvent.change(composer, { target: { value: "Still writable." } });
+        fireEvent.submit(composer.closest("form")!);
+        await waitFor(() => expect(queueContextMessage).toHaveBeenCalledWith(
+            "alpha",
+            "ctx-old-active",
+            "Still writable.",
+        ));
+    });
+
+    it("keeps the floating composer writable for a disabled Context", async () => {
+        const queueContextMessage = vi.fn(async () => true);
+        const disabledState: WebState = {
+            ...state,
+            readModel: {
+                ...state.readModel,
+                contexts: state.readModel.contexts.map((context) => ({
+                    ...context,
+                    status: "disabled" as const,
+                })),
+            },
+        };
+        render(<Messages
+            navigate={vi.fn()}
+            route={threadRoute}
+            state={disabledState}
+            store={{ queueContextMessage } as WebStore}
+        />);
+
+        const composer = screen.getByRole("textbox", { name: "Comment" });
+        fireEvent.change(composer, { target: { value: "Message after disable." } });
+        fireEvent.submit(composer.closest("form")!);
+        await waitFor(() => expect(queueContextMessage).toHaveBeenCalledWith(
+            "alpha",
+            "ctx-old-active",
+            "Message after disable.",
+        ));
     });
 
     it("uses the two-line drawer trigger and closes it when a conversation is selected", () => {
@@ -136,6 +208,7 @@ describe("Messages", () => {
             navigate={navigate}
             route={{ page: "messages", view: "contexts" }}
             state={state}
+            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
         />);
 
         expect(view.container.querySelector(".messages-sidebar")).not.toHaveClass("open");
