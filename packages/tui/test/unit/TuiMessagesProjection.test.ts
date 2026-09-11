@@ -186,7 +186,7 @@ test("Messages empty state explains the selected Conversation scope", () => {
     assert.match(String(view.props.children[1].props.children), /No conversation history on alpha/u);
 });
 
-test("Messages keeps the composer directly after short history instead of moving blank rows around it", () => {
+test("Messages keeps a fixed history viewport so the frame and composer do not move", () => {
     const store = new TuiAppStore();
     store.patchControlReadModel({
         instanceState: {
@@ -208,14 +208,13 @@ test("Messages keeps the composer directly after short history instead of moving
 
     const view = TuiMessagesView({ state: store.getState(), viewportRows: 30, width: 80 });
     const history = view.props.children[0];
-    assert.equal(view.props.height, undefined, "Messages content must not reserve the whole viewport");
-    assert.equal(history.props.height, 3);
+    assert.equal(view.props.flexGrow, 1, "Messages content must fill the main panel");
+    assert.equal(history.props.height, tuiMessagesHistoryRows(30));
     assert.equal(history.props.justifyContent, undefined);
     assert.equal(tuiMessagesRenderedHistoryRows(200, 30), tuiMessagesHistoryRows(30));
 
     const layout = TuiRootLayout({
         columns: 120,
-        fitMainContent: true,
         footer: "footer",
         header: "header",
         main: view,
@@ -224,7 +223,7 @@ test("Messages keeps the composer directly after short history instead of moving
     });
     const middle = layout.props.children[1];
     const mainPanel = middle.props.children[3];
-    assert.equal(mainPanel.props.alignSelf, "flex-start");
+    assert.equal(mainPanel.props.alignSelf, undefined);
 });
 
 test("Messages Ink frame reserves one physical separator row per conversation entry", async () => {
@@ -272,11 +271,7 @@ test("Messages Ink frame reserves one physical separator row per conversation en
     const composerRow = lines.findIndex((line) => line.includes("> Write a comment"));
     assert.notEqual(lastBodyRow, -1);
     assert.notEqual(composerRow, -1);
-    assert.equal(
-        composerRow - lastBodyRow,
-        3,
-        `expected body + one physical blank row + divider before composer, got ${composerRow - lastBodyRow - 2} blank rows\n${lines.join("\n")}`,
-    );
+    assert.equal(composerRow, tuiMessagesHistoryRows(30) + 1);
 });
 
 test("Messages composer owns an inline cursor cell", () => {

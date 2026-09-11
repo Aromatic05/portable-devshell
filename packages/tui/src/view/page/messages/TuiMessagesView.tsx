@@ -12,7 +12,6 @@ import {
     selectTuiMessageHistorySessions,
     selectTuiMessageSessions,
     tuiMessagesHistoryRows,
-    tuiMessagesRenderedHistoryRows,
 } from "./TuiMessagesProjection.js";
 
 export function TuiMessagesView(props: {
@@ -56,10 +55,6 @@ export function TuiMessagesView(props: {
     const requestedOffset = props.state.ui.scrollOffsets[scrollKey] ?? maxOffset;
     const offset = Math.min(Math.max(0, requestedOffset), maxOffset);
     const visible = history.slice(offset, offset + historyRows);
-    const renderedHistoryRows = tuiMessagesRenderedHistoryRows(
-        visible.length,
-        props.viewportRows,
-    );
     const draft = readContextConversationDraft(props.state, instance, route.ctxId);
     const editor = props.state.interaction.editor;
     const editing =
@@ -69,8 +64,8 @@ export function TuiMessagesView(props: {
     const status = props.state.interaction.screenStatusByPage.messages;
 
     return (
-        <Box flexDirection="column">
-            <Box flexDirection="column" height={renderedHistoryRows} overflow="hidden">
+        <Box flexDirection="column" flexGrow={1}>
+            <Box flexDirection="column" height={historyRows} overflow="hidden">
                 {visible.length === 0 ? <Text dimColor>No messages yet.</Text> : null}
                 {visible.map((line, index) => (
                     <Text dimColor={line.kind === "meta"} key={`${offset + index}:${line.text}`}>

@@ -74,13 +74,12 @@ export function TuiApp(props: TuiAppProps) {
         <Box height={props.runtime.rows} width={props.runtime.columns}>
             <TuiRootLayout
             columns={props.runtime.columns}
-            fitMainContent={state.ui.selectedPage === "messages" && overlay === undefined}
             footer={<TuiComponentFooter text={footer.text} />}
             header={<TuiComponentHeader stateLabel={connection.status} summary={selectHeaderSummary(state)} title={selectHeaderTitle()} />}
             main={
                 <Box
                     flexDirection="column"
-                    flexGrow={state.ui.selectedPage === "messages" && overlay === undefined ? 0 : 1}
+                    flexGrow={1}
                 >
                     {errorLines !== undefined ? <TuiComponentErrorBanner lines={errorLines} /> : undefined}
                     {overlay !== undefined ? (

@@ -25,8 +25,7 @@ import {
     selectTuiOverviewPresentation,
 } from "./page/TuiOverviewPresentation.js";
 import {
-    renderTuiMessageHistoryLines,
-    tuiMessagesRenderedHistoryRows,
+    tuiMessagesHistoryRows,
 } from "./page/messages/TuiMessagesProjection.js";
 import { tuiTextDetailImageRows } from "./TuiTextDetailLayout.js";
 
@@ -205,14 +204,7 @@ export function buildTuiHitRegions(
             route.view === "thread" &&
             state.ui.selectedInstance !== undefined
         ) {
-            const historyLines = renderTuiMessageHistoryLines(
-                state,
-                state.ui.selectedInstance,
-                route.ctxId,
-                boxInnerWidth,
-            );
-            const contentRows =
-                tuiMessagesRenderedHistoryRows(historyLines.length, viewportRows) + 3;
+            const contentRows = tuiMessagesHistoryRows(viewportRows) + 3;
             regions.push({
                 height: Math.max(1, contentRows),
                 target: { kind: "messagesViewport" },
