@@ -285,7 +285,7 @@ describe("authenticated application shell", () => {
         expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
     });
 
-    it("uses one responsive Page Switcher without reserving a global sidebar or bottom nav", async () => {
+    it("exposes direct primary navigation while retaining the responsive Page Switcher", async () => {
         window.location.hash = "#/overview";
         render(
             <App
@@ -296,7 +296,13 @@ describe("authenticated application shell", () => {
         await screen.findByRole("heading", { name: "Overview" });
 
         expect(document.querySelector(".app > aside")).toBeNull();
-        expect(screen.queryByRole("navigation", { name: "Primary navigation" })).not.toBeInTheDocument();
+        const primary = screen.getByRole("navigation", { name: "Primary navigation" });
+        fireEvent.click(within(primary).getByRole("button", { name: "Instances" }));
+        expect(window.location.hash).toBe("#/instances");
+        expect(await screen.findByRole("heading", { name: "Instances" })).toBeInTheDocument();
+
+        window.location.hash = "#/overview";
+        await screen.findByRole("heading", { name: "Overview" });
         fireEvent.click(screen.getByRole("button", { name: "Switch page, current Overview" }));
         const menu = screen.getByRole("menu", { name: "Pages" });
         fireEvent.click(within(menu).getByRole("menuitem", { name: /Instances/ }));

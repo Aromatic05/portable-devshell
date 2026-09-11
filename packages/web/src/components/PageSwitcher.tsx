@@ -46,19 +46,46 @@ export function PageSwitcher({
         };
     }, [open]);
 
-    return <div className="page-switcher" ref={root}>
-        <button
+    return <div className="page-navigation" ref={root}>
+        <nav aria-label="Primary navigation" className="desktop-page-nav">
+            {pages.map((item) => {
+                const badge = pageBadge(item.page, counts);
+                return <button
+                    aria-label={item.label}
+                    aria-current={active.page === item.page ? "page" : undefined}
+                    className={active.page === item.page ? "selected" : ""}
+                    key={item.page}
+                    onClick={() => navigate(pageRoute(item.page))}
+                    type="button"
+                >
+                    <span>{item.label}</span>
+                    {badge === undefined || badge === 0 ? null : <span className="badge">{badge}</span>}
+                </button>;
+            })}
+        </nav>
+        <div className="page-switcher">
+            <button
             aria-expanded={open}
             aria-haspopup="menu"
             aria-label={`Switch page, current ${current.label}`}
             className="page-switcher-trigger"
             onClick={() => setOpen((value) => !value)}
             type="button"
-        >
-            <span>{current.label}</span>
-            <span aria-hidden="true">⌄</span>
-        </button>
+            >
+                <span>{current.label}</span>
+                <span aria-hidden="true">⌄</span>
+            </button>
+            {applications.length === 0 ? null : <button
+                aria-expanded={open}
+                aria-haspopup="menu"
+                aria-label="Open Extension navigation"
+                className="desktop-extension-trigger"
+                onClick={() => setOpen((value) => !value)}
+                type="button"
+            >Extensions <span aria-hidden="true">⌄</span></button>}
+        </div>
         {open ? <div aria-label="Pages" className="page-switcher-menu" role="menu">
+            <div className="mobile-page-menu">
             {pages.map((item) => {
                 const badge = pageBadge(item.page, counts);
                 return <button
@@ -76,6 +103,7 @@ export function PageSwitcher({
                     {badge === undefined || badge === 0 ? null : <span className="badge">{badge}</span>}
                 </button>;
             })}
+            </div>
             {applications.length === 0 ? null : <>
                 <div className="page-switcher-separator" role="separator" />
                 <span className="page-switcher-section">Extensions</span>
