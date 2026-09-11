@@ -125,7 +125,7 @@ export function Audit({
             filters={filters}
             onChange={changeFilters}
             onClear={() => {
-                setContextStatus("active");
+                setContextStatus("all");
                 setFilters(emptyToolCallFilters);
             }}
             onContextStatusChange={(nextStatus) => {

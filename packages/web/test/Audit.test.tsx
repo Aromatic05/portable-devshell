@@ -174,7 +174,11 @@ describe("Audit", () => {
 
         const scope = screen.getByLabelText("Scope");
         expect(within(scope).getByRole("option", { name: /ctx-alpha.*active/u })).toBeInTheDocument();
-        fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+        expect(screen.getByRole("button", { name: "Filters (1)" })).toBeInTheDocument();
+        expect(within(screen.getByRole("group", { name: "Active filters" }))
+            .getByRole("button", { name: "Context: Active · last 30 min ×" }))
+            .toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Filters (1)" }));
         expect(screen.getByLabelText("Context status")).toHaveValue("active");
         fireEvent.change(scope, { target: { value: "#/audit/context/alpha/ctx-alpha" } });
         expect(navigate).toHaveBeenCalledWith({
@@ -182,6 +186,18 @@ describe("Audit", () => {
             view: "timeline",
             scope: { kind: "context", instance: "alpha", ctxId: "ctx-alpha" },
         });
+    });
+
+    it("clears the visible default Context window like any other filter", () => {
+        renderAudit();
+
+        fireEvent.click(within(screen.getByRole("group", { name: "Active filters" }))
+            .getByRole("button", { name: "Context: Active · last 30 min ×" }));
+
+        expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
+        expect(screen.queryByRole("group", { name: "Active filters" })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+        expect(screen.getByLabelText("Context status")).toHaveValue("all");
     });
 
     it("filters stale active Contexts and their tool calls outside the 30 minute window", () => {
@@ -205,7 +221,7 @@ describe("Audit", () => {
         expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(1);
         expect(screen.queryByText("bash_run", { selector: "strong" })).not.toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+        fireEvent.click(screen.getByRole("button", { name: "Filters (1)" }));
         fireEvent.change(screen.getByLabelText("Context status"), { target: { value: "all" } });
 
         expect(screen.getByRole("option", { name: /ctx-alpha/u })).toBeInTheDocument();
@@ -224,7 +240,7 @@ describe("Audit", () => {
         expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(1);
         expect(screen.getByText("bash_run", { selector: "strong" })).toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+        fireEvent.click(screen.getByRole("button", { name: "Filters (1)" }));
         fireEvent.change(screen.getByLabelText("Workspace"), { target: { value: "projects/alpha" } });
         expect(screen.getByRole("group", { name: "Active filters" })).toHaveTextContent("Workspace: projects/alpha");
     });

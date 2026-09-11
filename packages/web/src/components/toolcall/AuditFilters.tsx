@@ -37,7 +37,7 @@ export function AuditFilters({
 }) {
     const [advancedOpen, setAdvancedOpen] = useState(false);
     const advancedCount = [
-        contextStatus !== "active",
+        contextStatus !== "all",
         filters.workspace.length > 0,
         filters.tool !== "all",
         filters.period !== "all",
@@ -92,7 +92,9 @@ export function AuditFilters({
             >{label}</button>)}
         </div>
         {advancedCount === 0 ? null : <div aria-label="Active filters" className="audit-filter-chips" role="group">
-            {contextStatus === "active" ? null : <button onClick={() => onContextStatusChange("active")} type="button">Context: {contextStatus} ×</button>}
+            {contextStatus === "all" ? null : <button onClick={() => onContextStatusChange("all")} type="button">
+                {contextStatus === "active" ? "Context: Active · last 30 min ×" : `Context: ${contextStatus} ×`}
+            </button>}
             {filters.workspace.length === 0 ? null : <button onClick={() => onChange({ ...filters, workspace: "" })} type="button">Workspace: {filters.workspace} ×</button>}
             {filters.tool === "all" ? null : <button onClick={() => onChange({ ...filters, tool: "all" })} type="button">Tool: {filters.tool} ×</button>}
             {filters.period === "all" ? null : <button onClick={() => onChange({ ...filters, period: "all" })} type="button">Time: {filters.period} ×</button>}
