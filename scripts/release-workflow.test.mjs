@@ -28,6 +28,7 @@ test("release matrix emits one Agent Extension and one native Pi provider per ta
     const buildJob = workflow.slice(buildStart, publishStart);
     assert.match(buildJob, /if: matrix\.target == 'linux-x64'[\s\S]*?pnpm package:agent -- --target "\$\{\{ matrix\.target \}\}" --output-dir \.\/release-assets/u);
     assert.match(buildJob, /if: matrix\.target != 'linux-x64'[\s\S]*?pnpm package:agent -- --target "\$\{\{ matrix\.target \}\}" --output-dir \.\/release-assets --provider-only/u);
+    assert.match(buildJob, /if: matrix\.target == 'linux-x64'[\s\S]*?pnpm smoke:agent-package -- \.\/release-assets\/portable-devshell-app-linux-x64\.tar\.gz \.\/release-assets\/portable-devshell-agent\.dsext \.\/release-assets\/portable-devshell-agent-provider-pi-linux-x64\.dsprovider/u);
 });
 
 test("release verifies the tagged commit belongs to the default branch before asset jobs", async () => {

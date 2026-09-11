@@ -27,6 +27,7 @@
         "package:app": "node ./scripts/package-app.mjs",
         "package:agent": "node ./scripts/package-agent.mjs",
         "smoke:package": "node ./scripts/smoke-package.mjs",
+        "smoke:agent-package": "node ./scripts/smoke-agent-package.mjs",
         "smoke:install-release": "node ./scripts/smoke-install-release.mjs",
         "test:release-layout": "pnpm test:scripts",
         "test:scripts": "node ./scripts/run-script-tests.mjs",

@@ -112,6 +112,13 @@ export function createTargetCiSteps(target, platform = process.platform) {
     );
 
     if (target === "linux-x64") {
+        steps.push(pnpmStep("Agent package smoke", [
+            "smoke:agent-package",
+            "--",
+            application,
+            join("ci-artifacts", "portable-devshell-agent.dsext"),
+            join("ci-artifacts", `portable-devshell-agent-provider-pi-${target}.dsprovider`),
+        ]));
         steps.push({
             args: [
                 "-lc",
