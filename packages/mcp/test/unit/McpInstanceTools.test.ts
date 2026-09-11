@@ -681,6 +681,9 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
         async readTodo(instance, input) {
             return await (overrides.readTodo?.(instance, input) ?? Promise.resolve({ items: [], revision: 0, summary: { completed: 0, total: 0 } }));
         },
+        async reportTodo(instance, message, callId, callContext) {
+            await overrides.reportTodo?.(instance, message, callId, callContext);
+        },
         async connectInstance(instance, reference) {
             return await (overrides.connectInstance?.(instance, reference) ?? Promise.resolve({ instance }));
         },
@@ -711,6 +714,9 @@ test("todo tools are fixed control-side primitives and remain available while th
         async readTodo(instance, input) {
             calls.push(`read:${instance}:${input?.taskId ?? input?.title ?? "all"}`);
             return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
+        },
+        async reportTodo(instance, message, callId, callContext) {
+            calls.push(`report:${instance}:${callContext.ctxId}:${callId}:${message}`);
         },
         async writeTodo(instance, input, callContext) {
             calls.push(`write:${instance}:${callContext.ctxId}:${String((input as { revision?: number }).revision)}`);
@@ -768,6 +774,7 @@ test("todo tools are fixed control-side primitives and remain available while th
     await endpoint.callTool("todo_write", withContext({ revision: 0, title: "Recover", todos: [] }), context);
     assert.deepEqual(calls, [
         "read:main-pc:all",
+        "report:main-pc:ctx-instance-test:call-test:Finished the first acceptance stage.",
         "read:main-pc:Recover",
         "read:main-pc:task-recover",
         "write:main-pc:ctx-instance-test:0"

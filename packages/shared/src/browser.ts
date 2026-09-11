@@ -77,8 +77,14 @@ export type {
 } from "./dto/tool/DtoToolCallRecord.js";
 export type {
     ContextMessageQueueInput,
-    ContextMessageRecord
+    ContextMessageRecord,
+    ContextMessageStatus
 } from "./dto/context/DtoContextMessage.js";
+export type {
+    ConversationEntry,
+    ConversationEntryKind,
+    ConversationListInput
+} from "./dto/context/DtoConversation.js";
 export type {
     McpContextRecord,
     McpContextStatus

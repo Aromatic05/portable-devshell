@@ -1289,7 +1289,7 @@ export class McpEndpointDispatch {
                     signal
                 );
             case "todo":
-                return await this.#todo.call(toolName as McpToolCatalogTodoName, input, context, signal);
+                return await this.#todo.call(toolName as McpToolCatalogTodoName, input, context, signal, callId);
         }
     }
 

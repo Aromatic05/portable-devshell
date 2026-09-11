@@ -143,6 +143,11 @@ export class InstanceCreateCoordinator {
             this.#getMcpHost()?.unregisterInstance(normalized.name);
             this.#instanceRegistry.delete(normalized.name);
             if (descriptor !== undefined) {
+                try {
+                    descriptor.conversation.close();
+                } catch (closeError) {
+                    failures.push(closeError);
+                }
                 const close = (descriptor.worker as { close?: () => Promise<void> }).close;
                 if (close !== undefined) await close.call(descriptor.worker).catch((closeError) => failures.push(closeError));
             }

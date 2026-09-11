@@ -103,8 +103,7 @@ export function isRenderRelevantChange(
                 before?.snapshot !== after?.snapshot;
         case "messages":
             return previous.readModel.contexts !== next.readModel.contexts ||
-                before?.contextMessages !== after?.contextMessages ||
-                before?.reportCalls !== after?.reportCalls ||
+                before?.conversationEntries !== after?.conversationEntries ||
                 before?.snapshot !== after?.snapshot;
         case "audit":
             return previous.readModel.contexts !== next.readModel.contexts ||

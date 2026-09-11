@@ -14,9 +14,17 @@ import type {
     TodoTaskControlAction,
     TodoWriteInput,
     ToolCallAssociation,
+    ConversationEntry,
+    ConversationListInput,
     WaitCreateInput,
     WaitRecord
 } from "@portable-devshell/shared";
+
+export interface InstanceConversationPort {
+    close(): void;
+    list(input?: ConversationListInput): Promise<ConversationEntry[]>;
+    recordReport(input: { callId: string; createdAt?: string; ctxId: string; text: string }): Promise<void>;
+}
 
 export interface InstanceContextMessagePort {
     failAllPending(reason: string): Promise<ContextMessageRecord[]>;
@@ -70,6 +78,7 @@ export interface InstanceWaitPort {
 }
 
 export interface InstanceDescriptor {
+    conversation: InstanceConversationPort;
     contextMessages?: InstanceContextMessagePort;
     enabled: boolean;
     goal: InstanceGoalPort;

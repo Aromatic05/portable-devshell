@@ -336,6 +336,7 @@ function emptyInstanceReadState(): ControlInstanceReadState {
     return {
         approvals: [],
         commentCalls: [],
+        conversationEntries: [],
         contextMessages: [],
         goals: [],
         logs: [],

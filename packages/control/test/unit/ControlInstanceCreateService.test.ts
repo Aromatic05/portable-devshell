@@ -141,6 +141,7 @@ test("instance create restores configuration and registry when MCP registration 
     const writes: ControlConfig[] = [];
     const registry = new InstanceRegistry([]);
     const descriptor = {
+        conversation: { close() {}, async list() { return []; }, async recordReport() {} },
         enabled: true,
         mcpEnabled: true,
         mcpPath: "/demo-local/mcp",

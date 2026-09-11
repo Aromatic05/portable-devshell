@@ -52,6 +52,7 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
             name: "reverse-test",
             provider: "reverse",
             reverseConnector: connector,
+            conversation: { close() {}, async list() { return []; }, async recordReport() {} },
             goal,
             todo,
             worker
@@ -162,6 +163,7 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
             name: "reverse-test",
             provider: "reverse",
             reverseConnector: connector,
+            conversation: { close() {}, async list() { return []; }, async recordReport() {} },
             goal: new GoalService({
                 appendEvent: async () => undefined,
                 filePath: join(home, "goals.json"),

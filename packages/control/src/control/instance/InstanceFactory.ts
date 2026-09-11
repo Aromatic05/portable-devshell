@@ -3,6 +3,8 @@ import { asInstanceName, type ControlInstanceConfig } from "@portable-devshell/s
 
 import type { InstanceDescriptor } from "./InstanceDescriptor.js";
 import { ContextMessageService } from "../../instance/context/ContextMessageService.js";
+import { ConversationService } from "../../instance/conversation/ConversationService.js";
+import { ConversationStore } from "../../instance/conversation/ConversationStore.js";
 import { GoalService } from "../../instance/goal/GoalService.js";
 import { TodoService } from "../../instance/todo/TodoService.js";
 import { WaitService } from "../../instance/wait/WaitService.js";
@@ -21,6 +23,19 @@ export class InstanceFactory {
         const paths = new InstancePaths(name, homeDirectory);
         const reverseConnector = instance.provider === "reverse" ? new WorkerRpcInboundConnector() : undefined;
         const workerHolder: { value?: WorkerInstance } = {};
+        const conversationStore = new ConversationStore({
+            filePath: paths.conversationDatabaseFile,
+            instanceName: instance.name,
+            legacyContextMessagesFile: paths.contextMessagesFile,
+        });
+        const conversation = new ConversationService({
+            legacyReports: async () => await workerHolder.value?.readToolCalls({
+                includeInput: true,
+                includeOutput: false,
+                toolName: "todo_report",
+            }) ?? [],
+            store: conversationStore,
+        });
         const todo = new TodoService({
             appendEvent: async (type, data) => {
                 await workerHolder.value?.appendControlEvent(type, data);
@@ -32,8 +47,8 @@ export class InstanceFactory {
             appendEvent: async (type, data) => {
                 await workerHolder.value?.appendControlEvent(type, data);
             },
-            filePath: paths.contextMessagesFile,
-            instanceName: instance.name
+            instanceName: instance.name,
+            store: conversationStore,
         });
         const goal = new GoalService({
             appendEvent: async (type, data) => {
@@ -56,6 +71,7 @@ export class InstanceFactory {
         const terminal = new WorkerTerminalBackend({ worker });
 
         return {
+            conversation,
             contextMessages,
             goal,
             mcpContextMode: instance.mcp.contextMode,

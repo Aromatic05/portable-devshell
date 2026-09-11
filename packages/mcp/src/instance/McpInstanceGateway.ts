@@ -95,6 +95,7 @@ export interface McpInstanceGateway {
     consumeContextMessages?(instance: string, ctxId: string, callId: string): Promise<ContextMessageReadResult>;
     failContextMessages?(instance: string, ctxId: string, reason: string): Promise<ContextMessageRecord[]>;
     readTodo(instance: string, input?: TodoReadInput): Promise<JsonValue>;
+    reportTodo?(instance: string, message: string, callId: string, context: ToolCallContext): Promise<void>;
     listTools(instance: string): ToolDefinition[];
     observeTmuxTask?(
         instance: string,

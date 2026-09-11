@@ -4,6 +4,7 @@ import type {
 } from "../dto/artifact/DtoArtifact.js";
 import type { WebApplicationDescriptor } from "../dto/web/DtoWebApplication.js";
 import type { ContextMessageRecord } from "../dto/context/DtoContextMessage.js";
+import type { ConversationEntry } from "../dto/context/DtoConversation.js";
 import type { McpContextRecord } from "../dto/context/DtoContextRecord.js";
 import { CONTROL_PROTOCOL_VERSION } from "../dto/DtoControlProtocol.js";
 import type { InstanceEvent } from "../dto/instance/DtoInstanceEvent.js";
@@ -33,6 +34,7 @@ export type ControlInstanceReadKey =
 export interface ControlInstanceReadState {
     approvals: ApprovalRequest[];
     commentCalls: ToolCallRecord[];
+    conversationEntries: ConversationEntry[];
     contextMessages: ContextMessageRecord[];
     goals: GoalSnapshot[];
     logs: InstanceLogEntry[];
@@ -90,6 +92,7 @@ type InstanceReadValue =
     | ToolCallRecord[]
     | {
           commentCalls: ToolCallRecord[];
+          conversationEntries: ConversationEntry[];
           contextMessages: ContextMessageRecord[];
           reportCalls: ToolCallRecord[];
       }
@@ -456,6 +459,14 @@ export class ControlReadModel {
     mergeQueuedContextMessage(instance: string, message: ContextMessageRecord): void {
         const state = this.#instance(instance);
         state.contextMessages = mergeContextMessage(state.contextMessages, message);
+        state.conversationEntries = mergeConversationEntry(state.conversationEntries, {
+            createdAt: message.createdAt,
+            ctxId: message.ctxId,
+            id: message.id,
+            kind: "comment",
+            status: message.status,
+            text: message.text,
+        });
         this.#clearFailure(this.failureKey(instance, "comments"));
         this.#emit();
     }
@@ -542,6 +553,7 @@ export class ControlReadModel {
             if (key === "comments" && methodNotFound(error)) {
                 this.#applyInstanceValue(instance, key, {
                     commentCalls: [],
+                    conversationEntries: [],
                     contextMessages: [],
                     reportCalls: [],
                 });
@@ -579,6 +591,38 @@ export class ControlReadModel {
                     maxBytes: 512 * 1024,
                 });
             case "comments": {
+                try {
+                    const conversationEntries = await this.#clients.conversation.list(instance, {
+                        limit: 400,
+                        maxBytes: 1024 * 1024,
+                    });
+                    const contextMessages = conversationEntries.flatMap((entry) =>
+                        entry.kind === "comment" && entry.status !== undefined
+                            ? [contextMessageFromConversationEntry(instance, entry)]
+                            : [],
+                    );
+                    const callIds = [...new Set(contextMessages.flatMap((message) =>
+                        message.status === "delivered" && message.callId !== undefined
+                            ? [message.callId]
+                            : [],
+                    ))];
+                    return {
+                        commentCalls: callIds.length === 0
+                            ? []
+                            : await this.#clients.tool.listCalls(instance, {
+                                callIds,
+                                includeInput: false,
+                                includeOutput: true,
+                                limit: 1_000,
+                                maxBytes: 512 * 1024,
+                            }),
+                        conversationEntries,
+                        contextMessages,
+                        reportCalls: [],
+                    };
+                } catch (error) {
+                    if (!methodNotFound(error)) throw error;
+                }
                 const [contextMessages, reportCalls] = await Promise.all([
                     this.#clients.contextMessage.list(instance, {
                         limit: 200,
@@ -610,6 +654,7 @@ export class ControlReadModel {
                             limit: 1_000,
                             maxBytes: 512 * 1024,
                         }),
+                    conversationEntries: legacyConversationEntries(contextMessages, reportCalls),
                     contextMessages,
                     reportCalls,
                 };
@@ -649,10 +694,15 @@ export class ControlReadModel {
             case "comments": {
                 const comments = value as {
                     commentCalls: ToolCallRecord[];
+                    conversationEntries: ConversationEntry[];
                     contextMessages: ContextMessageRecord[];
                     reportCalls: ToolCallRecord[];
                 };
                 state.commentCalls = comments.commentCalls;
+                state.conversationEntries = mergeConversationEntryList(
+                    state.conversationEntries,
+                    comments.conversationEntries,
+                );
                 state.contextMessages = mergeContextMessageList(
                     state.contextMessages,
                     comments.contextMessages,
@@ -952,6 +1002,7 @@ export class ControlReadModel {
         return this.#state.instanceState[name] ??= {
             approvals: [],
             commentCalls: [],
+            conversationEntries: [],
             contextMessages: [],
             goals: [],
             logs: [],
@@ -1031,6 +1082,7 @@ function snapshotState(state: ControlReadModelState): ControlReadModelState {
                 ...value,
                 approvals: [...value.approvals],
                 commentCalls: [...value.commentCalls],
+                conversationEntries: [...value.conversationEntries],
                 contextMessages: [...value.contextMessages],
                 goals: [...value.goals],
                 logs: [...value.logs],
@@ -1076,6 +1128,85 @@ function mergeContextMessageList(
     const incomingIds = new Set(incoming.map((message) => message.id));
     return result.filter(
         (message) => incomingIds.has(message.id) || message.status === "pending" || message.status === "sent",
+    );
+}
+
+function mergeConversationEntry(
+    current: readonly ConversationEntry[],
+    incoming: ConversationEntry,
+): ConversationEntry[] {
+    return [...current.filter((entry) => !(entry.kind === incoming.kind && entry.id === incoming.id)), incoming]
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+}
+
+function mergeConversationEntryList(
+    current: readonly ConversationEntry[],
+    incoming: readonly ConversationEntry[],
+): ConversationEntry[] {
+    let result = [...current];
+    for (const entry of incoming) result = mergeConversationEntry(result, entry);
+    const incomingKeys = new Set(incoming.map((entry) => `${entry.kind}:${entry.id}`));
+    return result.filter((entry) =>
+        incomingKeys.has(`${entry.kind}:${entry.id}`) ||
+        (entry.kind === "comment" && (entry.status === "pending" || entry.status === "sent")),
+    );
+}
+
+function contextMessageFromConversationEntry(instance: string, entry: ConversationEntry): ContextMessageRecord {
+    if (entry.kind !== "comment" || entry.status === undefined) {
+        throw new Error("Conversation entry is not a Context Comment.");
+    }
+    return {
+        ...(entry.callId === undefined ? {} : { callId: entry.callId }),
+        createdAt: entry.createdAt,
+        ctxId: entry.ctxId,
+        ...(entry.deliveredAt === undefined ? {} : { deliveredAt: entry.deliveredAt }),
+        ...(entry.error === undefined ? {} : { error: entry.error }),
+        ...(entry.failedAt === undefined ? {} : { failedAt: entry.failedAt }),
+        id: entry.id,
+        instance,
+        status: entry.status,
+        text: entry.text,
+    };
+}
+
+function legacyConversationEntries(
+    messages: readonly ContextMessageRecord[],
+    reportCalls: readonly ToolCallRecord[],
+): ConversationEntry[] {
+    const comments = messages.map((message): ConversationEntry => ({
+        ...(message.callId === undefined ? {} : { callId: message.callId }),
+        createdAt: message.createdAt,
+        ctxId: message.ctxId,
+        ...(message.deliveredAt === undefined ? {} : { deliveredAt: message.deliveredAt }),
+        ...(message.error === undefined ? {} : { error: message.error }),
+        ...(message.failedAt === undefined ? {} : { failedAt: message.failedAt }),
+        id: message.id,
+        kind: "comment",
+        status: message.status,
+        text: message.text,
+    }));
+    const reports = reportCalls.flatMap((call): ConversationEntry[] => {
+        if (
+            call.status !== "completed" ||
+            call.ctxId === undefined ||
+            typeof call.input !== "object" ||
+            call.input === null ||
+            Array.isArray(call.input)
+        ) return [];
+        const message = call.input.message;
+        if (typeof message !== "string" || message.length === 0) return [];
+        return [{
+            callId: call.callId,
+            createdAt: call.completedAt ?? call.startedAt,
+            ctxId: call.ctxId,
+            id: call.callId,
+            kind: "report",
+            text: message,
+        }];
+    });
+    return [...comments, ...reports].sort(
+        (left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
     );
 }
 

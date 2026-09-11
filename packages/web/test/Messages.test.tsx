@@ -45,6 +45,24 @@ const state: WebState = {
             alpha: {
                 approvals: [],
                 commentCalls: [],
+                conversationEntries: [
+                    {
+                        createdAt: "2026-09-02T10:00:00Z",
+                        ctxId: "ctx-old-active",
+                        id: "comment-1",
+                        kind: "comment",
+                        status: "delivered",
+                        text: "Check the route model.",
+                    },
+                    {
+                        callId: "report-1",
+                        createdAt: "2026-09-02T10:01:00Z",
+                        ctxId: "ctx-old-active",
+                        id: "report-1",
+                        kind: "report",
+                        text: "Route model is now green.",
+                    },
+                ],
                 contextMessages: [{
                     createdAt: "2026-09-02T10:00:00Z",
                     ctxId: "ctx-old-active",
@@ -104,6 +122,7 @@ describe("Messages", () => {
                     ...state.readModel.instanceState,
                     alpha: {
                         ...state.readModel.instanceState.alpha!,
+                        conversationEntries: [],
                         contextMessages: [],
                         reportCalls: [],
                     },
@@ -112,7 +131,7 @@ describe("Messages", () => {
         }, now)).toEqual([]);
     });
 
-    it("projects Comments and completed todo_report calls into one chronological conversation", () => {
+    it("projects canonical Conversation entries into one chronological conversation", () => {
         expect(selectWebMessageEntries(state, "alpha", "ctx-old-active")).toEqual([
             expect.objectContaining({ kind: "comment", text: "Check the route model." }),
             expect.objectContaining({ kind: "report", text: "Route model is now green." }),

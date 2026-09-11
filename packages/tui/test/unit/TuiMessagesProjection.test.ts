@@ -40,6 +40,24 @@ test("Messages merges registered sessions with exact comment and report history"
         ],
         instanceState: {
             alpha: {
+                conversationEntries: [
+                    {
+                        createdAt: "2026-09-10T10:03:00.000Z",
+                        ctxId: "ctx-alpha",
+                        id: "comment-1",
+                        kind: "comment",
+                        status: "sent",
+                        text: "user comment",
+                    },
+                    {
+                        callId: "report-1",
+                        createdAt: "2026-09-10T10:04:00.000Z",
+                        ctxId: "ctx-alpha",
+                        id: "report-1",
+                        kind: "report",
+                        text: "agent report",
+                    },
+                ],
                 contextMessages: [
                     {
                         createdAt: "2026-09-10T10:03:00.000Z",

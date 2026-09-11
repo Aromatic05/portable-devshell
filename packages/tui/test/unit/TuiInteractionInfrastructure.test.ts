@@ -2837,6 +2837,14 @@ test("Messages scrolling measures wrapped history with the actual main viewport 
     harness.store.patchControlReadModel({
         instanceState: {
             alpha: {
+                conversationEntries: [{
+                    createdAt: "2026-09-10T10:00:00.000Z",
+                    ctxId: "ctx-alpha",
+                    id: "long-message",
+                    kind: "comment",
+                    status: "delivered",
+                    text: "wrapped message ".repeat(24),
+                }],
                 contextMessages: [{
                     createdAt: "2026-09-10T10:00:00.000Z",
                     ctxId: "ctx-alpha",

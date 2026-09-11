@@ -5,6 +5,7 @@ import test from "node:test";
 import {
     asInstanceName,
     type ApprovalRequest,
+    type ConversationEntry,
     type InstanceSnapshot,
     type JsonValue,
     type McpContextRecord,
@@ -101,11 +102,20 @@ test("TuiControlSession does not load details for a stopped instance during star
     assert.deepEqual(worker.logReadQueries, []);
 });
 
-test("TuiControlSession loads exact todo_report inputs with Context message history", async (t) => {
+test("TuiControlSession loads exact Conversation report history without rereading todo_report ToolCalls", async (t) => {
     const runtimeDir = await createTestTempDirectory("tui-report-history");
     const socketPath = createTestIpcPath("tui-report-history", runtimeDir);
     const worker = new FakeWorker("alpha");
-    const server = createServer(socketPath, worker, () => 7);
+    const server = createServer(socketPath, worker, () => 7, {
+        conversationEntries: () => [{
+            callId: "report-call",
+            createdAt: new Date(20).toISOString(),
+            ctxId: "ctx-alpha",
+            id: "report-call",
+            kind: "report",
+            text: "report text that must stay exact",
+        }],
+    });
     const session = new TuiControlSession({
         clients: createTuiClients({ socketPath }),
     });
@@ -118,34 +128,23 @@ test("TuiControlSession loads exact todo_report inputs with Context message hist
     });
 
     await session.start();
-    worker.addToolCall({
-        callId: "report-call",
-        completedAt: new Date(20).toISOString(),
-        ctxId: "ctx-alpha",
-        input: { message: "report text that must stay exact" },
-        inputSummary: '{"message":"report text that must stay exact"}',
-        instance: asInstanceName("alpha"),
-        source: "mcp",
-        startedAt: new Date(19).toISOString(),
-        status: "completed",
-        toolName: "todo_report",
-    });
-
     await session.refreshAudit("alpha");
 
     assert.equal(
-        worker.toolCallQueries.some(
-            (query) =>
-                query.toolName === "todo_report" && query.includeInput === true,
-        ),
-        true,
+        worker.toolCallQueries.some((query) => query.toolName === "todo_report"),
+        false,
         JSON.stringify(worker.toolCallQueries),
     );
     assert.deepEqual(
-        session.store.getState().readModel.instanceState.alpha?.reportCalls.map(
-            (call) => call.input,
-        ),
-        [{ message: "report text that must stay exact" }],
+        session.store.getState().readModel.instanceState.alpha?.conversationEntries,
+        [{
+            callId: "report-call",
+            createdAt: new Date(20).toISOString(),
+            ctxId: "ctx-alpha",
+            id: "report-call",
+            kind: "report",
+            text: "report text that must stay exact",
+        }],
     );
 });
 
@@ -627,6 +626,7 @@ function createServer(
     worker: FakeWorker,
     getConfigVersion: () => number,
     options: {
+        conversationEntries?: () => ConversationEntry[];
         contextRecords?: () => McpContextRecord[];
         onTodoRead?: () => void;
         restartable?: boolean;
@@ -641,6 +641,11 @@ function createServer(
 } {
     const instances = new InstanceRegistry([
         {
+            conversation: {
+                close() {},
+                async list() { return options.conversationEntries?.() ?? []; },
+                async recordReport() {},
+            },
             enabled: true,
             goal: {
                 async continuation() { return {}; },

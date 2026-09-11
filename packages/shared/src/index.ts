@@ -16,6 +16,7 @@ export * from "./dto/DtoExtension.js";
 export * from "./dto/cli/DtoCliCommand.js";
 export * from "./dto/web/DtoWebApplication.js";
 export * from "./dto/context/DtoContextMessage.js";
+export * from "./dto/context/DtoConversation.js";
 export * from "./dto/context/DtoContextRecord.js";
 export * from "./dto/artifact/DtoArtifact.js";
 export * from "./dto/instance/DtoInstanceCreate.js";

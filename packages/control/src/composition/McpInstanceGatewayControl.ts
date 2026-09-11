@@ -356,6 +356,19 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         )) as unknown as JsonValue;
     }
 
+    async reportTodo(
+        instance: string,
+        message: string,
+        callId: string,
+        context: ToolCallContext,
+    ): Promise<void> {
+        await this.#requireDescriptor(instance).conversation.recordReport({
+            callId,
+            ctxId: requireCtxId(context),
+            text: message,
+        });
+    }
+
     #requireWait(instance: string) {
         const wait = this.#requireDescriptor(instance).wait;
         if (wait === undefined) {

@@ -26,6 +26,7 @@ import type { ReverseCredentialService } from "../control/reverse/credential/Rev
 import { createReverseRouteModule } from "../control/reverse/route/ReverseRouteModule.js";
 import type { ToolCallProvenanceStore } from "../control/tool/ToolCallProvenanceStore.js";
 import { createContextMessageRouteModule } from "../instance/context/ContextMessageRouteModule.js";
+import { createConversationRouteModule } from "../instance/conversation/ConversationRouteModule.js";
 import { createGoalRouteModule } from "../instance/goal/GoalRouteModule.js";
 import { createRuntimeRouteModule } from "../instance/runtime/RuntimeRouteModule.js";
 import { RuntimeSubscriptionManager } from "../instance/runtime/RuntimeSubscriptionManager.js";
@@ -165,6 +166,7 @@ export class ControlRouteComposition {
                     ...(descriptor.contextMessages === undefined ? [] : [createContextMessageRouteModule(
                         descriptor.contextMessages
                     )]),
+                    createConversationRouteModule(descriptor.conversation),
                     createGoalRouteModule(descriptor),
                     createTodoRouteModule(descriptor, this.#subscriptions),
                     createToolRouteModule(descriptor, this.#options.toolProvenance),

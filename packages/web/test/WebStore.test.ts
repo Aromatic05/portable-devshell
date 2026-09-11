@@ -53,14 +53,14 @@ describe("WebStore", () => {
             text: "Continue with the next check.",
         };
         clients.tool.listCalls = vi.fn(async () => [call]);
-        clients.contextMessage.list = vi.fn(async () => []);
+        clients.conversation.list = vi.fn(async () => []);
         clients.contextMessage.queue = vi.fn(async () => queued);
         clients.overview.get = vi.fn(async () => operationalOverview());
         const store = new WebStore(clients);
 
         await store.load();
         expect(clients.tool.listCalls).not.toHaveBeenCalled();
-        expect(clients.contextMessage.list).not.toHaveBeenCalled();
+        expect(clients.conversation.list).not.toHaveBeenCalled();
         await store.refreshAudit();
         expect(store.state.readModel.instanceState.demo?.toolCalls).toEqual([call]);
         expect(await store.queueContextMessage("demo", "ctx-demo", queued.text)).toBe(true);
@@ -69,7 +69,8 @@ describe("WebStore", () => {
             text: queued.text,
         });
         expect(store.state.readModel.instanceState.demo?.contextMessages).toEqual([queued]);
-        expect(clients.contextMessage.list).toHaveBeenCalledTimes(2);
+        expect(clients.conversation.list).toHaveBeenCalledTimes(2);
+        expect(clients.contextMessage.list).not.toHaveBeenCalled();
         expect(store.state.readModel.instanceState.demo?.commentCalls).toEqual([]);
         expect(clients.overview.get).toHaveBeenCalledOnce();
     });
@@ -93,33 +94,27 @@ describe("WebStore", () => {
         const clients = fakeClients();
         clients.context.list = vi.fn(async () => []);
         clients.tool.listCalls = vi.fn(async () => []);
-        clients.contextMessage.list = vi.fn(async () => []);
+        clients.conversation.list = vi.fn(async () => []);
         clients.runtime.readLogs = vi.fn(async () => []);
         const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
         await store.load();
 
         vi.mocked(clients.context.list).mockClear();
         vi.mocked(clients.tool.listCalls).mockClear();
-        vi.mocked(clients.contextMessage.list).mockClear();
+        vi.mocked(clients.conversation.list).mockClear();
         vi.mocked(clients.runtime.readLogs).mockClear();
         await store.refreshAudit();
 
         expect(clients.context.list).toHaveBeenCalledOnce();
-        expect(clients.tool.listCalls).toHaveBeenCalledTimes(2);
+        expect(clients.tool.listCalls).toHaveBeenCalledOnce();
         expect(clients.tool.listCalls).toHaveBeenCalledWith("demo", {
             includeInput: false,
             includeOutput: false,
             limit: 200,
             maxBytes: 512 * 1024,
         });
-        expect(clients.tool.listCalls).toHaveBeenCalledWith("demo", {
-            includeInput: true,
-            includeOutput: false,
-            limit: 200,
-            maxBytes: 1024 * 1024,
-            toolName: "todo_report",
-        });
-        expect(clients.contextMessage.list).toHaveBeenCalledOnce();
+        expect(clients.conversation.list).toHaveBeenCalledOnce();
+        expect(clients.contextMessage.list).not.toHaveBeenCalled();
         expect(clients.runtime.readLogs).toHaveBeenCalledOnce();
         store.close();
     });
@@ -157,12 +152,12 @@ describe("WebStore", () => {
         });
         await vi.waitFor(() => expect(store.state.readModel.instanceState.demo?.sequence).toBe(11));
         expect(clients.tool.listCalls).not.toHaveBeenCalled();
-        expect(clients.contextMessage.list).not.toHaveBeenCalled();
+        expect(clients.conversation.list).not.toHaveBeenCalled();
         expect(clients.runtime.readLogs).not.toHaveBeenCalled();
 
         await store.refreshAudit();
         vi.mocked(clients.tool.listCalls).mockClear();
-        vi.mocked(clients.contextMessage.list).mockClear();
+        vi.mocked(clients.conversation.list).mockClear();
         vi.mocked(clients.runtime.readLogs).mockClear();
 
         stream.push({
@@ -186,7 +181,7 @@ describe("WebStore", () => {
         await vi.waitFor(() => {
             expect(clients.runtime.readLogs).toHaveBeenCalled();
             expect(clients.tool.listCalls).toHaveBeenCalled();
-            expect(clients.contextMessage.list).toHaveBeenCalled();
+            expect(clients.conversation.list).toHaveBeenCalled();
         });
         store.close();
     });
@@ -230,7 +225,16 @@ describe("WebStore", () => {
             status: "delivered",
         };
         let messages: ContextMessageRecord[] = [];
-        clients.contextMessage.list = vi.fn(async () => messages);
+        clients.conversation.list = vi.fn(async () => messages.map((message) => ({
+            ...(message.callId === undefined ? {} : { callId: message.callId }),
+            createdAt: message.createdAt,
+            ctxId: message.ctxId,
+            ...(message.deliveredAt === undefined ? {} : { deliveredAt: message.deliveredAt }),
+            id: message.id,
+            kind: "comment" as const,
+            status: message.status,
+            text: message.text,
+        })));
         clients.contextMessage.queue = vi.fn(async () => {
             messages = [queued];
             return queued;
@@ -442,6 +446,7 @@ function fakeClients(
         artifact: {} as WebClients["artifact"],
         cli: {} as WebClients["cli"],
         config: {} as WebClients["config"],
+        conversation: { list: vi.fn(async () => []) },
         extension: {} as WebClients["extension"],
         context: {
             disable: async () => {
@@ -498,7 +503,7 @@ function fakeClients(
         },
         goal: { get: async () => ({ goals: [], lastSeq: 3 }) },
         contextMessage: {
-            list: async () => [],
+            list: vi.fn(async () => []),
             queue: async (_instance, input) => ({
                 createdAt: "2026-07-31T00:00:00Z",
                 id: "message",

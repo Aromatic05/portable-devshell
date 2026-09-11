@@ -20,6 +20,7 @@ import type {
     ContextMessageQueueInput,
     ContextMessageRecord,
 } from "../dto/context/DtoContextMessage.js";
+import type { ConversationEntry, ConversationListInput } from "../dto/context/DtoConversation.js";
 import type { McpContextRecord } from "../dto/context/DtoContextRecord.js";
 import {
     CONTROL_PROTOCOL_VERSION,
@@ -148,6 +149,9 @@ export interface ControlClients {
         list(instance: string, input?: ContextMessageListInput | string): Promise<ContextMessageRecord[]>;
         queue(instance: string, input: ContextMessageQueueInput): Promise<ContextMessageRecord>;
     };
+    conversation: {
+        list(instance: string, input?: ConversationListInput): Promise<ConversationEntry[]>;
+    };
     debug: {
         list(): Promise<DebugPatchSummary[]>;
         load(request: DebugPatchLoadRequest): Promise<DebugPatchSummary>;
@@ -273,6 +277,7 @@ export function createControlClients(
     const reverse = controlClientModule(connection, "reverse");
     const service = controlClientModule(connection, "service");
     const contextMessage = instanceClientModule(connection, "contextMessage");
+    const conversation = instanceClientModule(connection, "conversation");
     const goal = instanceClientModule(connection, "goal");
     const runtime = instanceClientModule(connection, "runtime");
     const terminal = instanceClientModule(connection, "terminal");
@@ -333,6 +338,9 @@ export function createControlClients(
                     typeof input === "string" ? { ctxId: input } : (input ?? {}),
                 ),
             queue: (name, input) => contextMessage.request(name, "queue", input),
+        },
+        conversation: {
+            list: (name, input) => conversation.request(name, "list", input ?? {}),
         },
         debug: {
             list: () => debug.request("list"),

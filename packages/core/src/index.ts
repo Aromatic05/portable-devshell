@@ -1,4 +1,9 @@
 export { InstancePaths } from "./instance/InstancePaths.js";
+export {
+    assertSqliteSchemaVersionSupported,
+    readSqlitePragmaNumber,
+    SqliteSchemaVersionTooNewError,
+} from "./storage/SqliteSchemaVersion.js";
 export type { WorkerCommandInteractiveSession } from "./worker/command/WorkerCommandTransport.js";
 export type {
     WorkerDevshellCommandClose,

@@ -1,7 +1,6 @@
 import {
     workspaceFolderName,
-    type ContextMessageRecord,
-    type ToolCallRecord,
+    type ContextMessageStatus,
 } from "@portable-devshell/shared/browser";
 
 import type { WebState } from "../state/WebState.js";
@@ -10,7 +9,7 @@ export interface WebMessageEntry {
     at: string;
     id: string;
     kind: "comment" | "report";
-    status?: ContextMessageRecord["status"];
+    status?: ContextMessageStatus;
     text: string;
 }
 
@@ -77,14 +76,8 @@ function projectWebMessageSessions(state: WebState): WebMessageSession[] {
         }
     }
     for (const [instance, instanceState] of Object.entries(state.readModel.instanceState)) {
-        for (const message of instanceState.contextMessages) {
-            touch(instance, message.ctxId, { latestAt: message.createdAt });
-        }
-        for (const call of instanceState.reportCalls) {
-            touch(instance, call.ctxId, {
-                latestAt: call.completedAt ?? call.startedAt,
-                workspace: call.workspace,
-            });
+        for (const entry of instanceState.conversationEntries) {
+            touch(instance, entry.ctxId, { latestAt: entry.createdAt });
         }
     }
 
@@ -114,33 +107,16 @@ export function selectWebMessageEntries(
 ): WebMessageEntry[] {
     const instanceState = state.readModel.instanceState[instance];
     if (instanceState === undefined) return [];
-    const comments: WebMessageEntry[] = instanceState.contextMessages
-        .filter((message) => message.ctxId === ctxId)
-        .map((message) => ({
-            at: message.createdAt,
-            id: `comment:${message.id}`,
-            kind: "comment",
-            status: message.status,
-            text: message.text,
-        }));
-    const reports: WebMessageEntry[] = instanceState.reportCalls
-        .filter((call) =>
-            call.ctxId === ctxId &&
-            call.toolName === "todo_report" &&
-            call.status === "completed"
-        )
-        .flatMap((call) => {
-            const text = reportText(call);
-            return text === undefined
-                ? []
-                : [{
-                      at: call.completedAt ?? call.startedAt,
-                      id: `report:${call.callId}`,
-                      kind: "report" as const,
-                      text,
-                  }];
-        });
-    return [...comments, ...reports].sort(
+    return instanceState.conversationEntries
+        .filter((entry) => entry.ctxId === ctxId)
+        .map((entry): WebMessageEntry => ({
+            at: entry.createdAt,
+            id: `${entry.kind}:${entry.id}`,
+            kind: entry.kind,
+            ...(entry.status === undefined ? {} : { status: entry.status }),
+            text: entry.text,
+        }))
+        .sort(
         (left, right) => left.at.localeCompare(right.at) || left.id.localeCompare(right.id),
     );
 }
@@ -158,14 +134,6 @@ export function filterWebMessageSessions(
         session.workspace,
         session.status,
     ].some((value) => value?.toLowerCase().includes(needle) === true));
-}
-
-function reportText(call: ToolCallRecord): string | undefined {
-    if (typeof call.input !== "object" || call.input === null || Array.isArray(call.input)) {
-        return undefined;
-    }
-    const message = call.input.message;
-    return typeof message === "string" && message.length > 0 ? message : undefined;
 }
 
 function compactContextId(ctxId: string): string {

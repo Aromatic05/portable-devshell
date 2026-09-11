@@ -1,4 +1,4 @@
-import { workspaceFolderName, type ContextMessageStatus, type ToolCallRecord } from "@portable-devshell/shared";
+import { workspaceFolderName, type ContextMessageStatus } from "@portable-devshell/shared";
 
 import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
 import { currentTuiRoute } from "../../../state/route/TuiRouteState.js";
@@ -53,14 +53,8 @@ export function selectTuiMessageSessions(
             workspace: environment.workspace ?? context.workspace,
         });
     }
-    for (const message of state.readModel.instanceState[instance]?.contextMessages ?? []) {
-        touch(message.ctxId, { latestAt: message.createdAt });
-    }
-    for (const call of state.readModel.instanceState[instance]?.reportCalls ?? []) {
-        touch(call.ctxId, {
-            latestAt: call.completedAt ?? call.startedAt,
-            workspace: call.workspace,
-        });
+    for (const entry of state.readModel.instanceState[instance]?.conversationEntries ?? []) {
+        touch(entry.ctxId, { latestAt: entry.createdAt });
     }
 
     return [...sessions.values()]
@@ -134,39 +128,16 @@ export function selectTuiMessageEntries(
     instance: string,
     ctxId: string,
 ): TuiMessageEntry[] {
-    const comments: TuiMessageEntry[] = (
-        state.readModel.instanceState[instance]?.contextMessages ?? []
-    )
-        .filter((message) => message.ctxId === ctxId)
-        .map((message) => ({
-            at: message.createdAt,
-            id: `comment:${message.id}`,
-            kind: "comment" as const,
-            status: message.status,
-            text: message.text,
-        }));
-    const reports: TuiMessageEntry[] = (
-        state.readModel.instanceState[instance]?.reportCalls ?? []
-    )
-        .filter(
-            (call) =>
-                call.ctxId === ctxId &&
-                call.toolName === "todo_report" &&
-                call.status === "completed",
-        )
-        .flatMap((call) => {
-            const text = reportText(call);
-            return text === undefined
-                ? []
-                : [{
-                      at: call.completedAt ?? call.startedAt,
-                      id: `report:${call.callId}`,
-                      kind: "report" as const,
-                      text,
-                  }];
-        });
-
-    return [...comments, ...reports].sort(
+    return (state.readModel.instanceState[instance]?.conversationEntries ?? [])
+        .filter((entry) => entry.ctxId === ctxId)
+        .map((entry): TuiMessageEntry => ({
+            at: entry.createdAt,
+            id: `${entry.kind}:${entry.id}`,
+            kind: entry.kind,
+            ...(entry.status === undefined ? {} : { status: entry.status }),
+            text: entry.text,
+        }))
+        .sort(
         (left, right) =>
             left.at.localeCompare(right.at) || left.id.localeCompare(right.id),
     );
@@ -194,18 +165,6 @@ export function renderTuiMessageHistoryLines(
 
 export function tuiMessagesHistoryRows(viewportRows: number): number {
     return Math.max(0, viewportRows - 4);
-}
-
-function reportText(call: ToolCallRecord): string | undefined {
-    if (
-        typeof call.input !== "object" ||
-        call.input === null ||
-        Array.isArray(call.input)
-    ) {
-        return undefined;
-    }
-    const message = call.input.message;
-    return typeof message === "string" && message.length > 0 ? message : undefined;
 }
 
 function laterTimestamp(left: string | undefined, right: string | undefined): string {

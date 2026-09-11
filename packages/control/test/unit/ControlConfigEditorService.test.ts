@@ -1161,6 +1161,11 @@ function createService(
 
 function descriptor(worker: Record<string, unknown>, extra: Record<string, unknown> = {}) {
     return {
+        conversation: {
+            close() {},
+            async list() { return []; },
+            async recordReport() {},
+        },
         enabled: true,
         mcpEnabled: true,
         mcpPath: "/demo-local/mcp",

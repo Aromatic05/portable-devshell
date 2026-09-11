@@ -407,11 +407,8 @@ function isTuiRouteResourceValid(
         );
         const instanceState = state.readModel.instanceState[instance];
         return registered ||
-            (instanceState?.contextMessages ?? []).some(
-                (message) => message.ctxId === route.ctxId,
-            ) ||
-            (instanceState?.reportCalls ?? []).some(
-                (call) => call.ctxId === route.ctxId,
+            (instanceState?.conversationEntries ?? []).some(
+                (entry) => entry.ctxId === route.ctxId,
             );
     }
     if (route.page === "audit" && route.view !== "contexts") {

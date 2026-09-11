@@ -12,7 +12,13 @@ export class McpEndpointHandlerTodo {
         instanceName: string;
     }) {}
 
-    async call(toolName: McpToolCatalogTodoName, input: JsonValue, context: ToolCallContext, signal?: AbortSignal): Promise<McpEndpointResult> {
+    async call(
+        toolName: McpToolCatalogTodoName,
+        input: JsonValue,
+        context: ToolCallContext,
+        signal?: AbortSignal,
+        callId?: string,
+    ): Promise<McpEndpointResult> {
         const gateway = requireMcpEndpointGateway(this.options.gateway, this.options.instanceName);
         switch (toolName) {
             case "todo_read":
@@ -22,6 +28,12 @@ export class McpEndpointHandlerTodo {
                 );
             case "todo_report": {
                 const message = readTodoReportMessage(input);
+                if (callId !== undefined && gateway.reportTodo !== undefined) {
+                    await waitForMcpEndpointAbortable(
+                        gateway.reportTodo(this.options.instanceName, message, callId, context),
+                        signal,
+                    );
+                }
                 return new McpNativeToolResult({
                     content: [{ type: "text", text: message }],
                     structuredContent: { reported: true }

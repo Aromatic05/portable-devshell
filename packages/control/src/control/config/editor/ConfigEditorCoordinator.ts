@@ -350,6 +350,7 @@ export class ConfigEditorCoordinator {
         }
         await this.#retireStateForDelete(this.#instanceRegistry.get(instanceName));
         await this.#getMcpHost()?.contextAdmin.detachInstance(instanceName);
+        this.#instanceRegistry.get(instanceName)?.conversation.close();
         await this.#persistConfig(nextConfig);
         this.#getMcpHost()?.unregisterInstance(instanceName);
         this.#instanceRegistry.delete(instanceName);
@@ -582,7 +583,7 @@ export class ConfigEditorCoordinator {
                     failures.push(rollbackError);
                 }
             } else if (input.preparedDescriptor !== undefined) {
-                await closeWorkerBestEffort(input.preparedDescriptor).catch((rollbackError) => failures.push(rollbackError));
+                await closeDescriptorResourcesBestEffort(input.preparedDescriptor).catch((rollbackError) => failures.push(rollbackError));
             }
             if (failures.length === 1) throw error;
             throw new AggregateError(failures, "Configuration update failed and runtime rollback was incomplete.");
@@ -611,7 +612,7 @@ export class ConfigEditorCoordinator {
             }
         }
         if (preparedDescriptor !== undefined && preparedDescriptor !== descriptor) {
-            await closeWorkerBestEffort(preparedDescriptor).catch((error) => failures.push(error));
+            await closeDescriptorResourcesBestEffort(preparedDescriptor).catch((error) => failures.push(error));
         }
         if (failures.length > 0) throw new AggregateError(failures, `Failed to restore instance ${existing.name}.`);
     }
@@ -638,6 +639,7 @@ export class ConfigEditorCoordinator {
         }
         if (rebuildRequired) {
             if (preparedDescriptor === undefined) throw new Error(`Missing prepared descriptor for ${instance.name}.`);
+            descriptor.conversation.close();
             this.#instanceRegistry.add(preparedDescriptor);
             return;
         }
@@ -759,9 +761,20 @@ export class ConfigEditorCoordinator {
 
 }
 
-async function closeWorkerBestEffort(descriptor: ReturnType<InstanceFactory["map"]>): Promise<void> {
+async function closeDescriptorResourcesBestEffort(descriptor: ReturnType<InstanceFactory["map"]>): Promise<void> {
+    const failures: unknown[] = [];
+    try {
+        descriptor.conversation.close();
+    } catch (error) {
+        failures.push(error);
+    }
     const close = (descriptor.worker as { close?: () => Promise<void> }).close;
-    if (close !== undefined) await close.call(descriptor.worker);
+    if (close !== undefined) {
+        await close.call(descriptor.worker).catch((error) => failures.push(error));
+    }
+    if (failures.length > 0) {
+        throw new AggregateError(failures, `Failed to close instance ${descriptor.name} resources.`);
+    }
 }
 
 function stripConfigViewMetadata(value: JsonValue | undefined): JsonValue | undefined {
