@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
     InstanceLogEntry,
     ToolCallRecord,
@@ -16,19 +16,24 @@ import { toolCallResult } from "../../selectors/toolCalls.js";
 export function ToolCallEntry({
     call,
     disabled = false,
+    initiallyOpen = false,
     logs,
     onLoadDetail,
     onRefresh,
 }: {
     call: ToolCallRecord;
     disabled?: boolean;
+    initiallyOpen?: boolean;
     logs: readonly InstanceLogEntry[];
     onLoadDetail(): Promise<ToolCallRecord | undefined>;
     onRefresh(): Promise<void>;
 }) {
-    const [open, setOpen] = useState(false);
+    const [open, setOpen] = useState(initiallyOpen);
     const [detail, setDetail] = useState<ToolCallRecord | undefined>();
     const [loading, setLoading] = useState(false);
+    useEffect(() => {
+        if (initiallyOpen) setOpen(true);
+    }, [initiallyOpen]);
     const load = async (): Promise<void> => {
         if (detail !== undefined || loading || call.input !== undefined || call.output !== undefined) return;
         setLoading(true);
@@ -40,12 +45,13 @@ export function ToolCallEntry({
     };
     const visibleCall = call.input !== undefined || call.output !== undefined ? call : (detail ?? call);
     return <li className="activity-record tool-call-record">
-        <details onToggle={(event) => {
-            const next = event.currentTarget.open;
-            setOpen(next);
-            if (next) void load();
-        }}>
-            <summary><time dateTime={call.startedAt} title={call.startedAt}>{formatRelativeTime(call.startedAt)}</time><strong>{call.toolName}</strong><span>{workspaceFolderName(call.workspace)} · {call.instance}</span><span>ctx {call.ctxId ?? "unscoped"}</span><span className={`result ${toolCallResult(call)}`}>{call.status}</span></summary>
+        <details open={open}>
+            <summary onClick={(event) => {
+                event.preventDefault();
+                const next = !open;
+                setOpen(next);
+                if (next) void load();
+            }}><time dateTime={call.startedAt} title={call.startedAt}>{formatRelativeTime(call.startedAt)}</time><strong>{call.toolName}</strong><span>{workspaceFolderName(call.workspace)} · {call.instance}</span><span>ctx {call.ctxId ?? "unscoped"}</span><span className={`result ${toolCallResult(call)}`}>{call.status}</span></summary>
             {open && loading ? <p>Loading details…</p> : null}
             {open && !loading ? <ToolCallDetails call={visibleCall} disabled={disabled} logs={logs} onRefresh={onRefresh} /> : null}
         </details>

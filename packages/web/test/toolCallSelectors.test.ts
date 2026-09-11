@@ -9,6 +9,7 @@ import {
     resolveToolCallOutput,
 } from "../src/formatters/toolCalls.js";
 import {
+    emptyToolCallFilters,
     filterToolCalls,
     selectToolCalls,
     toolCallResult,
@@ -52,15 +53,12 @@ const calls: ToolCallRecord[] = [
     },
 ];
 
-describe("tool call activity read model", () => {
-    it("applies text, workspace, instance, context, result, tool, and time filters together", () => {
+describe("tool call audit query", () => {
+    it("applies text, workspace, result, tool, and time filters together", () => {
         expect(
             filterToolCalls(
                 calls,
                 {
-                    contextStatus: "active",
-                    ctxId: "context:ctx-alpha",
-                    instance: "alpha",
                     period: "1h",
                     query: "command failed",
                     result: "failure",
@@ -70,60 +68,6 @@ describe("tool call activity read model", () => {
                 Date.parse("2026-07-31T10:00:00Z"),
             ),
         ).toEqual([calls[1]]);
-        expect(
-            filterToolCalls(
-                calls,
-                {
-                    contextStatus: "active",
-                    ctxId: "unscoped",
-                    instance: "all",
-                    period: "24h",
-                    query: "",
-                    result: "pending",
-                    tool: "all",
-                    workspace: "",
-                },
-                Date.parse("2026-07-31T10:00:00Z"),
-            ),
-        ).toEqual([calls[2]]);
-    });
-
-    it("keeps real all and unscoped ctxId values separate from filter sentinels", () => {
-        const scoped = {
-            ...calls[0]!,
-            callId: "call-real-unscoped",
-            ctxId: "unscoped",
-        };
-        expect(
-            filterToolCalls(
-                [calls[2]!, scoped],
-                {
-                    contextStatus: "active",
-                    ctxId: "unscoped",
-                    instance: "all",
-                    period: "all",
-                    query: "",
-                    result: "all",
-                    tool: "all",
-                    workspace: "",
-                },
-            ),
-        ).toEqual([calls[2]]);
-        expect(
-            filterToolCalls(
-                [calls[2]!, scoped],
-                {
-                    contextStatus: "active",
-                    ctxId: "context:unscoped",
-                    instance: "all",
-                    period: "all",
-                    query: "",
-                    result: "all",
-                    tool: "all",
-                    workspace: "",
-                },
-            ),
-        ).toEqual([scoped]);
     });
 
     it("formats complete structured input and restores output from linked logs", () => {
@@ -144,7 +88,7 @@ describe("tool call activity read model", () => {
         ).toEqual({ stdout: "hello" });
     });
 
-    it("classifies tool call statuses for the existing result filter", () => {
+    it("classifies tool call statuses for quick result filters", () => {
         expect(toolCallResult(calls[0]!)).toBe("success");
         expect(toolCallResult(calls[1]!)).toBe("failure");
         expect(toolCallResult(calls[2]!)).toBe("pending");
@@ -159,17 +103,8 @@ describe("bounded Tool Call presentation", () => {
             input: { command: "unique-input-token" },
             output: { stdout: "unique-output-token" },
         };
-        const base = {
-            contextStatus: "active" as const,
-            ctxId: "all",
-            instance: "all",
-            period: "all" as const,
-            result: "all" as const,
-            tool: "all",
-            workspace: "",
-        };
-        expect(filterToolCalls([call], { ...base, query: "unique-input-token" })).toEqual([call]);
-        expect(filterToolCalls([call], { ...base, query: "unique-output-token" })).toEqual([call]);
+        expect(filterToolCalls([call], { ...emptyToolCallFilters, query: "unique-input-token" })).toEqual([call]);
+        expect(filterToolCalls([call], { ...emptyToolCallFilters, query: "unique-output-token" })).toEqual([call]);
     });
 
     it("bounds deeply nested and oversized values", () => {
@@ -206,16 +141,7 @@ it("reports the full match count separately from the display limit", () => {
         callId: `call-${index}`,
         startedAt: `2026-07-31T09:${String(index % 60).padStart(2, "0")}:00Z`,
     }));
-    const { items, total } = selectToolCalls(many, {
-        contextStatus: "active",
-        ctxId: "all",
-        instance: "all",
-        period: "all",
-        query: "",
-        result: "all",
-        tool: "all",
-        workspace: "",
-    });
+    const { items, total } = selectToolCalls(many, emptyToolCallFilters);
 
     expect(items).toHaveLength(100);
     expect(total).toBe(150);
@@ -227,16 +153,7 @@ it("returns the requested page of matching calls", () => {
         callId: `call-${index}`,
         startedAt: `2026-07-31T09:${String(index % 60).padStart(2, "0")}:00Z`,
     }));
-    const { items, total } = selectToolCalls(many, {
-        contextStatus: "active",
-        ctxId: "all",
-        instance: "all",
-        period: "all",
-        query: "",
-        result: "all",
-        tool: "all",
-        workspace: "",
-    }, Date.now(), 100);
+    const { items, total } = selectToolCalls(many, emptyToolCallFilters, Date.now(), 100);
 
     expect(items).toHaveLength(50);
     expect(total).toBe(150);

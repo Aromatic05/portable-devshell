@@ -4,12 +4,8 @@ import { formatToolSearchValue } from "../formatters/toolCalls.js";
 
 export type ToolCallResult = "all" | "failure" | "pending" | "success";
 export type ToolCallPeriod = "all" | "1h" | "24h";
-export type ContextStatusFilter = "all" | "active" | "expired" | "disabled";
 
 export interface ToolCallFilters {
-    contextStatus: ContextStatusFilter;
-    ctxId: string;
-    instance: string;
     period: ToolCallPeriod;
     query: string;
     result: ToolCallResult;
@@ -22,15 +18,9 @@ export interface ToolCallSelection {
     total: number;
 }
 
-export const allContextsFilter = "all";
-export const unscopedContextFilter = "unscoped";
-const scopedContextPrefix = "context:";
 const searchTextCache = new WeakMap<ToolCallRecord, string>();
 
 export const emptyToolCallFilters: ToolCallFilters = {
-    contextStatus: "active",
-    ctxId: "all",
-    instance: "all",
     period: "all",
     query: "",
     result: "all",
@@ -64,13 +54,6 @@ export function selectToolCalls(
     for (const call of [...calls].sort((left, right) =>
         right.startedAt.localeCompare(left.startedAt)
     )) {
-        if (filters.instance !== "all" && call.instance !== filters.instance) continue;
-        if (filters.ctxId === unscopedContextFilter && call.ctxId !== undefined) continue;
-        if (
-            filters.ctxId !== allContextsFilter &&
-            filters.ctxId !== unscopedContextFilter &&
-            call.ctxId !== selectedContextId(filters.ctxId)
-        ) continue;
         if (filters.tool !== "all" && call.toolName !== filters.tool) continue;
         if (filters.result !== "all" && toolCallResult(call) !== filters.result) continue;
         if (workspace.length > 0 && !(call.workspace ?? "").toLowerCase().includes(workspace)) continue;
@@ -91,8 +74,7 @@ export function filterToolCalls(
 }
 
 export function hasActiveToolCallFilters(filters: ToolCallFilters): boolean {
-    const { contextStatus: _contextStatus, ...otherFilters } = filters;
-    return Object.values(otherFilters).some((value) => value !== "all" && value !== "");
+    return Object.values(filters).some((value) => value !== "all" && value !== "");
 }
 
 function callSearchText(call: ToolCallRecord): string {
@@ -119,14 +101,4 @@ function callSearchText(call: ToolCallRecord): string {
         .toLowerCase();
     searchTextCache.set(call, text);
     return text;
-}
-
-export function contextFilterValue(ctxId: string): string {
-    return `${scopedContextPrefix}${ctxId}`;
-}
-
-export function selectedContextId(value: string): string | undefined {
-    return value.startsWith(scopedContextPrefix)
-        ? value.slice(scopedContextPrefix.length)
-        : undefined;
 }

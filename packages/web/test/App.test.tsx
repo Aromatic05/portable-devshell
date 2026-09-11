@@ -309,7 +309,7 @@ describe("authenticated application shell", () => {
         const activity = await screen.findByRole("link", { name: "Recent tool calls" });
         expect(activity).toHaveAttribute("href", "#/audit");
         fireEvent.click(activity);
-        expect(await screen.findByRole("heading", { name: "Audit · Tool Calls" })).toBeInTheDocument();
+        expect(await screen.findByRole("heading", { name: "Audit" })).toBeInTheDocument();
         expect(window.location.hash).toBe("#/audit");
     });
 });
