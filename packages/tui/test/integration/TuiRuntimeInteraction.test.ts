@@ -870,7 +870,16 @@ test("real Ink runtime renders compact and unsupported terminal layouts", async 
         { columns: 59, expected: "Terminal too small (need 60x14)", rows: 13 },
     ]) {
         const terminal = createTerminal(terminalOptions);
-        const clients = createClients();
+        const clients = createClients({
+            instanceList: [
+                {
+                    enabled: true,
+                    mcpEnabled: true,
+                    name: "alpha",
+                    provider: "local",
+                },
+            ],
+        });
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
             { clients: clients.value, inkDebug: true },
@@ -887,6 +896,22 @@ test("real Ink runtime renders compact and unsupported terminal layouts", async 
             );
             assert.equal(runtime.columns, terminalOptions.columns);
             assert.equal(runtime.rows, terminalOptions.rows);
+            if (terminalOptions.columns === 80) {
+                const beforeTerminal = terminal.output.length;
+                terminal.write("9");
+                await waitUntil(
+                    () => runtime.store.getState().ui.selectedPage === "terminal",
+                );
+                await waitUntil(() =>
+                    terminal.output
+                        .slice(beforeTerminal)
+                        .includes("▶9:terminal"),
+                );
+                assert.match(
+                    terminal.output.slice(beforeTerminal),
+                    /S\d+:/u,
+                );
+            }
             terminal.write("\u0004");
             await running;
         } finally {

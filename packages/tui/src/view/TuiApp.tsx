@@ -140,6 +140,7 @@ export function TuiApp(props: TuiAppProps) {
                 fullWidth
                     ? undefined
                     : <TuiComponentSidebar
+                        columns={viewport.columns}
                         compact={layout.mode === "compact"}
                         model={selectSidebarModel(state)}
                         rows={Math.max(0, renderRows - 6)}

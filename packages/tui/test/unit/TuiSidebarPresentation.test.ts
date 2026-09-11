@@ -68,3 +68,22 @@ test("sidebar geometry reserves the divider between independently scrollable sec
         undefined,
     );
 });
+
+test("compact sidebar keeps separate clickable rows for Context and Instances", () => {
+    const regions = tuiSidebarRegions({ columns: 80, rows: 20 });
+    assert.ok(regions);
+    assert.deepEqual(regions.context, {
+        height: 1,
+        width: 80,
+        x: 1,
+        y: 4,
+    });
+    assert.deepEqual(regions.instances, {
+        height: 1,
+        width: 80,
+        x: 1,
+        y: 5,
+    });
+    assert.equal(tuiSidebarSectionAt({ columns: 80, rows: 20 }, 10, 4), "context");
+    assert.equal(tuiSidebarSectionAt({ columns: 80, rows: 20 }, 10, 5), "instances");
+});

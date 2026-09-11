@@ -1,4 +1,9 @@
-import type { TuiSidebarEntry } from "../state/TuiViewModel.js";
+import stringWidth from "string-width";
+
+import type {
+    TuiSidebarContextEntry,
+    TuiSidebarEntry,
+} from "../state/TuiViewModel.js";
 import { tuiLayoutMetrics, tuiRenderRows } from "./TuiRootLayout.js";
 
 export interface TuiSidebarRegion {
@@ -19,6 +24,14 @@ export interface TuiSidebarViewport<T extends TuiSidebarEntry = TuiSidebarEntry>
     startIndex: number;
 }
 
+export interface TuiCompactSidebarItem<T extends TuiSidebarEntry = TuiSidebarEntry> {
+    index: number;
+    item: T;
+    text: string;
+    width: number;
+    x: number;
+}
+
 export function tuiSidebarSectionRows(sidebarRows: number): {
     contextRows: number;
     instanceRows: number;
@@ -36,7 +49,19 @@ export function tuiSidebarRegions(viewport: {
     rows: number;
 }): TuiSidebarRegions | undefined {
     const layout = tuiLayoutMetrics(viewport.columns);
-    if (layout.mode === "compact") return undefined;
+    if (layout.mode === "compact") {
+        const sidebar = {
+            height: 2,
+            width: Math.max(0, viewport.columns),
+            x: 1,
+            y: 4,
+        };
+        return {
+            context: { ...sidebar, height: 1 },
+            instances: { ...sidebar, height: 1, y: sidebar.y + 1 },
+            sidebar,
+        };
+    }
 
     const sidebarRows = Math.max(0, tuiRenderRows(viewport.rows) - 6);
     const sectionRows = tuiSidebarSectionRows(sidebarRows);
@@ -108,6 +133,70 @@ export function selectTuiSidebarViewport<T extends TuiSidebarEntry>(
         items: items.slice(startIndex, startIndex + visibleRows),
         startIndex,
     };
+}
+
+export function selectTuiCompactSidebarLine<T extends TuiSidebarEntry>(
+    items: readonly T[],
+    kind: "context" | "instance",
+    columns: number,
+): readonly TuiCompactSidebarItem<T>[] {
+    const width = Math.max(0, Math.floor(columns));
+    if (width === 0 || items.length === 0) return [];
+
+    const tokens = items.map((item, index) => {
+        const text = `${compactSidebarLabel(item, index, kind)} `;
+        return { index, item, text, width: stringWidth(text) };
+    });
+    const focusedIndex = items.findIndex((item) => item.focused);
+    const selectedIndex = items.findIndex((item) => item.selected);
+    const anchorIndex = focusedIndex >= 0
+        ? focusedIndex
+        : selectedIndex >= 0
+          ? selectedIndex
+          : 0;
+
+    let start = anchorIndex;
+    let end = anchorIndex + 1;
+    let used = tokens[anchorIndex]?.width ?? 0;
+    while (start > 0 && used + tokens[start - 1]!.width <= width) {
+        start -= 1;
+        used += tokens[start]!.width;
+    }
+    while (end < tokens.length && used + tokens[end]!.width <= width) {
+        used += tokens[end]!.width;
+        end += 1;
+    }
+
+    let x = 1;
+    return tokens.slice(start, end).map((token) => {
+        const projected = {
+            ...token,
+            width: Math.max(0, Math.min(token.width, width - x + 1)),
+            x,
+        };
+        x += token.width;
+        return projected;
+    });
+}
+
+function compactSidebarLabel(
+    item: TuiSidebarEntry,
+    index: number,
+    kind: "context" | "instance",
+): string {
+    if (kind === "instance") {
+        return `${item.selected ? "▶" : " "}S${index + 1}:${item.label}`;
+    }
+    const context = item as TuiSidebarContextEntry;
+    const label =
+        context.id === "overview"
+            ? "over"
+            : context.id === "instances"
+              ? "inst"
+              : context.id === "connections"
+                ? "conn"
+                : context.label;
+    return `${context.selected ? "▶" : " "}${context.shortcut === undefined ? "" : `${context.shortcut}:`}${label}`;
 }
 
 function containsPoint(region: TuiSidebarRegion, x: number, y: number): boolean {

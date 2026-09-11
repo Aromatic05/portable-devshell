@@ -1166,6 +1166,22 @@ test("narrow terminals use compact navigation and reject unsupported sizes", () 
         buildTuiHitRegions(harness.store.getState(), { columns: 59, rows: 20 }),
         [],
     );
+    const compactRegions = buildTuiHitRegions(harness.store.getState(), {
+        columns: 80,
+        rows: 20,
+    });
+    assert.ok(
+        compactRegions.some(
+            (region) =>
+                region.target.kind === "context" &&
+                region.target.id === "overview",
+        ),
+    );
+    assert.ok(
+        compactRegions.some(
+            (region) => region.target.kind === "instance",
+        ),
+    );
 });
 
 test("main box focus activates the main panel from the sidebar", () => {

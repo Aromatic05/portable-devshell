@@ -2,11 +2,13 @@ import { Box, Text } from "ink";
 
 import type { TuiSidebarModel } from "../../state/TuiViewModel.js";
 import {
+    selectTuiCompactSidebarLine,
     selectTuiSidebarViewport,
     tuiSidebarSectionRows,
 } from "../TuiSidebarPresentation.js";
 
 export interface TuiComponentSidebarProps {
+    columns: number;
     compact?: boolean;
     model: TuiSidebarModel;
     rows: number;
@@ -16,8 +18,8 @@ export function TuiComponentSidebar(props: TuiComponentSidebarProps) {
     if (props.compact === true) {
         return (
             <Box flexDirection="column" height={2} overflow="hidden" width="100%">
-                <CompactSidebarLine items={props.model.context.items} kind="context" />
-                <CompactSidebarLine items={props.model.instances} kind="instance" />
+                <CompactSidebarLine columns={props.columns} items={props.model.context.items} kind="context" />
+                <CompactSidebarLine columns={props.columns} items={props.model.instances} kind="instance" />
             </Box>
         );
     }
@@ -49,15 +51,6 @@ export function TuiComponentSidebar(props: TuiComponentSidebarProps) {
     );
 }
 
-function compactContextLabel(item: TuiSidebarModel["context"]["items"][number]): string {
-    const label = item.id === "overview" ? "over" : item.id === "instances" ? "inst" : item.id === "connections" ? "conn" : item.label;
-    return `${item.selected ? "▶" : " "}${item.shortcut === undefined ? "" : `${item.shortcut}:`}${label}`;
-}
-
-function compactInstanceLabel(item: TuiSidebarModel["instances"][number], index: number): string {
-    return `${item.selected ? "▶" : " "}S${index + 1}:${item.label}`;
-}
-
 function SidebarViewport(props: {
     items: TuiSidebarModel["context"]["items"] | TuiSidebarModel["instances"];
     kind: "context" | "instance";
@@ -86,14 +79,25 @@ function SidebarViewport(props: {
     );
 }
 
-function CompactSidebarLine(props: { items: TuiSidebarModel["context"]["items"] | TuiSidebarModel["instances"]; kind: "context" | "instance" }) {
+function CompactSidebarLine(props: {
+    columns: number;
+    items: TuiSidebarModel["context"]["items"] | TuiSidebarModel["instances"];
+    kind: "context" | "instance";
+}) {
+    const line = selectTuiCompactSidebarLine(
+        props.items,
+        props.kind,
+        props.columns,
+    );
     return (
+        <Box height={1} overflow="hidden" width="100%">
         <Text>
-            {props.items.map((item, index) => (
+            {line.map(({ item, text }) => (
                 <Text bold={item.selected} inverse={item.focused} key={item.id}>
-                    {`${props.kind === "context" ? compactContextLabel(item as TuiSidebarModel["context"]["items"][number]) : compactInstanceLabel(item as TuiSidebarModel["instances"][number], index)} `}
+                    {text}
                 </Text>
             ))}
         </Text>
+        </Box>
     );
 }

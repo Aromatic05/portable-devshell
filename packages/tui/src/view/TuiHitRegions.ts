@@ -16,6 +16,7 @@ import {
     tuiMainLayoutMetrics,
 } from "./TuiRootLayout.js";
 import {
+    selectTuiCompactSidebarLine,
     selectTuiSidebarViewport,
     tuiSidebarRegions,
 } from "./TuiSidebarPresentation.js";
@@ -149,8 +150,39 @@ export function buildTuiHitRegions(
     const mainX = geometry.contentX;
     const mainWidth = geometry.contentWidth;
     const contentY = geometry.contentY;
-    if (!compact) {
-        const sidebarRegions = tuiSidebarRegions(viewport)!;
+    const sidebarRegions = tuiSidebarRegions(viewport)!;
+    if (compact) {
+        const contextLine = selectTuiCompactSidebarLine(
+            sidebar.context.items,
+            "context",
+            sidebarRegions.context.width,
+        );
+        const instanceLine = selectTuiCompactSidebarLine(
+            sidebar.instances,
+            "instance",
+            sidebarRegions.instances.width,
+        );
+        for (const entry of contextLine) {
+            if (entry.width === 0) continue;
+            regions.push({
+                height: 1,
+                target: { id: entry.item.id, kind: "context" },
+                width: entry.width,
+                x: sidebarRegions.context.x + entry.x - 1,
+                y: sidebarRegions.context.y,
+            });
+        }
+        for (const entry of instanceLine) {
+            if (entry.width === 0) continue;
+            regions.push({
+                height: 1,
+                target: { id: entry.item.id, kind: "instance" },
+                width: entry.width,
+                x: sidebarRegions.instances.x + entry.x - 1,
+                y: sidebarRegions.instances.y,
+            });
+        }
+    } else {
         const contextViewport = selectTuiSidebarViewport(
             sidebar.context.items,
             sidebarRegions.context.height,
