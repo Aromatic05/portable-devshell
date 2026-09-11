@@ -280,6 +280,16 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
             ) {
                 return ["space expand", "↑↓ draft", "enter edit", "esc back"];
             }
+            if (route.page === "audit") {
+                return [
+                    "← sidebar",
+                    "enter expand",
+                    "space expand",
+                    ...(isAuditContextRoute(route) ? ["m comment"] : []),
+                    "/",
+                    "esc back",
+                ];
+            }
             return [
                 "← sidebar",
                 "enter detail",

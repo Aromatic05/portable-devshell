@@ -82,21 +82,6 @@ function callBox(
                 : [formatField("Error", call.error)]),
         ],
         id: `audit-call:${call.callId}`,
-        primaryRoute:
-            key.kind === "unscoped"
-                ? {
-                      callId: call.callId,
-                      page: "audit",
-                      scope: "unscoped",
-                      view: "call",
-                  }
-                : {
-                      callId: call.callId,
-                      ctxId: key.ctxId,
-                      page: "audit",
-                      scope: "context",
-                      view: "call",
-                  },
         searchText: `${call.toolName} ${call.status} ${call.callId} workspace ${call.workspace ?? ""}`,
         status: toolCallStatus(call),
         summaryLines: [

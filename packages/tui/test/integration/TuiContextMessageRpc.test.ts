@@ -364,6 +364,8 @@ test("real Ink keeps Space, Enter, route hierarchy, logical focus and rendered h
     await selectAudit(harness);
     await focusBox(harness, "audit-context:ctx-alpha");
     const contextBox = () => box(harness.runtime, "audit-context:ctx-alpha");
+    assert.equal(contextBox()?.enterable, false);
+    assert.equal(contextBox()?.primaryAction, undefined);
 
     harness.terminal.write(" ");
     await waitUntil(() => contextBox()?.expanded === true);
@@ -372,26 +374,22 @@ test("real Ink keeps Space, Enter, route hierarchy, logical focus and rendered h
     await waitUntil(() => contextBox()?.expanded === false);
 
     harness.terminal.write("\r");
-    await waitUntil(() => currentTuiRoute(harness.runtime.store.getState()).view === "context");
+    await waitUntil(() => contextBox()?.expanded === true);
+    assert.equal(currentTuiRoute(harness.runtime.store.getState()).view, "contexts");
+    harness.terminal.write("\r");
+    await waitUntil(() => contextBox()?.expanded === false);
+
+    await enterAuditContext(harness, "ctx-alpha");
     const callBox = () => box(harness.runtime, "audit-call:call-1");
     await focusBox(harness, "audit-call:call-1");
     await waitUntil(() => callBox()?.focused === true);
-    assert.equal(callBox()?.enterable, true);
-    assert.deepEqual(callBox()?.primaryAction, {
-        kind: "navigate",
-        route: {
-            callId: "call-1",
-            ctxId: "ctx-alpha",
-            page: "audit",
-            scope: "context",
-            view: "call",
-        },
-    });
+    assert.equal(callBox()?.enterable, false);
+    assert.equal(callBox()?.primaryAction, undefined);
     assert.equal(callBox()?.expandable, true);
     assert.equal(callBox()?.expanded, false);
     assert.equal(currentTuiRoute(harness.runtime.store.getState()).view, "context");
 
-    harness.terminal.write(" ");
+    harness.terminal.write("\r");
     await waitUntil(() => callBox()?.expanded === true);
     assert.equal(currentTuiRoute(harness.runtime.store.getState()).view, "context");
     assert.equal(callBox()?.focused, true);
@@ -406,36 +404,17 @@ test("real Ink keeps Space, Enter, route hierarchy, logical focus and rendered h
     );
     const rememberedDetailLine = callBox()?.selectedDetailLineId;
 
-    harness.terminal.write(" ");
+    harness.terminal.write("\r");
     await waitUntil(() => callBox()?.expanded === false);
-    harness.terminal.write(" ");
+    harness.terminal.write("\r");
     await waitUntil(() => callBox()?.expanded === true);
     assert.equal(
         callBox()?.selectedDetailLineId,
         rememberedDetailLine,
-        "Space collapse and re-expand must preserve the selected detail line",
+        "Enter collapse and re-expand must preserve the selected detail line",
     );
-    harness.terminal.write(" ");
+    harness.terminal.write("\r");
     await waitUntil(() => callBox()?.expanded === false);
-
-    await harness.runtime.handleInput("", { return: true });
-    await waitUntil(() => currentTuiRoute(harness.runtime.store.getState()).view === "call");
-    assert.deepEqual(currentTuiRoute(harness.runtime.store.getState()), {
-        callId: "call-1",
-        ctxId: "ctx-alpha",
-        page: "audit",
-        scope: "context",
-        view: "call",
-    });
-    assert.equal(
-        harness.runtime.store.getState().ui.mainFocusId,
-        "audit-call-detail:call-1",
-    );
-
-    await harness.runtime.handleInput("", { escape: true });
-    await waitUntil(() => currentTuiRoute(harness.runtime.store.getState()).view === "context");
-    await waitUntil(() => callBox()?.focused === true);
-    assert.equal(harness.runtime.store.getState().ui.mainFocusId, "audit-call:call-1");
 
     harness.terminal.write("\u001b[B");
     await waitUntil(() => harness.runtime.store.getState().ui.mainFocusId !== "audit-call:call-1");
@@ -445,8 +424,6 @@ test("real Ink keeps Space, Enter, route hierarchy, logical focus and rendered h
 
     await harness.runtime.handleInput("", { escape: true });
     await waitUntil(() => currentTuiRoute(harness.runtime.store.getState()).view === "contexts");
-    await waitUntil(() => contextBox()?.focused === true);
-    assert.equal(harness.runtime.store.getState().ui.mainFocusId, "audit-context:ctx-alpha");
 });
 
 interface Harness {
@@ -712,11 +689,22 @@ async function selectAudit(harness: Harness): Promise<void> {
 
 async function enterAuditContext(harness: Harness, ctxId: string): Promise<void> {
     await selectAudit(harness);
-    await focusBox(harness, `audit-context:${ctxId}`);
-    const outputBefore = harness.terminal.output.length;
+    harness.runtime.store.setSidebarCursor({
+        id: `audit:context:${ctxId}`,
+        kind: "context",
+    });
+    harness.runtime.store.setFocusScope("sidebarContext");
     harness.terminal.write("\r");
     await waitUntil(() => currentTuiRoute(harness.runtime.store.getState()).view === "context");
-    await waitUntil(() => harness.terminal.output.length > outputBefore);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+        const outputBefore = harness.terminal.output.length;
+        harness.terminal.write("\t");
+        await waitUntil(() => harness.terminal.output.length > outputBefore);
+        if (harness.runtime.store.getState().interaction.focusScope === "mainBoxes") return;
+    }
+    throw new Error(
+        `Tab did not enter Audit main panel: scope=${harness.runtime.store.getState().interaction.focusScope}`,
+    );
 }
 
 async function focusBox(harness: Harness, id: string): Promise<void> {
