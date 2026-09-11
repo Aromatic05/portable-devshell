@@ -60,6 +60,7 @@ test(
     harness.terminal.write("m");
     await waitUntil(() => currentTuiRoute(harness.runtime.store.getState()).view === "conversation");
     await waitUntil(() => harness.runtime.store.getState().ui.mainFocusId === "conversation-composer");
+    await waitUntil(() => conversationText(harness.runtime).includes("alpha seed comment"));
     const conversation = conversationText(harness.runtime);
     assert.match(conversation, /alpha seed comment/u);
     assert.equal(conversation.includes("beta seed comment"), false);

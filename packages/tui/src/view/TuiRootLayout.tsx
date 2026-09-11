@@ -8,6 +8,10 @@ const COMPACT_LAYOUT_MAX_COLUMNS = 89;
 export const MINIMUM_TERMINAL_COLUMNS = 60;
 export const MINIMUM_TERMINAL_ROWS = 14;
 
+export function tuiRenderRows(rows: number): number {
+    return Math.max(1, Math.floor(rows) - 1);
+}
+
 export interface TuiRootLayoutProps {
     columns: number;
     footer: React.ReactNode;
@@ -27,10 +31,11 @@ export function mainInnerWidth(columns: number, fullWidth = false): number {
 
 export function TuiRootLayout(props: TuiRootLayoutProps) {
     const layout = tuiLayoutMetrics(props.columns);
+    const renderRows = tuiRenderRows(props.rows);
 
     if (!isTerminalSizeSupported(props.columns, props.rows)) {
         return (
-            <Box alignItems="center" height={props.rows} justifyContent="center" width={props.columns}>
+            <Box alignItems="center" height={renderRows} justifyContent="center" width={props.columns}>
                 <Text color="yellow">{`Terminal too small (need ${MINIMUM_TERMINAL_COLUMNS}x${MINIMUM_TERMINAL_ROWS})`}</Text>
             </Box>
         );
@@ -38,9 +43,9 @@ export function TuiRootLayout(props: TuiRootLayoutProps) {
 
     if (props.sidebar === undefined) {
         return (
-            <Box flexDirection="column" height={props.rows} width={props.columns}>
+            <Box flexDirection="column" height={renderRows} width={props.columns}>
                 {props.header}
-                <Box flexGrow={1} height={Math.max(0, props.rows - 6)}>
+                <Box flexGrow={1} height={Math.max(0, renderRows - 6)}>
                     <Box
                         borderStyle="single"
                         flexDirection="column"
@@ -58,9 +63,9 @@ export function TuiRootLayout(props: TuiRootLayoutProps) {
 
     if (layout.mode === "compact") {
         return (
-            <Box flexDirection="column" height={props.rows} width={props.columns}>
+            <Box flexDirection="column" height={renderRows} width={props.columns}>
                 {props.header}
-                <Box flexDirection="column" flexGrow={1} height={Math.max(0, props.rows - 6)}>
+                <Box flexDirection="column" flexGrow={1} height={Math.max(0, renderRows - 6)}>
                     <Box height={2} width={props.columns}>
                         {props.sidebar}
                     </Box>
@@ -80,9 +85,9 @@ export function TuiRootLayout(props: TuiRootLayoutProps) {
     }
 
     return (
-        <Box flexDirection="column" height={props.rows} width={props.columns}>
+        <Box flexDirection="column" height={renderRows} width={props.columns}>
             {props.header}
-            <Box flexGrow={1} height={Math.max(0, props.rows - 6)}>
+            <Box flexGrow={1} height={Math.max(0, renderRows - 6)}>
                 <Box width={layout.outerGap} />
                 <Box width={layout.sidebarWidth}>
                     {props.sidebar}

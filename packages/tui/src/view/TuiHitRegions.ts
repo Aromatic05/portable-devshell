@@ -14,6 +14,7 @@ import {
     isTerminalSizeSupported,
     mainInnerWidth,
     tuiLayoutMetrics,
+    tuiRenderRows,
 } from "./TuiRootLayout.js";
 import {
     selectTuiSidebarViewport,
@@ -77,9 +78,10 @@ export function buildTuiTerminalViewportRegion(
     const layout = tuiLayoutMetrics(viewport.columns);
     const compact = layout.mode === "compact";
     const globalErrorHeight = blockHeight(selectErrorMessage(state));
+    const renderRows = tuiRenderRows(viewport.rows);
     const viewportRows = Math.max(
         0,
-        viewport.rows -
+        renderRows -
             (compact ? 10 : 7) -
             globalErrorHeight -
             (state.connection.status === "connecting" ? 1 : 0),
@@ -111,9 +113,10 @@ export function buildTuiTextDetailImageRegion(
     const layout = tuiLayoutMetrics(viewport.columns);
     const compact = layout.mode === "compact";
     const globalErrorHeight = blockHeight(selectErrorMessage(state));
+    const renderRows = tuiRenderRows(viewport.rows);
     const viewportRows = Math.max(
         0,
-        viewport.rows -
+        renderRows -
             (compact ? 10 : 7) -
             globalErrorHeight -
             (state.connection.status === "connecting" ? 1 : 0),
@@ -190,9 +193,10 @@ export function buildTuiHitRegions(
         }
     }
 
+    const renderRows = tuiRenderRows(viewport.rows);
     const viewportRows = Math.max(
         0,
-        viewport.rows -
+        renderRows -
             (compact ? 10 : 7) -
             globalErrorHeight -
             (state.connection.status === "connecting" ? 1 : 0),

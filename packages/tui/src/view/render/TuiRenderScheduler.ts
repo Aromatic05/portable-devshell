@@ -11,7 +11,7 @@ export class TuiRenderScheduler {
 
     constructor(
         readonly store: TuiAppStore,
-        flushDelayMs = 16,
+        flushDelayMs = 0,
     ) {
         this.#flushDelayMs = flushDelayMs;
         this.#lastObservedState = store.getState();

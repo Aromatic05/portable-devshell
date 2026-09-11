@@ -586,6 +586,41 @@ test("real Ink runtime handles sidebar mouse buttons and viewport wheel scrollin
     }
 });
 
+test("production Ink scrolling does not clear and repaint the whole terminal", async () => {
+    const terminal = createTerminal({ columns: 120, rows: 14 });
+    const clients = createClients();
+    const runtime = new TuiRuntime(
+        { stdin: terminal.stdin, stdout: terminal.stdout },
+        { clients: clients.value },
+    );
+    const running = runtime.run();
+
+    try {
+        await waitUntil(() => runtime.store.getState().connection.status === "connected");
+        runtime.store.setSelectedPage("help");
+        const navigationBox = selectMainScreenModel(runtime.store.getState()).boxes.find(
+            (box) => box.id === "help-navigation",
+        );
+        assert.ok(navigationBox);
+        runtime.store.toggleExpanded(navigationBox.expandedKey);
+        await waitUntil(() => terminal.output.includes("Navigation"));
+        await new Promise((resolve) => setTimeout(resolve, 40));
+
+        const clearsBefore = countOccurrences(terminal.output, "\u001B[2J");
+        const key = selectMainScrollKey(runtime.store.getState());
+        runtime.store.setScrollOffset(key, 0);
+        await runtime.commandDispatcher.dispatch({ delta: 3, type: "screen.scroll" });
+        await waitUntil(() => (runtime.store.getState().ui.scrollOffsets[key] ?? 0) > 0);
+        await new Promise((resolve) => setTimeout(resolve, 40));
+
+        assert.equal(countOccurrences(terminal.output, "\u001B[2J"), clearsBefore);
+    } finally {
+        terminal.write("\u0004");
+        await running;
+        await runtime.stop();
+    }
+});
+
 test("real Ink runtime moves mouse focus into an expanded main box from the sidebar", async () => {
     const terminal = createTerminal();
     const clients = createClients();

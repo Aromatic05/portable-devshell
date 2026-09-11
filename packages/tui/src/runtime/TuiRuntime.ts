@@ -34,7 +34,11 @@ import {
     type TuiHitTarget,
 } from "../view/TuiHitRegions.js";
 import { tuiSidebarSectionAt } from "../view/TuiSidebarPresentation.js";
-import { mainInnerWidth } from "../view/TuiRootLayout.js";
+import {
+    mainInnerWidth,
+    tuiLayoutMetrics,
+    tuiRenderRows,
+} from "../view/TuiRootLayout.js";
 import { TuiRuntimeOperations } from "./TuiRuntimeOperations.js";
 import { TuiRouteDataLoader } from "./route/TuiRouteDataLoader.js";
 import { TuiRouteLifecycleController } from "./route/TuiRouteLifecycleController.js";
@@ -221,7 +225,14 @@ export class TuiRuntime {
         this.commandDispatcher = new TuiCommandDispatcher({
             focusManager: this.focusManager,
             mainViewportColumns: () => mainInnerWidth(this.columns),
-            mainViewportRows: () => Math.max(0, this.rows - 7),
+            mainViewportRows: () => {
+                const layout = tuiLayoutMetrics(this.columns);
+                return Math.max(
+                    0,
+                    tuiRenderRows(this.rows) -
+                        (layout.mode === "compact" ? 10 : 7),
+                );
+            },
             onApprovalDecision: async (instance, approvalId, decision) => {
                 await this.#operations.decideApproval(
                     instance,

@@ -1,5 +1,5 @@
 import type { TuiSidebarEntry } from "../state/TuiViewModel.js";
-import { tuiLayoutMetrics } from "./TuiRootLayout.js";
+import { tuiLayoutMetrics, tuiRenderRows } from "./TuiRootLayout.js";
 
 export interface TuiSidebarRegion {
     height: number;
@@ -38,7 +38,7 @@ export function tuiSidebarRegions(viewport: {
     const layout = tuiLayoutMetrics(viewport.columns);
     if (layout.mode === "compact") return undefined;
 
-    const sidebarRows = Math.max(0, viewport.rows - 6);
+    const sidebarRows = Math.max(0, tuiRenderRows(viewport.rows) - 6);
     const sectionRows = tuiSidebarSectionRows(sidebarRows);
     const sidebar = {
         height: sidebarRows,

@@ -24,7 +24,12 @@ import {
 } from "./model/TuiViewProjection.js";
 import { tuiTerminalFullScreen } from "./TuiHitRegions.js";
 import type { TuiAppController } from "./TuiAppController.js";
-import { mainInnerWidth, tuiLayoutMetrics, TuiRootLayout } from "./TuiRootLayout.js";
+import {
+    mainInnerWidth,
+    tuiLayoutMetrics,
+    tuiRenderRows,
+    TuiRootLayout,
+} from "./TuiRootLayout.js";
 
 export interface TuiAppProps {
     runtime: TuiAppController;
@@ -46,11 +51,12 @@ export function TuiApp(props: TuiAppProps) {
     const overlay = topTuiOverlay(state.interaction.overlays);
     const footer = selectFooterModel(state);
     const layout = tuiLayoutMetrics(props.runtime.columns);
+    const renderRows = tuiRenderRows(props.runtime.rows);
     const fullWidth = tuiTerminalFullScreen(state);
     const boxInnerWidth = mainInnerWidth(props.runtime.columns, fullWidth);
     const viewportRows = Math.max(
         0,
-        props.runtime.rows - (layout.mode === "compact" ? 10 : 7) - (errorLines?.length ?? 0) - (connection.status === "connecting" ? 1 : 0)
+        renderRows - (layout.mode === "compact" ? 10 : 7) - (errorLines?.length ?? 0) - (connection.status === "connecting" ? 1 : 0)
     );
     const terminalRows = Math.max(1, viewportRows - 1);
     const openTerminal = useCallback(
@@ -71,7 +77,7 @@ export function TuiApp(props: TuiAppProps) {
         void props.runtime.handleInput(input, key);
     });
     return (
-        <Box height={props.runtime.rows} width={props.runtime.columns}>
+        <Box height={renderRows} width={props.runtime.columns}>
             <TuiRootLayout
             columns={props.runtime.columns}
             footer={<TuiComponentFooter text={footer.text} />}
@@ -129,7 +135,7 @@ export function TuiApp(props: TuiAppProps) {
                     : <TuiComponentSidebar
                         compact={layout.mode === "compact"}
                         model={selectSidebarModel(state)}
-                        rows={Math.max(0, props.runtime.rows - 6)}
+                        rows={Math.max(0, renderRows - 6)}
                     />
             }
             />
