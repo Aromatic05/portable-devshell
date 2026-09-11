@@ -36,6 +36,7 @@ export class WorkerInstanceFactory {
         const auditDatabase = new AuditDatabase(paths.auditDatabaseFile, resolved.auditStorage);
         const eventStore = auditDatabase.store<InstanceEvent>("events", {
             legacyFile: paths.legacyEventsFile,
+            maxRecords: resolved.eventBufferSize,
             sequence: (record) => record.seq,
             timestamp: (record) => record.at
         });

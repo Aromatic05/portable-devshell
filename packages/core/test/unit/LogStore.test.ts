@@ -757,6 +757,7 @@ test("InstanceEventBuffer replays from fromSeq and reports stream.gap", async ()
         });
         const store = database.store<InstanceEvent>("events", {
             legacyFile: paths.legacyEventsFile,
+            maxRecords: 2,
             sequence: (record) => record.seq,
             timestamp: (record) => record.at
         });
@@ -775,11 +776,57 @@ test("InstanceEventBuffer replays from fromSeq and reports stream.gap", async ()
         assert.equal(gap.kind, "gap");
         assert.equal(gap.code, errorCodes.streamGap);
         assert.equal(gap.nextSeq, 2);
+        assert.deepEqual((await store.readAll()).map((event) => event.seq), [2, 3]);
 
         const reloaded = new InstanceEventBuffer(instanceName, 2, store);
         await reloaded.append({ at: "2026-07-07T00:00:03.000Z", type: "instance.statusChanged" });
         assert.equal(reloaded.lastSeq, 4);
+        assert.deepEqual((await store.readAll()).map((event) => event.seq), [3, 4]);
         database.close();
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("AuditDatabase trims an existing event collection to the configured replay window", async () => {
+    const root = await createTestTempDirectory("events-existing-window");
+    const databaseFile = join(root, "audit.sqlite3");
+    const instanceName = asInstanceName("events-existing-window");
+
+    try {
+        const original = new AuditDatabase(databaseFile, {
+            maxBytes: 16 * MIB,
+            now: () => Date.parse("2026-07-07T00:00:10.000Z"),
+            retentionDays: 30
+        });
+        const originalStore = original.store<InstanceEvent>("events", {
+            sequence: (record) => record.seq,
+            timestamp: (record) => record.at
+        });
+        for (let seq = 1; seq <= 5; seq += 1) {
+            await originalStore.append({
+                at: `2026-07-07T00:00:0${seq}.000Z`,
+                instanceName,
+                seq,
+                type: "instance.statusChanged"
+            });
+        }
+        original.close();
+
+        const reopened = new AuditDatabase(databaseFile, {
+            maxBytes: 16 * MIB,
+            now: () => Date.parse("2026-07-07T00:00:10.000Z"),
+            retentionDays: 30
+        });
+        const boundedStore = reopened.store<InstanceEvent>("events", {
+            maxRecords: 2,
+            sequence: (record) => record.seq,
+            timestamp: (record) => record.at
+        });
+
+        assert.deepEqual((await boundedStore.readAll()).map((event) => event.seq), [4, 5]);
+        assert.equal(await boundedStore.readHighWater?.(), 5);
+        reopened.close();
     } finally {
         await rm(root, { recursive: true, force: true });
     }

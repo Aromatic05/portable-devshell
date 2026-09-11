@@ -28,6 +28,7 @@ export interface AuditDatabaseOptions {
 
 export interface AuditStoreOptions<TRecord> {
     legacyFile?: string;
+    maxRecords?: number;
     sequence?: (record: TRecord) => number;
     timestamp: (record: TRecord) => number | string;
 }
@@ -99,6 +100,7 @@ export class AuditDatabase {
 
     store<TRecord>(collection: AuditRecordCollection, options: AuditStoreOptions<TRecord>): AuditRecordStore<TRecord> {
         this.#assertOpen();
+        validateStoreOptions(options);
         return new AuditRecordStoreSqlite(this, collection, options);
     }
 
@@ -160,8 +162,13 @@ export class AuditDatabase {
         options: AuditStoreOptions<TRecord>
     ): Promise<void> {
         this.#assertOpen();
-        this.#startPayloadBackfill();
+        if (options.maxRecords === undefined) this.#startPayloadBackfill();
+        else this.#cancelPayloadBackfill();
         await this.#insertRecord(collection, record, options);
+        if (options.maxRecords !== undefined) {
+            this.#trimCollectionRecords(collection, options.maxRecords);
+            if (this.#payloadBytes === undefined) this.#startPayloadBackfill();
+        }
         this.#evictForPayloadLimit();
         this.#scheduleWalCheckpoint();
     }
@@ -374,6 +381,7 @@ export class AuditDatabase {
         this.#assertOpen();
         const migrationKey = `migration:jsonl-v1:${collection}`;
         if (this.#readMetadata(migrationKey) === "complete") {
+            if (options.maxRecords !== undefined) this.#trimCollectionRecords(collection, options.maxRecords);
             return;
         }
 
@@ -391,6 +399,7 @@ export class AuditDatabase {
             this.#payloadBytes = payloadBytesBefore;
             throw error;
         }
+        if (options.maxRecords !== undefined) this.#trimCollectionRecords(collection, options.maxRecords);
 
         if (options.legacyFile !== undefined) {
             try {
@@ -402,6 +411,22 @@ export class AuditDatabase {
             }
         }
         this.#evictForPayloadLimit();
+    }
+
+    #trimCollectionRecords(collection: AuditRecordCollection, maxRecords: number): void {
+        const boundary = this.#database.prepare(
+            "SELECT id FROM audit_records WHERE collection = ? ORDER BY id DESC LIMIT 1 OFFSET ?"
+        ).get(collection, maxRecords) as { id: number } | undefined;
+        if (boundary === undefined) return;
+        const removed = this.#database.prepare(
+            "SELECT COALESCE(SUM(payload_bytes), 0) AS payloadBytes FROM audit_records WHERE collection = ? AND id <= ?"
+        ).get(collection, boundary.id) as { payloadBytes: number };
+        this.#database.prepare(
+            "DELETE FROM audit_records WHERE collection = ? AND id <= ?"
+        ).run(collection, boundary.id);
+        if (this.#payloadBytes !== undefined) {
+            this.#setPayloadBytes(Math.max(0, this.#payloadBytes - removed.payloadBytes));
+        }
     }
 
     #initializeSchema(userVersion: number): void {
@@ -1089,6 +1114,12 @@ function validateOptions(options: AuditDatabaseOptions): void {
     }
     if (!Number.isSafeInteger(options.retentionDays) || options.retentionDays < 1) {
         throw new TypeError("retentionDays must be a positive safe integer.");
+    }
+}
+
+function validateStoreOptions<TRecord>(options: AuditStoreOptions<TRecord>): void {
+    if (options.maxRecords !== undefined && (!Number.isSafeInteger(options.maxRecords) || options.maxRecords < 1)) {
+        throw new TypeError("maxRecords must be a positive safe integer when provided.");
     }
 }
 
