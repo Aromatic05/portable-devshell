@@ -829,6 +829,41 @@ test("real Ink runtime drag-selects ordinary TUI text and copies it without acti
     }
 });
 
+test("screen selection updates only the selection layer, not the TUI root", async () => {
+    const terminal = createTerminal();
+    const clients = createClients();
+    const runtime = new TuiRuntime(
+        { stdin: terminal.stdin, stdout: terminal.stdout },
+        { clients: clients.value, inkDebug: true },
+    );
+    const originalGetSnapshot = runtime.scheduler.getSnapshot.bind(runtime.scheduler);
+    let rootSnapshotReads = 0;
+    Object.defineProperty(runtime.scheduler, "getSnapshot", {
+        configurable: true,
+        value: () => {
+            rootSnapshotReads += 1;
+            return originalGetSnapshot();
+        },
+    });
+    const running = runtime.run();
+
+    try {
+        await waitUntil(() => runtime.store.getState().connection.status === "connected");
+        await yieldEventLoop();
+        rootSnapshotReads = 0;
+
+        await runtime.selection.beginSelection(2, 2);
+        runtime.selection.updateSelection(5, 2);
+        await yieldEventLoop();
+
+        assert.equal(rootSnapshotReads, 0);
+    } finally {
+        terminal.write("\u0004");
+        await running;
+        await runtime.stop();
+    }
+});
+
 test("real Ink runtime renders compact and unsupported terminal layouts", async () => {
     for (const terminalOptions of [
         { columns: 80, expected: "1:inst", rows: 20 },

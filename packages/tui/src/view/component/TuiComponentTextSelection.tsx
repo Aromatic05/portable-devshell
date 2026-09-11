@@ -1,13 +1,19 @@
+import { useSyncExternalStore } from "react";
 import { Box, Text } from "ink";
 
-import type { TuiTextSelectionSnapshot } from "../TuiTextSelectionModel.js";
+import type { TuiTextSelectionRenderSource } from "../TuiTextSelectionModel.js";
 
 export function TuiComponentTextSelection(props: {
-    snapshot: TuiTextSelectionSnapshot;
+    source: TuiTextSelectionRenderSource;
 }) {
+    const snapshot = useSyncExternalStore(
+        (listener) => props.source.subscribe(listener),
+        () => props.source.getSnapshot(),
+        () => props.source.getSnapshot(),
+    );
     return (
         <>
-            {props.snapshot.spans.map((span, index) => (
+            {snapshot.spans.map((span, index) => (
                 <Box
                     key={`${span.row}:${span.column}:${index}`}
                     marginLeft={span.column}

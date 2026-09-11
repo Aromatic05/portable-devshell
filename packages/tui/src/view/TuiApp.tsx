@@ -41,11 +41,6 @@ export function TuiApp(props: TuiAppProps) {
         () => props.runtime.scheduler.getSnapshot(),
         () => props.runtime.scheduler.getSnapshot()
     );
-    const selection = useSyncExternalStore(
-        (listener) => props.runtime.selection.subscribe(listener),
-        () => props.runtime.selection.getSnapshot(),
-        () => props.runtime.selection.getSnapshot(),
-    );
     const viewport = useSyncExternalStore(
         (listener) => props.runtime.viewport.subscribe(listener),
         () => props.runtime.viewport.getSnapshot(),
@@ -151,7 +146,7 @@ export function TuiApp(props: TuiAppProps) {
                     />
             }
             />
-            <TuiComponentTextSelection snapshot={selection} />
+            <TuiComponentTextSelection source={props.runtime.selection} />
         </Box>
     );
 }

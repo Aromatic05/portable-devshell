@@ -25,7 +25,8 @@ export class TuiScreenTextSelection implements TuiTextSelectionRenderSource {
     readonly #terminal;
     #columns: number;
     #rows: number;
-    #pendingWrite: Promise<void> = Promise.resolve();
+    #pendingData = "";
+    #pendingWrite?: Promise<void>;
     #selection?: { anchor: SelectionPoint; focus: SelectionPoint };
     #columnBounds?: TuiTextSelectionColumnBounds;
     #snapshot = EMPTY_SNAPSHOT;
@@ -66,11 +67,14 @@ export class TuiScreenTextSelection implements TuiTextSelectionRenderSource {
 
     dispose(): void {
         this.#listeners.clear();
+        this.#pendingData = "";
         this.#terminal.dispose();
     }
 
     async flush(): Promise<void> {
-        await this.#pendingWrite;
+        while (this.#pendingWrite !== undefined) {
+            await this.#pendingWrite;
+        }
     }
 
     getSelectionText(): string {
@@ -116,12 +120,37 @@ export class TuiScreenTextSelection implements TuiTextSelectionRenderSource {
         const value = typeof data === "string"
             ? data
             : Buffer.from(data).toString("utf8");
-        this.#pendingWrite = this.#pendingWrite.then(
-            () =>
-                new Promise<void>((resolve) => {
-                    this.#terminal.write(value, resolve);
-                }),
+        if (value.length === 0) return;
+        this.#pendingData += value;
+        this.#scheduleWrite();
+    }
+
+    #scheduleWrite(): void {
+        if (this.#pendingWrite !== undefined || this.#pendingData.length === 0) {
+            return;
+        }
+        const running = this.#drainWrites();
+        this.#pendingWrite = running;
+        void running.then(
+            () => this.#finishWrite(running),
+            () => this.#finishWrite(running),
         );
+    }
+
+    async #drainWrites(): Promise<void> {
+        while (this.#pendingData.length > 0) {
+            const batch = this.#pendingData;
+            this.#pendingData = "";
+            await new Promise<void>((resolve) => {
+                this.#terminal.write(batch, resolve);
+            });
+        }
+    }
+
+    #finishWrite(running: Promise<void>): void {
+        if (this.#pendingWrite !== running) return;
+        this.#pendingWrite = undefined;
+        this.#scheduleWrite();
     }
 
     #notify(): void {
