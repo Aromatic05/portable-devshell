@@ -136,6 +136,51 @@ test("Pi devshell tool forwards Worker progress through Pi onUpdate before the f
     });
 });
 
+test("Pi devshell tool hard-limits model content for long single-line progress and final results", async () => {
+    let registeredTool: {
+        execute(
+            toolCallId: string,
+            params: unknown,
+            signal?: AbortSignal,
+            onUpdate?: (result: { content: Array<{ text: string; type: "text" }>; details: JsonValue }) => void
+        ): Promise<{ content: Array<{ text: string; type: "text" }>; details: JsonValue }>;
+    } | undefined;
+    const longLine = `head-${"x".repeat(100_000)}-tail`;
+    const extension = createDevshellPiExtension({
+        target: { instance: "worker-a", workspace: "/repo" },
+        tools: [{ description: "Run bash", inputSchema: { type: "object" }, name: "bash_run" }],
+        async callTool(_toolName, _input, _operationId, _signal, onProgress) {
+            onProgress?.({ stderr: "", stdout: longLine, termination: "running" });
+            return { exitCode: 0, stderr: "", stdout: longLine, termination: "exited" };
+        },
+        close() {}
+    }, { closeSessionOnShutdown: false });
+    await extension({
+        getCommands: () => [],
+        on() {},
+        registerCommand() {},
+        registerTool(tool) { registeredTool = tool; },
+        sendUserMessage() {}
+    });
+    assert.notEqual(registeredTool, undefined);
+    const updates: Array<{ content: Array<{ text: string; type: "text" }>; details: JsonValue }> = [];
+
+    const result = await registeredTool!.execute("call-long-output", { command: "produce-output" }, undefined, (update) => updates.push(update));
+    const progressText = updates[0]?.content[0]?.text ?? "";
+    const finalText = result.content[0]?.text ?? "";
+
+    assert.equal(updates.length, 1);
+    assert.equal(progressText.length, 30_000);
+    assert.equal(finalText.length, 30_000);
+    assert.match(progressText, /tool result truncated: \d+ characters total/u);
+    assert.match(finalText, /tool result truncated: \d+ characters total/u);
+    assert.match(progressText, /head-/u);
+    assert.match(progressText, /-tail/u);
+    assert.match(finalText, /head-/u);
+    assert.match(finalText, /-tail/u);
+    assert.deepEqual((result.details as { stdout?: string }).stdout, longLine);
+});
+
 const identityTheme: PiThemeLike = {
     bg: (_role, text) => text,
     bold: (text) => text,

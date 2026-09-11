@@ -273,7 +273,13 @@ export function prepareToolInput(toolName: string, params: unknown): JsonValue {
     return { ...input, resultDetail: "diff" };
 }
 
+const MAX_MODEL_TOOL_RESULT_CHARACTERS = 30_000;
+
 function renderModelToolResult(toolName: string, value: JsonValue): string {
+    return limitModelToolResult(renderModelToolResultUnbounded(toolName, value));
+}
+
+function renderModelToolResultUnbounded(toolName: string, value: JsonValue): string {
     if (toolName !== "file_edit" || value === null || Array.isArray(value) || typeof value !== "object") {
         return renderToolResult(value);
     }
@@ -290,6 +296,15 @@ function renderModelToolResult(toolName: string, value: JsonValue): string {
         const removed = typeof operation.removedLines === "number" ? `-${operation.removedLines}` : undefined;
         return [action, path, status, added, removed].filter(Boolean).join(" ");
     }).join("\n");
+}
+
+function limitModelToolResult(value: string): string {
+    if (value.length <= MAX_MODEL_TOOL_RESULT_CHARACTERS) return value;
+    const marker = `\n... [tool result truncated: ${value.length} characters total] ...\n`;
+    const retainedCharacters = MAX_MODEL_TOOL_RESULT_CHARACTERS - marker.length;
+    const headCharacters = Math.ceil(retainedCharacters / 2);
+    const tailCharacters = retainedCharacters - headCharacters;
+    return `${value.slice(0, headCharacters)}${marker}${value.slice(-tailCharacters)}`;
 }
 
 function asJsonValue(value: unknown): JsonValue {
