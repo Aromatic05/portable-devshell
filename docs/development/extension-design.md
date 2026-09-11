@@ -338,6 +338,16 @@ workers
 
 `workers` 允许 Extension 打开受 Control 管理的 Worker sessions，并调用正常 Tool pipeline。
 
+Worker session 是 **consumer-neutral capability view**：Control 只提供 canonical Worker tool catalog、routing、authorization、lifecycle 与 invocation，不把某个 consumer 的交互字段或展示策略冻结进该 catalog。具体 consumer 必须在 Control 边界之外自行 projection。例如 Agent Extension 决定哪些 Worker tools 暴露给模型、如何裁剪 model-facing schema 与 result；MCP consumer 则自行增加并剥离 `purpose` / `explanation` / `instance` 等 MCP invocation metadata。两者不得复用彼此 projection 后的 schema。
+
+```text
+Worker canonical capabilities
+    -> Control Worker session
+        -> Agent Extension -> Agent model projection
+        -> MCP consumer     -> MCP tool projection
+        -> other consumer   -> its own projection
+```
+
 它不暴露：
 
 ```text

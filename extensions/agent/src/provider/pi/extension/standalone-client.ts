@@ -9,6 +9,7 @@ import {
     type ControlClients
 } from "@portable-devshell/shared";
 
+import { projectAgentModelTools } from "../../../builtin/provider/AgentToolProjection.js";
 import { createDevshellPiExtension, type DevshellPiToolSession, type PiExtensionApiLike } from "./DevshellPiBridge.js";
 import type { DevshellPiTarget } from "./DevshellPiTarget.js";
 
@@ -50,14 +51,16 @@ export async function openStandaloneDevshellPiToolSession(
         if (selected === undefined) throw new Error(`Unknown devshell instance: ${instance}`);
         if (!selected.snapshot.ready) await control.clients.runtime.start(instance);
         const opened = await control.clients.tool.openSession(instance, requested.workspace);
+        const tools = opened.tools.map((tool) => ({
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+            name: tool.name
+        }));
         let closed = false;
         return {
             target: { instance, workspace: opened.workspace },
-            tools: opened.tools.map((tool) => ({
-                description: tool.description,
-                inputSchema: tool.inputSchema,
-                name: tool.name
-            })),
+            modelTools: projectAgentModelTools(tools),
+            tools,
             async callTool(toolName, input, operationId, signal, onProgress) {
                 signal?.throwIfAborted();
                 const result = await control.clients.tool.callStreaming(

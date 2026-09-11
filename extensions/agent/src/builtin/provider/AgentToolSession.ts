@@ -8,6 +8,12 @@ export interface AgentToolDefinition {
     name: string;
 }
 
+export interface AgentModelToolDefinition {
+    description: string;
+    inputSchema: ExtensionJsonValue;
+    name: string;
+}
+
 /**
  * Agent-owned view of one devshell Worker tool session.
  *
@@ -19,6 +25,9 @@ export interface AgentToolSession {
     /** Settles when the host-owned Worker session can no longer be used. */
     readonly closed: Promise<void>;
     readonly target: AgentWorkerTarget;
+    /** Agent-owned model-facing projection of the canonical Worker catalog. */
+    readonly modelTools: readonly AgentModelToolDefinition[];
+    /** Canonical Worker capabilities retained for provider-internal operations. */
     readonly tools: readonly AgentToolDefinition[];
     callTool(
         toolName: string,

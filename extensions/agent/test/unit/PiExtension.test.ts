@@ -4,6 +4,7 @@ import test from "node:test";
 import type { Component } from "@earendil-works/pi-tui";
 import type { JsonValue } from "@portable-devshell/shared";
 
+import { prepareAgentModelToolInput } from "../../src/builtin/provider/AgentToolProjection.ts";
 import {
     appendDevshellRemoteWorkspacePrompt,
     createDevshellPiExtension,
@@ -13,7 +14,6 @@ import {
     loadDevshellPiWorkspaceContext,
     loadDevshellPiWorkspaceResources,
     piPromptMetadata,
-    prepareToolInput,
     replacePiProjectContext,
     transformDevshellPiSkillInput
 } from "../../src/provider/pi/extension/index.ts";
@@ -35,6 +35,7 @@ test("Pi devshell adapter requires an injected tool session instead of opening C
     let closes = 0;
     const session = {
         target: { instance: "worker-a", workspace: "/repo" },
+        modelTools: [],
         tools: [],
         async callTool() {
             throw new Error("tool call not expected");
@@ -51,6 +52,45 @@ test("Pi devshell adapter requires an injected tool session instead of opening C
     assert.equal(closes, 1);
 });
 
+test("Pi registers only Agent model tools while retaining canonical tools for internal resources", async () => {
+    const calls: string[] = [];
+    const registered: string[] = [];
+    const bridge = createDevshellPiWorkspaceBridge({
+        target: { instance: "worker-a", workspace: "/repo" },
+        modelTools: [{ description: "Read files", inputSchema: { type: "object" }, name: "file_read" }],
+        tools: [
+            { description: "Find files", inputSchema: { type: "object" }, name: "file_glob" },
+            { description: "Read files", inputSchema: { type: "object" }, name: "file_read" },
+            { description: "Internal only", inputSchema: { type: "object" }, name: "future_internal" }
+        ],
+        async callTool(toolName, _input, _operationId) {
+            calls.push(toolName);
+            if (toolName === "file_glob") return { entries: [] };
+            if (toolName === "file_read") return {
+                files: [
+                    { path: "./.pi/skills", view: "metadata", metadata: { exists: false } },
+                    { path: "./.pi/prompts", view: "metadata", metadata: { exists: false } }
+                ]
+            };
+            throw new Error(`unexpected tool call: ${toolName}`);
+        },
+        close() {}
+    });
+
+    await bridge.extension({
+        getCommands: () => [],
+        on() {},
+        registerCommand() {},
+        registerTool(tool) { registered.push(tool.name); },
+        sendUserMessage() {}
+    });
+
+    assert.deepEqual(registered, ["file_read"]);
+    assert.equal(calls.includes("file_glob"), true);
+    assert.equal(calls.includes("file_read"), true);
+    await bridge.close();
+});
+
 test("standalone default export is a Pi extension factory, not the factory generator", () => {
     assert.equal(typeof standaloneDevshellPiExtension, "function");
     assert.notEqual(standaloneDevshellPiExtension, createStandaloneDevshellPiExtension);
@@ -61,6 +101,7 @@ test("managed Pi adapter leaves tool-session shutdown to its embedding owner", a
     const registeredEvents: string[] = [];
     const extension = createDevshellPiExtension({
         target: { instance: "worker-a", workspace: "/repo" },
+        modelTools: [],
         tools: [],
         async callTool() {
             throw new Error("tool call not expected");
@@ -94,6 +135,7 @@ test("Pi devshell tool forwards Worker progress through Pi onUpdate before the f
     } | undefined;
     const extension = createDevshellPiExtension({
         target: { instance: "worker-a", workspace: "/repo" },
+        modelTools: [{ description: "Run bash", inputSchema: { type: "object" }, name: "bash_run" }],
         tools: [{ description: "Run bash", inputSchema: { type: "object" }, name: "bash_run" }],
         async callTool(_toolName, _input, operationId, _signal, onProgress) {
             assert.equal(operationId, "call-stream");
@@ -149,6 +191,7 @@ test("Pi devshell tool hard-limits model content for long single-line progress a
     const recoveryPath = "/.devshell/tool-results/11111111-1111-1111-1111-111111111111/stdout";
     const extension = createDevshellPiExtension({
         target: { instance: "worker-a", workspace: "/repo" },
+        modelTools: [{ description: "Run bash", inputSchema: { type: "object" }, name: "bash_run" }],
         tools: [{ description: "Run bash", inputSchema: { type: "object" }, name: "bash_run" }],
         async callTool(_toolName, _input, _operationId, _signal, onProgress) {
             onProgress?.({ stderr: "", stdout: longLine, termination: "running" });
@@ -599,7 +642,7 @@ test("Pi devshell renderer formats common calls without JSON fallback", () => {
     );
 });
 
-test("Pi devshell renderer explicitly covers the complete current Worker catalog", () => {
+test("Pi devshell renderer explicitly covers the current Agent model tool surface", () => {
     const expected = [
         "bash_run",
         "file_edit",
@@ -769,8 +812,8 @@ test("Pi devshell file edit always requests diff details without exposing them t
         "+new",
         "*** End Edit"
     ].join("\n");
-    assert.deepEqual(prepareToolInput("file_edit", { changes }), { changes, resultDetail: "diff" });
-    assert.deepEqual(prepareToolInput("file_edit", { changes, resultDetail: "summary" }), { changes, resultDetail: "diff" });
+    assert.deepEqual(prepareAgentModelToolInput("file_edit", { changes }), { changes, resultDetail: "diff" });
+    assert.deepEqual(prepareAgentModelToolInput("file_edit", { changes, resultDetail: "summary" }), { changes, resultDetail: "diff" });
 });
 
 test("Pi devshell parses the Worker edit grammar only as adapter input", () => {

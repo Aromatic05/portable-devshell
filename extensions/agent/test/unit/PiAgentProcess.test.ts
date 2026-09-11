@@ -223,21 +223,23 @@ function toolSession(
     let isClosed = false;
     let resolveClosed!: () => void;
     const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
+    const tools = [
+        {
+            description: "Echo a value",
+            inputSchema: { type: "object" },
+            name: "echo_tool"
+        },
+        {
+            description: "Wait for cancellation",
+            inputSchema: { type: "object" },
+            name: "slow_tool"
+        }
+    ];
     return {
         closed,
+        modelTools: tools,
         target,
-        tools: [
-            {
-                description: "Echo a value",
-                inputSchema: { type: "object" },
-                name: "echo_tool"
-            },
-            {
-                description: "Wait for cancellation",
-                inputSchema: { type: "object" },
-                name: "slow_tool"
-            }
-        ],
+        tools,
         callTool: overrides.callTool ?? (async (_toolName, input) => input),
         async close() {
             if (isClosed) return;

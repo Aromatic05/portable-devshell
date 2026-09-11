@@ -100,6 +100,7 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
     await mkdir(input.localCwd, { recursive: true });
     const tools = new PiChildToolSession({
         agentId: input.agentId,
+        modelTools: input.modelTools,
         send,
         target: input.target,
         tools: input.tools

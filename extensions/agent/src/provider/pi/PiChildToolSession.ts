@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 
 import type { DevshellPiToolSession } from "./extension/index.js";
 import type { JsonValue } from "@portable-devshell/shared";
-import type { AgentToolDefinition } from "../../builtin/provider/AgentToolSession.js";
+import type {
+    AgentModelToolDefinition,
+    AgentToolDefinition
+} from "../../builtin/provider/AgentToolSession.js";
 import type { AgentWorkerTarget } from "../../builtin/worker/AgentWorkerTarget.js";
 import type {
     PiChildMessage,
@@ -19,6 +22,7 @@ interface PendingToolRequest {
 
 export class PiChildToolSession implements DevshellPiToolSession {
     readonly target: AgentWorkerTarget;
+    readonly modelTools: readonly AgentModelToolDefinition[];
     readonly tools: readonly AgentToolDefinition[];
     readonly #agentId: string;
     readonly #pending = new Map<string, PendingToolRequest>();
@@ -27,6 +31,7 @@ export class PiChildToolSession implements DevshellPiToolSession {
 
     constructor(options: {
         agentId: string;
+        modelTools: readonly AgentModelToolDefinition[];
         send(message: PiChildMessage): Promise<void> | void;
         target: AgentWorkerTarget;
         tools: readonly AgentToolDefinition[];
@@ -34,6 +39,7 @@ export class PiChildToolSession implements DevshellPiToolSession {
         this.#agentId = options.agentId;
         this.#send = options.send;
         this.target = { ...options.target };
+        this.modelTools = options.modelTools.map((tool) => ({ ...tool }));
         this.tools = options.tools.map((tool) => ({ ...tool }));
     }
 

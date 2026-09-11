@@ -143,6 +143,7 @@ function createProviderHandle(): AgentProviderHandle {
 function toolSession(target: ReturnType<typeof parseAgentWorkerTarget>) {
     return {
         closed: new Promise<void>(() => undefined),
+        modelTools: [],
         target,
         tools: [],
         async callTool() { return null; },

@@ -287,6 +287,7 @@ class PiSharedProcess {
                 agentId: options.agentId,
                 id: randomUUID(),
                 localCwd: options.localCwd,
+                modelTools: options.tools.modelTools.map((tool) => ({ ...tool })),
                 target: options.target,
                 tools: options.tools.tools.map((tool) => ({ ...tool })),
                 type: "agent.start"

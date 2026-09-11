@@ -1,6 +1,7 @@
 import type { ExtensionContext, ExtensionWorkerSession } from "@portable-devshell/extension";
 
 import type { AgentToolSession } from "./provider/AgentToolSession.js";
+import { projectAgentModelTools } from "./provider/AgentToolProjection.js";
 import { parseAgentWorkerTarget, type AgentWorkerTarget } from "./worker/AgentWorkerTarget.js";
 
 export async function openAgentToolSession(
@@ -17,14 +18,16 @@ export async function openAgentToolSession(
 }
 
 function adaptWorkerSession(worker: ExtensionWorkerSession): AgentToolSession {
+    const tools = worker.listTools().map((tool) => ({
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        name: tool.name
+    }));
     return {
         closed: worker.closed,
         target: parseAgentWorkerTarget(`${worker.instance}:${worker.workspace}`),
-        tools: worker.listTools().map((tool) => ({
-            description: tool.description,
-            inputSchema: tool.inputSchema,
-            name: tool.name
-        })),
+        modelTools: projectAgentModelTools(tools),
+        tools,
         callTool: async (toolName, input, operationId, signal, onProgress) => await worker.callTool(
             toolName,
             input,

@@ -1,8 +1,7 @@
 export {
     createDevshellPiExtension,
     createDevshellPiWorkspaceBridge,
-    piPromptMetadata,
-    prepareToolInput
+    piPromptMetadata
 } from "./DevshellPiBridge.js";
 export type {
     DevshellPiExtensionAttachOptions,

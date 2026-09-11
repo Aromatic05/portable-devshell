@@ -12,6 +12,7 @@ test("Pi child tool progress updates the pending call without resolving it", asy
     const progress: unknown[] = [];
     const session = new PiChildToolSession({
         agentId: "agent-a",
+        modelTools: [{ description: "Run bash", inputSchema: { type: "object" }, name: "bash_run" }],
         send(message) {
             sent.push(message);
         },

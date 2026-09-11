@@ -400,6 +400,7 @@ function toolSession(
     const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
     return {
         closed,
+        modelTools: [],
         target,
         tools: [],
         async callTool() { return null; },

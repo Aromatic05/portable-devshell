@@ -9,6 +9,11 @@ import type {
 import type { JsonValue } from "@portable-devshell/shared";
 
 import {
+    prepareAgentModelToolInput,
+    projectAgentModelToolResult
+} from "../../../builtin/provider/AgentToolProjection.js";
+import type { AgentModelToolDefinition } from "../../../builtin/provider/AgentToolSession.js";
+import {
     renderPiToolCall,
     renderPiToolResult,
     type PiThemeLike,
@@ -77,6 +82,7 @@ export interface PiToolLike {
 
 export interface DevshellPiToolSession {
     readonly target: DevshellPiTarget;
+    readonly modelTools: readonly AgentModelToolDefinition[];
     readonly tools: readonly DevshellPiToolDefinition[];
     callTool(
         toolName: string,
@@ -133,8 +139,8 @@ export function createDevshellPiWorkspaceBridge(
     session: DevshellPiToolSession
 ): DevshellPiWorkspaceBridge {
     let closed = false;
-    const catalog = [...session.tools];
-    const toolNames = new Set(catalog.map((tool) => tool.name));
+    const catalog = [...session.modelTools];
+    const toolNames = new Set(session.tools.map((tool) => tool.name));
     let resources: DevshellPiWorkspaceResources | undefined;
     let resourcesPromise: Promise<DevshellPiWorkspaceResources> | undefined;
     let resourceGeneration = 0;
@@ -213,7 +219,7 @@ function toPiTool(definition: DevshellPiToolDefinition, session: DevshellPiToolS
         description: definition.description,
         async execute(toolCallId, params, signal, onUpdate) {
             signal?.throwIfAborted();
-            const input = prepareToolInput(definition.name, params);
+            const input = prepareAgentModelToolInput(definition.name, params);
             const result = await session.callTool(
                 definition.name,
                 input,
@@ -221,14 +227,14 @@ function toPiTool(definition: DevshellPiToolDefinition, session: DevshellPiToolS
                 signal,
                 onUpdate === undefined ? undefined : (progress) => {
                     onUpdate({
-                        content: [{ text: renderModelToolResult(definition.name, progress), type: "text" }],
+                        content: [{ text: projectAgentModelToolResult(definition.name, progress), type: "text" }],
                         details: progress
                     });
                 }
             );
             signal?.throwIfAborted();
             return {
-                content: [{ text: renderModelToolResult(definition.name, result), type: "text" }],
+                content: [{ text: projectAgentModelToolResult(definition.name, result), type: "text" }],
                 details: result
             };
         },
@@ -263,81 +269,4 @@ export function piPromptMetadata(toolName: string): Pick<PiToolLike, "promptGuid
         default:
             return {};
     }
-}
-
-export function prepareToolInput(toolName: string, params: unknown): JsonValue {
-    const input = asJsonValue(params);
-    if (toolName !== "file_edit" || input === null || Array.isArray(input) || typeof input !== "object") {
-        return input;
-    }
-    return { ...input, resultDetail: "diff" };
-}
-
-const MAX_MODEL_TOOL_RESULT_CHARACTERS = 12_000;
-
-function renderModelToolResult(toolName: string, value: JsonValue): string {
-    return limitModelToolResult(renderModelToolResultUnbounded(toolName, value));
-}
-
-function renderModelToolResultUnbounded(toolName: string, value: JsonValue): string {
-    if (toolName === "bash_run" && value !== null && !Array.isArray(value) && typeof value === "object") {
-        return renderBashModelToolResult(value);
-    }
-    if (toolName !== "file_edit" || value === null || Array.isArray(value) || typeof value !== "object") {
-        return renderToolResult(value);
-    }
-    const operations = value.operations;
-    if (!Array.isArray(operations)) return renderToolResult(value);
-    return operations.map((operation) => {
-        if (operation === null || Array.isArray(operation) || typeof operation !== "object") {
-            return renderToolResult(operation);
-        }
-        const action = typeof operation.action === "string" ? operation.action : "edit";
-        const path = typeof operation.path === "string" ? operation.path : "<unknown>";
-        const status = typeof operation.status === "string" ? operation.status : "unknown";
-        const added = typeof operation.addedLines === "number" ? `+${operation.addedLines}` : undefined;
-        const removed = typeof operation.removedLines === "number" ? `-${operation.removedLines}` : undefined;
-        return [action, path, status, added, removed].filter(Boolean).join(" ");
-    }).join("\n");
-}
-
-function renderBashModelToolResult(value: Record<string, JsonValue>): string {
-    const {
-        stdoutArtifact: _stdoutArtifact,
-        stderrArtifact: _stderrArtifact,
-        stdoutPath,
-        stderrPath,
-        ...rest
-    } = value;
-    return renderToolResult({
-        ...(typeof stdoutPath === "string" ? { stdoutPath } : {}),
-        ...(typeof stderrPath === "string" ? { stderrPath } : {}),
-        ...rest
-    });
-}
-
-function limitModelToolResult(value: string): string {
-    if (value.length <= MAX_MODEL_TOOL_RESULT_CHARACTERS) return value;
-    const marker = `\n... [tool result truncated: ${value.length} characters total] ...\n`;
-    const retainedCharacters = MAX_MODEL_TOOL_RESULT_CHARACTERS - marker.length;
-    const headCharacters = Math.ceil(retainedCharacters / 2);
-    const tailCharacters = retainedCharacters - headCharacters;
-    return `${value.slice(0, headCharacters)}${marker}${value.slice(-tailCharacters)}`;
-}
-
-function asJsonValue(value: unknown): JsonValue {
-    if (!isJsonValue(value)) throw new TypeError("Pi tool arguments are not JSON serializable.");
-    return value;
-}
-
-function isJsonValue(value: unknown): value is JsonValue {
-    if (value === null || typeof value === "string" || typeof value === "boolean") return true;
-    if (typeof value === "number") return Number.isFinite(value);
-    if (Array.isArray(value)) return value.every(isJsonValue);
-    if (typeof value !== "object") return false;
-    return Object.values(value as Record<string, unknown>).every(isJsonValue);
-}
-
-function renderToolResult(value: JsonValue): string {
-    return typeof value === "string" ? value : JSON.stringify(value, null, 2);
 }

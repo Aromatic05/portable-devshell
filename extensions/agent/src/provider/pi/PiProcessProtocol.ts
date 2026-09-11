@@ -1,5 +1,8 @@
 import type { JsonValue } from "@portable-devshell/shared";
-import type { AgentToolDefinition } from "../../builtin/provider/AgentToolSession.js";
+import type {
+    AgentModelToolDefinition,
+    AgentToolDefinition
+} from "../../builtin/provider/AgentToolSession.js";
 import type { AgentWorkerTarget } from "../../builtin/worker/AgentWorkerTarget.js";
 
 export interface PiChildInitMessage {
@@ -12,6 +15,7 @@ export interface PiChildAgentStartMessage {
     agentId: string;
     id: string;
     localCwd: string;
+    modelTools: readonly AgentModelToolDefinition[];
     target: AgentWorkerTarget;
     tools: readonly AgentToolDefinition[];
     type: "agent.start";
