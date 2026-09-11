@@ -36,7 +36,6 @@ import {
 } from "../view/TuiHitRegions.js";
 import { tuiSidebarSectionAt } from "../view/TuiSidebarPresentation.js";
 import {
-    mainInnerWidth,
     tuiBlockHeight,
     tuiMainLayoutMetrics,
 } from "../view/TuiRootLayout.js";
@@ -234,7 +233,10 @@ export class TuiRuntime {
         });
         this.commandDispatcher = new TuiCommandDispatcher({
             focusManager: this.focusManager,
-            mainViewportColumns: () => mainInnerWidth(this.columns),
+            mainBoxInnerColumns: () =>
+                tuiMainLayoutMetrics(this.columns, this.rows).boxInnerWidth,
+            mainContentColumns: () =>
+                tuiMainLayoutMetrics(this.columns, this.rows).contentWidth,
             mainViewportRows: () => {
                 const geometry = tuiMainLayoutMetrics(
                     this.columns,

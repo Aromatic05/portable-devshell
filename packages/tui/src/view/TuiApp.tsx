@@ -25,7 +25,6 @@ import {
 import { tuiTerminalFullScreen } from "./TuiHitRegions.js";
 import type { TuiAppController } from "./TuiAppController.js";
 import {
-    mainInnerWidth,
     tuiBlockHeight,
     tuiMainLayoutMetrics,
     TuiRootLayout,
@@ -58,7 +57,8 @@ export function TuiApp(props: TuiAppProps) {
     );
     const layout = geometry.layout;
     const renderRows = geometry.renderRows;
-    const boxInnerWidth = mainInnerWidth(viewport.columns, fullWidth);
+    const contentWidth = geometry.contentWidth;
+    const boxInnerWidth = geometry.boxInnerWidth;
     const viewportRows = Math.max(
         0,
         geometry.contentHeight -
@@ -100,14 +100,14 @@ export function TuiApp(props: TuiAppProps) {
                             onTextDetailImageVisibility={renderTextDetailImage}
                             state={state}
                             viewportRows={viewportRows}
-                            width={boxInnerWidth}
+                            width={contentWidth}
                         />
                     ) : state.ui.selectedPage === "terminal" ? (
                         <Box flexDirection="column" flexGrow={1}>
                             <TuiComponentTerminalTabs activeTab={selectTerminalTab(state)} focused={state.interaction.focusScope === "terminal"} />
                             {selectTerminalTab(state) === "tmuxPanes" ? (
                                 <TuiComponentTmuxPanes
-                                    columns={Math.max(1, boxInnerWidth)}
+                                    columns={Math.max(1, contentWidth)}
                                     focused={state.interaction.focusScope === "terminal"}
                                     instance={state.ui.selectedInstance}
                                     rows={Math.max(1, terminalRows - 1)}
@@ -115,7 +115,7 @@ export function TuiApp(props: TuiAppProps) {
                                 />
                             ) : (
                                 <TuiComponentTerminal
-                                    columns={Math.max(1, boxInnerWidth)}
+                                    columns={Math.max(1, contentWidth)}
                                     focused={state.interaction.focusScope === "terminal"}
                                     instance={state.ui.selectedInstance}
                                     onGraphicsVisibility={renderTerminalGraphics}
@@ -128,6 +128,7 @@ export function TuiApp(props: TuiAppProps) {
                     ) : (
                         <TuiScreenRouter
                             boxInnerWidth={boxInnerWidth}
+                            contentWidth={contentWidth}
                             state={state}
                             viewportRows={viewportRows}
                         />

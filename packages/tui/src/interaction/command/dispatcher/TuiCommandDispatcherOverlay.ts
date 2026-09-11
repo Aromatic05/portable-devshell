@@ -145,7 +145,7 @@ export class TuiCommandDispatcherOverlay {
             this.#store.getState().interaction.overlays,
         );
         if (overlay?.kind !== "text-detail") return false;
-        const width = Math.max(20, this.#focus.mainViewportColumns());
+        const width = Math.max(20, this.#focus.mainContentColumns());
         const viewportRows = tuiTextDetailBodyRows(
             this.#focus.mainViewportRows(),
             overlay.image !== undefined,

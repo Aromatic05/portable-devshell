@@ -21,12 +21,16 @@ export interface TuiRootLayoutProps {
     sidebar?: React.ReactNode;
 }
 
-export function mainInnerWidth(columns: number, fullWidth = false): number {
+export function mainContentWidth(columns: number, fullWidth = false): number {
     if (fullWidth) return Math.max(0, columns - 4);
     const layout = tuiLayoutMetrics(columns);
     return layout.mode === "compact"
         ? Math.max(0, columns - 4)
         : Math.max(0, layout.mainPanelWidth - 4);
+}
+
+export function mainBoxInnerWidth(columns: number, fullWidth = false): number {
+    return Math.max(0, mainContentWidth(columns, fullWidth) - 4);
 }
 
 export function tuiBlockHeight(lines: readonly string[] | undefined): number {
@@ -38,6 +42,7 @@ export function tuiMainLayoutMetrics(
     rows: number,
     sidebarVisible = true,
 ): {
+    boxInnerWidth: number;
     contentHeight: number;
     contentWidth: number;
     contentX: number;
@@ -58,9 +63,11 @@ export function tuiMainLayoutMetrics(
             ? layout.outerGap + layout.sidebarWidth + layout.panelGap + 1
             : 1;
     const panelOuterY = 4 + compactSidebarRows;
+    const contentWidth = Math.max(0, panelWidth - 4);
     return {
+        boxInnerWidth: Math.max(0, contentWidth - 4),
         contentHeight: Math.max(0, renderRows - 6 - compactSidebarRows - 2),
-        contentWidth: Math.max(0, panelWidth - 4),
+        contentWidth,
         contentX: panelOuterX + 2,
         contentY: panelOuterY + 1,
         layout,

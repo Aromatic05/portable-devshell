@@ -13,6 +13,7 @@ import { tuiBlockHeight } from "../TuiRootLayout.js";
 
 export interface TuiScreenRouterProps {
     boxInnerWidth: number;
+    contentWidth: number;
     state: TuiAppState;
     viewportRows: number;
 }
@@ -24,7 +25,7 @@ export function TuiScreenRouter(props: TuiScreenRouterProps) {
             <TuiMessagesView
                 state={props.state}
                 viewportRows={props.viewportRows}
-                width={props.boxInnerWidth}
+                width={props.contentWidth}
             />
         );
     }
@@ -42,7 +43,7 @@ export function TuiScreenRouter(props: TuiScreenRouterProps) {
             <Box flexDirection="column">
                 {model.errorLines === undefined ? undefined : <TuiComponentErrorBanner lines={model.errorLines} />}
                 <PageLoadState state={model.loadState} />
-                {showOverview ? <TuiOverviewView state={props.state} viewportRows={overviewRows} width={props.boxInnerWidth} /> : undefined}
+                {showOverview ? <TuiOverviewView state={props.state} viewportRows={overviewRows} width={props.contentWidth} /> : undefined}
                 {model.statusLine !== undefined ? <Text color="yellow">{model.statusLine}</Text> : undefined}
             </Box>
         );

@@ -152,7 +152,7 @@ export function buildTuiHitRegions(
     const layout = geometry.layout;
     const sidebar = selectSidebarModel(state);
     const main = selectMainScreenModel(state);
-    const boxInnerWidth = geometry.contentWidth;
+    const boxInnerWidth = geometry.boxInnerWidth;
     const metrics = selectMainBoxFlowMetrics(state, boxInnerWidth);
     const compact = layout.mode === "compact";
     const mainX = geometry.contentX;

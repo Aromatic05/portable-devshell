@@ -21,7 +21,7 @@ import {
     selectSidebarModel,
     hitTargetAt,
     isTerminalSizeSupported,
-    mainInnerWidth,
+    mainBoxInnerWidth,
     renderExpandableBoxLines,
     readContextConversationDraft,
     type TuiHitTarget,
@@ -32,6 +32,7 @@ import {
     tuiPageEntries,
     topTuiOverlay,
     tuiLayoutMetrics,
+    tuiMainLayoutMetrics,
     tuiViewProjection,
     wrapTerminalText,
 } from "../../src/testing.ts";
@@ -905,7 +906,10 @@ test("mouse hit regions follow the rendered sidebar, boxes, and overlays", () =>
         hitTargetAt(initialRegions, boxRegion.x, boxRegion.y),
         boxRegion.target,
     );
-    assert.equal(boxRegion.width, mainInnerWidth(viewport.columns));
+    assert.equal(
+        boxRegion.width,
+        tuiMainLayoutMetrics(viewport.columns, viewport.rows).contentWidth,
+    );
 
     harness.store.setPanelError(
         "instances:alpha",
@@ -1204,10 +1208,30 @@ test("box borders encode result status and retain severity while focused", () =>
 
 test("narrow terminals use compact navigation and reject unsupported sizes", () => {
     const fullLayout = tuiLayoutMetrics(120);
+    const fullGeometry = tuiMainLayoutMetrics(120, 20);
     assert.equal(fullLayout.mode, "full");
-    assert.equal(mainInnerWidth(120), fullLayout.mainPanelWidth - 4);
+    assert.equal(fullGeometry.contentWidth, fullLayout.mainPanelWidth - 4);
+    assert.equal(mainBoxInnerWidth(120) + 4, fullGeometry.contentWidth);
+    const boxLines = renderExpandableBoxLines(
+        {
+            collapsedLines: [{ text: "summary" }],
+            enterable: false,
+            expandable: true,
+            expanded: false,
+            expandedKey: "width-contract",
+            expandedLines: [],
+            focused: false,
+            id: "width-contract",
+            status: "ready",
+            title: "Width contract",
+        },
+        mainBoxInnerWidth(120),
+    );
+    assert.ok(
+        boxLines.every((line) => line.text.length === fullGeometry.contentWidth),
+    );
     assert.equal(tuiLayoutMetrics(80).mode, "compact");
-    assert.equal(mainInnerWidth(80), 76);
+    assert.equal(mainBoxInnerWidth(80), 72);
     assert.equal(isTerminalSizeSupported(80, 20), true);
     assert.equal(isTerminalSizeSupported(59, 20), false);
     assert.equal(isTerminalSizeSupported(80, 13), false);
@@ -2826,7 +2850,7 @@ test("Main viewport scrolling uses one page-instance offset instead of per-box o
 });
 
 test("Messages scrolling measures wrapped history with the actual main viewport width", async () => {
-    const harness = createHarness({ mainViewportColumns: 20 });
+    const harness = createHarness({ mainContentColumns: 20 });
     harness.store.patchControlReadModel({
         instanceState: {
             alpha: {
@@ -2886,7 +2910,7 @@ test("Messages scrolling measures wrapped history with the actual main viewport 
 });
 
 test("scrolling at main viewport boundaries is a true no-op", async () => {
-    const harness = createHarness({ mainViewportColumns: 20 });
+    const harness = createHarness({ mainContentColumns: 20 });
     harness.store.patchControlReadModel({
         instanceState: {
             alpha: {
@@ -2933,7 +2957,7 @@ test("sidebar wheel input at the first item is a true no-op", async () => {
 });
 
 test("text detail scroll state clamps to the rendered upper boundary", async () => {
-    const harness = createHarness({ mainViewportColumns: 80 });
+    const harness = createHarness({ mainContentColumns: 80 });
     const body = Array.from({ length: 40 }, (_, index) => `line-${index}`).join("\n");
     harness.store.pushOverlay({ body, kind: "text-detail", scrollOffset: 0, title: "detail" });
     harness.store.setFocusScope("textDetail");
@@ -3440,7 +3464,8 @@ function createHarness(
         onValidateInstanceCreateDraft?: (
             draft: InstanceCreateDraft,
         ) => Promise<InstanceCreateSummary>;
-        mainViewportColumns?: number;
+        mainBoxInnerColumns?: number;
+        mainContentColumns?: number;
     } = {},
 ) {
     const store = new TuiAppStore();
@@ -3486,7 +3511,8 @@ function createHarness(
     });
     const commandDispatcher = new TuiCommandDispatcher({
         focusManager,
-        mainViewportColumns: () => options.mainViewportColumns ?? 80,
+        mainBoxInnerColumns: () => options.mainBoxInnerColumns ?? 80,
+        mainContentColumns: () => options.mainContentColumns ?? 84,
         mainViewportRows: () => 12,
         projection: tuiViewProjection,
         onApprovalDecision: async (instance, approvalId, decision) => {

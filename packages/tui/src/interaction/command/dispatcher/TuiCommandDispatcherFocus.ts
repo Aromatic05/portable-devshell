@@ -2,22 +2,26 @@ import type { TuiAppStore } from "../../../state/TuiAppStore.js";
 import type { TuiInteractionProjection } from "../../TuiInteractionProjection.js";
 import { overviewInstanceViewportRows } from "../../../view/page/TuiOverviewPresentation.js";
 import { tuiMessagesHistoryRows } from "../../../view/page/messages/TuiMessagesProjection.js";
+import { tuiBlockHeight } from "../../../view/TuiRootLayout.js";
 
 interface CommandFocusOptions {
-    mainViewportColumns?(): number;
+    mainBoxInnerColumns?(): number;
+    mainContentColumns?(): number;
     mainViewportRows(): number;
     projection: TuiInteractionProjection;
     store: TuiAppStore;
 }
 
 export class TuiCommandDispatcherFocus {
-    readonly #mainViewportColumns: () => number;
+    readonly #mainBoxInnerColumns: () => number;
+    readonly #mainContentColumns: () => number;
     readonly #mainViewportRows: CommandFocusOptions["mainViewportRows"];
     readonly #projection: TuiInteractionProjection;
     readonly #store: TuiAppStore;
 
     constructor(options: CommandFocusOptions) {
-        this.#mainViewportColumns = options.mainViewportColumns ?? (() => 80);
+        this.#mainBoxInnerColumns = options.mainBoxInnerColumns ?? (() => 80);
+        this.#mainContentColumns = options.mainContentColumns ?? (() => 84);
         this.#mainViewportRows = options.mainViewportRows;
         this.#projection = options.projection;
         this.#store = options.store;
@@ -58,8 +62,8 @@ export class TuiCommandDispatcherFocus {
         return action?.id?.slice(`${boxId}:approval.open:`.length);
     }
 
-    mainViewportColumns(): number {
-        return this.#mainViewportColumns();
+    mainContentColumns(): number {
+        return this.#mainContentColumns();
     }
 
     mainViewportRows(): number {
@@ -108,7 +112,7 @@ export class TuiCommandDispatcherFocus {
 
         const metrics = this.#projection.selectMainBoxFlowMetrics(
             state,
-            this.#mainViewportColumns(),
+            this.#mainFlowColumns(state),
         );
         const range = metrics.boxRanges[boxId];
         if (range === undefined) {
@@ -132,23 +136,48 @@ export class TuiCommandDispatcherFocus {
     }
 
     boxViewportRows(): number {
-        if (this.#store.getState().ui.selectedPage === "overview") {
-            return overviewInstanceViewportRows(this.#mainViewportRows());
+        const state = this.#store.getState();
+        const model = this.#projection.selectMainScreenModel(state);
+        const stateRows = model.loadState.kind === "ready" ? 0 : 1;
+        if (state.ui.selectedPage === "overview") {
+            const overviewRows = Math.max(
+                0,
+                this.#mainViewportRows() -
+                    tuiBlockHeight(model.errorLines) -
+                    stateRows -
+                    (model.statusLine === undefined ? 0 : 1),
+            );
+            return overviewInstanceViewportRows(overviewRows);
         }
-        if (this.#store.getState().ui.selectedPage === "messages") {
+        if (state.ui.selectedPage === "messages") {
             return tuiMessagesHistoryRows(this.#mainViewportRows());
         }
-        const model = this.#projection.selectMainScreenModel(this.#store.getState());
-        return Math.max(0, this.#mainViewportRows() - 1 - (model.statusLine === undefined ? 0 : 1) - (model.emptyState === undefined ? 0 : 1));
+        return Math.max(
+            0,
+            this.#mainViewportRows() -
+                1 -
+                tuiBlockHeight(model.errorLines) -
+                stateRows -
+                (model.statusLine === undefined ? 0 : 1) -
+                (model.emptyState === undefined ? 0 : 1),
+        );
     }
 
     maxMainScrollOffset(): number {
+        const state = this.#store.getState();
         const metrics = this.#projection.selectMainBoxFlowMetrics(
-            this.#store.getState(),
-            this.#mainViewportColumns(),
+            state,
+            this.#mainFlowColumns(state),
         );
         return Math.max(0, metrics.totalLines - this.boxViewportRows());
-    }}
+    }
+
+    #mainFlowColumns(state: ReturnType<TuiAppStore["getState"]>): number {
+        return state.ui.selectedPage === "messages"
+            ? this.#mainContentColumns()
+            : this.#mainBoxInnerColumns();
+    }
+}
 
 function clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
