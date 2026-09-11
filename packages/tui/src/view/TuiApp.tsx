@@ -26,8 +26,8 @@ import { tuiTerminalFullScreen } from "./TuiHitRegions.js";
 import type { TuiAppController } from "./TuiAppController.js";
 import {
     mainInnerWidth,
-    tuiLayoutMetrics,
-    tuiRenderRows,
+    tuiBlockHeight,
+    tuiMainLayoutMetrics,
     TuiRootLayout,
 } from "./TuiRootLayout.js";
 
@@ -46,17 +46,29 @@ export function TuiApp(props: TuiAppProps) {
         () => props.runtime.selection.getSnapshot(),
         () => props.runtime.selection.getSnapshot(),
     );
+    const viewport = useSyncExternalStore(
+        (listener) => props.runtime.viewport.subscribe(listener),
+        () => props.runtime.viewport.getSnapshot(),
+        () => props.runtime.viewport.getSnapshot(),
+    );
     const connection = selectConnectionState(state);
     const errorLines = selectErrorMessage(state);
     const overlay = topTuiOverlay(state.interaction.overlays);
     const footer = selectFooterModel(state);
-    const layout = tuiLayoutMetrics(props.runtime.columns);
-    const renderRows = tuiRenderRows(props.runtime.rows);
     const fullWidth = tuiTerminalFullScreen(state);
-    const boxInnerWidth = mainInnerWidth(props.runtime.columns, fullWidth);
+    const geometry = tuiMainLayoutMetrics(
+        viewport.columns,
+        viewport.rows,
+        !fullWidth,
+    );
+    const layout = geometry.layout;
+    const renderRows = geometry.renderRows;
+    const boxInnerWidth = mainInnerWidth(viewport.columns, fullWidth);
     const viewportRows = Math.max(
         0,
-        renderRows - (layout.mode === "compact" ? 10 : 7) - (errorLines?.length ?? 0) - (connection.status === "connecting" ? 1 : 0)
+        geometry.contentHeight -
+            tuiBlockHeight(errorLines) -
+            (connection.status === "connecting" ? 1 : 0),
     );
     const terminalRows = Math.max(1, viewportRows - 1);
     const openTerminal = useCallback(
@@ -77,9 +89,9 @@ export function TuiApp(props: TuiAppProps) {
         void props.runtime.handleInput(input, key);
     });
     return (
-        <Box height={renderRows} width={props.runtime.columns}>
+        <Box height={renderRows} width={viewport.columns}>
             <TuiRootLayout
-            columns={props.runtime.columns}
+            columns={viewport.columns}
             footer={<TuiComponentFooter text={footer.text} />}
             header={<TuiComponentHeader stateLabel={connection.status} summary={selectHeaderSummary(state)} title={selectHeaderTitle()} />}
             main={
@@ -128,7 +140,7 @@ export function TuiApp(props: TuiAppProps) {
                     {connection.status === "connecting" ? <Text color="cyan">Connecting to control server...</Text> : undefined}
                 </Box>
             }
-            rows={props.runtime.rows}
+            rows={viewport.rows}
             sidebar={
                 fullWidth
                     ? undefined

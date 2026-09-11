@@ -9,6 +9,7 @@ import { TuiComponentErrorBanner } from "../component/TuiComponentErrorBanner.js
 import { measureMainBoxFlowMetrics, selectMainBoxIds, selectMainScreenModel, selectMainScrollKey, selectSidebarModel } from "../model/TuiViewProjection.js";
 import { TuiMessagesView } from "../page/messages/TuiMessagesView.js";
 import { TuiOverviewView } from "../page/TuiOverviewView.js";
+import { tuiBlockHeight } from "../TuiRootLayout.js";
 
 export interface TuiScreenRouterProps {
     boxInnerWidth: number;
@@ -29,11 +30,19 @@ export function TuiScreenRouter(props: TuiScreenRouterProps) {
     }
     if (props.state.ui.selectedPage === "overview") {
         const showOverview = model.loadState.kind === "ready" || model.loadState.kind === "stale";
+        const stateRows = model.loadState.kind === "ready" ? 0 : 1;
+        const overviewRows = Math.max(
+            0,
+            props.viewportRows -
+                tuiBlockHeight(model.errorLines) -
+                stateRows -
+                (model.statusLine === undefined ? 0 : 1),
+        );
         return (
             <Box flexDirection="column">
                 {model.errorLines === undefined ? undefined : <TuiComponentErrorBanner lines={model.errorLines} />}
                 <PageLoadState state={model.loadState} />
-                {showOverview ? <TuiOverviewView state={props.state} viewportRows={props.viewportRows} width={props.boxInnerWidth} /> : undefined}
+                {showOverview ? <TuiOverviewView state={props.state} viewportRows={overviewRows} width={props.boxInnerWidth} /> : undefined}
                 {model.statusLine !== undefined ? <Text color="yellow">{model.statusLine}</Text> : undefined}
             </Box>
         );
@@ -41,7 +50,15 @@ export function TuiScreenRouter(props: TuiScreenRouterProps) {
     const flow = measureMainBoxFlowMetrics(model.boxes, selectMainScrollKey(props.state), props.boxInnerWidth);
     const scrollOffset = props.state.ui.scrollOffsets[flow.scrollKey] ?? 0;
     const stateRows = model.loadState.kind === "ready" ? 0 : 1;
-    const boxViewportRows = Math.max(0, props.viewportRows - 1 - stateRows - (model.statusLine === undefined ? 0 : 1) - (model.emptyState === undefined ? 0 : 1));
+    const boxViewportRows = Math.max(
+        0,
+        props.viewportRows -
+            1 -
+            tuiBlockHeight(model.errorLines) -
+            stateRows -
+            (model.statusLine === undefined ? 0 : 1) -
+            (model.emptyState === undefined ? 0 : 1),
+    );
     const clampedOffset = clamp(scrollOffset, 0, Math.max(0, flow.totalLines - boxViewportRows));
     const visibleLines = boxViewportRows > 0
         ? renderVisibleBoxLines(model.boxes, flow.boxRanges, props.boxInnerWidth, clampedOffset, boxViewportRows)

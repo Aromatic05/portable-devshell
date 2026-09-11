@@ -12,9 +12,8 @@ import {
 } from "./model/TuiViewProjection.js";
 import {
     isTerminalSizeSupported,
-    mainInnerWidth,
-    tuiLayoutMetrics,
-    tuiRenderRows,
+    tuiBlockHeight,
+    tuiMainLayoutMetrics,
 } from "./TuiRootLayout.js";
 import {
     selectTuiSidebarViewport,
@@ -75,25 +74,20 @@ export function buildTuiTerminalViewportRegion(
         return undefined;
     }
 
-    const layout = tuiLayoutMetrics(viewport.columns);
-    const compact = layout.mode === "compact";
-    const globalErrorHeight = blockHeight(selectErrorMessage(state));
-    const renderRows = tuiRenderRows(viewport.rows);
+    const geometry = tuiMainLayoutMetrics(viewport.columns, viewport.rows);
+    const globalErrorHeight = tuiBlockHeight(selectErrorMessage(state));
     const viewportRows = Math.max(
         0,
-        renderRows -
-            (compact ? 10 : 7) -
+        geometry.contentHeight -
             globalErrorHeight -
             (state.connection.status === "connecting" ? 1 : 0),
     );
 
     return {
         height: Math.max(1, viewportRows - 2),
-        width: Math.max(1, mainInnerWidth(viewport.columns)),
-        x: compact
-            ? 2
-            : layout.outerGap + layout.sidebarWidth + layout.panelGap + 2,
-        y: (compact ? 6 : 5) + globalErrorHeight + 2,
+        width: Math.max(1, geometry.contentWidth),
+        x: geometry.contentX,
+        y: geometry.contentY + globalErrorHeight + 2,
     };
 }
 
@@ -110,25 +104,20 @@ export function buildTuiTextDetailImageRegion(
         return undefined;
     }
 
-    const layout = tuiLayoutMetrics(viewport.columns);
-    const compact = layout.mode === "compact";
-    const globalErrorHeight = blockHeight(selectErrorMessage(state));
-    const renderRows = tuiRenderRows(viewport.rows);
+    const geometry = tuiMainLayoutMetrics(viewport.columns, viewport.rows);
+    const globalErrorHeight = tuiBlockHeight(selectErrorMessage(state));
     const viewportRows = Math.max(
         0,
-        renderRows -
-            (compact ? 10 : 7) -
+        geometry.contentHeight -
             globalErrorHeight -
             (state.connection.status === "connecting" ? 1 : 0),
     );
 
     return {
         height: tuiTextDetailImageRows(viewportRows),
-        width: Math.max(1, mainInnerWidth(viewport.columns)),
-        x: compact
-            ? 2
-            : layout.outerGap + layout.sidebarWidth + layout.panelGap + 2,
-        y: (compact ? 6 : 5) + globalErrorHeight + 2,
+        width: Math.max(1, geometry.contentWidth),
+        x: geometry.contentX,
+        y: geometry.contentY + globalErrorHeight + 2,
     };
 }
 
@@ -144,25 +133,22 @@ export function buildTuiHitRegions(
     }
 
     const regions: TuiHitRegion[] = [];
-    const globalErrorHeight = blockHeight(selectErrorMessage(state));
+    const globalErrorHeight = tuiBlockHeight(selectErrorMessage(state));
     if (tuiTerminalFullScreen(state)) {
         pushTerminalTabRegions(regions, 2, 5 + globalErrorHeight + 1);
         return regions;
     }
 
-    const layout = tuiLayoutMetrics(viewport.columns);
+    const geometry = tuiMainLayoutMetrics(viewport.columns, viewport.rows);
+    const layout = geometry.layout;
     const sidebar = selectSidebarModel(state);
     const main = selectMainScreenModel(state);
-    const boxInnerWidth = mainInnerWidth(viewport.columns);
+    const boxInnerWidth = geometry.contentWidth;
     const metrics = selectMainBoxFlowMetrics(state, boxInnerWidth);
     const compact = layout.mode === "compact";
-    const mainX = compact
-        ? 2
-        : layout.outerGap + layout.sidebarWidth + layout.panelGap + 2;
-    const mainWidth = compact
-        ? Math.max(0, viewport.columns - 4)
-        : Math.max(0, layout.mainPanelWidth - 2);
-    const contentY = compact ? 6 : 5;
+    const mainX = geometry.contentX;
+    const mainWidth = geometry.contentWidth;
+    const contentY = geometry.contentY;
     if (!compact) {
         const sidebarRegions = tuiSidebarRegions(viewport)!;
         const contextViewport = selectTuiSidebarViewport(
@@ -193,11 +179,9 @@ export function buildTuiHitRegions(
         }
     }
 
-    const renderRows = tuiRenderRows(viewport.rows);
     const viewportRows = Math.max(
         0,
-        renderRows -
-            (compact ? 10 : 7) -
+        geometry.contentHeight -
             globalErrorHeight -
             (state.connection.status === "connecting" ? 1 : 0),
     );
@@ -221,19 +205,27 @@ export function buildTuiHitRegions(
     }
     if (state.ui.selectedPage === "overview") {
         const overview = selectTuiOverviewPresentation(state);
+        const stateRows = main.loadState.kind === "ready" ? 0 : 1;
+        const pageErrorHeight = tuiBlockHeight(main.errorLines);
+        const overviewRows = Math.max(
+            0,
+            viewportRows -
+                pageErrorHeight -
+                stateRows -
+                (main.statusLine === undefined ? 0 : 1),
+        );
         const overviewViewport = selectTuiOverviewInstanceViewport(
             state,
-            viewportRows,
+            overviewRows,
         );
-        const stateRows = main.loadState.kind === "ready" ? 0 : 1;
         const mainY =
             contentY +
             globalErrorHeight +
-            blockHeight(main.errorLines) +
+            pageErrorHeight +
             stateRows;
         const firstInstanceY = mainY + 4 + overview.meters.length;
         regions.push({
-            height: Math.max(1, viewportRows),
+            height: Math.max(1, overviewRows),
             target: { kind: "scrollViewport" },
             width: mainWidth,
             x: mainX,
@@ -251,13 +243,15 @@ export function buildTuiHitRegions(
         return regions;
     }
 
-    const mainY =
-        contentY + globalErrorHeight + 1 + blockHeight(main.errorLines);
     const stateRows = main.loadState.kind === "ready" ? 0 : 1;
+    const pageErrorHeight = tuiBlockHeight(main.errorLines);
+    const mainY =
+        contentY + globalErrorHeight + 1 + pageErrorHeight + stateRows;
     const boxViewportRows = Math.max(
         0,
         viewportRows -
             1 -
+            pageErrorHeight -
             stateRows -
             (main.statusLine === undefined ? 0 : 1) -
             (main.emptyState === undefined ? 0 : 1),
@@ -331,7 +325,8 @@ export function tuiScreenSelectionColumnBounds(
     if (topTuiOverlay(state.interaction.overlays) !== undefined) {
         return undefined;
     }
-    const layout = tuiLayoutMetrics(viewport.columns);
+    const geometry = tuiMainLayoutMetrics(viewport.columns, viewport.rows);
+    const layout = geometry.layout;
     if (layout.mode !== "full") {
         return undefined;
     }
@@ -346,8 +341,7 @@ export function tuiScreenSelectionColumnBounds(
     ) {
         return undefined;
     }
-    const mainStart =
-        layout.outerGap + layout.sidebarWidth + layout.panelGap + 2;
+    const mainStart = geometry.contentX;
     if (Math.floor(x) < mainStart) {
         return {
             end: sidebar.context.x + sidebar.context.width - 1,
@@ -355,7 +349,7 @@ export function tuiScreenSelectionColumnBounds(
         };
     }
     return {
-        end: mainStart + Math.max(0, layout.mainPanelWidth - 2) - 1,
+        end: mainStart - 1 + geometry.contentWidth,
         start: mainStart - 1,
     };
 }
@@ -377,10 +371,6 @@ export function hitTargetAt(
         }
     }
     return undefined;
-}
-
-function blockHeight(lines: readonly string[] | undefined): number {
-    return lines === undefined ? 0 : lines.length + 2;
 }
 
 function pushTerminalTabRegions(

@@ -621,6 +621,30 @@ test("production Ink scrolling does not clear and repaint the whole terminal", a
     }
 });
 
+test("host terminal resize immediately reflows the live TUI", async () => {
+    const terminal = createTerminal({ columns: 120, rows: 40 });
+    const clients = createClients();
+    const runtime = new TuiRuntime(
+        { stdin: terminal.stdin, stdout: terminal.stdout },
+        { clients: clients.value, inkDebug: true },
+    );
+    const running = runtime.run();
+
+    try {
+        await waitUntil(() => runtime.store.getState().connection.status === "connected");
+        const beforeResize = terminal.output.length;
+        terminal.resize(59, 20);
+        await waitUntil(
+            () => terminal.output.slice(beforeResize).includes("Terminal too small"),
+            250,
+        );
+    } finally {
+        terminal.write("\u0004");
+        await running;
+        await runtime.stop();
+    }
+});
+
 test("real Ink runtime moves mouse focus into an expanded main box from the sidebar", async () => {
     const terminal = createTerminal();
     const clients = createClients();
@@ -1903,6 +1927,7 @@ function createClients(
 function createTerminal(options: { columns?: number; rows?: number } = {}): {
     output: string;
     rawModes: boolean[];
+    resize(columns: number, rows: number): void;
     stdin: ReadStream;
     stdout: WriteStream;
     write(value: string): void;
@@ -1926,9 +1951,9 @@ function createTerminal(options: { columns?: number; rows?: number } = {}): {
     }
 
     class Output extends PassThrough {
-        readonly columns = options.columns ?? 120;
+        columns = options.columns ?? 120;
         readonly isTTY = true;
-        readonly rows = options.rows ?? 40;
+        rows = options.rows ?? 40;
     }
 
     const input = new Input();
@@ -1943,6 +1968,11 @@ function createTerminal(options: { columns?: number; rows?: number } = {}): {
             return captured;
         },
         rawModes: input.rawModes,
+        resize(columns: number, rows: number) {
+            output.columns = columns;
+            output.rows = rows;
+            output.emit("resize");
+        },
         stdin: input as unknown as ReadStream,
         stdout: output as unknown as WriteStream,
         write(value: string) {

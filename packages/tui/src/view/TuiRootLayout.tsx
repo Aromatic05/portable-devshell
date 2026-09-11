@@ -22,11 +22,50 @@ export interface TuiRootLayoutProps {
 }
 
 export function mainInnerWidth(columns: number, fullWidth = false): number {
-    if (fullWidth) {
-        return Math.max(0, columns - 4);
-    }
+    if (fullWidth) return Math.max(0, columns - 4);
     const layout = tuiLayoutMetrics(columns);
-    return layout.mode === "compact" ? Math.max(0, columns - 4) : Math.max(0, layout.mainPanelWidth - GAP * 8);
+    return layout.mode === "compact"
+        ? Math.max(0, columns - 4)
+        : Math.max(0, layout.mainPanelWidth - 4);
+}
+
+export function tuiBlockHeight(lines: readonly string[] | undefined): number {
+    return lines === undefined ? 0 : lines.length + 2;
+}
+
+export function tuiMainLayoutMetrics(
+    columns: number,
+    rows: number,
+    sidebarVisible = true,
+): {
+    contentHeight: number;
+    contentWidth: number;
+    contentX: number;
+    contentY: number;
+    layout: ReturnType<typeof tuiLayoutMetrics>;
+    renderRows: number;
+} {
+    const layout = tuiLayoutMetrics(columns);
+    const renderRows = tuiRenderRows(rows);
+    const compactSidebarRows =
+        sidebarVisible && layout.mode === "compact" ? 2 : 0;
+    const panelWidth =
+        sidebarVisible && layout.mode === "full"
+            ? layout.mainPanelWidth
+            : Math.max(0, columns);
+    const panelOuterX =
+        sidebarVisible && layout.mode === "full"
+            ? layout.outerGap + layout.sidebarWidth + layout.panelGap + 1
+            : 1;
+    const panelOuterY = 4 + compactSidebarRows;
+    return {
+        contentHeight: Math.max(0, renderRows - 6 - compactSidebarRows - 2),
+        contentWidth: Math.max(0, panelWidth - 4),
+        contentX: panelOuterX + 2,
+        contentY: panelOuterY + 1,
+        layout,
+        renderRows,
+    };
 }
 
 export function TuiRootLayout(props: TuiRootLayoutProps) {

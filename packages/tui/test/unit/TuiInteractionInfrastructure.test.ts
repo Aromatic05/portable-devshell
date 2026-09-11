@@ -889,6 +889,9 @@ test("mouse hit regions follow the rendered sidebar, boxes, and overlays", () =>
             region.target.kind === "boxTitle" &&
             region.target.boxId === "create-instance",
     )!;
+    const scrollRegion = initialRegions.find(
+        (region) => region.target.kind === "scrollViewport",
+    )!;
 
     assert.deepEqual(
         hitTargetAt(initialRegions, pageRegion.x, pageRegion.y),
@@ -902,6 +905,7 @@ test("mouse hit regions follow the rendered sidebar, boxes, and overlays", () =>
         hitTargetAt(initialRegions, boxRegion.x, boxRegion.y),
         boxRegion.target,
     );
+    assert.equal(boxRegion.width, mainInnerWidth(viewport.columns));
 
     harness.store.setPanelError(
         "instances:alpha",
@@ -920,7 +924,11 @@ test("mouse hit regions follow the rendered sidebar, boxes, and overlays", () =>
             region.target.kind === "boxTitle" &&
             region.target.boxId === "create-instance",
     )!;
-    assert.equal(shiftedBoxRegion.y, boxRegion.y + 3);
+    const erroredScrollRegion = erroredRegions.find(
+        (region) => region.target.kind === "scrollViewport",
+    )!;
+    assert.equal(shiftedBoxRegion.y, boxRegion.y + 4);
+    assert.equal(erroredScrollRegion.height, scrollRegion.height - 4);
 });
 
 test("expanded box hit regions follow wrapped line ids", () => {
@@ -1144,7 +1152,9 @@ test("box borders encode result status and retain severity while focused", () =>
 });
 
 test("narrow terminals use compact navigation and reject unsupported sizes", () => {
-    assert.equal(tuiLayoutMetrics(120).mode, "full");
+    const fullLayout = tuiLayoutMetrics(120);
+    assert.equal(fullLayout.mode, "full");
+    assert.equal(mainInnerWidth(120), fullLayout.mainPanelWidth - 4);
     assert.equal(tuiLayoutMetrics(80).mode, "compact");
     assert.equal(mainInnerWidth(80), 76);
     assert.equal(isTerminalSizeSupported(80, 20), true);

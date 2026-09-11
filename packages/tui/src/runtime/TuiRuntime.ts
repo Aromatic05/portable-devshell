@@ -17,6 +17,7 @@ import { buildFocusGraphForState } from "../view/screen/TuiScreenRouter.js";
 import { TuiAppStore } from "../state/TuiAppStore.js";
 import { topTuiOverlay } from "../state/overlay/TuiOverlay.js";
 import {
+    selectErrorMessage,
     selectMainScreenModel,
     selectTerminalTab,
     tuiViewProjection,
@@ -36,8 +37,8 @@ import {
 import { tuiSidebarSectionAt } from "../view/TuiSidebarPresentation.js";
 import {
     mainInnerWidth,
-    tuiLayoutMetrics,
-    tuiRenderRows,
+    tuiBlockHeight,
+    tuiMainLayoutMetrics,
 } from "../view/TuiRootLayout.js";
 import { TuiRuntimeOperations } from "./TuiRuntimeOperations.js";
 import { TuiRouteDataLoader } from "./route/TuiRouteDataLoader.js";
@@ -64,6 +65,7 @@ import {
     createTuiScreenCaptureStdout,
     TuiScreenTextSelection,
 } from "./TuiScreenTextSelection.js";
+import { TuiViewport } from "./TuiViewport.js";
 
 const TERMINAL_ESCAPE_TIMEOUT_MS = 100;
 
@@ -94,6 +96,7 @@ export class TuiRuntime {
     readonly store: TuiAppStore;
     readonly terminal: TuiTerminalSession;
     readonly tmuxPanes: TuiTmuxPaneTerminalSession;
+    readonly viewport: TuiViewport;
     readonly #alternateScreen: AlternateScreen;
     readonly #inkDebug: boolean;
     readonly #inkStdin: ReadStream;
@@ -133,11 +136,16 @@ export class TuiRuntime {
     ) {
         this.#stdin = options.stdin ?? process.stdin;
         const stdout = options.stdout ?? process.stdout;
-        this.selection = new TuiScreenTextSelection({
+        this.viewport = new TuiViewport({
             columns: stdout.columns ?? 120,
             rows: stdout.rows ?? 40,
         });
+        this.selection = new TuiScreenTextSelection({
+            columns: this.viewport.getSnapshot().columns,
+            rows: this.viewport.getSnapshot().rows,
+        });
         this.#stdout = createTuiScreenCaptureStdout(stdout, this.selection);
+        this.#stdout.on("resize", this.#handleHostResize);
         this.#inkDebug = dependencies.inkDebug ?? false;
         this.#terminalGraphicsSupport = detectTerminalGraphicsSupport(
             process.env,
@@ -226,11 +234,16 @@ export class TuiRuntime {
             focusManager: this.focusManager,
             mainViewportColumns: () => mainInnerWidth(this.columns),
             mainViewportRows: () => {
-                const layout = tuiLayoutMetrics(this.columns);
+                const geometry = tuiMainLayoutMetrics(
+                    this.columns,
+                    this.rows,
+                );
+                const state = this.store.getState();
                 return Math.max(
                     0,
-                    tuiRenderRows(this.rows) -
-                        (layout.mode === "compact" ? 10 : 7),
+                    geometry.contentHeight -
+                        tuiBlockHeight(selectErrorMessage(state)) -
+                        (state.connection.status === "connecting" ? 1 : 0),
                 );
             },
             onApprovalDecision: async (instance, approvalId, decision) => {
@@ -414,11 +427,11 @@ export class TuiRuntime {
     }
 
     get columns(): number {
-        return this.#stdout.columns ?? 120;
+        return this.viewport.getSnapshot().columns;
     }
 
     get rows(): number {
-        return this.#stdout.rows ?? 40;
+        return this.viewport.getSnapshot().rows;
     }
 
     handleInput(input: string, key: TuiAppKey): Promise<void> {
@@ -527,9 +540,17 @@ export class TuiRuntime {
         this.#ink?.unmount();
         this.#ink = undefined;
         this.#stopInput();
+        this.#stdout.off("resize", this.#handleHostResize);
         this.#alternateScreen.exit();
         this.selection.dispose();
     }
+
+    #handleHostResize = (): void => {
+        const columns = this.#stdout.columns ?? 120;
+        const rows = this.#stdout.rows ?? 40;
+        if (!this.viewport.resize(columns, rows)) return;
+        this.selection.resize(columns, rows);
+    };
 
     redraw(): void {
         this.#stdout.write("\u001B[2J\u001B[H");
