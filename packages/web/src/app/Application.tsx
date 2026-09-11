@@ -9,6 +9,7 @@ import { webFailures } from "../state/WebState.js";
 import type { ApplicationBusy } from "../session/useWebApplicationSession.js";
 import { Approvals } from "../views/Approvals.js";
 import { Instances } from "../views/Instances.js";
+import { Messages } from "../views/Messages.js";
 import { Overview } from "../views/Overview.js";
 import { Todos } from "../views/Todos.js";
 import { ToolCalls } from "../views/ToolCalls.js";
@@ -77,7 +78,7 @@ export function Application({
             {route.page === "instances" ? <Instances disabled={interactionDisabled} store={store} /> : null}
             {route.page === "approvals" ? <Approvals disabled={interactionDisabled} store={store} /> : null}
             {route.page === "audit" ? <ToolCalls disabled={interactionDisabled} state={state} store={store} /> : null}
-            {route.page === "messages" ? <section><h2>Messages</h2><p className="empty">Select a conversation.</p></section> : null}
+            {route.page === "messages" ? <Messages navigate={navigate} route={route} state={state} /> : null}
             {route.page === "todos" ? <Todos disabled={interactionDisabled} state={state} store={store} /> : null}
         </main>
         <nav aria-label="Primary navigation" className="bottom">
