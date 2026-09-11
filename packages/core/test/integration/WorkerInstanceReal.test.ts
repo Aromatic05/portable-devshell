@@ -63,20 +63,20 @@ test("WorkerInstance completes lifecycle against frozen devshell-worker", realWo
     const bashRun = instance.listTools().find((tool) => tool.name === "bash_run");
     assert.notEqual(bashRun, undefined);
     assert.notEqual(bashRun?.inputSchema, undefined);
-    const fileFind = instance.listTools().find((tool) => tool.name === "file_find");
-    assert.notEqual(fileFind, undefined);
-    const fileFindSchema = fileFind?.inputSchema as {
+    const fileGlob = instance.listTools().find((tool) => tool.name === "file_glob");
+    assert.notEqual(fileGlob, undefined);
+    const fileGlobSchema = fileGlob?.inputSchema as {
         anyOf?: unknown;
         oneOf?: unknown;
         properties?: Record<string, unknown>;
         type?: unknown;
     };
-    assert.equal(fileFindSchema.type, "object");
-    assert.equal(fileFindSchema.anyOf, undefined);
-    assert.equal(fileFindSchema.oneOf, undefined);
-    assert.notEqual(fileFindSchema.properties?.paths, undefined);
-    assert.notEqual(fileFindSchema.properties?.type, undefined);
-    assert.notEqual(fileFindSchema.properties?.cursor, undefined);
+    assert.equal(fileGlobSchema.type, "object");
+    assert.equal(fileGlobSchema.anyOf, undefined);
+    assert.equal(fileGlobSchema.oneOf, undefined);
+    assert.notEqual(fileGlobSchema.properties?.patterns, undefined);
+    assert.notEqual(fileGlobSchema.properties?.type, undefined);
+    assert.notEqual(fileGlobSchema.properties?.cursor, undefined);
 
     const replay = instance.subscribe(1);
     assert.equal(replay.kind, "events");

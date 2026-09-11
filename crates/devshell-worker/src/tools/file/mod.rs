@@ -4,11 +4,10 @@ pub mod cursor;
 pub mod diff;
 pub mod discover;
 pub mod edit;
-pub mod find;
-pub mod info;
+pub mod glob;
+pub mod grep;
 pub mod publish;
 pub mod read;
-pub mod search;
 pub mod state;
 pub mod structure;
 pub mod types;
@@ -25,8 +24,8 @@ use crate::security::path::{
 use crate::tools::{ToolCall, ToolError};
 
 pub struct FileToolState {
-    pub find_cursors: Mutex<cursor::CursorStore<find::FindContinuation>>,
-    pub search_cursors: Mutex<cursor::CursorStore<search::SearchContinuation>>,
+    pub glob_cursors: Mutex<cursor::CursorStore<glob::GlobContinuation>>,
+    pub grep_cursors: Mutex<cursor::CursorStore<grep::GrepContinuation>>,
     pub context_snapshots: Mutex<state::ContextSnapshotStore>,
     snapshot_ordinal: AtomicU64,
     write_locks: Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>,
@@ -34,8 +33,8 @@ pub struct FileToolState {
 impl FileToolState {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            find_cursors: Mutex::new(cursor::CursorStore::default()),
-            search_cursors: Mutex::new(cursor::CursorStore::default()),
+            glob_cursors: Mutex::new(cursor::CursorStore::default()),
+            grep_cursors: Mutex::new(cursor::CursorStore::default()),
             context_snapshots: Mutex::new(state::ContextSnapshotStore::default()),
             snapshot_ordinal: AtomicU64::new(1),
             write_locks: Mutex::new(HashMap::new()),

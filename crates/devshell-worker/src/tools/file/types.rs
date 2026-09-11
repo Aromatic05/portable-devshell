@@ -7,7 +7,41 @@ pub enum FileReadView {
     #[default]
     Auto,
     Content,
+    Metadata,
     Outline,
+}
+
+#[derive(Clone, Copy, Debug, JsonSchema, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FileReadResolvedView {
+    Content,
+    Metadata,
+    Outline,
+}
+
+#[derive(Clone, Copy, Debug, JsonSchema, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FileEntryType {
+    File,
+    Directory,
+    Symlink,
+    Other,
+}
+
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileReadMetadata {
+    pub exists: bool,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub entry_type: Option<FileEntryType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_at_ms: Option<u128>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_type: Option<FileEntryType>,
 }
 
 #[derive(Clone, Copy, Debug, JsonSchema, PartialEq, Eq, Serialize)]
@@ -46,9 +80,11 @@ pub enum FileReadInput {
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FileReadOutput {
-    pub content: String,
+    pub view: FileReadResolvedView,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub view: Option<FileReadView>,
+    pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<FileReadMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub truncated: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -63,9 +99,11 @@ pub struct FileReadOutput {
 #[serde(rename_all = "camelCase")]
 pub struct FileReadBatchEntry {
     pub path: String,
-    pub content: String,
+    pub view: FileReadResolvedView,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub view: Option<FileReadView>,
+    pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<FileReadMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub truncated: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -80,8 +118,9 @@ impl FileReadBatchEntry {
     pub fn from_output(path: String, output: FileReadOutput) -> Self {
         Self {
             path,
-            content: output.content,
             view: output.view,
+            content: output.content,
+            metadata: output.metadata,
             truncated: output.truncated,
             next_selector: output.next_selector,
             language: output.language,
@@ -170,63 +209,50 @@ pub struct FileChangeSetOutput {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(untagged)]
-pub enum FileFindInput {
-    Start(FileFindStartInput),
-    Continue(FileCursorInput),
-}
-#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FileFindStartInput {
+pub struct FileGlobInput {
     #[schemars(length(min = 1))]
-    pub paths: Vec<String>,
+    /// Exact paths or glob patterns. Required when cursor is absent.
+    pub patterns: Option<Vec<String>>,
     #[serde(rename = "type")]
     /// Entry type filter. Defaults to any.
-    pub entry_type: Option<FindType>,
+    pub entry_type: Option<GlobType>,
     /// Include hidden entries. Defaults to true.
     pub hidden: Option<bool>,
     /// Respect ignore files. Defaults to true.
     pub gitignore: Option<bool>,
-}
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FileCursorInput {
+    /// Continue a previous page. When present, omit all other fields.
     #[schemars(length(min = 1))]
-    pub cursor: String,
+    pub cursor: Option<String>,
 }
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum FindType {
+pub enum GlobType {
     File,
     Directory,
     Any,
 }
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct FileFindOutput {
-    pub entries: Vec<FileFindEntry>,
+pub struct FileGlobOutput {
+    pub entries: Vec<FileGlobEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct FileFindEntry {
+pub struct FileGlobEntry {
     pub path: String,
     #[serde(rename = "type")]
-    pub entry_type: String,
+    pub entry_type: FileEntryType,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(untagged)]
-pub enum FileSearchInput {
-    Start(FileSearchStartInput),
-    Continue(FileCursorInput),
-}
-#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FileSearchStartInput {
+pub struct FileGrepInput {
+    /// Search pattern. Required when cursor is absent.
     #[schemars(length(min = 1))]
-    pub pattern: String,
+    pub pattern: Option<String>,
     /// Paths to search. Defaults to ["./"].
     #[schemars(length(min = 1))]
     pub paths: Option<Vec<String>>,
@@ -243,6 +269,9 @@ pub struct FileSearchStartInput {
     /// First source line eligible to match. Only valid for one exact file and defaults to 1.
     #[schemars(range(min = 1))]
     pub start_line: Option<usize>,
+    /// Continue a previous page. When present, omit all other fields.
+    #[schemars(length(min = 1))]
+    pub cursor: Option<String>,
 }
 #[derive(Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -252,14 +281,14 @@ pub enum SearchSyntax {
 }
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct FileSearchOutput {
-    pub files: Vec<FileSearchFile>,
+pub struct FileGrepOutput {
+    pub files: Vec<FileGrepFile>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct FileSearchFile {
+pub struct FileGrepFile {
     pub path: String,
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -268,35 +297,4 @@ pub struct FileSearchFile {
     #[serde(skip_serializing_if = "Option::is_none")]
     /// First omitted matching line. Search this exact file again with startLine to continue.
     pub next_line: Option<usize>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FileInfoInput {
-    #[schemars(length(min = 1))]
-    pub paths: Vec<String>,
-    /// Include size, modification time, and mode. Defaults to false.
-    pub details: Option<bool>,
-}
-#[derive(Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FileInfoOutput {
-    pub entries: Vec<FileInfoEntry>,
-}
-#[derive(Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FileInfoEntry {
-    pub path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub exists: Option<bool>,
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
-    pub entry_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub size_bytes: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub modified_at_ms: Option<u128>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mode: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub target_type: Option<String>,
 }

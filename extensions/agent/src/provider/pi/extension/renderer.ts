@@ -7,16 +7,14 @@ import {
     renderFileEditResultComponent
 } from "./file-edit-renderer.js";
 import {
-    formatFindCall,
-    formatInfoCall,
+    formatGlobCall,
+    formatGrepCall,
     formatReadCall,
-    formatSearchCall,
-    renderFileFind,
-    renderFileInfo,
+    renderFileGlob,
+    renderFileGrep,
     renderFileRead,
     renderFileReadComponent,
-    renderFileSummaryComponent,
-    renderFileSearch
+    renderFileSummaryComponent
 } from "./file-tool-renderer.js";
 import type {
     PiThemeLike,
@@ -50,10 +48,9 @@ export type {
 export const devshellPiRendererToolNames = Object.freeze([
     "bash_run",
     "file_edit",
-    "file_find",
-    "file_info",
+    "file_glob",
+    "file_grep",
     "file_read",
-    "file_search",
     "tmux_close",
     "tmux_create",
     "tmux_input",
@@ -93,9 +90,8 @@ export function renderPiToolResult(
     switch (toolName) {
         case "file_read":
             return renderFileReadComponent(result, options, theme, context);
-        case "file_find":
-        case "file_info":
-        case "file_search":
+        case "file_glob":
+        case "file_grep":
             return renderFileSummaryComponent(toolName, result, options, theme, context);
         case "bash_run":
             return renderBashResultComponent(result, options, theme, context);
@@ -120,14 +116,12 @@ export function formatPiToolCall(toolName: string, args: unknown, theme?: PiThem
             return formatShellCall(record, theme);
         case "file_edit":
             return formatFileEditStaticCall(stringField(record, "changes"), theme);
-        case "file_find":
-            return formatFindCall(record, theme);
-        case "file_info":
-            return formatInfoCall(record, theme);
+        case "file_glob":
+            return formatGlobCall(record, theme);
+        case "file_grep":
+            return formatGrepCall(record, theme);
         case "file_read":
             return formatReadCall(record, theme);
-        case "file_search":
-            return formatSearchCall(record, theme);
         case "tmux_close":
         case "tmux_create":
         case "tmux_input":
@@ -155,14 +149,12 @@ export function formatPiToolResult(
             return joinStyled(renderBashResult(result.details, expanded), theme);
         case "file_edit":
             return joinStyled(renderFileEditFallback(result.details, theme), theme);
-        case "file_find":
-            return joinStyled(renderFileFind(result.details, expanded), theme);
-        case "file_info":
-            return joinStyled(renderFileInfo(result.details), theme);
+        case "file_glob":
+            return joinStyled(renderFileGlob(result.details, expanded), theme);
+        case "file_grep":
+            return joinStyled(renderFileGrep(result.details, expanded), theme);
         case "file_read":
             return joinStyled(renderFileRead(result.details, expanded), theme);
-        case "file_search":
-            return joinStyled(renderFileSearch(result.details, expanded), theme);
         case "tmux_close":
         case "tmux_create":
         case "tmux_input":
@@ -185,10 +177,9 @@ export function formatPiToolResult(
 function displayToolLabel(toolName: string): string {
     switch (toolName) {
         case "bash_run": return "$";
-        case "file_find": return "find";
-        case "file_info": return "stat";
+        case "file_glob": return "glob";
+        case "file_grep": return "grep";
         case "file_read": return "read";
-        case "file_search": return "grep";
         default: return toolName.startsWith("tmux_") ? `tmux ${toolName.slice(5)}` : toolName;
     }
 }

@@ -126,8 +126,8 @@ async function modelRead(
 }
 
 async function projectSkills(session: ExtensionWorkerSession, signal: AbortSignal): Promise<SkillMetadata[]> {
-    const found = asRecord(await session.callTool("file_find", {
-        paths: ["./.agents/skills/*/SKILL.md"],
+    const found = asRecord(await session.callTool("file_glob", {
+        patterns: ["./.agents/skills/*/SKILL.md"],
         type: "file"
     }, { signal }));
     const entries = Array.isArray(found.entries) ? found.entries : [];
@@ -168,8 +168,8 @@ async function projectSkill(
         if (isFileNotFound(error)) return undefined;
         throw error;
     }
-    const found = asRecord(await session.callTool("file_find", {
-        paths: [`${root}/**/*`],
+    const found = asRecord(await session.callTool("file_glob", {
+        patterns: [`${root}/**/*`],
         type: "file"
     }, { signal }));
     const entries = Array.isArray(found.entries) ? found.entries : [];

@@ -29,7 +29,12 @@ import type { WorkspaceAppLeaseStore } from "../workspace/WorkspaceAppLeaseStore
 import type { WorkspaceAppPresenceStore } from "../workspace/WorkspaceAppPresenceStore.js";
 import { McpWorkspaceReentryArbiter } from "../workspace/McpWorkspaceReentryArbiter.js";
 import { throwIfMcpEndpointAborted, waitForMcpEndpointAbortable } from "./McpEndpointCancellation.js";
-import { mcpLegacyToolTombstone, resolveMcpLegacyTool } from "./McpEndpointCompatibility.js";
+import {
+    adaptMcpLegacyFileToolInput,
+    adaptMcpLegacyFileToolResult,
+    mcpLegacyToolTombstone,
+    resolveMcpLegacyTool
+} from "./McpEndpointCompatibility.js";
 import { attachMcpComments } from "./McpEndpointFeedback.js";
 import type { McpEndpointCatalog, McpEndpointCatalogWorker } from "./McpEndpointCatalog.js";
 import { readMcpContextInput, readMcpProvenanceInput, readMcpRoutedInput } from "./McpEndpointInput.js";
@@ -150,6 +155,7 @@ export class McpEndpointDispatch {
     ): Promise<McpEndpointResult> {
         throwIfMcpEndpointAborted(signal);
         const requestedToolName = toolName;
+        const requestedInput = input;
         const compatibility = resolveMcpLegacyTool(toolName);
         if (compatibility?.kind === "tombstone") {
             return mcpLegacyToolTombstone(toolName, compatibility);
@@ -157,8 +163,14 @@ export class McpEndpointDispatch {
         const legacyWorkspaceAppTool = compatibility?.kind === "workspace-app-v0615"
             ? requestedToolName
             : undefined;
-        if (compatibility?.kind === "alias" || compatibility?.kind === "workspace-app-v0615") {
+        if (
+            compatibility?.kind === "alias" || compatibility?.kind === "file-v07-alias" ||
+            compatibility?.kind === "workspace-app-v0615"
+        ) {
             toolName = compatibility.replacement;
+        }
+        if (compatibility?.kind === "file-v07-alias") {
+            input = adaptMcpLegacyFileToolInput(requestedToolName, input);
         }
         const snapshot = this.#catalog.snapshot();
         const known = snapshot.merged.find((entry) => entry.definition.name === toolName);
@@ -332,7 +344,10 @@ export class McpEndpointDispatch {
                             false,
                         );
                     }
-                    return await this.#attachComments(toolName, result, context, callId, routed.instance);
+                    const withComments = await this.#attachComments(toolName, result, context, callId, routed.instance);
+                    return compatibility?.kind === "file-v07-alias"
+                        ? adaptMcpLegacyFileToolResult(requestedToolName, withComments, requestedInput)
+                        : withComments;
                 }
             );
         } catch (error) {
@@ -1319,10 +1334,9 @@ function isPassiveWorkspaceRead(toolName: string): boolean {
 const OBSERVATION_TOOLS = new Set([
     "artifact_share",
     "artifact_viewImage",
-    "file_find",
-    "file_info",
+    "file_glob",
+    "file_grep",
     "file_read",
-    "file_search",
     "instance_list",
     "instance_status",
     "tmux_inspect",

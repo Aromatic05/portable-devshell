@@ -85,7 +85,7 @@ test("debug load forwards source only after local ownership is established", asy
             name: "load",
             payload: {
                 name: "probe",
-                scope: { ctxId: "ctx-own", toolName: "file_info" },
+                scope: { ctxId: "ctx-own", toolName: "file_read" },
                 source: "() => ({ action: 'continue' })",
                 target: "worker:demo-local",
             },
@@ -95,7 +95,7 @@ test("debug load forwards source only after local ownership is established", asy
 
     assert.deepEqual(received, {
         name: "probe",
-        scope: { ctxId: "ctx-own", toolName: "file_info" },
+        scope: { ctxId: "ctx-own", toolName: "file_read" },
         source: "() => ({ action: 'continue' })",
         target: "worker:demo-local",
     });

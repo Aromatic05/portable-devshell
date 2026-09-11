@@ -56,17 +56,17 @@ export async function loadDevshellPiWorkspaceResources(
     callTool: DevshellPiToolCall
 ): Promise<DevshellPiWorkspaceResources> {
     const contextFiles = await loadDevshellPiWorkspaceContext(target, toolNames, callTool);
-    if (!toolNames.has("file_find") || !toolNames.has("file_read")) {
+    if (!toolNames.has("file_glob") || !toolNames.has("file_read")) {
         return { contextFiles, prompts: [], skills: [] };
     }
     const resourcePaths = await projectResourcePaths(toolNames, callTool);
     if (resourcePaths.length === 0) return { contextFiles, prompts: [], skills: [] };
-    const found = asRecord(await callTool("file_find", {
+    const found = asRecord(await callTool("file_glob", {
         gitignore: true,
         hidden: true,
-        paths: resourcePaths,
+        patterns: resourcePaths,
         type: "file"
-    }, "pi-resources-find"));
+    }, "pi-resources-glob"));
     const paths = Array.isArray(found?.entries)
         ? found.entries.flatMap((value) => {
               const entry = asRecord(value);
@@ -99,15 +99,19 @@ async function projectResourcePaths(
 ): Promise<string[]> {
     const skillPaths = ["./.pi/skills/*.md", "./.pi/skills/**/SKILL.md"];
     const promptPaths = ["./.pi/prompts/*.md"];
-    if (!toolNames.has("file_info")) return [...skillPaths, ...promptPaths];
+    if (!toolNames.has("file_read")) return [...skillPaths, ...promptPaths];
 
-    const info = asRecord(await callTool("file_info", {
-        paths: [PI_PROJECT_SKILLS_DIRECTORY, PI_PROJECT_PROMPTS_DIRECTORY]
-    }, "pi-resources-info"));
-    const entries = Array.isArray(info?.entries) ? info.entries : [];
+    const info = asRecord(await callTool("file_read", {
+        files: [PI_PROJECT_SKILLS_DIRECTORY, PI_PROJECT_PROMPTS_DIRECTORY]
+            .map((path) => ({ path, view: "metadata" }))
+    }, "pi-resources-metadata"));
+    const entries = Array.isArray(info?.files) ? info.files : [];
     const directories = new Set(entries.flatMap((value) => {
         const entry = asRecord(value);
-        return typeof entry?.path === "string" && entry.type === "directory" ? [entry.path] : [];
+        const metadata = asRecord(entry?.metadata);
+        return typeof entry?.path === "string" && metadata?.exists === true && metadata.type === "directory"
+            ? [entry.path]
+            : [];
     }));
     return [
         ...(directories.has(PI_PROJECT_SKILLS_DIRECTORY) ? skillPaths : []),
@@ -192,13 +196,13 @@ export async function loadDevshellPiWorkspaceContext(
     toolNames: ReadonlySet<string>,
     callTool: DevshellPiToolCall
 ): Promise<DevshellPiContextFile[]> {
-    if (!toolNames.has("file_find") || !toolNames.has("file_read")) return [];
-    const found = asRecord(await callTool("file_find", {
+    if (!toolNames.has("file_glob") || !toolNames.has("file_read")) return [];
+    const found = asRecord(await callTool("file_glob", {
         gitignore: false,
         hidden: true,
-        paths: ["./AGENTS*", "./CLAUDE*"],
+        patterns: ["./AGENTS*", "./CLAUDE*"],
         type: "file"
-    }, "pi-context-find"));
+    }, "pi-context-glob"));
     const entries = Array.isArray(found?.entries) ? found.entries : [];
     const existing = new Map<string, string>();
     for (const value of entries) {
@@ -227,17 +231,20 @@ async function readCompleteTextFile(
     do {
         const result = asRecord(await callTool(
             "file_read",
-            { path, view: "content", ...(selector === undefined ? {} : { selector }) },
+            {
+                files: [{ path, view: "content", ...(selector === undefined ? {} : { selector }) }]
+            },
             `${operationPrefix}-${++page}`
         ));
-        const content = typeof result?.content === "string" ? result.content : "";
+        const file = Array.isArray(result?.files) ? asRecord(result.files[0]) : undefined;
+        const content = typeof file?.content === "string" ? file.content : "";
         for (const line of content.split("\n")) {
             if (line.length === 0) continue;
             const match = /^(\d+):(.*)$/u.exec(line);
             if (match === null) throw new Error(`file_read returned malformed context content for ${path}.`);
             lines.set(Number(match[1]), match[2] ?? "");
         }
-        const next = typeof result?.nextSelector === "string" ? result.nextSelector : undefined;
+        const next = typeof file?.nextSelector === "string" ? file.nextSelector : undefined;
         selector = next !== undefined && /^\d+$/u.test(next) ? `${next}:raw` : next;
     } while (selector !== undefined);
     return [...lines.entries()]

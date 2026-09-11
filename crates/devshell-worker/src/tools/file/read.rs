@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
-use crate::security::path::ResolvedPath;
+use crate::security::path::{ResolvedEntry, ResolvedMetadata, ResolvedPath};
 use crate::tools::file::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
 use crate::tools::file::structure;
 use crate::tools::file::types::{
-    FileParseStatus, FileReadBatchEntry, FileReadBatchInput, FileReadBatchOutput, FileReadInput,
-    FileReadOutput, FileReadRequest, FileReadView,
+    FileEntryType, FileParseStatus, FileReadBatchEntry, FileReadBatchInput, FileReadBatchOutput,
+    FileReadInput, FileReadMetadata, FileReadOutput, FileReadRequest, FileReadResolvedView,
+    FileReadView,
 };
-use crate::tools::file::{FileToolState, resolve_existing};
+use crate::tools::file::{FileToolState, resolve_existing, resolve_info};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const DEFAULT_LINE_COUNT: usize = 200;
@@ -36,7 +37,7 @@ impl ToolHandler for FileReadTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tools::contract::catalog_entry::<FileReadBatchInput, FileReadBatchOutput>(
             &self.name,
-            "Read one or more UTF-8 text files in one call. Pass files=[{path, view?, selector?}, ...]. All file tools use ./ for workspace-relative paths and / for absolute paths. Use view=content with selector forms N, N-M, N+count, or sorted non-overlapping comma-separated ranges; append :raw for exact lines. Without :raw, each range includes one preceding line and up to three following lines for editing context. A single N reads the default window and may return nextSelector. Use view=outline for structural navigation; selector cannot be combined with view=outline. Returned content ranges prepare those lines for file_edit; outline alone does not prepare source lines for patching.".to_string(),
+            "Read one or more paths in one call. Pass files=[{path, view?, selector?}, ...]. view=auto selects content or outline for text files; view=metadata inspects path metadata without following the final symlink and also supports missing paths. Use view=content with selector forms N, N-M, N+count, or sorted non-overlapping comma-separated ranges; append :raw for exact lines. Without :raw, each range includes one preceding line and up to three following lines for editing context. A single N reads the default window and may return nextSelector. selector is only valid for content reads. Returned content ranges prepare those lines for file_edit; outline and metadata do not.".to_string(),
             [ToolCapability::Read],
         )
     }
@@ -93,11 +94,16 @@ impl FileReadTool {
         call: &ToolCall,
         input: &FileReadRequest,
     ) -> Result<FileReadOutput, ToolError> {
-        if input.view == FileReadView::Outline && input.selector.is_some() {
+        if matches!(input.view, FileReadView::Outline | FileReadView::Metadata)
+            && input.selector.is_some()
+        {
             return Err(ToolError::new(
                 "tool.invalidArguments",
-                "selector cannot be combined with view=outline",
+                "selector is only valid with view=content or view=auto",
             ));
+        }
+        if input.view == FileReadView::Metadata {
+            return self.read_metadata(call, &input.path);
         }
         let ordinal = self.state.next_snapshot_ordinal();
         let (_, resolved) = resolve_existing(&call, &input.path, false)?;
@@ -119,6 +125,9 @@ impl FileReadTool {
         let output = match resolved_view {
             FileReadView::Outline => {
                 self.read_outline(&call, &resolved, &resolved.canonical, &metadata, ordinal)?
+            }
+            FileReadView::Metadata => {
+                unreachable!("metadata view is handled before text resolution")
             }
             FileReadView::Content | FileReadView::Auto => self.read_content(
                 &call,
@@ -175,8 +184,9 @@ impl FileReadTool {
             ordinal,
         );
         Ok(FileReadOutput {
-            content: outline.content,
-            view: Some(FileReadView::Outline),
+            view: FileReadResolvedView::Outline,
+            content: Some(outline.content),
+            metadata: None,
             truncated: outline.truncated.then_some(true),
             next_selector: None,
             language: Some(outline.language),
@@ -284,10 +294,58 @@ impl FileReadTool {
         }
 
         Ok(FileReadOutput {
-            content,
-            view: None,
+            view: FileReadResolvedView::Content,
+            content: Some(content),
+            metadata: None,
             truncated: None,
             next_selector: selector.next_selector,
+            language: None,
+            parse_status: None,
+        })
+    }
+
+    fn read_metadata(&self, call: &ToolCall, path: &str) -> Result<FileReadOutput, ToolError> {
+        let (_, resolved) = resolve_info(call, path)?;
+        let metadata = match resolved {
+            ResolvedEntry::Missing => FileReadMetadata {
+                exists: false,
+                entry_type: None,
+                size_bytes: None,
+                modified_at_ms: None,
+                mode: None,
+                target_type: None,
+            },
+            ResolvedEntry::Existing { target, metadata } => {
+                let entry_type = metadata_type(&metadata);
+                let target_type = if entry_type == FileEntryType::Symlink {
+                    target
+                        .metadata(true)
+                        .ok()
+                        .flatten()
+                        .map(|metadata| metadata_type(&metadata))
+                } else {
+                    None
+                };
+                #[cfg(unix)]
+                let mode = Some(metadata.mode());
+                #[cfg(not(unix))]
+                let mode = None;
+                FileReadMetadata {
+                    exists: true,
+                    entry_type: Some(entry_type),
+                    size_bytes: Some(metadata.len()),
+                    modified_at_ms: metadata.modified_at_millis(),
+                    mode,
+                    target_type,
+                }
+            }
+        };
+        Ok(FileReadOutput {
+            view: FileReadResolvedView::Metadata,
+            content: None,
+            metadata: Some(metadata),
+            truncated: None,
+            next_selector: None,
             language: None,
             parse_status: None,
         })
@@ -330,6 +388,7 @@ fn resolve_view(
     }
     match input.view {
         FileReadView::Content => FileReadView::Content,
+        FileReadView::Metadata => FileReadView::Metadata,
         FileReadView::Outline => FileReadView::Outline,
         FileReadView::Auto => {
             if metadata.total_lines <= AUTO_CONTENT_MAX_LINES
@@ -342,6 +401,18 @@ fn resolve_view(
                 FileReadView::Content
             }
         }
+    }
+}
+
+fn metadata_type(metadata: &ResolvedMetadata) -> FileEntryType {
+    if metadata.is_symlink() {
+        FileEntryType::Symlink
+    } else if metadata.is_file() {
+        FileEntryType::File
+    } else if metadata.is_dir() {
+        FileEntryType::Directory
+    } else {
+        FileEntryType::Other
     }
 }
 

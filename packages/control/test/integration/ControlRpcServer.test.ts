@@ -211,18 +211,18 @@ test("local Control socket loads and rolls back a protected debug patch on a liv
         [{ methods: ["callTool"], target: "worker:alpha" }],
     );
     const loaded = (await request(socketPath, "@control", "debug.load", {
-        scope: { ctxId: "ctx-own", toolName: "file_info" },
+        scope: { ctxId: "ctx-own", toolName: "file_read" },
         source: `() => ({ action: "return", value: { patched: true } })`,
         target: "worker:alpha",
     })).payload as { patchId: string; state: string };
     assert.equal(loaded.state, "active");
 
     assert.deepEqual(
-        await worker.callTool("file_info", {}, { ctxId: "ctx-own", source: "mcp" }),
+        await worker.callTool("file_read", {}, { ctxId: "ctx-own", source: "mcp" }),
         { patched: true },
     );
     assert.deepEqual(
-        await worker.callTool("file_info", {}, { ctxId: "ctx-other", source: "mcp" }),
+        await worker.callTool("file_read", {}, { ctxId: "ctx-other", source: "mcp" }),
         { exitCode: 0 },
     );
     assert.equal(worker.lastToolCall?.ctxId, "ctx-other");
@@ -239,7 +239,7 @@ test("local Control socket loads and rolls back a protected debug patch on a liv
     })).payload as { state: string };
     assert.equal(unloaded.state, "unloaded");
     assert.deepEqual(
-        await worker.callTool("file_info", {}, { ctxId: "ctx-own", source: "mcp" }),
+        await worker.callTool("file_read", {}, { ctxId: "ctx-own", source: "mcp" }),
         { exitCode: 0 },
     );
     assert.equal(worker.lastToolCall?.ctxId, "ctx-own");

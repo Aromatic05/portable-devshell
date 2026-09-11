@@ -2,7 +2,7 @@
 
 portable-devshell 的 Skill 功能由 builtin **Skill Extension** 提供。Extension 运行在 Control：负责本机 Skill discovery、catalog、内容快照与显式传输；Worker 不实现 Skill 协议，也不会在 provider 生命周期里自动同步 Skill。
 
-Skill 到达目标 Worker 后只是普通文件。Agent 后续读取 `SKILL.md`、读取附属文件和执行脚本仍使用 `file_read` / `file_search` / `bash` / `tmux` 等普通 Worker tools。
+Skill 到达目标 Worker 后只是普通文件。Agent 后续读取 `SKILL.md`、读取附属文件和执行脚本仍使用 `file_read` / `file_grep` / `bash` / `tmux` 等普通 Worker tools。
 
 ## 目录优先级
 
@@ -161,7 +161,7 @@ MCP builtin module 的 `environ_info` 仍返回 `skillsDirectory` 作为产品�
 <instance resource root>/extensions/skill/resources/managed
 ```
 
-因此 Agent 可以先通过 `environ_info` 得到目标 managed Skill 位置，再使用普通 `file_read` / `file_search` 按需读取已经 `get` 到该 Worker 的 Skill。
+因此 Agent 可以先通过 `environ_info` 得到目标 managed Skill 位置，再使用普通 `file_read` / `file_grep` 按需读取已经 `get` 到该 Worker 的 Skill。
 
 portable-devshell 不把整个 Skill catalog 转成巨大的 model-facing MCP schema；应该先发现/传输，再在目标环境按需读取。
 

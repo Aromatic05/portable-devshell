@@ -58,7 +58,7 @@ fn file_read_auto_returns_content_for_small_files_without_snapshot_tokens() {
     );
 
     assert_eq!(response["ok"], true, "{response}");
-    assert!(response["result"].get("view").is_none());
+    assert_eq!(response["result"]["view"], "content");
     assert!(response["result"].get("path").is_none());
     assert!(response["result"].get("returnedRanges").is_none());
     assert!(response["result"].get("totalLines").is_none());
@@ -278,7 +278,7 @@ fn file_edit_uses_context_scoped_implicit_snapshots() {
 }
 
 #[test]
-fn file_search_establishes_edit_coverage() {
+fn file_grep_establishes_edit_coverage() {
     let env = TestEnv::new();
     let instance = "aromatic-file-search-snapshot";
     fs::write(
@@ -293,7 +293,7 @@ fn file_search_establishes_edit_coverage() {
         instance,
         "1",
         "ctx-a",
-        "file_search",
+        "file_grep",
         json!({ "paths": ["./document.txt"], "pattern": "needle", "syntax": "literal" }),
     );
     assert_eq!(searched["ok"], true, "{searched}");
@@ -315,7 +315,7 @@ fn file_search_establishes_edit_coverage() {
 }
 
 #[test]
-fn file_search_snapshots_only_files_returned_in_the_current_page() {
+fn file_grep_snapshots_only_files_returned_in_the_current_page() {
     let env = TestEnv::new();
     let instance = "aromatic-file-search-page";
     let paths = (1..=21)
@@ -332,7 +332,7 @@ fn file_search_snapshots_only_files_returned_in_the_current_page() {
         instance,
         "1",
         "ctx-a",
-        "file_search",
+        "file_grep",
         json!({ "paths": paths.clone(), "pattern": "needle", "syntax": "literal" }),
     );
     assert_eq!(searched["ok"], true, "{searched}");
@@ -378,7 +378,7 @@ fn file_search_snapshots_only_files_returned_in_the_current_page() {
         instance,
         "4",
         "ctx-a",
-        "file_search",
+        "file_grep",
         json!({ "cursor": cursor }),
     );
     assert_eq!(second_page["ok"], true, "{second_page}");
@@ -785,40 +785,31 @@ fn file_edit_returns_diff_only_when_requested() {
 }
 
 #[test]
-fn file_info_returns_details_only_when_requested() {
+fn file_read_metadata_returns_complete_metadata_without_content() {
     let env = TestEnv::new();
-    let instance = "aromatic-file-info-detail";
+    let instance = "aromatic-file-read-metadata";
     fs::write(env.workspace().join("document.txt"), "data\n").unwrap();
     start(&env, instance);
 
-    let summary = call(
+    let response = call(
         &env,
         instance,
         "1",
         "ctx-a",
-        "file_info",
-        json!({ "paths": ["./document.txt"] }),
+        "file_read",
+        json!({ "files": [{ "path": "./document.txt", "view": "metadata" }] }),
     );
-    assert_eq!(summary["ok"], true, "{summary}");
-    let entry = &summary["result"]["entries"][0];
-    assert_eq!(entry["type"], "file");
-    assert!(entry.get("exists").is_none());
-    assert!(entry.get("sizeBytes").is_none());
-    assert!(entry.get("modifiedAtMs").is_none());
-    assert!(entry.get("mode").is_none());
-
-    let detailed = call(
-        &env,
-        instance,
-        "2",
-        "ctx-a",
-        "file_info",
-        json!({ "paths": ["./document.txt"], "details": true }),
-    );
-    assert_eq!(detailed["ok"], true, "{detailed}");
-    let entry = &detailed["result"]["entries"][0];
-    assert_eq!(entry["sizeBytes"], 5);
-    assert!(entry["modifiedAtMs"].is_number());
+    assert_eq!(response["ok"], true, "{response}");
+    let entry = &response["result"]["files"][0];
+    assert_eq!(entry["path"], "./document.txt");
+    assert_eq!(entry["view"], "metadata");
+    assert!(entry.get("content").is_none());
+    assert_eq!(entry["metadata"]["exists"], true);
+    assert_eq!(entry["metadata"]["type"], "file");
+    assert_eq!(entry["metadata"]["sizeBytes"], 5);
+    assert!(entry["metadata"]["modifiedAtMs"].is_number());
+    #[cfg(unix)]
+    assert!(entry["metadata"]["mode"].is_number());
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -869,8 +860,8 @@ fn file_tools_omit_absent_pagination_fields() {
         instance,
         "2",
         "ctx-a",
-        "file_find",
-        json!({ "paths": ["./document.txt"] }),
+        "file_glob",
+        json!({ "patterns": ["./document.txt"] }),
     );
     assert_eq!(found["ok"], true, "{found}");
     assert!(found["result"].get("nextCursor").is_none());
@@ -881,7 +872,7 @@ fn file_tools_omit_absent_pagination_fields() {
         instance,
         "3",
         "ctx-a",
-        "file_search",
+        "file_grep",
         json!({ "paths": ["./document.txt"], "pattern": "needle", "syntax": "literal" }),
     );
     assert_eq!(searched["ok"], true, "{searched}");
@@ -892,7 +883,7 @@ fn file_tools_omit_absent_pagination_fields() {
 }
 
 #[test]
-fn file_find_treats_missing_glob_roots_as_empty_without_masking_exact_missing_paths() {
+fn file_glob_treats_missing_glob_roots_as_empty_without_masking_exact_missing_paths() {
     let env = TestEnv::new();
     let instance = "aromatic-file-find-missing-glob-root";
     fs::create_dir_all(env.workspace().join(".pi/prompts")).unwrap();
@@ -904,9 +895,9 @@ fn file_find_treats_missing_glob_roots_as_empty_without_masking_exact_missing_pa
         instance,
         "1",
         "ctx-a",
-        "file_find",
+        "file_glob",
         json!({
-            "paths": [
+            "patterns": [
                 "./.pi/skills/**/SKILL.md",
                 "./.pi/prompts/*.md"
             ],
@@ -924,8 +915,8 @@ fn file_find_treats_missing_glob_roots_as_empty_without_masking_exact_missing_pa
         instance,
         "2",
         "ctx-a",
-        "file_find",
-        json!({ "paths": ["./.pi/skills/SKILL.md"] }),
+        "file_glob",
+        json!({ "patterns": ["./.pi/skills/SKILL.md"] }),
     );
     assert_eq!(exact_missing["ok"], false, "{exact_missing}");
     assert_eq!(exact_missing["error"]["code"], "file.notFound");
@@ -934,7 +925,7 @@ fn file_find_treats_missing_glob_roots_as_empty_without_masking_exact_missing_pa
 }
 
 #[test]
-fn file_find_respects_gitignore_and_can_explicitly_include_ignored_files() {
+fn file_glob_respects_gitignore_and_can_explicitly_include_ignored_files() {
     let env = TestEnv::new();
     let instance = "aromatic-file-find-ignore-v2";
     fs::write(env.workspace().join(".gitignore"), "ignored.txt\n").unwrap();
@@ -947,8 +938,8 @@ fn file_find_respects_gitignore_and_can_explicitly_include_ignored_files() {
         instance,
         "1",
         "ctx-a",
-        "file_find",
-        json!({ "paths": ["./"] }),
+        "file_glob",
+        json!({ "patterns": ["./"] }),
     );
     assert_eq!(default_result["ok"], true, "{default_result}");
     let default_paths = default_result["result"]["entries"]
@@ -965,8 +956,8 @@ fn file_find_respects_gitignore_and_can_explicitly_include_ignored_files() {
         instance,
         "2",
         "ctx-a",
-        "file_find",
-        json!({ "paths": ["./"], "gitignore": false }),
+        "file_glob",
+        json!({ "patterns": ["./"], "gitignore": false }),
     );
     assert_eq!(inclusive_result["ok"], true, "{inclusive_result}");
     let inclusive_paths = inclusive_result["result"]["entries"]
@@ -982,11 +973,11 @@ fn file_find_respects_gitignore_and_can_explicitly_include_ignored_files() {
 
 #[cfg(unix)]
 #[test]
-fn file_info_reports_missing_entries_and_dangling_symlinks_in_one_batch() {
+fn file_read_metadata_reports_missing_entries_and_dangling_symlinks_in_one_batch() {
     use std::os::unix::fs::symlink;
 
     let env = TestEnv::new();
-    let instance = "aromatic-file-info-batch-v2";
+    let instance = "aromatic-file-read-metadata-batch";
     symlink("missing-target", env.workspace().join("dangling-link")).unwrap();
     start(&env, instance);
 
@@ -995,25 +986,41 @@ fn file_info_reports_missing_entries_and_dangling_symlinks_in_one_batch() {
         instance,
         "1",
         "ctx-a",
-        "file_info",
-        json!({ "paths": ["./missing.txt", "./dangling-link"] }),
+        "file_read",
+        json!({
+            "files": [
+                { "path": "./missing.txt", "view": "metadata" },
+                { "path": "./dangling-link", "view": "metadata" }
+            ]
+        }),
     );
 
     assert_eq!(response["ok"], true, "{response}");
-    assert_eq!(response["result"]["entries"][0]["path"], "./missing.txt");
-    assert_eq!(response["result"]["entries"][0]["exists"], false);
-    assert!(response["result"]["entries"][0].get("type").is_none());
-    assert_eq!(response["result"]["entries"][1]["path"], "./dangling-link");
-    assert!(response["result"]["entries"][1].get("exists").is_none());
-    assert_eq!(response["result"]["entries"][1]["type"], "symlink");
-    assert!(response["result"]["entries"][1].get("targetType").is_none());
+    assert_eq!(response["result"]["files"][0]["path"], "./missing.txt");
+    assert_eq!(response["result"]["files"][0]["metadata"]["exists"], false);
+    assert!(
+        response["result"]["files"][0]["metadata"]
+            .get("type")
+            .is_none()
+    );
+    assert_eq!(response["result"]["files"][1]["path"], "./dangling-link");
+    assert_eq!(response["result"]["files"][1]["metadata"]["exists"], true);
+    assert_eq!(
+        response["result"]["files"][1]["metadata"]["type"],
+        "symlink"
+    );
+    assert!(
+        response["result"]["files"][1]["metadata"]
+            .get("targetType")
+            .is_none()
+    );
 
     env.json_command(&["stop", "--instance", instance]);
 }
 
 #[cfg(unix)]
 #[test]
-fn file_info_does_not_follow_a_workspace_symlink_outside_the_workspace() {
+fn file_read_metadata_does_not_follow_a_workspace_symlink_outside_the_workspace() {
     use std::os::unix::fs::symlink;
 
     let env = TestEnv::new();
@@ -1026,7 +1033,7 @@ fn file_info_does_not_follow_a_workspace_symlink_outside_the_workspace() {
     .unwrap();
     fs::write(env.workspace().join("inside-target.txt"), "inside\n").unwrap();
     symlink("inside-target.txt", env.workspace().join("inside-link")).unwrap();
-    let instance = "aromatic-file-info-no-follow-v2";
+    let instance = "aromatic-file-read-metadata-no-follow";
     start(&env, instance);
 
     let response = call(
@@ -1034,19 +1041,24 @@ fn file_info_does_not_follow_a_workspace_symlink_outside_the_workspace() {
         instance,
         "1",
         "ctx-a",
-        "file_info",
-        json!({ "paths": ["./outside-link", "./inside-link"], "details": true }),
+        "file_read",
+        json!({
+            "files": [
+                { "path": "./outside-link", "view": "metadata" },
+                { "path": "./inside-link", "view": "metadata" }
+            ]
+        }),
     );
 
     assert_eq!(response["ok"], true, "{response}");
-    let entry = &response["result"]["entries"][0];
+    let entry = &response["result"]["files"][0];
     assert_eq!(entry["path"], "./outside-link");
-    assert_eq!(entry["type"], "symlink");
-    assert!(entry["sizeBytes"].is_number(), "{entry}");
-    assert!(entry.get("targetType").is_none(), "{entry}");
-    let inside = &response["result"]["entries"][1];
-    assert_eq!(inside["type"], "symlink");
-    assert_eq!(inside["targetType"], "file", "{inside}");
+    assert_eq!(entry["metadata"]["type"], "symlink");
+    assert!(entry["metadata"]["sizeBytes"].is_number(), "{entry}");
+    assert!(entry["metadata"].get("targetType").is_none(), "{entry}");
+    let inside = &response["result"]["files"][1];
+    assert_eq!(inside["metadata"]["type"], "symlink");
+    assert_eq!(inside["metadata"]["targetType"], "file", "{inside}");
 
     fs::create_dir_all(outside.path().join("dir")).unwrap();
     symlink(
@@ -1059,8 +1071,8 @@ fn file_info_does_not_follow_a_workspace_symlink_outside_the_workspace() {
         instance,
         "2",
         "ctx-a",
-        "file_info",
-        json!({ "paths": ["./outside-dir/missing.txt"] }),
+        "file_read",
+        json!({ "files": [{ "path": "./outside-dir/missing.txt", "view": "metadata" }] }),
     );
     assert_eq!(escaped_missing["ok"], false, "{escaped_missing}");
 
@@ -1069,16 +1081,19 @@ fn file_info_does_not_follow_a_workspace_symlink_outside_the_workspace() {
         instance,
         "3",
         "ctx-a",
-        "file_info",
-        json!({ "paths": ["./missing-dir/missing.txt"] }),
+        "file_read",
+        json!({ "files": [{ "path": "./missing-dir/missing.txt", "view": "metadata" }] }),
     );
     assert_eq!(missing_tail["ok"], true, "{missing_tail}");
-    assert_eq!(missing_tail["result"]["entries"][0]["exists"], false);
+    assert_eq!(
+        missing_tail["result"]["files"][0]["metadata"]["exists"],
+        false
+    );
     env.json_command(&["stop", "--instance", instance]);
 }
 
 #[test]
-fn file_search_exact_file_reports_non_text_input() {
+fn file_grep_exact_file_reports_non_text_input() {
     let env = TestEnv::new();
     let instance = "aromatic-file-search-non-text-v2";
     fs::write(
@@ -1093,7 +1108,7 @@ fn file_search_exact_file_reports_non_text_input() {
         instance,
         "1",
         "ctx-a",
-        "file_search",
+        "file_grep",
         json!({ "paths": ["./binary.dat"], "pattern": "BAD", "syntax": "literal" }),
     );
 
@@ -1103,7 +1118,7 @@ fn file_search_exact_file_reports_non_text_input() {
 }
 
 #[test]
-fn file_search_cursor_continuation_rejects_repeated_query_fields() {
+fn file_grep_cursor_continuation_rejects_repeated_query_fields() {
     let env = TestEnv::new();
     let instance = "aromatic-file-search-cursor-v2";
     let paths = (1..=21)
@@ -1120,7 +1135,7 @@ fn file_search_cursor_continuation_rejects_repeated_query_fields() {
         instance,
         "1",
         "ctx-a",
-        "file_search",
+        "file_grep",
         json!({ "paths": paths.clone(), "pattern": "needle", "syntax": "literal" }),
     );
     assert_eq!(first_page["ok"], true, "{first_page}");
@@ -1131,7 +1146,7 @@ fn file_search_cursor_continuation_rejects_repeated_query_fields() {
         instance,
         "2",
         "ctx-a",
-        "file_search",
+        "file_grep",
         json!({ "pattern": "needle", "cursor": cursor }),
     );
 
@@ -1318,7 +1333,7 @@ fn file_edit_rejects_conflicting_external_changes_without_overwriting_them() {
 }
 
 #[test]
-fn file_search_keeps_the_serialized_page_within_the_rpc_output_budget() {
+fn file_grep_keeps_the_serialized_page_within_the_rpc_output_budget() {
     let env = TestEnv::new();
     let instance = "aromatic-file-search-budget-v2";
     let line = format!("needle {}\n", "\\\"".repeat(2000));
@@ -1336,7 +1351,7 @@ fn file_search_keeps_the_serialized_page_within_the_rpc_output_budget() {
         instance,
         "1",
         "ctx-a",
-        "file_search",
+        "file_grep",
         json!({ "pattern": "needle", "syntax": "literal" }),
     );
 
@@ -1348,7 +1363,7 @@ fn file_search_keeps_the_serialized_page_within_the_rpc_output_budget() {
 }
 
 #[test]
-fn file_find_cursor_resumes_the_open_traversal_after_root_replacement() {
+fn file_glob_cursor_resumes_the_open_traversal_after_root_replacement() {
     let env = TestEnv::new();
     let instance = "aromatic-file-find-continuation";
     let root = env.workspace().join("tree");
@@ -1363,8 +1378,8 @@ fn file_find_cursor_resumes_the_open_traversal_after_root_replacement() {
         instance,
         "1",
         "ctx-a",
-        "file_find",
-        json!({ "paths": ["./tree"], "type": "file" }),
+        "file_glob",
+        json!({ "patterns": ["./tree"], "type": "file" }),
     );
     assert_eq!(first["ok"], true, "{first}");
     assert_eq!(first["result"]["entries"].as_array().unwrap().len(), 200);
@@ -1378,7 +1393,7 @@ fn file_find_cursor_resumes_the_open_traversal_after_root_replacement() {
         instance,
         "2",
         "ctx-a",
-        "file_find",
+        "file_glob",
         json!({ "cursor": cursor.clone() }),
     );
     assert_eq!(second["ok"], true, "{second}");
@@ -1393,7 +1408,7 @@ fn file_find_cursor_resumes_the_open_traversal_after_root_replacement() {
         instance,
         "3",
         "ctx-a",
-        "file_find",
+        "file_glob",
         json!({ "cursor": cursor }),
     );
     assert_eq!(reused["ok"], true, "{reused}");
@@ -1403,7 +1418,7 @@ fn file_find_cursor_resumes_the_open_traversal_after_root_replacement() {
 }
 
 #[test]
-fn file_find_cursor_is_bound_to_context_and_workspace() {
+fn file_glob_cursor_is_bound_to_context_and_workspace() {
     let env = TestEnv::new();
     let instance = "aromatic-file-find-cursor-scope";
     let root = env.workspace().join("tree");
@@ -1418,8 +1433,8 @@ fn file_find_cursor_is_bound_to_context_and_workspace() {
         instance,
         "1",
         "ctx-a",
-        "file_find",
-        json!({ "paths": ["./tree"], "type": "file" }),
+        "file_glob",
+        json!({ "patterns": ["./tree"], "type": "file" }),
     );
     assert_eq!(first["ok"], true, "{first}");
     let cursor = first["result"]["nextCursor"].as_str().unwrap();
@@ -1429,7 +1444,7 @@ fn file_find_cursor_is_bound_to_context_and_workspace() {
         instance,
         "2",
         "ctx-b",
-        "file_find",
+        "file_glob",
         json!({ "cursor": cursor }),
     );
     assert_eq!(other_context["error"]["code"], "file.invalidCursor");
@@ -1441,7 +1456,7 @@ fn file_find_cursor_is_bound_to_context_and_workspace() {
         &json!({
             "type": "request",
             "id": "3",
-            "method": "file_find",
+            "method": "file_glob",
             "params": { "cursor": cursor },
             "context": {
                 "ctxId": "ctx-a",
@@ -1456,7 +1471,7 @@ fn file_find_cursor_is_bound_to_context_and_workspace() {
 }
 
 #[test]
-fn file_search_cursor_resumes_the_open_traversal_after_root_replacement() {
+fn file_grep_cursor_resumes_the_open_traversal_after_root_replacement() {
     let env = TestEnv::new();
     let instance = "aromatic-file-search-continuation";
     let root = env.workspace().join("search-tree");
@@ -1475,7 +1490,7 @@ fn file_search_cursor_resumes_the_open_traversal_after_root_replacement() {
         instance,
         "1",
         "ctx-a",
-        "file_search",
+        "file_grep",
         json!({
             "paths": ["./search-tree"],
             "pattern": "needle",
@@ -1495,7 +1510,7 @@ fn file_search_cursor_resumes_the_open_traversal_after_root_replacement() {
         instance,
         "2",
         "ctx-a",
-        "file_search",
+        "file_grep",
         json!({ "cursor": cursor.clone() }),
     );
     assert_eq!(second["ok"], true, "{second}");
@@ -1510,7 +1525,7 @@ fn file_search_cursor_resumes_the_open_traversal_after_root_replacement() {
         instance,
         "3",
         "ctx-a",
-        "file_search",
+        "file_grep",
         json!({ "cursor": cursor }),
     );
     assert_eq!(reused["ok"], true, "{reused}");
@@ -1520,7 +1535,7 @@ fn file_search_cursor_resumes_the_open_traversal_after_root_replacement() {
 }
 
 #[test]
-fn file_find_cursor_retires_parent_only_after_child_is_used() {
+fn file_glob_cursor_retires_parent_only_after_child_is_used() {
     let env = TestEnv::new();
     let instance = "aromatic-file-find-cursor-ack";
     let root = env.workspace().join("tree");
@@ -1535,8 +1550,8 @@ fn file_find_cursor_retires_parent_only_after_child_is_used() {
         instance,
         "1",
         "ctx-a",
-        "file_find",
-        json!({ "paths": ["./tree"], "type": "file" }),
+        "file_glob",
+        json!({ "patterns": ["./tree"], "type": "file" }),
     );
     assert_eq!(first["ok"], true, "{first}");
     let first_cursor = first["result"]["nextCursor"].as_str().unwrap().to_string();
@@ -1546,7 +1561,7 @@ fn file_find_cursor_retires_parent_only_after_child_is_used() {
         instance,
         "2",
         "ctx-a",
-        "file_find",
+        "file_glob",
         json!({ "cursor": first_cursor.clone() }),
     );
     assert_eq!(second["ok"], true, "{second}");
@@ -1558,7 +1573,7 @@ fn file_find_cursor_retires_parent_only_after_child_is_used() {
         instance,
         "3",
         "ctx-a",
-        "file_find",
+        "file_glob",
         json!({ "cursor": first_cursor.clone() }),
     );
     assert_eq!(retry["ok"], true, "{retry}");
@@ -1569,7 +1584,7 @@ fn file_find_cursor_retires_parent_only_after_child_is_used() {
         instance,
         "4",
         "ctx-a",
-        "file_find",
+        "file_glob",
         json!({ "cursor": second_cursor }),
     );
     assert_eq!(third["ok"], true, "{third}");
@@ -1580,7 +1595,7 @@ fn file_find_cursor_retires_parent_only_after_child_is_used() {
         instance,
         "5",
         "ctx-a",
-        "file_find",
+        "file_glob",
         json!({ "cursor": first_cursor }),
     );
     assert_eq!(retired["error"]["code"], "file.invalidCursor", "{retired}");
@@ -1588,7 +1603,7 @@ fn file_find_cursor_retires_parent_only_after_child_is_used() {
 }
 
 #[test]
-fn file_search_marks_per_file_match_truncation_explicitly() {
+fn file_grep_marks_per_file_match_truncation_explicitly() {
     let env = TestEnv::new();
     let instance = "aromatic-file-search-truncated";
     let over_limit = (0..201)
@@ -1606,7 +1621,7 @@ fn file_search_marks_per_file_match_truncation_explicitly() {
         instance,
         "1",
         "ctx-a",
-        "file_search",
+        "file_grep",
         json!({
             "paths": ["./over.txt"],
             "pattern": "needle",
@@ -1623,7 +1638,7 @@ fn file_search_marks_per_file_match_truncation_explicitly() {
         instance,
         "1b",
         "ctx-a",
-        "file_search",
+        "file_grep",
         json!({
             "paths": ["./over.txt"],
             "pattern": "needle",
@@ -1648,7 +1663,7 @@ fn file_search_marks_per_file_match_truncation_explicitly() {
         instance,
         "2",
         "ctx-a",
-        "file_search",
+        "file_grep",
         json!({
             "paths": ["./exact.txt"],
             "pattern": "needle",
@@ -1664,7 +1679,7 @@ fn file_search_marks_per_file_match_truncation_explicitly() {
 }
 
 #[test]
-fn file_search_exact_page_does_not_return_an_empty_continuation() {
+fn file_grep_exact_page_does_not_return_an_empty_continuation() {
     let env = TestEnv::new();
     let instance = "aromatic-file-search-exact-page";
     let root = env.workspace().join("exact-page");
@@ -1679,7 +1694,7 @@ fn file_search_exact_page_does_not_return_an_empty_continuation() {
         instance,
         "1",
         "ctx-a",
-        "file_search",
+        "file_grep",
         json!({
             "paths": ["./exact-page"],
             "pattern": "needle",

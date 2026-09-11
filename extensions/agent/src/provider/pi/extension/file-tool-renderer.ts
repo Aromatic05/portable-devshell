@@ -35,7 +35,7 @@ export function formatReadCall(record: Record<string, unknown>, theme?: PiThemeL
     return formatReadRequest(title, record, theme);
 }
 
-export function formatSearchCall(record: Record<string, unknown>, theme?: PiThemeLike): string {
+export function formatGrepCall(record: Record<string, unknown>, theme?: PiThemeLike): string {
     const title = style(theme, "toolTitle", "grep", true);
     const pattern = stringField(record, "pattern");
     const paths = stringArrayField(record, "paths");
@@ -50,18 +50,12 @@ export function formatSearchCall(record: Record<string, unknown>, theme?: PiThem
     ], theme);
 }
 
-export function formatFindCall(record: Record<string, unknown>, theme?: PiThemeLike): string {
-    const title = style(theme, "toolTitle", "find", true);
+export function formatGlobCall(record: Record<string, unknown>, theme?: PiThemeLike): string {
+    const title = style(theme, "toolTitle", "glob", true);
     if (typeof record.cursor === "string") return joinCall(title, ["next page"], theme);
-    const paths = stringArrayField(record, "paths");
+    const paths = stringArrayField(record, "patterns");
     const type = stringField(record, "type");
     return joinCall(title, [paths.length === 0 ? "." : paths.join(", "), type === undefined || type === "any" ? undefined : type], theme);
-}
-
-export function formatInfoCall(record: Record<string, unknown>, theme?: PiThemeLike): string {
-    const title = style(theme, "toolTitle", "stat", true);
-    const paths = stringArrayField(record, "paths");
-    return joinCall(title, [paths.length === 0 ? undefined : paths.join(", "), record.details === true ? "details" : undefined], theme);
 }
 
 export function renderFileReadComponent(
@@ -70,11 +64,17 @@ export function renderFileReadComponent(
     theme: PiThemeLike,
     context: PiToolRenderContextLike
 ) {
-    if (!options.expanded) return clearComponent(context.lastComponent);
     const sections = fileReadSections(result.details, context.args);
+    if (!options.expanded && !sections.some((section) => section.metadata !== undefined)) {
+        return clearComponent(context.lastComponent);
+    }
     const rendered: string[] = [];
     for (const [index, section] of sections.entries()) {
         if (index > 0) rendered.push("");
+        if (section.metadata !== undefined) {
+            rendered.push(renderMetadataRow(section.path, section.metadata));
+            continue;
+        }
         if (sections.length > 1 && section.path !== undefined) {
             rendered.push(`${style(theme, "toolTitle", "read", true)} ${style(theme, "accent", section.path)}`);
         }
@@ -85,11 +85,15 @@ export function renderFileReadComponent(
 }
 
 export function renderFileRead(value: JsonValue | undefined, expanded: boolean): string[] {
-    if (!expanded) return [];
     const sections = fileReadSections(value);
+    if (!expanded && !sections.some((section) => section.metadata !== undefined)) return [];
     const lines: string[] = [];
     for (const [index, section] of sections.entries()) {
         if (index > 0) lines.push("");
+        if (section.metadata !== undefined) {
+            lines.push(renderMetadataRow(section.path, section.metadata));
+            continue;
+        }
         if (sections.length > 1 && section.path !== undefined) lines.push(`read ${section.path}`);
         lines.push(...section.content.split("\n"));
         if (section.nextSelector !== undefined) lines.push(`[More available: selector ${section.nextSelector}]`);
@@ -99,7 +103,7 @@ export function renderFileRead(value: JsonValue | undefined, expanded: boolean):
     return lines;
 }
 
-export function renderFileSearch(value: JsonValue | undefined, expanded: boolean): string[] {
+export function renderFileGrep(value: JsonValue | undefined, expanded: boolean): string[] {
     const record = asRecord(value);
     if (record === undefined || !Array.isArray(record.files)) return [];
     const lines: string[] = [];
@@ -119,7 +123,7 @@ export function renderFileSearch(value: JsonValue | undefined, expanded: boolean
     return clipHead(lines, expanded ? 160 : 15);
 }
 
-export function renderFileFind(value: JsonValue | undefined, expanded: boolean): string[] {
+export function renderFileGlob(value: JsonValue | undefined, expanded: boolean): string[] {
     const record = asRecord(value);
     if (record === undefined || !Array.isArray(record.entries)) return [];
     const lines = record.entries.map(asRecord).filter((entry): entry is Record<string, unknown> => entry !== undefined).map((entry) => {
@@ -130,37 +134,16 @@ export function renderFileFind(value: JsonValue | undefined, expanded: boolean):
     return clipHead(lines, expanded ? 160 : 20);
 }
 
-export function renderFileInfo(value: JsonValue | undefined): string[] {
-    const record = asRecord(value);
-    if (record === undefined || !Array.isArray(record.entries)) return [];
-    return record.entries.map(asRecord).filter((entry): entry is Record<string, unknown> => entry !== undefined).map((entry) => {
-        const path = stringField(entry, "path") ?? "?";
-        if (entry.exists === false) return `${path} · missing`;
-        const type = stringField(entry, "type") ?? "unknown";
-        const target = stringField(entry, "targetType");
-        const size = numberField(entry, "sizeBytes");
-        const mode = numberField(entry, "mode");
-        return [
-            path,
-            type === "symlink" && target !== undefined ? `symlink→${target}` : type,
-            size === undefined ? undefined : formatBytes(size),
-            mode === undefined ? undefined : `0${mode.toString(8).slice(-3)}`
-        ].filter((item): item is string => item !== undefined).join(" · ");
-    });
-}
-
 export function renderFileSummaryComponent(
-    toolName: "file_find" | "file_info" | "file_search",
+    toolName: "file_glob" | "file_grep",
     result: PiToolRenderResultLike,
     options: PiToolRenderResultOptionsLike,
     theme: PiThemeLike,
     context: PiToolRenderContextLike
 ) {
-    const lines = toolName === "file_find"
-            ? renderFileFind(result.details, options.expanded)
-            : toolName === "file_info"
-                ? renderFileInfo(result.details)
-                : renderFileSearch(result.details, options.expanded);
+    const lines = toolName === "file_glob"
+        ? renderFileGlob(result.details, options.expanded)
+        : renderFileGrep(result.details, options.expanded);
     return setText(
         context.lastComponent,
         lines.map((line) => style(theme, line.trimStart().startsWith("[") ? "warning" : "toolOutput", line)).join("\n")
@@ -180,6 +163,7 @@ function formatReadRequest(title: string, record: Record<string, unknown>, theme
 interface FileReadSection {
     content: string;
     language?: string;
+    metadata?: Record<string, unknown>;
     nextSelector?: string;
     parseStatus?: string;
     path?: string;
@@ -193,6 +177,7 @@ function fileReadSections(value: JsonValue | undefined, args?: unknown): FileRea
         return record.files.map(asRecord).filter((entry): entry is Record<string, unknown> => entry !== undefined).map((entry) => ({
             content: stringField(entry, "content") ?? "",
             language: stringField(entry, "language"),
+            metadata: asRecord(entry.metadata),
             nextSelector: stringField(entry, "nextSelector"),
             parseStatus: stringField(entry, "parseStatus"),
             path: stringField(entry, "path"),
@@ -203,11 +188,27 @@ function fileReadSections(value: JsonValue | undefined, args?: unknown): FileRea
     return [{
         content: stringField(record, "content") ?? "",
         language: stringField(record, "language"),
+        metadata: asRecord(record.metadata),
         nextSelector: stringField(record, "nextSelector"),
         parseStatus: stringField(record, "parseStatus"),
         path: argRecord === undefined ? undefined : stringField(argRecord, "path"),
         truncated: record.truncated === true
     }];
+}
+
+function renderMetadataRow(path: string | undefined, metadata: Record<string, unknown>): string {
+    const displayPath = path ?? "?";
+    if (metadata.exists === false) return `${displayPath} · missing`;
+    const type = stringField(metadata, "type") ?? "unknown";
+    const target = stringField(metadata, "targetType");
+    const size = numberField(metadata, "sizeBytes");
+    const mode = numberField(metadata, "mode");
+    return [
+        displayPath,
+        type === "symlink" && target !== undefined ? `symlink→${target}` : type,
+        size === undefined ? undefined : formatBytes(size),
+        mode === undefined ? undefined : `0${mode.toString(8).slice(-3)}`
+    ].filter((item): item is string => item !== undefined).join(" · ");
 }
 
 function highlightNumberedContent(content: string, language: string | undefined, theme: PiThemeLike): string[] {

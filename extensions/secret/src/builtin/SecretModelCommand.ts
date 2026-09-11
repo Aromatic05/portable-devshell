@@ -56,8 +56,8 @@ async function scanRemote(
     let nextCursor: string | undefined;
     do {
         signal.throwIfAborted();
-        const result = asRecord(await session.callTool("file_find", nextCursor === undefined
-            ? { paths: [`${root === "." ? "./" : `${root}/`}**/*`], type: "file" }
+        const result = asRecord(await session.callTool("file_glob", nextCursor === undefined
+            ? { patterns: [`${root === "." ? "./" : `${root}/`}**/*`], type: "file" }
             : { cursor: nextCursor }, { signal }));
         for (const entry of Array.isArray(result.entries) ? result.entries : []) {
             const value = asRecord(entry);

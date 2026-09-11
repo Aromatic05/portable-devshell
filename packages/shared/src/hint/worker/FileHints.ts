@@ -8,25 +8,31 @@ export function fileReadResultHints(result: JsonValue): ToolDiagnosticHint[] {
     const record = asRecord(result);
     if (record === undefined) return [];
     const hints: ToolDiagnosticHint[] = [];
+    const reads = Array.isArray(record.files)
+        ? record.files.flatMap((entry) => {
+              const file = asRecord(entry);
+              return file === undefined ? [] : [file];
+          })
+        : [record];
 
-    if (asString(record.nextSelector) !== undefined || asBoolean(record.truncated) === true) {
+    if (reads.some((read) => asString(read.nextSelector) !== undefined || asBoolean(read.truncated) === true)) {
         hints.push(diagnosticHint(
             "file.partialRead",
             "Continue with nextSelector."
         ));
     }
 
-    if (asString(record.parseStatus) === "partial") {
+    if (reads.some((read) => asString(read.parseStatus) === "partial")) {
         hints.push(diagnosticHint(
             "file.partialParse",
-            "Verify with content view or file_search."
+            "Verify with content view or file_grep."
         ));
     }
 
     return hints;
 }
 
-export function fileFindResultHints(result: JsonValue): ToolDiagnosticHint[] {
+export function fileGlobResultHints(result: JsonValue): ToolDiagnosticHint[] {
     const record = asRecord(result);
     if (record === undefined) return [];
     if (asString(record.nextCursor) === undefined) return [];
@@ -36,7 +42,7 @@ export function fileFindResultHints(result: JsonValue): ToolDiagnosticHint[] {
     )];
 }
 
-export function fileSearchResultHints(result: JsonValue): ToolDiagnosticHint[] {
+export function fileGrepResultHints(result: JsonValue): ToolDiagnosticHint[] {
     const record = asRecord(result);
     if (record === undefined) return [];
     if (asString(record.nextCursor) === undefined) return [];
@@ -134,7 +140,7 @@ export function fileErrorHints(toolName: string, body: ControlErrorBody): ToolDi
         case "file.notFound":
             return [errorHint(
                 "file.notFound",
-                "Confirm the path with file_info or file_find."
+                "Confirm the path with file_read view=metadata or file_glob."
             )];
         case "file.notText":
             return [errorHint(
@@ -144,12 +150,12 @@ export function fileErrorHints(toolName: string, body: ControlErrorBody): ToolDi
         case "file.notFile":
             return [errorHint(
                 "file.notFile",
-                "Use file_find for directories."
+                "Use file_glob for directories or file_read view=metadata to inspect the path."
             )];
         case "file.notDirectory":
             return [errorHint(
                 "file.notDirectory",
-                "Confirm the directory with file_info."
+                "Confirm the directory with file_read view=metadata."
             )];
         case "file.invalidPattern":
             return [errorHint(
@@ -179,13 +185,13 @@ export function fileErrorHints(toolName: string, body: ControlErrorBody): ToolDi
         case "file.outlineTooLarge":
             return [errorHint(
                 "file.outlineTooLarge",
-                "Use content ranges or file_search."
+                "Use content ranges or file_grep."
             )];
         case "file.outlineUnavailable":
         case "file.parseFailed":
             return [errorHint(
                 body.code,
-                "Use content view or file_search."
+                "Use content view or file_grep."
             )];
         case "file.outputTooLarge":
             return [errorHint(

@@ -121,8 +121,8 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
             }
         );
         for (const name of [
-            "file_find",
-            "file_search",
+            "file_glob",
+            "file_grep",
             ...(tmuxAvailable ? ["tmux_input", "tmux_inspect", "tmux_close"] : [])
         ]) {
             const schema = tools.find((tool) => tool.name === name)?.inputSchema;
@@ -132,6 +132,9 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
             assert.equal(schema?.oneOf, undefined, name);
             assert.notEqual(schema?.properties, undefined, name);
             assert.equal((schema?.required as string[]).includes("ctxId"), true, name);
+        }
+        for (const retired of ["file_find", "file_info", "file_search"]) {
+            assert.equal(tools.some((tool) => tool.name === retired), false, retired);
         }
 
         const ctxId = await createContext(endpoint, sessionHeaders, selectedWorkspacePath);
@@ -155,6 +158,48 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
             (legacyRead.result?.structuredContent as { content?: JsonValue } | undefined)?.content,
             "1:legacy read"
         );
+        const legacyGlob = await postJson(endpoint, {
+            id: "req-stale-file-find",
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: {
+                arguments: { ctxId, paths: ["./legacy-read.txt"], type: "file" },
+                name: "file_find"
+            }
+        }, sessionHeaders);
+        assert.equal(legacyGlob.error, undefined, JSON.stringify(legacyGlob));
+        assert.deepEqual(
+            (legacyGlob.result?.structuredContent as { entries?: JsonValue } | undefined)?.entries,
+            [{ path: "./legacy-read.txt", type: "file" }]
+        );
+        const legacyGrep = await postJson(endpoint, {
+            id: "req-stale-file-search",
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: {
+                arguments: { ctxId, paths: ["./legacy-read.txt"], pattern: "legacy", syntax: "literal" },
+                name: "file_search"
+            }
+        }, sessionHeaders);
+        assert.equal(legacyGrep.error, undefined, JSON.stringify(legacyGrep));
+        assert.equal(
+            ((legacyGrep.result?.structuredContent as { files?: Array<{ content?: string }> } | undefined)?.files?.[0]?.content ?? "").includes("legacy"),
+            true
+        );
+        const legacyInfo = await postJson(endpoint, {
+            id: "req-stale-file-info",
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: {
+                arguments: { ctxId, paths: ["./legacy-read.txt"] },
+                name: "file_info"
+            }
+        }, sessionHeaders);
+        assert.equal(legacyInfo.error, undefined, JSON.stringify(legacyInfo));
+        const legacyInfoEntry = (legacyInfo.result?.structuredContent as { entries?: Array<Record<string, JsonValue>> } | undefined)?.entries?.[0];
+        assert.equal(legacyInfoEntry?.exists, undefined);
+        assert.equal(legacyInfoEntry?.type, "file");
+        assert.equal(legacyInfoEntry?.sizeBytes, undefined);
         const callRequest = withToolContext(
             await readFixture("mcp-tools-call.json"),
             ctxId

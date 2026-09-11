@@ -140,7 +140,7 @@ MCP endpoint 不再用 instance 配置中的 group/capability 去动态裁剪 `t
 | Domain | MCP model-facing surface |
 | --- | --- |
 | Environment | `environ_info`、`environ_remote` |
-| Worker shell/file | `bash_run`、`file_read`、`file_edit`、`file_find`、`file_search`、`file_info` 等 Worker primitive |
+| Worker shell/file | `bash_run`、`file_read`、`file_edit`、`file_glob`、`file_grep` 等 Worker primitive |
 | Artifact | Control `artifact_viewImage`；Worker 不暴露独立 Artifact 读取工具 |
 | tmux | `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_list`、`tmux_create`、`tmux_close` |
 | Todo | `todo_read`、`todo_write` |

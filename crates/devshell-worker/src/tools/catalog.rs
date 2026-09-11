@@ -8,10 +8,9 @@ use crate::tools::artifact::store::ArtifactStore;
 use crate::tools::bash::run::BashRunTool;
 use crate::tools::file::FileToolState;
 use crate::tools::file::edit::FileEditTool;
-use crate::tools::file::find::FileFindTool;
-use crate::tools::file::info::FileInfoTool;
+use crate::tools::file::glob::FileGlobTool;
+use crate::tools::file::grep::FileGrepTool;
 use crate::tools::file::read::FileReadTool;
-use crate::tools::file::search::FileSearchTool;
 #[cfg(unix)]
 use crate::tools::tmux::register_tools as register_tmux_tools;
 use crate::tools::{ToolError, ToolRegistry};
@@ -34,9 +33,8 @@ pub fn builtin_registry(
     )?) as Arc<_>)?;
     registry.register(Arc::new(FileReadTool::new(Arc::clone(&files))) as Arc<_>)?;
     registry.register(Arc::new(FileEditTool::new(Arc::clone(&files))) as Arc<_>)?;
-    registry.register(Arc::new(FileFindTool::new(Arc::clone(&files))) as Arc<_>)?;
-    registry.register(Arc::new(FileSearchTool::new(Arc::clone(&files))) as Arc<_>)?;
-    registry.register(Arc::new(FileInfoTool::new()) as Arc<_>)?;
+    registry.register(Arc::new(FileGlobTool::new(Arc::clone(&files))) as Arc<_>)?;
+    registry.register(Arc::new(FileGrepTool::new(Arc::clone(&files))) as Arc<_>)?;
     #[cfg(unix)]
     register_tmux_tools(
         &mut registry,

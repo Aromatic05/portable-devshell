@@ -54,9 +54,9 @@ function session(calls: string[], instance: string, workspace: string): Extensio
         workspace,
         async callTool(name, input): Promise<ExtensionJsonValue> {
             calls.push(`${name}:${JSON.stringify(input)}`);
-            if (name === "file_find") {
-                const paths = (input as { paths?: string[] }).paths ?? [];
-                if (paths[0] === "./.agents/skills/*/SKILL.md") {
+            if (name === "file_glob") {
+                const patterns = (input as { patterns?: string[] }).patterns ?? [];
+                if (patterns[0] === "./.agents/skills/*/SKILL.md") {
                     return { entries: [{ path: "./.agents/skills/review/SKILL.md", type: "file" }] };
                 }
                 return { entries: [{ path: "./.agents/skills/review/references/checklist.md", type: "file" }] };

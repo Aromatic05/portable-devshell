@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveMcpLegacyTool } from "../../src/endpoint/McpEndpointCompatibility.ts";
+import {
+    adaptMcpLegacyFileToolInput,
+    adaptMcpLegacyFileToolResult,
+    resolveMcpLegacyTool
+} from "../../src/endpoint/McpEndpointCompatibility.ts";
 
 test("legacy MCP compatibility aliases only the semantic superset", () => {
     assert.deepEqual(resolveMcpLegacyTool("ask_question"), {
@@ -35,6 +39,52 @@ test("v0.6.15 Workspace app protocol remains a hidden wire compatibility surface
             replacement,
         }, name);
     }
+});
+
+test("v0.7 file tool names remain hidden stale-schema aliases through v0.7.3", () => {
+    for (const [name, replacement] of [
+        ["file_find", "file_glob"],
+        ["file_info", "file_read"],
+        ["file_search", "file_grep"],
+    ] as const) {
+        assert.deepEqual(resolveMcpLegacyTool(name), {
+            kind: "file-v07-alias",
+            removeIn: "0.7.4",
+            replacement,
+        }, name);
+    }
+});
+
+test("v0.7 file aliases adapt inputs and preserve legacy file_info detail semantics", () => {
+    assert.deepEqual(
+        adaptMcpLegacyFileToolInput("file_find", { paths: ["./src/**/*.ts"], type: "file" }),
+        { patterns: ["./src/**/*.ts"], type: "file" }
+    );
+    assert.deepEqual(
+        adaptMcpLegacyFileToolInput("file_info", { details: false, paths: ["./a.ts"] }),
+        { files: [{ path: "./a.ts", view: "metadata" }] }
+    );
+    const current = {
+        files: [{
+            metadata: {
+                exists: true,
+                mode: 420,
+                modifiedAtMs: 123,
+                sizeBytes: 7,
+                type: "file"
+            },
+            path: "./a.ts",
+            view: "metadata"
+        }]
+    };
+    assert.deepEqual(
+        adaptMcpLegacyFileToolResult("file_info", current, { paths: ["./a.ts"] }),
+        { entries: [{ path: "./a.ts", type: "file" }] }
+    );
+    assert.deepEqual(
+        adaptMcpLegacyFileToolResult("file_info", current, { details: true, paths: ["./a.ts"] }),
+        { entries: [{ mode: 420, modifiedAtMs: 123, path: "./a.ts", sizeBytes: 7, type: "file" }] }
+    );
 });
 
 test("incompatible legacy MCP schemas stay tombstoned", () => {

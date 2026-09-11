@@ -222,7 +222,7 @@ fn is_numeric_type(value: &serde_json::Value) -> bool {
 mod tests {
     use serde_json::json;
 
-    use crate::tools::file::types::{FileFindInput, FileSearchInput};
+    use crate::tools::file::types::{FileGlobInput, FileGrepInput};
 
     use super::normalize_schema;
 
@@ -251,18 +251,16 @@ mod tests {
     }
 
     #[test]
-    fn normalize_schema_flattens_root_object_unions_for_model_tool_contracts() {
-        let mut schema = serde_json::to_value(schemars::schema_for!(FileFindInput)).unwrap();
+    fn normalize_schema_keeps_file_glob_as_one_object_contract() {
+        let mut schema = serde_json::to_value(schemars::schema_for!(FileGlobInput)).unwrap();
         normalize_schema(&mut schema);
 
         assert_eq!(schema.get("type"), Some(&json!("object")));
-        assert!(schema.get("oneOf").is_none());
-        assert!(schema.get("anyOf").is_none());
         let properties = schema
             .get("properties")
             .and_then(serde_json::Value::as_object)
             .unwrap();
-        assert!(properties.contains_key("paths"));
+        assert!(properties.contains_key("patterns"));
         assert!(properties.contains_key("type"));
         assert!(properties.contains_key("hidden"));
         assert!(properties.contains_key("gitignore"));
@@ -272,8 +270,8 @@ mod tests {
     }
 
     #[test]
-    fn normalize_schema_keeps_all_file_search_modes_under_one_object_root() {
-        let mut schema = serde_json::to_value(schemars::schema_for!(FileSearchInput)).unwrap();
+    fn normalize_schema_keeps_file_grep_as_one_object_contract() {
+        let mut schema = serde_json::to_value(schemars::schema_for!(FileGrepInput)).unwrap();
         normalize_schema(&mut schema);
 
         assert_eq!(schema.get("type"), Some(&json!("object")));

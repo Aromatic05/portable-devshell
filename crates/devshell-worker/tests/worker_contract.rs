@@ -177,10 +177,9 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     let mut expected_tools = vec![
         "bash_run",
         "file_edit",
-        "file_find",
-        "file_info",
+        "file_glob",
+        "file_grep",
         "file_read",
-        "file_search",
     ];
     if cfg!(unix)
         && Command::new("tmux")
@@ -311,18 +310,37 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         1
     );
     assert!(file_read_schema["outputSchema"]["properties"]["files"].is_object());
-    let file_search_schema = catalog
+    let file_glob_schema = catalog
         .iter()
-        .find(|tool| tool["name"] == "file_search")
+        .find(|tool| tool["name"] == "file_glob")
         .unwrap();
     assert_eq!(
-        file_search_schema["inputSchema"]["$defs"]["FileSearchStartInput"]["properties"]["paths"]["minItems"],
+        file_glob_schema["inputSchema"]["properties"]["patterns"]["minItems"],
         1
     );
     assert_eq!(
-        file_search_schema["inputSchema"]["$defs"]["FileCursorInput"]["properties"]["cursor"]["minLength"],
+        file_glob_schema["inputSchema"]["properties"]["cursor"]["minLength"],
         1
     );
+    let file_grep_schema = catalog
+        .iter()
+        .find(|tool| tool["name"] == "file_grep")
+        .unwrap();
+    assert_eq!(
+        file_grep_schema["inputSchema"]["properties"]["pattern"]["minLength"],
+        1
+    );
+    assert_eq!(
+        file_grep_schema["inputSchema"]["properties"]["paths"]["minItems"],
+        1
+    );
+    assert_eq!(
+        file_grep_schema["inputSchema"]["properties"]["cursor"]["minLength"],
+        1
+    );
+    for retired in ["file_find", "file_info", "file_search"] {
+        assert!(catalog.iter().all(|tool| tool["name"] != retired));
+    }
 
     if expected_tools.contains(&"tmux_input") {
         for name in ["tmux_input", "tmux_inspect", "tmux_close"] {

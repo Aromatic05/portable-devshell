@@ -106,18 +106,23 @@ test("bash_run error hints cover invalid command and cancellation semantics", ()
 test("file_read truncation and partial parse are diagnosed", () => {
     assert.deepEqual(codes(resolveResultHints("file_read", { parseStatus: "complete", truncated: true })), ["file.partialRead"]);
     assert.deepEqual(codes(resolveResultHints("file_read", { parseStatus: "partial", truncated: false })), ["file.partialParse"]);
+    assert.deepEqual(codes(resolveResultHints("file_read", {
+        files: [{ nextSelector: "201", path: "./a.ts", view: "content" }]
+    })), ["file.partialRead"]);
     assert.deepEqual(resolveResultHints("file_read", { parseStatus: "complete", truncated: false }), []);
 });
 
-test("file_find and file_search paging is diagnosed but empty results are not failures", () => {
-    assert.deepEqual(codes(resolveResultHints("file_find", { entries: [], nextCursor: "c1" })), ["file.partialResults"]);
-    assert.deepEqual(resolveResultHints("file_find", { entries: [] }), []);
-    assert.deepEqual(codes(resolveResultHints("file_search", { files: [], nextCursor: "c1" })), ["file.partialResults"]);
-    assert.deepEqual(resolveResultHints("file_search", { files: [] }), []);
+test("file_glob and file_grep paging is diagnosed but empty results are not failures", () => {
+    assert.deepEqual(codes(resolveResultHints("file_glob", { entries: [], nextCursor: "c1" })), ["file.partialResults"]);
+    assert.deepEqual(resolveResultHints("file_glob", { entries: [] }), []);
+    assert.deepEqual(codes(resolveResultHints("file_grep", { files: [], nextCursor: "c1" })), ["file.partialResults"]);
+    assert.deepEqual(resolveResultHints("file_grep", { files: [] }), []);
 });
 
-test("file_info exists=false is an observation, not a failure", () => {
-    assert.deepEqual(resolveResultHints("file_info", { entries: [{ exists: false, path: "./missing" }] }), []);
+test("file_read metadata missing paths are observations, not failures", () => {
+    assert.deepEqual(resolveResultHints("file_read", {
+        files: [{ metadata: { exists: false }, path: "./missing", view: "metadata" }]
+    }), []);
 });
 
 test("file_edit partial failure reports applied, failed, and not-executed operations", () => {

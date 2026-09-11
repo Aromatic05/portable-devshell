@@ -11,7 +11,7 @@ use crate::tools::file::FileToolState;
 use crate::tools::file::discover::DiscoveryCursor;
 use crate::tools::file::resolve_existing;
 use crate::tools::file::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
-use crate::tools::file::types::{FileSearchFile, FileSearchInput, FileSearchOutput, SearchSyntax};
+use crate::tools::file::types::{FileGrepFile, FileGrepInput, FileGrepOutput, SearchSyntax};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const FILES_PER_PAGE: usize = 20;
@@ -20,14 +20,14 @@ const SINGLE_FILE_MATCHES: usize = 200;
 const MAX_RENDERED_LINE_BYTES: usize = 4096;
 const MAX_SERIALIZED_OUTPUT_BYTES: usize = 1024 * 1024;
 
-pub struct FileSearchTool {
+pub struct FileGrepTool {
     name: ToolName,
     state: Arc<FileToolState>,
 }
 
 #[derive(Clone)]
 struct MatchedFile {
-    output: FileSearchFile,
+    output: FileGrepFile,
     resolved: ResolvedPath,
     metadata: TextMetadata,
     seen: Vec<usize>,
@@ -47,7 +47,7 @@ struct SearchGroup {
 }
 
 #[derive(Clone)]
-pub(crate) struct SearchContinuation {
+pub(crate) struct GrepContinuation {
     groups: Vec<SearchGroup>,
     next_group: usize,
     seen_candidates: HashSet<PathBuf>,
@@ -74,103 +74,127 @@ enum PreparedSearchSnapshot {
     },
 }
 
-impl FileSearchTool {
+impl FileGrepTool {
     pub fn new(state: Arc<FileToolState>) -> Self {
         Self {
-            name: ToolName::parse("file_search").unwrap(),
+            name: ToolName::parse("file_grep").unwrap(),
             state,
         }
     }
 }
-impl ToolHandler for FileSearchTool {
+impl ToolHandler for FileGrepTool {
     fn name(&self) -> &ToolName {
         &self.name
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        crate::tools::contract::catalog_entry::<FileSearchInput, FileSearchOutput>(
+        crate::tools::contract::catalog_entry::<FileGrepInput, FileGrepOutput>(
             &self.name,
-            "Search UTF-8 text in files, directories, or globs. Use ./ for workspace-relative paths and / for absolute paths. Returned source lines prepare those lines for file_edit. Continue result pages with cursor alone. A cursor remains retryable until a later nextCursor derived from it is actually used. A truncated file includes nextLine; rerun the same search against that exact file with startLine=nextLine to continue its matches.".to_string(),
+            "Search UTF-8 text in files, directories, or globs. Start with pattern and optional paths; continue result pages with cursor alone. When cursor is present, omit all search fields. Returned source lines prepare those lines for file_edit. A truncated file includes nextLine; rerun file_grep against that exact file with startLine to continue its matches.".to_string(),
             [ToolCapability::Read],
         )
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
-        let input: FileSearchInput = call.parse_params()?;
-        let (mut continuation, source_cursor) = match input {
-            FileSearchInput::Continue(input) => {
-                let continuation = self
-                    .state
-                    .search_cursors
-                    .lock()
-                    .unwrap()
-                    .resolve(&call, &input.cursor)?;
-                (continuation, Some(input.cursor))
+        let input: FileGrepInput = call.parse_params()?;
+        let (mut continuation, source_cursor) = if let Some(cursor) = input.cursor {
+            if input.pattern.is_some()
+                || input.paths.is_some()
+                || input.syntax.is_some()
+                || input.case_sensitive.is_some()
+                || input.hidden.is_some()
+                || input.gitignore.is_some()
+                || input.context.is_some()
+                || input.start_line.is_some()
+            {
+                return Err(ToolError::new(
+                    "tool.invalidArguments",
+                    "cursor must be provided alone when continuing file_grep",
+                ));
             }
-            FileSearchInput::Start(input) => {
-                let paths = input.paths.unwrap_or_else(|| vec!["./".to_string()]);
-                if paths.is_empty() {
-                    return Err(ToolError::new(
-                        "tool.invalidArguments",
-                        "paths must contain at least one path when provided",
-                    ));
-                }
-                let syntax = input.syntax.unwrap_or(SearchSyntax::Regex);
-                let case_sensitive = input.case_sensitive.unwrap_or(true);
-                let expression = match syntax {
-                    SearchSyntax::Literal => regex::escape(&input.pattern),
-                    SearchSyntax::Regex => input.pattern,
-                };
-                let matcher = RegexBuilder::new(&expression)
-                    .case_insensitive(!case_sensitive)
-                    .build()
-                    .map_err(|error| ToolError::new("file.invalidRegex", error.to_string()))?;
-                let hidden = input.hidden.unwrap_or(true);
-                let gitignore = input.gitignore.unwrap_or(true);
-                let context = input.context;
-                if context.is_some_and(|value| value > 20) {
-                    return Err(ToolError::new(
-                        "tool.invalidArguments",
-                        "context cannot exceed 20",
-                    ));
-                }
-                let single_exact_file = is_single_exact_file(&call, &paths)?;
-                let start_line = input.start_line.unwrap_or(1);
-                if start_line > 1 && !single_exact_file {
-                    return Err(ToolError::new(
-                        "tool.invalidArguments",
-                        "startLine is only valid when paths contains one exact file",
-                    ));
-                }
-                let groups = paths
-                    .iter()
-                    .map(|path| {
-                        DiscoveryCursor::new(&call, std::slice::from_ref(path), hidden, gitignore)
-                            .map(|discovery| SearchGroup {
-                                discovery,
-                                exhausted: false,
-                            })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                let per_file = if single_exact_file {
-                    SINGLE_FILE_MATCHES
-                } else {
-                    MATCHES_PER_FILE
-                };
-                (
-                    SearchContinuation {
-                        groups,
-                        next_group: 0,
-                        seen_candidates: HashSet::new(),
-                        pending: None,
-                        strict_single_file: single_exact_file,
-                        per_file,
-                        matcher,
-                        context,
-                        start_line,
-                    },
-                    None,
+            let continuation = self
+                .state
+                .grep_cursors
+                .lock()
+                .unwrap()
+                .resolve(&call, &cursor)?;
+            (continuation, Some(cursor))
+        } else {
+            let pattern = input.pattern.ok_or_else(|| {
+                ToolError::new(
+                    "tool.invalidArguments",
+                    "pattern is required when starting file_grep",
                 )
+            })?;
+            if pattern.is_empty() {
+                return Err(ToolError::new(
+                    "tool.invalidArguments",
+                    "pattern cannot be empty",
+                ));
             }
+            let paths = input.paths.unwrap_or_else(|| vec!["./".to_string()]);
+            if paths.is_empty() {
+                return Err(ToolError::new(
+                    "tool.invalidArguments",
+                    "paths must contain at least one path when provided",
+                ));
+            }
+            let syntax = input.syntax.unwrap_or(SearchSyntax::Regex);
+            let case_sensitive = input.case_sensitive.unwrap_or(true);
+            let expression = match syntax {
+                SearchSyntax::Literal => regex::escape(&pattern),
+                SearchSyntax::Regex => pattern,
+            };
+            let matcher = RegexBuilder::new(&expression)
+                .case_insensitive(!case_sensitive)
+                .build()
+                .map_err(|error| ToolError::new("file.invalidRegex", error.to_string()))?;
+            let hidden = input.hidden.unwrap_or(true);
+            let gitignore = input.gitignore.unwrap_or(true);
+            let context = input.context;
+            if context.is_some_and(|value| value > 20) {
+                return Err(ToolError::new(
+                    "tool.invalidArguments",
+                    "context cannot exceed 20",
+                ));
+            }
+            let single_exact_file = is_single_exact_file(&call, &paths)?;
+            let start_line = input.start_line.unwrap_or(1);
+            if start_line > 1 && !single_exact_file {
+                return Err(ToolError::new(
+                    "tool.invalidArguments",
+                    "startLine is only valid when paths contains one exact file",
+                ));
+            }
+            let groups = paths
+                .iter()
+                .map(|path| {
+                    DiscoveryCursor::new(&call, std::slice::from_ref(path), hidden, gitignore).map(
+                        |discovery| SearchGroup {
+                            discovery,
+                            exhausted: false,
+                        },
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let per_file = if single_exact_file {
+                SINGLE_FILE_MATCHES
+            } else {
+                MATCHES_PER_FILE
+            };
+            (
+                GrepContinuation {
+                    groups,
+                    next_group: 0,
+                    seen_candidates: HashSet::new(),
+                    pending: None,
+                    strict_single_file: single_exact_file,
+                    per_file,
+                    matcher,
+                    context,
+                    start_line,
+                },
+                None,
+            )
         };
 
         let mut page = Vec::<MatchedFile>::new();
@@ -185,7 +209,7 @@ impl ToolHandler for FileSearchTool {
                 .map(|matched| matched.output.clone())
                 .chain(std::iter::once(file.output.clone()))
                 .collect();
-            let probe = FileSearchOutput {
+            let probe = FileGrepOutput {
                 files: candidate,
                 next_cursor: Some("00000000-0000-0000-0000-000000000000".to_string()),
             };
@@ -278,13 +302,13 @@ impl ToolHandler for FileSearchTool {
             }
         }
         let next_cursor = has_more.then(|| {
-            self.state.search_cursors.lock().unwrap().issue(
+            self.state.grep_cursors.lock().unwrap().issue(
                 &call,
                 continuation,
                 source_cursor.clone(),
             )
         });
-        crate::tools::contract::serialize(FileSearchOutput {
+        crate::tools::contract::serialize(FileGrepOutput {
             files: returned,
             next_cursor,
         })
@@ -293,7 +317,7 @@ impl ToolHandler for FileSearchTool {
 
 fn next_page_file(
     call: &ToolCall,
-    continuation: &mut SearchContinuation,
+    continuation: &mut GrepContinuation,
     state: &FileToolState,
 ) -> Result<Option<MatchedFile>, ToolError> {
     if let Some(pending) = continuation.pending.take() {
@@ -306,7 +330,7 @@ fn next_page_file(
 
 fn refresh_pending_file(
     call: &ToolCall,
-    continuation: &SearchContinuation,
+    continuation: &GrepContinuation,
     pending: PendingFile,
     state: &FileToolState,
 ) -> Result<Option<MatchedFile>, ToolError> {
@@ -333,7 +357,7 @@ fn refresh_pending_file(
     }
     let (body, seen) = format_streamed_content(&matches, &shown);
     Ok(Some(MatchedFile {
-        output: FileSearchFile {
+        output: FileGrepFile {
             path: pending.path,
             content: body,
             truncated: next_line.is_some().then_some(true),
@@ -366,7 +390,7 @@ fn is_single_exact_file(call: &ToolCall, paths: &[String]) -> Result<bool, ToolE
 
 fn next_matched_file(
     call: &ToolCall,
-    continuation: &mut SearchContinuation,
+    continuation: &mut GrepContinuation,
     state: &FileToolState,
 ) -> Result<Option<MatchedFile>, ToolError> {
     if continuation.groups.is_empty() {
@@ -430,7 +454,7 @@ fn next_matched_file(
             }
             let (body, seen) = format_streamed_content(&matches, &shown);
             return Ok(Some(MatchedFile {
-                output: FileSearchFile {
+                output: FileGrepFile {
                     path: entry.display,
                     content: body,
                     truncated: next_line.is_some().then_some(true),

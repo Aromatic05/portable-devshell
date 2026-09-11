@@ -2,15 +2,19 @@
 
 ## `file_read`
 
-`file_read` 读取 UTF-8 文本，并在当前 worker instance 与 `ctxId` 内建立隐式编辑快照。调用方不需要复制 snapshot ID、tag 或 revision。
+`file_read` 批量读取文件正文、结构或路径元数据。正文和 outline 读取在当前 worker instance 与 `ctxId` 内建立隐式编辑快照；metadata 只观察文件系统状态，不建立编辑 coverage。调用方不需要复制 snapshot ID、tag 或 revision。
 
 输入：
 
 ```json
 {
-  "path": "./src/lib.rs",
-  "view": "auto",
-  "selector": "50-100"
+  "files": [
+    {
+      "path": "./src/lib.rs",
+      "view": "content",
+      "selector": "50-100"
+    }
+  ]
 }
 ```
 
@@ -25,8 +29,13 @@
 ```text
 auto
 content
+metadata
 outline
 ```
+
+`metadata` 不跟随最后一级符号链接，并允许路径不存在。它返回稳定的 `exists` 布尔值，以及存在时的 `type`、`sizeBytes`、`modifiedAtMs`、`mode` 和可选 `targetType`。`type` / `targetType` 取值为 `file | directory | symlink | other`。metadata 不接受 `selector`。
+
+输出中的 `view` 始终是实际解析后的 `content`、`outline` 或 `metadata`，不会返回 `auto`。
 
 `content` selector 使用一基行号：
 
@@ -41,11 +50,18 @@ raw
 
 outline 返回符号的起止行、层级、语言和 `parseStatus`。outline 不使用正文分页式 `nextSelector`；根据符号范围再次调用 `view=content` 即可读取实现。
 
-## `file_find`
+## `file_glob`
 
-`file_find` 按 exact path 或 glob 查找文件和目录，并支持 `file` / `directory` / `any` 类型过滤。
+`file_glob` 按 exact path 或 glob pattern 查找文件和目录，并支持 `file` / `directory` / `any` 类型过滤。第一页使用 `patterns`：
 
-每页最多返回 200 个 entry。出现 `nextCursor` 时，cursor 保存实际 traversal continuation，包括目录 DFS 栈、当前 entry index、ignore 规则、类型过滤条件和去重状态。下一页只传 `cursor`，不再重复 `paths`、`type`、`hidden` 或 `gitignore`；它会从上次停止的位置继续，而不是重新遍历根目录。
+```json
+{
+  "patterns": ["./src/**/*.ts", "./packages/*/package.json"],
+  "type": "file"
+}
+```
+
+每页最多返回 200 个 entry。出现 `nextCursor` 时，cursor 保存实际 traversal continuation，包括目录 DFS 栈、当前 entry index、ignore 规则、类型过滤条件和去重状态。下一页只传 `cursor`，不再重复 `patterns`、`type`、`hidden` 或 `gitignore`；它会从上次停止的位置继续，而不是重新遍历根目录。
 
 Cursor 绑定当前 `ctxId + workspace + worker process`，并受 LRU 容量限制。续页响应如果丢失，原 cursor 仍可重试；只有当调用方实际使用由它派生出的后续 `nextCursor` 时，旧 cursor 才会被回收。跨 Context/workspace 使用、worker restart 或 cursor 被淘汰后返回 `file.invalidCursor`；此时重新发起原始查询即可。
 
@@ -53,9 +69,9 @@ Cursor 绑定当前 `ctxId + workspace + worker process`，并受 LRU 容量限�
 
 Traversal 使用已经解析并锚定的目录能力。因此第一页之后即使路径名被替换，后续 cursor 仍沿着原来已经打开的目录树继续，而不会静默切换到新目标。
 
-## `file_search`
+## `file_grep`
 
-`file_search` 在 exact file、目录或 glob 中搜索 UTF-8 文本：
+`file_grep` 在 exact file、目录或 glob 中搜索 UTF-8 文本：
 
 ```json
 {
@@ -66,7 +82,7 @@ Traversal 使用已经解析并锚定的目录能力。因此第一页之后即�
 }
 ```
 
-一页最多返回 20 个匹配文件。与 `file_find` 相同，`nextCursor` 保存完整 discovery/search continuation；下一页只传 `cursor`，由它继续扫描尚未访问的候选文件。恰好一页结束时已经没有更多匹配，则不会额外返回一个只会产生空页的 cursor。
+一页最多返回 20 个匹配文件。与 `file_glob` 相同，`nextCursor` 保存完整 discovery/search continuation；下一页只传 `cursor`，此时不得重复 `pattern`、`paths`、`syntax`、`caseSensitive`、`hidden`、`gitignore`、`context` 或 `startLine`。它会继续扫描尚未访问的候选文件。恰好一页结束时已经没有更多匹配，则不会额外返回一个只会产生空页的 cursor。
 
 为了约束单个文件的返回规模，每个文件最多展示：
 
@@ -90,6 +106,10 @@ directory/glob search       20 matches per file
 
 搜索结果还受 RPC 序列化输出预算约束。因为预算而留到下一页的文件不会提前建立编辑快照；只有本次真正出现在 `files` 数组中的源码行才算已经被 agent 观察，并进入 `file_edit` coverage。
 
+### 旧 MCP 名称兼容
+
+`0.7.2` 引入新名称后，缓存旧 schema 的 MCP 客户端仍可在 `0.7.2` 和 `0.7.3` 调用 `file_find`、`file_search`、`file_info`。这些旧名称不会继续出现在新的 `tools/list`：`file_find` 映射到 `file_glob`，`file_search` 映射到 `file_grep`，`file_info` 映射到 `file_read view=metadata` 并保持旧输入/输出 shape。兼容入口在 `0.7.4` 删除。
+
 ## 隐式快照
 
 快照按以下边界隔离：
@@ -102,11 +122,11 @@ worker instance + ctxId + normalized path
 
 ```text
 file_read
-file_search
+file_grep
 成功的 file_edit 子操作
 ```
 
-MCP/RPC transport session 关闭不会清理 Context 快照；重连后只要仍解析到同一个内部 `ctxId` 就可以继续使用。`file_search` 只为本次实际返回在 `files` 数组中的结果建立或更新快照，分页之外或因输出预算未返回的匹配文件不会获得快照。没有快照时，修改已有文件返回 `file.snapshotRequired`。Patch 使用未读取的源码行时返回 `file.unreadRange`。
+MCP/RPC transport session 关闭不会清理 Context 快照；重连后只要仍解析到同一个内部 `ctxId` 就可以继续使用。`file_grep` 只为本次实际返回在 `files` 数组中的结果建立或更新快照，分页之外或因输出预算未返回的匹配文件不会获得快照。`file_read view=metadata` 不建立快照。没有快照时，修改已有文件返回 `file.snapshotRequired`。Patch 使用未读取的源码行时返回 `file.unreadRange`。
 
 ## `file_edit`
 
@@ -227,7 +247,7 @@ Patch B
 
 ## 取消语义
 
-`file_read`、`file_find`、`file_search` 和 `file_info` 会在目录遍历、文件读取及结果组装的安全点响应取消。
+`file_read`、`file_glob` 和 `file_grep` 会在目录遍历、文件读取及结果组装的安全点响应取消。
 
 `file_edit` 的取消是协作式的：解析和完整预检阶段可以直接停止；开始执行后只在子操作边界检查取消。当前正在进行的原子 Write/Patch/Rewrite/Delete/Move 不会被截断，先前已经成功的子操作也不会回滚。取消发生后，当前 section 返回取消错误，后续 section 标记为 `notExecuted`。
 

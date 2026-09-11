@@ -32,7 +32,7 @@ worker:<instance>
 (event) => {
     if (
         event.method === "callTool" &&
-        event.args.toolName === "file_info"
+        event.args.toolName === "file_read"
     ) {
         return { action: "hold", label: "host-timeout-probe" };
     }

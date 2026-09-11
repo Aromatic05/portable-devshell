@@ -249,14 +249,14 @@ function toPiTool(definition: DevshellPiToolDefinition, session: DevshellPiToolS
 export function piPromptMetadata(toolName: string): Pick<PiToolLike, "promptGuidelines" | "promptSnippet"> {
     switch (toolName) {
         case "file_read":
-            return { promptSnippet: "Read file contents from the devshell workspace" };
-        case "file_search":
+            return { promptSnippet: "Read file contents, outlines, or metadata from the devshell workspace" };
+        case "file_grep":
             return { promptSnippet: "Search file contents in the devshell workspace" };
         case "file_edit":
             return {
                 promptSnippet: "Edit workspace files with devshell Write/Patch/Rewrite/Delete/Move edit blocks",
                 promptGuidelines: [
-                    "Before file_edit modifies an existing file, use file_read or file_search on that file in the current context; file_edit rejects unseen existing files.",
+                    "Before file_edit modifies an existing file, use file_read or file_grep on that file in the current context; file_edit rejects unseen existing files.",
                     "file_edit changes must use devshell edit blocks: start with '*** Begin Edit', use '*** Patch File:', '*** Write File:', '*** Rewrite File:', '*** Delete File:', or '*** Move File:', and finish with '*** End Edit'. Never use '*** Update File:'."
                 ]
             };

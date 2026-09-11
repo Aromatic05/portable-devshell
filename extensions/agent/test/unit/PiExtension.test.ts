@@ -220,10 +220,10 @@ test("Pi devshell workspace context follows native Pi file priority and reconstr
     const calls: Array<{ input: unknown; operationId: string; toolName: string }> = [];
     const contextFiles = await loadDevshellPiWorkspaceContext(
         { instance: "worker-a", workspace: "/repo" },
-        new Set(["file_find", "file_read"]),
+        new Set(["file_glob", "file_read"]),
         async (toolName, input, operationId): Promise<JsonValue> => {
             calls.push({ input, operationId, toolName });
-            if (toolName === "file_find") {
+            if (toolName === "file_glob") {
                 return {
                     entries: [
                         { path: "./CLAUDE.md", type: "file" },
@@ -234,12 +234,22 @@ test("Pi devshell workspace context follows native Pi file priority and reconstr
             }
             if (operationId === "pi-context-read-1") {
                 return {
-                    content: "1:# Override rules\n2:alpha",
-                    nextSelector: "3"
+                    files: [{
+                        content: "1:# Override rules\n2:alpha",
+                        nextSelector: "3",
+                        path: "./AGENTS.override.md",
+                        view: "content"
+                    }]
                 };
             }
             assert.equal(operationId, "pi-context-read-2");
-            return { content: "3:\n4:omega" };
+            return {
+                files: [{
+                    content: "3:\n4:omega",
+                    path: "./AGENTS.override.md",
+                    view: "content"
+                }]
+            };
         }
     );
 
@@ -247,18 +257,18 @@ test("Pi devshell workspace context follows native Pi file priority and reconstr
         content: "# Override rules\nalpha\n\nomega",
         path: "worker-a:/repo/AGENTS.override.md"
     }]);
-    assert.equal(calls[0]?.toolName, "file_find");
+    assert.equal(calls[0]?.toolName, "file_glob");
     assert.deepEqual(calls[0]?.input, {
         gitignore: false,
         hidden: true,
-        paths: ["./AGENTS*", "./CLAUDE*"],
+        patterns: ["./AGENTS*", "./CLAUDE*"],
         type: "file"
     });
-    assert.deepEqual(calls[1]?.input, { path: "./AGENTS.override.md", view: "content" });
+    assert.deepEqual(calls[1]?.input, {
+        files: [{ path: "./AGENTS.override.md", view: "content" }]
+    });
     assert.deepEqual(calls[2]?.input, {
-        path: "./AGENTS.override.md",
-        selector: "3:raw",
-        view: "content"
+        files: [{ path: "./AGENTS.override.md", selector: "3:raw", view: "content" }]
     });
 });
 
@@ -296,18 +306,32 @@ test("Pi devshell workspace resources load native project skills and prompt temp
     ]);
     const resources = await loadDevshellPiWorkspaceResources(
         { instance: "worker-a", workspace: "/repo" },
-        new Set(["file_find", "file_read"]),
+        new Set(["file_glob", "file_read"]),
         async (toolName, input): Promise<JsonValue> => {
-            if (toolName === "file_find") {
+            if (toolName === "file_glob") {
                 return {
                     entries: [...files.keys()].map((path) => ({ path, type: "file" }))
                 };
             }
-            const path = (input as { path: string }).path;
+            const requests = (input as { files: Array<{ path: string; view: string }> }).files;
+            if (requests.every((request) => request.view === "metadata")) {
+                return {
+                    files: requests.map((request) => ({
+                        metadata: { exists: true, type: "directory" },
+                        path: request.path,
+                        view: "metadata"
+                    }))
+                };
+            }
+            const path = requests[0]!.path;
             const content = files.get(path);
             assert.notEqual(content, undefined, path);
             return {
-                content: content!.split("\n").map((line, index) => `${index + 1}:${line}`).join("\n")
+                files: [{
+                    content: content!.split("\n").map((line, index) => `${index + 1}:${line}`).join("\n"),
+                    path,
+                    view: "content"
+                }]
             };
         }
     );
@@ -396,22 +420,40 @@ test("Pi devshell workspace resources probe optional remote directories before g
         let resourceFindPaths: unknown;
         const resources = await loadDevshellPiWorkspaceResources(
             { instance: "worker-a", workspace: "/repo" },
-            new Set(["file_find", "file_info", "file_read"]),
+            new Set(["file_glob", "file_read"]),
             async (toolName, input, operationId): Promise<JsonValue> => {
-                if (operationId === "pi-context-find") return { entries: [] };
-                if (operationId === "pi-resources-info") return { entries: scenario.infoEntries };
-                if (operationId === "pi-resources-find") {
-                    resourceFindPaths = (input as { paths: unknown }).paths;
+                if (operationId === "pi-context-glob") return { entries: [] };
+                if (operationId === "pi-resources-metadata") {
+                    return {
+                        files: scenario.infoEntries.map((value) => {
+                            const entry = value as { exists?: boolean; path: string; type?: string };
+                            return {
+                                metadata: {
+                                    exists: entry.exists !== false,
+                                    ...(entry.type === undefined ? {} : { type: entry.type })
+                                },
+                                path: entry.path,
+                                view: "metadata"
+                            };
+                        })
+                    };
+                }
+                if (operationId === "pi-resources-glob") {
+                    resourceFindPaths = (input as { patterns: unknown }).patterns;
                     return {
                         entries: [...scenario.files.keys()].map((path) => ({ path, type: "file" }))
                     };
                 }
                 assert.equal(toolName, "file_read");
-                const path = (input as { path: string }).path;
+                const path = (input as { files: Array<{ path: string }> }).files[0]!.path;
                 const content = scenario.files.get(path);
                 assert.notEqual(content, undefined, path);
                 return {
-                    content: content!.split("\n").map((line, index) => `${index + 1}:${line}`).join("\n")
+                    files: [{
+                        content: content!.split("\n").map((line, index) => `${index + 1}:${line}`).join("\n"),
+                        path,
+                        view: "content"
+                    }]
                 };
             }
         );
@@ -526,15 +568,19 @@ test("Pi devshell edit tool contributes its Worker preconditions and grammar to 
     const metadata = piPromptMetadata("file_edit");
     assert.match(metadata.promptSnippet ?? "", /Edit workspace files/u);
     assert.equal(metadata.promptGuidelines?.length, 2);
-    assert.match(metadata.promptGuidelines?.[0] ?? "", /file_read or file_search/u);
+    assert.match(metadata.promptGuidelines?.[0] ?? "", /file_read or file_grep/u);
     assert.match(metadata.promptGuidelines?.[1] ?? "", /\*\*\* Patch File:/u);
     assert.match(metadata.promptGuidelines?.[1] ?? "", /Never use '\*\*\* Update File:'/u);
 });
 
 test("Pi devshell renderer formats common calls without JSON fallback", () => {
     assert.equal(
-        formatPiToolCall("file_search", { pattern: "renderCall", paths: ["./src", "./test"] }),
+        formatPiToolCall("file_grep", { pattern: "renderCall", paths: ["./src", "./test"] }),
         "grep /renderCall/ in ./src, ./test"
+    );
+    assert.equal(
+        formatPiToolCall("file_glob", { patterns: ["./src/**/*.ts"], type: "file" }),
+        "glob ./src/**/*.ts file"
     );
     assert.equal(
         formatPiToolCall("bash_run", { command: "pnpm test", cwd: "./extensions/agent" }),
@@ -546,10 +592,9 @@ test("Pi devshell renderer explicitly covers the complete current Worker catalog
     const expected = [
         "bash_run",
         "file_edit",
-        "file_find",
-        "file_info",
+        "file_glob",
+        "file_grep",
         "file_read",
-        "file_search",
         "tmux_close",
         "tmux_create",
         "tmux_input",
@@ -604,9 +649,9 @@ test("Pi devshell read renderer follows native collapsed and expanded semantics"
     ]);
 });
 
-test("Pi devshell find and info results use native compact rows rather than structured keys", () => {
+test("Pi devshell glob and metadata read results use native compact rows rather than structured keys", () => {
     assert.equal(
-        formatPiToolResult("file_find", {
+        formatPiToolResult("file_glob", {
             content: [],
             details: {
                 entries: [
@@ -618,12 +663,12 @@ test("Pi devshell find and info results use native compact rows rather than stru
         }, false),
         ["src/", "src/index.ts", "[More results available: continue with next cursor]"].join("\n")
     );
-    const info = formatPiToolResult("file_info", {
+    const info = formatPiToolResult("file_read", {
         content: [],
         details: {
-            entries: [
-                { path: "./src", type: "directory", mode: 493 },
-                { path: "./missing", exists: false }
+            files: [
+                { path: "./src", view: "metadata", metadata: { exists: true, type: "directory", mode: 493 } },
+                { path: "./missing", view: "metadata", metadata: { exists: false } }
             ]
         }
     }, false);
@@ -684,8 +729,8 @@ test("Pi devshell tmux renderer consumes Worker output arrays and keeps task sta
     assert.equal(rendered.includes("task:"), false);
 });
 
-test("Pi devshell renderer turns file search results into readable sections", () => {
-    const rendered = formatPiToolResult("file_search", {
+test("Pi devshell renderer turns file grep results into readable sections", () => {
+    const rendered = formatPiToolResult("file_grep", {
         content: [],
         details: {
             files: [

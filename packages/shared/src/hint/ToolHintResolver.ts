@@ -9,9 +9,9 @@ import { bashErrorHints, bashResultHints } from "./worker/BashHints.js";
 import {
     fileEditResultHints,
     fileErrorHints,
-    fileFindResultHints,
+    fileGlobResultHints,
+    fileGrepResultHints,
     fileReadResultHints,
-    fileSearchResultHints
 } from "./worker/FileHints.js";
 import {
     tmuxCloseResultHints,
@@ -28,9 +28,9 @@ type ErrorResolver = (toolName: string, body: ControlErrorBody) => ToolDiagnosti
 const resultResolvers: Record<string, ResultResolver> = {
     bash_run: (_toolName, result) => bashResultHints(result),
     file_edit: (_toolName, result) => fileEditResultHints(result),
-    file_find: (_toolName, result) => fileFindResultHints(result),
+    file_glob: (_toolName, result) => fileGlobResultHints(result),
+    file_grep: (_toolName, result) => fileGrepResultHints(result),
     file_read: (_toolName, result) => fileReadResultHints(result),
-    file_search: (_toolName, result) => fileSearchResultHints(result),
     tmux_close: (_toolName, result) => tmuxCloseResultHints(result),
     tmux_create: (_toolName, result) => tmuxCreateResultHints(result),
     tmux_input: (toolName, result) => tmuxTaskResultHints(toolName, result),
@@ -40,7 +40,7 @@ const resultResolvers: Record<string, ResultResolver> = {
     tmux_run: (toolName, result) => tmuxTaskResultHints(toolName, result)
 };
 
-const fileTools = new Set(["file_read", "file_edit", "file_find", "file_search", "file_info"]);
+const fileTools = new Set(["file_read", "file_edit", "file_glob", "file_grep"]);
 const tmuxTools = new Set(["tmux_run", "tmux_input", "tmux_read", "tmux_inspect", "tmux_list", "tmux_create", "tmux_close"]);
 const artifactControlTools = new Set(["artifact_viewImage", "artifact_share"]);
 const instanceTools = new Set(["instance_list", "instance_status", "instance_create", "instance_stop"]);

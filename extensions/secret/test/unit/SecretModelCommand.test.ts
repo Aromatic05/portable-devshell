@@ -41,7 +41,7 @@ function session(events: string[], instance: string, workspace: string): Extensi
         workspace,
         async callTool(name, input): Promise<ExtensionJsonValue> {
             events.push(`${name}:${JSON.stringify(input)}`);
-            if (name === "file_find") {
+            if (name === "file_glob") {
                 return { entries: [{ path: "./src/config.ts", type: "file" }] };
             }
             if (name === "file_read") {
