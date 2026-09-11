@@ -34,7 +34,7 @@ export function Application({
     const [route, navigate] = useHashRoute();
     const interactionDisabled = busy !== undefined;
     useEffect(() => {
-        if (route === "activity" && state.connection === "online") {
+        if ((route.page === "audit" || route.page === "messages") && state.connection === "online") {
             void store.refreshAudit();
         }
     }, [route, state.connection, store]);
@@ -73,11 +73,12 @@ export function Application({
                 {state.error === undefined ? null : <p className="error" role="alert">{state.error}</p>}
                 {error === undefined ? null : <p className="error" role="alert">{error}</p>}
             </div>
-            {route === "overview" ? <Overview state={state} /> : null}
-            {route === "instances" ? <Instances disabled={interactionDisabled} store={store} /> : null}
-            {route === "approvals" ? <Approvals disabled={interactionDisabled} store={store} /> : null}
-            {route === "activity" ? <ToolCalls disabled={interactionDisabled} state={state} store={store} /> : null}
-            {route === "todos" ? <Todos disabled={interactionDisabled} state={state} store={store} /> : null}
+            {route.page === "overview" ? <Overview state={state} /> : null}
+            {route.page === "instances" ? <Instances disabled={interactionDisabled} store={store} /> : null}
+            {route.page === "approvals" ? <Approvals disabled={interactionDisabled} store={store} /> : null}
+            {route.page === "audit" ? <ToolCalls disabled={interactionDisabled} state={state} store={store} /> : null}
+            {route.page === "messages" ? <section><h2>Messages</h2><p className="empty">Select a conversation.</p></section> : null}
+            {route.page === "todos" ? <Todos disabled={interactionDisabled} state={state} store={store} /> : null}
         </main>
         <nav aria-label="Primary navigation" className="bottom">
             <Navigation

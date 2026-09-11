@@ -1,12 +1,14 @@
-import type { Route } from "../routing/hashRoute.js";
 import type { WebApplicationDescriptor } from "@portable-devshell/shared/browser";
 
-const navigation: Array<{ route: Route; label: string; badge?: number }> = [
-    { route: "overview", label: "Overview" },
-    { route: "instances", label: "Instances" },
-    { route: "approvals", label: "Approvals" },
-    { route: "activity", label: "Audit" },
-    { route: "todos", label: "Todos" },
+import { pageRoute, type WebPage, type WebRoute } from "../routing/hashRoute.js";
+
+const navigation: Array<{ page: WebPage; label: string }> = [
+    { page: "overview", label: "Overview" },
+    { page: "instances", label: "Instances" },
+    { page: "messages", label: "Messages" },
+    { page: "audit", label: "Audit" },
+    { page: "approvals", label: "Approvals" },
+    { page: "todos", label: "Todos" },
 ];
 
 export function Navigation({
@@ -15,21 +17,21 @@ export function Navigation({
     counts,
     navigate,
 }: {
-    active: Route;
+    active: WebRoute;
     applications: readonly WebApplicationDescriptor[];
     counts: { approvals: number; instances: number; todos: number };
-    navigate(route: Route): void;
+    navigate(route: WebRoute): void;
 }) {
     return (
         <>
             {navigation.map((item) => {
-                const badge = item.route === "approvals" ? counts.approvals : item.route === "instances" ? counts.instances : item.route === "todos" ? counts.todos : undefined;
+                const badge = item.page === "approvals" ? counts.approvals : item.page === "instances" ? counts.instances : item.page === "todos" ? counts.todos : undefined;
                 return (
                     <button
-                        aria-current={active === item.route ? "page" : undefined}
-                        className={active === item.route ? "selected" : ""}
-                        key={item.route}
-                        onClick={() => navigate(item.route)}
+                        aria-current={active.page === item.page ? "page" : undefined}
+                        className={active.page === item.page ? "selected" : ""}
+                        key={item.page}
+                        onClick={() => navigate(pageRoute(item.page))}
                     >
                         {item.label}{badge !== undefined && badge > 0 ? <span className="badge">{badge}</span> : null}
                     </button>

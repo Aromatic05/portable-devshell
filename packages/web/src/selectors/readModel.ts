@@ -66,7 +66,7 @@ export function overviewToolCalls(
 export function overviewAlertRoute(kind: OperationalOverviewAlert["kind"]): string {
     if (kind.startsWith("approval.")) return "#/approvals";
     if (kind.startsWith("todo.")) return "#/todos";
-    if (kind.startsWith("activity.")) return "#/activity";
+    if (kind.startsWith("activity.")) return "#/audit";
     if (kind.startsWith("instance.")) return "#/instances";
     return "#/overview";
 }

@@ -307,10 +307,10 @@ describe("authenticated application shell", () => {
         render(<App createClients={fakeClients} session={fakeSession({ check: true })} />);
 
         const activity = await screen.findByRole("link", { name: "Recent tool calls" });
-        expect(activity).toHaveAttribute("href", "#/activity");
+        expect(activity).toHaveAttribute("href", "#/audit");
         fireEvent.click(activity);
         expect(await screen.findByRole("heading", { name: "Audit · Tool Calls" })).toBeInTheDocument();
-        expect(window.location.hash).toBe("#/activity");
+        expect(window.location.hash).toBe("#/audit");
     });
 });
 

@@ -31,7 +31,7 @@ export function Overview({ state }: { state: WebState }) {
                     {currentAlerts.length === 0 ? <p className="empty">No current alerts.</p> : <ul className="alerts">{currentAlerts.map((alert) => <li className={alert.severity} key={alert.id}><a href={overviewAlertRoute(alert.kind)}><strong>{alert.title}</strong><br />{alert.detail}</a></li>)}</ul>}
                 </section>
                 <section>
-                    <h3><a href="#/activity">Recent tool calls</a></h3>
+                    <h3><a href="#/audit">Recent tool calls</a></h3>
                     {overviewToolCalls(overview).length === 0 ? <p className="empty">No recent activity.</p> : <ol className="feed">{overviewToolCalls(overview).map((activity) => <li key={activity.callId}><time>{activity.completedAt ?? activity.startedAt}</time><strong>{activity.instance}</strong> {activity.toolName} · {activity.status}</li>)}</ol>}
                 </section>
             </div>
