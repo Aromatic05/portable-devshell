@@ -385,32 +385,32 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
                 .get("timeMs")
                 .is_none()
         );
-        assert!(
-            tmux_run["description"]
-                .as_str()
-                .is_some_and(|value| value.contains("Use bash_run for short non-interactive work"))
+        let tmux_run_description = tmux_run["description"].as_str().unwrap();
+        assert!(tmux_run_description.contains("Start a managed PTY task"));
+        assert!(tmux_run_description.contains("durable bounded transcript"));
+        for consumer_policy in ["Use bash_run", "Prefer wait=block", "use tmux_read"] {
+            assert!(!tmux_run_description.contains(consumer_policy));
+        }
+        assert_eq!(
+            tmux_run["inputSchema"]["properties"]["wait"]["description"],
+            "Wait strategy. Defaults to nonblock."
         );
-        assert!(tmux_run["description"].as_str().is_some_and(|value| {
-            value.contains("Prefer wait=block for unattended tasks on the current critical path")
-        }));
-        assert!(tmux_run["description"].as_str().is_some_and(|value| {
-            value.contains("use tmux_read unless the client explicitly provides automatic recovery")
-        }));
-        assert!(
-            !tmux_run["description"]
-                .as_str()
-                .is_some_and(|value| value.contains("Live Workspace"))
+        assert_eq!(
+            tmux_run["inputSchema"]["properties"]["timeout"]["description"],
+            "Total deadline from task start for wait=block. Reaching it does not stop the task."
         );
-        assert!(tmux_run["inputSchema"]["properties"]["wait"]["description"]
-            .as_str()
-            .is_some_and(|value| value.contains("Use block when completion is required before continuing and there is no useful parallel work")));
-        assert!(tmux_run["inputSchema"]["properties"]["wait"]["description"]
-            .as_str()
-            .is_some_and(|value| value.contains("Use nonblock only when you intentionally want to continue other work or interact with or observe the task later")));
+        let bash_run = catalog
+            .iter()
+            .find(|tool| tool["name"] == "bash_run")
+            .unwrap();
+        let bash_description = bash_run["description"].as_str().unwrap();
+        assert!(!bash_description.contains("tmux_run"));
+        assert!(!bash_description.contains("file_read"));
         assert!(
-            tmux_run["inputSchema"]["properties"]["timeout"]["description"]
+            !bash_run["inputSchema"]["properties"]["timeoutMs"]["description"]
                 .as_str()
-                .is_some_and(|value| value.contains("Set it long enough for the expected runtime"))
+                .unwrap_or("")
+                .contains("tmux_run")
         );
         let tmux_manage = catalog
             .iter()

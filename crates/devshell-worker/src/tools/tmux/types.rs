@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TmuxWaitMode {
-    /// Wait for the task result. Prefer this for unattended work on the current critical path when completion is required before continuing and there is no useful parallel work.
+    /// Wait for task progress or terminal status before returning, subject to timeout.
     Block,
-    /// Return after the task starts. Use this only when you intentionally want to continue other work or interact with or observe the task later.
+    /// Return after the task starts without waiting for terminal status.
     Nonblock,
 }
 
@@ -21,11 +21,11 @@ pub struct TmuxRunParams {
     #[schemars(length(min = 1))]
     pub command: String,
     #[serde(default)]
-    /// Total deadline from task start for wait=block. It does not stop the task. Set it long enough for the expected runtime; a client may detach from the wait while leaving the task running.
+    /// Total deadline from task start for wait=block. Reaching it does not stop the task.
     #[schemars(range(min = 1, max = 3600000))]
     pub timeout: Option<u64>,
     #[serde(default)]
-    /// Wait strategy. Use block when completion is required before continuing and there is no useful parallel work; long unattended builds, tests, downloads, and benchmarks on the current critical path should normally use block. A long block wait may be detached without stopping the task; use the returned task id with tmux_read unless the client explicitly provides automatic recovery. Use nonblock only when you intentionally want to continue other work or interact with or observe the task later. Defaults to nonblock.
+    /// Wait strategy. Defaults to nonblock.
     pub wait: Option<TmuxWaitMode>,
     #[serde(default)]
     /// Internal direct-worker block interval used by higher-level wait orchestration.
@@ -52,7 +52,7 @@ pub enum TmuxInputParams {
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxTaskInputParams {
-    /// Managed task id returned by tmux_run.
+    /// Managed task id.
     #[schemars(length(min = 1))]
     pub task: String,
     #[schemars(length(min = 1))]
@@ -71,7 +71,7 @@ pub struct TmuxTaskInputParams {
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxPaneInputParams {
-    /// Persistent pane name or id returned by tmux_manage.
+    /// Persistent pane name or id.
     #[schemars(length(min = 1))]
     pub pane: String,
     #[schemars(length(min = 1))]
@@ -82,6 +82,7 @@ pub struct TmuxPaneInputParams {
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxReadParams {
+    /// Managed task id.
     #[schemars(length(min = 1))]
     pub task: String,
     #[serde(default)]
@@ -203,7 +204,7 @@ pub enum TmuxCloseParams {
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxTaskCloseParams {
-    /// Managed task id returned by tmux_run.
+    /// Managed task id.
     #[schemars(length(min = 1))]
     pub task: String,
     #[serde(default)]
@@ -215,7 +216,7 @@ pub struct TmuxTaskCloseParams {
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxPaneCloseParams {
-    /// Persistent pane name or id returned by tmux_manage.
+    /// Persistent pane name or id.
     #[schemars(length(min = 1))]
     pub pane: String,
     #[serde(default)]

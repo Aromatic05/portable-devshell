@@ -18,7 +18,7 @@ pub struct BashRunParams {
     #[serde(default)]
     /// Standard input text. Omit to close stdin immediately and deliver EOF.
     pub stdin: Option<String>,
-    /// Required command timeout in milliseconds. Use tmux_run for work that may exceed 100000 ms.
+    /// Required command timeout in milliseconds. Range: 1..=100000.
     #[schemars(range(min = 1, max = 100000))]
     pub timeout_ms: u64,
     #[serde(default)]
@@ -44,10 +44,10 @@ pub struct BashRunOutput {
     pub stderr_bytes: usize,
     pub stdout_truncated: bool,
     pub stderr_truncated: bool,
-    /// Read-only file_read path for retained stdout when recovery storage is available.
+    /// Read-only virtual path for retained stdout when recovery storage is available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stdout_path: Option<String>,
-    /// Read-only file_read path for retained stderr when recovery storage is available.
+    /// Read-only virtual path for retained stderr when recovery storage is available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stderr_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

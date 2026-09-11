@@ -23,31 +23,80 @@ const MAX_SEMANTIC_CONTENT_CHARACTERS = 9_000;
 
 type AgentModelToolResultProjector = (value: Record<string, ExtensionJsonValue>) => string;
 
-const AGENT_MODEL_TOOL_RESULT_PROJECTORS = new Map<string, AgentModelToolResultProjector>([
-    ["bash_run", renderBashModelToolResult],
-    ["file_edit", renderFileEditModelToolResult],
-    ["file_glob", renderFileGlobModelToolResult],
-    ["file_grep", renderFileGrepModelToolResult],
-    ["file_read", renderFileReadModelToolResult],
-    ["tmux_input", renderTmuxTaskModelToolResult],
-    ["tmux_inspect", renderTmuxInspectModelToolResult],
-    ["tmux_manage", renderTmuxManageModelToolResult],
-    ["tmux_read", renderTmuxTaskModelToolResult],
-    ["tmux_run", renderTmuxTaskModelToolResult]
+interface AgentModelToolProjectionSpec {
+    description: string;
+    projectResult: AgentModelToolResultProjector;
+}
+
+const AGENT_MODEL_TOOL_PROJECTIONS = new Map<string, AgentModelToolProjectionSpec>([
+    ["bash_run", {
+        description: "Run a short, bounded, non-interactive shell command. Prefer this when the work fits the command timeout and does not need a PTY; use tmux_run for long-running or interactive work. If stdoutRecovery or stderrRecovery is returned, use file_read on that path for omitted output.",
+        projectResult: renderBashModelToolResult
+    }],
+    ["file_edit", {
+        description: "Apply an ordered multi-file change set. Before changing an existing file, establish edit coverage with file_read or file_grep. Keep one coherent change set; if an operation fails, later operations are not executed.",
+        projectResult: renderFileEditModelToolResult
+    }],
+    ["file_glob", {
+        description: "Discover files and directories by exact path or glob pattern. Use this for path discovery rather than content search, and continue paged results with cursor alone.",
+        projectResult: renderFileGlobModelToolResult
+    }],
+    ["file_grep", {
+        description: "Search text in files, directories, or globs. Use this to locate relevant lines and establish edit coverage before file_edit; continue a truncated file with startLine and paged traversal with cursor alone.",
+        projectResult: renderFileGrepModelToolResult
+    }],
+    ["file_read", {
+        description: "Read file content, structural outline, metadata, or a retained tool-result path. Use focused selectors for large files. Read existing target lines before file_edit to establish edit coverage, and follow nextSelector when a content read is truncated.",
+        projectResult: renderFileReadModelToolResult
+    }],
+    ["tmux_input", {
+        description: "Send terminal input to a managed task or persistent pane. Address managed executions by task id and persistent interactions by pane; use tmux_read for task transcript output and tmux_inspect for pane screen state. Caret notation sends control keys.",
+        projectResult: renderTmuxTaskModelToolResult
+    }],
+    ["tmux_inspect", {
+        description: "Observe pane terminal state without consuming a managed task transcript. Use this for main or persistent panes and curses/TUI screen state; use tmux_read when the durable managed-task transcript is the source of truth.",
+        projectResult: renderTmuxInspectModelToolResult
+    }],
+    ["tmux_manage", {
+        description: "Manage tmux resources: command=list discovers panes and active tasks, command=create opens a persistent interactive pane, and command=close terminates a task or closes a persistent pane. Use force only when intentionally terminating a running or busy resource.",
+        projectResult: renderTmuxManageModelToolResult
+    }],
+    ["tmux_read", {
+        description: "Wait for or consume a managed task transcript using its task id. Use this for durable task output; use tmux_inspect for non-consuming pane screen state. Positive line consumes oldest unread lines, while negative line waits and returns a tail.",
+        projectResult: renderTmuxTaskModelToolResult
+    }],
+    ["tmux_run", {
+        description: "Start long-running or PTY/interactive work as a managed task. Prefer wait=block when completion is on the current critical path and there is no useful parallel work; use wait=nonblock when intentionally continuing other work. Continue task output with tmux_read and interact with tmux_input.",
+        projectResult: renderTmuxTaskModelToolResult
+    }]
 ]);
 
-const AGENT_MODEL_TOOL_NAMES = new Set(AGENT_MODEL_TOOL_RESULT_PROJECTORS.keys());
+const AGENT_MODEL_INPUT_PROPERTY_DESCRIPTIONS = new Map<string, Readonly<Record<string, string>>>([
+    ["bash_run", {
+        timeoutMs: "Hard command timeout in milliseconds, up to 100000. Use tmux_run instead when work may exceed this bound."
+    }],
+    ["tmux_run", {
+        timeout: "Maximum block-wait deadline from task start; reaching it leaves the task running. Set it to cover the expected critical-path wait.",
+        wait: "Prefer block when this task must finish before continuing and there is no useful parallel work; use nonblock when intentionally continuing other work or planning later interaction."
+    }]
+]);
+
+const AGENT_MODEL_TOOL_NAMES = new Set(AGENT_MODEL_TOOL_PROJECTIONS.keys());
 
 export function projectAgentModelTools(
     tools: readonly AgentToolDefinition[]
 ): AgentModelToolDefinition[] {
     return tools
         .filter((tool) => AGENT_MODEL_TOOL_NAMES.has(tool.name))
-        .map((tool) => ({
-            description: tool.description,
-            inputSchema: projectAgentModelInputSchema(tool.name, tool.inputSchema),
-            name: tool.name
-        }));
+        .map((tool) => {
+            const projection = AGENT_MODEL_TOOL_PROJECTIONS.get(tool.name);
+            if (projection === undefined) throw new Error(`Missing Agent model tool projection: ${tool.name}`);
+            return {
+                description: projection.description,
+                inputSchema: projectAgentModelInputSchema(tool.name, tool.inputSchema),
+                name: tool.name
+            };
+        });
 }
 
 export function prepareAgentModelToolInput(toolName: string, params: unknown): ExtensionJsonValue {
@@ -73,6 +122,14 @@ function projectAgentModelInputSchema(toolName: string, schema: ExtensionJsonVal
     ]);
     for (const property of hidden) delete properties[property];
 
+    const propertyDescriptions = AGENT_MODEL_INPUT_PROPERTY_DESCRIPTIONS.get(toolName);
+    if (propertyDescriptions !== undefined) {
+        for (const [property, description] of Object.entries(propertyDescriptions)) {
+            const propertySchema = properties[property];
+            if (isRecord(propertySchema)) properties[property] = { ...propertySchema, description };
+        }
+    }
+
     const required = Array.isArray(schema.required)
         ? schema.required.filter((entry) => typeof entry !== "string" || !hidden.has(entry))
         : undefined;
@@ -85,7 +142,7 @@ function projectAgentModelInputSchema(toolName: string, schema: ExtensionJsonVal
 
 function renderAgentModelToolResult(toolName: string, value: ExtensionJsonValue): string {
     if (!isRecord(value)) return renderToolResult(value);
-    return AGENT_MODEL_TOOL_RESULT_PROJECTORS.get(toolName)?.(value) ?? renderToolResult(value);
+    return AGENT_MODEL_TOOL_PROJECTIONS.get(toolName)?.projectResult(value) ?? renderToolResult(value);
 }
 
 function renderFileEditModelToolResult(value: Record<string, ExtensionJsonValue>): string {

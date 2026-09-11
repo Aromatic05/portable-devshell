@@ -42,7 +42,7 @@ impl ToolHandler for FileEditTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tools::contract::catalog_entry::<FileChangeSetInput, FileChangeSetOutput>(
             &self.name,
-            "Apply an ordered multi-file change set. changes must contain one *** Begin Edit / *** End Edit envelope with Write File, Patch File, Rewrite File, Delete File, or Move File sections. Move File requires a following *** To: target line. Write File and Rewrite File bodies are literal text. Patch hunks use @@, @@ BOF, or @@ EOF with space, -, and + line prefixes. Existing files must be read or searched first. If an operation fails, earlier operations remain applied and later operations are not executed.".to_string(),
+            "Apply an ordered multi-file change set. changes contains one *** Begin Edit / *** End Edit envelope with Write File, Patch File, Rewrite File, Delete File, or Move File sections. Move File requires a following *** To: target line; patch hunks use @@, @@ BOF, or @@ EOF with space, -, and + line prefixes. Mutations of existing files require edit coverage established earlier in the same context. If an operation fails, earlier operations remain applied and later operations are not executed.".to_string(),
             [ToolCapability::Write],
         )
     }

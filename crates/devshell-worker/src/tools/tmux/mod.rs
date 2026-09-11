@@ -163,35 +163,35 @@ pub fn register_tools(
     ));
     registry.register(tool::<TmuxRunParams, TmuxRunOutput>(
         ToolName::parse("tmux_run").unwrap(),
-        "Run a long-running or PTY-oriented Bash program as a managed task in a fresh ephemeral pane. Uses clean Bash without user rc files; command may contain multiple lines and cwd defaults to the workspace. Use bash_run for short non-interactive work. Prefer wait=block for unattended tasks on the current critical path when their result is required before continuing and there is no useful parallel work. A long block wait may be detached without stopping the task; when that happens, continue with the returned task id and use tmux_read unless the client explicitly provides automatic recovery. Use wait=nonblock only when you intentionally want to continue other work or interact with or observe the task later. timeout limits the total block wait without stopping the task. The pane is destroyed after exit while the bounded task transcript remains readable during retention.",
+        "Start a managed PTY task in a fresh ephemeral pane using clean Bash without user rc files. command may contain multiple lines and cwd defaults to the workspace. wait controls whether the call returns after startup or waits for task progress or termination; timeout bounds block waiting without stopping the task. The task owns a durable bounded transcript, and its pane is destroyed after termination.",
         ToolCapability::Execute,
         Arc::clone(&states),
         TmuxState::run,
     ))?;
     registry.register(tool::<TmuxInputParams, TmuxInputOutput>(
         ToolName::parse("tmux_input").unwrap(),
-        "Send raw terminal input to either a running managed task or a persistent interactive pane. Task input with a positive line returns when new output appears; a negative line waits until terminal state or timeMs then returns the requested tail. Pane input returns after send and should be observed with tmux_inspect. Input may start programs inside the target but never creates a new managed task. Caret notation supports control keys such as ^B, ^C, ^D, ^I, and ^M.",
+        "Send raw terminal input to either a running managed task or a persistent interactive pane. Task input can wait for subsequent transcript output according to line and timeMs; pane input returns after delivery. Input never creates a new managed task. Caret notation encodes control keys such as ^B, ^C, ^D, ^I, and ^M.",
         ToolCapability::Execute,
         Arc::clone(&states),
         TmuxState::input,
     ))?;
     registry.register(tool::<TmuxReadParams, TmuxReadOutput>(
         ToolName::parse("tmux_read").unwrap(),
-        "Consume a managed task's durable terminal transcript. Positive line values return the oldest unread lines, zero discards unread transcript data, and negative values wait until terminal state or timeMs then return only the requested tail. Transcript capture is bounded and reports truncation explicitly. Use tmux_inspect for current terminal screen state while the task is running.",
+        "Read a managed task's durable terminal transcript. Positive line values consume the oldest unread lines, zero discards unread transcript data, and negative values wait until terminal state or timeMs and return the requested tail. Transcript capture is bounded and reports truncation explicitly.",
         ToolCapability::Read,
         Arc::clone(&states),
         TmuxState::read,
     ))?;
     registry.register(tool::<TmuxInspectParams, TmuxPaneOperationOutput>(
         ToolName::parse("tmux_inspect").unwrap(),
-        "Inspect terminal screen/history without consuming managed task transcript data. Omit pane/panes to inspect main, set pane for one pane, or set panes=all for every current pane. Use this for persistent interactive panes and curses/TUI state.",
+        "Inspect current pane terminal screen/history without consuming managed task transcript data. Omit pane/panes for main, set pane for one pane, or set panes=all for every current pane. start and end select a bounded terminal-history window.",
         ToolCapability::Read,
         Arc::clone(&states),
         TmuxState::inspect,
     ))?;
     registry.register(tool::<TmuxManageParams, TmuxManageOutput>(
         ToolName::parse("tmux_manage").unwrap(),
-        "Manage tmux-owned resources. command=list returns current panes and active tasks and may initialize the managed tmux session; command=create creates a persistent interactive pane; command=close closes a persistent pane or terminates a managed task.",
+        "Manage tmux-owned resource lifecycle. command=list returns current panes and active tasks and may initialize the managed session and main pane; command=create creates a persistent interactive pane; command=close closes a persistent pane or terminates a managed task. The main pane cannot be closed.",
         ToolCapability::Execute,
         states,
         TmuxState::manage,

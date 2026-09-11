@@ -43,7 +43,7 @@ impl ToolHandler for FileReadTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tools::contract::catalog_entry::<FileReadBatchInput, FileReadBatchOutput>(
             &self.name,
-            "Read one or more paths in one call. Pass files=[{path, view?, selector?}, ...]. Also reads the read-only /.devshell/tool-results/... paths returned by bash_run. view=auto selects content or outline for workspace text files; view=metadata inspects workspace path metadata without following the final symlink and also supports missing paths. Use view=content with selector forms N, N-M, N+count, or sorted non-overlapping comma-separated ranges; append :raw for exact lines. Without :raw, each range includes one preceding line and up to three following lines for editing context. A single N reads the default window and may return nextSelector. selector is only valid for content reads. Workspace content ranges prepare those lines for file_edit; tool-result paths, outline, and metadata do not.".to_string(),
+            "Read one or more paths as text content, structural outline, or filesystem metadata. Accepts batch requests in files=[{path, view?, selector?}, ...] and read-only virtual tool-result paths. Content selectors support N, N-M, N+count, and sorted non-overlapping ranges with optional :raw exact-range mode. Workspace content reads establish edit coverage; virtual tool-result reads, outline reads, and metadata reads do not.".to_string(),
             [ToolCapability::Read],
         )
     }

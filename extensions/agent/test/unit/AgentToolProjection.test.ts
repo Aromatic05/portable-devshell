@@ -49,6 +49,8 @@ test("Agent model projection filters capabilities and strips non-model input fie
     ]);
 
     assert.deepEqual(projected.map((tool) => tool.name), ["bash_run", "file_edit", "tmux_read"]);
+    assert.match(projected[0]?.description ?? "", /tmux_run/u);
+    assert.notEqual(projected[0]?.description, "Run bash");
     assert.deepEqual(
         (projected[0]?.inputSchema as { properties?: Record<string, unknown> }).properties,
         { command: { type: "string" } }
@@ -63,6 +65,59 @@ test("Agent model projection filters capabilities and strips non-model input fie
         undefined
     );
     assert.notEqual(bashSchema.properties.purpose, undefined, "projection must not mutate the canonical Worker schema");
+});
+
+test("Agent model projection owns usage descriptions without mutating Worker schema descriptions", () => {
+    const inputSchema = {
+        properties: {
+            command: { type: "string" },
+            consumeOutput: { description: "Worker internal", type: ["boolean", "null"] },
+            timeout: { description: "Worker neutral timeout", type: ["number", "null"] },
+            wait: { description: "Worker neutral wait", type: ["string", "null"] }
+        },
+        required: ["command"],
+        type: "object"
+    };
+    const [projected] = projectAgentModelTools([{
+        description: "Worker neutral tmux contract",
+        inputSchema,
+        name: "tmux_run"
+    }]);
+
+    assert.match(projected?.description ?? "", /Prefer wait=block/u);
+    assert.match(projected?.description ?? "", /tmux_read/u);
+    const properties = (projected?.inputSchema as { properties?: Record<string, { description?: string }> }).properties;
+    assert.match(properties?.wait?.description ?? "", /Prefer block/u);
+    assert.match(properties?.timeout?.description ?? "", /critical-path wait/u);
+    assert.equal(properties?.consumeOutput, undefined);
+    assert.equal(inputSchema.properties.wait.description, "Worker neutral wait");
+    assert.equal(inputSchema.properties.timeout.description, "Worker neutral timeout");
+});
+
+test("every Agent model tool has an Agent-owned description", () => {
+    const names = [
+        "bash_run",
+        "file_edit",
+        "file_glob",
+        "file_grep",
+        "file_read",
+        "tmux_input",
+        "tmux_inspect",
+        "tmux_manage",
+        "tmux_read",
+        "tmux_run"
+    ];
+    const projected = projectAgentModelTools(names.map((name) => ({
+        description: `Worker canonical ${name}`,
+        inputSchema: { properties: {}, type: "object" },
+        name
+    })));
+
+    assert.deepEqual(projected.map((tool) => tool.name), names);
+    for (const tool of projected) {
+        assert.notEqual(tool.description, `Worker canonical ${tool.name}`);
+        assert.equal(tool.description.length > 40, true, tool.name);
+    }
 });
 
 test("Agent model projection owns input preparation and bounded result projection", () => {

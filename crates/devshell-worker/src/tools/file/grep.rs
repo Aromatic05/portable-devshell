@@ -89,7 +89,7 @@ impl ToolHandler for FileGrepTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tools::contract::catalog_entry::<FileGrepInput, FileGrepOutput>(
             &self.name,
-            "Search UTF-8 text in files, directories, or globs. Start with pattern and optional paths; continue result pages with cursor alone. When cursor is present, omit all search fields. Returned source lines prepare those lines for file_edit. A truncated file includes nextLine; rerun file_grep against that exact file with startLine to continue its matches.".to_string(),
+            "Search UTF-8 text in files, directories, or globs. Initial requests accept pattern and optional search fields; continuation requests contain cursor alone. Returned source lines establish edit coverage. A truncated file reports nextLine as the first omitted matching line for exact-file continuation with startLine.".to_string(),
             [ToolCapability::Read],
         )
     }

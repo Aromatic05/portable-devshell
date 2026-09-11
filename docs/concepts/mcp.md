@@ -147,6 +147,8 @@ MCP endpoint 不再用 instance 配置中的 group/capability 去动态裁剪 `t
 | Workspace | 小型 model-facing surface + App-only wire protocol |
 | Instance | 无固定 MCP 管理 tool；model Extension 只负责 discovery/status/logs 与 opaque handle projection |
 
+Worker catalog 的 description 只描述 canonical capability 契约；MCP endpoint 在暴露 Worker tool 时独立投影面向 ChatGPT/MCP consumer 的使用说明。这个投影不回写 Worker，也不与 Agent Extension 的 model description 共用实现。
+
 跨 instance bootstrap 分成两步：model-facing `devshell instance list/status` 只读取当前 Context
 可见的 managed instance，并为非 primary instance 返回 opaque handle；随后固定 MCP
 `environ_remote` 使用该 handle 修改 Context environment。它采用稳定的开放 command envelope，

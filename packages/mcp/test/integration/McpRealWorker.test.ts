@@ -81,7 +81,7 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
             method: "tools/list"
         }, sessionHeaders);
         assert.equal(list.error, undefined);
-        const tools = list.result?.tools as Array<{ inputSchema: Record<string, unknown>; name: string }>;
+        const tools = list.result?.tools as Array<{ description: string; inputSchema: Record<string, unknown>; name: string }>;
         const bash = tools.find((tool) => tool.name === "bash_run");
         const fileRead = tools.find((tool) => tool.name === "file_read");
         const tmuxManage = tools.find((tool) => tool.name === "tmux_manage");
@@ -90,8 +90,12 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         assert.notEqual((fileRead?.inputSchema.properties as Record<string, unknown>).files, undefined);
         assert.equal((fileRead?.inputSchema.properties as Record<string, unknown>).path, undefined);
         assert.equal(tmuxManage === undefined, !tmuxAvailable);
-        const workerBashSchema = instance.listTools().find((tool) => tool.name === "bash_run")?.inputSchema as Record<string, unknown>;
+        const workerBash = instance.listTools().find((tool) => tool.name === "bash_run");
+        const workerBashSchema = workerBash?.inputSchema as Record<string, unknown>;
         const workerTmuxSchema = instance.listTools().find((tool) => tool.name === "tmux_manage")?.inputSchema as Record<string, unknown> | undefined;
+        assert.notEqual(bash?.description, workerBash?.description);
+        assert.match(bash?.description ?? "", /tmux_run/u);
+        assert.equal(workerBash?.description.includes("tmux_run"), false);
         assert.deepEqual(
             Object.fromEntries(Object.entries(bash?.inputSchema ?? {}).filter(([key]) => key !== "properties" && key !== "required")),
             Object.fromEntries(Object.entries(workerBashSchema).filter(([key]) => key !== "properties" && key !== "required"))

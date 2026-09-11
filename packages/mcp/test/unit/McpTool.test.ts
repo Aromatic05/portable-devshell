@@ -154,10 +154,14 @@ test("McpToolCatalogEndpoint rejects duplicate names across providers", () => {
     );
 });
 
-test("McpToolDescriptionEnhancer preserves only the supplied description", () => {
+test("McpToolDescriptionEnhancer owns Worker consumer guidance and preserves other descriptions", () => {
     const enhancer = new McpToolDescriptionEnhancer();
-    assert.equal(enhancer.enhance("  Run shell  "), "Run shell");
-    assert.equal(enhancer.enhance(undefined), "");
+    const bash = enhancer.enhance("bash_run", "  Worker-neutral shell contract  ");
+    assert.match(bash, /tmux_run/u);
+    assert.match(bash, /file_read/u);
+    assert.notEqual(bash, "Worker-neutral shell contract");
+    assert.equal(enhancer.enhance("workspace_open", "  Open workspace  "), "Open workspace");
+    assert.equal(enhancer.enhance("future_tool", undefined), "");
 });
 
 test("McpToolSchemaAdapter rejects missing schema", () => {

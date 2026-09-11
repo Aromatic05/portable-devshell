@@ -19,14 +19,14 @@ impl ShellRuntime {
         #[cfg(windows)]
         {
             return format!(
-                "Run a bounded, non-interactive command using {} {}. Use PowerShell syntax. Use tmux_run for commands expected to run about a minute or longer or that need a PTY/interaction. Large retained stdout/stderr may include stdoutPath/stderrPath; read those paths with file_read to recover omitted output.",
+                "Execute a bounded, non-interactive command using {} {} with PowerShell syntax. Captures stdout and stderr and reports termination, byte counts, truncation, and optional read-only recovery paths for retained output.",
                 self.display_name(),
                 self.version
             );
         }
         #[cfg(not(windows))]
         {
-            "Run a bounded, non-interactive Bash command. Use tmux_run for commands expected to run about a minute or longer or that need a PTY/interaction. Large retained stdout/stderr may include stdoutPath/stderrPath; read those paths with file_read to recover omitted output.".to_string()
+            "Execute a bounded, non-interactive Bash command. Captures stdout and stderr and reports termination, byte counts, truncation, and optional read-only recovery paths for retained output.".to_string()
         }
     }
 

@@ -295,6 +295,6 @@ pub struct FileGrepFile {
     /// Present and true when additional matches existed in this file but were not rendered.
     pub truncated: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    /// First omitted matching line. Search this exact file again with startLine to continue.
+    /// First omitted matching line; valid as startLine in a subsequent exact-file request.
     pub next_line: Option<usize>,
 }

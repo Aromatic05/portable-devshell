@@ -348,6 +348,8 @@ Worker canonical capabilities
         -> other consumer   -> its own projection
 ```
 
+Tool description 同样遵循 consumer boundary。Worker catalog 的 description 与 schema property description 只陈述 capability 的执行契约、约束、状态变化和数据语义，不包含“模型何时应该调用另一个工具”之类的 orchestration policy。Agent Extension 在 model projection 中拥有自己的 tool description，并可为关键参数补充模型决策语义；MCP catalog 独立投影面向 ChatGPT/MCP consumer 的 description。Control 只转交 canonical definition，不生成或统一 consumer wording。
+
 它不暴露：
 
 ```text
