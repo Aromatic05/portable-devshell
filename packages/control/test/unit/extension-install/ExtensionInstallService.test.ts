@@ -137,6 +137,10 @@ test("builtin Extension identity cannot be replaced by ordinary install", async 
         h.service.install(await h.source("builtin-secret", { id: "secret" })),
         /reserved for a builtin Extension/u
     );
+    await assert.rejects(
+        h.service.install(await h.source("builtin-storage", { id: "storage" })),
+        /reserved for a builtin Extension/u
+    );
     const installed = await h.service.installBuiltin("skill", source);
 
     assert.equal(installed.id, "skill");

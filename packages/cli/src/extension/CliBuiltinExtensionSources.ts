@@ -3,6 +3,7 @@ import { instanceExtensionDirectory } from "@portable-devshell/instance-extensio
 import { mcpExtensionDirectory } from "@portable-devshell/mcp-extension";
 import { secretExtensionDirectory } from "@portable-devshell/secret-extension";
 import { skillExtensionDirectory } from "@portable-devshell/skill-extension";
+import { storageExtensionDirectory } from "@portable-devshell/storage-extension";
 
 export interface CliBuiltinExtensionSource {
     readonly id: string;
@@ -15,6 +16,7 @@ export function cliBuiltinExtensionSources(): readonly CliBuiltinExtensionSource
         Object.freeze({ id: "instance", path: instanceExtensionDirectory() }),
         Object.freeze({ id: "skill", path: skillExtensionDirectory() }),
         Object.freeze({ id: "secret", path: secretExtensionDirectory() }),
+        Object.freeze({ id: "storage", path: storageExtensionDirectory() }),
         Object.freeze({ id: "mcp", path: mcpExtensionDirectory() })
     ]);
 }

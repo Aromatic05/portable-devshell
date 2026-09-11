@@ -1,0 +1,18 @@
+{
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": {
+        "composite": true,
+        "declaration": true,
+        "declarationMap": true,
+        "outDir": "dist",
+        "rootDir": "src",
+        "paths": {
+            "@portable-devshell/extension": ["../../packages/extension/dist/index.d.ts"],
+            "@portable-devshell/extension/cli": ["../../packages/extension/dist/domain/cli.d.ts"]
+        }
+    },
+    "include": ["src/**/*.ts"],
+    "references": [
+        { "path": "../../packages/extension" }
+    ]
+}

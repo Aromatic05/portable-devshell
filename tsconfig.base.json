@@ -39,6 +39,9 @@
             ],
             "@portable-devshell/tui/testing": [
                 "./packages/tui/dist/testing.d.ts"
+            ],
+            "@portable-devshell/storage-extension": [
+                "./extensions/storage/dist/index.d.ts"
             ]
         },
         "types": [

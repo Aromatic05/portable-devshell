@@ -7,6 +7,7 @@ import { instanceExtensionDirectory } from "@portable-devshell/instance-extensio
 import { mcpExtensionDirectory } from "@portable-devshell/mcp-extension";
 import { secretExtensionDirectory } from "@portable-devshell/secret-extension";
 import { skillExtensionDirectory } from "@portable-devshell/skill-extension";
+import { storageExtensionDirectory } from "@portable-devshell/storage-extension";
 
 import { cliBuiltinExtensionSources } from "../../src/extension/CliBuiltinExtensionSources.ts";
 
@@ -18,6 +19,7 @@ test("CLI lifecycle injects every builtin Extension source including MCP", () =>
         { id: "instance", path: instanceExtensionDirectory() },
         { id: "skill", path: skillExtensionDirectory() },
         { id: "secret", path: secretExtensionDirectory() },
+        { id: "storage", path: storageExtensionDirectory() },
         { id: "mcp", path: mcpExtensionDirectory() }
     ]);
     assert.equal(sources.every((source) => isAbsolute(source.path)), true);

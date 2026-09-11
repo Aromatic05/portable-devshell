@@ -52,6 +52,9 @@
             "@portable-devshell/secret-extension": [
                 "./extensions/secret/src/index.ts"
             ],
+            "@portable-devshell/storage-extension": [
+                "./extensions/storage/src/index.ts"
+            ],
             "@portable-devshell/control": [
                 "./packages/control/src/index.ts"
             ],
