@@ -56,7 +56,6 @@ import {
     terminalImageClearSequence,
     type TuiTerminalImageSupport,
 } from "./terminal/TuiTerminalImageRenderer.js";
-import { stripBracketedPasteMarkers } from "./terminal/TuiBracketedPaste.js";
 import { TuiTerminalInputRouter } from "./terminal/TuiTerminalInputRouter.js";
 import { TuiControlTerminalPtyFactory } from "./terminal/TuiControlTerminalPty.js";
 import { TuiTerminalSession } from "./terminal/TuiTerminalSession.js";
@@ -65,8 +64,10 @@ import {
     createTuiScreenCaptureStdout,
     TuiScreenTextSelection,
 } from "./TuiScreenTextSelection.js";
+import { TuiApplicationInputRouter } from "./TuiApplicationInputRouter.js";
 import { TuiViewport } from "./TuiViewport.js";
 
+const APPLICATION_ESCAPE_TIMEOUT_MS = 25;
 const TERMINAL_ESCAPE_TIMEOUT_MS = 100;
 
 export interface TuiRuntimeOptions {
@@ -106,14 +107,15 @@ export class TuiRuntime {
     readonly #stdout: WriteStream;
     readonly #terminalGraphicsSupport: TuiTerminalGraphicsSupport;
     readonly #terminalImageSupport: TuiTerminalImageSupport;
+    readonly #applicationInputRouter = new TuiApplicationInputRouter();
     readonly #terminalInputRouter = new TuiTerminalInputRouter();
     readonly #controlTerminalPty?: TuiControlTerminalPtyFactory;
+    #applicationDeliveryQueue: Promise<void> = Promise.resolve();
+    #applicationEscapeTimer?: ReturnType<typeof setTimeout>;
     #cursorBlinkTimer?: ReturnType<typeof setInterval>;
     #ink?: InkInstance;
     #inputStarted = false;
     #inputQueue: Promise<void> = Promise.resolve();
-    #mouseBuffer = "";
-    #pasteBuffer = "";
     #screenMouseGesture?: {
         anchor: { x: number; y: number };
         selecting: boolean;
@@ -435,16 +437,14 @@ export class TuiRuntime {
     }
 
     handleInput(input: string, key: TuiAppKey): Promise<void> {
-        this.selection.clearSelection();
-        const handled = this.#inputQueue.then(async () => {
+        return this.#enqueueInput(async () => {
+            this.selection.clearSelection();
             const intents = this.keyDispatcher.dispatch(
                 this.store.getState().interaction.focusScope,
                 { input, key },
             );
             await this.commandDispatcher.dispatchMany(intents);
         });
-        this.#inputQueue = handled.catch(() => undefined);
-        return handled;
     }
 
     async openTerminal(
@@ -527,6 +527,7 @@ export class TuiRuntime {
             return;
         }
         this.#stopped = true;
+        this.#clearApplicationEscapeTimer();
         this.#clearTerminalEscapeTimer();
         this.#stopCursorBlink();
         this.renderTextDetailImage(false);
@@ -686,8 +687,8 @@ export class TuiRuntime {
             this.store.getState().ui.selectedPage === "terminal" &&
             this.store.getState().interaction.focusScope === "terminal"
         ) {
-            this.#mouseBuffer = "";
-            this.#pasteBuffer = "";
+            this.#clearApplicationEscapeTimer();
+            this.#applicationInputRouter.reset();
             this.#clearTerminalEscapeTimer();
             this.#dispatchTerminalInputActions(
                 this.#terminalInputRouter.push(chunk.toString()),
@@ -704,39 +705,39 @@ export class TuiRuntime {
         }
         this.#clearTerminalEscapeTimer();
         this.#terminalInputRouter.reset();
-        const stripped = stripBracketedPasteMarkers(
-            this.#pasteBuffer + this.#mouseBuffer + chunk.toString(),
+        this.#clearApplicationEscapeTimer();
+        this.#dispatchApplicationInputActions(
+            this.#applicationInputRouter.push(chunk),
         );
-        this.#pasteBuffer = stripped.partial;
-        const input = stripped.text;
-        const pattern = new RegExp(
-            `${String.fromCharCode(27)}\\[<(\\d+);(\\d+);(\\d+)([Mm])`,
-            "g",
-        );
-        let cursor = 0;
-
-        for (const match of input.matchAll(pattern)) {
-            const start = match.index ?? 0;
-            this.#inkStdin.write(input.slice(cursor, start));
-            cursor = start + match[0].length;
-            void this.#handleMouse({
-                button: Number(match[1]),
-                kind: match[4] === "M" ? "press" : "release",
-                x: Number(match[2]),
-                y: Number(match[3]),
-            });
+        if (this.#applicationInputRouter.hasPendingEscape()) {
+            this.#applicationEscapeTimer = setTimeout(() => {
+                this.#applicationEscapeTimer = undefined;
+                this.#dispatchApplicationInputActions(
+                    this.#applicationInputRouter.flushPendingEscape(),
+                );
+            }, APPLICATION_ESCAPE_TIMEOUT_MS);
         }
-
-        const remainder = input.slice(cursor);
-        const partialStart = remainder.lastIndexOf("\u001B[<");
-        if (partialStart >= 0) {
-            this.#inkStdin.write(remainder.slice(0, partialStart));
-            this.#mouseBuffer = remainder.slice(partialStart);
-            return;
-        }
-        this.#mouseBuffer = "";
-        this.#inkStdin.write(remainder);
     };
+
+    #dispatchApplicationInputActions(
+        actions: ReturnType<TuiApplicationInputRouter["push"]>,
+    ): void {
+        for (const action of actions) {
+            const delivery = this.#applicationDeliveryQueue.then(async () => {
+                if (this.#ink === undefined) return;
+                if (action.type === "mouse") {
+                    await this.#enqueueInput(
+                        async () => await this.#handleMouse(action),
+                    );
+                    return;
+                }
+                this.#inkStdin.write(action.data);
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                await this.#inputQueue;
+            });
+            this.#applicationDeliveryQueue = delivery.catch(() => undefined);
+        }
+    }
 
     #dispatchTerminalInputActions(
         actions: ReturnType<TuiTerminalInputRouter["push"]>,
@@ -764,7 +765,7 @@ export class TuiRuntime {
                 if (action.type === "data" || action.type === "paste") {
                     this.#inkStdin.write(action.data);
                 } else if (action.type === "mouse") {
-                    void this.#handleMouse(action);
+                    void this.#enqueueInput(async () => await this.#handleMouse(action));
                 }
                 continue;
             }
@@ -793,7 +794,7 @@ export class TuiRuntime {
             } else if (action.type === "scroll") {
                 this.#scrollTerminal(action.direction);
             } else if (action.type === "mouse") {
-                void this.#handleTerminalMouse(action);
+                void this.#enqueueInput(async () => await this.#handleTerminalMouse(action));
             }
         }
     }
@@ -818,7 +819,20 @@ export class TuiRuntime {
             this.tmuxPanes.scroll(delta);
             return;
         }
-        void this.#handleMouse(action);
+        void this.#enqueueInput(async () => await this.#handleMouse(action));
+    }
+
+    #enqueueInput(operation: () => Promise<void> | void): Promise<void> {
+        const handled = this.#inputQueue.then(async () => await operation());
+        this.#inputQueue = handled.catch(() => undefined);
+        return handled;
+    }
+
+    #clearApplicationEscapeTimer(): void {
+        if (this.#applicationEscapeTimer !== undefined) {
+            clearTimeout(this.#applicationEscapeTimer);
+            this.#applicationEscapeTimer = undefined;
+        }
     }
 
     #clearTerminalEscapeTimer(): void {

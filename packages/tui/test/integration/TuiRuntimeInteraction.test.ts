@@ -135,6 +135,32 @@ test("real Ink runtime strips bracketed paste markers from app input", async () 
     }
 });
 
+test("real Ink runtime preserves every key in a burst of escape sequences", async () => {
+    const terminal = createTerminal();
+    const clients = createClients();
+    const runtime = new TuiRuntime(
+        { stdin: terminal.stdin, stdout: terminal.stdout },
+        { clients: clients.value, inkDebug: true },
+    );
+    const running = runtime.run();
+
+    try {
+        await waitUntil(() => runtime.store.getState().connection.status === "connected");
+        runtime.store.setSidebarCursor({ id: "overview", kind: "context" });
+        runtime.store.setFocusScope("sidebarContext");
+
+        terminal.write("\u001B[B\u001B[B");
+        await waitUntil(
+            () => runtime.store.getState().interaction.sidebarCursor?.id === "config",
+            250,
+        );
+    } finally {
+        terminal.write("\u0004");
+        await running;
+        await runtime.stop();
+    }
+});
+
 test("serializes rapid Audit Input navigation and activation", async () => {
     const terminal = createTerminal();
     const clients = createClients({
