@@ -14,6 +14,9 @@ const ESCAPE = "\u001B";
 const MOUSE_PREFIX = `${ESCAPE}[<`;
 const PASTE_BEGIN = `${ESCAPE}[200~`;
 const PASTE_END = `${ESCAPE}[201~`;
+const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, {
+    granularity: "grapheme",
+});
 
 export class TuiApplicationInputRouter {
     #buffer = "";
@@ -78,7 +81,7 @@ export class TuiApplicationInputRouter {
                 continue;
             }
             const end = controlIndex === -1 ? this.#buffer.length : controlIndex;
-            appendInk(actions, this.#buffer.slice(0, end));
+            appendInkKeys(actions, this.#buffer.slice(0, end));
             this.#buffer = this.#buffer.slice(end);
         }
 
@@ -99,7 +102,7 @@ export class TuiApplicationInputRouter {
             actions.push({ data: ESCAPE, type: "ink" });
             cursor += 1;
         }
-        appendInk(actions, buffered.slice(cursor));
+        appendInkKeys(actions, buffered.slice(cursor));
         return actions;
     }
 
@@ -178,4 +181,10 @@ function parseMouse(value: string): {
 function appendInk(actions: TuiApplicationInputAction[], data: string): void {
     if (data.length === 0) return;
     actions.push({ data, type: "ink" });
+}
+
+function appendInkKeys(actions: TuiApplicationInputAction[], data: string): void {
+    for (const { segment } of GRAPHEME_SEGMENTER.segment(data)) {
+        appendInk(actions, segment);
+    }
 }

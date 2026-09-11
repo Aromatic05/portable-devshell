@@ -6,6 +6,12 @@ import { TuiApplicationInputRouter } from "../../src/testing.ts";
 test("application input router splits burst and partial escape sequences", () => {
     const router = new TuiApplicationInputRouter();
 
+    assert.deepEqual(router.push("4@"), [
+        { data: "4", type: "ink" },
+        { data: "@", type: "ink" },
+    ]);
+
+    router.reset();
     assert.deepEqual(router.push("\u001B[B\u001B[B"), [
         { data: "\u001B[B", type: "ink" },
         { data: "\u001B[B", type: "ink" },
@@ -39,6 +45,7 @@ test("application input router preserves UTF-8 split across Buffer chunks", () =
 
     assert.deepEqual(router.push(bytes.subarray(0, 2)), []);
     assert.deepEqual(router.push(bytes.subarray(2)), [
-        { data: "中文", type: "ink" },
+        { data: "中", type: "ink" },
+        { data: "文", type: "ink" },
     ]);
 });

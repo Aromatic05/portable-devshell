@@ -161,6 +161,36 @@ test("real Ink runtime preserves every key in a burst of escape sequences", asyn
     }
 });
 
+test("real Ink runtime preserves every shortcut in a printable input burst", async () => {
+    const terminal = createTerminal();
+    const clients = createClients({
+        instanceList: [
+            { enabled: true, mcpEnabled: true, name: "alpha" },
+            { enabled: true, mcpEnabled: true, name: "beta" },
+        ],
+    });
+    const runtime = new TuiRuntime(
+        { stdin: terminal.stdin, stdout: terminal.stdout },
+        { clients: clients.value, inkDebug: true },
+    );
+    const running = runtime.run();
+
+    try {
+        await waitUntil(() => runtime.store.getState().connection.status === "connected");
+        terminal.write("4@");
+        await waitUntil(
+            () =>
+                runtime.store.getState().ui.selectedPage === "messages" &&
+                runtime.store.getState().ui.selectedInstance === "beta",
+            250,
+        );
+    } finally {
+        terminal.write("\u0004");
+        await running;
+        await runtime.stop();
+    }
+});
+
 test("serializes rapid Audit Input navigation and activation", async () => {
     const terminal = createTerminal();
     const clients = createClients({
