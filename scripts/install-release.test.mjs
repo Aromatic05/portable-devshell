@@ -447,6 +447,48 @@ test("Unix release installer rolls back application and worker aliases as one tr
     await verifyTransactionalRollback(false);
 });
 
+test("Unix release installer restores preexisting regular devshell and pi commands after candidate failure", {
+    skip: process.platform === "win32"
+}, async () => {
+    const root = await createTestTempDirectory("release-command-rollback-test");
+    const release = resolve(root, "release");
+    const app = resolve(root, "app");
+    const home = resolve(root, "home");
+    const installRoot = resolve(root, "installed");
+    const binDirectory = resolve(root, "bin");
+    const devshellHome = resolve(root, "devshell-home");
+    const environment = {
+        ...process.env,
+        HOME: home,
+        XDG_DATA_HOME: resolve(root, "data"),
+        PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(release).href.replace(/\/$/u, ""),
+        PORTABLE_DEVSHELL_INSTALL_ROOT: installRoot,
+        PORTABLE_DEVSHELL_BIN_DIR: binDirectory,
+        PORTABLE_DEVSHELL_HOME: devshellHome,
+    };
+    try {
+        await mkdir(binDirectory, { recursive: true });
+        await writeFile(resolve(binDirectory, "devshell"), "original devshell\n", { mode: 0o755 });
+        await writeFile(resolve(binDirectory, "pi"), "original pi\n", { mode: 0o755 });
+        await writeTransactionalReleaseFixture({
+            app,
+            failAfterActivation: true,
+            release,
+            version: "9.8.8-command-rollback",
+            workerContent: "candidate-worker\n"
+        });
+
+        const failed = runInstallerRaw(environment, false);
+        assert.notEqual(failed.status, 0, `${failed.stdout}${failed.stderr}`);
+        assert.equal(await readFile(resolve(binDirectory, "devshell"), "utf8"), "original devshell\n");
+        assert.equal(await readFile(resolve(binDirectory, "pi"), "utf8"), "original pi\n");
+        assert.equal((await lstat(resolve(binDirectory, "devshell"))).isFile(), true);
+        assert.equal((await lstat(resolve(binDirectory, "pi"))).isFile(), true);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
 test("Unix release installer restores the previous running runtime after rollback", {
     skip: process.platform === "win32"
 }, async () => {

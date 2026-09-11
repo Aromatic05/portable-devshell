@@ -404,10 +404,12 @@ rollback_application() {
     else
         rm -f "$current_link" || rollback_app_failed=1
     fi
-    if [ -n "${previous_command_target:-}" ]; then
-        ln -sfn "$previous_command_target" "$command_link" || rollback_app_failed=1
-    else
-        rm -f "$command_link" || rollback_app_failed=1
+    if ! rm -f "$command_link"; then
+        rollback_app_failed=1
+    elif [ "${previous_command_kind:-missing}" = symlink ]; then
+        ln -s "$previous_command_target" "$command_link" || rollback_app_failed=1
+    elif [ "${previous_command_kind:-missing}" = file ]; then
+        cp -p "$previous_command_backup" "$command_link" || rollback_app_failed=1
     fi
     if ! rm -f "$pi_command_link"; then
         rollback_app_failed=1
@@ -649,7 +651,9 @@ done
 ln -sfn "devshell-worker-$host_target" "$worker_bin_directory/devshell-worker"
 
 previous_current_target=
+previous_command_kind=missing
 previous_command_target=
+previous_command_backup="$temporary/devshell-command-backup"
 previous_pi_command_kind=missing
 previous_pi_command_target=
 previous_pi_command_backup="$temporary/pi-command-backup"
@@ -657,7 +661,14 @@ if [ -L "$current_link" ]; then
     previous_current_target=$(readlink "$current_link")
 fi
 if [ -L "$command_link" ]; then
+    previous_command_kind=symlink
     previous_command_target=$(readlink "$command_link")
+elif [ -f "$command_link" ]; then
+    previous_command_kind=file
+    cp -p "$command_link" "$previous_command_backup"
+elif [ -e "$command_link" ]; then
+    echo "现有 devshell 命令不是普通文件或符号链接：$command_link" >&2
+    exit 1
 fi
 if [ -L "$pi_command_link" ]; then
     previous_pi_command_kind=symlink
@@ -679,8 +690,8 @@ if ! mv "$staging_directory" "$version_directory"; then
     rollback_installation
     exit 1
 fi
-rm -f "$pi_command_link"
-if ! ln -sfn "versions/$version" "$current_link" || ! ln -sfn "$current_link/$cli_relative_path" "$command_link" || ! ln -s "$current_link/$pi_relative_path" "$pi_command_link"; then
+rm -f "$command_link" "$pi_command_link"
+if ! ln -sfn "versions/$version" "$current_link" || ! ln -s "$current_link/$cli_relative_path" "$command_link" || ! ln -s "$current_link/$pi_relative_path" "$pi_command_link"; then
     echo "无法激活新版本，正在恢复原安装。" >&2
     rollback_installation
     exit 1
