@@ -17,6 +17,11 @@ import {
     contextConversationDraftKey,
     readContextConversationDraft,
 } from "../../../state/TuiContextConversationDraft.js";
+import {
+    nextTuiGraphemeCursor,
+    normalizeTuiGraphemeCursor,
+    previousTuiGraphemeCursor,
+} from "../../../state/TuiGraphemeCursor.js";
 
 export interface TuiCommandDispatcherNavigationOptions {
     dispatch?(intent: TuiUiIntent): Promise<boolean>;
@@ -327,9 +332,10 @@ export class TuiCommandDispatcherNavigation {
         const editor = this.#store.getState().interaction.editor;
         if (target === undefined || editor?.kind !== "comment" || editor.editing !== true) return false;
         const draft = readContextConversationDraft(this.#store.getState(), target.instance, target.ctxId);
-        const cursor = Math.min(Math.max(editor.cursor ?? draft.length, 0), draft.length);
+        const cursor = normalizeTuiGraphemeCursor(draft, editor.cursor ?? draft.length);
+        const previous = previousTuiGraphemeCursor(draft, cursor);
         const next = backspace
-            ? `${draft.slice(0, Math.max(0, cursor - 1))}${draft.slice(cursor)}`
+            ? `${draft.slice(0, previous)}${draft.slice(cursor)}`
             : `${draft.slice(0, cursor)}${input}${draft.slice(cursor)}`;
         this.#store.setFormDraft(
             contextConversationDraftKey(target.instance, target.ctxId),
@@ -338,7 +344,7 @@ export class TuiCommandDispatcherNavigation {
         );
         this.#store.setEditor({
             ...editor,
-            cursor: backspace ? Math.max(0, cursor - 1) : cursor + input.length,
+            cursor: backspace ? previous : cursor + input.length,
         });
         this.#store.setScreenStatus(target.page, undefined);
         return true;
@@ -349,10 +355,12 @@ export class TuiCommandDispatcherNavigation {
         const editor = this.#store.getState().interaction.editor;
         if (target === undefined || editor?.kind !== "comment" || editor.editing !== true) return false;
         const draft = readContextConversationDraft(this.#store.getState(), target.instance, target.ctxId);
-        const cursor = Math.min(Math.max(editor.cursor ?? draft.length, 0), draft.length);
+        const cursor = normalizeTuiGraphemeCursor(draft, editor.cursor ?? draft.length);
         this.#store.setEditor({
             ...editor,
-            cursor: direction === "left" ? Math.max(0, cursor - 1) : Math.min(draft.length, cursor + 1),
+            cursor: direction === "left"
+                ? previousTuiGraphemeCursor(draft, cursor)
+                : nextTuiGraphemeCursor(draft, cursor),
         });
         return true;
     }

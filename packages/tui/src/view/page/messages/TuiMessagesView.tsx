@@ -69,7 +69,7 @@ export function TuiMessagesView(props: {
                 {editing ? (
                     <ComposerText
                         cursor={editor.cursor ?? draft.length}
-                        cursorVisible={props.state.interaction.redrawNonce % 2 === 0}
+                        cursorVisible
                         draft={draft}
                     />
                 ) : (

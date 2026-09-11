@@ -606,7 +606,8 @@ export class TuiRuntime {
 
     #startCursorBlink(): void {
         this.#cursorBlinkTimer = setInterval(() => {
-            if (this.store.getState().interaction.editor?.editing === true) {
+            const editor = this.store.getState().interaction.editor;
+            if (editor?.editing === true && editor.kind !== "comment") {
                 this.store.bumpRedrawNonce();
             }
         }, 500);

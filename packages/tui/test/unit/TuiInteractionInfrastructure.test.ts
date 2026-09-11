@@ -468,6 +468,29 @@ test("Comment conversation shows exact history and keeps the route open after se
     assert.deepEqual(sent, ["new guidance"], "successful send must clear the draft");
 });
 
+test("Comment editor moves and deletes whole grapheme clusters", async () => {
+    const harness = createHarness();
+    enableContextMessageMcp(harness);
+    harness.store.patchControlReadModel({ contexts: [tuiContextRecord("ctx-alpha", "active")] });
+    enterAuditContext(harness, "ctx-alpha");
+    await harness.press("m");
+    await harness.dispatch({ type: "contextConversation.edit" });
+    await harness.press("A👩‍💻éB");
+
+    await harness.press("", { leftArrow: true });
+    await harness.press("", { backspace: true });
+    assert.equal(
+        readContextConversationDraft(harness.store.getState(), "alpha", "ctx-alpha"),
+        "A👩‍💻B",
+    );
+
+    await harness.press("", { backspace: true });
+    assert.equal(
+        readContextConversationDraft(harness.store.getState(), "alpha", "ctx-alpha"),
+        "AB",
+    );
+});
+
 test("Audit lists the newest Tool Calls first", () => {
     const harness = createHarness();
     harness.store.patchControlReadModel({ instanceState: { alpha: { toolCalls: [

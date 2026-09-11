@@ -1,7 +1,15 @@
-import { workspaceFolderName, type ContextMessageStatus } from "@portable-devshell/shared";
+import {
+    workspaceFolderName,
+    type ContextMessageStatus,
+    type ConversationEntry,
+} from "@portable-devshell/shared";
 
 import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
 import { currentTuiRoute } from "../../../state/route/TuiRouteState.js";
+import {
+    nextTuiGraphemeCursor,
+    normalizeTuiGraphemeCursor,
+} from "../../../state/TuiGraphemeCursor.js";
 import type { TuiSidebarContextEntry } from "../../../state/TuiViewModel.js";
 import { wrapTerminalText } from "../../component/TuiComponentExpandableBox.js";
 
@@ -26,6 +34,11 @@ export interface TuiMessageComposerSegment {
 }
 
 const activeSessionWindowMs = 30 * 60 * 1_000;
+const emptyConversationEntries = Object.freeze([]) as readonly ConversationEntry[];
+const messageHistoryCache = new WeakMap<
+    readonly ConversationEntry[],
+    Map<string, Array<{ kind: "meta" | "text"; text: string }>>
+>();
 
 export function selectTuiMessageSessions(
     state: TuiAppState,
@@ -133,7 +146,17 @@ export function selectTuiMessageEntries(
     instance: string,
     ctxId: string,
 ): TuiMessageEntry[] {
-    return (state.readModel.instanceState[instance]?.conversationEntries ?? [])
+    return selectTuiMessageEntriesFromSource(
+        state.readModel.instanceState[instance]?.conversationEntries ?? emptyConversationEntries,
+        ctxId,
+    );
+}
+
+function selectTuiMessageEntriesFromSource(
+    entries: readonly ConversationEntry[],
+    ctxId: string,
+): TuiMessageEntry[] {
+    return entries
         .filter((entry) => entry.ctxId === ctxId)
         .map((entry): TuiMessageEntry => ({
             at: entry.createdAt,
@@ -155,7 +178,16 @@ export function renderTuiMessageHistoryLines(
     width: number,
 ): Array<{ kind: "meta" | "text"; text: string }> {
     const innerWidth = Math.max(1, width - 2);
-    return selectTuiMessageEntries(state, instance, ctxId).flatMap((entry) => [
+    const source = state.readModel.instanceState[instance]?.conversationEntries ?? emptyConversationEntries;
+    let byContextAndWidth = messageHistoryCache.get(source);
+    if (byContextAndWidth === undefined) {
+        byContextAndWidth = new Map();
+        messageHistoryCache.set(source, byContextAndWidth);
+    }
+    const cacheKey = `${ctxId}\u0000${innerWidth}`;
+    const cached = byContextAndWidth.get(cacheKey);
+    if (cached !== undefined) return cached;
+    const rendered = selectTuiMessageEntriesFromSource(source, ctxId).flatMap((entry) => [
         {
             kind: "meta" as const,
             text: `${entry.kind === "comment" ? "You" : "Agent"}  ${formatMessageTime(entry.at)}${entry.kind === "comment" && entry.status !== "delivered" ? `  ${entry.status ?? ""}` : ""}`,
@@ -166,6 +198,8 @@ export function renderTuiMessageHistoryLines(
         })),
         { kind: "text" as const, text: "" },
     ]);
+    byContextAndWidth.set(cacheKey, rendered);
+    return rendered;
 }
 
 export function tuiMessagesHistoryRows(viewportRows: number): number {
@@ -186,11 +220,12 @@ export function renderTuiMessageComposerSegments(
     requestedCursor: number,
     visible: boolean,
 ): TuiMessageComposerSegment[] {
-    const cursor = Math.min(Math.max(0, requestedCursor), draft.length);
+    const cursor = normalizeTuiGraphemeCursor(draft, requestedCursor);
+    const next = nextTuiGraphemeCursor(draft, cursor);
     return [
         { text: draft.slice(0, cursor) },
-        { text: draft[cursor] ?? " ", underline: visible || undefined },
-        { text: draft.slice(cursor + (cursor < draft.length ? 1 : 0)) },
+        { text: cursor === draft.length ? " " : draft.slice(cursor, next), underline: visible || undefined },
+        { text: draft.slice(next) },
     ];
 }
 

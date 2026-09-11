@@ -6,6 +6,7 @@ import { asInstanceName } from "@portable-devshell/shared";
 import { TuiAppStore } from "../../src/state/TuiAppStore.ts";
 import {
     renderTuiMessageComposerSegments,
+    renderTuiMessageHistoryLines,
     selectTuiMessageEntries,
     selectTuiMessageSessions,
     selectTuiMessagesSidebarEntries,
@@ -191,4 +192,25 @@ test("Messages composer owns an inline cursor cell", () => {
         { text: " ", underline: undefined },
         { text: "" },
     ]);
+    assert.deepEqual(renderTuiMessageComposerSegments("👩‍💻x", 0, true), [
+        { text: "" },
+        { text: "👩‍💻", underline: true },
+        { text: "x" },
+    ]);
+});
+
+test("Messages reuses wrapped history while only editor state changes", () => {
+    const store = new TuiAppStore();
+    store.patchControlReadModel({ instanceState: { alpha: { conversationEntries: [{
+        createdAt: "2026-09-10T10:03:00.000Z",
+        ctxId: "ctx-alpha",
+        id: "comment-1",
+        kind: "comment",
+        status: "delivered",
+        text: "history ".repeat(200),
+    }] } } });
+    const first = renderTuiMessageHistoryLines(store.getState(), "alpha", "ctx-alpha", 80);
+    store.setFormDraft("messages:alpha:ctx-alpha", "editing", true);
+    const second = renderTuiMessageHistoryLines(store.getState(), "alpha", "ctx-alpha", 80);
+    assert.equal(second, first, "editing must not re-wrap unchanged conversation history");
 });

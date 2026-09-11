@@ -207,6 +207,13 @@ test("Messages renders comment and report history and sends a Comment from the f
         false,
         "Messages must not re-enable the terminal hardware cursor while Ink owns stdout",
     );
+    const redrawNonce = harness.runtime.store.getState().interaction.redrawNonce;
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    assert.equal(
+        harness.runtime.store.getState().interaction.redrawNonce,
+        redrawNonce,
+        "Comment caret must not force a whole-TUI blink redraw",
+    );
     await waitUntil(() => harness.terminal.output.includes("agent progress report"));
     assert.match(harness.terminal.output, /existing user comment/u);
 
