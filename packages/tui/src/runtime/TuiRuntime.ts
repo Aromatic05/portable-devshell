@@ -55,7 +55,10 @@ import {
     terminalImageClearSequence,
     type TuiTerminalImageSupport,
 } from "./terminal/TuiTerminalImageRenderer.js";
-import { TuiTerminalInputRouter } from "./terminal/TuiTerminalInputRouter.js";
+import {
+    projectTuiTerminalInputFrame,
+    type TuiTerminalInputAction,
+} from "./terminal/TuiTerminalInputRouter.js";
 import { TuiControlTerminalPtyFactory } from "./terminal/TuiControlTerminalPty.js";
 import { TuiTerminalSession } from "./terminal/TuiTerminalSession.js";
 import { TuiTmuxPaneTerminalSession } from "./terminal/TuiTmuxPaneTerminalSession.js";
@@ -63,7 +66,7 @@ import {
     createTuiScreenCaptureStdout,
     TuiScreenTextSelection,
 } from "./TuiScreenTextSelection.js";
-import { TuiApplicationInputRouter } from "./TuiApplicationInputRouter.js";
+import { TuiInputFramer, type TuiInputFrame } from "./TuiInputFramer.js";
 import { TuiViewport } from "./TuiViewport.js";
 
 const APPLICATION_ESCAPE_TIMEOUT_MS = 25;
@@ -106,11 +109,10 @@ export class TuiRuntime {
     readonly #stdout: WriteStream;
     readonly #terminalGraphicsSupport: TuiTerminalGraphicsSupport;
     readonly #terminalImageSupport: TuiTerminalImageSupport;
-    readonly #applicationInputRouter = new TuiApplicationInputRouter();
-    readonly #terminalInputRouter = new TuiTerminalInputRouter();
+    readonly #inputFramer = new TuiInputFramer();
     readonly #controlTerminalPty?: TuiControlTerminalPtyFactory;
-    #applicationDeliveryQueue: Promise<void> = Promise.resolve();
-    #applicationEscapeTimer?: ReturnType<typeof setTimeout>;
+    #inputDeliveryQueue: Promise<void> = Promise.resolve();
+    #inputEscapeTimer?: ReturnType<typeof setTimeout>;
     #cursorBlinkTimer?: ReturnType<typeof setInterval>;
     #ink?: InkInstance;
     #inputStarted = false;
@@ -122,7 +124,6 @@ export class TuiRuntime {
     };
     #stopped = false;
     #terminalColumns = 1;
-    #terminalEscapeTimer?: ReturnType<typeof setTimeout>;
     #terminalFocused = false;
     #terminalInstance?: string;
     #terminalRows = 1;
@@ -522,8 +523,7 @@ export class TuiRuntime {
             return;
         }
         this.#stopped = true;
-        this.#clearApplicationEscapeTimer();
-        this.#clearTerminalEscapeTimer();
+        this.#clearInputEscapeTimer();
         this.#stopCursorBlink();
         this.renderTextDetailImage(false);
         this.renderTerminalGraphics(false);
@@ -678,7 +678,7 @@ export class TuiRuntime {
             return;
         }
         this.#inputStarted = true;
-        this.#stdin.on("data", this.#forwardTerminalInput);
+        this.#stdin.on("data", this.#forwardInput);
     }
 
     #stopInput(): void {
@@ -686,74 +686,68 @@ export class TuiRuntime {
             return;
         }
         this.#inputStarted = false;
-        this.#stdin.off("data", this.#forwardTerminalInput);
+        this.#stdin.off("data", this.#forwardInput);
     }
 
-    #forwardTerminalInput = (chunk: string | Buffer): void => {
+    #forwardInput = (chunk: string | Buffer): void => {
         if (this.#ink === undefined) {
             return;
         }
-        if (this.#terminalOwnsInput()) {
-            this.#clearApplicationEscapeTimer();
-            this.#applicationInputRouter.reset();
-            this.#dispatchTerminalInputChunk(chunk.toString());
-            return;
-        }
-        this.#clearTerminalEscapeTimer();
-        this.#terminalInputRouter.reset();
-        this.#clearApplicationEscapeTimer();
-        this.#dispatchApplicationInputActions(
-            this.#applicationInputRouter.push(chunk),
-        );
-        if (this.#applicationInputRouter.hasPendingEscape()) {
-            this.#applicationEscapeTimer = setTimeout(() => {
-                this.#applicationEscapeTimer = undefined;
-                this.#dispatchApplicationInputActions(
-                    this.#applicationInputRouter.flushPendingEscape(),
-                );
-            }, APPLICATION_ESCAPE_TIMEOUT_MS);
-        }
+        this.#clearInputEscapeTimer();
+        this.#dispatchInputFrames(this.#inputFramer.push(chunk));
+        if (!this.#inputFramer.hasPendingEscape()) return;
+        const timeoutMs = this.#terminalOwnsInput()
+            ? TERMINAL_ESCAPE_TIMEOUT_MS
+            : APPLICATION_ESCAPE_TIMEOUT_MS;
+        this.#inputEscapeTimer = setTimeout(() => {
+            this.#inputEscapeTimer = undefined;
+            this.#dispatchInputFrames(this.#inputFramer.flushPendingEscape());
+        }, timeoutMs);
     };
 
-    #dispatchApplicationInputActions(
-        actions: ReturnType<TuiApplicationInputRouter["push"]>,
-    ): void {
-        for (const action of actions) {
-            const delivery = this.#applicationDeliveryQueue.then(async () => {
+    #dispatchInputFrames(frames: readonly TuiInputFrame[]): void {
+        const delivery = this.#inputDeliveryQueue.then(async () => {
+            for (let index = 0; index < frames.length; index += 1) {
                 if (this.#ink === undefined) return;
+                const frame = frames[index]!;
                 if (this.#terminalOwnsInput()) {
-                    if (action.type === "mouse") {
-                        this.#dispatchTerminalInputActions([action]);
+                    const action = projectTuiTerminalInputFrame(frame);
+                    if (action.type === "data" && action.data !== "\u001B") {
+                        let data = action.data;
+                        while (index + 1 < frames.length) {
+                            const next = projectTuiTerminalInputFrame(
+                                frames[index + 1]!,
+                            );
+                            if (
+                                next.type !== "data" ||
+                                next.data === "\u001B"
+                            ) {
+                                break;
+                            }
+                            data += next.data;
+                            index += 1;
+                        }
+                        this.#dispatchTerminalInputActions([
+                            { data, type: "data" },
+                        ]);
                     } else {
-                        this.#dispatchTerminalInputChunk(action.data);
+                        this.#dispatchTerminalInputActions([action]);
                     }
                     await this.#inputQueue;
-                    return;
+                    continue;
                 }
-                if (action.type === "mouse") {
+                if (frame.type === "mouse") {
                     await this.#enqueueInput(
-                        async () => await this.#handleMouse(action),
+                        async () => await this.#handleMouse(frame),
                     );
-                    return;
+                    continue;
                 }
-                this.#inkStdin.write(action.data);
+                this.#inkStdin.write(frame.data);
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 await this.#inputQueue;
-            });
-            this.#applicationDeliveryQueue = delivery.catch(() => undefined);
-        }
-    }
-
-    #dispatchTerminalInputChunk(chunk: string): void {
-        this.#clearTerminalEscapeTimer();
-        this.#dispatchTerminalInputActions(this.#terminalInputRouter.push(chunk));
-        if (!this.#terminalInputRouter.hasPendingEscape()) return;
-        this.#terminalEscapeTimer = setTimeout(() => {
-            this.#terminalEscapeTimer = undefined;
-            this.#dispatchTerminalInputActions(
-                this.#terminalInputRouter.flushPendingEscape(),
-            );
-        }, TERMINAL_ESCAPE_TIMEOUT_MS);
+            }
+        });
+        this.#inputDeliveryQueue = delivery.catch(() => undefined);
     }
 
     #terminalOwnsInput(): boolean {
@@ -765,7 +759,7 @@ export class TuiRuntime {
     }
 
     #dispatchTerminalInputActions(
-        actions: ReturnType<TuiTerminalInputRouter["push"]>,
+        actions: readonly TuiTerminalInputAction[],
     ): void {
         let tab = selectTerminalTab(this.store.getState());
         let focused = true;
@@ -825,7 +819,7 @@ export class TuiRuntime {
     }
 
     #dispatchTmuxPaneInputAction(
-        action: Exclude<ReturnType<TuiTerminalInputRouter["push"]>[number], { type: "focus.leave" } | { type: "source.toggle" }>,
+        action: Exclude<TuiTerminalInputAction, { type: "focus.leave" } | { type: "source.toggle" }>,
     ): void {
         if (action.type === "data" || action.type === "paste") {
             void this.tmuxPanes.handleRawInput(action.data);
@@ -853,17 +847,10 @@ export class TuiRuntime {
         return handled;
     }
 
-    #clearApplicationEscapeTimer(): void {
-        if (this.#applicationEscapeTimer !== undefined) {
-            clearTimeout(this.#applicationEscapeTimer);
-            this.#applicationEscapeTimer = undefined;
-        }
-    }
-
-    #clearTerminalEscapeTimer(): void {
-        if (this.#terminalEscapeTimer !== undefined) {
-            clearTimeout(this.#terminalEscapeTimer);
-            this.#terminalEscapeTimer = undefined;
+    #clearInputEscapeTimer(): void {
+        if (this.#inputEscapeTimer !== undefined) {
+            clearTimeout(this.#inputEscapeTimer);
+            this.#inputEscapeTimer = undefined;
         }
     }
 
@@ -881,8 +868,6 @@ export class TuiRuntime {
         this.#stdout.write(focused ? "\u001B[?1h\u001B=" : "\u001B[?1l\u001B>");
         if (!focused) {
             this.#terminalSelecting = false;
-            this.#clearTerminalEscapeTimer();
-            this.#terminalInputRouter.reset();
         }
     }
 

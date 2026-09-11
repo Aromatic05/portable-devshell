@@ -1,7 +1,8 @@
 import { StringDecoder } from "node:string_decoder";
 
-export type TuiApplicationInputAction =
-    | { data: string; type: "ink" }
+export type TuiInputFrame =
+    | { data: string; type: "data" }
+    | { data: string; type: "paste" }
     | {
           button: number;
           kind: "press" | "release";
@@ -18,17 +19,17 @@ const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, {
     granularity: "grapheme",
 });
 
-export class TuiApplicationInputRouter {
+export class TuiInputFramer {
     #buffer = "";
     #decoder = new StringDecoder("utf8");
     #pasteBuffer?: string;
 
-    push(chunk: string | Uint8Array): TuiApplicationInputAction[] {
+    push(chunk: string | Uint8Array): TuiInputFrame[] {
         this.#buffer +=
             typeof chunk === "string"
                 ? chunk
                 : this.#decoder.write(Buffer.from(chunk));
-        const actions: TuiApplicationInputAction[] = [];
+        const actions: TuiInputFrame[] = [];
 
         while (this.#buffer.length > 0) {
             if (this.#pasteBuffer !== undefined) {
@@ -36,7 +37,7 @@ export class TuiApplicationInputRouter {
                 this.#buffer = "";
                 const end = this.#pasteBuffer.indexOf(PASTE_END);
                 if (end === -1) break;
-                appendInk(actions, this.#pasteBuffer.slice(0, end));
+                appendFrame(actions, this.#pasteBuffer.slice(0, end), "paste");
                 this.#buffer = this.#pasteBuffer.slice(end + PASTE_END.length);
                 this.#pasteBuffer = undefined;
                 continue;
@@ -68,7 +69,7 @@ export class TuiApplicationInputRouter {
                 if (sequenceLength === undefined) break;
                 actions.push({
                     data: this.#buffer.slice(0, sequenceLength),
-                    type: "ink",
+                    type: "data",
                 });
                 this.#buffer = this.#buffer.slice(sequenceLength);
                 continue;
@@ -76,12 +77,12 @@ export class TuiApplicationInputRouter {
 
             const controlIndex = firstControlIndex(this.#buffer);
             if (controlIndex === 0) {
-                actions.push({ data: this.#buffer[0]!, type: "ink" });
+                actions.push({ data: this.#buffer[0]!, type: "data" });
                 this.#buffer = this.#buffer.slice(1);
                 continue;
             }
             const end = controlIndex === -1 ? this.#buffer.length : controlIndex;
-            appendInkKeys(actions, this.#buffer.slice(0, end));
+            appendDataFrames(actions, this.#buffer.slice(0, end));
             this.#buffer = this.#buffer.slice(end);
         }
 
@@ -92,17 +93,17 @@ export class TuiApplicationInputRouter {
         return this.#pasteBuffer === undefined && this.#buffer.startsWith(ESCAPE);
     }
 
-    flushPendingEscape(): TuiApplicationInputAction[] {
+    flushPendingEscape(): TuiInputFrame[] {
         if (!this.hasPendingEscape()) return [];
         const buffered = this.#buffer;
         this.#buffer = "";
-        const actions: TuiApplicationInputAction[] = [];
+        const actions: TuiInputFrame[] = [];
         let cursor = 0;
         while (buffered[cursor] === ESCAPE) {
-            actions.push({ data: ESCAPE, type: "ink" });
+            actions.push({ data: ESCAPE, type: "data" });
             cursor += 1;
         }
-        appendInkKeys(actions, buffered.slice(cursor));
+        appendDataFrames(actions, buffered.slice(cursor));
         return actions;
     }
 
@@ -176,13 +177,17 @@ function parseMouse(value: string): {
     return undefined;
 }
 
-function appendInk(actions: TuiApplicationInputAction[], data: string): void {
+function appendFrame(
+    actions: TuiInputFrame[],
+    data: string,
+    type: "data" | "paste",
+): void {
     if (data.length === 0) return;
-    actions.push({ data, type: "ink" });
+    actions.push({ data, type });
 }
 
-function appendInkKeys(actions: TuiApplicationInputAction[], data: string): void {
+function appendDataFrames(actions: TuiInputFrame[], data: string): void {
     for (const { segment } of GRAPHEME_SEGMENTER.segment(data)) {
-        appendInk(actions, segment);
+        appendFrame(actions, segment, "data");
     }
 }

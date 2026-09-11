@@ -1,6 +1,6 @@
 export * from "./runtime/client/TuiClientComposition.js";
 export * from "./runtime/control/TuiControlSession.js";
-export * from "./runtime/TuiApplicationInputRouter.js";
+export * from "./runtime/TuiInputFramer.js";
 export * from "./state/instance/TuiInstanceTerminalCapability.js";
 export * from "./state/editor/TuiEditorProviderChoices.js";
 export * from "./runtime/terminal/TuiTerminalBuffer.js";

@@ -1633,6 +1633,22 @@ test("real Ink runtime switches terminal sources and drives tmux View and Attach
         await waitUntil(() => ptyWrites.includes("x"), 250);
         assert.equal(currentTuiRoute(runtime.store.getState()).page, "terminal");
 
+        host.write("\u001D");
+        await waitUntil(
+            () => runtime.store.getState().interaction.focusScope !== "terminal",
+        );
+        host.write("\t\u001B[");
+        await waitUntil(
+            () => runtime.store.getState().interaction.focusScope === "terminal",
+        );
+        host.write("A");
+        await waitUntil(() => ptyWrites.includes("\u001B[A"), 250);
+
+        const utf8 = Buffer.from("中", "utf8");
+        host.write(utf8.subarray(0, 2));
+        host.write(utf8.subarray(2));
+        await waitUntil(() => ptyWrites.includes("中"), 250);
+
         host.write("\u0014");
         await waitUntil(() => {
             const route = currentTuiRoute(runtime.store.getState());
@@ -2164,7 +2180,7 @@ function createTerminal(options: { columns?: number; rows?: number } = {}): {
     resize(columns: number, rows: number): void;
     stdin: ReadStream;
     stdout: WriteStream;
-    write(value: string): void;
+    write(value: string | Uint8Array): void;
 } {
     class Input extends PassThrough {
         readonly isTTY = true;
@@ -2209,7 +2225,7 @@ function createTerminal(options: { columns?: number; rows?: number } = {}): {
         },
         stdin: input as unknown as ReadStream,
         stdout: output as unknown as WriteStream,
-        write(value: string) {
+        write(value: string | Uint8Array) {
             input.write(value);
         },
     };
