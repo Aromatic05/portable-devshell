@@ -9,6 +9,8 @@ import {
     selectTuiMessageEntries,
     selectTuiMessageSessions,
     selectTuiMessagesSidebarEntries,
+    tuiMessagesHistoryRows,
+    tuiMessagesRenderedHistoryRows,
 } from "../../src/view/page/messages/TuiMessagesProjection.ts";
 import { TuiMessagesView } from "../../src/view/page/messages/TuiMessagesView.tsx";
 
@@ -151,16 +153,16 @@ test("Messages hides sessions that were inactive for more than 30 minutes", () =
     );
 });
 
-test("Messages keeps short history at the top while reserving composer space at the bottom", () => {
+test("Messages keeps the composer directly after short history instead of moving blank rows around it", () => {
     const store = new TuiAppStore();
     store.patchControlReadModel({
         instanceState: {
             alpha: {
-                contextMessages: [{
+                conversationEntries: [{
                     createdAt: "2026-09-10T10:03:00.000Z",
                     ctxId: "ctx-alpha",
                     id: "comment-1",
-                    instance: "alpha",
+                    kind: "comment",
                     status: "delivered",
                     text: "short history",
                 }],
@@ -173,8 +175,9 @@ test("Messages keeps short history at the top while reserving composer space at 
 
     const view = TuiMessagesView({ state: store.getState(), viewportRows: 30, width: 80 });
     const history = view.props.children[0];
-    assert.equal(history.props.height, 26);
-    assert.equal(history.props.justifyContent, "flex-start");
+    assert.equal(history.props.height, 3);
+    assert.equal(history.props.justifyContent, undefined);
+    assert.equal(tuiMessagesRenderedHistoryRows(200, 30), tuiMessagesHistoryRows(30));
 });
 
 test("Messages composer owns an inline cursor cell", () => {

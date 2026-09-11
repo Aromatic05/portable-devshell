@@ -172,6 +172,15 @@ export function tuiMessagesHistoryRows(viewportRows: number): number {
     return Math.max(0, viewportRows - 4);
 }
 
+export function tuiMessagesRenderedHistoryRows(
+    historyLineCount: number,
+    viewportRows: number,
+): number {
+    const maximum = tuiMessagesHistoryRows(viewportRows);
+    if (maximum === 0) return 0;
+    return Math.min(maximum, Math.max(1, historyLineCount));
+}
+
 export function renderTuiMessageComposerSegments(
     draft: string,
     requestedCursor: number,
