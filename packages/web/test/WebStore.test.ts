@@ -105,7 +105,20 @@ describe("WebStore", () => {
         await store.refreshAudit();
 
         expect(clients.context.list).toHaveBeenCalledOnce();
-        expect(clients.tool.listCalls).toHaveBeenCalledOnce();
+        expect(clients.tool.listCalls).toHaveBeenCalledTimes(2);
+        expect(clients.tool.listCalls).toHaveBeenCalledWith("demo", {
+            includeInput: false,
+            includeOutput: false,
+            limit: 200,
+            maxBytes: 512 * 1024,
+        });
+        expect(clients.tool.listCalls).toHaveBeenCalledWith("demo", {
+            includeInput: true,
+            includeOutput: false,
+            limit: 200,
+            maxBytes: 1024 * 1024,
+            toolName: "todo_report",
+        });
         expect(clients.contextMessage.list).toHaveBeenCalledOnce();
         expect(clients.runtime.readLogs).toHaveBeenCalledOnce();
         store.close();
