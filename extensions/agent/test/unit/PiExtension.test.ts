@@ -63,7 +63,7 @@ test("Pi registers only Agent model tools while retaining canonical tools for in
             { description: "Read files", inputSchema: { type: "object" }, name: "file_read" },
             { description: "Internal only", inputSchema: { type: "object" }, name: "future_internal" }
         ],
-        async callTool(toolName, _input, _operationId) {
+        async callTool(toolName, _input, _operationId): Promise<JsonValue> {
             calls.push(toolName);
             if (toolName === "file_glob") return { entries: [] };
             if (toolName === "file_read") return {
