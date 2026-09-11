@@ -40,7 +40,7 @@ export type CliParsedCommand =
     | { kind: "control.stop" }
     | { kind: "tui" }
     | { kind: "extension.help" }
-    | { kind: "extension.list" }
+    | { json: boolean; kind: "extension.list" }
     | { extensionId: string; kind: "extension.inspect" }
     | { extensionId: string; kind: "extension.enable" | "extension.disable" | "extension.reload" }
     | { kind: "extension.install"; source: string }
@@ -158,7 +158,9 @@ export class CliParser {
         }
         switch (argv[0]) {
             case "list":
-                return this.#expectNoExtra(argv, { kind: "extension.list" });
+                if (argv.length === 1) return { json: false, kind: "extension.list" };
+                if (argv.length === 2 && argv[1] === "--json") return { json: true, kind: "extension.list" };
+                throw CliRenderError.usage("extension list accepts only [--json]");
             case "install":
             case "update":
                 if (argv.length !== 2) throw CliRenderError.usage(`extension ${argv[0]} requires <bundle-or-directory>`);

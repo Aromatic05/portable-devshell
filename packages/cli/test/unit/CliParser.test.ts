@@ -44,7 +44,8 @@ test("CliParser treats unknown top-level namespaces as cli.commands local ids", 
         kind: "cli.command"
     });
     assert.deepEqual(parser.parse(["extension"]), { kind: "extension.help" });
-    assert.deepEqual(parser.parse(["extension", "list"]), { kind: "extension.list" });
+    assert.deepEqual(parser.parse(["extension", "list"]), { json: false, kind: "extension.list" });
+    assert.deepEqual(parser.parse(["extension", "list", "--json"]), { json: true, kind: "extension.list" });
     assert.deepEqual(parser.parse(["extension", "install", "./example.dsext"]), {
         kind: "extension.install",
         source: "./example.dsext"

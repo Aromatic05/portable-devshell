@@ -21,7 +21,7 @@ import { CliCommandWatchStatus } from "./command/watch/CliCommandWatchStatus.js"
 import { cliExitCodes } from "./exit/CliExitCode.js";
 import { CliExitMapper } from "./exit/CliExitMapper.js";
 import { CliRenderError, renderCliError } from "./render/CliRenderError.js";
-import { renderCliTopicUsage, renderCliUsage, renderExtensionCommandUsage, renderExtensionUsage, renderInstanceUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
+import { renderCliTopicUsage, renderCliUsage, renderExtensionCommandUsage, renderExtensionList, renderExtensionUsage, renderInstanceUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
 import { renderControlLogs } from "./render/control/CliRenderControlLogs.js";
 import { renderControlStatus } from "./render/control/CliRenderControlStatus.js";
 import { renderInstanceList } from "./render/instance/CliRenderInstanceList.js";
@@ -118,12 +118,17 @@ export class CliMain {
         }
         try {
             await negotiateCliControl(this.#clients);
-            const overlay = (await this.#clients.cli.commands()).find((candidate) => candidate.id === commandId);
+            const commands = await this.#clients.cli.commands();
+            const overlay = commands.find((candidate) => candidate.id === commandId);
             if (overlay !== undefined) {
                 return {
                     command: { args: [...argv.slice(1)], commandId, kind: "cli.command" },
                     controlNegotiated: true
                 };
+            }
+            const suggestion = suggestCliCommand(commandId, commands.map((candidate) => candidate.id));
+            if (suggestion !== undefined) {
+                throw CliRenderError.usage(`Unknown command "${commandId}". Did you mean "${suggestion}"?`);
             }
             return { command: this.#parser.parse(argv), controlNegotiated: true };
         } catch (error) {
@@ -143,7 +148,7 @@ export class CliMain {
                 this.#stdout.write(`devshell ${resolvePortableDevshellApplicationVersion()}\n`);
                 return;
             case "help":
-                this.#stdout.write(`${command.topic === undefined ? renderCliUsage() : renderCliTopicUsage(command.topic)}\n`);
+                this.#stdout.write(`${command.topic === undefined ? await this.#rootUsage(controlNegotiated) : renderCliTopicUsage(command.topic)}\n`);
                 return;
             case "control.start":
                 this.#stdout.write(renderControlStatus(await (await this.#lifecycle()).start()));
@@ -294,7 +299,8 @@ export class CliMain {
                 this.#stdout.write(`${renderExtensionUsage()}\n`);
                 return;
             case "extension.list":
-                this.#writeJson(await this.#clients.extension.list());
+                if (command.json) this.#writeJson(await this.#clients.extension.list());
+                else this.#stdout.write(renderExtensionList(await this.#clients.extension.list()));
                 return;
             case "extension.install":
                 this.#writeJson(await this.#clients.extension.install(resolve(command.source)));
@@ -484,6 +490,15 @@ export class CliMain {
         this.#stdout.write(`${JSON.stringify(value, null, 2)}\n`);
     }
 
+    async #rootUsage(controlNegotiated: boolean): Promise<string> {
+        try {
+            if (!controlNegotiated) await negotiateCliControl(this.#clients);
+            return renderCliUsage(await this.#clients.cli.commands());
+        } catch {
+            return renderCliUsage();
+        }
+    }
+
     async #startTui(): Promise<void> {
         if (this.#runTui !== undefined) {
             await this.#runTui();
@@ -504,6 +519,41 @@ export class CliMain {
             xdgRuntimeDir: this.#xdgRuntimeDir
         });
     }
+}
+
+const builtinCliCommands = [
+    "approval", "config", "context", "debug", "extension", "help", "instance",
+    "logs", "oauth", "overview", "restart", "start", "status", "stop", "todo",
+    "tool", "tui", "watch",
+] as const;
+
+function suggestCliCommand(command: string, extensionCommands: readonly string[]): string | undefined {
+    if ((builtinCliCommands as readonly string[]).includes(command)) return undefined;
+    const candidates = [...builtinCliCommands, ...extensionCommands]
+        .filter((candidate, index, values) => values.indexOf(candidate) === index);
+    let best: { command: string; distance: number } | undefined;
+    for (const candidate of candidates) {
+        const distance = editDistance(command, candidate);
+        if (best === undefined || distance < best.distance) best = { command: candidate, distance };
+    }
+    const threshold = command.length <= 4 ? 1 : command.length <= 8 ? 2 : 3;
+    return best !== undefined && best.distance <= threshold ? best.command : undefined;
+}
+
+function editDistance(left: string, right: string): number {
+    let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+    for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
+        const current = [leftIndex + 1];
+        for (let rightIndex = 0; rightIndex < right.length; rightIndex += 1) {
+            current.push(Math.min(
+                current[rightIndex]! + 1,
+                previous[rightIndex + 1]! + 1,
+                previous[rightIndex]! + (left[leftIndex] === right[rightIndex] ? 0 : 1),
+            ));
+        }
+        previous = current;
+    }
+    return previous[right.length] ?? left.length;
 }
 
 if (isCliEntrypoint(import.meta.url, process.argv[1])) {

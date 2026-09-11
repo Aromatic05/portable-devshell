@@ -1,9 +1,9 @@
-import type { CliCommandDescriptor } from "@portable-devshell/shared";
+import type { CliCommandDescriptor, ExtensionRuntimeRecord } from "@portable-devshell/shared";
 
 export type CliHelpTopic = "approval" | "config" | "context" | "debug" | "oauth" | "todo" | "tool";
 
-export function renderCliUsage(): string {
-    return [
+export function renderCliUsage(commands: readonly CliCommandDescriptor[] = []): string {
+    const lines = [
         "portable-devshell",
         "",
         "Usage:",
@@ -35,7 +35,14 @@ export function renderCliUsage(): string {
         "  help                           Show this help",
         "",
         "Run `devshell <command> --help` for related usage.",
-    ].join("\n");
+    ];
+    if (commands.length > 0) {
+        lines.push("", "Installed commands:");
+        for (const command of commands) {
+            lines.push(`  ${command.id.padEnd(30)} ${command.summary ?? command.title}`);
+        }
+    }
+    return lines.join("\n");
 }
 
 export function renderCliTopicUsage(topic: CliHelpTopic): string {
@@ -106,7 +113,7 @@ export function renderExtensionUsage(): string {
         "  devshell extension install <bundle-or-directory>",
         "  devshell extension update <bundle-or-directory>",
         "  devshell extension remove <extensionId> [--purge]",
-        "  devshell extension list",
+        "  devshell extension list [--json]",
         "  devshell extension inspect <extensionId>",
         "  devshell extension enable <extensionId>",
         "  devshell extension disable <extensionId>",
@@ -126,6 +133,15 @@ export function renderExtensionCommandUsage(command: CliCommandDescriptor): stri
         "",
         `Extension: ${command.extensionId}`,
     ].join("\n");
+}
+
+export function renderExtensionList(records: readonly ExtensionRuntimeRecord[]): string {
+    if (records.length === 0) return "no extensions\n";
+    return `${records.map((record) => [
+        record.id,
+        record.version ?? "-",
+        record.enabled ? record.state : "disabled",
+    ].join("\t")).join("\n")}\n`;
 }
 
 export function renderInstanceUsage(): string {

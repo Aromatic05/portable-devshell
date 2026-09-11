@@ -176,7 +176,7 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
     assert.equal(stderr.flush(), "missing\n");
 });
 
-test("CliMain resolves help locally without contacting Control", async () => {
+test("CliMain keeps static help available without depending on Control business data", async () => {
     const stdout = createBuffer();
     const stderr = createBuffer();
     const cli = new CliMain({
@@ -208,6 +208,64 @@ test("CliMain resolves help locally without contacting Control", async () => {
 
     assert.equal(await cli.run(["Bad_Command"]), 2);
     assert.notEqual(stderr.flush().length, 0);
+});
+
+test("CliMain root help discovers installed Extension commands when Control is online", async () => {
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const cli = new CliMain({
+        createCliClients: () => testClients({
+            async hello() {
+                return { capabilities: ["request", "stream", "streamResume"], protocolVersion: 1 };
+            },
+            async cliCommands() {
+                return [{
+                    extensionId: "agent",
+                    id: "agent",
+                    summary: "Run and manage Agent providers",
+                    title: "Agent",
+                    usage: "agent <command>",
+                }];
+            },
+        }),
+        stderr,
+        stdout,
+    });
+
+    assert.equal(await cli.run(["--help"]), 0);
+    const output = stdout.flush();
+    assert.match(output, /Installed commands:/u);
+    assert.match(output, /agent\s+Run and manage Agent providers/u);
+    assert.equal(stderr.flush(), "");
+});
+
+test("CliMain suggests a nearby command instead of treating a typo as an Extension command", async () => {
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const calls: string[] = [];
+    const cli = new CliMain({
+        createCliClients: () => testClients({
+            async hello() {
+                calls.push("hello");
+                return { capabilities: ["request", "stream", "streamResume"], protocolVersion: 1 };
+            },
+            async cliCommand() {
+                calls.push("cli.command");
+                return { kind: "text", text: "unexpected" };
+            },
+            async cliCommands() {
+                calls.push("cli.commands");
+                return [{ extensionId: "agent", id: "agent", title: "Agent" }];
+            },
+        }),
+        stderr,
+        stdout,
+    });
+
+    assert.equal(await cli.run(["insance"]), 2);
+    assert.equal(stdout.flush(), "");
+    assert.match(stderr.flush(), /Unknown command "insance"\. Did you mean "instance"\?/u);
+    assert.deepEqual(calls, ["hello", "cli.commands"]);
 });
 
 test("CliMain keeps Extension management separate from cli.commands dispatch", async () => {
@@ -273,6 +331,8 @@ test("CliMain keeps Extension management separate from cli.commands dispatch", a
     });
 
     assert.equal(await cli.run(["extension", "list"]), 0);
+    assert.equal(stdout.flush(), "agent\t0.1.0\tactive\n");
+    assert.equal(await cli.run(["extension", "list", "--json"]), 0);
     assert.match(stdout.flush(), /"id": "agent"/u);
     assert.equal(await cli.run(["extension", "install", "./bundle.dsext"]), 0);
     stdout.flush();
@@ -305,6 +365,7 @@ test("CliMain keeps Extension management separate from cli.commands dispatch", a
 
     assert.deepEqual(calls.filter((call) => call !== "cli.commands"), [
         "list",
+        "list",
         `install:${resolve("./bundle.dsext")}`,
         `install:${resolve("./bundle-v2.dsext")}`,
         "remove:agent:true",
@@ -314,7 +375,7 @@ test("CliMain keeps Extension management separate from cli.commands dispatch", a
         "reload:agent",
         "command:agent:json"
     ]);
-    assert.equal(calls.filter((call) => call === "cli.commands").length, 11);
+    assert.equal(calls.filter((call) => call === "cli.commands").length, 12);
     assert.equal(stderr.flush(), "");
 });
 
