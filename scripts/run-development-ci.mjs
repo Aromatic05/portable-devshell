@@ -109,16 +109,16 @@ export function createTargetCiSteps(target, platform = process.platform) {
         pnpmStep("Package Agent artifacts", ["package:agent", "--", "--target", target, "--output-dir", "./ci-artifacts"]),
         pnpmStep("Application package smoke", ["smoke:package", "--", application]),
         pnpmStep("Unix release installer smoke", ["smoke:install-release", "--", application]),
-    );
-
-    if (target === "linux-x64") {
-        steps.push(pnpmStep("Agent package smoke", [
+        pnpmStep("Agent package smoke", [
             "smoke:agent-package",
             "--",
             application,
             join("ci-artifacts", "portable-devshell-agent.dsext"),
             join("ci-artifacts", `portable-devshell-agent-provider-pi-${target}.dsprovider`),
-        ]));
+        ]),
+    );
+
+    if (target === "linux-x64") {
         steps.push({
             args: [
                 "-lc",

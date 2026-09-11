@@ -84,6 +84,7 @@ test("Unix target CI proves the native deliverable without rerunning common corr
         "Package Agent artifacts",
         "Application package smoke",
         "Unix release installer smoke",
+        "Agent package smoke",
     ]);
     for (const commonOnly of ["Lint", "Typecheck", "Rust workspace tests", "Package tests"]) {
         assert.equal(names.includes(commonOnly), false);
