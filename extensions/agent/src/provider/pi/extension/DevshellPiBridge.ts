@@ -273,13 +273,16 @@ export function prepareToolInput(toolName: string, params: unknown): JsonValue {
     return { ...input, resultDetail: "diff" };
 }
 
-const MAX_MODEL_TOOL_RESULT_CHARACTERS = 30_000;
+const MAX_MODEL_TOOL_RESULT_CHARACTERS = 12_000;
 
 function renderModelToolResult(toolName: string, value: JsonValue): string {
     return limitModelToolResult(renderModelToolResultUnbounded(toolName, value));
 }
 
 function renderModelToolResultUnbounded(toolName: string, value: JsonValue): string {
+    if (toolName === "bash_run" && value !== null && !Array.isArray(value) && typeof value === "object") {
+        return renderBashModelToolResult(value);
+    }
     if (toolName !== "file_edit" || value === null || Array.isArray(value) || typeof value !== "object") {
         return renderToolResult(value);
     }
@@ -296,6 +299,21 @@ function renderModelToolResultUnbounded(toolName: string, value: JsonValue): str
         const removed = typeof operation.removedLines === "number" ? `-${operation.removedLines}` : undefined;
         return [action, path, status, added, removed].filter(Boolean).join(" ");
     }).join("\n");
+}
+
+function renderBashModelToolResult(value: Record<string, JsonValue>): string {
+    const {
+        stdoutArtifact: _stdoutArtifact,
+        stderrArtifact: _stderrArtifact,
+        stdoutPath,
+        stderrPath,
+        ...rest
+    } = value;
+    return renderToolResult({
+        ...(typeof stdoutPath === "string" ? { stdoutPath } : {}),
+        ...(typeof stderrPath === "string" ? { stderrPath } : {}),
+        ...rest
+    });
 }
 
 function limitModelToolResult(value: string): string {

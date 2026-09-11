@@ -8,7 +8,7 @@ Artifact 在 MCP 上只保留图片查看 primitive：
 artifact_viewImage
 ```
 
-`artifact_viewImage` 由 control 提供，并合并到实例 MCP endpoint 的固定工具 catalog。分享和跨实例传输属于 Artifact Extension command，不再作为 MCP tool 暴露。`bash_run` 仍可将被截断的 stdout/stderr 持久化到内部 ArtifactStore，但不再向模型提供独立的 Artifact 文本读取工具。
+`artifact_viewImage` 由 control 提供，并合并到实例 MCP endpoint 的固定工具 catalog。分享和跨实例传输属于 Artifact Extension command，不再作为 MCP tool 暴露。`bash_run` 会为超过 recovery 阈值或已经被 Worker 截断的 stdout/stderr 使用内部 ArtifactStore 保留完整输出，并返回 `/.devshell/tool-results/<id>/<stdout|stderr>` 形式的只读路径；模型通过普通 `file_read` 按需读取，不存在独立的 Artifact 文本读取工具。
 
 本地用户通过 `devshell artifact ...` 使用 Artifact native Extension command。模型要调用同一 domain，必须先由当前 instance 的 `[extensions].model` 允许 `artifact`，然后在 `bash_run` / `tmux_run` 中通过 Context-bound `devshell artifact ...` 调用；不存在从 model command 到 builtin CLI 的 fallback。
 

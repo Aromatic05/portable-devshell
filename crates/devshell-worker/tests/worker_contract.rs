@@ -729,6 +729,74 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
         output_limited["result"]["stdoutArtifact"]["artifactTruncated"],
         false
     );
+    let truncated_path = output_limited["result"]["stdoutPath"]
+        .as_str()
+        .expect("truncated stdout must expose a file_read recovery path");
+    assert!(truncated_path.starts_with("/.devshell/tool-results/"));
+    assert!(truncated_path.ends_with("/stdout"));
+    let recovered = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "6-recover",
+            "method": "file_read",
+            "params": {
+                "files": [{
+                    "path": truncated_path,
+                    "view": "content",
+                    "selector": "1-1:raw"
+                }]
+            },
+            "context": { "workspace": env.workspace() }
+        }),
+    );
+    assert_eq!(recovered["ok"], true, "{recovered}");
+    assert_eq!(
+        recovered["result"]["files"][0]["content"],
+        format!("1:{}", "x".repeat(2000))
+    );
+
+    #[cfg(unix)]
+    let recovery_command = "awk 'BEGIN { for (i = 1; i <= 4000; i++) printf \"line-%04d\\n\", i }'";
+    #[cfg(windows)]
+    let recovery_command =
+        "1..4000 | ForEach-Object { [Console]::Out.WriteLine(('line-{0:D4}' -f $_)) }";
+    let recovery = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "7-recovery",
+            "method": "bash_run",
+            "params": { "command": recovery_command, "timeoutMs": 30_000 },
+            "context": { "workspace": env.workspace() }
+        }),
+    );
+    assert_eq!(recovery["ok"], true, "{recovery}");
+    assert_eq!(recovery["result"]["stdoutTruncated"], false, "{recovery}");
+    let recovery_path = recovery["result"]["stdoutPath"]
+        .as_str()
+        .expect("large inline stdout must expose a recovery path");
+    let middle = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "7-recover-middle",
+            "method": "file_read",
+            "params": {
+                "files": [{
+                    "path": recovery_path,
+                    "view": "content",
+                    "selector": "2000-2002:raw"
+                }]
+            },
+            "context": { "workspace": env.workspace() }
+        }),
+    );
+    assert_eq!(middle["ok"], true, "{middle}");
+    assert_eq!(
+        middle["result"]["files"][0]["content"],
+        "2000:line-2000\n2001:line-2001\n2002:line-2002"
+    );
 
     #[cfg(unix)]
     let compact_command = "printf compact";
@@ -748,6 +816,8 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
     assert_eq!(compact["ok"], true, "{compact}");
     assert!(compact["result"].get("stdoutArtifact").is_none());
     assert!(compact["result"].get("stderrArtifact").is_none());
+    assert!(compact["result"].get("stdoutPath").is_none());
+    assert!(compact["result"].get("stderrPath").is_none());
 
     env.json_command(&["stop", "--instance", instance]);
 }

@@ -44,6 +44,12 @@ pub struct BashRunOutput {
     pub stderr_bytes: usize,
     pub stdout_truncated: bool,
     pub stderr_truncated: bool,
+    /// Read-only file_read path for retained stdout when recovery storage is available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdout_path: Option<String>,
+    /// Read-only file_read path for retained stderr when recovery storage is available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stdout_artifact: Option<ArtifactReference>,
     #[serde(skip_serializing_if = "Option::is_none")]

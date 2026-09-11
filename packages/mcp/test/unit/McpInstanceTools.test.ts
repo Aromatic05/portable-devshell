@@ -30,6 +30,20 @@ const bashTool: ToolDefinition = {
     outputSchema: { type: "object" }
 };
 
+const fileReadTool: ToolDefinition = {
+    requiredCapabilities: ["read"],
+    description: "Read files.",
+    group: "file",
+    inputSchema: {
+        additionalProperties: false,
+        properties: { files: { type: "array" } },
+        required: ["files"],
+        type: "object"
+    },
+    name: "file_read",
+    outputSchema: { type: "object" }
+};
+
 const context = { principal: "local", requestId: "request-1" } as const;
 const contextRegistry = new McpContextRegistry({ idFactory: () => "ctx-instance-test" });
 const activeContext = await contextRegistry.create({
@@ -276,13 +290,15 @@ test("worker calls default to the endpoint instance and route explicit targets t
         callTool: async (toolName, input) => {
             localCalls.push({ input, toolName });
             return { local: true };
-        }
+        },
+        tools: [bashTool, fileReadTool]
     });
     const gateway = createGateway({
         callTool: async (instance, toolName, input, callContext) => {
             remoteCalls.push({ context: callContext, input, instance, toolName });
             return { remote: true };
-        }
+        },
+        listTools: () => [bashTool, fileReadTool]
     });
     const endpoint = createManagedEndpoint(worker, gateway);
 
@@ -304,6 +320,14 @@ test("worker calls default to the endpoint instance and route explicit targets t
         await endpoint.callTool("bash_run", withContext({ command: "pwd", instance: "remote-server" }), context),
         { remote: true }
     );
+    const recoveryPath = "/.devshell/tool-results/11111111-1111-1111-1111-111111111111/stdout";
+    assert.deepEqual(
+        await endpoint.callTool("file_read", withContext({
+            files: [{ path: recoveryPath, selector: "2000-2002:raw", view: "content" }],
+            instance: "remote-server"
+        }), context),
+        { remote: true }
+    );
     assert.deepEqual(localCalls, [{ input: { command: "pwd" }, toolName: "bash_run" }]);
     assert.deepEqual(remoteCalls, [{
         context: {
@@ -315,6 +339,18 @@ test("worker calls default to the endpoint instance and route explicit targets t
         input: { command: "pwd" },
         instance: "remote-server",
         toolName: "bash_run"
+    }, {
+        context: {
+            ctxId: activeContext.ctxId,
+            requestId: "request-1",
+            source: "mcp",
+            workspace: "/remote-workspace"
+        },
+        input: {
+            files: [{ path: recoveryPath, selector: "2000-2002:raw", view: "content" }]
+        },
+        instance: "remote-server",
+        toolName: "file_read"
     }]);
 
 });
@@ -581,6 +617,7 @@ function createWorker(options: {
     callTool?: (toolName: string, input: JsonValue, context: ToolCallContext) => Promise<JsonValue>;
     hasSchema?: boolean;
     ready?: boolean;
+    tools?: ToolDefinition[];
 } = {}) {
     return {
         async auditToolCall<T extends JsonValue>(
@@ -613,7 +650,7 @@ function createWorker(options: {
             return options.hasSchema ?? true;
         },
         listTools() {
-            return [bashTool];
+            return options.tools ?? [bashTool];
         },
         snapshot() {
             return { ready: options.ready ?? true };

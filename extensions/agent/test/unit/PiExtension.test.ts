@@ -146,12 +146,20 @@ test("Pi devshell tool hard-limits model content for long single-line progress a
         ): Promise<{ content: Array<{ text: string; type: "text" }>; details: JsonValue }>;
     } | undefined;
     const longLine = `head-${"x".repeat(100_000)}-tail`;
+    const recoveryPath = "/.devshell/tool-results/11111111-1111-1111-1111-111111111111/stdout";
     const extension = createDevshellPiExtension({
         target: { instance: "worker-a", workspace: "/repo" },
         tools: [{ description: "Run bash", inputSchema: { type: "object" }, name: "bash_run" }],
         async callTool(_toolName, _input, _operationId, _signal, onProgress) {
             onProgress?.({ stderr: "", stdout: longLine, termination: "running" });
-            return { exitCode: 0, stderr: "", stdout: longLine, termination: "exited" };
+            return {
+                exitCode: 0,
+                stderr: "",
+                stdout: longLine,
+                stdoutArtifact: { artifactTruncated: false, handle: "private-handle", stream: "stdout" },
+                stdoutPath: recoveryPath,
+                termination: "exited"
+            };
         },
         close() {}
     }, { closeSessionOnShutdown: false });
@@ -170,15 +178,18 @@ test("Pi devshell tool hard-limits model content for long single-line progress a
     const finalText = result.content[0]?.text ?? "";
 
     assert.equal(updates.length, 1);
-    assert.equal(progressText.length, 30_000);
-    assert.equal(finalText.length, 30_000);
+    assert.equal(progressText.length, 12_000);
+    assert.equal(finalText.length, 12_000);
     assert.match(progressText, /tool result truncated: \d+ characters total/u);
     assert.match(finalText, /tool result truncated: \d+ characters total/u);
     assert.match(progressText, /head-/u);
     assert.match(progressText, /-tail/u);
     assert.match(finalText, /head-/u);
     assert.match(finalText, /-tail/u);
+    assert.match(finalText, new RegExp(recoveryPath.replaceAll("/", "\\/"), "u"));
+    assert.doesNotMatch(finalText, /stdoutArtifact|private-handle/u);
     assert.deepEqual((result.details as { stdout?: string }).stdout, longLine);
+    assert.equal((result.details as { stdoutArtifact?: { handle?: string } }).stdoutArtifact?.handle, "private-handle");
 });
 
 const identityTheme: PiThemeLike = {

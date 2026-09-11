@@ -1,6 +1,9 @@
-use std::sync::Arc;
+use std::{fs, sync::Arc};
 
+use crate::platform::unix_time_millis;
 use crate::security::path::{ResolvedEntry, ResolvedMetadata, ResolvedPath};
+use crate::tools::artifact::result_path::{ToolResultPath, parse_tool_result_path};
+use crate::tools::artifact::store::ArtifactStore;
 use crate::tools::file::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
 use crate::tools::file::structure;
 use crate::tools::file::types::{
@@ -17,16 +20,19 @@ const AUTO_CONTENT_MAX_BYTES: usize = 64 * 1024;
 const MAX_RANGES: usize = 16;
 const MAX_CONTENT_BYTES: usize = 1024 * 1024;
 const MAX_BATCH_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+const TOOL_RESULT_READ_LEASE_MS: u128 = 60_000;
 
 pub struct FileReadTool {
     name: ToolName,
     state: Arc<FileToolState>,
+    artifacts: Arc<ArtifactStore>,
 }
 impl FileReadTool {
-    pub fn new(state: Arc<FileToolState>) -> Self {
+    pub fn new(state: Arc<FileToolState>, artifacts: Arc<ArtifactStore>) -> Self {
         Self {
             name: ToolName::parse("file_read").unwrap(),
             state,
+            artifacts,
         }
     }
 }
@@ -37,7 +43,7 @@ impl ToolHandler for FileReadTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tools::contract::catalog_entry::<FileReadBatchInput, FileReadBatchOutput>(
             &self.name,
-            "Read one or more paths in one call. Pass files=[{path, view?, selector?}, ...]. view=auto selects content or outline for text files; view=metadata inspects path metadata without following the final symlink and also supports missing paths. Use view=content with selector forms N, N-M, N+count, or sorted non-overlapping comma-separated ranges; append :raw for exact lines. Without :raw, each range includes one preceding line and up to three following lines for editing context. A single N reads the default window and may return nextSelector. selector is only valid for content reads. Returned content ranges prepare those lines for file_edit; outline and metadata do not.".to_string(),
+            "Read one or more paths in one call. Pass files=[{path, view?, selector?}, ...]. Also reads the read-only /.devshell/tool-results/... paths returned by bash_run. view=auto selects content or outline for workspace text files; view=metadata inspects workspace path metadata without following the final symlink and also supports missing paths. Use view=content with selector forms N, N-M, N+count, or sorted non-overlapping comma-separated ranges; append :raw for exact lines. Without :raw, each range includes one preceding line and up to three following lines for editing context. A single N reads the default window and may return nextSelector. selector is only valid for content reads. Workspace content ranges prepare those lines for file_edit; tool-result paths, outline, and metadata do not.".to_string(),
             [ToolCapability::Read],
         )
     }
@@ -94,6 +100,9 @@ impl FileReadTool {
         call: &ToolCall,
         input: &FileReadRequest,
     ) -> Result<FileReadOutput, ToolError> {
+        if let Some(result_path) = parse_tool_result_path(&input.path)? {
+            return self.read_tool_result(call, input, result_path);
+        }
         if matches!(input.view, FileReadView::Outline | FileReadView::Metadata)
             && input.selector.is_some()
         {
@@ -139,6 +148,83 @@ impl FileReadTool {
             )?,
         };
         Ok(output)
+    }
+
+    fn read_tool_result(
+        &self,
+        call: &ToolCall,
+        input: &FileReadRequest,
+        result_path: ToolResultPath,
+    ) -> Result<FileReadOutput, ToolError> {
+        if matches!(input.view, FileReadView::Outline | FileReadView::Metadata) {
+            return Err(ToolError::new(
+                "tool.invalidArguments",
+                "tool result paths support only view=auto or view=content",
+            ));
+        }
+        let lease = self
+            .artifacts
+            .acquire_lease(
+                &result_path.handle,
+                unix_time_millis().saturating_add(TOOL_RESULT_READ_LEASE_MS),
+            )
+            .map_err(map_tool_result_error)?;
+        let read = (|| {
+            if lease.stream != result_path.stream {
+                return Err(ToolError::new(
+                    "file.notFound",
+                    "tool result path is unavailable",
+                ));
+            }
+            let metadata = TextMetadata::inspect_file(
+                fs::File::open(&lease.data_path)
+                    .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+                &call.cancellation,
+            )?;
+            let mut selector = parse_selector(input.selector.as_deref(), metadata.total_lines)?;
+            let selected = TextMetadata::read_selected_file(
+                fs::File::open(&lease.data_path)
+                    .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+                &selector.ranges,
+                MAX_CONTENT_BYTES,
+                &call.cancellation,
+            )?;
+            if selected.metadata.revision != metadata.revision {
+                return Err(ToolError::retryable(
+                    "file.revisionMismatch",
+                    "tool result changed while it was being read",
+                ));
+            }
+            let mut content = String::new();
+            for (offset, (line_no, line)) in selected.lines.iter().enumerate() {
+                if offset % 256 == 0 {
+                    call.check_cancelled()?;
+                }
+                if !content.is_empty() {
+                    content.push('\n');
+                }
+                content.push_str(&format!("{line_no}:{line}"));
+            }
+            if let Some(next_line) = selected.next_line {
+                selector.truncated = true;
+                selector.next_selector = remaining_selector(
+                    &selector.ranges,
+                    next_line,
+                    selector.next_selector.as_deref(),
+                );
+            }
+            Ok(FileReadOutput {
+                view: FileReadResolvedView::Content,
+                content: Some(content),
+                metadata: None,
+                truncated: None,
+                next_selector: selector.next_selector,
+                language: None,
+                parse_status: None,
+            })
+        })();
+        let _ = self.artifacts.release_lease(&lease.lease_id);
+        read
     }
 
     fn read_outline(
@@ -375,6 +461,15 @@ impl FileReadTool {
                 .unwrap()
                 .remember_sparse(&call.ctx_id, path, metadata, seen, ordinal);
         }
+    }
+}
+
+fn map_tool_result_error(error: ToolError) -> ToolError {
+    match error.code.as_str() {
+        "artifact.notFound" | "artifact.expired" => {
+            ToolError::new("file.notFound", "tool result is unavailable or expired")
+        }
+        _ => ToolError::new("file.readFailed", error.message),
     }
 }
 

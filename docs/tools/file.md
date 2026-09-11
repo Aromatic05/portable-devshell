@@ -37,6 +37,8 @@ outline
 
 输出中的 `view` 始终是实际解析后的 `content`、`outline` 或 `metadata`，不会返回 `auto`。
 
+`bash_run` 还可能返回 `/.devshell/tool-results/<id>/stdout` 或 `/.devshell/tool-results/<id>/stderr`。这些是 Worker 内部 ResultStore 的只读虚拟路径，不是宿主绝对路径，也不要求 `AbsoluteRead` 权限。`file_read` 对它们支持 `auto` / `content` 和相同的 selector 分页，但不支持 `metadata` / `outline`，也不会建立 `file_edit` snapshot/coverage。引用受内部 ArtifactStore TTL 与配额约束；过期后按 `file.notFound` 处理。
+
 `content` selector 使用一基行号：
 
 ```text

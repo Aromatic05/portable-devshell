@@ -14,6 +14,7 @@ use crate::security::path::{
     FilesystemCapability, PathNamespace, ResolvedPath, parse_requested_path,
     resolve_existing_target,
 };
+use crate::tools::artifact::result_path::tool_result_path;
 use crate::tools::artifact::store::{ArtifactDraft, ArtifactStore};
 use crate::tools::artifact::types::{ArtifactReference, ArtifactStream};
 use crate::tools::bash::backend::spawn_shell;
@@ -31,6 +32,7 @@ const MAX_CAPTURE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_STDIN_BYTES: usize = 4 * 1024 * 1024;
 const MAX_INLINE_JSON_BYTES_PER_STREAM: usize = 6 * 1024 * 1024;
 const FALLBACK_INLINE_BYTES_PER_STREAM: usize = 512 * 1024;
+const RECOVERY_OUTPUT_BYTES: usize = 24 * 1024;
 const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 const PROGRESS_TAIL_BYTES: usize = 64 * 1024;
 
@@ -208,18 +210,27 @@ impl ToolHandler for BashRunTool {
             BashWaitOutcome::Termination(termination) => termination,
         };
         let mut artifact_warnings = Vec::new();
+        let retain_recovery = stdout.truncated
+            || stderr.truncated
+            || stdout.kept.len().saturating_add(stderr.kept.len()) > RECOVERY_OUTPUT_BYTES;
+        let retain_stdout = retain_recovery && !stdout.kept.is_empty();
+        let retain_stderr = retain_recovery && !stderr.kept.is_empty();
         let stdout_artifact = persist_artifact(
             &self.artifacts,
             &mut stdout,
             "stdout",
+            retain_stdout,
             &mut artifact_warnings,
         );
         let stderr_artifact = persist_artifact(
             &self.artifacts,
             &mut stderr,
             "stderr",
+            retain_stderr,
             &mut artifact_warnings,
         );
+        let stdout_path = stdout_artifact.as_ref().map(tool_result_path);
+        let stderr_path = stderr_artifact.as_ref().map(tool_result_path);
         if matches!(wait_outcome, BashWaitOutcome::Cancelled) {
             return Err(ToolError::new(
                 "tool.cancelled",
@@ -253,6 +264,8 @@ impl ToolHandler for BashRunTool {
             stderr_bytes: stderr_bytes.load(Ordering::SeqCst),
             stdout_truncated: stdout.truncated,
             stderr_truncated: stderr.truncated,
+            stdout_path,
+            stderr_path,
             stdout_artifact,
             stderr_artifact,
             artifact_warnings: (!artifact_warnings.is_empty()).then_some(artifact_warnings),
@@ -618,12 +631,13 @@ fn persist_artifact(
     store: &ArtifactStore,
     output: &mut StreamOutput,
     stream_name: &str,
+    retain: bool,
     warnings: &mut Vec<String>,
 ) -> Option<ArtifactReference> {
     if let Some(warning) = output.artifact_warning.take() {
         warnings.push(format!("{stream_name} artifact unavailable: {warning}"));
     }
-    if !output.truncated {
+    if !output.truncated && !retain {
         output.artifact_draft.take();
         return None;
     }

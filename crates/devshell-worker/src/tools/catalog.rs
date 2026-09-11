@@ -31,7 +31,10 @@ pub fn builtin_registry(
         Arc::clone(&artifacts),
         Arc::clone(&model_devshell),
     )?) as Arc<_>)?;
-    registry.register(Arc::new(FileReadTool::new(Arc::clone(&files))) as Arc<_>)?;
+    registry.register(Arc::new(FileReadTool::new(
+        Arc::clone(&files),
+        Arc::clone(&artifacts),
+    )) as Arc<_>)?;
     registry.register(Arc::new(FileEditTool::new(Arc::clone(&files))) as Arc<_>)?;
     registry.register(Arc::new(FileGlobTool::new(Arc::clone(&files))) as Arc<_>)?;
     registry.register(Arc::new(FileGrepTool::new(Arc::clone(&files))) as Arc<_>)?;
