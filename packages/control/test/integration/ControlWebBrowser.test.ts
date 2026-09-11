@@ -56,6 +56,32 @@ test("real Chromium opens auth=none WebUI, establishes a session, and boots thro
     assertPageHealthy(page);
 });
 
+test("real Chromium keeps the empty Messages prompt directly below its heading on mobile", BROWSER_TEST_OPTIONS, async (t) => {
+    const runtime = await startBrowserRuntime({ auth: "none", prefix: "" });
+    const browser = await launchBrowser();
+    t.after(async () => {
+        await cleanupInOrder(
+            () => browser.close(),
+            () => runtime.close(),
+        );
+    });
+
+    const page = await guardedPage(browser);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${runtime.origin}${runtime.basePath}/#/messages`, {
+        waitUntil: "domcontentloaded",
+    });
+    const heading = await page.locator(".messages-thread-heading").boundingBox();
+    const prompt = await page.locator(".messages-placeholder h3").boundingBox();
+    assert.notEqual(heading, null);
+    assert.notEqual(prompt, null);
+    assert.ok(
+        prompt!.y - (heading!.y + heading!.height) < 80,
+        "the empty Messages prompt must not be vertically centered behind a large blank region",
+    );
+    assertPageHealthy(page);
+});
+
 test("real Chromium rejects a wrong Web token, accepts the configured token, and logs out", BROWSER_TEST_OPTIONS, async (t) => {
     const runtime = await startBrowserRuntime({ auth: "token", prefix: "" });
     const browser = await launchBrowser();
