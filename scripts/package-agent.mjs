@@ -20,49 +20,57 @@ const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 const piProviderManifest = resolve(repoRoot, "extensions/agent/src/provider/pi/devshell-agent-provider.json");
 
 export async function packageAgentArtifacts(options = {}) {
+    const includeExtension = options.includeExtension ?? true;
+    const includeProvider = options.includeProvider ?? true;
+    if (!includeExtension && !includeProvider) {
+        throw new Error("Agent packaging must include the Extension, a provider, or both");
+    }
     const outputDirectory = resolve(repoRoot, options.outputDirectory ?? "release-assets");
     const target = options.target ?? hostTarget();
-    if (target !== hostTarget()) {
+    if (includeProvider && target !== hostTarget()) {
         throw new Error(`cannot package Agent provider ${target} on ${hostTarget()}; package provider native dependencies on the target platform`);
     }
     const stagingRoot = await mkdtemp(resolve(repoRoot, ".portable-devshell-agent-"));
     const extensionDirectory = resolve(stagingRoot, "agent-extension");
     const providerDirectory = resolve(stagingRoot, "pi-provider");
-    const extensionAsset = resolve(outputDirectory, "portable-devshell-agent.dsext");
-    const providerAsset = resolve(outputDirectory, `portable-devshell-agent-provider-pi-${target}.dsprovider`);
+    const extensionAsset = includeExtension ? resolve(outputDirectory, "portable-devshell-agent.dsext") : undefined;
+    const providerAsset = includeProvider
+        ? resolve(outputDirectory, `portable-devshell-agent-provider-pi-${target}.dsprovider`)
+        : undefined;
 
     try {
         await mkdir(outputDirectory, { recursive: true });
         buildWorkspacePackage("@portable-devshell/agent-extension");
         buildWorkspacePackage("@portable-devshell/control");
-        deployWorkspacePackage("@portable-devshell/agent-extension", extensionDirectory);
-        deployWorkspacePackage("@portable-devshell/agent-extension", providerDirectory);
+        if (includeExtension) deployWorkspacePackage("@portable-devshell/agent-extension", extensionDirectory);
+        if (includeProvider) deployWorkspacePackage("@portable-devshell/agent-extension", providerDirectory);
         await Promise.all([
-            sanitizeDeployTree(extensionDirectory),
-            sanitizeDeployTree(providerDirectory)
+            ...(includeExtension ? [sanitizeDeployTree(extensionDirectory)] : []),
+            ...(includeProvider ? [sanitizeDeployTree(providerDirectory)] : [])
         ]);
-        await pruneProviderRuntimeTree(providerDirectory);
+        if (includeProvider) await pruneProviderRuntimeTree(providerDirectory);
+        if (includeExtension) await shapeThinAgentExtensionTree(extensionDirectory);
+        if (includeProvider) await shapePiProviderTree(providerDirectory);
         await Promise.all([
-            shapeThinAgentExtensionTree(extensionDirectory),
-            shapePiProviderTree(providerDirectory)
-        ]);
-        await Promise.all([
-            assertNoSymbolicLinks(extensionDirectory),
-            assertNoSymbolicLinks(providerDirectory),
-            assertThinAgentExtensionTree(extensionDirectory)
+            ...(includeExtension ? [assertNoSymbolicLinks(extensionDirectory), assertThinAgentExtensionTree(extensionDirectory)] : []),
+            ...(includeProvider ? [assertNoSymbolicLinks(providerDirectory)] : [])
         ]);
 
-        await rm(extensionAsset, { force: true });
-        await rm(providerAsset, { force: true });
+        if (extensionAsset !== undefined) await rm(extensionAsset, { force: true });
+        if (providerAsset !== undefined) await rm(providerAsset, { force: true });
         const archiveModule = await import(pathToFileURL(resolve(
             repoRoot,
             "packages/control/dist/control/artifact/host/ArtifactHostArchive.js"
         )).href);
-        await archiveModule.createArtifactDirectoryArchive(extensionDirectory, extensionAsset);
-        await archiveModule.createArtifactDirectoryArchive(providerDirectory, providerAsset);
+        if (extensionAsset !== undefined) {
+            await archiveModule.createArtifactDirectoryArchive(extensionDirectory, extensionAsset);
+        }
+        if (providerAsset !== undefined) {
+            await archiveModule.createArtifactDirectoryArchive(providerDirectory, providerAsset);
+        }
         await Promise.all([
-            writeSha256(extensionAsset),
-            writeSha256(providerAsset)
+            ...(extensionAsset === undefined ? [] : [writeSha256(extensionAsset)]),
+            ...(providerAsset === undefined ? [] : [writeSha256(providerAsset)])
         ]);
         return {
             extensionAsset,
@@ -276,12 +284,30 @@ function readOption(args, name) {
     return value;
 }
 
+export function resolveAgentPackageSelection(args) {
+    const providerOnly = args.includes("--provider-only");
+    const extensionOnly = args.includes("--extension-only");
+    if (providerOnly && extensionOnly) {
+        throw new Error("--provider-only and --extension-only are mutually exclusive");
+    }
+    return {
+        includeExtension: !providerOnly,
+        includeProvider: !extensionOnly
+    };
+}
+
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
     const args = process.argv.slice(2);
+    const selection = resolveAgentPackageSelection(args);
     const result = await packageAgentArtifacts({
+        ...selection,
         outputDirectory: readOption(args, "--output-dir"),
         target: readOption(args, "--target")
     });
-    process.stdout.write(`${result.extensionAsset}\n${result.extensionAsset}.sha256\n`);
-    process.stdout.write(`${result.providerAsset}\n${result.providerAsset}.sha256\n`);
+    if (result.extensionAsset !== undefined) {
+        process.stdout.write(`${result.extensionAsset}\n${result.extensionAsset}.sha256\n`);
+    }
+    if (result.providerAsset !== undefined) {
+        process.stdout.write(`${result.providerAsset}\n${result.providerAsset}.sha256\n`);
+    }
 }

@@ -8,11 +8,31 @@ import {
     assertNoSymbolicLinks,
     assertThinAgentExtensionTree,
     pruneProviderRuntimeTree,
+    resolveAgentPackageSelection,
     sanitizeDeployTree,
     shapeThinAgentExtensionTree
 } from "./package-agent.mjs";
 
 const repoRoot = new URL("../", import.meta.url);
+
+test("Agent packaging can emit both artifacts or one release-matrix half", () => {
+    assert.deepEqual(resolveAgentPackageSelection([]), {
+        includeExtension: true,
+        includeProvider: true
+    });
+    assert.deepEqual(resolveAgentPackageSelection(["--provider-only"]), {
+        includeExtension: false,
+        includeProvider: true
+    });
+    assert.deepEqual(resolveAgentPackageSelection(["--extension-only"]), {
+        includeExtension: true,
+        includeProvider: false
+    });
+    assert.throws(
+        () => resolveAgentPackageSelection(["--provider-only", "--extension-only"]),
+        /mutually exclusive/u
+    );
+});
 
 test("Agent Extension source package owns the Pi provider without separate Agent workspace packages", async () => {
     const agentExtension = JSON.parse(await readFile(new URL("extensions/agent/package.json", repoRoot), "utf8"));

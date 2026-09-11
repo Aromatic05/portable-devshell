@@ -96,6 +96,7 @@ export function createTargetCiSteps(target, platform = process.platform) {
         // architectures, then packages the exact release asset.
         steps.push(
             pnpmStep("Package native application", ["package:app", "--", "--target", target, "--output-dir", "./ci-artifacts"]),
+            pnpmStep("Package Agent artifacts", ["package:agent", "--", "--target", target, "--output-dir", "./ci-artifacts"]),
         );
         return steps;
     }
@@ -105,6 +106,7 @@ export function createTargetCiSteps(target, platform = process.platform) {
         { args: ["./scripts/smoke-reverse-worker.mjs", worker], command: process.execPath, name: "Reverse worker PTY smoke" },
         { args: ["./scripts/smoke-client.mjs", worker], command: process.execPath, name: "Client and local instance smoke" },
         pnpmStep("Package native application", ["package:app", "--", "--target", target, "--output-dir", "./ci-artifacts"]),
+        pnpmStep("Package Agent artifacts", ["package:agent", "--", "--target", target, "--output-dir", "./ci-artifacts"]),
         pnpmStep("Application package smoke", ["smoke:package", "--", application]),
         pnpmStep("Unix release installer smoke", ["smoke:install-release", "--", application]),
     );

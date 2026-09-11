@@ -81,6 +81,7 @@ test("Unix target CI proves the native deliverable without rerunning common corr
         "Reverse worker PTY smoke",
         "Client and local instance smoke",
         "Package native application",
+        "Package Agent artifacts",
         "Application package smoke",
         "Unix release installer smoke",
     ]);
@@ -123,6 +124,7 @@ test("Windows target CI keeps native build validation but omits runtime and comm
             "Build",
             "Build native Worker",
             "Package native application",
+            "Package Agent artifacts",
         ]);
     } finally {
         if (previous === undefined) {

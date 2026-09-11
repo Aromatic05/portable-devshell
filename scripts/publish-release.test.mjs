@@ -60,6 +60,17 @@ test("release preflight fails closed when GitHub cannot determine tag publicatio
     );
 });
 
+test("release assets require the Agent Extension and every native Pi provider", () => {
+    const names = expectedReleaseAssetNames();
+    assert.equal(names.includes("portable-devshell-agent.dsext"), true);
+    assert.equal(names.includes("portable-devshell-agent.dsext.sha256"), true);
+    for (const target of ["linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64", "windows-x64", "windows-arm64"]) {
+        const provider = `portable-devshell-agent-provider-pi-${target}.dsprovider`;
+        assert.equal(names.includes(provider), true, provider);
+        assert.equal(names.includes(`${provider}.sha256`), true, `${provider}.sha256`);
+    }
+});
+
 async function createReleaseAssets() {
     const root = await createTestTempDirectory("publish-release");
     const directory = resolve(root, "assets");
