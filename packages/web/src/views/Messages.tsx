@@ -34,6 +34,10 @@ export function Messages({
 }) {
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [draft, setDraft] = useState("");
+    const [composerFeedback, setComposerFeedback] = useState<{
+        kind: "error" | "success";
+        text: string;
+    }>();
     const [query, setQuery] = useState("");
     const [sessionScope, setSessionScope] = useState<"active" | "history">("active");
     const historyEndRef = useRef<HTMLDivElement>(null);
@@ -68,6 +72,7 @@ export function Messages({
     useEffect(() => {
         setDrawerOpen(false);
         setDraft("");
+        setComposerFeedback(undefined);
     }, [route]);
 
     useLayoutEffect(() => {
@@ -101,8 +106,17 @@ export function Messages({
         if (route.view !== "thread") return;
         const text = draft.trim();
         if (text.length === 0) return;
+        setComposerFeedback(undefined);
         const queued = await store.queueContextMessage(route.instance, route.ctxId, text);
-        if (queued) setDraft("");
+        if (queued) {
+            setDraft("");
+            setComposerFeedback({ kind: "success", text: "Message queued." });
+        } else {
+            setComposerFeedback({
+                kind: "error",
+                text: store.state.error ?? "Message could not be queued.",
+            });
+        }
     }
 
     function exportMarkdown(): void {
@@ -254,6 +268,7 @@ export function Messages({
                     maxLength={20_000}
                     onChange={(event) => {
                         setDrawerOpen(false);
+                        setComposerFeedback(undefined);
                         setDraft(event.target.value);
                     }}
                     onFocus={() => setDrawerOpen(false)}
@@ -279,6 +294,10 @@ export function Messages({
                     disabled={draft.trim().length === 0 || state.operations[`context-message:${route.instance}:${route.ctxId}`] !== undefined}
                     type="submit"
                 >{state.operations[`context-message:${route.instance}:${route.ctxId}`] !== undefined ? "…" : "↑"}</button>
+                {composerFeedback === undefined ? null : <p
+                    className={`messages-composer-feedback ${composerFeedback.kind === "error" ? "error" : "notice"}`}
+                    role={composerFeedback.kind === "error" ? "alert" : "status"}
+                >{composerFeedback.text}</p>}
             </form> : null}
         </div>
     </section>;

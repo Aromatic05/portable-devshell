@@ -274,10 +274,34 @@ describe("Messages", () => {
             "ctx-old-active",
             "Continue from Messages.",
         ));
+        expect(within(composer.closest("form")!).getByRole("status")).toHaveTextContent("Message queued.");
         expect(screen.getByRole("link", { name: "Open in Audit" })).toHaveAttribute(
             "href",
             "#/audit/context/alpha/ctx-old-active",
         );
+    });
+
+    it("shows a send failure next to the composer and preserves the draft", async () => {
+        const failedState = { ...state, error: "Control connection was lost." };
+        const queueContextMessage = vi.fn(async () => false);
+        const store = {
+            get state() { return failedState; },
+            queueContextMessage,
+        } as unknown as WebStore;
+        render(<Messages
+            navigate={vi.fn()}
+            route={threadRoute}
+            state={failedState}
+            store={store}
+        />);
+
+        const composer = screen.getByRole("textbox", { name: "Comment" });
+        fireEvent.change(composer, { target: { value: "Keep this draft." } });
+        fireEvent.submit(composer.closest("form")!);
+
+        const error = await within(composer.closest("form")!).findByRole("alert");
+        expect(error).toHaveTextContent("Control connection was lost.");
+        expect(composer).toHaveValue("Keep this draft.");
     });
 
     it("scrolls to the newest message whenever a conversation is entered or switched", async () => {
