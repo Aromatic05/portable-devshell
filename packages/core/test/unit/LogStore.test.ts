@@ -18,6 +18,7 @@ import {
     LogStoreInstance,
     InstancePaths,
     AuditDatabase,
+    AUDIT_DATABASE_SCHEMA_VERSION,
     AuditToolCallHistory,
     type InstanceLogEntry
 } from "@portable-devshell/core/testing";
@@ -237,8 +238,40 @@ test("AuditDatabase upgrades v1 SQLite rows without rewriting historical log pay
         };
 
         assert.deepEqual(await store.readAll(), [legacy]);
+        assert.equal(readAuditUserVersion(databaseFile), AUDIT_DATABASE_SCHEMA_VERSION);
         await store.append(compressed);
         assert.deepEqual(await store.readAll(), [legacy, compressed]);
+        database.close();
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("AuditDatabase rejects a newer schema without modifying it", async () => {
+    const root = await createTestTempDirectory("sqlite-future-schema");
+    const databaseFile = join(root, "audit.sqlite3");
+
+    try {
+        createFutureAuditDatabase(databaseFile, AUDIT_DATABASE_SCHEMA_VERSION + 1);
+        const before = readRawAuditSchema(databaseFile);
+        const database = new AuditDatabase(databaseFile, {
+            maxBytes: 16 * MIB,
+            retentionDays: 30
+        });
+        const store = database.store<{ at: string }>("events", {
+            timestamp: (record) => record.at
+        });
+
+        await assert.rejects(
+            store.readAll(),
+            (error: unknown) => {
+                assert.match(String((error as Error).message), /newer than the supported version/u);
+                assert.match(String((error as Error).message), /Upgrade portable-devshell/u);
+                assert.match(String((error as Error).message), /database was not modified/iu);
+                return true;
+            }
+        );
+        assert.deepEqual(readRawAuditSchema(databaseFile), before);
         database.close();
     } finally {
         await rm(root, { recursive: true, force: true });
@@ -1051,6 +1084,51 @@ function createV1AuditDatabase(filePath: string, record: InstanceLogEntry): void
     } finally {
         process.emitWarning = originalEmitWarning;
     }
+}
+
+function createFutureAuditDatabase(filePath: string, version: number): void {
+    const require = createRequire(import.meta.url);
+    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const database = new DatabaseSync(filePath);
+    try {
+        database.exec(`
+            CREATE TABLE future_sentinel (value TEXT NOT NULL) STRICT;
+            INSERT INTO future_sentinel(value) VALUES ('preserve-me');
+            PRAGMA user_version = ${version};
+        `);
+    } finally {
+        database.close();
+    }
+}
+
+function readAuditUserVersion(filePath: string): number {
+    const require = createRequire(import.meta.url);
+    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const database = new DatabaseSync(filePath);
+    try {
+        return readAuditUserVersionFromDatabase(database);
+    } finally {
+        database.close();
+    }
+}
+
+function readRawAuditSchema(filePath: string): { sentinel: string; tables: string[]; userVersion: number } {
+    const require = createRequire(import.meta.url);
+    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const database = new DatabaseSync(filePath);
+    try {
+        const tables = (database.prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+        ).all() as Array<{ name: string }>).map((row) => row.name);
+        const sentinel = (database.prepare("SELECT value FROM future_sentinel").get() as { value: string }).value;
+        return { sentinel, tables, userVersion: readAuditUserVersionFromDatabase(database) };
+    } finally {
+        database.close();
+    }
+}
+
+function readAuditUserVersionFromDatabase(database: import("node:sqlite").DatabaseSync): number {
+    return Number(Object.values(database.prepare("PRAGMA user_version").get() as Record<string, number>)[0] ?? 0);
 }
 
 function readStoredAuditRow(filePath: string): { bodyCodec: string | null; payload: string } {

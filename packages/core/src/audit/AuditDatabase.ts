@@ -13,6 +13,10 @@ import {
 } from "./AuditBackgroundWorker.js";
 import type { AuditRecordStore } from "./AuditRecordStore.js";
 import { minimumAuditStorageBytes } from "./AuditStorageLimits.js";
+import {
+    assertSqliteSchemaVersionSupported,
+    readSqlitePragmaNumber,
+} from "../storage/SqliteSchemaVersion.js";
 
 export type AuditRecordCollection = "approvals" | "events" | "logs" | "toolCalls";
 
@@ -57,7 +61,7 @@ const LOG_BODY_SAMPLE_MAX_RATIO = 0.7;
 const LOG_BODY_ASYNC_COMPRESSION_THRESHOLD_BYTES = 256 * 1024;
 const PAYLOAD_BYTES_METADATA_KEY = "payloadBytes:v1";
 const ROUTINE_INCREMENTAL_VACUUM_PAGES = 64;
-const SCHEMA_VERSION = 2;
+export const AUDIT_DATABASE_SCHEMA_VERSION = 2;
 const WAL_AUTOCHECKPOINT_PAGES = 0;
 const WAL_CHECKPOINT_THRESHOLD_BYTES = 4 * 1024 * 1024;
 const WAL_MINIMUM_WRITE_BYTES = 16 * 1024;
@@ -400,7 +404,7 @@ export class AuditDatabase {
         this.#evictForPayloadLimit();
     }
 
-    #initializeSchema(): void {
+    #initializeSchema(userVersion: number): void {
         this.#database.exec("PRAGMA journal_mode = WAL");
         this.#database.exec("PRAGMA synchronous = NORMAL");
         this.#database.exec(`PRAGMA wal_autocheckpoint = ${WAL_AUTOCHECKPOINT_PAGES}`);
@@ -444,7 +448,7 @@ export class AuditDatabase {
                 value TEXT NOT NULL
             ) STRICT;
         `);
-        this.#upgradeSchema();
+        this.#upgradeSchema(userVersion);
     }
 
     async #insertRecord<TRecord>(
@@ -493,13 +497,18 @@ export class AuditDatabase {
         }
     }
 
-    #upgradeSchema(): void {
+    #upgradeSchema(userVersion: number): void {
         const columns = new Set(
             (this.#database.prepare("PRAGMA table_info(audit_records)").all() as Array<{ name: string }>)
                 .map((column) => column.name)
         );
-        const userVersion = readPragmaNumber(this.#database, "user_version");
-        if (columns.has("body") && columns.has("body_codec") && userVersion >= SCHEMA_VERSION) {
+        if (userVersion === AUDIT_DATABASE_SCHEMA_VERSION) {
+            if (!columns.has("body") || !columns.has("body_codec")) {
+                throw new Error(
+                    `Audit database schema version ${AUDIT_DATABASE_SCHEMA_VERSION} is inconsistent: ` +
+                    "required body columns are missing. Refusing to modify the database."
+                );
+            }
             return;
         }
         this.#database.exec("BEGIN IMMEDIATE");
@@ -510,7 +519,7 @@ export class AuditDatabase {
             if (!columns.has("body_codec")) {
                 this.#database.exec("ALTER TABLE audit_records ADD COLUMN body_codec TEXT");
             }
-            this.#database.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+            this.#database.exec(`PRAGMA user_version = ${AUDIT_DATABASE_SCHEMA_VERSION}`);
             this.#database.exec("COMMIT");
         } catch (error) {
             this.#database.exec("ROLLBACK");
@@ -706,7 +715,7 @@ export class AuditDatabase {
     }
 
     #compact(aggressive = false): void {
-        const freelist = readPragmaNumber(this.#database, "freelist_count");
+        const freelist = readSqlitePragmaNumber(this.#database, "freelist_count");
         if (freelist > 0) {
             const pages = aggressive ? freelist : Math.min(freelist, ROUTINE_INCREMENTAL_VACUUM_PAGES);
             this.#database.exec(`PRAGMA incremental_vacuum(${pages})`);
@@ -744,7 +753,12 @@ export class AuditDatabase {
         const database = new Database(this.#filePath, { timeout: 5_000 });
         this.#databaseHandle = database;
         try {
-            this.#initializeSchema();
+            const userVersion = assertSqliteSchemaVersionSupported(database, {
+                databaseLabel: "Audit database",
+                filePath: this.#filePath,
+                supportedVersion: AUDIT_DATABASE_SCHEMA_VERSION,
+            });
+            this.#initializeSchema(userVersion);
             const storedPayloadBytes = this.#readMetadata(PAYLOAD_BYTES_METADATA_KEY);
             if (storedPayloadBytes !== undefined && /^\d+$/u.test(storedPayloadBytes)) {
                 this.#payloadBytes = Number(storedPayloadBytes);
@@ -1067,14 +1081,6 @@ function auditCollectionSql(collection: AuditRecordCollection): string {
         case "logs": return "'logs'";
         case "toolCalls": return "'toolCalls'";
     }
-}
-
-function readPragmaNumber(
-    database: DatabaseSync,
-    name: "freelist_count" | "page_count" | "page_size" | "user_version",
-): number {
-    const row = database.prepare(`PRAGMA ${name}`).get() as Record<string, number>;
-    return Number(Object.values(row)[0] ?? 0);
 }
 
 function validateOptions(options: AuditDatabaseOptions): void {
