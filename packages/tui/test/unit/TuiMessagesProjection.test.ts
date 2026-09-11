@@ -68,9 +68,10 @@ test("Messages merges registered sessions with exact comment and report history"
     });
     store.setSelectedInstance("alpha");
     store.setSelectedPage("messages");
+    const now = Date.parse("2026-09-10T10:05:00.000Z");
 
     assert.deepEqual(
-        selectTuiMessageSessions(store.getState(), "alpha").map((session) => session.ctxId),
+        selectTuiMessageSessions(store.getState(), "alpha", now).map((session) => session.ctxId),
         ["ctx-alpha", "ctx-empty"],
     );
     assert.deepEqual(
@@ -81,13 +82,13 @@ test("Messages merges registered sessions with exact comment and report history"
         ],
     );
     assert.deepEqual(
-        selectTuiMessagesSidebarEntries(store.getState(), true, { id: "messages:back", kind: "context" })
+        selectTuiMessagesSidebarEntries(store.getState(), true, { id: "messages:back", kind: "context" }, now)
             .map((entry) => entry.label),
         ["← messages", "project", "empty"],
     );
 });
 
-test("Messages keeps registered sessions visible regardless of recent activity", () => {
+test("Messages hides sessions that were inactive for more than 30 minutes", () => {
     const store = new TuiAppStore();
     store.patchControlReadModel({
         contexts: [
@@ -117,14 +118,15 @@ test("Messages keeps registered sessions visible regardless of recent activity",
     });
     store.setSelectedInstance("alpha");
     store.setSelectedPage("messages");
+    const now = Date.parse("2026-09-10T10:05:00.000Z");
 
     assert.deepEqual(
-        selectTuiMessageSessions(store.getState(), "alpha").map((session) => session.ctxId),
-        ["ctx-recent", "ctx-stale"],
+        selectTuiMessageSessions(store.getState(), "alpha", now).map((session) => session.ctxId),
+        ["ctx-recent"],
     );
     assert.deepEqual(
-        selectTuiMessagesSidebarEntries(store.getState(), true, { id: "messages:back", kind: "context" })
+        selectTuiMessagesSidebarEntries(store.getState(), true, { id: "messages:back", kind: "context" }, now)
             .map((entry) => entry.label),
-        ["← messages", "recent", "stale"],
+        ["← messages", "recent"],
     );
 });
