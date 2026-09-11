@@ -221,10 +221,10 @@ test("Pi devshell tool hard-limits model content for long single-line progress a
     const finalText = result.content[0]?.text ?? "";
 
     assert.equal(updates.length, 1);
-    assert.equal(progressText.length, 12_000);
-    assert.equal(finalText.length, 12_000);
-    assert.match(progressText, /tool result truncated: \d+ characters total/u);
-    assert.match(finalText, /tool result truncated: \d+ characters total/u);
+    assert.equal(progressText.length < 12_000, true);
+    assert.equal(finalText.length < 12_000, true);
+    assert.match(progressText, /semantic preview clipped: \d+ characters total/u);
+    assert.match(finalText, /semantic preview clipped: \d+ characters total/u);
     assert.match(progressText, /head-/u);
     assert.match(progressText, /-tail/u);
     assert.match(finalText, /head-/u);
