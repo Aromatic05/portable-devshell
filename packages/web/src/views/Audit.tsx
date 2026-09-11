@@ -120,7 +120,7 @@ export function Audit({
                     {refreshing ? "Refreshing…" : "Refresh all"}
                 </button>
                 <button disabled={!interactive} onClick={() => setBatchDisableOpen(true)} type="button">
-                    Manage Contexts
+                    Disable inactive Contexts…
                 </button>
             </div>
         </div>

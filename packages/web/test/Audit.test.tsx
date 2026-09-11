@@ -309,7 +309,7 @@ describe("Audit", () => {
             },
             store: { disableContexts },
         });
-        fireEvent.click(screen.getByRole("button", { name: "Manage Contexts" }));
+        fireEvent.click(screen.getByRole("button", { name: "Disable inactive Contexts…" }));
 
         const dialog = screen.getByRole("dialog", { name: "Disable inactive Contexts" });
         expect(within(dialog).getByText("ctx-alpha")).toBeInTheDocument();
