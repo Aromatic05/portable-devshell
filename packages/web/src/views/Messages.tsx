@@ -6,6 +6,7 @@ import {
     useRef,
     useState,
 } from "react";
+import { workspaceFolderName } from "@portable-devshell/shared/browser";
 
 import { webRouteHref, type WebRoute } from "../routing/hashRoute.js";
 import {
@@ -15,6 +16,7 @@ import {
     selectWebMessageSession,
     selectWebMessageSessions,
     type WebMessageEntry,
+    type WebMessageSession,
 } from "../selectors/messages.js";
 import type { WebState } from "../state/WebState.js";
 import type { WebStore } from "../state/WebStore.js";
@@ -46,6 +48,10 @@ export function Messages({
     const visibleSessions = useMemo(
         () => filterWebMessageSessions(sessions, query),
         [query, sessions],
+    );
+    const historyGroups = useMemo(
+        () => groupHistorySessionsByWorkspace(visibleSessions),
+        [visibleSessions],
     );
     const selected = route.view === "thread"
         ? selectWebMessageSession(state, route.instance, route.ctxId)
@@ -113,6 +119,31 @@ export function Messages({
         );
     }
 
+    function renderSession(session: WebMessageSession, title = session.title) {
+        const active = route.view === "thread" &&
+            route.instance === session.instance &&
+            route.ctxId === session.ctxId;
+        return <button
+            aria-current={active ? "page" : undefined}
+            className={active ? "selected" : ""}
+            key={`${session.instance}:${session.ctxId}`}
+            onClick={() => {
+                setDrawerOpen(false);
+                navigate({
+                    page: "messages",
+                    view: "thread",
+                    instance: session.instance,
+                    ctxId: session.ctxId,
+                });
+            }}
+            type="button"
+        >
+            <strong>{title}</strong>
+            <span>{session.instance} · {session.status ?? "history"}</span>
+            <time dateTime={session.latestAt}>{formatMessageDate(session.latestAt)}</time>
+        </button>;
+    }
+
     return <section className="messages-page">
         <button
             aria-label="Close conversations"
@@ -153,30 +184,21 @@ export function Messages({
                 />
             </label>
             <nav aria-label="Conversations" className="conversation-list">
-                {visibleSessions.length === 0 ? <p className="empty">No conversations found.</p> : visibleSessions.map((session) => {
-                    const active = route.view === "thread" &&
-                        route.instance === session.instance &&
-                        route.ctxId === session.ctxId;
-                    return <button
-                        aria-current={active ? "page" : undefined}
-                        className={active ? "selected" : ""}
-                        key={`${session.instance}:${session.ctxId}`}
-                        onClick={() => {
-                            setDrawerOpen(false);
-                            navigate({
-                                page: "messages",
-                                view: "thread",
-                                instance: session.instance,
-                                ctxId: session.ctxId,
-                            });
-                        }}
-                        type="button"
-                    >
-                        <strong>{session.title}</strong>
-                        <span>{session.instance} · {session.status ?? "history"}</span>
-                        <time dateTime={session.latestAt}>{formatMessageDate(session.latestAt)}</time>
-                    </button>;
-                })}
+                {visibleSessions.length === 0
+                    ? <p className="empty">No conversations found.</p>
+                    : sessionScope === "active"
+                        ? visibleSessions.map((session) => renderSession(session))
+                        : historyGroups.map((group) => <section
+                            aria-label={group.label}
+                            className="conversation-workspace-group"
+                            key={group.key}
+                            role="group"
+                        >
+                            <h3 className="conversation-workspace-heading" title={group.workspace}>
+                                {group.label}
+                            </h3>
+                            {group.sessions.map((session) => renderSession(session, session.ctxId))}
+                        </section>)}
             </nav>
         </div>
         <div className="messages-content">
@@ -269,6 +291,32 @@ function formatMessageDate(value: string): string {
         dateStyle: "medium",
         timeStyle: "short",
     }).format(date);
+}
+
+function groupHistorySessionsByWorkspace(sessions: readonly WebMessageSession[]): Array<{
+    key: string;
+    label: string;
+    sessions: WebMessageSession[];
+    workspace?: string;
+}> {
+    const groups = new Map<string, {
+        key: string;
+        label: string;
+        sessions: WebMessageSession[];
+        workspace?: string;
+    }>();
+    for (const session of sessions) {
+        const key = session.workspace ?? "\u0000other";
+        const group = groups.get(key) ?? {
+            key,
+            label: session.workspace === undefined ? "Other" : workspaceFolderName(session.workspace),
+            sessions: [],
+            ...(session.workspace === undefined ? {} : { workspace: session.workspace }),
+        };
+        group.sessions.push(session);
+        groups.set(key, group);
+    }
+    return [...groups.values()];
 }
 
 export function buildConversationMarkdown({
