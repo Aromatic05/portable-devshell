@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 
-import { Navigation } from "../components/Navigation.js";
+import { PageSwitcher } from "../components/PageSwitcher.js";
 import { PartialFailures } from "../components/PartialFailures.js";
 import { useHashRoute } from "../routing/hashRoute.js";
 import { openTodos, pendingApprovals } from "../selectors/readModel.js";
@@ -46,17 +46,15 @@ export function Application({
     };
 
     return <div className="app">
-        <aside>
-            <h1>portable-devshell</h1>
-            <Navigation
+        <header className="app-header">
+            <strong className="app-name">portable-devshell</strong>
+            <PageSwitcher
                 active={route}
                 applications={state.readModel.webApplications}
                 counts={counts}
                 navigate={navigate}
             />
-        </aside>
-        <main>
-            <header className={`connection ${state.connection}`}>
+            <div className={`connection ${state.connection}`}>
                 <span>{connectionLabel(state.connection)}</span>
                 {state.connection === "online" ? null : <button
                     disabled={busy !== undefined}
@@ -67,7 +65,9 @@ export function Application({
                 <button disabled={busy !== undefined} onClick={() => void onLogout()}>
                     {busy === "logout" ? "Logging out…" : "Log out"}
                 </button>
-            </header>
+            </div>
+        </header>
+        <main className={`page page-${route.page}`}>
             <PartialFailures failures={webFailures(state.readModel)} />
             <div aria-live="polite">
                 {state.notice === undefined ? null : <p className="notice">{state.notice}</p>}
@@ -81,14 +81,6 @@ export function Application({
             {route.page === "messages" ? <Messages navigate={navigate} route={route} state={state} /> : null}
             {route.page === "todos" ? <Todos disabled={interactionDisabled} state={state} store={store} /> : null}
         </main>
-        <nav aria-label="Primary navigation" className="bottom">
-            <Navigation
-                active={route}
-                applications={state.readModel.webApplications}
-                counts={counts}
-                navigate={navigate}
-            />
-        </nav>
     </div>;
 }
 

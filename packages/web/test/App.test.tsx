@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     asInstanceName,
@@ -34,9 +34,9 @@ describe("authenticated application shell", () => {
 
         render(<App createClients={() => clients} session={session} />);
 
-        const links = await screen.findAllByRole("link", { name: "Agent" });
-        expect(links).toHaveLength(2);
-        for (const link of links) expect(link).toHaveAttribute("href", "./extensions/agent/");
+        fireEvent.click(await screen.findByRole("button", { name: "Switch page, current Overview" }));
+        const link = await screen.findByRole("menuitem", { name: "Agent" });
+        expect(link).toHaveAttribute("href", "./extensions/agent/");
         expect(clients.web.applications).toHaveBeenCalledOnce();
     });
 
@@ -218,8 +218,8 @@ describe("authenticated application shell", () => {
             releaseLogout = resolve;
         }));
         render(<App createClients={fakeClients} session={session} />);
-        const instances = await screen.findAllByRole("button", { name: /Instances/ });
-        fireEvent.click(instances[0]!);
+        fireEvent.click(await screen.findByRole("button", { name: "Switch page, current Overview" }));
+        fireEvent.click(within(screen.getByRole("menu", { name: "Pages" })).getByRole("menuitem", { name: /Instances/ }));
         fireEvent.click(await screen.findByText("demo"));
         const stop = await screen.findByRole("button", { name: "Stop" });
         expect(stop).toBeEnabled();
@@ -285,7 +285,7 @@ describe("authenticated application shell", () => {
         expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
     });
 
-    it("supports mobile bottom and desktop navigation", async () => {
+    it("uses one responsive Page Switcher without reserving a global sidebar or bottom nav", async () => {
         window.location.hash = "#/overview";
         render(
             <App
@@ -295,9 +295,12 @@ describe("authenticated application shell", () => {
         );
         await screen.findByRole("heading", { name: "Overview" });
 
-        const instances = screen.getAllByRole("button", { name: /Instances/ });
-        expect(instances).toHaveLength(2);
-        fireEvent.click(instances[0]!);
+        expect(document.querySelector(".app > aside")).toBeNull();
+        expect(screen.queryByRole("navigation", { name: "Primary navigation" })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Switch page, current Overview" }));
+        const menu = screen.getByRole("menu", { name: "Pages" });
+        fireEvent.click(within(menu).getByRole("menuitem", { name: /Instances/ }));
+        expect(window.location.hash).toBe("#/instances");
         fireEvent.click(await screen.findByText("demo"));
         expect(await screen.findByRole("heading", { name: "demo", level: 3 })).toBeInTheDocument();
     });
