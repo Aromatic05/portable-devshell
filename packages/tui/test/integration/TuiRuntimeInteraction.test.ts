@@ -1626,10 +1626,12 @@ test("real Ink runtime switches terminal sources and drives tmux View and Attach
         await waitUntil(
             () => runtime.store.getState().ui.selectedPage === "terminal",
         );
-        host.write("\t");
+        await waitUntil(() => embedded.getSnapshot().status === "running");
+        host.write("\tx");
         await waitUntil(
             () => runtime.store.getState().interaction.focusScope === "terminal",
         );
+        await waitUntil(() => ptyWrites.includes("x"), 250);
         assert.equal(currentTuiRoute(runtime.store.getState()).page, "terminal");
 
         host.write("\u0014");

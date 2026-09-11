@@ -685,24 +685,10 @@ export class TuiRuntime {
         if (this.#ink === undefined) {
             return;
         }
-        if (
-            this.store.getState().ui.selectedPage === "terminal" &&
-            this.store.getState().interaction.focusScope === "terminal"
-        ) {
+        if (this.#terminalOwnsInput()) {
             this.#clearApplicationEscapeTimer();
             this.#applicationInputRouter.reset();
-            this.#clearTerminalEscapeTimer();
-            this.#dispatchTerminalInputActions(
-                this.#terminalInputRouter.push(chunk.toString()),
-            );
-            if (this.#terminalInputRouter.hasPendingEscape()) {
-                this.#terminalEscapeTimer = setTimeout(() => {
-                    this.#terminalEscapeTimer = undefined;
-                    this.#dispatchTerminalInputActions(
-                        this.#terminalInputRouter.flushPendingEscape(),
-                    );
-                }, TERMINAL_ESCAPE_TIMEOUT_MS);
-            }
+            this.#dispatchTerminalInputChunk(chunk.toString());
             return;
         }
         this.#clearTerminalEscapeTimer();
@@ -727,6 +713,15 @@ export class TuiRuntime {
         for (const action of actions) {
             const delivery = this.#applicationDeliveryQueue.then(async () => {
                 if (this.#ink === undefined) return;
+                if (this.#terminalOwnsInput()) {
+                    if (action.type === "mouse") {
+                        this.#dispatchTerminalInputActions([action]);
+                    } else {
+                        this.#dispatchTerminalInputChunk(action.data);
+                    }
+                    await this.#inputQueue;
+                    return;
+                }
                 if (action.type === "mouse") {
                     await this.#enqueueInput(
                         async () => await this.#handleMouse(action),
@@ -739,6 +734,26 @@ export class TuiRuntime {
             });
             this.#applicationDeliveryQueue = delivery.catch(() => undefined);
         }
+    }
+
+    #dispatchTerminalInputChunk(chunk: string): void {
+        this.#clearTerminalEscapeTimer();
+        this.#dispatchTerminalInputActions(this.#terminalInputRouter.push(chunk));
+        if (!this.#terminalInputRouter.hasPendingEscape()) return;
+        this.#terminalEscapeTimer = setTimeout(() => {
+            this.#terminalEscapeTimer = undefined;
+            this.#dispatchTerminalInputActions(
+                this.#terminalInputRouter.flushPendingEscape(),
+            );
+        }, TERMINAL_ESCAPE_TIMEOUT_MS);
+    }
+
+    #terminalOwnsInput(): boolean {
+        const state = this.store.getState();
+        return (
+            state.ui.selectedPage === "terminal" &&
+            state.interaction.focusScope === "terminal"
+        );
     }
 
     #dispatchTerminalInputActions(
