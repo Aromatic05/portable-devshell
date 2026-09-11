@@ -26,6 +26,8 @@ export default [
         },
         rules: {
             "no-useless-escape": "off",
+            "no-useless-assignment": "off",
+            "preserve-caught-error": "off",
         },
     },
     {
@@ -40,6 +42,8 @@ export default [
         rules: {
             "no-undef": "off",
             "no-useless-escape": "off",
+            "no-useless-assignment": "off",
+            "preserve-caught-error": "off",
             "@typescript-eslint/no-empty-object-type": "off",
             "@typescript-eslint/no-unused-vars": [
                 "error",

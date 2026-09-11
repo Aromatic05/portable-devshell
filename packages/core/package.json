@@ -21,7 +21,7 @@
     "dependencies": {
         "@portable-devshell/shared": "workspace:*",
         "string-argv": "^0.3.2",
-        "tar-stream": "^3.2.0"
+        "tar-stream": "3.2.0"
     },
     "devDependencies": {
         "@types/tar-stream": "^3.1.4"

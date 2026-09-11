@@ -25,17 +25,17 @@
         "@modelcontextprotocol/sdk": "1.30.0",
         "@modelcontextprotocol/server": "2.0.0",
         "@portable-devshell/shared": "workspace:*",
-        "@types/oidc-provider": "9.5.0",
+        "@types/oidc-provider": "9.12.1",
         "express": "^5.2.1",
-        "hono": "4.13.3",
-        "jose": "^6.2.3",
-        "oidc-provider": "9.9.1",
+        "hono": "4.13.7",
+        "jose": "^6.2.12",
+        "oidc-provider": "9.12.2",
         "zod": "3.25.76"
     },
     "devDependencies": {
         "@modelcontextprotocol/client": "2.0.0",
         "@portable-devshell/core": "workspace:*",
-        "@types/express": "^5.0.5"
+        "@types/express": "^5.0.6"
     },
     "scripts": {
         "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b --force",

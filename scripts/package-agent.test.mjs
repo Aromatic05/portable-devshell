@@ -16,7 +16,7 @@ const repoRoot = new URL("../", import.meta.url);
 
 test("Agent Extension source package owns the Pi provider without separate Agent workspace packages", async () => {
     const agentExtension = JSON.parse(await readFile(new URL("extensions/agent/package.json", repoRoot), "utf8"));
-    assert.equal(agentExtension.dependencies.diff, "8.0.4");
+    assert.equal(agentExtension.dependencies.diff, "9.0.0");
     await assert.rejects(readFile(new URL("packages/agentd/package.json", repoRoot), "utf8"));
     await assert.rejects(readFile(new URL("packages/agent-provider-pi/package.json", repoRoot), "utf8"));
     await assert.rejects(readFile(new URL("packages/pi-extension/package.json", repoRoot), "utf8"));

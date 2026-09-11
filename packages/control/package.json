@@ -19,15 +19,15 @@
         "dist"
     ],
     "dependencies": {
-        "@portable-devshell/extension": "workspace:*",
         "@portable-devshell/core": "workspace:*",
+        "@portable-devshell/extension": "workspace:*",
         "@portable-devshell/mcp": "workspace:*",
         "@portable-devshell/shared": "workspace:*",
         "@portable-devshell/web": "workspace:*",
         "hash-wasm": "^4.12.0",
-        "smol-toml": "1.7.0",
-        "tar-stream": "^3.2.0",
-        "ws": "8.21.0"
+        "smol-toml": "1.8.0",
+        "tar-stream": "3.2.0",
+        "ws": "8.21.3"
     },
     "scripts": {
         "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b --force",
@@ -37,6 +37,6 @@
     "devDependencies": {
         "@types/tar-stream": "^3.1.4",
         "@types/ws": "8.18.1",
-        "playwright": "^1.62.1"
+        "playwright": "^1.63.0"
     }
 }

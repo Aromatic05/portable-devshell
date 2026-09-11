@@ -25,6 +25,9 @@
         "react": "^18.3.1",
         "string-width": "^7.2.0"
     },
+    "devDependencies": {
+        "@types/react": "^18.3.31"
+    },
     "scripts": {
         "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b --force",
         "typecheck": "tsc --noEmit -p ../../tsconfig.typecheck.json",
