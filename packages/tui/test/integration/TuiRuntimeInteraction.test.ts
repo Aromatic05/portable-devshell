@@ -1251,6 +1251,22 @@ test("real Ink runtime routes terminal scrollback and mouse without trapping sid
         );
         assert.equal(host.output.includes("\u001B_Ga=d,d=A;\u001B\\"), true);
 
+        const clearsAfterGraphic = countOccurrences(
+            host.output,
+            "\u001B_Ga=d,d=A;\u001B\\",
+        );
+        dataListener?.("plain update");
+        await waitUntil(() =>
+            embedded.getSnapshot().lines.some((line) =>
+                line.segments.some((segment) => segment.text.includes("plain update")),
+            ),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        assert.equal(
+            countOccurrences(host.output, "\u001B_Ga=d,d=A;\u001B\\"),
+            clearsAfterGraphic,
+        );
+
         dataListener?.(
             Array.from({ length: 80 }, (_, index) => String(index)).join(
                 "\r\n",

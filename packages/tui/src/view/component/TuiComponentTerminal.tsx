@@ -31,7 +31,13 @@ export function TuiComponentTerminal(props: TuiComponentTerminalProps) {
 
     useEffect(() => {
         props.onGraphicsVisibility(true);
-    });
+    }, [
+        props.onGraphicsVisibility,
+        snapshot.columns,
+        snapshot.graphics.revision,
+        snapshot.rows,
+        snapshot.scroll.viewportLine,
+    ]);
 
     useEffect(() => {
         return () => props.onGraphicsVisibility(false);
