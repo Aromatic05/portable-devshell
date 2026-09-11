@@ -11,6 +11,7 @@ import { webRouteHref, type WebRoute } from "../routing/hashRoute.js";
 import {
     filterWebMessageSessions,
     selectWebMessageEntries,
+    selectWebMessageHistorySessions,
     selectWebMessageSession,
     selectWebMessageSessions,
     type WebMessageEntry,
@@ -32,10 +33,16 @@ export function Messages({
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [draft, setDraft] = useState("");
     const [query, setQuery] = useState("");
+    const [sessionScope, setSessionScope] = useState<"active" | "history">("active");
     const historyEndRef = useRef<HTMLDivElement>(null);
     const followBottomRef = useRef(true);
     const previousThreadKeyRef = useRef<string>();
-    const sessions = useMemo(() => selectWebMessageSessions(state), [state]);
+    const sessions = useMemo(
+        () => sessionScope === "active"
+            ? selectWebMessageSessions(state)
+            : selectWebMessageHistorySessions(state),
+        [sessionScope, state],
+    );
     const visibleSessions = useMemo(
         () => filterWebMessageSessions(sessions, query),
         [query, sessions],
@@ -117,6 +124,18 @@ export function Messages({
         <div className={`messages-sidebar${sidebarOpen ? " open" : ""}`}>
             <div className="messages-sidebar-heading">
                 <strong>Conversations</strong>
+                <div aria-label="Conversation scope" className="messages-session-scope" role="group">
+                    <button
+                        aria-pressed={sessionScope === "active"}
+                        onClick={() => setSessionScope("active")}
+                        type="button"
+                    >Active</button>
+                    <button
+                        aria-pressed={sessionScope === "history"}
+                        onClick={() => setSessionScope("history")}
+                        type="button"
+                    >History</button>
+                </div>
                 <button
                     aria-label="Close conversations"
                     className="messages-sidebar-close"

@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
     selectWebMessageEntries,
+    selectWebMessageHistorySessions,
     selectWebMessageSessions,
 } from "../src/selectors/messages.js";
 import type { WebRoute } from "../src/routing/hashRoute.js";
@@ -129,6 +130,42 @@ describe("Messages", () => {
                 },
             },
         }, now)).toEqual([]);
+    });
+
+    it("partitions loaded conversations into active and history sessions", () => {
+        const now = Date.parse("2026-09-02T10:05:00Z");
+        const mixedState: WebState = {
+            ...state,
+            readModel: {
+                ...state.readModel,
+                contexts: state.readModel.contexts.map((context) => ({
+                    ...context,
+                    lastAccessedAt: "2026-09-02T10:00:00Z",
+                })),
+                instanceState: {
+                    ...state.readModel.instanceState,
+                    alpha: {
+                        ...state.readModel.instanceState.alpha!,
+                        conversationEntries: [
+                            ...state.readModel.instanceState.alpha!.conversationEntries,
+                            {
+                                createdAt: "2026-09-02T09:00:00Z",
+                                ctxId: "ctx-history",
+                                id: "comment-history",
+                                kind: "comment",
+                                status: "delivered",
+                                text: "Older conversation.",
+                            },
+                        ],
+                    },
+                },
+            },
+        };
+
+        expect(selectWebMessageSessions(mixedState, now).map((session) => session.ctxId))
+            .toEqual(["ctx-old-active"]);
+        expect(selectWebMessageHistorySessions(mixedState, now).map((session) => session.ctxId))
+            .toEqual(["ctx-history"]);
     });
 
     it("projects canonical Conversation entries into one chronological conversation", () => {
@@ -352,5 +389,53 @@ describe("Messages", () => {
         fireEvent.click(screen.getByRole("button", { name: /portable-devshell/ }));
         expect(navigate).toHaveBeenCalledWith(threadRoute);
         expect(view.container.querySelector(".messages-sidebar")).not.toHaveClass("open");
+    });
+
+    it("switches the sidebar between active and history conversations", () => {
+        const historyState: WebState = {
+            ...state,
+            readModel: {
+                ...state.readModel,
+                instanceState: {
+                    ...state.readModel.instanceState,
+                    alpha: {
+                        ...state.readModel.instanceState.alpha!,
+                        conversationEntries: [
+                            ...state.readModel.instanceState.alpha!.conversationEntries,
+                            {
+                                createdAt: "2026-09-01T08:00:00Z",
+                                ctxId: "ctx-history",
+                                id: "comment-history",
+                                kind: "comment",
+                                status: "delivered",
+                                text: "Historical conversation.",
+                            },
+                        ],
+                    },
+                },
+            },
+        };
+        render(<Messages
+            navigate={vi.fn()}
+            route={{ page: "messages", view: "contexts" }}
+            state={historyState}
+            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+        />);
+
+        const active = screen.getByRole("button", { name: "Active" });
+        const history = screen.getByRole("button", { name: "History" });
+        expect(active.closest(".messages-sidebar-heading")).not.toBeNull();
+        expect(history.closest(".messages-sidebar-heading")).not.toBeNull();
+        expect(active).toHaveAttribute("aria-pressed", "true");
+        expect(history).toHaveAttribute("aria-pressed", "false");
+        expect(screen.getByRole("button", { name: /portable-devshell/ })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /ctx-history/ })).not.toBeInTheDocument();
+
+        fireEvent.click(history);
+
+        expect(active).toHaveAttribute("aria-pressed", "false");
+        expect(history).toHaveAttribute("aria-pressed", "true");
+        expect(screen.queryByRole("button", { name: /portable-devshell/ })).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /ctx-history/ })).toBeInTheDocument();
     });
 });

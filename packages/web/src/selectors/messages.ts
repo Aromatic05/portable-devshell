@@ -29,7 +29,16 @@ export function selectWebMessageSessions(
     now: number = Date.now(),
 ): WebMessageSession[] {
     return projectWebMessageSessions(state).filter(
-        (session) => Date.parse(session.latestAt) >= now - activeSessionWindowMs,
+        (session) => isWebMessageSessionActive(session, now),
+    );
+}
+
+export function selectWebMessageHistorySessions(
+    state: WebState,
+    now: number = Date.now(),
+): WebMessageSession[] {
+    return projectWebMessageSessions(state).filter(
+        (session) => !isWebMessageSessionActive(session, now),
     );
 }
 
@@ -138,6 +147,10 @@ export function filterWebMessageSessions(
 
 function compactContextId(ctxId: string): string {
     return ctxId.length <= 16 ? ctxId : `${ctxId.slice(0, 12)}…`;
+}
+
+function isWebMessageSessionActive(session: WebMessageSession, now: number): boolean {
+    return Date.parse(session.latestAt) >= now - activeSessionWindowMs;
 }
 
 function laterTimestamp(left: string | undefined, right: string | undefined): string {
