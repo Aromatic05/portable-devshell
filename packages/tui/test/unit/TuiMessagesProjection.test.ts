@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { PassThrough } from "node:stream";
+import type { WriteStream } from "node:tty";
 import test from "node:test";
+import { stripVTControlCharacters } from "node:util";
 
 import { asInstanceName } from "@portable-devshell/shared";
+import { render } from "ink";
 
 import { TuiAppStore } from "../../src/state/TuiAppStore.ts";
 import {
@@ -194,6 +198,58 @@ test("Messages keeps the composer directly after short history instead of moving
     const middle = layout.props.children[1];
     const mainPanel = middle.props.children[3];
     assert.equal(mainPanel.props.alignSelf, "flex-start");
+});
+
+test("Messages Ink frame reserves one physical separator row per conversation entry", async () => {
+    const store = new TuiAppStore();
+    store.patchControlReadModel({
+        instanceState: {
+            alpha: {
+                conversationEntries: Array.from({ length: 8 }, (_, index) => ({
+                    createdAt: `2026-09-10T10:${String(index).padStart(2, "0")}:00.000Z`,
+                    ctxId: "ctx-alpha",
+                    id: `comment-${index}`,
+                    kind: "comment" as const,
+                    status: "delivered" as const,
+                    text: `frame comment ${index}`,
+                })),
+            },
+        },
+    });
+    store.setSelectedInstance("alpha");
+    store.setSelectedPage("messages");
+    store.replaceRoute({ ctxId: "ctx-alpha", page: "messages", view: "thread" });
+
+    const output = new PassThrough() as PassThrough & {
+        columns: number;
+        isTTY: true;
+        rows: number;
+    };
+    output.columns = 80;
+    output.isTTY = true;
+    output.rows = 30;
+    let captured = "";
+    output.on("data", (chunk) => { captured += chunk.toString(); });
+    const ink = render(
+        TuiMessagesView({ state: store.getState(), viewportRows: 30, width: 80 }),
+        { debug: true, stdout: output as unknown as WriteStream },
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    ink.cleanup();
+
+    const lines = stripVTControlCharacters(captured).split("\n");
+    const lastBodyRow = lines.reduce(
+        (latest, line, index) => line.includes("frame comment") ? index : latest,
+        -1,
+    );
+    const composerRow = lines.findIndex((line) => line.includes("> Write a comment"));
+    assert.notEqual(lastBodyRow, -1);
+    assert.notEqual(composerRow, -1);
+    assert.equal(
+        composerRow - lastBodyRow,
+        3,
+        `expected body + one physical blank row + divider before composer, got ${composerRow - lastBodyRow - 2} blank rows\n${lines.join("\n")}`,
+    );
 });
 
 test("Messages composer owns an inline cursor cell", () => {

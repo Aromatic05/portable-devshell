@@ -196,7 +196,7 @@ export function renderTuiMessageHistoryLines(
             kind: "text" as const,
             text: `  ${line}`,
         })),
-        { kind: "text" as const, text: "" },
+        { kind: "text" as const, text: " " },
     ]);
     byContextAndWidth.set(cacheKey, rendered);
     return rendered;
