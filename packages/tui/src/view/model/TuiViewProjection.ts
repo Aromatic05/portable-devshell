@@ -262,8 +262,11 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
     const route = currentTuiRoute(state);
     switch (state.interaction.focusScope) {
         case "sidebarContext":
+            return state.ui.sidebarLevel === "section"
+                ? ["enter open", "esc back", "? help", "0-9 pages", "shift+1-9 instances"]
+                : ["enter open", "→ main", "? help", "0-9 pages", "shift+1-9 instances"];
         case "sidebarInstances":
-            return ["→ main", "enter", "0-9 pages", "shift+1-9 instances"];
+            return ["enter select", "→ main", "? help", "shift+1-9 instances"];
         case "mainBoxes":
             if (state.ui.selectedPage === "overview") {
                 return [

@@ -29,6 +29,7 @@ export function createInitialTuiAppState(): TuiAppState {
             logsFollowByInstance: {},
             logsPausedAtSeqByInstance: {},
             mainFocusId: undefined,
+            messageScope: "active",
             routeStacks: {},
             routeViewStates: {},
             scrollOffsets: {},

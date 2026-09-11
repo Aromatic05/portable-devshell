@@ -21,6 +21,14 @@ export function reduceTuiStoreReducerInteraction(
                     mainFocusId: action.mainFocusId,
                 },
             };
+        case "messages.scope.set":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    messageScope: action.scope,
+                },
+            };
         case "detailLine.select": {
             const selectedDetailLineIds = {
                 ...state.interaction.selectedDetailLineIds,

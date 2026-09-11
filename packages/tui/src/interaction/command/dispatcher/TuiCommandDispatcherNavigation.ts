@@ -22,6 +22,7 @@ import {
     normalizeTuiGraphemeCursor,
     previousTuiGraphemeCursor,
 } from "../../../state/TuiGraphemeCursor.js";
+import { buildContextualHelpLines } from "../../../view/page/TuiPageHelp.js";
 
 export interface TuiCommandDispatcherNavigationOptions {
     dispatch?(intent: TuiUiIntent): Promise<boolean>;
@@ -81,7 +82,11 @@ export class TuiCommandDispatcherNavigation {
             case "page.reload":
                 return await this.#reloadPage();
             case "ui.help":
-                return await this.#selectPage("help");
+                return (await this.#overlay.dispatch({
+                    body: buildContextualHelpLines(this.#store.getState()).join("\n"),
+                    title: `${this.#store.getState().ui.selectedPage} · help`,
+                    type: "textDetail.open",
+                })) ?? false;
             case "ui.redraw":
                 this.#store.bumpRedrawNonce();
                 this.#onRedraw();
@@ -137,6 +142,12 @@ export class TuiCommandDispatcherNavigation {
                         id: this.#store.getState().ui.selectedPage,
                         kind: "context",
                     });
+                    this.#store.setFocusScope("sidebarContext");
+                    return true;
+                case "messageScope":
+                    this.#store.setMessageScope(entry.target.scope);
+                    this.#store.resetRoute();
+                    this.#store.setSidebarCursor(cursor);
                     this.#store.setFocusScope("sidebarContext");
                     return true;
                 case "route": {

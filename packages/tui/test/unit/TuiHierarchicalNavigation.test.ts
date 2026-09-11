@@ -226,6 +226,20 @@ test("Audit footer exposes Comment only on concrete Context routes", () => {
     assert.equal(selectFooterShortcuts(store.getState()).includes("m comment"), true);
 });
 
+test("section sidebar footer prioritizes the actions available at the current location", () => {
+    const store = createStore();
+    store.setSelectedPage("messages");
+    store.setFocusScope("sidebarContext");
+
+    assert.deepEqual(selectFooterShortcuts(store.getState()), [
+        "enter open",
+        "esc back",
+        "? help",
+        "0-9 pages",
+        "shift+1-9 instances",
+    ]);
+});
+
 test("Audit Comment footer reflects browse and edit modes", () => {
     const store = createStore();
     store.setSelectedPage("audit");

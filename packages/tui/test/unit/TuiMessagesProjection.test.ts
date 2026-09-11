@@ -12,6 +12,7 @@ import {
     renderTuiMessageComposerSegments,
     renderTuiMessageHistoryLines,
     selectTuiMessageEntries,
+    selectTuiMessageHistorySessions,
     selectTuiMessageSessions,
     selectTuiMessagesSidebarEntries,
     tuiMessagesHistoryRows,
@@ -112,7 +113,7 @@ test("Messages merges registered sessions with exact comment and report history"
     assert.deepEqual(
         selectTuiMessagesSidebarEntries(store.getState(), true, { id: "messages:back", kind: "context" }, now)
             .map((entry) => entry.label),
-        ["← messages", "project", "empty"],
+        ["← messages", "History", "project", "empty"],
     );
 });
 
@@ -153,10 +154,36 @@ test("Messages hides sessions that were inactive for more than 30 minutes", () =
         ["ctx-recent"],
     );
     assert.deepEqual(
+        selectTuiMessageHistorySessions(store.getState(), "alpha", now).map((session) => session.ctxId),
+        ["ctx-stale"],
+    );
+    assert.deepEqual(
         selectTuiMessagesSidebarEntries(store.getState(), true, { id: "messages:back", kind: "context" }, now)
             .map((entry) => entry.label),
-        ["← messages", "recent"],
+        ["← messages", "History", "recent"],
     );
+
+    store.setMessageScope("history");
+    assert.deepEqual(
+        selectTuiMessagesSidebarEntries(store.getState(), true, { id: "messages:scope", kind: "context" }, now)
+            .map((entry) => entry.label),
+        ["← messages", "Active", "stale"],
+    );
+});
+
+test("Messages empty state explains the selected Conversation scope", () => {
+    const store = new TuiAppStore();
+    store.patchControlReadModel({ instances: [{ enabled: true, mcpEnabled: true, name: "alpha" }] });
+    store.setSelectedInstance("alpha");
+    store.setSelectedPage("messages");
+
+    let view = TuiMessagesView({ state: store.getState(), viewportRows: 30, width: 80 });
+    assert.match(String(view.props.children[1].props.children), /No active conversations on alpha/u);
+    assert.match(String(view.props.children[1].props.children), /History/u);
+
+    store.setMessageScope("history");
+    view = TuiMessagesView({ state: store.getState(), viewportRows: 30, width: 80 });
+    assert.match(String(view.props.children[1].props.children), /No conversation history on alpha/u);
 });
 
 test("Messages keeps the composer directly after short history instead of moving blank rows around it", () => {

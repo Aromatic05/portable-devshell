@@ -1,5 +1,5 @@
 import type { TuiRoute } from "./route/TuiRoute.js";
-import type { TuiActivePage, TuiExpandableBoxStatus, TuiPageId } from "./TuiUiState.js";
+import type { TuiActivePage, TuiExpandableBoxStatus, TuiMessageScope, TuiPageId } from "./TuiUiState.js";
 
 export type TuiBoxLineTone = "normal" | "muted" | "accent" | "success" | "warning" | "danger";
 
@@ -55,6 +55,7 @@ export interface TuiSidebarEntry {
 export type TuiSidebarContextTarget =
     | { kind: "page"; page: TuiPageId }
     | { kind: "root" }
+    | { kind: "messageScope"; scope: TuiMessageScope }
     | { kind: "route"; route: TuiRoute };
 
 export interface TuiSidebarContextEntry extends TuiSidebarEntry {

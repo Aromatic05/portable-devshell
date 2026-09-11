@@ -16,6 +16,8 @@ export type TuiSidebarFocus = "context" | "instances";
 
 export type TuiSidebarLevel = "root" | "section";
 
+export type TuiMessageScope = "active" | "history";
+
 export type TuiFocusScope =
     | "sidebarContext"
     | "sidebarInstances"
@@ -50,6 +52,7 @@ export type TuiUiState = {
     sidebarFocus: TuiSidebarFocus;
     sidebarLevel: TuiSidebarLevel;
     mainFocusId?: string;
+    messageScope: TuiMessageScope;
     routeStacks: Record<string, readonly TuiRoute[]>;
     routeViewStates: Record<string, TuiRouteViewState>;
     expandedBoxes: Record<string, boolean>;

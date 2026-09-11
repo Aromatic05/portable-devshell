@@ -15,6 +15,7 @@ import type { TuiOverlay } from "../overlay/TuiOverlay.js";
 import type { TuiRoute } from "../route/TuiRoute.js";
 import type {
     TuiFocusScope,
+    TuiMessageScope,
     TuiPageId,
     TuiSidebarCursor,
     TuiSidebarFocus,
@@ -111,6 +112,7 @@ export type TuiAppAction =
     | { focusScope: TuiFocusScope; type: "focus.scope.set" }
     | { type: "log.clearBuffer" }
     | { mainFocusId?: string; type: "mainFocus.set" }
+    | { scope: TuiMessageScope; type: "messages.scope.set" }
     | { key: string; lineId?: string; type: "detailLine.select" }
     | { cursor?: TuiSidebarCursor; type: "sidebar.cursor.set" }
     | { sidebarFocus: TuiSidebarFocus; type: "sidebar.focus.set" }

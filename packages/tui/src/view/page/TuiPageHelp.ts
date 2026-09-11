@@ -1,5 +1,6 @@
 import type { BoxModel } from "../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../state/reducer/TuiStoreModel.js";
+import { currentTuiRoute } from "../../state/route/TuiRouteState.js";
 import { makeBox } from "./TuiPageBoxSupport.js";
 
 export function buildHelpLines(state: TuiAppState): string[] {
@@ -13,6 +14,32 @@ export function buildHelpLines(state: TuiAppState): string[] {
         "Space expands and collapses the focused box.",
         "Esc returns from detail, search, menus, and main focus.",
         "Ctrl+[ remains available as a terminal-safe escape fallback.",
+    ];
+}
+
+export function buildContextualHelpLines(state: TuiAppState): string[] {
+    const route = currentTuiRoute(state);
+    const pageLines: Record<TuiAppState["ui"]["selectedPage"], string[]> = {
+        overview: ["Enter opens the focused Instance.", "r refreshes the overview; / searches visible data."],
+        instances: ["Enter opens the focused item; Space expands actions and details.", "Lifecycle actions are inside the expanded Instance."],
+        config: ["Enter edits the focused field.", "Ctrl+S saves; Ctrl+D discards local edits."],
+        connections: ["Enter opens the focused connection or action.", "Editable connection fields use Ctrl+S to save."],
+        messages: ["Use Active / History in the upper sidebar to choose Conversations.", "Enter opens a Conversation; type in the composer and Enter sends."],
+        audit: ["Enter opens the focused Context or Tool Call; Space expands details.", "M opens the Conversation for a concrete Context; / searches Audit."],
+        logs: ["Enter opens the focused log Context; Space expands details.", "r refreshes and / searches logs."],
+        todo: ["Enter opens the focused Todo; Space expands details.", "Destructive actions require confirmation."],
+        help: ["This page contains the complete navigation and action reference."],
+        terminal: ["Right/Tab enters the terminal; Ctrl+] returns to the sidebar.", "Ctrl+T switches terminal sources; Shift+PgUp/PgDn browses scrollback."],
+    };
+    return [
+        `Page: ${state.ui.selectedPage}`,
+        `Instance: ${state.ui.selectedInstance ?? "none"}`,
+        `View: ${route.view}`,
+        "",
+        ...pageLines[state.ui.selectedPage],
+        "",
+        "Esc closes this help and returns to the same location.",
+        "Open the Help page for the complete reference.",
     ];
 }
 
@@ -33,7 +60,7 @@ export function buildHelpPageBoxes(state: TuiAppState): BoxModel[] {
                 "Kitty and Sixel images are replayed when the host terminal advertises support; DEVSHELL_TUI_GRAPHICS overrides detection.",
                 "On an Audit Context, M/m opens the Comment conversation; expand Write Comment, select Draft, Enter edits, and Enter sends.",
                 "r reloads the current page and / opens search where available.",
-                "? opens this page; Ctrl+[ returns from detail, search, menus, and main focus.",
+                "? opens contextual help without leaving the current page; Ctrl+[ returns from detail, search, menus, and main focus.",
             ],
             id: "help-navigation",
             status: "normal",

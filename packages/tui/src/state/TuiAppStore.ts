@@ -11,6 +11,7 @@ import type { TuiRoute } from "./route/TuiRoute.js";
 import { currentTuiRouteStack } from "./route/TuiRouteState.js";
 import type {
     TuiFocusScope,
+    TuiMessageScope,
     TuiPageId,
     TuiSidebarCursor,
     TuiSidebarFocus,
@@ -155,6 +156,10 @@ export class TuiAppStore {
             mainFocusId,
             type: "mainFocus.set",
         });
+    }
+
+    setMessageScope(scope: TuiMessageScope): void {
+        this.dispatch({ scope, type: "messages.scope.set" });
     }
 
     setSelectedPage(page: TuiPageId): void {

@@ -46,6 +46,23 @@ export function selectTuiMessageSessions(
     instance: string,
     now: number = Date.now(),
 ): TuiMessageSession[] {
+    return projectTuiMessageSessions(state, instance)
+        .filter((session) => isActiveMessageSession(session, now));
+}
+
+export function selectTuiMessageHistorySessions(
+    state: TuiAppState,
+    instance: string,
+    now: number = Date.now(),
+): TuiMessageSession[] {
+    return projectTuiMessageSessions(state, instance)
+        .filter((session) => !isActiveMessageSession(session, now));
+}
+
+function projectTuiMessageSessions(
+    state: TuiAppState,
+    instance: string,
+): TuiMessageSession[] {
     const sessions = new Map<string, TuiMessageSession>();
     const touch = (
         ctxId: string | undefined,
@@ -76,11 +93,9 @@ export function selectTuiMessageSessions(
         touch(entry.ctxId, { latestAt: entry.createdAt });
     }
 
-    return [...sessions.values()]
-        .filter((session) => Date.parse(session.latestAt) >= now - activeSessionWindowMs)
-        .sort((left, right) =>
-            right.latestAt.localeCompare(left.latestAt),
-        );
+    return [...sessions.values()].sort((left, right) =>
+        right.latestAt.localeCompare(left.latestAt),
+    );
 }
 
 export function selectTuiMessagesSidebarEntries(
@@ -91,9 +106,12 @@ export function selectTuiMessagesSidebarEntries(
 ): TuiSidebarContextEntry[] {
     const route = currentTuiRoute(state);
     const instance = state.ui.selectedInstance;
+    const scope = state.ui.messageScope;
     const sessions = instance === undefined
         ? []
-        : selectTuiMessageSessions(state, instance, now);
+        : scope === "active"
+            ? selectTuiMessageSessions(state, instance, now)
+            : selectTuiMessageHistorySessions(state, instance, now);
     const baseLabels = sessions.map((session) => humanConversationTitle(session, 8));
     const labelCounts = new Map<string, number>();
     for (const label of baseLabels) {
@@ -108,6 +126,17 @@ export function selectTuiMessagesSidebarEntries(
             label: "← messages",
             selected: route.page === "messages" && route.view === "contexts",
             target: { kind: "root" },
+        },
+        {
+            focused:
+                focused && cursor?.kind === "context" && cursor.id === "messages:scope",
+            id: "messages:scope",
+            label: scope === "active" ? "History" : "Active",
+            selected: false,
+            target: {
+                kind: "messageScope",
+                scope: scope === "active" ? "history" : "active",
+            },
         },
         ...sessions.map((session, index): TuiSidebarContextEntry => {
             const baseLabel = baseLabels[index] ?? humanConversationTitle(session, 8);
@@ -136,6 +165,10 @@ export function selectTuiMessagesSidebarEntries(
             };
         }),
     ];
+}
+
+function isActiveMessageSession(session: TuiMessageSession, now: number): boolean {
+    return Date.parse(session.latestAt) >= now - activeSessionWindowMs;
 }
 
 export function selectTuiMessageEntries(

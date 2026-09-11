@@ -5,6 +5,7 @@ import { asInstanceName } from "@portable-devshell/shared";
 
 import {
     buildFocusGraphForState,
+    currentTuiRoute,
     selectMainScreenModel,
     topTuiOverlay,
     tuiViewProjection,
@@ -259,6 +260,45 @@ test("navigation controller preserves and restores focus around search and confi
         harness.store.getState().interaction.focusScope,
         "sidebarContext",
     );
+});
+
+test("contextual help opens as an overlay and restores the exact page context", async () => {
+    const harness = createHarness();
+    await harness.navigation.dispatch({ page: "audit", type: "page.select" });
+    harness.store.setSidebarCursor({ id: "audit:back", kind: "context" });
+    const routeBefore = currentTuiRoute(harness.store.getState());
+    const cursorBefore = harness.store.getState().interaction.sidebarCursor;
+
+    assert.equal(await harness.navigation.dispatch({ type: "ui.help" }), true);
+    assert.equal(harness.store.getState().ui.selectedPage, "audit");
+    assert.deepEqual(currentTuiRoute(harness.store.getState()), routeBefore);
+    const overlay = topTuiOverlay(harness.store.getState().interaction.overlays);
+    assert.equal(overlay?.kind, "text-detail");
+    assert.match(overlay?.kind === "text-detail" ? overlay.body : "", /Page: audit/u);
+    assert.equal(harness.store.getState().interaction.focusScope, "textDetail");
+
+    assert.equal(await harness.navigation.dispatch({ type: "textDetail.close" }), true);
+    assert.equal(harness.store.getState().ui.selectedPage, "audit");
+    assert.deepEqual(currentTuiRoute(harness.store.getState()), routeBefore);
+    assert.deepEqual(harness.store.getState().interaction.sidebarCursor, cursorBefore);
+    assert.equal(harness.store.getState().interaction.focusScope, "sidebarContext");
+});
+
+test("Messages scope row switches between Active and History without leaving the feature", async () => {
+    const harness = createHarness();
+    await harness.navigation.dispatch({ page: "messages", type: "page.select" });
+    harness.store.setSidebarCursor({ id: "messages:scope", kind: "context" });
+
+    assert.equal(await harness.navigation.activateSidebarSelection(), true);
+    assert.equal(harness.store.getState().ui.messageScope, "history");
+    assert.deepEqual(currentTuiRoute(harness.store.getState()), {
+        page: "messages",
+        view: "contexts",
+    });
+
+    harness.store.setSidebarCursor({ id: "messages:scope", kind: "context" });
+    assert.equal(await harness.navigation.activateSidebarSelection(), true);
+    assert.equal(harness.store.getState().ui.messageScope, "active");
 });
 
 test("navigation controller owns box expansion, scrolling, logs follow, reload, and redraw", async () => {
