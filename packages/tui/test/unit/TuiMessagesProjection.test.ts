@@ -14,6 +14,7 @@ import {
     tuiMessagesRenderedHistoryRows,
 } from "../../src/view/page/messages/TuiMessagesProjection.ts";
 import { TuiMessagesView } from "../../src/view/page/messages/TuiMessagesView.tsx";
+import { TuiRootLayout } from "../../src/view/TuiRootLayout.tsx";
 
 test("Messages merges registered sessions with exact comment and report history", () => {
     const store = new TuiAppStore();
@@ -176,9 +177,23 @@ test("Messages keeps the composer directly after short history instead of moving
 
     const view = TuiMessagesView({ state: store.getState(), viewportRows: 30, width: 80 });
     const history = view.props.children[0];
+    assert.equal(view.props.height, undefined, "Messages content must not reserve the whole viewport");
     assert.equal(history.props.height, 3);
     assert.equal(history.props.justifyContent, undefined);
     assert.equal(tuiMessagesRenderedHistoryRows(200, 30), tuiMessagesHistoryRows(30));
+
+    const layout = TuiRootLayout({
+        columns: 120,
+        fitMainContent: true,
+        footer: "footer",
+        header: "header",
+        main: view,
+        rows: 40,
+        sidebar: "sidebar",
+    });
+    const middle = layout.props.children[1];
+    const mainPanel = middle.props.children[3];
+    assert.equal(mainPanel.props.alignSelf, "flex-start");
 });
 
 test("Messages composer owns an inline cursor cell", () => {

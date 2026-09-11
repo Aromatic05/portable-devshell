@@ -54,7 +54,7 @@ export function TuiMessagesView(props: {
     const status = props.state.interaction.screenStatusByPage.messages;
 
     return (
-        <Box flexDirection="column" height={props.viewportRows}>
+        <Box flexDirection="column">
             <Box flexDirection="column" height={renderedHistoryRows} overflow="hidden">
                 {visible.length === 0 ? <Text dimColor>No messages yet.</Text> : null}
                 {visible.map((line, index) => (

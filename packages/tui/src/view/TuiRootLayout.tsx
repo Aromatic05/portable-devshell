@@ -10,6 +10,7 @@ export const MINIMUM_TERMINAL_ROWS = 14;
 
 export interface TuiRootLayoutProps {
     columns: number;
+    fitMainContent?: boolean;
     footer: React.ReactNode;
     header: React.ReactNode;
     main: React.ReactNode;
@@ -41,7 +42,13 @@ export function TuiRootLayout(props: TuiRootLayoutProps) {
             <Box flexDirection="column" height={props.rows} width={props.columns}>
                 {props.header}
                 <Box flexGrow={1} height={Math.max(0, props.rows - 6)}>
-                    <Box borderStyle="single" flexDirection="column" paddingX={1} width={props.columns}>
+                    <Box
+                        alignSelf={props.fitMainContent === true ? "flex-start" : undefined}
+                        borderStyle="single"
+                        flexDirection="column"
+                        paddingX={1}
+                        width={props.columns}
+                    >
                         {props.main}
                     </Box>
                 </Box>
@@ -58,7 +65,13 @@ export function TuiRootLayout(props: TuiRootLayoutProps) {
                     <Box height={2} width={props.columns}>
                         {props.sidebar}
                     </Box>
-                    <Box borderStyle="single" flexDirection="column" flexGrow={1} paddingX={1} width={props.columns}>
+                    <Box
+                        borderStyle="single"
+                        flexDirection="column"
+                        flexGrow={props.fitMainContent === true ? 0 : 1}
+                        paddingX={1}
+                        width={props.columns}
+                    >
                         {props.main}
                     </Box>
                 </Box>
@@ -76,7 +89,13 @@ export function TuiRootLayout(props: TuiRootLayoutProps) {
                     {props.sidebar}
                 </Box>
                 <Box width={layout.panelGap} />
-                <Box borderStyle="single" flexDirection="column" paddingX={1} width={layout.mainPanelWidth}>
+                <Box
+                    alignSelf={props.fitMainContent === true ? "flex-start" : undefined}
+                    borderStyle="single"
+                    flexDirection="column"
+                    paddingX={1}
+                    width={layout.mainPanelWidth}
+                >
                     {props.main}
                 </Box>
                 <Box width={layout.outerGap} />
