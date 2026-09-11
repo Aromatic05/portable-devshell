@@ -112,8 +112,13 @@ describe("Messages", () => {
 
     it("uses the two-line drawer trigger and closes it when a conversation is selected", () => {
         const navigate = vi.fn();
-        const view = render(<Messages navigate={navigate} route={threadRoute} state={state} />);
+        const view = render(<Messages
+            navigate={navigate}
+            route={{ page: "messages", view: "contexts" }}
+            state={state}
+        />);
 
+        expect(view.container.querySelector(".messages-sidebar")).not.toHaveClass("open");
         fireEvent.click(screen.getByRole("button", { name: "Open conversations" }));
         expect(view.container.querySelector(".messages-sidebar")).toHaveClass("open");
         fireEvent.click(screen.getByRole("button", { name: /portable-devshell/ }));

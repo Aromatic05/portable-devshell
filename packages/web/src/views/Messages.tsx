@@ -32,7 +32,7 @@ export function Messages({
     const entries = route.view === "thread"
         ? selectWebMessageEntries(state, route.instance, route.ctxId)
         : [];
-    const sidebarOpen = drawerOpen || route.view === "contexts";
+    const sidebarOpen = drawerOpen;
 
     useEffect(() => setDrawerOpen(false), [route]);
 
