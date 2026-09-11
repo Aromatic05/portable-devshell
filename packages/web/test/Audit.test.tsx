@@ -174,6 +174,9 @@ describe("Audit", () => {
 
         const scope = screen.getByLabelText("Scope");
         expect(within(scope).getByRole("option", { name: /ctx-alpha.*active/u })).toBeInTheDocument();
+        expect(scope.querySelector('optgroup[label="Workspace · alpha"]')).not.toBeNull();
+        expect(scope.querySelector('optgroup[label="Workspace · beta"]')).not.toBeNull();
+        expect(scope.querySelector('optgroup[label="Instances"]')).not.toBeNull();
         expect(screen.getByRole("button", { name: "Filters (1)" })).toBeInTheDocument();
         expect(within(screen.getByRole("group", { name: "Active filters" }))
             .getByRole("button", { name: "Context: Active · last 30 min ×" }))
@@ -186,6 +189,19 @@ describe("Audit", () => {
             view: "timeline",
             scope: { kind: "context", instance: "alpha", ctxId: "ctx-alpha" },
         });
+    });
+
+    it("searches grouped Audit scopes without dropping the current selection", () => {
+        renderAudit();
+
+        const scope = screen.getByLabelText("Scope");
+        fireEvent.change(screen.getByRole("searchbox", { name: "Search scopes" }), {
+            target: { value: "beta" },
+        });
+
+        expect(within(scope).getByRole("option", { name: "All instances" })).toBeInTheDocument();
+        expect(within(scope).getByRole("option", { name: /ctx-beta/u })).toBeInTheDocument();
+        expect(within(scope).queryByRole("option", { name: /ctx-alpha/u })).not.toBeInTheDocument();
     });
 
     it("clears the visible default Context window like any other filter", () => {

@@ -1,6 +1,10 @@
 import { useMemo, useState } from "react";
 
-import type { McpContextRecord } from "@portable-devshell/shared/browser";
+import {
+    compactContextId,
+    workspaceFolderName,
+    type McpContextRecord,
+} from "@portable-devshell/shared/browser";
 
 import { ContextBatchDisableDialog } from "../components/ContextBatchDisableDialog.js";
 import { ContextIntervention } from "../components/ContextIntervention.js";
@@ -190,7 +194,7 @@ function auditScope(route: Extract<WebRoute, { page: "audit" }>): AuditScope {
 
 function auditScopeOptions(
     state: WebState,
-    calls: readonly { ctxId?: string; instance: string }[],
+    calls: readonly { ctxId?: string; instance: string; workspace?: string }[],
     contextStatus: AuditContextStatusFilter,
     now: number,
     currentScope: AuditScope,
@@ -201,6 +205,7 @@ function auditScopeOptions(
         instance: string;
         record?: McpContextRecord;
         status?: string;
+        workspace?: string;
     }>();
     for (const context of state.readModel.contexts) {
         const environments = context.environments ?? [{ instance: context.instance }];
@@ -211,6 +216,7 @@ function auditScopeOptions(
                 instance: environment.instance,
                 record: context,
                 status: context.status,
+                workspace: environment.workspace ?? context.workspace,
             });
         }
     }
@@ -218,13 +224,18 @@ function auditScopeOptions(
         instances.add(call.instance);
         if (call.ctxId !== undefined) {
             const key = `${call.instance}\u0000${call.ctxId}`;
-            if (!contexts.has(key)) contexts.set(key, { ctxId: call.ctxId, instance: call.instance });
+            if (!contexts.has(key)) contexts.set(key, {
+                ctxId: call.ctxId,
+                instance: call.instance,
+                workspace: call.workspace,
+            });
         }
     }
     return [
         { label: "All instances", scope: { kind: "all" } },
         ...[...instances].sort().map((instance): AuditScopeOption => ({
-            label: `Instance · ${instance}`,
+            group: { id: "instances", label: "Instances" },
+            label: instance,
             scope: { kind: "instance", instance },
         })),
         ...[...contexts.values()]
@@ -235,10 +246,18 @@ function auditScopeOptions(
                 contextMatchesFilter(context.record, contextStatus, now)
             )
             .sort((left, right) =>
-                left.instance.localeCompare(right.instance) || left.ctxId.localeCompare(right.ctxId)
+                (left.workspace ?? "").localeCompare(right.workspace ?? "") ||
+                left.instance.localeCompare(right.instance) ||
+                left.ctxId.localeCompare(right.ctxId)
             )
             .map((context): AuditScopeOption => ({
-                label: `Context · ${context.ctxId} · ${context.instance}${context.status === undefined ? "" : ` · ${context.status}`}`,
+                group: context.workspace === undefined
+                    ? { id: "contexts:other", label: "Other Contexts" }
+                    : {
+                        id: `workspace:${context.workspace}`,
+                        label: `Workspace · ${workspaceFolderName(context.workspace)}`,
+                    },
+                label: `${compactContextId(context.ctxId)} · ${context.instance}${context.status === undefined ? "" : ` · ${context.status}`}`,
                 scope: { kind: "context", instance: context.instance, ctxId: context.ctxId },
             })),
     ];

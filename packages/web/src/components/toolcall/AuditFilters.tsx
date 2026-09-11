@@ -10,6 +10,7 @@ import {
 export type AuditContextStatusFilter = "active" | "expired" | "disabled" | "all";
 
 export interface AuditScopeOption {
+    group?: { id: string; label: string };
     label: string;
     scope: AuditScope;
 }
@@ -36,6 +37,7 @@ export function AuditFilters({
     tools: readonly string[];
 }) {
     const [advancedOpen, setAdvancedOpen] = useState(false);
+    const [scopeQuery, setScopeQuery] = useState("");
     const advancedCount = [
         contextStatus !== "all",
         filters.workspace.length > 0,
@@ -43,11 +45,22 @@ export function AuditFilters({
         filters.period !== "all",
     ].filter(Boolean).length;
     const scopeValue = webRouteHref({ page: "audit", view: "timeline", scope });
+    const visibleScopes = filterScopeOptions(scopes, scopeQuery, scopeValue);
+    const scopeGroups = groupScopeOptions(visibleScopes);
 
     return <div className="audit-query">
         <div className="audit-query-primary">
-            <label className="audit-scope">Scope
+            <div className="audit-scope">
+                <label htmlFor="audit-scope-select">Scope</label>
+                <input
+                    aria-label="Search scopes"
+                    onChange={(event) => setScopeQuery(event.target.value)}
+                    placeholder="Workspace, Context, or Instance"
+                    type="search"
+                    value={scopeQuery}
+                />
                 <select
+                    id="audit-scope-select"
                     onChange={(event) => {
                         const option = scopes.find((candidate) =>
                             webRouteHref({ page: "audit", view: "timeline", scope: candidate.scope }) === event.target.value
@@ -56,12 +69,18 @@ export function AuditFilters({
                     }}
                     value={scopeValue}
                 >
-                    {scopes.map((option) => {
+                    {scopeGroups.ungrouped.map((option) => {
                         const value = webRouteHref({ page: "audit", view: "timeline", scope: option.scope });
                         return <option key={value} value={value}>{option.label}</option>;
                     })}
+                    {scopeGroups.grouped.map((group) => <optgroup key={group.id} label={group.label}>
+                        {group.options.map((option) => {
+                            const value = webRouteHref({ page: "audit", view: "timeline", scope: option.scope });
+                            return <option key={value} value={value}>{option.label}</option>;
+                        })}
+                    </optgroup>)}
                 </select>
-            </label>
+            </div>
             <label className="audit-search">Search audit
                 <input
                     onChange={(event) => onChange({ ...filters, query: event.target.value })}
@@ -107,4 +126,36 @@ export function AuditFilters({
             <button className="secondary" onClick={onClear} type="button">Clear filters</button>
         </div> : null}
     </div>;
+}
+
+function filterScopeOptions(
+    scopes: readonly AuditScopeOption[],
+    query: string,
+    currentValue: string,
+): AuditScopeOption[] {
+    const needle = query.trim().toLocaleLowerCase();
+    if (needle.length === 0) return [...scopes];
+    return scopes.filter((option) => {
+        const value = webRouteHref({ page: "audit", view: "timeline", scope: option.scope });
+        if (value === currentValue) return true;
+        return `${option.group?.label ?? ""} ${option.label}`.toLocaleLowerCase().includes(needle);
+    });
+}
+
+function groupScopeOptions(scopes: readonly AuditScopeOption[]): {
+    grouped: Array<{ id: string; label: string; options: AuditScopeOption[] }>;
+    ungrouped: AuditScopeOption[];
+} {
+    const grouped = new Map<string, { id: string; label: string; options: AuditScopeOption[] }>();
+    const ungrouped: AuditScopeOption[] = [];
+    for (const option of scopes) {
+        if (option.group === undefined) {
+            ungrouped.push(option);
+            continue;
+        }
+        const group = grouped.get(option.group.id) ?? { ...option.group, options: [] };
+        group.options.push(option);
+        grouped.set(option.group.id, group);
+    }
+    return { grouped: [...grouped.values()], ungrouped };
 }
