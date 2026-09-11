@@ -103,25 +103,6 @@ test("bash_run error hints cover invalid command and cancellation semantics", ()
     assert.deepEqual(codes(cancelled), ["tool.cancelled"]);
 });
 
-test("artifact_read paging, lossy, and source truncation are diagnosed", () => {
-    assert.deepEqual(codes(resolveResultHints("artifact_read", {
-        artifactTruncated: false, eof: false, lossy: false, nextOffsetBytes: 100
-    })), ["artifact.partialRead"]);
-
-    assert.deepEqual(codes(resolveResultHints("artifact_read", {
-        artifactTruncated: false, eof: true, lossy: true
-    })), ["artifact.lossy"]);
-
-    const truncated = resolveResultHints("artifact_read", {
-        artifactTruncated: true, eof: true, lossy: false
-    });
-    assert.deepEqual(codes(truncated), ["artifact.sourceTruncated"]);
-});
-
-test("artifact_read expired handle is an error hint", () => {
-    assert.deepEqual(codes(resolveErrorHints("artifact_read", body("artifact.expired"))), ["artifact.expired"]);
-});
-
 test("file_read truncation and partial parse are diagnosed", () => {
     assert.deepEqual(codes(resolveResultHints("file_read", { parseStatus: "complete", truncated: true })), ["file.partialRead"]);
     assert.deepEqual(codes(resolveResultHints("file_read", { parseStatus: "partial", truncated: false })), ["file.partialParse"]);

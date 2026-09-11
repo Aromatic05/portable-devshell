@@ -37,12 +37,9 @@ export function bashResultHints(result: JsonValue): ToolDiagnosticHint[] {
             ...(stdoutTruncated ? ["stdout"] : []),
             ...(stderrTruncated ? ["stderr"] : [])
         ].join(" and ");
-        const hasArtifact = asRecord(record.stdoutArtifact) !== undefined || asRecord(record.stderrArtifact) !== undefined;
         hints.push(diagnosticHint(
             "bash.outputTruncated",
-            hasArtifact
-                ? `Read full ${streams} with artifact_read.`
-                : `${streams} output is incomplete.`
+            `${streams} output is incomplete.`
         ));
     }
 

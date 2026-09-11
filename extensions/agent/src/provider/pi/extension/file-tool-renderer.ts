@@ -22,18 +22,6 @@ import {
     textContentLines
 } from "./renderer-utils.js";
 
-export function formatArtifactCall(record: Record<string, unknown>, theme?: PiThemeLike): string {
-    const title = style(theme, "toolTitle", "artifact", true);
-    const handle = stringField(record, "handle");
-    const offset = numberField(record, "offsetBytes");
-    const encoding = stringField(record, "encoding");
-    return joinCall(title, [
-        handle,
-        offset === undefined || offset === 0 ? undefined : `@${offset}`,
-        encoding === undefined || encoding === "utf8" ? undefined : encoding
-    ], theme);
-}
-
 export function formatReadCall(record: Record<string, unknown>, theme?: PiThemeLike): string {
     const title = style(theme, "toolTitle", "read", true);
     const files = record.files;
@@ -161,29 +149,14 @@ export function renderFileInfo(value: JsonValue | undefined): string[] {
     });
 }
 
-export function renderArtifactResult(value: JsonValue | undefined, expanded: boolean): string[] {
-    const record = asRecord(value);
-    if (record === undefined) return [];
-    const content = stringField(record, "content") ?? "";
-    const lines = content.length === 0 ? [] : content.replace(/\n$/u, "").split("\n");
-    const clipped = clipHead(lines, expanded ? 160 : 12);
-    const next = numberField(record, "nextOffsetBytes");
-    if (next !== undefined) clipped.push(`[More available: offsetBytes=${next}]`);
-    if (record.lossy === true) clipped.push("[Lossy UTF-8 decoding]");
-    if (record.artifactTruncated === true) clipped.push("[Artifact truncated at capture time]");
-    return clipped;
-}
-
 export function renderFileSummaryComponent(
-    toolName: "artifact_read" | "file_find" | "file_info" | "file_search",
+    toolName: "file_find" | "file_info" | "file_search",
     result: PiToolRenderResultLike,
     options: PiToolRenderResultOptionsLike,
     theme: PiThemeLike,
     context: PiToolRenderContextLike
 ) {
-    const lines = toolName === "artifact_read"
-        ? renderArtifactResult(result.details, options.expanded)
-        : toolName === "file_find"
+    const lines = toolName === "file_find"
             ? renderFileFind(result.details, options.expanded)
             : toolName === "file_info"
                 ? renderFileInfo(result.details)

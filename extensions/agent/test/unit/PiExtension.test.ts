@@ -499,7 +499,6 @@ test("Pi devshell renderer formats common calls without JSON fallback", () => {
 
 test("Pi devshell renderer explicitly covers the complete current Worker catalog", () => {
     const expected = [
-        "artifact_read",
         "bash_run",
         "file_edit",
         "file_find",
@@ -638,30 +637,6 @@ test("Pi devshell tmux renderer consumes Worker output arrays and keeps task sta
     assert.equal(rendered, ["build", "test", "task-abc · running · detached"].join("\n"));
     assert.equal(rendered.includes("output:"), false);
     assert.equal(rendered.includes("task:"), false);
-});
-
-test("Pi devshell artifact renderer exposes paging without dumping artifact metadata", () => {
-    const rendered = formatPiToolResult("artifact_read", {
-        content: [],
-        details: {
-            handle: "artifact-1",
-            stream: "stdout",
-            offsetBytes: 0,
-            returnedBytes: 12,
-            totalBytes: 24,
-            sourceBytes: 24,
-            content: "alpha\nbeta",
-            encoding: "utf8",
-            lossy: false,
-            eof: false,
-            nextOffsetBytes: 12,
-            artifactTruncated: false,
-            blake3: "deadbeef",
-            expiresAtMs: 123
-        }
-    }, false);
-    assert.equal(rendered, ["alpha", "beta", "[More available: offsetBytes=12]"].join("\n"));
-    assert.equal(rendered.includes("blake3"), false);
 });
 
 test("Pi devshell renderer turns file search results into readable sections", () => {

@@ -5,7 +5,6 @@ import { errorHint, type ToolDiagnosticHint } from "./ToolDiagnosticHint.js";
 import { artifactControlErrorHints } from "./control/ArtifactControlHints.js";
 import { instanceErrorHints } from "./control/InstanceHints.js";
 import { todoErrorHints } from "./control/TodoHints.js";
-import { artifactReadErrorHints, artifactReadResultHints } from "./worker/ArtifactReadHints.js";
 import { bashErrorHints, bashResultHints } from "./worker/BashHints.js";
 import {
     fileEditResultHints,
@@ -27,7 +26,6 @@ type ResultResolver = (toolName: string, result: JsonValue) => ToolDiagnosticHin
 type ErrorResolver = (toolName: string, body: ControlErrorBody) => ToolDiagnosticHint[];
 
 const resultResolvers: Record<string, ResultResolver> = {
-    artifact_read: (_toolName, result) => artifactReadResultHints(result),
     bash_run: (_toolName, result) => bashResultHints(result),
     file_edit: (_toolName, result) => fileEditResultHints(result),
     file_find: (_toolName, result) => fileFindResultHints(result),
@@ -50,7 +48,6 @@ const todoTools = new Set(["todo_read", "todo_write"]);
 
 function errorResolverFor(toolName: string): ErrorResolver | undefined {
     if (toolName === "bash_run") return (_name, body) => bashErrorHints(body);
-    if (toolName === "artifact_read") return (_name, body) => artifactReadErrorHints(body);
     if (fileTools.has(toolName)) return (name, body) => fileErrorHints(name, body);
     if (tmuxTools.has(toolName)) return (name, body) => tmuxErrorHints(name, body);
     if (artifactControlTools.has(toolName)) return (_name, body) => artifactControlErrorHints(body);

@@ -411,7 +411,7 @@ test("remote environment attach cleans an unused alert lease and reference when 
     assert.deepEqual(releasedReferences, [`remote-server:${created.ctxId}`]);
 });
 
-test("remote bash artifacts tell artifact_read to stay on the source instance", async () => {
+test("remote bash truncation does not advertise the retired artifact_read tool", async () => {
     const registry = new McpContextRegistry({ idFactory: () => "ctx-remote-artifact" });
     const created = await registry.create({
         instance: "main-pc",
@@ -449,7 +449,7 @@ test("remote bash artifacts tell artifact_read to stay on the source instance", 
         context
     ) as { comment?: string[] };
     assert.deepEqual(result.comment, [
-        `[bash.outputTruncated] Read full stdout with artifact_read using instance "remote-server".`
+        "[bash.outputTruncated] stdout output is incomplete."
     ]);
 });
 

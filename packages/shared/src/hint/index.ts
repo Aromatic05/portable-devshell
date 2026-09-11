@@ -5,7 +5,6 @@ export * from "./ToolHintResolver.js";
 export * from "./control/ArtifactControlHints.js";
 export * from "./control/InstanceHints.js";
 export * from "./control/TodoHints.js";
-export * from "./worker/ArtifactReadHints.js";
 export * from "./worker/BashHints.js";
 export * from "./worker/FileHints.js";
 export * from "./worker/TmuxHints.js";

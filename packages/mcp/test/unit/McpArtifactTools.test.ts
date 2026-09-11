@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { JsonValue, ToolCallContext, ToolDefinition } from "@portable-devshell/shared";
+import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
 import { McpContextRegistry, McpEndpointWorker, type McpInstanceGateway } from "@portable-devshell/mcp/testing";
 
 const context = { principal: "local", requestId: "artifact-request" } as const;
@@ -16,21 +16,12 @@ const withContext = <T extends Record<string, unknown>>(input: T): T & { ctxId: 
     ctxId: activeContext.ctxId
 });
 
-const artifactRead: ToolDefinition = {
-    description: "Read an artifact payload.",
-    group: "artifact",
-    inputSchema: { type: "object" },
-    name: "artifact_read",
-    outputSchema: { type: "object" },
-    requiredCapabilities: ["read"]
-};
-
 const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
     "base64"
 );
 
-test("artifact fixed MCP surface contains read and image primitives but no management operations", () => {
+test("artifact fixed MCP surface contains image primitive but no read or management operations", () => {
     const gateway = createGateway({
         async viewArtifactImage() {
             return {
@@ -50,7 +41,7 @@ test("artifact fixed MCP surface contains read and image primitives but no manag
         worker: createWorker(false, true)
     });
     const names = endpoint.listTools().map((tool) => tool.name);
-    assert.equal(names.includes("artifact_read"), true);
+    assert.equal(names.includes("artifact_read"), false);
     assert.equal(names.includes("artifact_viewImage"), true);
     assert.equal(names.includes("artifact_share"), false);
     assert.equal(names.includes("artifact_transfer"), false);
@@ -96,7 +87,7 @@ function createWorker(ready: boolean, hasSchema: boolean) {
         async callTool() { return {}; },
         async readAlerts() { return { advice: [] }; },
         hasToolSchemaCache() { return hasSchema; },
-        listTools() { return [artifactRead]; },
+        listTools() { return []; },
         snapshot() { return { ready }; }
     };
 }
@@ -122,7 +113,7 @@ function createGateway(overrides: Partial<McpInstanceGateway>): McpInstanceGatew
         async callTool() { return {}; },
         environment() { return undefined; },
         async listInstances() { return []; },
-        listTools() { return [artifactRead]; },
+        listTools() { return []; },
         async prepareWorkspace(_instance, workspace) {
             return {
                 projectMemoryAgentFile: `${workspace}/.devshell/AGENT.md`,

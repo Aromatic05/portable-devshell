@@ -175,7 +175,6 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     assert_eq!(tools["ok"], true);
     let catalog = tools["result"]["tools"].as_array().unwrap();
     let mut expected_tools = vec![
-        "artifact_read",
         "bash_run",
         "file_edit",
         "file_find",
@@ -694,9 +693,12 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
     assert!(output_limited["result"].get("timedOut").is_none());
     assert!(output_limited["result"].get("artifactWarnings").is_none());
     assert!(output_limited["result"].get("stderrArtifact").is_none());
-    let handle = output_limited["result"]["stdoutArtifact"]["handle"]
-        .as_str()
-        .expect("truncated stdout must expose an artifact handle");
+    assert!(
+        output_limited["result"]["stdoutArtifact"]["handle"]
+            .as_str()
+            .is_some(),
+        "truncated stdout must expose an artifact handle"
+    );
     assert_eq!(
         output_limited["result"]["stdoutArtifact"]["sourceBytes"],
         2000
@@ -709,49 +711,6 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
         output_limited["result"]["stdoutArtifact"]["artifactTruncated"],
         false
     );
-
-    let first = env.rpc(
-        instance,
-        &serde_json::json!({
-            "type": "request",
-            "id": "7",
-            "method": "artifact_read",
-            "params": {
-                "handle": handle,
-                "maxBytes": 1000
-            },
-            "context": { "workspace": env.workspace() }
-        }),
-    );
-    assert_eq!(first["ok"], true, "{first}");
-    assert_eq!(first["result"]["returnedBytes"], 1000);
-    assert_eq!(first["result"]["eof"], false);
-    assert_eq!(first["result"]["nextOffsetBytes"], 1000);
-
-    let second = env.rpc(
-        instance,
-        &serde_json::json!({
-            "type": "request",
-            "id": "8",
-            "method": "artifact_read",
-            "params": {
-                "handle": handle,
-                "offsetBytes": first["result"]["nextOffsetBytes"],
-                "maxBytes": 2000
-            },
-            "context": { "workspace": env.workspace() }
-        }),
-    );
-    assert_eq!(second["ok"], true, "{second}");
-    assert_eq!(second["result"]["returnedBytes"], 1000);
-    assert_eq!(second["result"]["eof"], true);
-    assert!(second["result"].get("nextOffsetBytes").is_none());
-    let restored = format!(
-        "{}{}",
-        first["result"]["content"].as_str().unwrap(),
-        second["result"]["content"].as_str().unwrap()
-    );
-    assert_eq!(restored, "x".repeat(2000));
 
     #[cfg(unix)]
     let compact_command = "printf compact";

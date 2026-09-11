@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use tempfile::{Builder, NamedTempFile};
 use uuid::Uuid;
@@ -13,16 +12,12 @@ use uuid::Uuid;
 use crate::platform::unix_time_millis;
 use crate::tools::ToolError;
 use crate::tools::artifact::storage;
-use crate::tools::artifact::types::{
-    ArtifactEncoding, ArtifactReadInput, ArtifactReadOutput, ArtifactReference, ArtifactStream,
-};
+use crate::tools::artifact::types::{ArtifactReference, ArtifactStream};
 
 const DEFAULT_STREAM_LIMIT_BYTES: usize = 256 * 1024 * 1024;
 const DEFAULT_INSTANCE_QUOTA_BYTES: usize = 1024 * 1024 * 1024;
 const DEFAULT_INSTANCE_ARTIFACT_LIMIT: usize = 4096;
 const DEFAULT_TTL: Duration = Duration::from_secs(24 * 60 * 60);
-const DEFAULT_READ_BYTES: usize = 64 * 1024;
-const MAX_READ_BYTES: usize = 1024 * 1024;
 const METADATA_VERSION: u32 = 1;
 
 #[derive(Clone, Copy)]
@@ -346,70 +341,6 @@ impl ArtifactStore {
             lease_id: lease.lease_id,
             stored_bytes: metadata.stored_bytes,
             stream: metadata.stream,
-        })
-    }
-
-    pub fn read(&self, input: ArtifactReadInput) -> Result<ArtifactReadOutput, ToolError> {
-        validate_handle(&input.handle)?;
-        let max_bytes = input.max_bytes.unwrap_or(DEFAULT_READ_BYTES);
-        if max_bytes == 0 || max_bytes > MAX_READ_BYTES {
-            return Err(ToolError::new(
-                "tool.invalidArguments",
-                format!("maxBytes must be between 1 and {MAX_READ_BYTES}"),
-            ));
-        }
-        let offset = input.offset_bytes.unwrap_or(0);
-        let encoding = input.encoding.unwrap_or_default();
-
-        let _guard = self.lock()?;
-        let metadata = self.load_metadata(&input.handle)?;
-        if metadata.expires_at_ms <= unix_time_millis() {
-            return Err(ToolError::new(
-                "artifact.expired",
-                "artifact reference has expired",
-            ));
-        }
-        if offset > metadata.stored_bytes as u64 {
-            return Err(ToolError::new(
-                "artifact.invalidOffset",
-                "offsetBytes exceeds artifact size",
-            ));
-        }
-        let mut file = fs::File::open(self.data_path(&input.handle))
-            .map_err(|_| ToolError::new("artifact.notFound", "artifact is unavailable"))?;
-        file.seek(SeekFrom::Start(offset))
-            .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
-        let remaining = metadata.stored_bytes.saturating_sub(offset as usize);
-        let requested = remaining.min(max_bytes);
-        let mut bytes = vec![0; requested];
-        file.read_exact(&mut bytes)
-            .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
-
-        let (content, lossy) = match encoding {
-            ArtifactEncoding::Utf8 => match String::from_utf8(bytes.clone()) {
-                Ok(content) => (content, false),
-                Err(_) => (String::from_utf8_lossy(&bytes).into_owned(), true),
-            },
-            ArtifactEncoding::Base64 => (STANDARD.encode(&bytes), false),
-        };
-        let next = offset.saturating_add(bytes.len() as u64);
-        let eof = next >= metadata.stored_bytes as u64;
-
-        Ok(ArtifactReadOutput {
-            handle: metadata.handle,
-            stream: metadata.stream,
-            offset_bytes: offset,
-            returned_bytes: bytes.len(),
-            total_bytes: metadata.stored_bytes,
-            source_bytes: metadata.source_bytes,
-            content,
-            encoding,
-            lossy,
-            eof,
-            next_offset_bytes: (!eof).then_some(next),
-            artifact_truncated: metadata.artifact_truncated,
-            blake3: metadata.blake3,
-            expires_at_ms: metadata.expires_at_ms,
         })
     }
 
@@ -755,46 +686,12 @@ mod tests {
 
     use super::{ArtifactPolicy, ArtifactStore, unix_time_millis};
     use crate::tools::artifact::storage;
-    use crate::tools::artifact::types::{ArtifactEncoding, ArtifactReadInput, ArtifactStream};
+    use crate::tools::artifact::types::ArtifactStream;
 
     fn store(policy: ArtifactPolicy) -> (tempfile::TempDir, std::sync::Arc<ArtifactStore>) {
         let root = crate::testing::temp_dir();
         let store = ArtifactStore::with_policy(root.path().join("artifacts"), policy).unwrap();
         (root, store)
-    }
-
-    #[test]
-    fn stores_raw_bytes_and_reads_utf8_or_base64() {
-        let (_root, store) = store(ArtifactPolicy {
-            stream_limit_bytes: 8,
-            instance_quota_bytes: 32,
-            artifact_limit: 64,
-            ttl: Duration::from_secs(60),
-        });
-        let mut draft = store.begin(ArtifactStream::Stdout).unwrap();
-        draft.write_chunk(&[0xff, b'a', b'b']).unwrap();
-        let reference = store.persist(draft).unwrap();
-
-        let utf8 = store
-            .read(ArtifactReadInput {
-                handle: reference.handle.clone(),
-                offset_bytes: None,
-                max_bytes: None,
-                encoding: Some(ArtifactEncoding::Utf8),
-            })
-            .unwrap();
-        assert!(utf8.lossy);
-
-        let base64 = store
-            .read(ArtifactReadInput {
-                handle: reference.handle,
-                offset_bytes: None,
-                max_bytes: None,
-                encoding: Some(ArtifactEncoding::Base64),
-            })
-            .unwrap();
-        assert_eq!(base64.content, "/2Fi");
-        assert!(!base64.lossy);
     }
 
     #[test]
@@ -815,16 +712,7 @@ mod tests {
         second.write_chunk(b"abcdefgh").unwrap();
         let error = store.persist(second).unwrap_err();
         assert_eq!(error.code, "artifact.quotaExceeded");
-        assert!(
-            store
-                .read(ArtifactReadInput {
-                    handle: first.handle,
-                    offset_bytes: None,
-                    max_bytes: None,
-                    encoding: None,
-                })
-                .is_ok()
-        );
+        assert!(store.data_path(&first.handle).is_file());
     }
 
     #[test]
@@ -864,7 +752,7 @@ mod tests {
     }
 
     #[test]
-    fn expired_reference_is_unreadable_while_payload_lease_keeps_content() {
+    fn expired_reference_content_survives_while_payload_lease_keeps_content() {
         let (_root, store) = store(ArtifactPolicy {
             stream_limit_bytes: 32,
             instance_quota_bytes: 64,
@@ -887,15 +775,6 @@ mod tests {
             &metadata,
         )
         .unwrap();
-        let error = store
-            .read(ArtifactReadInput {
-                handle: reference.handle.clone(),
-                offset_bytes: None,
-                max_bytes: None,
-                encoding: None,
-            })
-            .unwrap_err();
-        assert_eq!(error.code, "artifact.expired");
         assert!(store.data_path(&reference.handle).is_file());
 
         store.release_lease(&lease.lease_id).unwrap();
@@ -964,47 +843,6 @@ mod tests {
 
         store.release_lease(&lease.lease_id).unwrap();
         assert!(store.data_path(&expired.handle).is_file());
-    }
-
-    #[test]
-    fn read_does_not_run_unrelated_artifact_gc() {
-        let (_root, store) = store(ArtifactPolicy {
-            stream_limit_bytes: 32,
-            instance_quota_bytes: 40,
-            artifact_limit: 64,
-            ttl: Duration::from_secs(60),
-        });
-        let mut expired = store.begin(ArtifactStream::Stdout).unwrap();
-        expired.write_chunk(b"expired").unwrap();
-        let expired = store.persist(expired).unwrap();
-        let mut active = store.begin(ArtifactStream::Stdout).unwrap();
-        active.write_chunk(b"active").unwrap();
-        let active = store.persist(active).unwrap();
-
-        let mut metadata = store.load_metadata(&expired.handle).unwrap();
-        metadata.expires_at_ms = 0;
-        storage::write_json(
-            &store.root,
-            &store.metadata_path(&expired.handle),
-            "metadata-",
-            &metadata,
-        )
-        .unwrap();
-
-        store
-            .read(ArtifactReadInput {
-                handle: active.handle,
-                offset_bytes: None,
-                max_bytes: None,
-                encoding: None,
-            })
-            .unwrap();
-        assert!(store.data_path(&expired.handle).is_file());
-
-        let mut next = store.begin(ArtifactStream::Stdout).unwrap();
-        next.write_chunk(&[b'x'; 32]).unwrap();
-        store.persist(next).unwrap();
-        assert!(!store.data_path(&expired.handle).exists());
     }
 
     #[test]

@@ -7,12 +7,10 @@ import {
     renderFileEditResultComponent
 } from "./file-edit-renderer.js";
 import {
-    formatArtifactCall,
     formatFindCall,
     formatInfoCall,
     formatReadCall,
     formatSearchCall,
-    renderArtifactResult,
     renderFileFind,
     renderFileInfo,
     renderFileRead,
@@ -50,7 +48,6 @@ export type {
 } from "./renderer-types.js";
 
 export const devshellPiRendererToolNames = Object.freeze([
-    "artifact_read",
     "bash_run",
     "file_edit",
     "file_find",
@@ -96,7 +93,6 @@ export function renderPiToolResult(
     switch (toolName) {
         case "file_read":
             return renderFileReadComponent(result, options, theme, context);
-        case "artifact_read":
         case "file_find":
         case "file_info":
         case "file_search":
@@ -120,8 +116,6 @@ export function formatPiToolCall(toolName: string, args: unknown, theme?: PiThem
     if (record === undefined) return style(theme, "toolTitle", displayToolLabel(toolName), true);
 
     switch (toolName) {
-        case "artifact_read":
-            return formatArtifactCall(record, theme);
         case "bash_run":
             return formatShellCall(record, theme);
         case "file_edit":
@@ -157,8 +151,6 @@ export function formatPiToolResult(
     if (isError) return renderError(result, theme);
 
     switch (toolName) {
-        case "artifact_read":
-            return joinStyled(renderArtifactResult(result.details, expanded), theme);
         case "bash_run":
             return joinStyled(renderBashResult(result.details, expanded), theme);
         case "file_edit":
@@ -192,7 +184,6 @@ export function formatPiToolResult(
 
 function displayToolLabel(toolName: string): string {
     switch (toolName) {
-        case "artifact_read": return "artifact";
         case "bash_run": return "$";
         case "file_find": return "find";
         case "file_info": return "stat";

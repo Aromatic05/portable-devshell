@@ -1,5 +1,4 @@
 const titles: Readonly<Record<string, string>> = {
-    artifact_read: "Read artifact",
     artifact_share: "Share artifact",
     artifact_viewImage: "View image",
     bash_run: "Run shell command",

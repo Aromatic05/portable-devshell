@@ -2,16 +2,13 @@
 
 ## MCP 工具面
 
-Artifact 在 MCP 上只保留两个 primitive：
+Artifact 在 MCP 上只保留图片查看 primitive：
 
 ```text
-artifact_read
 artifact_viewImage
 ```
 
-`artifact_read` 是 worker 工具，只读取 `bash_run` 为 stdout 或 stderr 创建的 Artifact。
-
-`artifact_viewImage` 由 control 提供，并合并到实例 MCP endpoint 的固定工具 catalog。分享和跨实例传输属于 Artifact Extension command，不再作为 MCP tool 暴露。普通文件、目录、分享 payload 和传输 payload 不会获得 Artifact handle，也不能通过 `artifact_read` 读取。
+`artifact_viewImage` 由 control 提供，并合并到实例 MCP endpoint 的固定工具 catalog。分享和跨实例传输属于 Artifact Extension command，不再作为 MCP tool 暴露。`bash_run` 仍可将被截断的 stdout/stderr 持久化到内部 ArtifactStore，但不再向模型提供独立的 Artifact 文本读取工具。
 
 本地用户通过 `devshell artifact ...` 使用 Artifact native Extension command。模型要调用同一 domain，必须先由当前 instance 的 `[extensions].model` 允许 `artifact`，然后在 `bash_run` / `tmux_run` 中通过 Context-bound `devshell artifact ...` 调用；不存在从 model command 到 builtin CLI 的 fallback。
 
@@ -46,7 +43,7 @@ ArtifactLease
   expiresAt
 ```
 
-Artifact 引用过期或被撤销后立即不可访问，即使底层内容尚未删除，`artifact_read` 也必须拒绝读取。只有所有持久化租约都消失后，物理内容才可以删除。分享和传输任务必须先原子取得自己的租约，再返回成功。
+Artifact 引用过期或被撤销后立即不可访问，即使底层内容尚未删除。只有所有持久化租约都消失后，物理内容才可以删除。分享和传输任务必须先原子取得自己的租约，再返回成功。
 
 control 重启后从持久化租约重建引用计数；单独维护的可变计数器不具有权威性。
 

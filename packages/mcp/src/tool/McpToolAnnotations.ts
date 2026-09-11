@@ -8,7 +8,6 @@ export interface McpToolAnnotations extends Record<string, JsonValue> {
 }
 
 const readOnlyTools = new Set([
-    "artifact_read",
     "artifact_viewImage",
     "file_find",
     "file_info",
@@ -44,7 +43,6 @@ const nonDestructiveMutationTools = new Set([
 const idempotentMutationTools = new Set<string>();
 
 const closedWorldTools = new Set([
-    "artifact_read",
     "artifact_viewImage",
     "environ_info",
     "environ_remote",

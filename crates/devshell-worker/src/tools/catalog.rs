@@ -4,7 +4,6 @@ use crate::daemon::process::WorkerRuntimeContext;
 use crate::model_devshell::ModelDevshellShim;
 use crate::socket::SocketPaths;
 use crate::storage::InstancePaths;
-use crate::tools::artifact::read::ArtifactReadTool;
 use crate::tools::artifact::store::ArtifactStore;
 use crate::tools::bash::run::BashRunTool;
 use crate::tools::file::FileToolState;
@@ -33,7 +32,6 @@ pub fn builtin_registry(
         Arc::clone(&artifacts),
         Arc::clone(&model_devshell),
     )?) as Arc<_>)?;
-    registry.register(Arc::new(ArtifactReadTool::new(Arc::clone(&artifacts))) as Arc<_>)?;
     registry.register(Arc::new(FileReadTool::new(Arc::clone(&files))) as Arc<_>)?;
     registry.register(Arc::new(FileEditTool::new(Arc::clone(&files))) as Arc<_>)?;
     registry.register(Arc::new(FileFindTool::new(Arc::clone(&files))) as Arc<_>)?;
