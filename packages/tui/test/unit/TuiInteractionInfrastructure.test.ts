@@ -107,6 +107,14 @@ test("Audit replaces upper Context navigation with workspace sessions while Inst
     await harness.dispatch({ type: "focus.activate" });
     assert.equal(selectSidebarModel(harness.store.getState()).context.kind, "pages");
     assert.equal(harness.store.getState().ui.selectedPage, "audit");
+
+    assert.equal(
+        harness.focusManager.setFocus({ id: "audit", kind: "context" }),
+        true,
+    );
+    await harness.dispatch({ type: "focus.activate" });
+    assert.equal(selectSidebarModel(harness.store.getState()).context.kind, "audit");
+    assert.equal(harness.store.getState().ui.sidebarLevel, "section");
 });
 
 test("reload works on every current page", async () => {

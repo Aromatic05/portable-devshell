@@ -10,16 +10,23 @@ import type { TuiAppAction, TuiAppState } from "./TuiStoreModel.js";
 export function reduceTuiStoreReducerRoute(state: TuiAppState, action: TuiAppAction): TuiAppState | undefined {
     switch (action.type) {
         case "ui.selectPage": {
-            if (state.ui.selectedPage === action.page) return state;
+            const sidebarLevel =
+                action.page === "audit" || action.page === "messages"
+                    ? "section"
+                    : "root";
+            if (state.ui.selectedPage === action.page) {
+                if (state.ui.sidebarLevel === sidebarLevel) return state;
+                return {
+                    ...state,
+                    ui: { ...state.ui, sidebarLevel },
+                };
+            }
             const next = transitionTuiRouteContext(state, action.page, state.ui.selectedInstance);
             return {
                 ...next,
                 ui: {
                     ...next.ui,
-                    sidebarLevel:
-                        action.page === "audit" || action.page === "messages"
-                            ? "section"
-                            : "root",
+                    sidebarLevel,
                 },
             };
         }
