@@ -23,7 +23,7 @@ const state: WebState = {
             ctxId: "ctx-old-active",
             expiresAt: "2026-10-01T00:00:00Z",
             instance: "alpha",
-            lastAccessedAt: "2026-09-01T00:00:00Z",
+            lastAccessedAt: new Date(Date.now() - 5 * 60 * 1_000).toISOString(),
             principal: "client-alpha",
             status: "active",
             workspace: "/work/portable-devshell",
@@ -80,8 +80,9 @@ const threadRoute: Extract<WebRoute, { page: "messages" }> = {
 };
 
 describe("Messages", () => {
-    it("keeps registered active Contexts visible regardless of recent activity", () => {
-        expect(selectWebMessageSessions(state)).toEqual([
+    it("keeps only sessions active within the last 30 minutes", () => {
+        const now = Date.parse("2026-09-02T10:05:00Z");
+        expect(selectWebMessageSessions(state, now)).toEqual([
             expect.objectContaining({
                 ctxId: "ctx-old-active",
                 instance: "alpha",
@@ -89,6 +90,25 @@ describe("Messages", () => {
                 title: "portable-devshell",
             }),
         ]);
+
+        expect(selectWebMessageSessions({
+            ...state,
+            readModel: {
+                ...state.readModel,
+                contexts: state.readModel.contexts.map((context) => ({
+                    ...context,
+                    lastAccessedAt: "2026-09-02T09:20:00Z",
+                })),
+                instanceState: {
+                    ...state.readModel.instanceState,
+                    alpha: {
+                        ...state.readModel.instanceState.alpha!,
+                        contextMessages: [],
+                        reportCalls: [],
+                    },
+                },
+            },
+        }, now)).toEqual([]);
     });
 
     it("projects Comments and completed todo_report calls into one chronological conversation", () => {

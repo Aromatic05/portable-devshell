@@ -7,23 +7,29 @@ import {
     type ToolCallResult,
 } from "../../selectors/toolCalls.js";
 
+export type AuditContextStatusFilter = "active" | "expired" | "disabled" | "all";
+
 export interface AuditScopeOption {
     label: string;
     scope: AuditScope;
 }
 
 export function AuditFilters({
+    contextStatus,
     filters,
     onChange,
     onClear,
+    onContextStatusChange,
     onScopeChange,
     scope,
     scopes,
     tools,
 }: {
+    contextStatus: AuditContextStatusFilter;
     filters: Filters;
     onChange(next: Filters): void;
     onClear(): void;
+    onContextStatusChange(status: AuditContextStatusFilter): void;
     onScopeChange(scope: AuditScope): void;
     scope: AuditScope;
     scopes: readonly AuditScopeOption[];
@@ -31,6 +37,7 @@ export function AuditFilters({
 }) {
     const [advancedOpen, setAdvancedOpen] = useState(false);
     const advancedCount = [
+        contextStatus !== "active",
         filters.workspace.length > 0,
         filters.tool !== "all",
         filters.period !== "all",
@@ -85,11 +92,13 @@ export function AuditFilters({
             >{label}</button>)}
         </div>
         {advancedCount === 0 ? null : <div aria-label="Active filters" className="audit-filter-chips" role="group">
+            {contextStatus === "active" ? null : <button onClick={() => onContextStatusChange("active")} type="button">Context: {contextStatus} ×</button>}
             {filters.workspace.length === 0 ? null : <button onClick={() => onChange({ ...filters, workspace: "" })} type="button">Workspace: {filters.workspace} ×</button>}
             {filters.tool === "all" ? null : <button onClick={() => onChange({ ...filters, tool: "all" })} type="button">Tool: {filters.tool} ×</button>}
             {filters.period === "all" ? null : <button onClick={() => onChange({ ...filters, period: "all" })} type="button">Time: {filters.period} ×</button>}
         </div>}
         {advancedOpen ? <div className="audit-advanced-filters">
+            <label>Context status<select onChange={(event) => onContextStatusChange(event.target.value as AuditContextStatusFilter)} value={contextStatus}><option value="active">Active · last 30 min</option><option value="expired">Expired</option><option value="disabled">Disabled</option><option value="all">All statuses</option></select></label>
             <label>Workspace<input onChange={(event) => onChange({ ...filters, workspace: event.target.value })} placeholder="Path or folder" type="search" value={filters.workspace} /></label>
             <label>Tool<select onChange={(event) => onChange({ ...filters, tool: event.target.value })} value={filters.tool}><option value="all">All tools</option>{tools.map((tool) => <option key={tool} value={tool}>{tool}</option>)}</select></label>
             <label>Time range<select onChange={(event) => onChange({ ...filters, period: event.target.value as ToolCallPeriod })} value={filters.period}><option value="all">All time</option><option value="1h">Last hour</option><option value="24h">Last 24 hours</option></select></label>

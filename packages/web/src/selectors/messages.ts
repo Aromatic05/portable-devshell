@@ -23,7 +23,28 @@ export interface WebMessageSession {
     workspace?: string;
 }
 
-export function selectWebMessageSessions(state: WebState): WebMessageSession[] {
+const activeSessionWindowMs = 30 * 60 * 1_000;
+
+export function selectWebMessageSessions(
+    state: WebState,
+    now: number = Date.now(),
+): WebMessageSession[] {
+    return projectWebMessageSessions(state).filter(
+        (session) => Date.parse(session.latestAt) >= now - activeSessionWindowMs,
+    );
+}
+
+export function selectWebMessageSession(
+    state: WebState,
+    instance: string,
+    ctxId: string,
+): WebMessageSession | undefined {
+    return projectWebMessageSessions(state).find(
+        (session) => session.instance === instance && session.ctxId === ctxId,
+    );
+}
+
+function projectWebMessageSessions(state: WebState): WebMessageSession[] {
     const sessions = new Map<string, Omit<WebMessageSession, "title">>();
     const touch = (
         instance: string,

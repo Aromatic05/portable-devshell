@@ -9,6 +9,8 @@ import type { WebRoute } from "../src/routing/hashRoute.js";
 import type { WebState, WebStore } from "../src/state/WebStore.js";
 import { Audit } from "../src/views/Audit.js";
 
+const recentContextAccess = new Date(Date.now() - 5 * 60 * 1_000).toISOString();
+
 const alphaCall = {
     callId: "call-alpha",
     completedAt: "2026-07-31T09:00:01Z",
@@ -49,7 +51,7 @@ const state: WebState = {
             ctxId: "ctx-alpha",
             expiresAt: "2026-12-01T00:00:00Z",
             instance: "alpha",
-            lastAccessedAt: "2026-07-01T00:00:00Z",
+            lastAccessedAt: recentContextAccess,
             principal: "client-alpha",
             status: "active",
             workspace: "/workspace/alpha",
@@ -58,7 +60,7 @@ const state: WebState = {
             ctxId: "ctx-beta",
             expiresAt: "2026-12-01T00:00:00Z",
             instance: "beta",
-            lastAccessedAt: "2026-07-31T09:00:00Z",
+            lastAccessedAt: recentContextAccess,
             principal: "client-beta",
             status: "active",
             workspace: "/workspace/beta",
@@ -167,17 +169,47 @@ function renderAudit({
 }
 
 describe("Audit", () => {
-    it("uses route Scope as navigation state and does not hide old active Contexts", () => {
+    it("uses route Scope as navigation state and defaults Context filtering to active in the last 30 minutes", () => {
         const { navigate } = renderAudit();
 
         const scope = screen.getByLabelText("Scope");
         expect(within(scope).getByRole("option", { name: /ctx-alpha.*active/u })).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+        expect(screen.getByLabelText("Context status")).toHaveValue("active");
         fireEvent.change(scope, { target: { value: "#/audit/context/alpha/ctx-alpha" } });
         expect(navigate).toHaveBeenCalledWith({
             page: "audit",
             view: "timeline",
             scope: { kind: "context", instance: "alpha", ctxId: "ctx-alpha" },
         });
+    });
+
+    it("filters stale active Contexts and their tool calls outside the 30 minute window", () => {
+        const staleState: WebState = {
+            ...state,
+            readModel: {
+                ...state.readModel,
+                contexts: state.readModel.contexts.map((context) =>
+                    context.ctxId === "ctx-alpha"
+                        ? {
+                              ...context,
+                              lastAccessedAt: new Date(Date.now() - 31 * 60 * 1_000).toISOString(),
+                          }
+                        : context
+                ),
+            },
+        };
+        const view = renderAudit({ state: staleState });
+
+        expect(screen.queryByRole("option", { name: /ctx-alpha/u })).not.toBeInTheDocument();
+        expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(1);
+        expect(screen.queryByText("bash_run", { selector: "strong" })).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+        fireEvent.change(screen.getByLabelText("Context status"), { target: { value: "all" } });
+
+        expect(screen.getByRole("option", { name: /ctx-alpha/u })).toBeInTheDocument();
+        expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(2);
     });
 
     it("separates Search, quick result filters, and collapsed advanced filters", () => {
@@ -281,7 +313,23 @@ describe("Audit", () => {
 
     it("keeps batch Context management separate from Audit scope", async () => {
         const disableContexts = vi.fn(async () => true);
-        renderAudit({ store: { disableContexts } });
+        renderAudit({
+            state: {
+                ...state,
+                readModel: {
+                    ...state.readModel,
+                    contexts: state.readModel.contexts.map((context) =>
+                        context.ctxId === "ctx-alpha"
+                            ? {
+                                  ...context,
+                                  lastAccessedAt: new Date(Date.now() - 2 * 60 * 60 * 1_000).toISOString(),
+                              }
+                            : context
+                    ),
+                },
+            },
+            store: { disableContexts },
+        });
         fireEvent.click(screen.getByRole("button", { name: "Manage Contexts" }));
 
         const dialog = screen.getByRole("dialog", { name: "Disable inactive Contexts" });

@@ -1,9 +1,12 @@
 import { useMemo, useState } from "react";
 
+import type { McpContextRecord } from "@portable-devshell/shared/browser";
+
 import { ContextBatchDisableDialog } from "../components/ContextBatchDisableDialog.js";
 import { ContextIntervention } from "../components/ContextIntervention.js";
 import {
     AuditFilters,
+    type AuditContextStatusFilter,
     type AuditScopeOption,
 } from "../components/toolcall/AuditFilters.js";
 import { ToolCallEntry } from "../components/toolcall/ToolCallEntry.js";
@@ -17,6 +20,7 @@ import {
 import type { WebState, WebStore } from "../state/WebStore.js";
 
 const toolCallPageSize = 20;
+const activeContextWindowMs = 30 * 60 * 1_000;
 
 export function Audit({
     disabled = false,
@@ -32,6 +36,7 @@ export function Audit({
     store: WebStore;
 }) {
     const [filters, setFilters] = useState<Filters>(emptyToolCallFilters);
+    const [contextStatus, setContextStatus] = useState<AuditContextStatusFilter>("active");
     const [toolCallPage, setToolCallPage] = useState(0);
     const [batchDisableOpen, setBatchDisableOpen] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
@@ -41,13 +46,24 @@ export function Audit({
         [instanceState],
     );
     const scope = auditScope(route);
+    const contextRecords = useMemo(
+        () => new Map(state.readModel.contexts.map((context) => [context.ctxId, context])),
+        [state.readModel.contexts],
+    );
+    const now = Date.now();
+    const calls = useMemo(
+        () => allCalls.filter((call) =>
+            callMatchesContextFilter(call, scope, contextRecords, contextStatus, now)
+        ),
+        [allCalls, contextRecords, contextStatus, now, scope],
+    );
     const scopes = useMemo(
-        () => auditScopeOptions(state, allCalls),
-        [allCalls, state],
+        () => auditScopeOptions(state, allCalls, contextStatus, now, scope),
+        [allCalls, contextStatus, now, scope, state],
     );
     const scopedCalls = useMemo(
-        () => allCalls.filter((call) => callMatchesScope(call, scope)),
-        [allCalls, scope],
+        () => calls.filter((call) => callMatchesScope(call, scope)),
+        [calls, scope],
     );
     const tools = useMemo(
         () => [...new Set(scopedCalls.map((call) => call.toolName))].sort(),
@@ -66,7 +82,7 @@ export function Audit({
             toolCallPageSize,
         );
     }, [filters, route, scopedCalls, toolCallPage]);
-    const active = hasActiveToolCallFilters(filters);
+    const active = contextStatus !== "all" || hasActiveToolCallFilters(filters);
     const interactive = state.connection === "online" && !disabled;
     const countText = route.view === "call"
         ? selection.total === 0 ? "Tool call not found in the current read model." : "Tool call detail."
@@ -105,9 +121,17 @@ export function Audit({
             </div>
         </div>
         <AuditFilters
+            contextStatus={contextStatus}
             filters={filters}
             onChange={changeFilters}
-            onClear={() => setFilters(emptyToolCallFilters)}
+            onClear={() => {
+                setContextStatus("active");
+                setFilters(emptyToolCallFilters);
+            }}
+            onContextStatusChange={(nextStatus) => {
+                setToolCallPage(0);
+                setContextStatus(nextStatus);
+            }}
             onScopeChange={(nextScope) => {
                 setToolCallPage(0);
                 navigate({ page: "audit", view: "timeline", scope: nextScope });
@@ -167,9 +191,17 @@ function auditScope(route: Extract<WebRoute, { page: "audit" }>): AuditScope {
 function auditScopeOptions(
     state: WebState,
     calls: readonly { ctxId?: string; instance: string }[],
+    contextStatus: AuditContextStatusFilter,
+    now: number,
+    currentScope: AuditScope,
 ): AuditScopeOption[] {
     const instances = new Set(state.readModel.instances.map((instance) => instance.name));
-    const contexts = new Map<string, { ctxId: string; instance: string; status?: string }>();
+    const contexts = new Map<string, {
+        ctxId: string;
+        instance: string;
+        record?: McpContextRecord;
+        status?: string;
+    }>();
     for (const context of state.readModel.contexts) {
         const environments = context.environments ?? [{ instance: context.instance }];
         for (const environment of environments) {
@@ -177,6 +209,7 @@ function auditScopeOptions(
             contexts.set(`${environment.instance}\u0000${context.ctxId}`, {
                 ctxId: context.ctxId,
                 instance: environment.instance,
+                record: context,
                 status: context.status,
             });
         }
@@ -195,6 +228,12 @@ function auditScopeOptions(
             scope: { kind: "instance", instance },
         })),
         ...[...contexts.values()]
+            .filter((context) =>
+                (currentScope.kind === "context" &&
+                    currentScope.instance === context.instance &&
+                    currentScope.ctxId === context.ctxId) ||
+                contextMatchesFilter(context.record, contextStatus, now)
+            )
             .sort((left, right) =>
                 left.instance.localeCompare(right.instance) || left.ctxId.localeCompare(right.ctxId)
             )
@@ -203,6 +242,35 @@ function auditScopeOptions(
                 scope: { kind: "context", instance: context.instance, ctxId: context.ctxId },
             })),
     ];
+}
+
+function callMatchesContextFilter(
+    call: { ctxId?: string; instance: string },
+    scope: AuditScope,
+    contextRecords: ReadonlyMap<string, McpContextRecord>,
+    filter: AuditContextStatusFilter,
+    now: number,
+): boolean {
+    if (
+        scope.kind === "context" &&
+        call.instance === scope.instance &&
+        call.ctxId === scope.ctxId
+    ) {
+        return true;
+    }
+    return call.ctxId === undefined ||
+        contextMatchesFilter(contextRecords.get(call.ctxId), filter, now);
+}
+
+function contextMatchesFilter(
+    context: McpContextRecord | undefined,
+    filter: AuditContextStatusFilter,
+    now: number,
+): boolean {
+    if (filter === "all" || context === undefined) return true;
+    if (context.status !== filter) return false;
+    return filter !== "active" ||
+        Date.parse(context.lastAccessedAt) >= now - activeContextWindowMs;
 }
 
 function callMatchesScope(

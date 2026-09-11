@@ -4,6 +4,7 @@ import { webRouteHref, type WebRoute } from "../routing/hashRoute.js";
 import {
     filterWebMessageSessions,
     selectWebMessageEntries,
+    selectWebMessageSession,
     selectWebMessageSessions,
 } from "../selectors/messages.js";
 import type { WebState } from "../state/WebState.js";
@@ -25,9 +26,7 @@ export function Messages({
         [query, sessions],
     );
     const selected = route.view === "thread"
-        ? sessions.find((session) =>
-            session.instance === route.instance && session.ctxId === route.ctxId
-        )
+        ? selectWebMessageSession(state, route.instance, route.ctxId)
         : undefined;
     const entries = route.view === "thread"
         ? selectWebMessageEntries(state, route.instance, route.ctxId)
