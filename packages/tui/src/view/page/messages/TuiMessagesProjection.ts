@@ -1,5 +1,6 @@
 import {
-    workspaceFolderName,
+    compactContextId,
+    humanConversationTitle,
     type ContextMessageStatus,
     type ConversationEntry,
 } from "@portable-devshell/shared";
@@ -93,11 +94,7 @@ export function selectTuiMessagesSidebarEntries(
     const sessions = instance === undefined
         ? []
         : selectTuiMessageSessions(state, instance, now);
-    const baseLabels = sessions.map((session) =>
-        session.workspace === undefined
-            ? compactContextId(session.ctxId)
-            : workspaceFolderName(session.workspace),
-    );
+    const baseLabels = sessions.map((session) => humanConversationTitle(session, 8));
     const labelCounts = new Map<string, number>();
     for (const label of baseLabels) {
         labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
@@ -113,9 +110,9 @@ export function selectTuiMessagesSidebarEntries(
             target: { kind: "root" },
         },
         ...sessions.map((session, index): TuiSidebarContextEntry => {
-            const baseLabel = baseLabels[index] ?? compactContextId(session.ctxId);
+            const baseLabel = baseLabels[index] ?? humanConversationTitle(session, 8);
             const label = (labelCounts.get(baseLabel) ?? 0) > 1
-                ? `${baseLabel} · ${compactContextId(session.ctxId)}`
+                ? `${baseLabel} · ${compactContextId(session.ctxId, 8)}`
                 : baseLabel;
             return {
                 focused:
@@ -239,8 +236,4 @@ function formatMessageTime(value: string): string {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
     return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
-
-function compactContextId(ctxId: string): string {
-    return ctxId.length <= 12 ? ctxId : `${ctxId.slice(0, 8)}…`;
 }

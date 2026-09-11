@@ -1,5 +1,5 @@
 import {
-    workspaceFolderName,
+    humanConversationTitle,
     type ContextMessageStatus,
 } from "@portable-devshell/shared/browser";
 
@@ -91,14 +91,12 @@ function projectWebMessageSessions(state: WebState): WebMessageSession[] {
     }
 
     const values = [...sessions.values()];
-    const baseTitles = values.map((session) => session.workspace === undefined
-        ? compactContextId(session.ctxId)
-        : workspaceFolderName(session.workspace));
+    const baseTitles = values.map((session) => humanConversationTitle(session));
     const titleCounts = new Map<string, number>();
     for (const title of baseTitles) titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
     return values
         .map((session, index): WebMessageSession => {
-            const baseTitle = baseTitles[index] ?? compactContextId(session.ctxId);
+            const baseTitle = baseTitles[index] ?? humanConversationTitle(session);
             return {
                 ...session,
                 title: (titleCounts.get(baseTitle) ?? 0) > 1
@@ -143,10 +141,6 @@ export function filterWebMessageSessions(
         session.workspace,
         session.status,
     ].some((value) => value?.toLowerCase().includes(needle) === true));
-}
-
-function compactContextId(ctxId: string): string {
-    return ctxId.length <= 16 ? ctxId : `${ctxId.slice(0, 12)}…`;
 }
 
 function isWebMessageSessionActive(session: WebMessageSession, now: number): boolean {

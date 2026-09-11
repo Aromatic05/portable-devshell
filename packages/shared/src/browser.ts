@@ -134,5 +134,5 @@ export type {
     TerminalVersionedIdentity
 } from "./dto/terminal/DtoTerminal.js";
 
-export { formatBytes, formatDuration, formatJsonSummary, formatJsonValue, formatPercent, jsonDetailLimits, jsonSearchLimits, parseJsonFallback, projectTodoTaskSummaries, resolveToolOutput, toolCallOutcome, toolCallOutput, workspaceFolderName } from "./presentation/ControlPresentation.js";
+export { compactContextId, formatBytes, formatDuration, formatJsonSummary, formatJsonValue, formatPercent, formatRelativeTime, humanConversationTitle, jsonDetailLimits, jsonSearchLimits, parseJsonFallback, projectTodoTaskSummaries, resolveToolOutput, toolCallOutcome, toolCallOutput, workspaceFolderName } from "./presentation/ControlPresentation.js";
 export type { JsonFormatLimits } from "./presentation/ControlPresentation.js";
