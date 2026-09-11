@@ -66,12 +66,6 @@ export function TuiApp(props: TuiAppProps) {
             (connection.status === "connecting" ? 1 : 0),
     );
     const terminalRows = Math.max(1, viewportRows - 1);
-    const openTerminal = useCallback(
-        async (instance: string | undefined, columns: number, rows: number) => {
-            await props.runtime.openTerminal(instance, columns, rows);
-        },
-        [props.runtime]
-    );
     const renderTerminalGraphics = useCallback(
         (visible: boolean) => props.runtime.renderTerminalGraphics(visible),
         [props.runtime]
@@ -119,7 +113,6 @@ export function TuiApp(props: TuiAppProps) {
                                     focused={state.interaction.focusScope === "terminal"}
                                     instance={state.ui.selectedInstance}
                                     onGraphicsVisibility={renderTerminalGraphics}
-                                    onOpen={openTerminal}
                                     rows={Math.max(1, terminalRows - 1)}
                                     source={props.runtime.terminal}
                                 />

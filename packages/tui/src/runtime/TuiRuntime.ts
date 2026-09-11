@@ -290,11 +290,7 @@ export class TuiRuntime {
                 this.store.setSelectedInstance(instance);
                 this.store.setSelectedPage("terminal");
                 this.store.setFocusScope("terminal");
-                await this.openTerminal(
-                    instance,
-                    this.#terminalColumns,
-                    this.#terminalRows,
-                );
+                await this.#syncTerminalSession();
             },
             onTerminalKill: async (instance) => {
                 const killed = await this.#controlTerminalPty?.kill(instance);
@@ -340,11 +336,7 @@ export class TuiRuntime {
             onPageReload: async (page, instance) => {
                 if (page === "terminal") {
                     this.#terminalInstance = undefined;
-                    await this.openTerminal(
-                        instance,
-                        this.#terminalColumns,
-                        this.#terminalRows,
-                    );
+                    await this.#syncTerminalSession();
                     return;
                 }
                 await this.#operations.reloadPage(page, instance);
@@ -395,6 +387,7 @@ export class TuiRuntime {
                 }
             }
             this.#syncTerminalFocus();
+            void this.#syncTerminalSession();
             this.#syncTmuxPanes();
         });
         this.focusManager.syncPanel(
@@ -553,7 +546,22 @@ export class TuiRuntime {
         const rows = this.#stdout.rows ?? 40;
         if (!this.viewport.resize(columns, rows)) return;
         this.selection.resize(columns, rows);
+        void this.#syncTerminalSession();
     };
+
+    async #syncTerminalSession(): Promise<void> {
+        const state = this.store.getState();
+        const region = buildTuiTerminalViewportRegion(state, {
+            columns: this.columns,
+            rows: this.rows,
+        });
+        if (region === undefined) return;
+        await this.openTerminal(
+            state.ui.selectedInstance,
+            region.width,
+            region.height,
+        );
+    }
 
     redraw(): void {
         this.#stdout.write("\u001B[2J\u001B[H");

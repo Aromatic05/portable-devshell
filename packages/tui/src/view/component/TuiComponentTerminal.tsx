@@ -13,7 +13,6 @@ export interface TuiComponentTerminalProps {
     focused: boolean;
     instance?: string;
     onGraphicsVisibility(visible: boolean): void;
-    onOpen(instance: string | undefined, columns: number, rows: number): Promise<void>;
     rows: number;
     source: TuiTerminalRenderSource;
 }
@@ -24,10 +23,6 @@ export function TuiComponentTerminal(props: TuiComponentTerminalProps) {
         () => props.source.getSnapshot(),
         () => props.source.getSnapshot()
     );
-
-    useEffect(() => {
-        void props.onOpen(props.instance, props.columns, props.rows);
-    }, [props.columns, props.instance, props.onOpen, props.rows]);
 
     useEffect(() => {
         props.onGraphicsVisibility(true);
