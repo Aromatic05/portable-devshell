@@ -10,25 +10,33 @@ import { type InstanceLogEntry, LogStoreInstance } from "../../src/log/store/Log
 import { WorkerInstanceToolLog } from "../../src/worker/instance/tool/WorkerInstanceToolLog.ts";
 
 test("WorkerInstanceToolLog chunks large streams without changing their content", async () => {
-    const appended: Array<{ message: string; stream: string }> = [];
+    const appended: Array<{ context: unknown; message: string; stream: string }> = [];
     const events: Array<{ data: unknown; type: string }> = [];
     const log = new WorkerInstanceToolLog({
         async appendEvent(type, data) {
             events.push({ data, type });
         },
         logStore: {
-            async append(stream: string, message: string) {
-                appended.push({ message, stream });
+            async append(stream: string, message: string, _at: string, context: unknown) {
+                appended.push({ context, message, stream });
                 return {};
             },
         } as never,
     });
     const stdout = `${"A".repeat(256 * 1024 - 1)}😀${"B".repeat(512 * 1024)}`;
 
-    await log.append(
-        { stderr: "", stdout },
-        { callId: "call-large-log", source: "mcp", toolName: "bash_run" },
-    );
+    const wideContext = {
+        callId: "call-large-log",
+        ctxId: "ctx-log",
+        inputSummary: "duplicate input",
+        requestId: "request-log",
+        source: "mcp" as const,
+        taskId: "task-log",
+        todoItemId: "item-log",
+        toolName: "bash_run",
+        workspace: "/duplicate/workspace",
+    };
+    await log.append({ stderr: "", stdout }, wideContext);
 
     assert.equal(appended.length, 4);
     assert.equal(appended.every((entry) => entry.stream === "stdout"), true);
@@ -37,12 +45,24 @@ test("WorkerInstanceToolLog chunks large streams without changing their content"
         appended.every((entry) => Buffer.byteLength(entry.message, "utf8") <= 768 * 1024),
         true,
     );
+    assert.deepEqual(appended[0]?.context, {
+        callId: "call-large-log",
+        ctxId: "ctx-log",
+        requestId: "request-log",
+        source: "mcp",
+        toolName: "bash_run",
+    });
     assert.equal(events.length, 1);
     assert.equal(events[0]?.type, "log.appended");
     assert.equal(
         (events[0]?.data as { bytes?: number }).bytes,
         Buffer.byteLength(stdout, "utf8"),
     );
+    const eventData = events[0]?.data as Record<string, unknown>;
+    assert.equal("inputSummary" in eventData, false);
+    assert.equal("workspace" in eventData, false);
+    assert.equal("taskId" in eventData, false);
+    assert.equal("todoItemId" in eventData, false);
 });
 
 test("WorkerInstanceToolLog keeps bounded reads below one MiB of decoded stream data", async () => {

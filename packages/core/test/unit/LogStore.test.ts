@@ -1006,19 +1006,28 @@ test("LogStoreInstance and AuditToolCallHistory write and query per-instance rec
             })
         );
 
-        const logEntry = await logStore.append("stdout", "hello", "2026-07-07T00:00:00.000Z", {
+        const wideLogContext = {
             callId: "call-1",
             requestId: "request-1",
             ctxId: "context-1",
+            inputSummary: "must-not-persist",
             source: "mcp",
-            toolName: "bash_run"
-        });
+            taskId: "task-duplicate",
+            todoItemId: "item-duplicate",
+            toolName: "bash_run",
+            workspace: "/duplicate/workspace"
+        } as const;
+        const logEntry = await logStore.append("stdout", "hello", "2026-07-07T00:00:00.000Z", wideLogContext);
         assert.equal(logEntry.seq, 1);
         assert.equal(logEntry.callId, "call-1");
         assert.equal(logEntry.requestId, "request-1");
         assert.equal(logEntry.ctxId, "context-1");
         assert.equal(logEntry.source, "mcp");
         assert.equal(logEntry.toolName, "bash_run");
+        assert.equal("inputSummary" in logEntry, false);
+        assert.equal("workspace" in logEntry, false);
+        assert.equal("taskId" in logEntry, false);
+        assert.equal("todoItemId" in logEntry, false);
         assert.deepEqual(await logStore.read({ fromSeq: 1 }), [logEntry]);
 
         const patch = "*** Begin Patch\n*** Update File: src/example.ts\n" + "+line\n".repeat(120) + "*** End Patch";

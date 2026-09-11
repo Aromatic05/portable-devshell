@@ -37,13 +37,21 @@ export class WorkerInstanceToolLog {
         }
     ): Promise<void> {
         const at = new Date().toISOString();
+        const logContext = {
+            callId: context.callId,
+            ...(context.requestId === undefined ? {} : { requestId: context.requestId }),
+            ...(context.ctxId === undefined ? {} : { ctxId: context.ctxId }),
+            ...(context.extensionId === undefined ? {} : { extensionId: context.extensionId }),
+            source: context.source,
+            toolName: context.toolName,
+        };
 
         if (result.stdout.length > 0) {
-            const bytes = await this.#appendStream("stdout", result.stdout, at, context);
+            const bytes = await this.#appendStream("stdout", result.stdout, at, logContext);
             await this.#appendEvent(
                 "log.appended",
                 toEventData({
-                    ...context,
+                    ...logContext,
                     bytes,
                     preview: readPreview(result.stdout),
                     stream: "stdout",
@@ -53,11 +61,11 @@ export class WorkerInstanceToolLog {
         }
 
         if (result.stderr.length > 0) {
-            const bytes = await this.#appendStream("stderr", result.stderr, at, context);
+            const bytes = await this.#appendStream("stderr", result.stderr, at, logContext);
             await this.#appendEvent(
                 "log.appended",
                 toEventData({
-                    ...context,
+                    ...logContext,
                     bytes,
                     preview: readPreview(result.stderr),
                     stream: "stderr",

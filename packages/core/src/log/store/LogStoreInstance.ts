@@ -39,7 +39,12 @@ export class LogStoreInstance {
             await this.#initialize();
             const entry: InstanceLogEntry = {
                 at,
-                ...context,
+                ...(context.callId === undefined ? {} : { callId: context.callId }),
+                ...(context.requestId === undefined ? {} : { requestId: context.requestId }),
+                ...(context.ctxId === undefined ? {} : { ctxId: context.ctxId }),
+                ...(context.extensionId === undefined ? {} : { extensionId: context.extensionId }),
+                ...(context.source === undefined ? {} : { source: context.source }),
+                ...(context.toolName === undefined ? {} : { toolName: context.toolName }),
                 instanceName: this.#instanceName,
                 message,
                 seq: this.#lastSeq + 1,
