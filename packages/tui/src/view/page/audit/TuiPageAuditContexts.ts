@@ -54,6 +54,15 @@ export function buildAuditContextListBoxes(
                 context.key.kind === "unscoped"
                     ? "audit-scope:unscoped"
                     : `audit-context:${context.key.ctxId}`,
+            primaryRoute:
+                context.key.kind === "unscoped"
+                    ? { page: "audit", scope: "unscoped", view: "context" }
+                    : {
+                          ctxId: context.key.ctxId,
+                          page: "audit",
+                          scope: "context",
+                          view: "context",
+                      },
             searchText: [
                 context.label,
                 `workspace ${context.workspace ?? ""}`,
