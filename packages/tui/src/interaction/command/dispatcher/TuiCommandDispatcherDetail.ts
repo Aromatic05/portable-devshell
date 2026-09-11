@@ -207,24 +207,21 @@ export class TuiCommandDispatcherDetail {
                     return false;
                 }
                 this.#store.setSelectedPage("audit");
-                this.#store.replaceRoute(
-                    entry.ctxId === undefined || entry.ctxId.length === 0
-                        ? {
-                              callId: entry.callId,
-                              page: "audit",
-                              scope: "unscoped",
-                              view: "call",
-                          }
-                        : {
-                              callId: entry.callId,
-                              ctxId: entry.ctxId,
-                              page: "audit",
-                              scope: "context",
-                              view: "call",
-                          },
-                );
+                await this.#dispatch({ type: "page.reload" });
+                const call = this.#store.getState().readModel.instanceState[state.ui.selectedInstance ?? ""]?.toolCalls
+                    .find((candidate) => candidate.callId === entry.callId);
+                if (call === undefined) {
+                    this.#store.setScreenStatus("audit", "Linked tool call is no longer available in Audit history.");
+                    this.#focus.syncMainFocus();
+                    return false;
+                }
+                this.#store.replaceRoute(call.ctxId === undefined || call.ctxId.length === 0
+                    ? { page: "audit", scope: "unscoped", view: "context" }
+                    : { ctxId: call.ctxId, page: "audit", scope: "context", view: "context" });
+                this.#store.setMainFocusId(`audit-call:${call.callId}`);
                 this.#store.setFocusScope("mainBoxes");
-                this.#focus.syncMainFocus();
+                this.#focus.ensureMainFocusVisible();
+                this.#store.setScreenStatus("audit", undefined);
                 return true;
             }
             if (button !== undefined && state.ui.selectedPage === "instances") {

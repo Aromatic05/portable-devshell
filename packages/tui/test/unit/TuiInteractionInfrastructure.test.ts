@@ -308,24 +308,6 @@ test("Audit opens Comment conversation only from a concrete context route", asyn
     });
     assert.equal(topTuiOverlay(unscoped.store.getState().interaction.overlays), undefined);
 
-    const call = createHarness();
-    enableContextMessageMcp(call);
-    call.store.setSelectedPage("audit");
-    call.store.replaceRoute({
-        callId: "call-1",
-        page: "audit",
-        scope: "unscoped",
-        view: "call",
-    });
-    await call.press("m");
-    assert.deepEqual(currentTuiRoute(call.store.getState()), {
-        callId: "call-1",
-        page: "audit",
-        scope: "unscoped",
-        view: "call",
-    });
-    assert.equal(topTuiOverlay(call.store.getState().interaction.overlays), undefined);
-
     const context = createHarness();
     enableContextMessageMcp(context);
     enterAuditContext(context, "ctx-alpha");
@@ -1891,6 +1873,8 @@ test("audit truncates input and output previews while opening complete structure
     harness.store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [record] } } });
     enterAuditContext(harness, "ctx-live-patch");
     const audit = expandBox(harness, "audit-call:live-patch");
+    assert.equal(audit.enterable, false);
+    assert.equal(audit.primaryAction, undefined);
     const inputLine = audit.expandedLines.find(
         (line) => line.id === "audit-call:live-patch:input",
     );
@@ -1927,64 +1911,6 @@ test("audit truncates input and output previews while opening complete structure
     assert.equal(
         overlay?.kind === "text-detail" &&
             overlay.body.includes("src/example.ts"),
-        true,
-    );
-});
-test("Audit Call detail page opens complete Input and Output content", async () => {
-    const harness = createHarness();
-    harness.store.patchControlReadModel({ instanceState: { ["alpha"]: { toolCalls: [
-        {
-            callId: "call-detail",
-            completedAt: "2026-08-06T12:00:01.000Z",
-            input: { command: "printf detail-input" },
-            inputSummary: '{"command":"printf detail-input"}',
-            instance: asInstanceName("alpha"),
-            output: { stdout: "detail-output" },
-            source: "mcp",
-            startedAt: "2026-08-06T12:00:00.000Z",
-            status: "completed",
-            toolName: "bash_run",
-            workspace: "/projects/detail",
-        },
-    ] } } });
-    harness.store.setSelectedInstance("alpha");
-    harness.store.setSelectedPage("audit");
-    harness.store.replaceRoute({
-        callId: "call-detail",
-        page: "audit",
-        scope: "unscoped",
-        view: "call",
-    });
-    const detail = expandBox(harness, "audit-call-detail:call-detail");
-    assert.equal(detail.title, "bash_run · detail");
-    assert.equal(
-        detail.expandedLines.some((line) => line.text.includes("/projects/detail")),
-        true,
-    );
-    const inputLine = detail.expandedLines.find(
-        (line) => line.id === "audit-call-detail:call-detail:input",
-    );
-    const outputLine = detail.expandedLines.find(
-        (line) => line.id === "audit-call-detail:call-detail:output",
-    );
-    assert.ok(inputLine?.id && outputLine?.id);
-
-    harness.store.setFocusScope("boxDetail");
-    harness.store.setMainFocusId(detail.id);
-    harness.store.setSelectedDetailLine(detail.expandedKey, inputLine.id);
-    await harness.dispatch({ type: "focus.activate" });
-    let overlay = topTuiOverlay(harness.store.getState().interaction.overlays);
-    assert.equal(
-        overlay?.kind === "text-detail" && overlay.body.includes("detail-input"),
-        true,
-    );
-
-    await harness.dispatch({ type: "textDetail.close" });
-    harness.store.setSelectedDetailLine(detail.expandedKey, outputLine.id);
-    await harness.dispatch({ type: "focus.activate" });
-    overlay = topTuiOverlay(harness.store.getState().interaction.overlays);
-    assert.equal(
-        overlay?.kind === "text-detail" && overlay.body.includes("detail-output"),
         true,
     );
 });
@@ -2711,7 +2637,7 @@ test("logs render timestamps and correlation metadata", () => {
         assert.equal(rendered.includes(value), true, value);
     }
 });
-test("Logs linked call opens the matching scoped Audit call route", async () => {
+test("Logs linked call opens the matching inline ToolCall in its Audit Context", async () => {
     const harness = createHarness();
     harness.store.patchControlReadModel({ instanceState: { alpha: {
         logs: [{
@@ -2747,15 +2673,14 @@ test("Logs linked call opens the matching scoped Audit call route", async () => 
 
     assert.equal(harness.store.getState().ui.selectedPage, "audit");
     assert.deepEqual(currentTuiRoute(harness.store.getState()), {
-        callId: "call-linked",
         ctxId: "ctx-alpha",
         page: "audit",
         scope: "context",
-        view: "call",
+        view: "context",
     });
     assert.equal(
         harness.store.getState().ui.mainFocusId,
-        "audit-call-detail:call-linked",
+        "audit-call:call-linked",
     );
 });
 test("Logs controls drive follow state", async () => {

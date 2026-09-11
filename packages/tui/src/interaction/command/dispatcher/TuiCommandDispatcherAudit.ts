@@ -57,10 +57,9 @@ export class TuiCommandDispatcherAudit {
     }
 
     callIdFromBox(boxId: string): string | undefined {
-        for (const prefix of ["audit-call:", "audit-call-detail:"]) {
-            if (boxId.startsWith(prefix)) return boxId.slice(prefix.length);
-        }
-        return undefined;
+        return boxId.startsWith("audit-call:")
+            ? boxId.slice("audit-call:".length)
+            : undefined;
     }
 
     async openInput(instance: string, callId: string): Promise<boolean> {

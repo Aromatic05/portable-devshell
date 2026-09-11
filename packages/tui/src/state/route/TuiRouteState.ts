@@ -256,7 +256,7 @@ export function selectBreadcrumbSegments(state: TuiAppState): string[] {
             }
             break;
         case "audit":
-            if (route.view === "context" || route.view === "conversation" || route.view === "call") {
+            if (route.view === "context" || route.view === "conversation") {
                 segments.push(
                     route.scope === "unscoped"
                         ? "unscoped"
@@ -265,9 +265,6 @@ export function selectBreadcrumbSegments(state: TuiAppState): string[] {
             }
             if (route.view === "conversation") {
                 segments.push("conversation");
-            }
-            if (route.view === "call") {
-                segments.push(truncateTuiBreadcrumbSegment(route.callId));
             }
             break;
         case "todo":
@@ -420,33 +417,16 @@ function isTuiRouteResourceValid(
         const approvals = state.readModel.instanceState[instance]?.approvals ?? [];
         const messages = state.readModel.instanceState[instance]?.contextMessages ?? [];
         if (route.scope === "unscoped") {
-            return route.view === "context"
-                ? calls.some(
-                      (call) =>
-                          call.ctxId === undefined || call.ctxId.length === 0,
-                  ) ||
-                      approvals.some(
-                          (approval) =>
-                              approval.ctxId === undefined ||
-                              approval.ctxId.length === 0,
-                      )
-                : calls.some(
-                      (call) =>
-                          call.callId === route.callId &&
-                          (call.ctxId === undefined || call.ctxId.length === 0),
-                  );
-        }
-        if (route.view === "context" || route.view === "conversation") {
-            return (
-                calls.some((call) => call.ctxId === route.ctxId) ||
-                approvals.some((approval) => approval.ctxId === route.ctxId) ||
-                messages.some((message) => message.ctxId === route.ctxId)
+            return calls.some(
+                (call) => call.ctxId === undefined || call.ctxId.length === 0,
+            ) || approvals.some(
+                (approval) => approval.ctxId === undefined || approval.ctxId.length === 0,
             );
         }
-        return calls.some(
-            (call) =>
-                call.callId === route.callId &&
-                call.ctxId === route.ctxId,
+        return (
+            calls.some((call) => call.ctxId === route.ctxId) ||
+            approvals.some((approval) => approval.ctxId === route.ctxId) ||
+            messages.some((message) => message.ctxId === route.ctxId)
         );
     }
     if (route.page === "todo" && route.view === "detail") {
