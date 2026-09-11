@@ -78,7 +78,6 @@ export class TuiCommandDispatcherOverlay {
         if (!isTuiSearchablePage(page)) return false;
         this.#focusManager.pushRestore("search");
         this.#store.pushOverlay({ kind: "search", page });
-        this.#store.setFocusScope("search");
         return true;
     }
 
@@ -103,7 +102,6 @@ export class TuiCommandDispatcherOverlay {
             selectedAction: "cancel",
             title: intent.title,
         });
-        this.#store.setFocusScope("confirm");
     }
 
     #focusConfirmation(button: "cancel" | "confirm"): boolean {
@@ -140,7 +138,6 @@ export class TuiCommandDispatcherOverlay {
             scrollOffset: 0,
             title: intent.title,
         });
-        this.#store.setFocusScope("textDetail");
     }
 
     #scrollTextDetail(delta: number): boolean {

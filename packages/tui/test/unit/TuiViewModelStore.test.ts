@@ -181,6 +181,54 @@ test("TuiAppStore does not publish an unchanged OAuth approval collection", () =
     assert.equal(notifications, 0);
 });
 
+test("TuiAppStore does not publish unchanged interaction state", () => {
+    const store = new TuiAppStore();
+    const editor = {
+        editing: false,
+        key: "config:alpha",
+        kind: "config" as const,
+    };
+
+    store.setFocusScope("mainBoxes");
+    store.setMainFocusId("instance:alpha");
+    store.setMessageScope("history");
+    store.setSidebarCursor({ id: "instances", kind: "context" });
+    store.setSidebarFocus("instances");
+    store.setSidebarLevel("root");
+    store.setSearchQuery("instances", "alpha");
+    store.setEditor(editor);
+    store.setSelectedDetailLine("instance:alpha", "line:alpha");
+    store.setScreenStatus("instances", "ready");
+    store.setSelectedInstance("alpha");
+    store.setSelectedPage("logs");
+    store.setLogsFollow("alpha", false);
+    store.setLogsPausedAtSeq("alpha", 42);
+
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+        notifications += 1;
+    });
+
+    store.setFocusScope("mainBoxes");
+    store.setMainFocusId(store.getState().ui.mainFocusId);
+    store.setMessageScope("history");
+    store.setSidebarCursor({ id: "instances", kind: "context" });
+    store.setSidebarFocus("instances");
+    store.setSidebarLevel("root");
+    store.setSearchQuery("instances", "alpha");
+    store.setEditor(editor);
+    store.setSelectedDetailLine("instance:alpha", "line:alpha");
+    store.setScreenStatus("instances", "ready");
+    store.setSelectedInstance("alpha");
+    store.setSelectedPage("logs");
+    store.setLogsFollow("alpha", false);
+    store.setLogsPausedAtSeq("alpha", 42);
+    store.clearFormDraft("missing");
+
+    unsubscribe();
+    assert.equal(notifications, 0);
+});
+
 test("TuiRenderScheduler ignores updates outside the visible page and instance", (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const store = new TuiAppStore();

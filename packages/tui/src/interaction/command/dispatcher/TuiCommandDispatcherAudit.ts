@@ -53,7 +53,6 @@ export class TuiCommandDispatcherAudit {
             kind: "approval",
             selectedAction: "back",
         });
-        this.#store.setFocusScope("approvalDetail");
     }
 
     callIdFromBox(boxId: string): string | undefined {

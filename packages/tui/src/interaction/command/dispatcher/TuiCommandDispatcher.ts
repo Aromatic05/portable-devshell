@@ -290,7 +290,6 @@ export class TuiCommandDispatcher {
                     kind: "tool-form",
                     toolName: intent.toolName
                 });
-                this.#store.setFocusScope("toolForm");
                 return true;
             case "toolForm.append":
                 return this.#updateToolForm((input) => {
