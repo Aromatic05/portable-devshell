@@ -587,7 +587,7 @@ test("Comment conversation can queue to any active Context on the selected insta
     );
 });
 
-test("Comment conversation disables editing for a disabled Context", async () => {
+test("Comment conversation remains writable for a disabled Context", async () => {
     const sent: Array<{ ctxId: string; text: string }> = [];
     const harness = createHarness({
         onContextMessage: async (_instance, ctxId, text) => { sent.push({ ctxId, text }); },
@@ -612,11 +612,84 @@ test("Comment conversation disables editing for a disabled Context", async () =>
     const composer = selectMainScreenModel(harness.store.getState()).boxes.find(
         (box) => box.id === "conversation-composer",
     );
-    assert.equal(composer?.status, "disabled");
-    assert.match(conversationScreenText(harness), /context is not active/iu);
-    assert.equal(await harness.dispatch({ type: "contextConversation.edit" }), undefined);
-    assert.notEqual(harness.store.getState().interaction.focusScope, "contextConversation");
-    assert.deepEqual(sent, []);
+    assert.notEqual(composer?.status, "disabled");
+    assert.doesNotMatch(conversationScreenText(harness), /blocked|read-only|unavailable/iu);
+    await harness.dispatch({ type: "contextConversation.edit" });
+    assert.equal(harness.store.getState().interaction.focusScope, "contextConversation");
+    await harness.press("message after disable");
+    await harness.press("", { return: true });
+    assert.deepEqual(sent, [{ ctxId: "ctx-disabled", text: "message after disable" }]);
+});
+
+test("Messages history-only session remains writable without a current Context registry record", async () => {
+    const sent: Array<{ ctxId: string; text: string }> = [];
+    const harness = createHarness({
+        onContextMessage: async (_instance, ctxId, text) => { sent.push({ ctxId, text }); },
+    });
+    harness.store.patchControlReadModel({
+        contexts: [],
+        instanceState: { alpha: { contextMessages: [{
+            createdAt: "2026-08-06T12:00:00.000Z",
+            ctxId: "ctx-history-only",
+            id: "message-history",
+            instance: "alpha",
+            status: "delivered",
+            text: "older message",
+        }] } },
+    });
+    harness.store.setSelectedPage("messages");
+    harness.store.replaceRoute({
+        ctxId: "ctx-history-only",
+        page: "messages",
+        view: "thread",
+    });
+
+    await harness.dispatch({ type: "contextConversation.edit" });
+    assert.equal(harness.store.getState().interaction.focusScope, "contextConversation");
+    await harness.press("continue this conversation");
+    await harness.press("", { return: true });
+
+    assert.deepEqual(sent, [{ ctxId: "ctx-history-only", text: "continue this conversation" }]);
+    assert.doesNotMatch(
+        harness.store.getState().interaction.screenStatusByPage.messages ?? "",
+        /not active|read-only|unavailable/iu,
+    );
+});
+
+test("Comment submit remains writable when Context becomes disabled after editing starts", async () => {
+    const sent: Array<{ ctxId: string; text: string }> = [];
+    const harness = createHarness({
+        onContextMessage: async (_instance, ctxId, text) => { sent.push({ ctxId, text }); },
+    });
+    enableContextMessageMcp(harness);
+    harness.store.patchControlReadModel({
+        contexts: [tuiContextRecord("ctx-race", "active")],
+        instanceState: { alpha: { contextMessages: [{
+            createdAt: "2026-08-06T12:00:00.000Z",
+            ctxId: "ctx-race",
+            id: "message-race-history",
+            instance: "alpha",
+            status: "delivered",
+            text: "existing conversation",
+        }] } },
+    });
+    enterAuditContext(harness, "ctx-race");
+    await harness.press("m");
+    await harness.dispatch({ type: "contextConversation.edit" });
+    await harness.press("send across lifecycle change");
+
+    harness.store.patchControlReadModel({ contexts: [tuiContextRecord("ctx-race", "disabled")] });
+    await harness.press("", { return: true });
+
+    assert.deepEqual(sent, [{ ctxId: "ctx-race", text: "send across lifecycle change" }]);
+    assert.equal(
+        readContextConversationDraft(harness.store.getState(), "alpha", "ctx-race"),
+        "",
+    );
+    assert.equal(
+        harness.store.getState().interaction.screenStatusByPage.audit,
+        "Comment queued.",
+    );
 });
 
 test("Todo owns Goal presentation and does not leak it into Instances", async () => {

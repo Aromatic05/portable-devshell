@@ -223,7 +223,8 @@ describe("Audit", () => {
         ));
     });
 
-    it("does not compose Comments for a disabled Context", () => {
+    it("keeps Comment composition writable for a disabled Context", async () => {
+        const queueContextMessage = vi.fn(async () => true);
         const disabledState: WebState = {
             ...state,
             readModel: {
@@ -233,11 +234,32 @@ describe("Audit", () => {
                 ),
             },
         };
-        renderAudit({ route: alphaContextRoute, state: disabledState });
+        renderAudit({ route: alphaContextRoute, state: disabledState, store: { queueContextMessage } });
 
-        expect(screen.queryByLabelText("Comment")).not.toBeInTheDocument();
-        expect(screen.queryByRole("button", { name: "Queue Comment" })).not.toBeInTheDocument();
-        expect(screen.getByText(/Comments can only be queued for an active Context/u)).toBeInTheDocument();
+        fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "message after disable" } });
+        fireEvent.click(screen.getByRole("button", { name: "Queue Comment" }));
+        await waitFor(() => expect(queueContextMessage).toHaveBeenCalledWith(
+            "alpha",
+            "ctx-alpha",
+            "message after disable",
+        ));
+    });
+
+    it("keeps Comment composition writable when the Context registry record is absent", async () => {
+        const queueContextMessage = vi.fn(async () => true);
+        const historyOnlyState: WebState = {
+            ...state,
+            readModel: { ...state.readModel, contexts: [] },
+        };
+        renderAudit({ route: alphaContextRoute, state: historyOnlyState, store: { queueContextMessage } });
+
+        fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "history-only message" } });
+        fireEvent.click(screen.getByRole("button", { name: "Queue Comment" }));
+        await waitFor(() => expect(queueContextMessage).toHaveBeenCalledWith(
+            "alpha",
+            "ctx-alpha",
+            "history-only message",
+        ));
     });
 
     it("retains Context lifecycle controls with pending renewal and disable confirmation", async () => {

@@ -3,9 +3,6 @@ import type { ContextMessageRecord, JsonValue, ToolCallRecord } from "@portable-
 import type { BoxModel } from "../../component/TuiComponentExpandableBox.js";
 import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
 import { readContextConversationDraft } from "../../../state/TuiContextConversationDraft.js";
-import {
-    isActiveContextForInstance,
-} from "../../../state/audit/TuiAuditContextActivity.js";
 import { compactSummary, formatField, makeBox } from "../TuiPageBoxSupport.js";
 
 export function buildAuditConversationBoxes(
@@ -116,18 +113,12 @@ function composerBox(
     ctxId: string,
 ): BoxModel {
     const draft = readContextConversationDraft(state, instance, ctxId);
-    const active = isActiveContextForInstance(state, instance, ctxId);
     const prefix = "Draft              ";
     const display = draft.length === 0 ? "<empty>" : draft;
     return makeBox(state, "audit", instance, {
         detailLines: [
             formatField("Context", ctxId),
-            formatField(
-                "Delivery",
-                active
-                    ? "next tool call in this context"
-                    : "blocked; context is not active on this instance",
-            ),
+            formatField("Delivery", "next tool call in this context"),
             {
                 editable: true,
                 editableValue: {
@@ -139,20 +130,16 @@ function composerBox(
                 id: "draft",
                 text: `${prefix}${display}`,
             },
-            active
-                ? "Enter queues this Comment for the next tool call."
-                : "Sending is blocked because this context is not active on this instance.",
+            "Enter queues this Comment for the next tool call.",
             "Esc or Ctrl+[ returns to the Audit Context.",
         ],
         expandedKey: `audit-conversation:${instance}:${ctxId}:composer`,
         editable: true,
         id: "conversation-composer",
-        status: active ? (draft.length === 0 ? "normal" : "running") : "disabled",
+        status: draft.length === 0 ? "normal" : "running",
         summaryLines: [
             draft.length === 0 ? "draft=<empty>" : `draft=${draft}`,
-            active
-                ? "Space expand · ↑/↓ Draft · Enter edit · Esc back"
-                : "sending blocked · context is not active",
+            "Space expand · ↑/↓ Draft · Enter edit · Esc back",
         ],
         title: "Write Comment",
     });

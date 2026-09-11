@@ -14,9 +14,6 @@ import {
     currentTuiRouteScrollKey,
 } from "../../../state/route/TuiRouteState.js";
 import {
-    isActiveContextForInstance,
-} from "../../../state/audit/TuiAuditContextActivity.js";
-import {
     contextConversationDraftKey,
     readContextConversationDraft,
 } from "../../../state/TuiContextConversationDraft.js";
@@ -155,22 +152,7 @@ export class TuiCommandDispatcherNavigation {
                             Number.MAX_SAFE_INTEGER,
                         );
                         this.#store.setFocusScope("sidebarContext");
-                        const state = this.#store.getState();
-                        if (
-                            state.ui.selectedInstance !== undefined &&
-                            isActiveContextForInstance(
-                                state,
-                                state.ui.selectedInstance,
-                                entry.target.route.ctxId,
-                            )
-                        ) {
-                            this.#startContextConversationEditing();
-                        } else {
-                            this.#store.setScreenStatus(
-                                "messages",
-                                "This session is read-only.",
-                            );
-                        }
+                        this.#startContextConversationEditing();
                         return true;
                     }
                     this.#store.setFocusScope("sidebarContext");
@@ -329,13 +311,6 @@ export class TuiCommandDispatcherNavigation {
         const target = this.#contextConversationTarget();
         if (target === undefined) return false;
         const state = this.#store.getState();
-        if (!isActiveContextForInstance(state, target.instance, target.ctxId)) {
-            this.#store.setScreenStatus(
-                target.page,
-                "Comment editing is blocked because this context is not active on this instance.",
-            );
-            return false;
-        }
         const draft = readContextConversationDraft(state, target.instance, target.ctxId);
         this.#store.setEditor({
             cursor: draft.length,
@@ -386,13 +361,6 @@ export class TuiCommandDispatcherNavigation {
         const target = this.#contextConversationTarget();
         if (target === undefined) return false;
         const state = this.#store.getState();
-        if (!isActiveContextForInstance(state, target.instance, target.ctxId)) {
-            this.#store.setScreenStatus(
-                target.page,
-                "Comment not queued: this context is not active on this instance.",
-            );
-            return false;
-        }
         const text = readContextConversationDraft(
             state,
             target.instance,

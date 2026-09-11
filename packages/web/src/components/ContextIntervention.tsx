@@ -32,7 +32,6 @@ export function ContextIntervention({
               temporaryDirectory: context.temporaryDirectory,
               workspace: context.workspace,
           }]).find((candidate) => candidate.instance === instance);
-    const attached = environment !== undefined;
     const interactive = state.connection === "online" && !disabled;
     const instanceState = state.readModel.instanceState[instance];
     const queuedComments = useMemo(
@@ -66,7 +65,7 @@ export function ContextIntervention({
 
     async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
         event.preventDefault();
-        if (!interactive || !attached || context?.status !== "active" || draft.trim().length === 0) return;
+        if (!interactive || draft.trim().length === 0) return;
         const queued = await store.queueContextMessage(instance, ctxId, draft.trim());
         if (queued) setDraft("");
     }
@@ -91,10 +90,10 @@ export function ContextIntervention({
                 >Disable Context</button>
             </div>}
         </div>
-        {context === undefined ? <p className="empty">This Context is no longer registered. Historical Audit records remain readable.</p> : <p className="hint">
+        {context === undefined ? <p className="hint">Context registry record unavailable.</p> : <p className="hint">
             Workspace: {environment?.workspace ?? context.workspace ?? "not attached"} · Status: {context.status} · expires {context.expiresAt}
         </p>}
-        {context?.status === "active" && attached ? <form onSubmit={(event) => void submit(event)}>
+        <form onSubmit={(event) => void submit(event)}>
             <label>Comment
                 <textarea
                     disabled={!interactive}
@@ -110,7 +109,7 @@ export function ContextIntervention({
                 disabled={!interactive || draft.trim().length === 0 || state.operations[operation] !== undefined}
                 type="submit"
             >{state.operations[operation] !== undefined ? "Sending…" : "Queue Comment"}</button>
-        </form> : <p className="empty">Comments can only be queued for an active Context attached to this instance.</p>}
+        </form>
         {queuedComments.length === 0 ? null : <section>
             <h4>Queued Comments</h4>
             <ol className="context-messages">

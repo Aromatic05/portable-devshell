@@ -1,7 +1,6 @@
 import { Box, Text } from "ink";
 
 import { readContextConversationDraft } from "../../../state/TuiContextConversationDraft.js";
-import { isActiveContextForInstance } from "../../../state/audit/TuiAuditContextActivity.js";
 import type { TuiAppState } from "../../../state/reducer/TuiStoreModel.js";
 import {
     currentTuiRoute,
@@ -46,7 +45,6 @@ export function TuiMessagesView(props: {
         props.state.interaction.focusScope === "contextConversation" &&
         editor?.kind === "comment" &&
         editor.editing === true;
-    const active = isActiveContextForInstance(props.state, instance, route.ctxId);
     const status = props.state.interaction.screenStatusByPage.messages;
 
     return (
@@ -61,18 +59,14 @@ export function TuiMessagesView(props: {
             </Box>
             <Text dimColor>{"─".repeat(Math.max(1, props.width))}</Text>
             <Box>
-                <Text>{active ? "> " : "× "}</Text>
+                <Text>{"> "}</Text>
                 {editing ? (
                     <ComposerText draft={draft} />
                 ) : (
-                    <Text dimColor={!active}>
-                        {draft || (active ? "Write a comment…" : "Comment unavailable")}
-                    </Text>
+                    <Text>{draft || "Write a comment…"}</Text>
                 )}
             </Box>
-            <Text dimColor>
-                {status ?? (active ? "Enter send · Esc sessions" : "This session is read-only.")}
-            </Text>
+            <Text dimColor>{status ?? "Enter send · Esc sessions"}</Text>
         </Box>
     );
 }

@@ -163,9 +163,7 @@ export class ControlRouteComposition {
                         this.#subscriptions
                     ),
                     ...(descriptor.contextMessages === undefined ? [] : [createContextMessageRouteModule(
-                        descriptor.contextMessages,
-                        descriptor.name,
-                        this.#options.contextAdmin
+                        descriptor.contextMessages
                     )]),
                     createGoalRouteModule(descriptor),
                     createTodoRouteModule(descriptor, this.#subscriptions),
