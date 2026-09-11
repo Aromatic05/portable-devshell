@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -15,8 +15,25 @@ import type {
 import { ContextMessageState } from "../context/ContextMessageState.js";
 
 export const CONVERSATION_DATABASE_SCHEMA_VERSION = 1;
+export const defaultConversationStorageLimits = {
+    maxBytes: 512 * 1024 * 1024,
+    retentionDays: 90,
+} as const;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const RETENTION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const LEGACY_COMMENT_MIGRATION_KEY = "migration:context-messages-json-v1";
 const LEGACY_REPORT_MIGRATION_KEY = "migration:todo-report-audit-v1";
+
+export interface ConversationStoreStats {
+    comments: number;
+    entries: number;
+    fileBytes: number;
+    maxBytes: number;
+    payloadBytes: number;
+    protectedComments: number;
+    reports: number;
+    retentionDays: number;
+}
 
 interface ConversationRow {
     callId: string | null;
@@ -36,24 +53,48 @@ export class ConversationStore {
     readonly #filePath: string;
     readonly #instanceName: string;
     readonly #legacyContextMessagesFile?: string;
+    readonly #maxBytes: number;
+    readonly #now: () => number;
+    readonly #retentionDays: number;
+    readonly #retentionMs: number;
     #database?: DatabaseSync;
+    #lastRetentionCleanupAt = Number.NEGATIVE_INFINITY;
+    #payloadBytes?: number;
 
     constructor(options: {
         filePath: string;
         instanceName: string;
         legacyContextMessagesFile?: string;
+        maxBytes?: number;
+        now?: () => number;
+        retentionDays?: number;
     }) {
+        const maxBytes = options.maxBytes ?? defaultConversationStorageLimits.maxBytes;
+        const retentionDays = options.retentionDays ?? defaultConversationStorageLimits.retentionDays;
+        if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+            throw new TypeError("Conversation maxBytes must be a positive safe integer.");
+        }
+        if (!Number.isSafeInteger(retentionDays) || retentionDays < 1) {
+            throw new TypeError("Conversation retentionDays must be a positive safe integer.");
+        }
         this.#filePath = options.filePath;
         this.#instanceName = options.instanceName;
         this.#legacyContextMessagesFile = options.legacyContextMessagesFile;
+        this.#maxBytes = maxBytes;
+        this.#now = options.now ?? Date.now;
+        this.#retentionDays = retentionDays;
+        this.#retentionMs = retentionDays * DAY_MS;
     }
 
     close(): void {
         this.#database?.close();
         this.#database = undefined;
+        this.#lastRetentionCleanupAt = Number.NEGATIVE_INFINITY;
+        this.#payloadBytes = undefined;
     }
 
     list(input: ConversationListInput = {}): ConversationEntry[] {
+        this.#cleanup(this.#open());
         return applyByteBudget(
             this.#listRows(input, undefined).map(toConversationEntry),
             input.maxBytes,
@@ -61,6 +102,7 @@ export class ConversationStore {
     }
 
     listComments(input: ContextMessageListInput = {}): ContextMessageRecord[] {
+        this.#cleanup(this.#open());
         const entries = this.#listRows(input, "comment").map((row) => toContextMessageRecord(row, this.#instanceName));
         return applyByteBudget(entries, input.maxBytes);
     }
@@ -90,7 +132,8 @@ export class ConversationStore {
     }
 
     insertComment(record: ContextMessageRecord): void {
-        this.#open().prepare(`
+        const database = this.#open();
+        database.prepare(`
             INSERT INTO conversation_entries(
                 kind, id, ctx_id, created_at, text, status, call_id, delivered_at, failed_at, error
             ) VALUES ('comment', ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -105,17 +148,25 @@ export class ConversationStore {
             record.failedAt ?? null,
             record.error ?? null,
         );
+        this.#payloadBytes = this.#trackedPayloadBytes() + this.#readEntryPayloadBytes(database, "comment", record.id);
+        this.#cleanup(database, record.status === "delivered" || record.status === "failed");
     }
 
     deliverComments(ctxId: string, callId: string, deliveredAt: string): ContextMessageRecord[] {
         const database = this.#open();
+        let pending: ContextMessageRecord[] = [];
+        let beforePayloadBytes = 0;
         database.exec("BEGIN IMMEDIATE");
         try {
-            const pending = this.pendingComments(ctxId);
+            pending = this.pendingComments(ctxId);
             if (pending.length === 0) {
                 database.exec("COMMIT");
                 return [];
             }
+            beforePayloadBytes = pending.reduce(
+                (total, record) => total + this.#readEntryPayloadBytes(database, "comment", record.id),
+                0,
+            );
             const update = database.prepare(`
                 UPDATE conversation_entries
                 SET status = 'delivered', call_id = ?, delivered_at = ?, failed_at = NULL, error = NULL
@@ -123,23 +174,33 @@ export class ConversationStore {
             `);
             for (const record of pending) update.run(callId, deliveredAt, record.id);
             database.exec("COMMIT");
-            return pending.map((record) => ({
-                ...record,
-                callId,
-                deliveredAt,
-                error: undefined,
-                failedAt: undefined,
-                status: "delivered" as const,
-            }));
         } catch (error) {
             database.exec("ROLLBACK");
             throw error;
         }
+        const afterPayloadBytes = pending.reduce(
+            (total, record) => total + this.#readEntryPayloadBytes(database, "comment", record.id),
+            0,
+        );
+        this.#payloadBytes = this.#trackedPayloadBytes() + afterPayloadBytes - beforePayloadBytes;
+        this.#cleanup(database, true);
+        return pending.map((record) => ({
+            ...record,
+            callId,
+            deliveredAt,
+            error: undefined,
+            failedAt: undefined,
+            status: "delivered" as const,
+        }));
     }
 
     failComments(ids: ReadonlySet<string>, error: string, failedAt: string): void {
         if (ids.size === 0) return;
         const database = this.#open();
+        const beforePayloadBytes = [...ids].reduce(
+            (total, id) => total + this.#readEntryPayloadBytes(database, "comment", id),
+            0,
+        );
         database.exec("BEGIN IMMEDIATE");
         try {
             const update = database.prepare(`
@@ -153,14 +214,53 @@ export class ConversationStore {
             database.exec("ROLLBACK");
             throw cause;
         }
+        const afterPayloadBytes = [...ids].reduce(
+            (total, id) => total + this.#readEntryPayloadBytes(database, "comment", id),
+            0,
+        );
+        this.#payloadBytes = this.#trackedPayloadBytes() + afterPayloadBytes - beforePayloadBytes;
+        this.#cleanup(database, true);
     }
 
     appendReport(input: { callId: string; createdAt: string; ctxId: string; text: string }): void {
-        this.#open().prepare(`
+        const database = this.#open();
+        const result = database.prepare(`
             INSERT INTO conversation_entries(kind, id, ctx_id, created_at, text, call_id)
             VALUES ('report', ?, ?, ?, ?, ?)
             ON CONFLICT(kind, id) DO NOTHING
         `).run(input.callId, input.ctxId, input.createdAt, input.text, input.callId);
+        if (Number(result.changes) > 0) {
+            this.#payloadBytes = this.#trackedPayloadBytes() + this.#readEntryPayloadBytes(database, "report", input.callId);
+        }
+        this.#cleanup(database, true);
+    }
+
+    stats(): ConversationStoreStats {
+        const database = this.#open();
+        this.#cleanup(database);
+        const row = database.prepare(`
+            SELECT
+                COUNT(*) AS entries,
+                COALESCE(SUM(CASE WHEN kind = 'comment' THEN 1 ELSE 0 END), 0) AS comments,
+                COALESCE(SUM(CASE WHEN kind = 'report' THEN 1 ELSE 0 END), 0) AS reports,
+                COALESCE(SUM(CASE WHEN kind = 'comment' AND status IN ('pending', 'sent') THEN 1 ELSE 0 END), 0) AS protectedComments
+            FROM conversation_entries
+        `).get() as {
+            comments: number;
+            entries: number;
+            protectedComments: number;
+            reports: number;
+        };
+        return {
+            comments: row.comments,
+            entries: row.entries,
+            fileBytes: fileSize(this.#filePath) + fileSize(`${this.#filePath}-wal`),
+            maxBytes: this.#maxBytes,
+            payloadBytes: this.#trackedPayloadBytes(),
+            protectedComments: row.protectedComments,
+            reports: row.reports,
+            retentionDays: this.#retentionDays,
+        };
     }
 
     isLegacyReportMigrationComplete(): boolean {
@@ -240,6 +340,8 @@ export class ConversationStore {
             database.exec("PRAGMA synchronous = NORMAL");
             this.#database = database;
             this.#migrateLegacyComments();
+            this.#payloadBytes = this.#readPayloadBytes(database);
+            this.#cleanup(database, true);
             return database;
         } catch (error) {
             this.#database = undefined;
@@ -294,6 +396,104 @@ export class ConversationStore {
             database.exec("ROLLBACK");
             throw error;
         }
+    }
+
+    #cleanup(database: DatabaseSync, forceRetention = false): void {
+        const now = this.#now();
+        let removed = false;
+        if (forceRetention || now - this.#lastRetentionCleanupAt >= RETENTION_CLEANUP_INTERVAL_MS) {
+            const cutoff = new Date(now - this.#retentionMs).toISOString();
+            const expired = database.prepare(`
+                SELECT COUNT(*) AS entries, COALESCE(SUM(${conversationPayloadBytesSql()}), 0) AS payloadBytes
+                FROM conversation_entries
+                WHERE
+                    (kind = 'report' AND created_at < ?)
+                    OR (
+                        kind = 'comment'
+                        AND status IN ('delivered', 'failed')
+                        AND COALESCE(delivered_at, failed_at, created_at) < ?
+                    )
+            `).get(cutoff, cutoff) as { entries: number; payloadBytes: number };
+            if (expired.entries > 0) {
+                database.prepare(`
+                    DELETE FROM conversation_entries
+                    WHERE
+                        (kind = 'report' AND created_at < ?)
+                        OR (
+                            kind = 'comment'
+                            AND status IN ('delivered', 'failed')
+                            AND COALESCE(delivered_at, failed_at, created_at) < ?
+                        )
+                `).run(cutoff, cutoff);
+                this.#payloadBytes = Math.max(0, this.#trackedPayloadBytes() - expired.payloadBytes);
+                removed = true;
+            }
+            this.#lastRetentionCleanupAt = now;
+        }
+
+        while (this.#trackedPayloadBytes() > this.#maxBytes) {
+            const candidates = database.prepare(`
+                SELECT seq, ${conversationPayloadBytesSql()} AS payloadBytes
+                FROM conversation_entries
+                WHERE kind = 'report' OR (kind = 'comment' AND status IN ('delivered', 'failed'))
+                ORDER BY
+                    CASE
+                        WHEN kind = 'report' THEN created_at
+                        ELSE COALESCE(delivered_at, failed_at, created_at)
+                    END ASC,
+                    seq ASC
+                LIMIT 256
+            `).all() as Array<{ payloadBytes: number; seq: number }>;
+            if (candidates.length === 0) break;
+            const remove = database.prepare("DELETE FROM conversation_entries WHERE seq = ?");
+            let payloadBytes = this.#trackedPayloadBytes();
+            database.exec("BEGIN IMMEDIATE");
+            try {
+                for (const candidate of candidates) {
+                    if (payloadBytes <= this.#maxBytes) break;
+                    remove.run(candidate.seq);
+                    payloadBytes -= candidate.payloadBytes;
+                    removed = true;
+                }
+                database.exec("COMMIT");
+            } catch (error) {
+                database.exec("ROLLBACK");
+                throw error;
+            }
+            this.#payloadBytes = Math.max(0, payloadBytes);
+        }
+
+        if (removed && this.#trackedPayloadBytes() <= this.#maxBytes) {
+            const fileBytes = fileSize(this.#filePath) + fileSize(`${this.#filePath}-wal`);
+            if (fileBytes > this.#maxBytes) {
+                database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+                if (fileSize(this.#filePath) > this.#maxBytes) database.exec("VACUUM");
+            }
+        }
+    }
+
+    #readPayloadBytes(database: DatabaseSync): number {
+        const row = database.prepare(`
+            SELECT COALESCE(SUM(${conversationPayloadBytesSql()}), 0) AS payloadBytes
+            FROM conversation_entries
+        `).get() as { payloadBytes: number };
+        return row.payloadBytes;
+    }
+
+    #readEntryPayloadBytes(database: DatabaseSync, kind: ConversationEntryKind, id: string): number {
+        const row = database.prepare(`
+            SELECT ${conversationPayloadBytesSql()} AS payloadBytes
+            FROM conversation_entries
+            WHERE kind = ? AND id = ?
+        `).get(kind, id) as { payloadBytes: number } | undefined;
+        return row?.payloadBytes ?? 0;
+    }
+
+    #trackedPayloadBytes(): number {
+        if (this.#payloadBytes === undefined) {
+            throw new Error("Conversation payload accounting is not initialized.");
+        }
+        return this.#payloadBytes;
     }
 
     #migrateLegacyComments(): void {
@@ -406,6 +606,31 @@ function applyByteBudget<T>(records: T[], maxBytes: number | undefined): T[] {
         bytes += recordBytes;
     }
     return accepted;
+}
+
+function conversationPayloadBytesSql(): string {
+    return [
+        "64",
+        "length(CAST(kind AS BLOB))",
+        "length(CAST(id AS BLOB))",
+        "length(CAST(ctx_id AS BLOB))",
+        "length(CAST(created_at AS BLOB))",
+        "length(CAST(text AS BLOB))",
+        "COALESCE(length(CAST(status AS BLOB)), 0)",
+        "COALESCE(length(CAST(call_id AS BLOB)), 0)",
+        "COALESCE(length(CAST(delivered_at AS BLOB)), 0)",
+        "COALESCE(length(CAST(failed_at AS BLOB)), 0)",
+        "COALESCE(length(CAST(error AS BLOB)), 0)",
+    ].join(" + ");
+}
+
+function fileSize(path: string): number {
+    try {
+        return statSync(path).size;
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+        throw error;
+    }
 }
 
 function migrationBackupPath(source: string): string {

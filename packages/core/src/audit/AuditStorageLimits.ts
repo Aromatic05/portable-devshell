@@ -8,7 +8,7 @@ export interface AuditStorageLimits {
 }
 
 export const defaultAuditStorageLimits: AuditStorageLimits = {
-    maxBytes: 64 * 1024 * 1024,
+    maxBytes: 1024 * 1024 * 1024,
     retentionDays: 7
 };
 

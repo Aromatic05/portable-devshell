@@ -10,6 +10,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import {
     CONVERSATION_DATABASE_SCHEMA_VERSION,
     ConversationStore,
+    defaultConversationStorageLimits,
 } from "../../src/instance/conversation/ConversationStore.ts";
 import { ConversationService } from "../../src/instance/conversation/ConversationService.ts";
 
@@ -68,6 +69,110 @@ test("ConversationStore rejects a newer schema without modifying it", async () =
         },
     );
     assert.deepEqual(readFutureDatabase(databaseFile), before);
+});
+
+test("ConversationStore defaults to a 512 MiB fuse and 90 day retention", () => {
+    assert.deepEqual(defaultConversationStorageLimits, {
+        maxBytes: 512 * 1024 * 1024,
+        retentionDays: 90,
+    });
+});
+
+test("ConversationStore retention removes old terminal history but never old pending or sent Comments", async () => {
+    const root = await createTestTempDirectory("conversation-retention");
+    const store = new ConversationStore({
+        filePath: join(root, "conversation.sqlite3"),
+        instanceName: "alpha",
+        now: () => Date.parse("2026-09-11T00:00:00.000Z"),
+        retentionDays: 30,
+    });
+    store.appendReport({
+        callId: "old-report",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        ctxId: "ctx-a",
+        text: "expired report",
+    });
+    store.insertComment({
+        createdAt: "2026-07-01T00:00:00.000Z",
+        ctxId: "ctx-a",
+        deliveredAt: "2026-07-01T00:01:00.000Z",
+        id: "old-delivered",
+        instance: "alpha",
+        status: "delivered",
+        text: "expired delivered comment",
+    });
+    store.insertComment({
+        createdAt: "2026-07-01T00:00:00.000Z",
+        ctxId: "ctx-a",
+        id: "old-sent",
+        instance: "alpha",
+        status: "sent",
+        text: "must survive until delivered or failed",
+    });
+    store.insertComment({
+        createdAt: "2026-07-01T00:00:00.000Z",
+        ctxId: "ctx-a",
+        deliveredAt: "2026-09-10T00:00:00.000Z",
+        id: "recently-delivered",
+        instance: "alpha",
+        status: "delivered",
+        text: "retention starts from terminal time",
+    });
+    store.appendReport({
+        callId: "recent-report",
+        createdAt: "2026-09-10T00:00:00.000Z",
+        ctxId: "ctx-a",
+        text: "recent report",
+    });
+
+    assert.deepEqual((store.list()).map((entry) => entry.id), [
+        "old-sent",
+        "recently-delivered",
+        "recent-report",
+    ]);
+    assert.equal(store.stats().protectedComments, 1);
+    store.close();
+});
+
+test("ConversationStore capacity evicts oldest terminal history before protected Comments", async () => {
+    const root = await createTestTempDirectory("conversation-capacity");
+    const maxBytes = 12_000;
+    const store = new ConversationStore({
+        filePath: join(root, "conversation.sqlite3"),
+        instanceName: "alpha",
+        maxBytes,
+        now: () => Date.parse("2026-09-11T00:00:00.000Z"),
+        retentionDays: 365,
+    });
+    store.appendReport({
+        callId: "report-old",
+        createdAt: "2026-09-09T00:00:00.000Z",
+        ctxId: "ctx-a",
+        text: "a".repeat(8_000),
+    });
+    store.appendReport({
+        callId: "report-new",
+        createdAt: "2026-09-10T00:00:00.000Z",
+        ctxId: "ctx-a",
+        text: "b".repeat(8_000),
+    });
+    assert.deepEqual(store.list().map((entry) => entry.id), ["report-new"]);
+
+    store.insertComment({
+        createdAt: "2026-09-11T00:00:00.000Z",
+        ctxId: "ctx-a",
+        id: "protected-comment",
+        instance: "alpha",
+        status: "sent",
+        text: "c".repeat(20_000),
+    });
+    assert.deepEqual(store.list().map((entry) => entry.id), ["protected-comment"]);
+    const stats = store.stats();
+    assert.equal(stats.entries, 1);
+    assert.equal(stats.protectedComments, 1);
+    assert.equal(stats.maxBytes, maxBytes);
+    assert.equal(stats.payloadBytes > maxBytes, true);
+    store.close();
 });
 
 test("ConversationService imports historical todo_report calls and records new reports idempotently", async () => {
