@@ -107,27 +107,32 @@ function Assert-Sha256([string]$File, [string]$ShaFile) {
     if ($actual -ne $expected) { throw "SHA-256 校验失败：$File" }
 }
 
-function Get-ApplicationCliRelativePath([string]$ApplicationDirectory) {
+function Get-ApplicationBinRelativePath([string]$ApplicationDirectory, [string]$BinName) {
     $packageManifestPath = Join-Path $ApplicationDirectory "package.json"
     if (-not (Test-Path -LiteralPath $packageManifestPath -PathType Leaf)) {
         throw "应用包缺少 package.json：$packageManifestPath"
     }
     $packageManifest = Get-Content -Raw -LiteralPath $packageManifestPath | ConvertFrom-Json
-    $entry = [string]$packageManifest.bin.devshell
+    $binProperty = $packageManifest.bin.PSObject.Properties[$BinName]
+    $entry = if ($null -eq $binProperty) { "" } else { [string]$binProperty.Value }
     if ([string]::IsNullOrWhiteSpace($entry)) {
-        throw "应用包未声明 bin.devshell：$packageManifestPath"
+        throw "应用包未声明 bin.${BinName}：$packageManifestPath"
     }
     if ([IO.Path]::IsPathRooted($entry)) {
-        throw "应用包 bin.devshell 必须是相对路径：$entry"
+        throw "应用包 bin.${BinName} 必须是相对路径：$entry"
     }
 
     $root = [IO.Path]::GetFullPath($ApplicationDirectory).TrimEnd('\')
     $absolute = [IO.Path]::GetFullPath((Join-Path $root $entry))
     $rootPrefix = "$root\"
     if (-not $absolute.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "应用包 bin.devshell 逃逸 package 根目录：$entry"
+        throw "应用包 bin.${BinName} 逃逸 package 根目录：$entry"
     }
     return $absolute.Substring($rootPrefix.Length).Replace('\', '/')
+}
+
+function Get-ApplicationCliRelativePath([string]$ApplicationDirectory) {
+    return Get-ApplicationBinRelativePath $ApplicationDirectory "devshell"
 }
 
 function Test-ControlProcessRunning([int]$ControlProcessId) {
@@ -433,15 +438,21 @@ try {
     $currentBackupDirectory = Join-Path $installRoot ".current-backup-$PID"
     $workerBackupDirectory = Join-Path $devshellHome ".install-worker-backup-$PID"
     $commandPath = Join-Path $binDirectory "devshell.cmd"
+    $piCommandPath = Join-Path $binDirectory "pi.cmd"
     $previousVersionPresent = Test-Path -LiteralPath $versionDirectory
     $previousCurrentPresent = Test-Path -LiteralPath $currentDirectory
     New-Item -ItemType Directory -Force -Path $installRoot, $versionsDirectory, $binDirectory, $devshellHome | Out-Null
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $stagingDirectory, $backupDirectory, $currentBackupDirectory, $workerBackupDirectory
     Copy-Item -Recurse -Force -LiteralPath $appDirectory -Destination $stagingDirectory
     $cliRelativePath = Get-ApplicationCliRelativePath $stagingDirectory
+    $piRelativePath = Get-ApplicationBinRelativePath $stagingDirectory "pi"
     $stagingCli = Join-Path $stagingDirectory $cliRelativePath
+    $stagingPi = Join-Path $stagingDirectory $piRelativePath
     if (-not (Test-Path -LiteralPath $stagingCli -PathType Leaf)) {
         throw "应用包声明的 CLI 不存在：$stagingCli"
+    }
+    if (-not (Test-Path -LiteralPath $stagingPi -PathType Leaf)) {
+        throw "应用包声明的 Pi launcher 不存在：$stagingPi"
     }
     Assert-CliStarts $stagingCli "安装前验证失败"
     Write-InstallDetail "CLI 入口和运行时依赖验证通过"
@@ -479,6 +490,11 @@ try {
     } else {
         $null
     }
+    $previousPiCommandContent = if (Test-Path -LiteralPath $piCommandPath -PathType Leaf) {
+        Get-Content -Raw -LiteralPath $piCommandPath
+    } else {
+        $null
+    }
     Backup-WorkerAliases $targets $devshellHome $workerBackupDirectory
     $runtimeWasStopped = [bool]$runtimeState.ControlRunning
     $candidateControlRestoreAttempted = $false
@@ -497,7 +513,9 @@ try {
         Move-Item -Force $stagingDirectory $versionDirectory
         Copy-Item -Recurse -Force -LiteralPath $versionDirectory -Destination $currentDirectory
         $cliPath = Join-Path $currentDirectory $cliRelativePath
+        $piPath = Join-Path $currentDirectory $piRelativePath
         Set-Content -Encoding ASCII -LiteralPath $commandPath -Value "@echo off`r`nnode `"$cliPath`" %*`r`n"
+        Set-Content -Encoding ASCII -LiteralPath $piCommandPath -Value "@echo off`r`nnode `"$piPath`" %*`r`n"
 
         Write-InstallStep "验证安装结果"
         Assert-CliStarts $commandPath "安装结果验证失败" $true
@@ -531,6 +549,11 @@ try {
                 } else {
                     Set-Content -Encoding ASCII -LiteralPath $commandPath -Value $previousCommandContent
                 }
+                if ($null -eq $previousPiCommandContent) {
+                    Remove-Item -Force -ErrorAction SilentlyContinue $piCommandPath
+                } else {
+                    Set-Content -Encoding ASCII -LiteralPath $piCommandPath -Value $previousPiCommandContent
+                }
             } finally {
                 Restore-WorkerAliases $targets $devshellHome $workerBackupDirectory
             }
@@ -555,6 +578,7 @@ try {
     Write-Host ""
     Write-Host "已安装 portable-devshell $version。"
     Write-Host "命令：$commandPath"
+    Write-Host "Pi：$piCommandPath（安装 Agent Extension 与 Pi Provider 后可用）"
     Write-Host "已预装 Worker：$($targets -join ', ')"
     Write-Host "其他 Worker：首次连接对应平台时按需下载并校验"
     Write-Host "下一步："

@@ -39,7 +39,7 @@ test("Unix release installer activates the manifest-declared CLI and supports re
             version: applicationVersion,
             private: true,
             type: "module",
-            bin: { devshell: "./custom/devshell-entry.js" },
+            bin: { devshell: "./custom/devshell-entry.js", pi: "./custom/devshell-entry.js" },
             engines: { node: ">=24" }
         }, null, 2)}\n`, "utf8");
         await writeFile(resolve(app, "portable-devshell-install.json"), `${JSON.stringify({
@@ -116,7 +116,7 @@ test("Unix release installer restores the Control and managed instances that wer
             version: packageVersion,
             private: true,
             type: "module",
-            bin: { devshell: "./custom/devshell-entry.js" },
+            bin: { devshell: "./custom/devshell-entry.js", pi: "./custom/devshell-entry.js" },
             engines: { node: ">=24" }
         }, null, 2)}\n`;
         await writeFile(resolve(oldVersionDirectory, "package.json"), packageManifest("9.8.6-old"), "utf8");
@@ -219,7 +219,7 @@ test("Unix release installer rejects an application that cannot start before act
             version: "9.8.8-broken",
             private: true,
             type: "module",
-            bin: { devshell: "./dist/CliMain.js" },
+            bin: { devshell: "./dist/CliMain.js", pi: "./dist/CliMain.js" },
             engines: { node: ">=24" }
         }, null, 2)}\n`, "utf8");
         await writeFile(resolve(app, "portable-devshell-install.json"), `${JSON.stringify({
@@ -289,7 +289,7 @@ test("Windows release installer activates a fresh application with the host work
             version: applicationVersion,
             private: true,
             type: "module",
-            bin: { devshell: "./custom/devshell-entry.js" },
+            bin: { devshell: "./custom/devshell-entry.js", pi: "./custom/devshell-entry.js" },
             engines: { node: ">=24" }
         }, null, 2)}\n`, "utf8");
         await writeFile(resolve(app, "portable-devshell-install.json"), `${JSON.stringify({
@@ -349,6 +349,13 @@ test("Windows release installer activates a fresh application with the host work
             shell: true
         });
         assert.equal(commandResult.status, 0, `${commandResult.stdout}${commandResult.stderr}`);
+        const piCommand = resolve(binDirectory, "pi.cmd");
+        const piResult = spawnSync(piCommand, ["status"], {
+            encoding: "utf8",
+            env: environment,
+            shell: true
+        });
+        assert.equal(piResult.status, 0, `${piResult.stdout}${piResult.stderr}`);
 
         for (const target of preinstalledTargets()) {
             const suffix = target.startsWith("windows-") ? ".exe" : "";
@@ -374,6 +381,11 @@ async function assertInstalledLayout({ applicationVersion, binDirectory, devshel
 
     const result = spawnSync(command, ["status"], { encoding: "utf8" });
     assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+    const piCommand = resolve(binDirectory, "pi");
+    assert.equal((await lstat(piCommand)).isSymbolicLink(), true);
+    assert.equal(await readlink(piCommand), resolve(current, "custom", "devshell-entry.js"));
+    const piResult = spawnSync(piCommand, ["status"], { encoding: "utf8" });
+    assert.equal(piResult.status, 0, `${piResult.stdout}${piResult.stderr}`);
 
     const installedManifest = JSON.parse(await readFile(resolve(current, "package.json"), "utf8"));
     assert.equal(installedManifest.bin.devshell, "./custom/devshell-entry.js");
@@ -785,7 +797,7 @@ async function writeTransactionalReleaseFixture({ app, failAfterActivation = fal
         version,
         private: true,
         type: "module",
-        bin: { devshell: "./custom/devshell-entry.js" },
+        bin: { devshell: "./custom/devshell-entry.js", pi: "./custom/devshell-entry.js" },
         engines: { node: ">=24" }
     }, null, 2)}\n`, "utf8");
     await writeFile(resolve(app, "portable-devshell-install.json"), `${JSON.stringify({

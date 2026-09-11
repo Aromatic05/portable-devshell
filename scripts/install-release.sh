@@ -62,28 +62,34 @@ verify_sha256() {
     fi
 }
 
-resolve_cli_relative_path() {
+resolve_bin_relative_path() {
     app_directory=$1
-    node - "$app_directory/package.json" <<'NODE'
+    bin_name=$2
+    node - "$app_directory/package.json" "$bin_name" <<'NODE'
 const fs = require("fs");
 const path = require("path");
 const manifestPath = process.argv[2];
+const binName = process.argv[3];
 const root = path.resolve(path.dirname(manifestPath));
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-const entry = manifest?.bin?.devshell;
+const entry = manifest?.bin?.[binName];
 if (typeof entry !== "string" || entry.trim().length === 0) {
-    throw new Error(`Application package does not declare bin.devshell: ${manifestPath}`);
+    throw new Error(`Application package does not declare bin.${binName}: ${manifestPath}`);
 }
 if (path.isAbsolute(entry)) {
-    throw new Error(`Application bin.devshell must be relative: ${entry}`);
+    throw new Error(`Application bin.${binName} must be relative: ${entry}`);
 }
 const absolute = path.resolve(root, entry);
 const relative = path.relative(root, absolute);
 if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw new Error(`Application bin.devshell escapes package root: ${entry}`);
+    throw new Error(`Application bin.${binName} escapes package root: ${entry}`);
 }
 process.stdout.write(relative.split(path.sep).join("/"));
 NODE
+}
+
+resolve_cli_relative_path() {
+    resolve_bin_relative_path "$1" devshell
 }
 
 write_install_metadata() {
@@ -403,6 +409,13 @@ rollback_application() {
     else
         rm -f "$command_link" || rollback_app_failed=1
     fi
+    if ! rm -f "$pi_command_link"; then
+        rollback_app_failed=1
+    elif [ "${previous_pi_command_kind:-missing}" = symlink ]; then
+        ln -s "$previous_pi_command_target" "$pi_command_link" || rollback_app_failed=1
+    elif [ "${previous_pi_command_kind:-missing}" = file ]; then
+        cp -p "$previous_pi_command_backup" "$pi_command_link" || rollback_app_failed=1
+    fi
     return "$rollback_app_failed"
 }
 
@@ -528,6 +541,7 @@ staging_directory="$install_root/.staging-$version-$$"
 backup_directory="$install_root/.backup-$version-$$"
 current_link="$install_root/current"
 command_link="$bin_directory/devshell"
+pi_command_link="$bin_directory/pi"
 worker_bin_directory="$devshell_home/bin"
 worker_backup_directory="$devshell_home/.install-worker-backup-$$"
 application_transaction_active=0
@@ -580,11 +594,17 @@ mkdir -p "$bin_directory"
 cp -R "$temporary/app/." "$staging_directory/"
 cli_relative_path=$(resolve_cli_relative_path "$staging_directory")
 staging_cli="$staging_directory/$cli_relative_path"
+pi_relative_path=$(resolve_bin_relative_path "$staging_directory" pi)
+staging_pi="$staging_directory/$pi_relative_path"
 if [ ! -f "$staging_cli" ]; then
     echo "应用包声明的 CLI 不存在：$staging_cli" >&2
     exit 1
 fi
-chmod 755 "$staging_cli"
+if [ ! -f "$staging_pi" ]; then
+    echo "应用包声明的 Pi launcher 不存在：$staging_pi" >&2
+    exit 1
+fi
+chmod 755 "$staging_cli" "$staging_pi"
 if ! smoke_cli "$staging_cli" "安装前验证失败"; then
     exit 1
 fi
@@ -630,11 +650,24 @@ ln -sfn "devshell-worker-$host_target" "$worker_bin_directory/devshell-worker"
 
 previous_current_target=
 previous_command_target=
+previous_pi_command_kind=missing
+previous_pi_command_target=
+previous_pi_command_backup="$temporary/pi-command-backup"
 if [ -L "$current_link" ]; then
     previous_current_target=$(readlink "$current_link")
 fi
 if [ -L "$command_link" ]; then
     previous_command_target=$(readlink "$command_link")
+fi
+if [ -L "$pi_command_link" ]; then
+    previous_pi_command_kind=symlink
+    previous_pi_command_target=$(readlink "$pi_command_link")
+elif [ -f "$pi_command_link" ]; then
+    previous_pi_command_kind=file
+    cp -p "$pi_command_link" "$previous_pi_command_backup"
+elif [ -e "$pi_command_link" ]; then
+    echo "现有 Pi 命令不是普通文件或符号链接：$pi_command_link" >&2
+    exit 1
 fi
 
 application_transaction_active=1
@@ -646,7 +679,8 @@ if ! mv "$staging_directory" "$version_directory"; then
     rollback_installation
     exit 1
 fi
-if ! ln -sfn "versions/$version" "$current_link" || ! ln -sfn "$current_link/$cli_relative_path" "$command_link"; then
+rm -f "$pi_command_link"
+if ! ln -sfn "versions/$version" "$current_link" || ! ln -sfn "$current_link/$cli_relative_path" "$command_link" || ! ln -s "$current_link/$pi_relative_path" "$pi_command_link"; then
     echo "无法激活新版本，正在恢复原安装。" >&2
     rollback_installation
     exit 1
@@ -683,6 +717,7 @@ fi
 
 printf '\n已安装 portable-devshell %s。\n' "$version"
 echo "命令：$command_link"
+echo "Pi：$pi_command_link（安装 Agent Extension 与 Pi Provider 后可用）"
 echo "已预装 Worker：$targets"
 echo "其他 Worker：首次连接对应平台时按需下载并校验"
 echo "下一步："

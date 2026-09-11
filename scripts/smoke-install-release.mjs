@@ -23,6 +23,7 @@ const installRoot = resolve(root, "install");
 const binDirectory = resolve(root, "bin");
 const devshellHome = resolve(root, "devshell-home");
 const command = resolve(binDirectory, "devshell");
+const piCommand = resolve(binDirectory, "pi");
 const environment = {
     ...process.env,
     HOME: home,
@@ -59,6 +60,10 @@ try {
     controlStarted = true;
     run(command, ["status"], environment);
     run(command, ["logs"], environment);
+    const piBeforeProvider = run(piCommand, ["--version"], environment, true);
+    if (piBeforeProvider.status === 0 || !`${piBeforeProvider.stdout}${piBeforeProvider.stderr}`.includes("devshell agent provider install")) {
+        throw new Error("release-installed pi launcher did not report the expected missing-provider guidance");
+    }
     run(command, ["stop"], environment);
     controlStarted = false;
 
