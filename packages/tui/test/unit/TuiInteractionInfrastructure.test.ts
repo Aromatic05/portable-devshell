@@ -2792,8 +2792,19 @@ test("Messages scrolling measures wrapped history with the actual main viewport 
         tuiViewProjection.selectMainBoxFlowMetrics(state, 80).totalLines -
             tuiMessagesHistoryRows(12),
     );
-    assert.equal(state.ui.scrollOffsets[key], actualMax);
+    assert.equal(
+        state.ui.scrollOffsets[key],
+        Number.MAX_SAFE_INTEGER,
+        "End explicitly restores sticky-bottom follow instead of freezing the current numeric max",
+    );
     assert.notEqual(actualMax, legacyWidthMax);
+
+    await harness.dispatch({ delta: -1, type: "screen.scroll" });
+    assert.equal(
+        harness.store.getState().ui.scrollOffsets[key],
+        Math.max(0, actualMax - 1),
+        "scrolling up from the sticky bottom must leave follow mode and preserve a concrete offset",
+    );
 });
 
 test("Moving focus down advances the shared main viewport to keep the focused box visible", async () => {

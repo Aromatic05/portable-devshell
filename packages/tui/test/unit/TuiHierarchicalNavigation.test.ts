@@ -117,6 +117,31 @@ test("route stacks are isolated by feature page and instance and restore route v
     assert.equal(store.getState().ui.mainFocusId, "audit-context:ctx-a");
 });
 
+test("Messages enters a thread at the sticky bottom instead of restoring an old scroll position", () => {
+    const store = createStore();
+    store.patchControlReadModel({ instanceState: { alpha: { conversationEntries: [{
+        createdAt: "2026-09-11T06:00:00.000Z",
+        ctxId: "ctx-a",
+        id: "report-a",
+        kind: "report",
+        text: "latest report",
+    }] } } });
+    store.setSelectedPage("messages");
+    store.pushRoute({ ctxId: "ctx-a", page: "messages", view: "thread" });
+    let key = selectMainScrollKey(store.getState());
+    assert.equal(store.getState().ui.scrollOffsets[key], Number.MAX_SAFE_INTEGER);
+
+    store.setScrollOffset(key, 0);
+    store.setSelectedPage("audit");
+    store.setSelectedPage("messages");
+    key = selectMainScrollKey(store.getState());
+    assert.equal(
+        store.getState().ui.scrollOffsets[key],
+        Number.MAX_SAFE_INTEGER,
+        "re-entering a conversation must start at its newest content",
+    );
+});
+
 test("resource refresh removes invalid trailing routes instead of retaining a blank detail page", () => {
     const store = createStore();
     store.setSelectedPage("audit");

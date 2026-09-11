@@ -358,8 +358,12 @@ function restoreCurrentTuiRouteView(
     forceMainFocus = false,
 ): TuiAppState {
     const view = currentTuiRouteViewState(state);
+    const route = currentTuiRoute(state);
     const focusScope = forceMainFocus ? "mainBoxes" : view.focusRegion;
     const scrollKey = currentTuiRouteScrollKey(state);
+    const scrollOffset = route.page === "messages" && route.view === "thread"
+        ? Number.MAX_SAFE_INTEGER
+        : view.scrollOffset;
     return {
         ...state,
         interaction: { ...state.interaction, focusScope },
@@ -368,7 +372,7 @@ function restoreCurrentTuiRouteView(
             mainFocusId: view.selectedItemId,
             scrollOffsets: {
                 ...state.ui.scrollOffsets,
-                [scrollKey]: view.scrollOffset,
+                [scrollKey]: scrollOffset,
             },
         },
     };

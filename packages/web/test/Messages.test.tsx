@@ -168,6 +168,47 @@ describe("Messages", () => {
         );
     });
 
+    it("scrolls to the newest message whenever a conversation is entered or switched", async () => {
+        const scrollIntoView = vi.fn();
+        const original = Element.prototype.scrollIntoView;
+        Object.defineProperty(Element.prototype, "scrollIntoView", {
+            configurable: true,
+            value: scrollIntoView,
+        });
+        try {
+            const view = render(<Messages
+                navigate={vi.fn()}
+                route={threadRoute}
+                state={state}
+                store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+            />);
+            await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+            const initialCalls = scrollIntoView.mock.calls.length;
+
+            view.rerender(<Messages
+                navigate={vi.fn()}
+                route={{
+                    page: "messages",
+                    view: "thread",
+                    instance: "alpha",
+                    ctxId: "ctx-second",
+                }}
+                state={state}
+                store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+            />);
+            await waitFor(() => expect(scrollIntoView.mock.calls.length).toBeGreaterThan(initialCalls));
+        } finally {
+            if (original === undefined) {
+                Reflect.deleteProperty(Element.prototype, "scrollIntoView");
+            } else {
+                Object.defineProperty(Element.prototype, "scrollIntoView", {
+                    configurable: true,
+                    value: original,
+                });
+            }
+        }
+    });
+
     it("keeps the floating composer writable when the Context registry record is absent", async () => {
         const queueContextMessage = vi.fn(async () => true);
         const historyOnlyState: WebState = {

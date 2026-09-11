@@ -1,4 +1,11 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import {
+    type FormEvent,
+    useEffect,
+    useLayoutEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
 
 import { webRouteHref, type WebRoute } from "../routing/hashRoute.js";
 import {
@@ -24,6 +31,9 @@ export function Messages({
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [draft, setDraft] = useState("");
     const [query, setQuery] = useState("");
+    const historyEndRef = useRef<HTMLDivElement>(null);
+    const followBottomRef = useRef(true);
+    const previousThreadKeyRef = useRef<string>();
     const sessions = useMemo(() => selectWebMessageSessions(state), [state]);
     const visibleSessions = useMemo(
         () => filterWebMessageSessions(sessions, query),
@@ -35,12 +45,42 @@ export function Messages({
     const entries = route.view === "thread"
         ? selectWebMessageEntries(state, route.instance, route.ctxId)
         : [];
+    const threadKey = route.view === "thread"
+        ? `${route.instance}\u0000${route.ctxId}`
+        : undefined;
+    const latestEntryId = entries.at(-1)?.id;
     const sidebarOpen = drawerOpen;
 
     useEffect(() => {
         setDrawerOpen(false);
         setDraft("");
     }, [route]);
+
+    useLayoutEffect(() => {
+        if (threadKey === undefined) {
+            previousThreadKeyRef.current = undefined;
+            return;
+        }
+        if (previousThreadKeyRef.current !== threadKey) {
+            previousThreadKeyRef.current = threadKey;
+            followBottomRef.current = true;
+        }
+        const end = historyEndRef.current;
+        if (followBottomRef.current && typeof end?.scrollIntoView === "function") {
+            end.scrollIntoView({ block: "end" });
+        }
+    }, [latestEntryId, threadKey]);
+
+    useEffect(() => {
+        if (threadKey === undefined) return;
+        const updateFollowBottom = () => {
+            const distanceFromBottom =
+                document.documentElement.scrollHeight - window.innerHeight - window.scrollY;
+            followBottomRef.current = distanceFromBottom <= 96;
+        };
+        window.addEventListener("scroll", updateFollowBottom, { passive: true });
+        return () => window.removeEventListener("scroll", updateFollowBottom);
+    }, [threadKey]);
 
     async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
         event.preventDefault();
@@ -149,6 +189,7 @@ export function Messages({
                     </div>
                     <p>{entry.text}</p>
                 </article>)}
+                <div aria-hidden="true" className="message-history-end" ref={historyEndRef} />
             </div>}
             {route.view === "thread" ? <form className="messages-composer" onSubmit={(event) => void submit(event)}>
                 <label className="sr-only" htmlFor="messages-comment">Comment</label>

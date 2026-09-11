@@ -201,7 +201,10 @@ test("Messages renders comment and report history and sends a Comment from the f
             harness.runtime.store.getState().interaction.focusScope ===
             "contextConversation",
     );
-    await waitUntil(() => harness.terminal.output.includes("\u001B[4m"));
+    await waitUntil(() => {
+        const editor = harness.runtime.store.getState().interaction.editor;
+        return editor?.kind === "comment" && editor.editing === true;
+    });
     assert.equal(
         harness.terminal.output.includes("\u001B[?25h"),
         false,

@@ -63,13 +63,25 @@ export class TuiCommandDispatcherFocus {
         const max = this.maxMainScrollOffset();
         const current = clamp(this.#store.getState().ui.scrollOffsets[key] ?? 0, 0, max);
         const next = clamp(delta === 0 ? current : current + delta, 0, max);
-        this.#store.setScrollOffset(key, next);
+        this.#store.setScrollOffset(
+            key,
+            this.#store.getState().ui.selectedPage === "messages" && next === max
+                ? Number.MAX_SAFE_INTEGER
+                : next,
+        );
         return true;
     }
 
     setMainColumnOffset(offset: number): boolean {
         const key = this.#projection.selectMainScrollKey(this.#store.getState());
-        this.#store.setScrollOffset(key, clamp(offset, 0, this.maxMainScrollOffset()));
+        const max = this.maxMainScrollOffset();
+        const next = clamp(offset, 0, max);
+        this.#store.setScrollOffset(
+            key,
+            this.#store.getState().ui.selectedPage === "messages" && next === max
+                ? Number.MAX_SAFE_INTEGER
+                : next,
+        );
         return true;
     }
 
