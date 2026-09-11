@@ -11,7 +11,7 @@ Windows x86-64
 Windows arm64
 ```
 
-主程序需要 Node.js 24 或更高版本。发布包已经包含 TypeScript 应用依赖；安装器会预装当前主机对应的 worker。使用发布包时不需要 pnpm 或 Rust。
+主程序需要 Node.js 24 或更高版本。发布包已经包含 TypeScript 应用依赖；安装器会预装当前主机对应的 worker，并安装 `devshell` 与受管 `pi` launcher。使用发布包时不需要 pnpm 或 Rust。
 
 ## 从 GitHub Release 安装
 
@@ -74,6 +74,39 @@ devshell --version
 devshell status
 ```
 
+### 安装 Agent Extension 与 Pi Provider
+
+Agent 不属于 Control builtin Extension。需要 Agent/Pi 时，再从同一 Release 安装公共 Agent Extension 和当前主机对应的 Pi Provider。以 Linux x86-64 为例：
+
+```bash
+base=https://github.com/Aromatic05/portable-devshell/releases/latest/download
+target=linux-x64
+
+for asset in \
+  portable-devshell-agent.dsext \
+  portable-devshell-agent-provider-pi-$target.dsprovider; do
+  curl -fLO "$base/$asset"
+  curl -fLO "$base/$asset.sha256"
+done
+
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum -c portable-devshell-agent.dsext.sha256
+  sha256sum -c portable-devshell-agent-provider-pi-$target.dsprovider.sha256
+else
+  shasum -a 256 -c portable-devshell-agent.dsext.sha256
+  shasum -a 256 -c portable-devshell-agent-provider-pi-$target.dsprovider.sha256
+fi
+
+devshell start
+devshell extension install "$PWD/portable-devshell-agent.dsext"
+devshell agent provider install "$PWD/portable-devshell-agent-provider-pi-$target.dsprovider"
+pi --version
+```
+
+`target` 可取 `linux-x64`、`linux-arm64`、`darwin-x64`、`darwin-arm64`、`windows-x64` 或 `windows-arm64`。Windows 使用对应 `.dsprovider`，并按上文 PowerShell 的 `Get-FileHash` 方法校验两个资产后执行相同的 `devshell extension install` / `devshell agent provider install` 命令。
+
+`pi` launcher 本身随主程序安装，但不会隐式安装或更新 Agent Extension/Provider；Provider 未安装时会明确提示运行 `devshell agent provider install <bundle>`。Provider 更新使用 `devshell agent provider update <bundle>`。
+
 ## 从源码安装
 
 源码安装需要：
@@ -95,7 +128,7 @@ pnpm install:local
 3. 对预装 worker 校验 SHA-256 并安装到版本化目录；
 4. 只有某个 Release asset 找不到或下载失败时，才尝试在本地构建该 target；
 5. 在切换版本前后分别执行 CLI 启动验证；
-6. 安装应用，并在 Unix 创建 `~/.local/bin/devshell` 和 `~/.local/bin/pi`，在 Windows 创建对应的 `.cmd` 入口；Pi 默认加载 portable-devshell extension 并关闭 Pi 内置工具。
+6. 安装应用，并在 Unix 创建 `~/.local/bin/devshell` 和 `~/.local/bin/pi`，在 Windows 创建对应的 `.cmd` 入口；受管 `pi` launcher 在 Pi Provider 安装后加载该 Provider 的 portable-devshell extension，并默认关闭 Pi 内置工具。
 7. 如果安装前 Control 正在运行，恢复 Control 以及当时由它管理的运行中实例。
 
 当前主机 worker 用于本地实例。其他远程目标由 control 在首次连接时根据探测结果按需取得，不应在每次安装时下载全部平台。
@@ -109,8 +142,6 @@ pnpm install:local
 ~/.local/bin/pi
 ~/.local/share/portable-devshell/current/
 ~/.local/share/portable-devshell/versions/<version>/
-~/.local/share/portable-devshell/pi-integration-original.json
-~/.pi/agent/extensions/devshell.js
 ~/.devshell/bin/devshell-worker
 ~/.devshell/bin/devshell-worker-<host-target>
 ~/.devshell/workers/<target>/<sha256>/devshell-worker
@@ -126,8 +157,6 @@ Windows 对应位置：
 %USERPROFILE%\.local\bin\pi.cmd
 %LOCALAPPDATA%\portable-devshell\current\
 %LOCALAPPDATA%\portable-devshell\versions\<version>\
-%LOCALAPPDATA%\portable-devshell\pi-integration-original.json
-%USERPROFILE%\.pi\agent\extensions\devshell.js
 %USERPROFILE%\.devshell\bin\devshell-worker.exe
 %USERPROFILE%\.devshell\workers\<target>\<sha256>\devshell-worker.exe
 %USERPROFILE%\.devshell\release-cache\workers\<tag>\<target>\<sha256>\devshell-worker.exe
@@ -168,28 +197,23 @@ Reverse instance 是 self-managed，不由本机安装器主动启动；升级�
 devshell stop
 ```
 
-先恢复安装 portable-devshell 前的 Pi 命令和 `devshell.js` extension，再删除程序文件：
+标准安装会让 `PORTABLE_DEVSHELL_BIN_DIR` 中的 `pi` 指向 portable-devshell 的受管 launcher，但不会写入 `~/.pi/agent/extensions/`。停止 Control 后删除这两个命令和程序文件：
 
 ```bash
-node "$HOME/.local/share/portable-devshell/current/portable-devshell-pi-integration.mjs" \
-  deactivate \
-  "$HOME/.local/share/portable-devshell/pi-integration-original.json" \
-  "$HOME/.local/bin" \
-  "$HOME"
 rm -f ~/.local/bin/devshell
+rm -f ~/.local/bin/pi
 rm -rf ~/.local/share/portable-devshell
 ```
 
-首次接管 Pi 时，安装器会把原有 `pi` 入口和同名 `devshell.js` 的文件/软链状态持久化到 `pi-integration-original.json`；升级不会覆盖这份基线。对于没有该基线的旧安装，`deactivate` 只删除能够识别为 portable-devshell 生成的 Pi 文件，不会删除未知的用户文件。
+安装事务失败时会恢复安装前的 `pi` 命令；成功安装后该命令由 portable-devshell 接管，目前不会保留供未来卸载自动恢复的长期副本。如果该路径原先已有需要保留的 `pi` 命令，请在首次安装前自行备份或使用不同的 `PORTABLE_DEVSHELL_BIN_DIR`。自定义安装路径时，上述卸载命令也应替换成对应路径。
 
 Windows PowerShell：
 
 ```powershell
 $root = Join-Path $env:LOCALAPPDATA "portable-devshell"
 $bin = Join-Path $HOME ".local\bin"
-node (Join-Path $root "current\portable-devshell-pi-integration.mjs") deactivate `
-  (Join-Path $root "pi-integration-original.json") $bin $HOME win32
 Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $bin "devshell.cmd")
+Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $bin "pi.cmd")
 Remove-Item -Recurse -Force $root
 ```
 
