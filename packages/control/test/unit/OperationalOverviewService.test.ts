@@ -4,6 +4,7 @@ import test from "node:test";
 import {
     asInstanceName,
     type ActiveTodoSummary,
+    type OAuthApprovalRequest,
     type ToolCallRecord
 } from "@portable-devshell/shared";
 
@@ -107,7 +108,13 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
     const overview = await new OperationalOverviewService({
         instances: { list: () => [ready, failed] },
         now: () => now,
-        oauthApprovals: () => ({ list: async () => [{ id: "oauth-1" }] }),
+        oauthApprovals: () => ({
+            list: async () => [
+                oauthApproval("oauth-pending", "pending"),
+                oauthApproval("oauth-approved", "approved"),
+                oauthApproval("oauth-denied", "denied")
+            ]
+        }),
         processId: () => 42,
         systemCollector: {
             async collect() {
@@ -455,3 +462,21 @@ test("operational overview remains available when one collection source fails", 
         ["overview.partial", "overview.partial"]
     );
 });
+
+function oauthApproval(
+    approvalId: string,
+    status: OAuthApprovalRequest["status"]
+): OAuthApprovalRequest {
+    return {
+        approvalId,
+        clientId: `client-${approvalId}`,
+        clientName: approvalId,
+        createdAt: "2026-07-30T23:00:00.000Z",
+        expiresAt: "2026-08-01T23:00:00.000Z",
+        kind: "authorization",
+        redirectUris: ["https://example.invalid/callback"],
+        requestedResources: [],
+        requestedScopes: [],
+        status
+    };
+}

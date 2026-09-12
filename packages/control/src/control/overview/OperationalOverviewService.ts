@@ -1,4 +1,5 @@
 import type {
+    OAuthApprovalRequest,
     OperationalOverview,
     OperationalOverviewAlert
 } from "@portable-devshell/shared";
@@ -27,7 +28,7 @@ export interface OperationalOverviewRegistryPort {
 }
 
 export interface OperationalOverviewApprovalPort {
-    list(): Promise<readonly unknown[]>;
+    list(): Promise<readonly OAuthApprovalRequest[]>;
 }
 
 export interface OperationalOverviewInstanceCollectorPort {
@@ -171,7 +172,7 @@ export class OperationalOverviewService {
             return { alerts: [], count: 0 };
         }
         try {
-            const pending = await approvals.list();
+            const pending = (await approvals.list()).filter((approval) => approval.status === "pending");
             if (pending.length === 0) {
                 return { alerts: [], count: 0 };
             }
