@@ -295,6 +295,17 @@ test("CliMain keeps Extension management separate from cli.commands dispatch", a
             },
             async cliCommand(commandId: string, argv: readonly string[]) {
                 calls.push(`command:${commandId}:${argv.join("|")}`);
+                if (commandId === "agent" && argv.length === 1 && argv[0] === "help") {
+                    return {
+                        kind: "text",
+                        text: [
+                            "Usage:",
+                            "  devshell agent [--provider <id>] <instance:/workspace>",
+                            "  devshell agent provider list",
+                            "  devshell agent stop <agentId>"
+                        ].join("\n")
+                    };
+                }
                 return { kind: "json", value: { commandId } };
             },
             async extensionDisable(extensionId: string) {
@@ -350,16 +361,14 @@ test("CliMain keeps Extension management separate from cli.commands dispatch", a
     stdout.flush();
     assert.equal(await cli.run(["agent", "--help"]), 0);
     assert.equal(stdout.flush(), [
-        "Agent",
-        "",
         "Usage:",
-        "  devshell agent <command>",
-        "",
-        "Run and manage Agent providers",
-        "",
-        "Extension: agent",
+        "  devshell agent [--provider <id>] <instance:/workspace>",
+        "  devshell agent provider list",
+        "  devshell agent stop <agentId>",
         ""
     ].join("\n"));
+    assert.equal(await cli.run(["agent", "provider", "list", "--help"]), 0);
+    assert.match(stdout.flush(), /devshell agent provider list/u);
     assert.equal(await cli.run(["agent", "json"]), 0);
     assert.match(stdout.flush(), /"commandId": "agent"/u);
 
@@ -373,6 +382,8 @@ test("CliMain keeps Extension management separate from cli.commands dispatch", a
         "enable:agent",
         "disable:agent",
         "reload:agent",
+        "command:agent:help",
+        "command:agent:help",
         "command:agent:json"
     ]);
     assert.equal(calls.filter((call) => call === "cli.commands").length, 12);

@@ -21,7 +21,7 @@ import { CliCommandWatchStatus } from "./command/watch/CliCommandWatchStatus.js"
 import { cliExitCodes } from "./exit/CliExitCode.js";
 import { CliExitMapper } from "./exit/CliExitMapper.js";
 import { CliRenderError, renderCliError } from "./render/CliRenderError.js";
-import { renderCliTopicUsage, renderCliUsage, renderExtensionCommandUsage, renderExtensionList, renderExtensionUsage, renderInstanceUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
+import { renderCliTopicUsage, renderCliUsage, renderExtensionList, renderExtensionUsage, renderInstanceUsage, renderWatchUsage } from "./render/CliRenderUsage.js";
 import { renderControlLogs } from "./render/control/CliRenderControlLogs.js";
 import { renderControlStatus } from "./render/control/CliRenderControlStatus.js";
 import { renderInstanceList } from "./render/instance/CliRenderInstanceList.js";
@@ -122,7 +122,7 @@ export class CliMain {
             const overlay = commands.find((candidate) => candidate.id === commandId);
             if (overlay !== undefined) {
                 return {
-                    command: { args: [...argv.slice(1)], commandId, kind: "cli.command" },
+                    command: { args: normalizeExtensionCommandArgs(argv.slice(1)), commandId, kind: "cli.command" },
                     controlNegotiated: true
                 };
             }
@@ -321,14 +321,6 @@ export class CliMain {
                 this.#writeJson(await this.#clients.extension.reload(command.extensionId));
                 return;
             case "cli.command": {
-                if (isExtensionHelp(command.args)) {
-                    const descriptor = (await this.#clients.cli.commands())
-                        .find((candidate) => candidate.id === command.commandId);
-                    if (descriptor !== undefined) {
-                        this.#stdout.write(`${renderExtensionCommandUsage(descriptor)}\n`);
-                        return;
-                    }
-                }
                 const result = await this.#clients.cli.command(command.commandId, command.args, {
                     relay: {
                         input: this.#stdin,
@@ -561,8 +553,10 @@ if (isCliEntrypoint(import.meta.url, process.argv[1])) {
     process.exit(exitCode);
 }
 
-function isExtensionHelp(args: readonly string[]): boolean {
-    return args.length === 1 && (args[0] === "--help" || args[0] === "-h");
+function normalizeExtensionCommandArgs(args: readonly string[]): string[] {
+    const trailing = args.at(-1);
+    if (trailing === "--help" || trailing === "-h") return ["help"];
+    return [...args];
 }
 
 function splitGlobalFlags(argv: readonly string[]): { commandArgs: string[]; debug: boolean; verbose: boolean } {
