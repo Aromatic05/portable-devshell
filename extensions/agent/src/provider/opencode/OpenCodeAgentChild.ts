@@ -249,16 +249,16 @@ class McpToolBridge {
 
     static async start(tools: readonly AgentModelToolDefinition[]): Promise<McpToolBridge> {
         const mcp = new McpServer({ name: "portable-devshell", version: "0.7.2" });
-        let bridge: McpToolBridge | undefined;
+        const bridge: { current?: McpToolBridge } = {};
         for (const tool of tools) {
             mcp.registerTool(tool.name, {
                 description: tool.description,
                 inputSchema: fromJsonSchema(tool.inputSchema as Record<string, unknown>)
             }, async (input) => {
-                if (bridge === undefined || bridge.#runtime === undefined) {
+                if (bridge.current === undefined || bridge.current.#runtime === undefined) {
                     throw new Error("OpenCode DevShell tool bridge is not bound.");
                 }
-                const result = await bridge.#runtime.callTool(tool.name, input);
+                const result = await bridge.current.#runtime.callTool(tool.name, input);
                 return { content: [{ text: result, type: "text" }] };
             });
         }
@@ -280,8 +280,8 @@ class McpToolBridge {
             await mcp.close();
             throw new Error("OpenCode MCP bridge did not obtain a TCP address.");
         }
-        bridge = new McpToolBridge(http, mcp, `http://127.0.0.1:${address.port}/mcp`);
-        return bridge;
+        bridge.current = new McpToolBridge(http, mcp, `http://127.0.0.1:${address.port}/mcp`);
+        return bridge.current;
     }
 
     bind(runtime: OpenCodeRuntime): void {

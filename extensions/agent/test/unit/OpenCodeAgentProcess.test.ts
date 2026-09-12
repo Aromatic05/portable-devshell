@@ -127,7 +127,7 @@ function nodeProcessCapability(): ExtensionProcessCapability {
                 async send(message: ExtensionJsonValue) {
                     if (!child.connected || child.send === undefined) throw new Error("Test child IPC is unavailable.");
                     await new Promise<void>((resolve, reject) => {
-                        child.send!(message, (error) => error === null ? resolve() : reject(error));
+                        child.send!(message as never, (error) => error === null ? resolve() : reject(error));
                     });
                 },
                 async terminate(signal = "SIGTERM") {
