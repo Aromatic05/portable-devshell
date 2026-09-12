@@ -57,7 +57,10 @@ export function createCommonCiSteps(platform = process.platform) {
         { args: ["test", "--locked", "--workspace"], command: "cargo", name: "Rust workspace tests" },
         pnpmStep("Worker tmux contract tests", ["test:worker:tmux"]),
         pnpmStep("Prepare test Worker", ["test:prepare"]),
-        pnpmStep("Package tests", ["test:packages"]),
+        {
+            ...pnpmStep("Package tests", ["test:packages"]),
+            env: { CI: "false" },
+        },
     ];
 }
 
@@ -70,7 +73,10 @@ export function createPlatformContractCiSteps(platform = process.platform) {
         { args: ["test", "--locked", "--workspace"], command: "cargo", name: "Rust workspace tests" },
         pnpmStep("Worker tmux contract tests", ["test:worker:tmux"]),
         pnpmStep("Prepare test Worker", ["test:prepare"]),
-        pnpmStep("Package tests", ["test:packages"]),
+        {
+            ...pnpmStep("Package tests", ["test:packages"]),
+            env: { CI: "false" },
+        },
     ];
 }
 

@@ -57,7 +57,8 @@ test("development CI continues after an executor throws", () => {
 });
 
 test("common CI owns source correctness without rebuilding release assets", () => {
-    const names = createCommonCiSteps("linux").map((step) => step.name);
+    const steps = createCommonCiSteps("linux");
+    const names = steps.map((step) => step.name);
     assert.deepEqual(names, [
         "Script tests",
         "Lint",
@@ -70,6 +71,7 @@ test("common CI owns source correctness without rebuilding release assets", () =
     ]);
     assert.equal(names.includes("Build native Worker"), false);
     assert.equal(names.includes("Package native application"), false);
+    assert.equal(steps.find((step) => step.name === "Package tests")?.env?.CI, "false");
 });
 
 test("Unix target CI proves the native deliverable without rerunning common correctness", () => {
@@ -92,13 +94,15 @@ test("Unix target CI proves the native deliverable without rerunning common corr
 });
 
 test("macOS platform contract retains OS-sensitive package Rust and tmux behavior on one architecture", () => {
-    const names = createPlatformContractCiSteps("darwin").map((step) => step.name);
+    const steps = createPlatformContractCiSteps("darwin");
+    const names = steps.map((step) => step.name);
     assert.deepEqual(names, [
         "Rust workspace tests",
         "Worker tmux contract tests",
         "Prepare test Worker",
         "Package tests",
     ]);
+    assert.equal(steps.find((step) => step.name === "Package tests")?.env?.CI, "false");
 });
 
 test("Linux x64 target CI runs final integration without repeating unit gates", () => {
