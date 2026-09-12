@@ -116,6 +116,7 @@ export function createTargetCiSteps(target, platform = process.platform) {
             join("ci-artifacts", "portable-devshell-agent.dsext"),
             join("ci-artifacts", `portable-devshell-agent-provider-pi-${target}.dsprovider`),
             join("ci-artifacts", `portable-devshell-agent-provider-opencode-${target}.dsprovider`),
+            worker,
         ]),
     );
 

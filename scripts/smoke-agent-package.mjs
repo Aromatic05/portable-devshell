@@ -1,5 +1,5 @@
 import { fork, spawnSync } from "node:child_process";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -7,29 +7,34 @@ import { assertPackageBinFile, readPackageBinPath } from "./application-layout.m
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const inputs = process.argv.slice(2).filter((argument) => argument !== "--");
-if (inputs.length !== 4) {
-    throw new Error("usage: node scripts/smoke-agent-package.mjs <app.tar.gz> <agent.dsext> <pi.dsprovider> <opencode.dsprovider>");
+if (inputs.length !== 5) {
+    throw new Error("usage: node scripts/smoke-agent-package.mjs <app.tar.gz> <agent.dsext> <pi.dsprovider> <opencode.dsprovider> <worker>");
 }
 if (process.platform === "win32") {
     throw new Error("smoke-agent-package.mjs currently validates the Unix release path.");
 }
 
-const [appArgument, extensionArgument, piProviderArgument, openCodeProviderArgument] = inputs;
+const [appArgument, extensionArgument, piProviderArgument, openCodeProviderArgument, workerArgument] = inputs;
 const appArchive = absoluteInput(appArgument);
 const extensionBundle = absoluteInput(extensionArgument);
 const piProviderBundle = absoluteInput(piProviderArgument);
 const openCodeProviderBundle = absoluteInput(openCodeProviderArgument);
+const worker = absoluteInput(workerArgument);
 const root = await createTestTempDirectory("agent-package-smoke");
 const appDirectory = resolve(root, "app");
 const home = resolve(root, "home");
 const runtime = resolve(root, "runtime");
 const devshellHome = resolve(home, ".devshell");
+const instance = "agent-smoke";
+const workspace = resolve(root, "workspace");
+const workerEnvName = `PORTABLE_DEVSHELL_WORKER_${hostTargetKey()}_PATH`;
 const environment = {
     ...process.env,
     HOME: home,
     XDG_DATA_HOME: resolve(root, "data"),
     XDG_RUNTIME_DIR: runtime,
-    PORTABLE_DEVSHELL_HOME: devshellHome
+    PORTABLE_DEVSHELL_HOME: devshellHome,
+    [workerEnvName]: worker
 };
 let controlStarted = false;
 
@@ -37,8 +42,47 @@ try {
     await Promise.all([
         mkdir(appDirectory, { recursive: true }),
         mkdir(home, { recursive: true }),
-        mkdir(runtime, { mode: 0o700, recursive: true })
+        mkdir(runtime, { mode: 0o700, recursive: true }),
+        mkdir(resolve(devshellHome, "control", "instances"), { recursive: true }),
+        mkdir(workspace, { recursive: true })
     ]);
+    await writeFile(
+        resolve(devshellHome, "control", "config.toml"),
+        [
+            "version = 2",
+            "",
+            "[control]",
+            'logLevel = "info"',
+            "",
+            "[mcp]",
+            "enabled = false",
+            'listenHost = "127.0.0.1"',
+            "listenPort = 17890",
+            'publicBaseUrl = "http://127.0.0.1:17890"',
+            ""
+        ].join("\n"),
+        "utf8"
+    );
+    await writeFile(
+        resolve(devshellHome, "control", "instances", `${instance}.toml`),
+        [
+            "version = 4",
+            `name = ${JSON.stringify(instance)}`,
+            "enabled = true",
+            'provider = "local"',
+            "",
+            "[mcp]",
+            "enabled = false",
+            "",
+            "[approvalPolicy]",
+            'mode = "disabled"',
+            "",
+            "[security]",
+            'mode = "workspace"',
+            ""
+        ].join("\n"),
+        "utf8"
+    );
     run("tar", ["-xzf", appArchive, "-C", appDirectory], environment);
     const cli = await assertPackageBinFile(await readPackageBinPath(appDirectory, "devshell"));
     const pi = await assertPackageBinFile(await readPackageBinPath(appDirectory, "pi"));
@@ -71,6 +115,7 @@ try {
     if (!/^\d+\.\d+\.\d+(?:[-+].*)?$/u.test(piVersion)) {
         throw new Error(`packaged Pi launcher returned an invalid version: ${JSON.stringify(piVersion)}`);
     }
+    smokePiAgentLifecycle(cli.absolutePath, environment);
     const openCodeVersion = await smokeOpenCodeProvider(openCodeProvider, environment);
 
     run(process.execPath, [cli.absolutePath, "stop"], environment);
@@ -85,6 +130,13 @@ try {
 
 function absoluteInput(value) {
     return isAbsolute(value) ? value : resolve(process.cwd(), value);
+}
+
+function hostTargetKey() {
+    const os = process.platform === "darwin" ? "DARWIN" : process.platform === "win32" ? "WINDOWS" : "LINUX";
+    const arch = process.arch === "arm64" ? "ARM64" : process.arch === "x64" ? "X64" : undefined;
+    if (arch === undefined) throw new Error(`unsupported host architecture: ${process.arch}`);
+    return `${os}_${arch}`;
 }
 
 function run(executable, args, env, ignoreFailure = false) {
@@ -104,6 +156,29 @@ function run(executable, args, env, ignoreFailure = false) {
         stderr: result.stderr ?? "",
         stdout: result.stdout ?? ""
     };
+}
+
+function smokePiAgentLifecycle(cli, env) {
+    const target = `${instance}:${workspace}`;
+    const started = JSON.parse(run(
+        process.execPath,
+        [cli, "agent", "--provider", "pi", target],
+        env
+    ).stdout);
+    if (started?.provider !== "pi" || started?.state !== "running" || typeof started?.agentId !== "string") {
+        throw new Error(`Pi Agent did not start through the packaged provider: ${JSON.stringify(started)}`);
+    }
+
+    const listed = JSON.parse(run(process.execPath, [cli, "agent", "list"], env).stdout);
+    if (!Array.isArray(listed) || !listed.some((agent) => agent?.agentId === started.agentId && agent?.provider === "pi")) {
+        throw new Error(`started Pi Agent is missing from list: ${JSON.stringify(listed)}`);
+    }
+
+    run(process.execPath, [cli, "agent", "stop", started.agentId], env);
+    const afterStop = JSON.parse(run(process.execPath, [cli, "agent", "list"], env).stdout);
+    if (Array.isArray(afterStop) && afterStop.some((agent) => agent?.agentId === started.agentId)) {
+        throw new Error(`stopped Pi Agent is still listed: ${JSON.stringify(afterStop)}`);
+    }
 }
 
 async function smokeOpenCodeProvider(provider, env) {
