@@ -6,6 +6,7 @@ import { ExtensionArtifactCapabilityControl } from "../../control/extension/host
 import { ExtensionAssetCapabilityControl } from "../../control/extension/host/generation/capability/ExtensionAssetCapabilityControl.js";
 import { ExtensionInstanceCapabilityControl } from "../../control/extension/host/generation/capability/ExtensionInstanceCapabilityControl.js";
 import { readBuiltinExtensionSources, type BuiltinExtensionSource } from "../../control/extension/install/ExtensionBuiltinSource.js";
+import type { ExtensionInstallLimits } from "../../control/extension/install/ExtensionInstallPolicy.js";
 import { ExtensionLoader } from "../../control/extension/host/generation/ExtensionLoader.js";
 import { ExtensionPathLayout } from "../../control/extension/state/ExtensionPathLayout.js";
 import { ExtensionRegistryStore } from "../../control/extension/state/ExtensionRegistryStore.js";
@@ -69,6 +70,7 @@ export class ControlRuntimeFactory {
                         allowed,
                         dataDirectory,
                         extensionId,
+                        limits: resolveControlExtensionAssetLimits(extensionId),
                         project: async (input) => await artifact.projectExtensionAsset(extensionId, input)
                     }),
                     instanceFactory: ({ allowed, extensionId }) => new ExtensionInstanceCapabilityControl({
@@ -113,4 +115,15 @@ export class ControlRuntimeFactory {
             throw error;
         }
     }
+}
+
+export function resolveControlExtensionAssetLimits(
+    extensionId: string
+): Partial<ExtensionInstallLimits> | undefined {
+    if (extensionId !== "agent") return undefined;
+    return {
+        maxCompressedBytes: 128 * 1024 * 1024,
+        maxFileBytes: 256 * 1024 * 1024,
+        maxLogicalBytes: 512 * 1024 * 1024
+    };
 }
