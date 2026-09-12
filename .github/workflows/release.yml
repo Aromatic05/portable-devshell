@@ -152,7 +152,7 @@ jobs:
 
             - name: 验证最终 Agent 发布包
               if: matrix.target == 'linux-x64'
-              run: pnpm smoke:agent-package -- ./release-assets/portable-devshell-app-linux-x64.tar.gz ./release-assets/portable-devshell-agent.dsext ./release-assets/portable-devshell-agent-provider-pi-linux-x64.dsprovider
+              run: pnpm smoke:agent-package -- ./release-assets/portable-devshell-app-linux-x64.tar.gz ./release-assets/portable-devshell-agent.dsext ./release-assets/portable-devshell-agent-provider-pi-linux-x64.dsprovider ./release-assets/portable-devshell-agent-provider-opencode-linux-x64.dsprovider
 
             - uses: actions/upload-artifact@v7
               with:

@@ -46,12 +46,21 @@ importers:
 
   extensions/agent:
     dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: 1.4.0
+        version: 1.4.0(zod@4.6.2)
       '@earendil-works/pi-coding-agent':
         specifier: 0.85.1
         version: 0.85.1(@modelcontextprotocol/sdk@1.30.0(zod@4.6.2))(ws@8.21.3)(zod@4.6.2)
       '@earendil-works/pi-tui':
         specifier: 0.85.1
         version: 0.85.1
+      '@modelcontextprotocol/node':
+        specifier: 2.0.0
+        version: 2.0.0(@modelcontextprotocol/server@2.0.0)(hono@4.13.7)
+      '@modelcontextprotocol/server':
+        specifier: 2.0.0
+        version: 2.0.0
       '@portable-devshell/extension':
         specifier: workspace:*
         version: link:../../packages/extension
@@ -61,6 +70,9 @@ importers:
       diff:
         specifier: 9.0.0
         version: 9.0.0
+      opencode-ai:
+        specifier: 1.18.30
+        version: 1.18.30
       pi-gui-extension:
         specifier: 0.4.1
         version: 0.4.1(@earendil-works/pi-coding-agent@0.85.1(@modelcontextprotocol/sdk@1.30.0(zod@4.6.2))(ws@8.21.3)(zod@4.6.2))
@@ -318,6 +330,11 @@ packages:
 
   '@adobe/css-tools@4.5.0':
     resolution: {integrity: sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q==}
+
+  '@agentclientprotocol/sdk@1.4.0':
+    resolution: {integrity: sha512-/eufudw+aFY1LKLolT6yFE6UMmYRl7fMJ/DEONSIyR6wI3slHWITBsANRGqXEY8FRzqUxwh7QEaGiZHcJPVThg==}
+    peerDependencies:
+      zod: ^3.25.0 || ^4.0.0
 
   '@alcalzone/ansi-tokenize@0.1.3':
     resolution: {integrity: sha512-3yWxPTq3UQ/FY9p1ErPxIyfT64elWaMvM9lIHnaqpyft63tkxodF5aUElYHrdisWve5cETkh1+KBw1yJuW0aRw==}
@@ -2444,6 +2461,72 @@ packages:
       zod:
         optional: true
 
+  opencode-ai@1.18.30:
+    resolution: {integrity: sha512-oLcOLQE4XzDKy6T5L5d1RdVJvXHXwVlD4hRF5V317JbUQorrl2EyDdGZk5kbgv675J9FXp8usg92MZbEWhh6gQ==}
+    cpu: [arm64, x64]
+    os: [darwin, linux, win32]
+    hasBin: true
+
+  opencode-darwin-arm64@1.18.30:
+    resolution: {integrity: sha512-KO4FJGZpgmSz+NNQ6PizynT5qAzVfoZI5HJLpyD0tYNqePPu87g2/UgVmNW663Bock2r75koLZFjR5waZiFiqw==}
+    cpu: [arm64]
+    os: [darwin]
+
+  opencode-darwin-x64-baseline@1.18.30:
+    resolution: {integrity: sha512-DMQWRe9blvI+639fcwqG+JUxppTOVrPyasMF/uWhTi5N+5veXpB1K/wV15D8Lz7uqblH/CE7apxroaz/E7vudA==}
+    cpu: [x64]
+    os: [darwin]
+
+  opencode-darwin-x64@1.18.30:
+    resolution: {integrity: sha512-VW9LBLU1Y8GQICT2gAIzL1syK8ac5/BFaSHB6vtVetQuwBE/NKZkAKq4VBVn/87cdkFA645AVnZrUy3SLqdkwA==}
+    cpu: [x64]
+    os: [darwin]
+
+  opencode-linux-arm64-musl@1.18.30:
+    resolution: {integrity: sha512-IQedvhqaisv886gwk3bR603fPTErdExQa0z3hmqi7waIeuSsQG9B+suhg6iaD74lmxMbYMRlPlg4kIioytiHGg==}
+    cpu: [arm64]
+    os: [linux]
+
+  opencode-linux-arm64@1.18.30:
+    resolution: {integrity: sha512-KU2VO9oGRhV3M9LCYJXeBBtadIIgJYf620KMHFeghrGL0967Zz7PAcMBFZqTy7gUqNEnMaqOqAkSGx57BIw41Q==}
+    cpu: [arm64]
+    os: [linux]
+
+  opencode-linux-x64-baseline-musl@1.18.30:
+    resolution: {integrity: sha512-8VAJb4VnNP6MbqWHMDMUwJ5k47tb5SPDqM0lcsCgfbeGjDy7rgFtlA8PYSgUgA9VTByBWmpfERR/34VVOHe82g==}
+    cpu: [x64]
+    os: [linux]
+
+  opencode-linux-x64-baseline@1.18.30:
+    resolution: {integrity: sha512-//sHZuMaNZXo6fzBtgUI5vf1oXiMX9Un2a2R3AUzajRahuW42+98wg9J33uuICblE3RS6G4HxobrvnWA8mr4VA==}
+    cpu: [x64]
+    os: [linux]
+
+  opencode-linux-x64-musl@1.18.30:
+    resolution: {integrity: sha512-7LeMsIfPu1/sEVAUCXRCAk1htCKdRKmrPR5lQvG9NCkxoerpQE6m89eJTRqDQrYWUcHWtVmqo0fwdHdR4MnYcA==}
+    cpu: [x64]
+    os: [linux]
+
+  opencode-linux-x64@1.18.30:
+    resolution: {integrity: sha512-qiJz71TAZjV24Lo0mh3HgHMAZSrAPLEn7ld6H540ub0hLc0XA2Pa2YhZxjn1K845azojLv8Ek+zpK6384VbU/w==}
+    cpu: [x64]
+    os: [linux]
+
+  opencode-windows-arm64@1.18.30:
+    resolution: {integrity: sha512-NLnAzRNqv+6ebLeK5DBGRcN6Fk3PM4STXyrp+IuI8w2WNLJ6JbIk7xxTfbMsrO+CBEV88DCurFOKHB4dpDBaYQ==}
+    cpu: [arm64]
+    os: [win32]
+
+  opencode-windows-x64-baseline@1.18.30:
+    resolution: {integrity: sha512-BaqwQxA2TWBUNKsmrDoTF1gg3x6lbt7vA4WluRNuT6GuuJJhQ+lJzOTk2G9tqp4bMybR31p5zXAmPf9JwHP2GA==}
+    cpu: [x64]
+    os: [win32]
+
+  opencode-windows-x64@1.18.30:
+    resolution: {integrity: sha512-E00yRyUDQvdmf8AYQNYDYgZuLkWW0mBqBrACHPwfCCBZdyC8Sa4nUtQq27nAIOPAp2jfyrpH3WJBxT2GVpT42w==}
+    cpu: [x64]
+    os: [win32]
+
   optionator@0.9.4:
     resolution: {integrity: sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g==}
     engines: {node: '>= 0.8.0'}
@@ -3042,6 +3125,10 @@ packages:
 snapshots:
 
   '@adobe/css-tools@4.5.0': {}
+
+  '@agentclientprotocol/sdk@1.4.0(zod@4.6.2)':
+    dependencies:
+      zod: 4.6.2
 
   '@alcalzone/ansi-tokenize@0.1.3':
     dependencies:
@@ -5295,6 +5382,57 @@ snapshots:
     optionalDependencies:
       ws: 8.21.3
       zod: 4.6.2
+
+  opencode-ai@1.18.30:
+    optionalDependencies:
+      opencode-darwin-arm64: 1.18.30
+      opencode-darwin-x64: 1.18.30
+      opencode-darwin-x64-baseline: 1.18.30
+      opencode-linux-arm64: 1.18.30
+      opencode-linux-arm64-musl: 1.18.30
+      opencode-linux-x64: 1.18.30
+      opencode-linux-x64-baseline: 1.18.30
+      opencode-linux-x64-baseline-musl: 1.18.30
+      opencode-linux-x64-musl: 1.18.30
+      opencode-windows-arm64: 1.18.30
+      opencode-windows-x64: 1.18.30
+      opencode-windows-x64-baseline: 1.18.30
+
+  opencode-darwin-arm64@1.18.30:
+    optional: true
+
+  opencode-darwin-x64-baseline@1.18.30:
+    optional: true
+
+  opencode-darwin-x64@1.18.30:
+    optional: true
+
+  opencode-linux-arm64-musl@1.18.30:
+    optional: true
+
+  opencode-linux-arm64@1.18.30:
+    optional: true
+
+  opencode-linux-x64-baseline-musl@1.18.30:
+    optional: true
+
+  opencode-linux-x64-baseline@1.18.30:
+    optional: true
+
+  opencode-linux-x64-musl@1.18.30:
+    optional: true
+
+  opencode-linux-x64@1.18.30:
+    optional: true
+
+  opencode-windows-arm64@1.18.30:
+    optional: true
+
+  opencode-windows-x64-baseline@1.18.30:
+    optional: true
+
+  opencode-windows-x64@1.18.30:
+    optional: true
 
   optionator@0.9.4:
     dependencies:

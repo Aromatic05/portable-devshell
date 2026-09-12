@@ -1,0 +1,8 @@
+{
+    "schemaVersion": 1,
+    "apiVersion": 1,
+    "id": "opencode",
+    "name": "OpenCode",
+    "version": "0.1.0",
+    "entry": "dist/provider/opencode/index.js"
+}

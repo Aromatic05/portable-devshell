@@ -18,6 +18,19 @@ import { resolvePnpmCommand } from "./PnpmCommand.mjs";
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 const piProviderManifest = resolve(repoRoot, "extensions/agent/src/provider/pi/devshell-agent-provider.json");
+const openCodeProviderManifest = resolve(repoRoot, "extensions/agent/src/provider/opencode/devshell-agent-provider.json");
+const providerDefinitions = [
+    {
+        id: "pi",
+        manifest: piProviderManifest,
+        shape: shapePiProviderTree
+    },
+    {
+        id: "opencode",
+        manifest: openCodeProviderManifest,
+        shape: shapeOpenCodeProviderTree
+    }
+];
 
 export async function packageAgentArtifacts(options = {}) {
     const includeExtension = options.includeExtension ?? true;
@@ -32,32 +45,46 @@ export async function packageAgentArtifacts(options = {}) {
     }
     const stagingRoot = await mkdtemp(resolve(repoRoot, ".portable-devshell-agent-"));
     const extensionDirectory = resolve(stagingRoot, "agent-extension");
-    const providerDirectory = resolve(stagingRoot, "pi-provider");
+    const providerDirectories = Object.fromEntries(providerDefinitions.map((provider) => [
+        provider.id,
+        resolve(stagingRoot, `${provider.id}-provider`)
+    ]));
     const extensionAsset = includeExtension ? resolve(outputDirectory, "portable-devshell-agent.dsext") : undefined;
-    const providerAsset = includeProvider
-        ? resolve(outputDirectory, `portable-devshell-agent-provider-pi-${target}.dsprovider`)
-        : undefined;
+    const providerAssets = includeProvider
+        ? Object.fromEntries(providerDefinitions.map((provider) => [
+            provider.id,
+            resolve(outputDirectory, `portable-devshell-agent-provider-${provider.id}-${target}.dsprovider`)
+        ]))
+        : {};
 
     try {
         await mkdir(outputDirectory, { recursive: true });
         buildWorkspacePackage("@portable-devshell/agent-extension");
         buildWorkspacePackage("@portable-devshell/control");
         if (includeExtension) deployWorkspacePackage("@portable-devshell/agent-extension", extensionDirectory);
-        if (includeProvider) deployWorkspacePackage("@portable-devshell/agent-extension", providerDirectory);
+        if (includeProvider) {
+            for (const provider of providerDefinitions) {
+                deployWorkspacePackage("@portable-devshell/agent-extension", providerDirectories[provider.id]);
+            }
+        }
         await Promise.all([
             ...(includeExtension ? [sanitizeDeployTree(extensionDirectory)] : []),
-            ...(includeProvider ? [sanitizeDeployTree(providerDirectory)] : [])
+            ...(includeProvider ? providerDefinitions.map((provider) => sanitizeDeployTree(providerDirectories[provider.id])) : [])
         ]);
-        if (includeProvider) await pruneProviderRuntimeTree(providerDirectory);
         if (includeExtension) await shapeThinAgentExtensionTree(extensionDirectory);
-        if (includeProvider) await shapePiProviderTree(providerDirectory);
+        if (includeProvider) {
+            for (const provider of providerDefinitions) {
+                await provider.shape(providerDirectories[provider.id]);
+                await pruneProviderRuntimeTree(providerDirectories[provider.id]);
+            }
+        }
         await Promise.all([
             ...(includeExtension ? [assertNoSymbolicLinks(extensionDirectory), assertThinAgentExtensionTree(extensionDirectory)] : []),
-            ...(includeProvider ? [assertNoSymbolicLinks(providerDirectory)] : [])
+            ...(includeProvider ? providerDefinitions.map((provider) => assertNoSymbolicLinks(providerDirectories[provider.id])) : [])
         ]);
 
         if (extensionAsset !== undefined) await rm(extensionAsset, { force: true });
-        if (providerAsset !== undefined) await rm(providerAsset, { force: true });
+        await Promise.all(Object.values(providerAssets).map((asset) => rm(asset, { force: true })));
         const archiveModule = await import(pathToFileURL(resolve(
             repoRoot,
             "packages/control/dist/control/artifact/host/ArtifactHostArchive.js"
@@ -65,16 +92,20 @@ export async function packageAgentArtifacts(options = {}) {
         if (extensionAsset !== undefined) {
             await archiveModule.createArtifactDirectoryArchive(extensionDirectory, extensionAsset);
         }
-        if (providerAsset !== undefined) {
-            await archiveModule.createArtifactDirectoryArchive(providerDirectory, providerAsset);
+        for (const provider of providerDefinitions) {
+            const asset = providerAssets[provider.id];
+            if (asset !== undefined) {
+                await archiveModule.createArtifactDirectoryArchive(providerDirectories[provider.id], asset);
+            }
         }
         await Promise.all([
             ...(extensionAsset === undefined ? [] : [writeSha256(extensionAsset)]),
-            ...(providerAsset === undefined ? [] : [writeSha256(providerAsset)])
+            ...Object.values(providerAssets).map((asset) => writeSha256(asset))
         ]);
         return {
             extensionAsset,
-            providerAsset,
+            providerAsset: providerAssets.pi,
+            providerAssets,
             target
         };
     } finally {
@@ -134,7 +165,7 @@ async function pruneNodeModulesRuntimeTree(directory) {
 }
 
 export async function shapeThinAgentExtensionTree(root) {
-    await rm(join(root, "dist", "provider", "pi"), { force: true, recursive: true });
+    await rm(join(root, "dist", "provider"), { force: true, recursive: true });
     const builtinManifest = JSON.parse(await readFile(join(root, "dist", "builtin", "devshell-extension.json"), "utf8"));
     await writeFile(
         join(root, "devshell-extension.json"),
@@ -154,27 +185,106 @@ export async function shapeThinAgentExtensionTree(root) {
 
 export async function shapePiProviderTree(root) {
     const providerManifest = JSON.parse(await readFile(piProviderManifest, "utf8"));
-    const providerTree = join(root, ".pi-provider-dist");
-    await rename(join(root, "dist", "provider", "pi"), providerTree);
-    await rm(join(root, "dist"), { force: true, recursive: true });
-    await mkdir(join(root, "dist", "provider"), { recursive: true });
-    await rename(providerTree, join(root, "dist", "provider", "pi"));
-    await copyFile(piProviderManifest, join(root, "devshell-agent-provider.json"));
-    await rm(join(root, "devshell-extension.json"), { force: true });
-    await rm(join(root, "node_modules", "@portable-devshell", "extension"), { force: true, recursive: true });
-    await rewriteDeploymentPackage(root, {
-        dependencies: {
-            "@earendil-works/pi-coding-agent": "0.85.1",
-            "@earendil-works/pi-tui": "0.85.1",
-            "@portable-devshell/shared": "workspace:*",
-            "diff": "9.0.0",
-            "pi-gui-extension": "0.4.1",
-            "typebox": "1.3.30"
-        },
+    const dependencies = {
+        "@earendil-works/pi-coding-agent": "0.85.1",
+        "@earendil-works/pi-tui": "0.85.1",
+        "@portable-devshell/shared": "workspace:*",
+        "diff": "9.0.0",
+        "pi-gui-extension": "0.4.1",
+        "typebox": "1.3.30"
+    };
+    await shapeProviderTree(root, {
+        dependencies,
         entry: "./dist/provider/pi/index.js",
+        id: "pi",
+        manifest: piProviderManifest,
         name: "@portable-devshell-internal/agent-provider-pi",
         version: providerManifest.version
     });
+}
+
+export async function shapeOpenCodeProviderTree(root) {
+    const providerManifest = JSON.parse(await readFile(openCodeProviderManifest, "utf8"));
+    const dependencies = {
+        "@agentclientprotocol/sdk": "1.4.0",
+        "@modelcontextprotocol/node": "2.0.0",
+        "@modelcontextprotocol/server": "2.0.0",
+        "opencode-ai": "1.18.30"
+    };
+    await shapeProviderTree(root, {
+        dependencies,
+        entry: "./dist/provider/opencode/index.js",
+        id: "opencode",
+        manifest: openCodeProviderManifest,
+        name: "@portable-devshell-internal/agent-provider-opencode",
+        version: providerManifest.version
+    });
+}
+
+async function shapeProviderTree(root, options) {
+    const providerTree = join(root, `.${options.id}-provider-dist`);
+    const projectionSource = join(root, "dist", "builtin", "provider", "AgentToolProjection.js");
+    const projectionTree = join(root, ".agent-tool-projection.js");
+    await rename(join(root, "dist", "provider", options.id), providerTree);
+    await copyFile(projectionSource, projectionTree);
+    await rm(join(root, "dist"), { force: true, recursive: true });
+    await mkdir(join(root, "dist", "provider"), { recursive: true });
+    await mkdir(join(root, "dist", "builtin", "provider"), { recursive: true });
+    await rename(providerTree, join(root, "dist", "provider", options.id));
+    await rename(projectionTree, join(root, "dist", "builtin", "provider", "AgentToolProjection.js"));
+    await copyFile(options.manifest, join(root, "devshell-agent-provider.json"));
+    await rm(join(root, "devshell-extension.json"), { force: true });
+    await rewriteDeploymentPackage(root, options);
+    await retainProviderDependencies(root, Object.keys(options.dependencies), options.id);
+}
+
+async function retainProviderDependencies(root, directDependencies, providerId) {
+    const nodeModules = join(root, "node_modules");
+    const retained = new Set(directDependencies);
+    const pending = [...directDependencies];
+    while (pending.length > 0) {
+        const name = pending.pop();
+        const packageRoot = join(nodeModules, ...name.split("/"));
+        let manifest;
+        try {
+            manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
+        } catch (error) {
+            if (error?.code === "ENOENT") continue;
+            throw error;
+        }
+        const dependencies = {
+            ...(manifest.dependencies ?? {}),
+            ...(manifest.optionalDependencies ?? {})
+        };
+        for (const dependency of Object.keys(dependencies)) {
+            if (providerId === "opencode" && name === "opencode-ai" && dependency.startsWith("opencode-")) {
+                if (dependency !== openCodeRuntimePackageForHost()) continue;
+            }
+            if (retained.has(dependency)) continue;
+            retained.add(dependency);
+            pending.push(dependency);
+        }
+    }
+
+    for (const entry of await readdir(nodeModules, { withFileTypes: true })) {
+        if (entry.name.startsWith(".")) continue;
+        const entryPath = join(nodeModules, entry.name);
+        if (!entry.name.startsWith("@")) {
+            if (!retained.has(entry.name)) await rm(entryPath, { force: true, recursive: true });
+            continue;
+        }
+        for (const scoped of await readdir(entryPath, { withFileTypes: true })) {
+            const name = `${entry.name}/${scoped.name}`;
+            if (!retained.has(name)) await rm(join(entryPath, scoped.name), { force: true, recursive: true });
+        }
+        if ((await readdir(entryPath)).length === 0) await rm(entryPath, { force: true, recursive: true });
+    }
+}
+
+function openCodeRuntimePackageForHost() {
+    const platform = process.platform === "win32" ? "windows" : process.platform;
+    const base = `opencode-${platform}-${process.arch}`;
+    return process.arch === "x64" ? `${base}-baseline` : base;
 }
 
 export async function assertNoSymbolicLinks(root) {
@@ -191,8 +301,8 @@ export async function assertThinAgentExtensionTree(root) {
         if (normalized === "node_modules" || normalized.startsWith("node_modules/")) {
             throw new Error(`Agent Extension payload must not contain private node_modules: ${normalized}`);
         }
-        if (normalized === "dist/provider/pi" || normalized.startsWith("dist/provider/pi/")) {
-            throw new Error(`Agent Extension payload must not contain Pi provider/runtime content: ${normalized}`);
+        if (normalized === "dist/provider" || normalized.startsWith("dist/provider/")) {
+            throw new Error(`Agent Extension payload must not contain provider/runtime content: ${normalized}`);
         }
     });
 }
@@ -303,7 +413,7 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.a
     if (result.extensionAsset !== undefined) {
         process.stdout.write(`${result.extensionAsset}\n${result.extensionAsset}.sha256\n`);
     }
-    if (result.providerAsset !== undefined) {
-        process.stdout.write(`${result.providerAsset}\n${result.providerAsset}.sha256\n`);
+    for (const providerAsset of Object.values(result.providerAssets)) {
+        process.stdout.write(`${providerAsset}\n${providerAsset}.sha256\n`);
     }
 }

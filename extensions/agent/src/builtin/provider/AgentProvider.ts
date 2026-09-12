@@ -35,10 +35,7 @@ export interface AgentProviderHandle {
     waitForIdle?(): Promise<void>;
 }
 
-/**
- * Agent runtime implementation. Pi is expected to be the first provider, but
- * no Pi-specific types belong in the Agent provider contract.
- */
+/** Provider-neutral Agent runtime implementation contract. */
 export interface AgentProvider {
     readonly id: string;
     readonly version: string;
