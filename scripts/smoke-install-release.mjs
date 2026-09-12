@@ -1,19 +1,16 @@
 import { spawnSync } from "node:child_process";
 import { copyFile, mkdir, rm } from "node:fs/promises";
-import { basename, dirname, isAbsolute, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { resolveApplicationSmokeArchive } from "./smoke-artifact-arguments.mjs";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
-const archiveArgument = process.argv.slice(2).find((argument) => argument !== "--");
-if (archiveArgument === undefined) {
-    throw new Error("usage: node scripts/smoke-install-release.mjs <portable-devshell-app.tar.gz>");
-}
 if (process.platform === "win32") {
     throw new Error("smoke-install-release.mjs currently validates the Unix release installer.");
 }
 
-const archive = isAbsolute(archiveArgument) ? archiveArgument : resolve(process.cwd(), archiveArgument);
+const archive = resolveApplicationSmokeArchive(process.argv.slice(2));
 const archiveSha = `${archive}.sha256`;
 const root = await createTestTempDirectory("release-install-smoke");
 const release = resolve(root, "release");

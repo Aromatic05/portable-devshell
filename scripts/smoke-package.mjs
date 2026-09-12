@@ -1,16 +1,12 @@
 import { spawnSync } from "node:child_process";
 import { lstat, mkdir, readdir, rm, symlink } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import { assertPackageBinFile, readPackageBinPath } from "./application-layout.mjs";
+import { resolveApplicationSmokeArchive } from "./smoke-artifact-arguments.mjs";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
-const archiveArgument = process.argv.slice(2).find((argument) => argument !== "--");
-if (archiveArgument === undefined) {
-    throw new Error("usage: node scripts/smoke-package.mjs <portable-devshell-app.tar.gz>");
-}
-
-const archive = isAbsolute(archiveArgument) ? archiveArgument : resolve(process.cwd(), archiveArgument);
+const archive = resolveApplicationSmokeArchive(process.argv.slice(2));
 const root = await createTestTempDirectory("package-smoke");
 const app = resolve(root, "app");
 const home = resolve(root, "home");

@@ -1,25 +1,17 @@
 import { fork, spawnSync } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { assertPackageBinFile, readPackageBinPath } from "./application-layout.mjs";
+import { resolveAgentSmokeArtifacts } from "./smoke-artifact-arguments.mjs";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
-const inputs = process.argv.slice(2).filter((argument) => argument !== "--");
-if (inputs.length !== 5) {
-    throw new Error("usage: node scripts/smoke-agent-package.mjs <app.tar.gz> <agent.dsext> <pi.dsprovider> <opencode.dsprovider> <worker>");
-}
 if (process.platform === "win32") {
     throw new Error("smoke-agent-package.mjs currently validates the Unix release path.");
 }
 
-const [appArgument, extensionArgument, piProviderArgument, openCodeProviderArgument, workerArgument] = inputs;
-const appArchive = absoluteInput(appArgument);
-const extensionBundle = absoluteInput(extensionArgument);
-const piProviderBundle = absoluteInput(piProviderArgument);
-const openCodeProviderBundle = absoluteInput(openCodeProviderArgument);
-const worker = absoluteInput(workerArgument);
+const [appArchive, extensionBundle, piProviderBundle, openCodeProviderBundle, worker] = resolveAgentSmokeArtifacts(process.argv.slice(2));
 const root = await createTestTempDirectory("agent-package-smoke");
 const appDirectory = resolve(root, "app");
 const home = resolve(root, "home");
@@ -126,10 +118,6 @@ try {
         run(process.execPath, [resolve(appDirectory, (await readPackageBinPath(appDirectory, "devshell")).relativePath), "stop"], environment, true);
     }
     await rm(root, { force: true, recursive: true });
-}
-
-function absoluteInput(value) {
-    return isAbsolute(value) ? value : resolve(process.cwd(), value);
 }
 
 function hostTargetKey() {
