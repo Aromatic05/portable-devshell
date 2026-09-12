@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { copyFile, mkdir, rm } from "node:fs/promises";
+import { copyFile, lstat, mkdir, rm } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolveApplicationSmokeArchive } from "./smoke-artifact-arguments.mjs";
@@ -20,7 +20,6 @@ const installRoot = resolve(root, "install");
 const binDirectory = resolve(root, "bin");
 const devshellHome = resolve(root, "devshell-home");
 const command = resolve(binDirectory, "devshell");
-const piCommand = resolve(binDirectory, "pi");
 const environment = {
     ...process.env,
     HOME: home,
@@ -57,10 +56,7 @@ try {
     controlStarted = true;
     run(command, ["status"], environment);
     run(command, ["logs"], environment);
-    const piBeforeProvider = run(piCommand, ["--version"], environment, true);
-    if (piBeforeProvider.status === 0 || !`${piBeforeProvider.stdout}${piBeforeProvider.stderr}`.includes("devshell agent provider install")) {
-        throw new Error("release-installed pi launcher did not report the expected missing-provider guidance");
-    }
+    await assertMissing(resolve(binDirectory, "pi"));
     run(command, ["stop"], environment);
     controlStarted = false;
 
@@ -80,6 +76,16 @@ function hostTarget() {
     const os = process.platform === "darwin" ? "darwin" : "linux";
     const arch = process.arch === "arm64" ? "arm64" : "x64";
     return `${os}-${arch}`;
+}
+
+async function assertMissing(path) {
+    try {
+        await lstat(path);
+    } catch (error) {
+        if (error?.code === "ENOENT") return;
+        throw error;
+    }
+    throw new Error(`core release installer unexpectedly created ${path}`);
 }
 
 function run(executable, args, env, ignoreFailure = false) {

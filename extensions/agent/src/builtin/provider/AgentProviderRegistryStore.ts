@@ -9,6 +9,7 @@ export interface AgentProviderRegistryEntry {
 }
 
 export interface AgentProviderRegistrySnapshot {
+    defaultProvider?: string;
     providers: Record<string, AgentProviderRegistryEntry>;
     schemaVersion: 1;
 }
@@ -67,6 +68,7 @@ export function emptyAgentProviderRegistry(): AgentProviderRegistrySnapshot {
 
 export function cloneAgentProviderRegistry(snapshot: AgentProviderRegistrySnapshot): AgentProviderRegistrySnapshot {
     return {
+        ...(snapshot.defaultProvider === undefined ? {} : { defaultProvider: snapshot.defaultProvider }),
         providers: Object.fromEntries(Object.entries(snapshot.providers).map(([id, entry]) => [id, { ...entry }])),
         schemaVersion: 1
     };
@@ -94,7 +96,14 @@ export function parseAgentProviderRegistry(value: unknown): AgentProviderRegistr
             ...(lastKnownGoodGeneration === undefined ? {} : { lastKnownGoodGeneration })
         };
     }
-    return { providers, schemaVersion: 1 };
+    const defaultProvider = value.defaultProvider === undefined
+        ? undefined
+        : readProviderId(value.defaultProvider, "defaultProvider");
+    return {
+        ...(defaultProvider === undefined ? {} : { defaultProvider }),
+        providers,
+        schemaVersion: 1
+    };
 }
 
 export function assertProviderSegment(value: string, label: string): void {
@@ -107,6 +116,12 @@ function readOptionalGeneration(value: unknown, id: string, field: string): stri
     if (value === undefined) return undefined;
     if (typeof value !== "string") throw new TypeError(`Agent provider registry ${id}.${field} must be a string.`);
     assertProviderSegment(value, "generation");
+    return value;
+}
+
+function readProviderId(value: unknown, field: string): string {
+    if (typeof value !== "string") throw new TypeError(`Agent provider registry ${field} must be a string.`);
+    assertProviderSegment(value, field);
     return value;
 }
 

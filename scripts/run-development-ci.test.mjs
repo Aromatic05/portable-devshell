@@ -114,7 +114,7 @@ test("Linux x64 target CI runs final integration without repeating unit gates", 
     const agentSmoke = steps.at(-2);
     assert.deepEqual(agentSmoke.args.slice(-5), [
         "ci-artifacts/portable-devshell-app-linux-x64.tar.gz",
-        "ci-artifacts/portable-devshell-agent.dsext",
+        "ci-artifacts/portable-devshell-agent-linux-x64.dsext",
         "ci-artifacts/portable-devshell-agent-provider-pi-linux-x64.dsprovider",
         "ci-artifacts/portable-devshell-agent-provider-opencode-linux-x64.dsprovider",
         "ci-artifacts/devshell-worker-linux-x64"

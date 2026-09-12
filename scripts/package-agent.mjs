@@ -40,8 +40,8 @@ export async function packageAgentArtifacts(options = {}) {
     }
     const outputDirectory = resolve(repoRoot, options.outputDirectory ?? "release-assets");
     const target = options.target ?? hostTarget();
-    if (includeProvider && target !== hostTarget()) {
-        throw new Error(`cannot package Agent provider ${target} on ${hostTarget()}; package provider native dependencies on the target platform`);
+    if ((includeExtension || includeProvider) && target !== hostTarget()) {
+        throw new Error(`cannot package Agent artifacts ${target} on ${hostTarget()}; bundled provider native dependencies require the target platform`);
     }
     const stagingRoot = await mkdtemp(resolve(repoRoot, ".portable-devshell-agent-"));
     const extensionDirectory = resolve(stagingRoot, "agent-extension");
@@ -49,46 +49,61 @@ export async function packageAgentArtifacts(options = {}) {
         provider.id,
         resolve(stagingRoot, `${provider.id}-provider`)
     ]));
-    const extensionAsset = includeExtension ? resolve(outputDirectory, "portable-devshell-agent.dsext") : undefined;
+    const extensionAsset = includeExtension
+        ? resolve(outputDirectory, `portable-devshell-agent-${target}.dsext`)
+        : undefined;
     const providerAssets = includeProvider
         ? Object.fromEntries(providerDefinitions.map((provider) => [
             provider.id,
             resolve(outputDirectory, `portable-devshell-agent-provider-${provider.id}-${target}.dsprovider`)
         ]))
         : {};
+    const stagedProviderIds = new Set([
+        ...(includeExtension ? ["pi"] : []),
+        ...(includeProvider ? providerDefinitions.map((provider) => provider.id) : [])
+    ]);
 
     try {
         await mkdir(outputDirectory, { recursive: true });
         buildWorkspacePackage("@portable-devshell/agent-extension");
         buildWorkspacePackage("@portable-devshell/control");
         if (includeExtension) deployWorkspacePackage("@portable-devshell/agent-extension", extensionDirectory);
-        if (includeProvider) {
-            for (const provider of providerDefinitions) {
+        for (const provider of providerDefinitions) {
+            if (stagedProviderIds.has(provider.id)) {
                 deployWorkspacePackage("@portable-devshell/agent-extension", providerDirectories[provider.id]);
             }
         }
         await Promise.all([
             ...(includeExtension ? [sanitizeDeployTree(extensionDirectory)] : []),
-            ...(includeProvider ? providerDefinitions.map((provider) => sanitizeDeployTree(providerDirectories[provider.id])) : [])
+            ...providerDefinitions
+                .filter((provider) => stagedProviderIds.has(provider.id))
+                .map((provider) => sanitizeDeployTree(providerDirectories[provider.id]))
         ]);
         if (includeExtension) await shapeThinAgentExtensionTree(extensionDirectory);
-        if (includeProvider) {
-            for (const provider of providerDefinitions) {
+        for (const provider of providerDefinitions) {
+            if (stagedProviderIds.has(provider.id)) {
                 await provider.shape(providerDirectories[provider.id]);
                 await pruneProviderRuntimeTree(providerDirectories[provider.id]);
             }
         }
-        await Promise.all([
-            ...(includeExtension ? [assertNoSymbolicLinks(extensionDirectory), assertThinAgentExtensionTree(extensionDirectory)] : []),
-            ...(includeProvider ? providerDefinitions.map((provider) => assertNoSymbolicLinks(providerDirectories[provider.id])) : [])
-        ]);
-
         if (extensionAsset !== undefined) await rm(extensionAsset, { force: true });
         await Promise.all(Object.values(providerAssets).map((asset) => rm(asset, { force: true })));
         const archiveModule = await import(pathToFileURL(resolve(
             repoRoot,
             "packages/control/dist/control/artifact/host/ArtifactHostArchive.js"
         )).href);
+        if (includeExtension) {
+            await embedBundledProviderArchive(
+                extensionDirectory,
+                providerDirectories.pi,
+                "pi",
+                archiveModule.createArtifactDirectoryArchive
+            );
+        }
+        await Promise.all([
+            ...(includeExtension ? [assertNoSymbolicLinks(extensionDirectory), assertThinAgentExtensionTree(extensionDirectory)] : []),
+            ...(includeProvider ? providerDefinitions.map((provider) => assertNoSymbolicLinks(providerDirectories[provider.id])) : [])
+        ]);
         if (extensionAsset !== undefined) {
             await archiveModule.createArtifactDirectoryArchive(extensionDirectory, extensionAsset);
         }
@@ -181,6 +196,13 @@ export async function shapeThinAgentExtensionTree(root) {
         name: "@portable-devshell/agent-extension",
         version: builtinManifest.version
     });
+}
+
+export async function embedBundledProviderArchive(extensionRoot, providerRoot, id, createArchive) {
+    const bundledRoot = join(extensionRoot, "bundled-providers");
+    const destination = join(bundledRoot, `${id}.dsprovider`);
+    await mkdir(bundledRoot, { recursive: true });
+    await createArchive(providerRoot, destination);
 }
 
 export async function shapePiProviderTree(root) {

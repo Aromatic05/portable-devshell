@@ -89,6 +89,7 @@ async function harness(t: test.TestContext) {
     const registry = new AgentProviderRegistry();
     let inUse = false;
     const manager = new AgentProviderManager({
+        bundledProviders: { pi: "/bundled/pi.dsprovider" },
         context,
         isProviderInUse: () => inUse,
         loader,
@@ -110,22 +111,23 @@ async function writeProvider(
     context: ExtensionContext,
     generation: string,
     version: string,
-    options: { runtimeId?: string } = {}
+    options: { id?: string; runtimeId?: string } = {}
 ): Promise<void> {
+    const id = options.id ?? "pi";
     const directory = join(context.paths.dataDirectory, "bundles", generation);
     await mkdir(join(directory, "dist"), { recursive: true });
     await writeFile(join(directory, "devshell-agent-provider.json"), `${JSON.stringify({
         apiVersion: 1,
         entry: "dist/index.mjs",
-        id: "pi",
-        name: "Pi",
+        id,
+        name: id,
         schemaVersion: 1,
         version
     })}\n`, "utf8");
     await writeFile(join(directory, "dist", "index.mjs"), [
         "export function createAgentProvider() {",
         "  const closed = new Promise(() => {});",
-        `  return { id: ${JSON.stringify(options.runtimeId ?? "pi")}, version: ${JSON.stringify(version)},`,
+        `  return { id: ${JSON.stringify(options.runtimeId ?? id)}, version: ${JSON.stringify(version)},`,
         "    async start() {",
         "      return { closed, async prompt() {}, async stop() {} };",
         "    }",
@@ -152,6 +154,73 @@ test("Agent provider install atomically selects a validated generation and hot-r
     const snapshot = await h.store.read();
     assert.equal(snapshot.providers.pi?.selectedGeneration, "provider-v2");
     assert.equal(snapshot.providers.pi?.lastKnownGoodGeneration, "provider-v2");
+});
+
+test("bundled Pi ensure-install upgrades an older generation but never downgrades a newer selected generation", async (t) => {
+    const h = await harness(t);
+    await writeProvider(h.context, "provider-v1", "0.1.0");
+    h.generations.set("/bundled/pi.dsprovider", "provider-v1");
+
+    const first = await h.manager.installBundled("pi");
+    assert.equal(first.version, "0.1.0");
+    assert.equal((await h.store.read()).defaultProvider, "pi");
+
+    await writeProvider(h.context, "provider-v2", "0.2.0");
+    h.generations.set("/bundled/pi.dsprovider", "provider-v2");
+    const second = await h.manager.installBundled("pi");
+    assert.equal(second.version, "0.2.0");
+    assert.equal((await h.store.read()).providers.pi?.selectedGeneration, "provider-v2");
+    assert.equal((await h.store.read()).defaultProvider, "pi");
+    assert.equal(h.registry.require("pi").version, "0.2.0");
+
+    await writeProvider(h.context, "provider-v3", "0.3.0");
+    h.generations.set("/provider-v3.dsprovider", "provider-v3");
+    await h.manager.install("/provider-v3.dsprovider");
+    h.generations.set("/bundled/pi.dsprovider", "provider-v2");
+    const preserved = await h.manager.installBundled("pi");
+    assert.equal(preserved.version, "0.3.0");
+    assert.equal((await h.store.read()).providers.pi?.selectedGeneration, "provider-v3");
+    assert.equal(h.registry.require("pi").version, "0.3.0");
+    assert.equal(h.removed.includes("provider-v2"), true);
+});
+
+test("bundled provider migration preserves a disabled provider while updating its generation floor", async (t) => {
+    const h = await harness(t);
+    await writeProvider(h.context, "provider-v1", "0.1.1");
+    await writeProvider(h.context, "provider-v2", "0.1.2");
+    h.generations.set("/bundle-v1", "provider-v1");
+    h.generations.set("/bundled/pi.dsprovider", "provider-v2");
+    await h.manager.install("/bundle-v1");
+    await h.manager.disable("pi");
+
+    const migrated = await h.manager.installBundled("pi");
+
+    assert.equal(migrated.version, "0.1.2");
+    assert.equal(migrated.enabled, false);
+    assert.equal(migrated.state, "disabled");
+    assert.equal((await h.store.read()).providers.pi?.selectedGeneration, "provider-v2");
+    assert.equal(h.registry.get("pi"), undefined);
+});
+
+test("Agent provider default selection is explicit and remains provider-neutral", async (t) => {
+    const h = await harness(t);
+    await writeProvider(h.context, "pi-v1", "0.1.0");
+    await writeProvider(h.context, "opencode-v1", "1.0.0", { id: "opencode" });
+    h.generations.set("/pi", "pi-v1");
+    h.generations.set("/opencode", "opencode-v1");
+
+    await h.manager.install("/pi");
+    await h.manager.install("/opencode");
+    assert.equal(await h.manager.resolveProvider(), "pi");
+    assert.equal(await h.manager.resolveProvider("opencode"), "opencode");
+
+    assert.equal(await h.manager.setDefault("opencode"), "opencode");
+    assert.equal(await h.manager.getDefault(), "opencode");
+    assert.equal(await h.manager.resolveProvider(), "opencode");
+
+    await h.manager.remove("opencode");
+    assert.equal(await h.manager.getDefault(), undefined);
+    assert.equal(await h.manager.resolveProvider(), "pi");
 });
 
 test("Agent provider manager serializes concurrent mutations", async (t) => {

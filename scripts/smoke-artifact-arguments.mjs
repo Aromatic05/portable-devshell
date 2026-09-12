@@ -30,7 +30,7 @@ export function resolveAgentSmokeArtifacts(argv, cwd = process.cwd(), platform =
     const assets = path.resolve(cwd, "release-assets");
     return [
         path.resolve(assets, `portable-devshell-app-${target}.tar.gz`),
-        path.resolve(assets, "portable-devshell-agent.dsext"),
+        path.resolve(assets, `portable-devshell-agent-${target}.dsext`),
         path.resolve(assets, `portable-devshell-agent-provider-pi-${target}.dsprovider`),
         path.resolve(assets, `portable-devshell-agent-provider-opencode-${target}.dsprovider`),
         path.resolve(assets, `devshell-worker-${target}${suffix}`)

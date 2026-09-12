@@ -7,6 +7,7 @@ import test from "node:test";
 import {
     assertNoSymbolicLinks,
     assertThinAgentExtensionTree,
+    embedBundledProviderArchive,
     pruneProviderRuntimeTree,
     resolveAgentPackageSelection,
     sanitizeDeployTree,
@@ -80,6 +81,31 @@ test("thin Agent Extension shaping removes the internal Pi subtree and provider 
     assert.deepEqual(Object.keys(manifest.dependencies).sort(), ["@portable-devshell/extension"]);
     const extensionManifest = JSON.parse(await readFile(join(root, "devshell-extension.json"), "utf8"));
     assert.equal(extensionManifest.entry, "dist/builtin/index.js");
+    assert.equal(extensionManifest.bundledAssets, undefined);
+});
+
+test("Agent Extension embeds a provider as one opaque dsprovider without merging its dependencies", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "devshell-agent-bundled-"));
+    t.after(async () => await rm(root, { force: true, recursive: true }));
+    const extension = join(root, "extension");
+    const provider = join(root, "provider");
+    await mkdir(join(extension, "dist", "builtin"), { recursive: true });
+    await mkdir(join(provider, "node_modules", "runtime"), { recursive: true });
+    await writeFile(join(provider, "devshell-agent-provider.json"), "{}\n", "utf8");
+    await writeFile(join(provider, "node_modules", "runtime", "index.js"), "export {};\n", "utf8");
+
+    await embedBundledProviderArchive(extension, provider, "pi", async (source, destination) => {
+        assert.equal(source, provider);
+        await writeFile(destination, "provider archive\n", "utf8");
+    });
+
+    await assertThinAgentExtensionTree(extension);
+    assert.equal(
+        await readFile(join(extension, "bundled-providers", "pi.dsprovider"), "utf8"),
+        "provider archive\n"
+    );
+    await assert.rejects(() => lstat(join(extension, "node_modules")), /ENOENT/u);
+    await assert.rejects(() => lstat(join(extension, "bundled-providers", "pi")), /ENOENT/u);
 });
 
 test("Agent artifact sanitizer removes pnpm deployment metadata and symlink guard remains strict", async (t) => {

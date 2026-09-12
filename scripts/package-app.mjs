@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
     chmod,
-    copyFile,
     mkdir,
     mkdtemp,
     readFile,
@@ -45,17 +44,12 @@ try {
         "--legacy",
         deployDirectory,
     ]);
-    const piLauncherPath = resolve(appDirectory, "portable-devshell-pi-launcher.mjs");
-    await copyFile(resolve(repoRoot, "scripts", "pi-launcher.mjs"), piLauncherPath);
     await writePortableApplicationManifest(appDirectory, {
-        additionalBins: { pi: "portable-devshell-pi-launcher.mjs" },
         minimumNodeMajor: 24,
         version
     });
     const cli = await assertPackageBinFile(await readPackageBinPath(appDirectory, "devshell"));
-    const pi = await assertPackageBinFile(await readPackageBinPath(appDirectory, "pi"));
     await chmod(cli.absolutePath, 0o755);
-    await chmod(pi.absolutePath, 0o755);
     await writeFile(
         resolve(appDirectory, "portable-devshell-install.json"),
         `${JSON.stringify({ minimumNodeMajor: 24, version }, null, 2)}\n`,

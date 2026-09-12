@@ -16,18 +16,18 @@ const TARGETS = [
 ];
 
 export function expectedReleaseAssetNames() {
-    const assets = [
-        "portable-devshell-agent.dsext",
-        "portable-devshell-agent.dsext.sha256",
-    ];
+    const assets = [];
     for (const target of TARGETS) {
         const application = `portable-devshell-app-${target}.tar.gz`;
+        const agentExtension = `portable-devshell-agent-${target}.dsext`;
         const worker = target.startsWith("windows-")
             ? `devshell-worker-${target}.exe`
             : `devshell-worker-${target}`;
         assets.push(
             application,
             `${application}.sha256`,
+            agentExtension,
+            `${agentExtension}.sha256`,
             worker,
             `${worker}.sha256`,
         );

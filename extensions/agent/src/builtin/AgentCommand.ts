@@ -1,3 +1,5 @@
+import { isAbsolute } from "node:path";
+
 import type { AgentHostRecord } from "./host/AgentHost.js";
 import type {
     ExtensionJsonValue
@@ -11,11 +13,15 @@ import type { AgentProviderManagementRecord } from "./provider/AgentProviderMana
 import { AgentExtensionRuntime, AGENT_WEB_RELATIVE_PATH } from "./AgentRuntime.js";
 
 export interface AgentProviderCommandPort {
+    bundledProviders(): readonly string[];
     disable(id: string): Promise<AgentProviderManagementRecord>;
     enable(id: string): Promise<AgentProviderManagementRecord>;
+    getDefault(): Promise<string | undefined>;
     install(sourcePath: string): Promise<AgentProviderManagementRecord>;
+    installBundled(id: string): Promise<AgentProviderManagementRecord>;
     list(): Promise<AgentProviderManagementRecord[]>;
     remove(id: string): Promise<{ id: string; removed: true }>;
+    setDefault(id: string): Promise<string>;
 }
 
 const usage = [
@@ -23,8 +29,10 @@ const usage = [
     "  devshell agent [--provider <id>] <instance:/workspace>",
     "  devshell agent list",
     "  devshell agent provider list",
-    "  devshell agent provider install <absolute-bundle-path>",
+    "  devshell agent provider bundled",
+    "  devshell agent provider install <bundled-id|absolute-bundle-path>",
     "  devshell agent provider update <absolute-bundle-path>",
+    "  devshell agent provider default [<id>]",
     "  devshell agent provider enable <id>",
     "  devshell agent provider disable <id>",
     "  devshell agent provider remove <id>",
@@ -114,11 +122,30 @@ async function providerCommand(
         return json((await providers.list()).map(providerRecordToJson));
     }
     switch (argv[0]) {
-        case "install":
+        case "bundled":
+            expectLength(argv, 1, "agent provider bundled");
+            return json([...providers.bundledProviders()]);
+        case "install": {
+            requireLocalOwner(context);
+            expectLength(argv, 2, "agent provider install <bundled-id|absolute-bundle-path>");
+            const source = required(argv[1], "provider id or bundle path is required");
+            const record = isAbsolute(source)
+                ? await providers.install(source)
+                : await providers.installBundled(source);
+            return json(providerRecordToJson(record));
+        }
         case "update":
             requireLocalOwner(context);
-            expectLength(argv, 2, `agent provider ${argv[0]} <absolute-bundle-path>`);
-            return json(providerRecordToJson(await providers.install(required(argv[1], "provider bundle path is required"))));
+            expectLength(argv, 2, "agent provider update <absolute-bundle-path>");
+            return json(providerRecordToJson(await providers.install(requiredAbsolutePath(argv[1]))));
+        case "default": {
+            if (argv.length === 1) {
+                return json({ provider: await providers.getDefault() ?? null });
+            }
+            requireLocalOwner(context);
+            expectLength(argv, 2, "agent provider default <id>");
+            return json({ provider: await providers.setDefault(required(argv[1], "provider id is required")) });
+        }
         case "enable":
         case "disable": {
             requireLocalOwner(context);
@@ -198,6 +225,12 @@ function expectLength(argv: readonly string[], length: number, usageLine: string
 function required(value: string | undefined, message: string): string {
     if (value !== undefined && value.trim().length > 0) return value.trim();
     throw usageError(message);
+}
+
+function requiredAbsolutePath(value: string | undefined): string {
+    const path = required(value, "provider bundle path is required");
+    if (!isAbsolute(path)) throw usageError("agent provider update requires an absolute bundle path");
+    return path;
 }
 
 function requireLocalOwner(context: CliNativeCommandInvocationContext): void {

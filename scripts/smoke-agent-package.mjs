@@ -1,5 +1,5 @@
 import { fork, spawnSync } from "node:child_process";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -77,12 +77,42 @@ try {
     );
     run("tar", ["-xzf", appArchive, "-C", appDirectory], environment);
     const cli = await assertPackageBinFile(await readPackageBinPath(appDirectory, "devshell"));
-    const pi = await assertPackageBinFile(await readPackageBinPath(appDirectory, "pi"));
 
     run(process.execPath, [cli.absolutePath, "start"], environment);
     controlStarted = true;
     run(process.execPath, [cli.absolutePath, "extension", "install", extensionBundle], environment);
-    run(process.execPath, [cli.absolutePath, "agent", "provider", "install", piProviderBundle], environment);
+    const bundledProviders = JSON.parse(run(
+        process.execPath,
+        [cli.absolutePath, "agent", "provider", "list"],
+        environment
+    ).stdout);
+    const bundledPi = Array.isArray(bundledProviders)
+        ? bundledProviders.find((provider) => provider?.id === "pi")
+        : undefined;
+    if (bundledPi?.enabled !== true || bundledPi?.state !== "ready") {
+        throw new Error(`Agent Extension did not ensure-install bundled Pi: ${JSON.stringify(bundledPi)}`);
+    }
+    const initialDefault = JSON.parse(run(
+        process.execPath,
+        [cli.absolutePath, "agent", "provider", "default"],
+        environment
+    ).stdout);
+    if (initialDefault?.provider !== "pi") {
+        throw new Error(`bundled Pi was not selected as the initial default provider: ${JSON.stringify(initialDefault)}`);
+    }
+    const piCommand = resolve(home, ".local", "bin", "pi");
+    const piCliVersion = run(piCommand, ["--version"], environment).stdout.trim();
+    if (!/^\d+\.\d+\.\d+(?:[-+].*)?$/u.test(piCliVersion)) {
+        throw new Error(`Agent Extension pi command returned an invalid version: ${JSON.stringify(piCliVersion)}`);
+    }
+    try {
+        await lstat(resolve(devshellHome, "pi", "workspaces"));
+        throw new Error("direct pi created a DevShell-private workspace instead of preserving its invoking cwd");
+    } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+    }
+
+    run(process.execPath, [cli.absolutePath, "agent", "provider", "update", piProviderBundle], environment);
     run(process.execPath, [cli.absolutePath, "agent", "provider", "install", openCodeProviderBundle], environment);
 
     const providers = JSON.parse(run(
@@ -102,17 +132,25 @@ try {
     if (openCodeProvider?.enabled !== true || openCodeProvider?.state !== "ready") {
         throw new Error(`installed OpenCode provider is not ready: ${JSON.stringify(openCodeProvider)}`);
     }
+    const selectedDefault = JSON.parse(run(
+        process.execPath,
+        [cli.absolutePath, "agent", "provider", "default"],
+        environment
+    ).stdout);
+    if (selectedDefault?.provider !== "pi") {
+        throw new Error(`installing another provider unexpectedly changed the default: ${JSON.stringify(selectedDefault)}`);
+    }
 
-    const piVersion = run(process.execPath, [pi.absolutePath, "--version"], environment).stdout.trim();
-    if (!/^\d+\.\d+\.\d+(?:[-+].*)?$/u.test(piVersion)) {
-        throw new Error(`packaged Pi launcher returned an invalid version: ${JSON.stringify(piVersion)}`);
+    const piVersion = piProvider?.version;
+    if (typeof piVersion !== "string" || !/^\d+\.\d+\.\d+(?:[-+].*)?$/u.test(piVersion)) {
+        throw new Error(`packaged Pi provider returned an invalid version: ${JSON.stringify(piVersion)}`);
     }
     smokePiAgentLifecycle(cli.absolutePath, environment);
     const openCodeVersion = await smokeOpenCodeProvider(openCodeProvider, environment);
 
     run(process.execPath, [cli.absolutePath, "stop"], environment);
     controlStarted = false;
-    process.stdout.write(`Agent package smoke passed (Pi ${piVersion}, OpenCode ${openCodeVersion})\n`);
+    process.stdout.write(`Agent package smoke passed (pi CLI ${piCliVersion}, Pi provider ${piVersion}, OpenCode ${openCodeVersion})\n`);
 } finally {
     if (controlStarted) {
         run(process.execPath, [resolve(appDirectory, (await readPackageBinPath(appDirectory, "devshell")).relativePath), "stop"], environment, true);
@@ -150,7 +188,7 @@ function smokePiAgentLifecycle(cli, env) {
     const target = `${instance}:${workspace}`;
     const started = JSON.parse(run(
         process.execPath,
-        [cli, "agent", "--provider", "pi", target],
+        [cli, "agent", target],
         env
     ).stdout);
     if (started?.provider !== "pi" || started?.state !== "running" || typeof started?.agentId !== "string") {

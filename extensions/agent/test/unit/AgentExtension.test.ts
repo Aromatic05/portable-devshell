@@ -51,7 +51,7 @@ test("Agent Extension start opens one canonical Worker session and owns it until
     const provider = providerFixture(starts, events);
     const runtime = new AgentExtensionRuntime(context, { providers: [provider] });
 
-    const record = await runtime.start({ provider: "test", target: "worker-a:/repo/requested" });
+    const record = await runtime.start({ target: "worker-a:/repo/requested" });
     assert.equal(record.target.instance, "worker-a");
     assert.equal(record.target.workspace, "/repo/canonical");
     assert.deepEqual(events.slice(0, 2), [
@@ -140,8 +140,10 @@ test("Agent Extension command owns the legacy devshell agent grammar", async () 
         assert.equal(providerHelp.kind, "text");
         if (providerHelp.kind === "text") {
             assert.match(providerHelp.text, /devshell agent provider list/u);
+            assert.match(providerHelp.text, /devshell agent provider bundled/u);
             assert.match(providerHelp.text, /devshell agent provider install/u);
             assert.match(providerHelp.text, /devshell agent provider update/u);
+            assert.match(providerHelp.text, /devshell agent provider default/u);
         }
     }
 
@@ -201,6 +203,23 @@ test("Agent provider mutations require local-owner Extension command authority",
     );
     assert.equal(installed.kind, "json");
     assert.equal(events.includes("provider.install:/provider.dsprovider"), true);
+    const bundled = await executeAgentCommand(
+        runtime,
+        providers,
+        ["provider", "install", "pi"],
+        invocationContext(true)
+    );
+    assert.equal(bundled.kind, "json");
+    assert.equal(events.includes("provider.installBundled:pi"), true);
+    assert.deepEqual(
+        await executeAgentCommand(runtime, providers, ["provider", "default"], invocationContext(true)),
+        { kind: "json", value: { provider: "pi" } }
+    );
+    assert.deepEqual(
+        await executeAgentCommand(runtime, providers, ["provider", "default", "pi"], invocationContext(true)),
+        { kind: "json", value: { provider: "pi" } }
+    );
+    assert.equal(events.includes("provider.default:pi"), true);
     const updated = await executeAgentCommand(
         runtime,
         providers,
@@ -370,10 +389,14 @@ function providerCommandFixture(events: string[]): AgentProviderCommandPort {
         version: "0.1.0"
     };
     return {
+        bundledProviders() { return ["pi"]; },
         async disable(id) { events.push(`provider.disable:${id}`); return { ...record, enabled: false, state: "disabled" }; },
         async enable(id) { events.push(`provider.enable:${id}`); return record; },
+        async getDefault() { return "pi"; },
         async install(sourcePath) { events.push(`provider.install:${sourcePath}`); return record; },
+        async installBundled(id) { events.push(`provider.installBundled:${id}`); return record; },
         async list() { return [record]; },
-        async remove(id) { events.push(`provider.remove:${id}`); return { id, removed: true }; }
+        async remove(id) { events.push(`provider.remove:${id}`); return { id, removed: true }; },
+        async setDefault(id) { events.push(`provider.default:${id}`); return id; }
     };
 }

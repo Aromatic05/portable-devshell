@@ -1,3 +1,5 @@
+import { isAbsolute } from "node:path";
+
 import type { ExtensionAssetCapability, ExtensionContext } from "@portable-devshell/extension";
 
 import type { AgentProviderRegistry } from "./AgentProviderRegistry.js";
@@ -26,6 +28,7 @@ export interface AgentProviderManagementRecord {
 }
 
 export interface AgentProviderManagerOptions {
+    bundledProviders?: Readonly<Record<string, string>>;
     context: ExtensionContext;
     isProviderInUse(id: string): boolean;
     loader: AgentProviderLoader;
@@ -35,6 +38,7 @@ export interface AgentProviderManagerOptions {
 
 export class AgentProviderManager {
     readonly #assets: ExtensionAssetCapability;
+    readonly #bundledProviders: Readonly<Record<string, string>>;
     readonly #isProviderInUse: (id: string) => boolean;
     readonly #loader: AgentProviderLoader;
     readonly #registry: AgentProviderRegistry;
@@ -45,6 +49,7 @@ export class AgentProviderManager {
         const assets = options.context.capabilities.assets;
         if (assets === undefined) throw new Error("Agent Extension requires the assets capability.");
         this.#assets = assets;
+        this.#bundledProviders = options.bundledProviders ?? {};
         this.#isProviderInUse = options.isProviderInUse;
         this.#loader = options.loader;
         this.#registry = options.registry;
@@ -55,22 +60,119 @@ export class AgentProviderManager {
         return await this.#exclusive(async () => await this.#install(sourcePath));
     }
 
+    async installBundled(id: string): Promise<AgentProviderManagementRecord> {
+        return await this.#exclusive(async () => {
+            const before = await this.#store.read();
+            const source = this.#bundledProviders[id];
+            if (source === undefined) throw new Error(`Unknown bundled Agent provider: ${id}`);
+            const existing = before.providers[id];
+            if (existing === undefined) return await this.#install(source);
+
+            const bundled = await this.#assets.installBundle(source);
+            const candidate = await this.#loadInstalledCandidate(before, bundled.generation);
+            if (candidate.manifest.id !== id) {
+                return await this.#failCandidate(
+                    before,
+                    bundled.generation,
+                    new Error(`Bundled Agent provider ${id} declares id ${candidate.manifest.id}.`),
+                    id
+                );
+            }
+
+            const current = await this.#record(id, existing);
+            const runtimeReady = !existing.enabled || this.#registry.get(id) !== undefined;
+            if (
+                runtimeReady
+                && current.version !== undefined
+                && providerVersionAtLeast(current.version, candidate.manifest.version)
+            ) {
+                if (!registryReferencesGeneration(before, bundled.generation)) {
+                    await this.#assets.removeBundle(bundled.generation);
+                }
+                if (before.defaultProvider === undefined && existing.enabled) {
+                    const next = cloneAgentProviderRegistry(before);
+                    next.defaultProvider = id;
+                    await this.#store.write(next);
+                    return await this.#record(id, next.providers[id]!);
+                }
+                return current;
+            }
+
+            return await this.#selectCandidate(before, bundled.generation, candidate, existing.enabled);
+        });
+    }
+
+    bundledProviders(): readonly string[] {
+        return Object.keys(this.#bundledProviders).sort();
+    }
+
+    async getDefault(): Promise<string | undefined> {
+        await this.#mutation;
+        return (await this.#store.read()).defaultProvider;
+    }
+
+    async setDefault(id: string): Promise<string> {
+        return await this.#exclusive(async () => {
+            const before = await this.#store.read();
+            const entry = requireEntry(before, id);
+            if (!entry.enabled || this.#registry.get(id) === undefined) {
+                throw new Error(`Agent provider ${id} is not enabled and ready.`);
+            }
+            const next = cloneAgentProviderRegistry(before);
+            next.defaultProvider = id;
+            await this.#store.write(next);
+            return id;
+        });
+    }
+
+    async resolveProvider(requested?: string): Promise<string> {
+        await this.#mutation;
+        if (requested !== undefined) {
+            this.#registry.require(requested);
+            return requested;
+        }
+        const snapshot = await this.#store.read();
+        if (snapshot.defaultProvider !== undefined && this.#registry.get(snapshot.defaultProvider) !== undefined) {
+            return snapshot.defaultProvider;
+        }
+        const ready = this.#registry.list().map((provider) => provider.id).sort();
+        if (ready.length === 1) return ready[0]!;
+        if (ready.length === 0) {
+            throw new Error("No enabled Agent provider is available. Install or enable a provider first.");
+        }
+        throw new Error(`Multiple Agent providers are enabled (${ready.join(", ")}). Select one with --provider or \`devshell agent provider default <id>\`.`);
+    }
+
     async #install(sourcePath: string): Promise<AgentProviderManagementRecord> {
+        if (!isAbsolute(sourcePath)) {
+            throw new TypeError("Agent provider bundle path must be absolute. Use `agent provider install <id>` for bundled providers.");
+        }
         const before = await this.#store.read();
         const bundle = await this.#assets.installBundle(sourcePath);
         const loaded = await this.#loadInstalledCandidate(before, bundle.generation);
+        return await this.#selectCandidate(before, bundle.generation, loaded, true);
+    }
+
+    async #selectCandidate(
+        before: AgentProviderRegistrySnapshot,
+        generation: string,
+        loaded: LoadedAgentProvider,
+        enabled: boolean
+    ): Promise<AgentProviderManagementRecord> {
         const manifest = loaded.manifest;
         const next = cloneAgentProviderRegistry(before);
         next.providers[manifest.id] = {
-            enabled: true,
-            lastKnownGoodGeneration: bundle.generation,
-            selectedGeneration: bundle.generation
+            enabled,
+            lastKnownGoodGeneration: generation,
+            selectedGeneration: generation
         };
+        if (enabled) next.defaultProvider ??= manifest.id;
         try {
             await this.#store.write(next);
         } catch (error) {
-            return await this.#failCandidate(before, bundle.generation, error, manifest.id);
+            return await this.#failCandidate(before, generation, error, manifest.id);
         }
+        if (!enabled) return recordFromLoaded(next.providers[manifest.id]!, loaded);
         try {
             this.#registry.replace(loaded.provider);
         } catch (error) {
@@ -82,7 +184,7 @@ export class AgentProviderManager {
                     `Agent provider ${manifest.id} runtime publish failed and registry rollback was incomplete.`
                 );
             }
-            return await this.#failCandidate(before, bundle.generation, error, manifest.id);
+            return await this.#failCandidate(before, generation, error, manifest.id);
         }
         return recordFromLoaded(next.providers[manifest.id]!, loaded);
     }
@@ -158,6 +260,7 @@ export class AgentProviderManager {
         }
         const next = cloneAgentProviderRegistry(before);
         delete next.providers[id];
+        if (next.defaultProvider === id) delete next.defaultProvider;
         const provider = this.#registry.unregister(id);
         try {
             await this.#store.write(next);
@@ -298,4 +401,49 @@ function registryReferencesGeneration(snapshot: AgentProviderRegistrySnapshot, g
     return Object.values(snapshot.providers).some((entry) =>
         entry.selectedGeneration === generation || entry.lastKnownGoodGeneration === generation
     );
+}
+
+function providerVersionAtLeast(current: string, bundled: string): boolean {
+    if (current === bundled) return true;
+    const left = parseComparableProviderVersion(current);
+    const right = parseComparableProviderVersion(bundled);
+    if (left === undefined || right === undefined) return true;
+    const core = compareVersionCore(left, right);
+    if (core !== 0) return core > 0;
+    return comparePrerelease(left[3], right[3]) >= 0;
+}
+
+function compareVersionCore(
+    left: [number, number, number, string[] | undefined],
+    right: [number, number, number, string[] | undefined]
+): number {
+    if (left[0] !== right[0]) return left[0] > right[0] ? 1 : -1;
+    if (left[1] !== right[1]) return left[1] > right[1] ? 1 : -1;
+    if (left[2] !== right[2]) return left[2] > right[2] ? 1 : -1;
+    return 0;
+}
+
+function parseComparableProviderVersion(value: string): [number, number, number, string[] | undefined] | undefined {
+    const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/u.exec(value);
+    if (match === null) return undefined;
+    return [Number(match[1]), Number(match[2]), Number(match[3]), match[4]?.split(".")];
+}
+
+function comparePrerelease(left: string[] | undefined, right: string[] | undefined): number {
+    if (left === undefined) return right === undefined ? 0 : 1;
+    if (right === undefined) return -1;
+    const length = Math.max(left.length, right.length);
+    for (let index = 0; index < length; index += 1) {
+        const a = left[index];
+        const b = right[index];
+        if (a === undefined) return -1;
+        if (b === undefined) return 1;
+        if (a === b) continue;
+        const aNumeric = /^\d+$/u.test(a);
+        const bNumeric = /^\d+$/u.test(b);
+        if (aNumeric && bNumeric) return Number(a) > Number(b) ? 1 : -1;
+        if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
+        return a > b ? 1 : -1;
+    }
+    return 0;
 }

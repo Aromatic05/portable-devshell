@@ -74,38 +74,39 @@ devshell --version
 devshell status
 ```
 
-### 安装 Agent Extension 与 Pi Provider
+### 安装 Agent Extension
 
-Agent 不属于 Control builtin Extension。需要 Agent/Pi 时，再从同一 Release 安装公共 Agent Extension 和当前主机对应的 Pi Provider。以 Linux x86-64 为例：
+Agent 不属于 Control builtin Extension。需要 Agent 时，再从同一 Release 安装公共 Agent Extension。Agent Extension 自带一个通过标准 Agent Provider ABI 安装的 Pi Provider，因此首次安装后即可直接使用；Pi 不属于 portable-devshell 主程序。
 
 ```bash
 base=https://github.com/Aromatic05/portable-devshell/releases/latest/download
 target=linux-x64
-
-for asset in \
-  portable-devshell-agent.dsext \
-  portable-devshell-agent-provider-pi-$target.dsprovider; do
-  curl -fLO "$base/$asset"
-  curl -fLO "$base/$asset.sha256"
-done
+curl -fLO "$base/portable-devshell-agent-$target.dsext"
+curl -fLO "$base/portable-devshell-agent-$target.dsext.sha256"
 
 if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum -c portable-devshell-agent.dsext.sha256
-  sha256sum -c portable-devshell-agent-provider-pi-$target.dsprovider.sha256
+  sha256sum -c "portable-devshell-agent-$target.dsext.sha256"
 else
-  shasum -a 256 -c portable-devshell-agent.dsext.sha256
-  shasum -a 256 -c portable-devshell-agent-provider-pi-$target.dsprovider.sha256
+  shasum -a 256 -c "portable-devshell-agent-$target.dsext.sha256"
 fi
 
 devshell start
-devshell extension install "$PWD/portable-devshell-agent.dsext"
-devshell agent provider install "$PWD/portable-devshell-agent-provider-pi-$target.dsprovider"
+devshell extension install "$PWD/portable-devshell-agent-$target.dsext"
+devshell agent provider list
+devshell agent provider default
 pi --version
 ```
 
-`target` 可取 `linux-x64`、`linux-arm64`、`darwin-x64`、`darwin-arm64`、`windows-x64` 或 `windows-arm64`。Windows 使用对应 `.dsprovider`，并按上文 PowerShell 的 `Get-FileHash` 方法校验两个资产后执行相同的 `devshell extension install` / `devshell agent provider install` 命令。
+首次安装时，若用户此前没有 Pi Provider 记录，Agent Extension 会 ensure-install 随包 Pi，并将首个可用 Provider 设为默认；同时由 Agent Extension 发布 `pi` 用户命令。若该路径已经存在非 portable-devshell 所有的 `pi`，Agent Extension 不会覆盖它。旧版本由 portable-devshell 主程序创建的 Pi launcher 会在 Agent 安装时迁移为 Agent-owned launcher。如果 Pi Provider 已安装或用户已经升级到更新 generation，升级 Agent Extension 不会强制覆盖或降级它。
 
-`pi` launcher 本身随主程序安装，但不会隐式安装或更新 Agent Extension/Provider；Provider 未安装时会明确提示运行 `devshell agent provider install <bundle>`。Provider 更新使用 `devshell agent provider update <bundle>`。
+其他 Provider 仍独立安装。例如下载当前平台的 `.dsprovider` 后：
+
+```bash
+devshell agent provider install "$PWD/portable-devshell-agent-provider-opencode-linux-x64.dsprovider"
+devshell agent provider default opencode
+```
+
+`target` 可取 `linux-x64`、`linux-arm64`、`darwin-x64`、`darwin-arm64`、`windows-x64` 或 `windows-arm64`。由于 Agent Extension 内含可离线引导 Pi runtime 的 Provider seed，`.dsext` 按目标平台发布；这不改变 Provider ABI，其他 Provider 仍可独立安装。随 Agent Extension 提供的 Provider 可用 `devshell agent provider bundled` 查看，并可用 `devshell agent provider install <id>` 重新 ensure-install；外部 Provider bundle 使用绝对路径安装。Provider 显式更新使用 `devshell agent provider update <absolute-bundle-path>`。
 
 ## 从源码安装
 
@@ -128,7 +129,7 @@ pnpm install:local
 3. 对预装 worker 校验 SHA-256 并安装到版本化目录；
 4. 只有某个 Release asset 找不到或下载失败时，才尝试在本地构建该 target；
 5. 在切换版本前后分别执行 CLI 启动验证；
-6. 安装应用，并在 Unix 创建 `~/.local/bin/devshell` 和 `~/.local/bin/pi`，在 Windows 创建对应的 `.cmd` 入口；受管 `pi` launcher 从当前 Pi Provider 加载 portable-devshell bridge，但 Pi 本体只由 Provider 首次引导到稳定私有安装目录。之后 `pi update` 与 `pi install/remove/update` 管理该私有 Pi runtime 和插件，不会被 portable-devshell/Provider 升级覆盖；Agent 模式仍只暴露 DevShell 投影工具。
+6. 安装应用，并在 Unix 创建 `~/.local/bin/devshell`，在 Windows 创建对应的 `devshell.cmd`；主程序安装器不创建、替换或回滚系统中的 `pi` 命令。
 7. 如果安装前 Control 正在运行，恢复 Control 以及当时由它管理的运行中实例。
 
 当前主机 worker 用于本地实例。其他远程目标由 control 在首次连接时根据探测结果按需取得，不应在每次安装时下载全部平台。
@@ -139,15 +140,17 @@ pnpm install:local
 
 ```text
 ~/.local/bin/devshell
-~/.local/bin/pi
 ~/.local/share/portable-devshell/current/
 ~/.local/share/portable-devshell/versions/<version>/
+~/.local/share/portable-devshell/extensions/agent/<generation>/
+~/.local/share/portable-devshell/extension-data/agent/bundles/<provider-generation>/
 ~/.devshell/bin/devshell-worker
 ~/.devshell/bin/devshell-worker-<host-target>
 ~/.devshell/workers/<target>/<sha256>/devshell-worker
 ~/.devshell/release-cache/workers/<tag>/<target>/<sha256>/devshell-worker
-~/.local/share/portable-devshell/extension-data/agent/providers/pi/install/
-~/.local/share/portable-devshell/extension-data/agent/providers/pi/state/pi/
+~/.devshell/control/extensions/state/agent/providers/pi/install/
+~/.devshell/control/extensions/state/agent/providers/pi/state/pi/
+~/.local/bin/pi  # 仅安装 Agent Extension 后，由 Agent 发布
 ```
 
 `~/.devshell/bin/` 中会包含当前主机 target 的带后缀 worker；默认 `devshell-worker` 指向/对应这个 host target。其他 target 只在 provider 首次需要连接时进入 release cache，并从对应 Release 取得。
@@ -199,15 +202,14 @@ Reverse instance 是 self-managed，不由本机安装器主动启动；升级�
 devshell stop
 ```
 
-标准安装会让 `PORTABLE_DEVSHELL_BIN_DIR` 中的 `pi` 指向 portable-devshell 的受管 launcher，但不会写入 `~/.pi/agent/extensions/`。停止 Control 后删除这两个命令和程序文件：
+停止 Control 后删除 portable-devshell 主程序命令和程序文件：
 
 ```bash
 rm -f ~/.local/bin/devshell
-rm -f ~/.local/bin/pi
 rm -rf ~/.local/share/portable-devshell
 ```
 
-安装事务失败时会恢复安装前的 `pi` 命令；成功安装后该命令由 portable-devshell 接管，目前不会保留供未来卸载自动恢复的长期副本。如果该路径原先已有需要保留的 `pi` 命令，请在首次安装前自行备份或使用不同的 `PORTABLE_DEVSHELL_BIN_DIR`。自定义安装路径时，上述卸载命令也应替换成对应路径。
+主程序安装和卸载都不会接管已有的 `pi` 命令；`pi` 的发布属于 Agent Extension。Agent Extension code/provider bundles 位于 portable-devshell 的 Extension data 目录，Provider 的稳定 runtime/state 位于 `~/.devshell/control/extensions/state/agent/`。如果已经安装 Agent，还应通过 Extension 生命周期卸载 Agent；不要把删除主程序目录当作 Agent runtime/state 的完整卸载。自定义安装路径时，上述卸载命令也应替换成对应路径。
 
 Windows PowerShell：
 
@@ -215,7 +217,6 @@ Windows PowerShell：
 $root = Join-Path $env:LOCALAPPDATA "portable-devshell"
 $bin = Join-Path $HOME ".local\bin"
 Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $bin "devshell.cmd")
-Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $bin "pi.cmd")
 Remove-Item -Recurse -Force $root
 ```
 
