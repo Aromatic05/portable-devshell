@@ -6,7 +6,9 @@ import type {
 import type { AgentWorkerTarget } from "../../builtin/worker/AgentWorkerTarget.js";
 
 export interface PiChildInitMessage {
+    agentDirectory: string;
     entrypoint: string;
+    managedInstallRoot: string;
     type: "init";
     webBasePath: string;
 }

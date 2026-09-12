@@ -68,7 +68,9 @@ test("Pi provider child exits when its parent IPC channel disconnects", async ()
     try {
         const ready = nextMessage(child);
         child.send({
+            agentDirectory: stateDirectory,
             entrypoint: fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")),
+            managedInstallRoot: join(stateDirectory, "managed-pi"),
             type: "init",
             webBasePath: "/agent/"
         });

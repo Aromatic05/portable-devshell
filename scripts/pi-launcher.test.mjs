@@ -18,19 +18,24 @@ test("pi launcher reports an actionable error when the provider is not installed
     }
 });
 
-test("pi launcher resolves the selected provider generation without embedding a Pi version", async () => {
+test("pi launcher combines the selected provider bridge with the stable managed Pi runtime", async () => {
     const root = await createTestTempDirectory("pi-launcher-provider");
     const home = resolve(root, "home");
     const data = resolve(root, "data");
     const generation = "sha256-test-generation";
     const provider = resolve(data, "portable-devshell", "extension-data", "agent", "bundles", generation);
-    const piRoot = resolve(provider, "node_modules", "@earendil-works", "pi-coding-agent");
+    const managedRoot = resolve(data, "portable-devshell", "extension-data", "agent", "providers", "pi", "install");
+    const managedVersion = "0.99.0";
+    const piRoot = resolve(managedRoot, "releases", managedVersion, "node_modules", "@earendil-works", "pi-coding-agent");
     const extensionEntrypoint = resolve(provider, "dist", "provider", "pi", "extension", "index.js");
     const registryDirectory = resolve(home, ".devshell", "control", "extensions", "state", "agent");
     try {
         await mkdir(resolve(piRoot, "dist"), { recursive: true });
         await mkdir(resolve(provider, "dist", "provider", "pi", "extension"), { recursive: true });
         await mkdir(registryDirectory, { recursive: true });
+        await mkdir(managedRoot, { recursive: true });
+        await writeFile(resolve(managedRoot, "managed-install.json"), `${JSON.stringify({ kind: "pi-managed-install", layout: "releases-v1", schemaVersion: 1 })}\n`, "utf8");
+        await writeFile(resolve(managedRoot, "current-version"), `${managedVersion}\n`, "utf8");
         await writeFile(resolve(piRoot, "package.json"), JSON.stringify({ bin: { pi: "./dist/cli.js" } }), "utf8");
         await writeFile(resolve(piRoot, "dist", "cli.js"), "export {};\n", "utf8");
         await writeFile(extensionEntrypoint, "export default () => {};\n", "utf8");
@@ -50,6 +55,8 @@ test("pi launcher resolves the selected provider generation without embedding a 
         assert.equal(runtime.providerDirectory, provider);
         assert.equal(runtime.piEntrypoint, resolve(piRoot, "dist", "cli.js"));
         assert.equal(runtime.extensionEntrypoint, extensionEntrypoint);
+        assert.equal(runtime.managedInstallRoot, managedRoot);
+        assert.equal(runtime.agentDirectory, resolve(data, "portable-devshell", "extension-data", "agent", "providers", "pi", "state", "pi"));
     } finally {
         await rm(root, { force: true, recursive: true });
     }

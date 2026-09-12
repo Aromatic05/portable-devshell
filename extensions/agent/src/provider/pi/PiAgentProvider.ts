@@ -2,6 +2,7 @@ import { join } from "node:path";
 
 import type { AgentProvider, AgentProviderHandle, AgentProviderStartContext } from "../../builtin/provider/AgentProvider.js";
 import {
+    PI_BOOTSTRAP_VERSION,
     PiProviderInstaller,
     type PiProviderInstallation
 } from "./PiProviderInstaller.js";
@@ -11,8 +12,7 @@ import {
 } from "./PiAgentProcess.js";
 
 export const PI_PROVIDER_ID = "pi";
-export const PI_PROVIDER_VERSION = "0.1.1";
-export const PI_RUNTIME_VERSION = "0.85.1";
+export const PI_PROVIDER_VERSION = "0.1.2";
 
 export interface PiProviderInstallerLike {
     ensureInstalled(runtime: AgentProviderStartContext["runtime"]): Promise<PiProviderInstallation>;
@@ -20,7 +20,7 @@ export interface PiProviderInstallerLike {
 
 export interface PiAgentProviderOptions {
     installer?: PiProviderInstallerLike;
-    piRuntimeVersion?: string;
+    piBootstrapVersion?: string;
     runtimeFactory?: PiAgentRuntimeFactory;
     version?: string;
 }
@@ -33,7 +33,9 @@ export class PiAgentProvider implements AgentProvider {
 
     constructor(options: PiAgentProviderOptions = {}) {
         this.version = options.version ?? PI_PROVIDER_VERSION;
-        this.#installer = options.installer ?? new PiProviderInstaller({ version: options.piRuntimeVersion ?? PI_RUNTIME_VERSION });
+        this.#installer = options.installer ?? new PiProviderInstaller({
+            version: options.piBootstrapVersion ?? PI_BOOTSTRAP_VERSION
+        });
         this.#runtimeFactory = options.runtimeFactory ?? new PiAgentProcessFactory();
     }
 
@@ -42,8 +44,10 @@ export class PiAgentProvider implements AgentProvider {
         const paths = resolvePiAgentPaths(context);
         return await this.#runtimeFactory.start({
             agentId: context.agentId,
+            agentDirectory: installation.agentDirectory,
             entrypoint: installation.entrypoint,
             localCwd: paths.localCwd,
+            managedInstallRoot: installation.managedInstallRoot,
             processes: context.processes,
             runtimeDirectory: context.runtime.stateDirectory,
             target: context.target,

@@ -1,6 +1,5 @@
 export {
     PI_PROVIDER_ID,
-    PI_RUNTIME_VERSION,
     PI_PROVIDER_VERSION,
     PiAgentProvider,
     type PiAgentProviderOptions,
@@ -12,6 +11,7 @@ export {
     type PiAgentRuntimeFactory
 } from "./PiAgentProcess.js";
 export {
+    PI_BOOTSTRAP_VERSION,
     PI_PACKAGE_NAME,
     PiProviderInstaller,
     type PiProviderInstallation,

@@ -128,7 +128,7 @@ pnpm install:local
 3. 对预装 worker 校验 SHA-256 并安装到版本化目录；
 4. 只有某个 Release asset 找不到或下载失败时，才尝试在本地构建该 target；
 5. 在切换版本前后分别执行 CLI 启动验证；
-6. 安装应用，并在 Unix 创建 `~/.local/bin/devshell` 和 `~/.local/bin/pi`，在 Windows 创建对应的 `.cmd` 入口；受管 `pi` launcher 在 Pi Provider 安装后加载该 Provider 的 portable-devshell extension，并默认关闭 Pi 内置工具。
+6. 安装应用，并在 Unix 创建 `~/.local/bin/devshell` 和 `~/.local/bin/pi`，在 Windows 创建对应的 `.cmd` 入口；受管 `pi` launcher 从当前 Pi Provider 加载 portable-devshell bridge，但 Pi 本体只由 Provider 首次引导到稳定私有安装目录。之后 `pi update` 与 `pi install/remove/update` 管理该私有 Pi runtime 和插件，不会被 portable-devshell/Provider 升级覆盖；Agent 模式仍只暴露 DevShell 投影工具。
 7. 如果安装前 Control 正在运行，恢复 Control 以及当时由它管理的运行中实例。
 
 当前主机 worker 用于本地实例。其他远程目标由 control 在首次连接时根据探测结果按需取得，不应在每次安装时下载全部平台。
@@ -146,6 +146,8 @@ pnpm install:local
 ~/.devshell/bin/devshell-worker-<host-target>
 ~/.devshell/workers/<target>/<sha256>/devshell-worker
 ~/.devshell/release-cache/workers/<tag>/<target>/<sha256>/devshell-worker
+~/.local/share/portable-devshell/extension-data/agent/providers/pi/install/
+~/.local/share/portable-devshell/extension-data/agent/providers/pi/state/pi/
 ```
 
 `~/.devshell/bin/` 中会包含当前主机 target 的带后缀 worker；默认 `devshell-worker` 指向/对应这个 host target。其他 target 只在 provider 首次需要连接时进入 release cache，并从对应 Release 取得。

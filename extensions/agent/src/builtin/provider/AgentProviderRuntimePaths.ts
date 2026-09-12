@@ -9,13 +9,15 @@ export interface AgentProviderRuntimePathsOptions {
 /**
  * Filesystem namespace owned by one Agent provider.
  *
- * Executable dependencies live in a versioned prefix while provider-owned
- * session/config state stays outside that prefix. Upgrading a provider can
- * therefore replace its runtime without migrating or deleting its sessions.
+ * Provider-owned executable dependencies live in a versioned prefix. A stable
+ * installation directory is reserved for runtimes bootstrapped by the provider
+ * but subsequently owned by the runtime itself (for example, self-updating
+ * Agent CLIs). Session/config state is stable as well.
  */
 export class AgentProviderRuntimePaths {
     readonly agentDirectory: string;
     readonly cacheDirectory: string;
+    readonly installationDirectory: string;
     readonly prefixDirectory: string;
     readonly providerDirectory: string;
     readonly stateDirectory: string;
@@ -30,6 +32,7 @@ export class AgentProviderRuntimePaths {
         this.agentDirectory = options.rootDirectory;
         this.providerDirectory = join(this.agentDirectory, "providers", options.provider);
         this.prefixDirectory = join(this.providerDirectory, "prefix", options.version);
+        this.installationDirectory = join(this.providerDirectory, "install");
         this.stateDirectory = join(this.providerDirectory, "state");
         this.cacheDirectory = join(this.providerDirectory, "cache");
     }

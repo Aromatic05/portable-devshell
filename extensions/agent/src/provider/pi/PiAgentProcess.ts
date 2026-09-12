@@ -22,8 +22,10 @@ const PI_OWNER_HEARTBEAT_TIMEOUT_MS = 10_000;
 
 export interface PiAgentProcessStartOptions {
     agentId: string;
+    agentDirectory: string;
     entrypoint: string;
     localCwd: string;
+    managedInstallRoot: string;
     processes: ExtensionProcessCapability;
     runtimeDirectory: string;
     target: AgentWorkerTarget;
@@ -198,7 +200,10 @@ class PiSharedProcess {
         reject(error: Error): void;
         resolve(): void;
     }>();
-    readonly #identity: Pick<PiAgentProcessStartOptions, "entrypoint" | "runtimeDirectory" | "webBasePath">;
+    readonly #identity: Pick<
+        PiAgentProcessStartOptions,
+        "agentDirectory" | "entrypoint" | "managedInstallRoot" | "runtimeDirectory" | "webBasePath"
+    >;
     readonly #ownerHeartbeat: NodeJS.Timeout;
     readonly #agents = new Set<string>();
     readonly #toolCalls = new Map<string, AbortController>();
@@ -217,7 +222,9 @@ class PiSharedProcess {
         });
         this.#close = close;
         this.#identity = {
+            agentDirectory: options.agentDirectory,
             entrypoint: options.entrypoint,
+            managedInstallRoot: options.managedInstallRoot,
             runtimeDirectory: options.runtimeDirectory,
             webBasePath: options.webBasePath
         };
@@ -257,7 +264,13 @@ class PiSharedProcess {
     }
 
     assertCompatible(options: PiAgentProcessStartOptions): void {
-        for (const field of ["runtimeDirectory", "entrypoint", "webBasePath"] as const) {
+        for (const field of [
+            "runtimeDirectory",
+            "agentDirectory",
+            "entrypoint",
+            "managedInstallRoot",
+            "webBasePath"
+        ] as const) {
             if (options[field] !== this.#identity[field]) {
                 throw new Error(`Pi provider shared process cannot change ${field} while Agents are running.`);
             }
@@ -270,7 +283,9 @@ class PiSharedProcess {
             this.#readyReject = reject;
         });
         await this.#send({
+            agentDirectory: this.#identity.agentDirectory,
             entrypoint: this.#identity.entrypoint,
+            managedInstallRoot: this.#identity.managedInstallRoot,
             type: "init",
             webBasePath: this.#identity.webBasePath
         });

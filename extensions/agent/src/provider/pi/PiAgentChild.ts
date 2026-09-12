@@ -1,6 +1,5 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { createDevshellPiExtension } from "./extension/index.js";
 import { PiChildToolSession } from "./PiChildToolSession.js";
@@ -80,6 +79,8 @@ async function handleMessage(message: PiParentMessage): Promise<void> {
 
 async function initialize(input: PiChildInitMessage): Promise<URL> {
     if (sdk !== undefined) throw new Error("Pi provider child is already initialized.");
+    process.env.PI_CODING_AGENT_DIR = input.agentDirectory;
+    process.env.PI_MANAGED_INSTALL_ROOT = input.managedInstallRoot;
     sdk = await new PiSdkLoader().load(input.entrypoint);
     agentDir = sdk.getAgentDir();
     await mkdir(agentDir, { recursive: true });
@@ -116,8 +117,6 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
             hidden: true,
             name: "portable-devshell"
         }],
-        additionalExtensionPaths: bundledPiExtensionPaths(),
-        noExtensions: true,
         settingsManager
     });
     let session: PiSessionLike | undefined;
@@ -151,15 +150,6 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
         }
         throw error;
     }
-}
-
-function bundledPiExtensionPaths(): string[] {
-    return [
-        "pi-web-access/index.ts",
-        "pi-editor-plus/index.ts",
-        "@henryqw/pi-auto-compact/extensions/auto-compact.ts",
-        "@henryqw/pi-ask-question/extensions/ask-question.ts"
-    ].map((specifier) => fileURLToPath(import.meta.resolve(specifier)));
 }
 
 async function commandAgent(message: PiChildAgentCommandMessage): Promise<void> {

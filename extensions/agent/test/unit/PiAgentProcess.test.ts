@@ -209,7 +209,9 @@ function startOptions(
     return {
         ...base,
         agentId,
+        agentDirectory: join(base.runtimeDirectory, "user-pi-state"),
         localCwd: join(base.runtimeDirectory, "agents", agentId, "cwd"),
+        managedInstallRoot: join(base.runtimeDirectory, "managed-pi"),
         processes: nodeProcessCapability(),
         target,
         tools

@@ -3,6 +3,6 @@
     "apiVersion": 1,
     "id": "pi",
     "name": "Pi",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "entry": "dist/provider/pi/index.js"
 }
