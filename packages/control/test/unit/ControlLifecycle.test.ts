@@ -333,6 +333,53 @@ test("start failure reports only the current startup attempt", async () => {
     }
 });
 
+test("default lifecycle start accepts a control that becomes ready after five seconds", async () => {
+    let recordedPid: number | undefined;
+    let spawnedAt: number | undefined;
+    let alive = true;
+    const pid = 424_243;
+    const manager = new ControlLifecycleManager({
+        daemonModulePath: controlDaemonModulePath(),
+        logger: {
+            error: async () => undefined,
+            info: async () => undefined,
+            path: "/tmp/control-delayed-ready.log",
+            readAll: async () => ""
+        },
+        pidFile: {
+            read: async () => recordedPid,
+            remove: async () => { recordedPid = undefined; },
+            write: async (nextPid) => { recordedPid = nextPid; },
+            path: "/tmp/control-delayed-ready.pid"
+        },
+        processIsRunning: (candidate) => candidate === pid && alive,
+        rpcClient: {
+            async request() {
+                if (spawnedAt === undefined || Date.now() - spawnedAt < 5_200) {
+                    throw new Error("offline");
+                }
+                return { instanceCount: 0, pid };
+            }
+        },
+        signalProcess: () => { alive = false; },
+        socketFile: {
+            ensureRuntimeDir: async () => undefined,
+            path: "/tmp/control-delayed-ready.sock",
+            remove: async () => undefined,
+            runtimeDir: "/tmp"
+        },
+        spawnFunction() {
+            spawnedAt = Date.now();
+            return { pid, unref() {} } as never;
+        },
+        startupLogPath: "/tmp/control-delayed-ready.startup.log"
+    });
+
+    const started = await manager.start();
+    assert.equal(started.running, true);
+    assert.equal(started.pid, pid);
+});
+
 test("pid publication failure terminates the spawned control process", async (t) => {
     const root = await createTestTempDirectory("control-pid-failure");
     let childPid: number | undefined;

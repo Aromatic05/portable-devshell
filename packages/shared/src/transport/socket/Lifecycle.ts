@@ -65,6 +65,7 @@ export interface ControlLifecycleManagerOptions extends Partial<ControlDaemonLau
     rpcClient?: ControlLifecycleRpcClient;
     socketFile?: ControlSocketFilePort;
     signalProcess?: (pid: number, signal: NodeJS.Signals) => void;
+    startWaitTimeoutMs?: number;
     waitTimeoutMs?: number;
 }
 
@@ -174,6 +175,7 @@ export class ControlLifecycleManager {
     readonly #rpcClient: ControlLifecycleRpcClient;
     readonly #socketFile: ControlSocketFilePort;
     readonly #startupLogPath: string;
+    readonly #startWaitTimeoutMs: number;
     readonly #signalProcess: (pid: number, signal: NodeJS.Signals) => void;
     readonly #waitTimeoutMs: number;
 
@@ -183,6 +185,7 @@ export class ControlLifecycleManager {
         this.#socketFile = options.socketFile ?? new ControlSocketFile(options.xdgRuntimeDir);
         this.#startupLogPath = options.startupLogPath ?? controlStartupLogPath(options.homeDirectory);
         this.#waitTimeoutMs = options.waitTimeoutMs ?? 5_000;
+        this.#startWaitTimeoutMs = options.startWaitTimeoutMs ?? options.waitTimeoutMs ?? 15_000;
         this.#processIsRunning = options.processIsRunning ?? processIsRunning;
         this.#processIdentity = options.processIdentity ?? ((pid) => identifyControlProcess(pid, {
             daemonModulePath: options.daemonModulePath,
@@ -251,7 +254,7 @@ export class ControlLifecycleManager {
                         throw new Error(`control server process ${pid} exited before becoming ready`);
                     }
                     return undefined;
-                }, "control server did not become ready");
+                }, "control server did not become ready", this.#startWaitTimeoutMs);
             } catch (error) {
                 await this.#terminateProcess(pid).catch(() => undefined);
                 await this.#cleanupRuntimeFiles(pid);
@@ -362,8 +365,12 @@ export class ControlLifecycleManager {
         await this.#waitForProcessExit(pid, `control process ${pid} did not terminate after SIGKILL`);
     }
 
-    async #waitFor<T>(factory: () => Promise<T | undefined>, timeoutMessage: string): Promise<T> {
-        const deadline = Date.now() + this.#waitTimeoutMs;
+    async #waitFor<T>(
+        factory: () => Promise<T | undefined>,
+        timeoutMessage: string,
+        timeoutMs = this.#waitTimeoutMs
+    ): Promise<T> {
+        const deadline = Date.now() + timeoutMs;
         while (Date.now() < deadline) {
             const value = await factory();
             if (value !== undefined) {
