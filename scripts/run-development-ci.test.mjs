@@ -122,7 +122,7 @@ test("Linux x64 target CI runs final integration without repeating unit gates", 
     assert.equal(integration.env.PORTABLE_DEVSHELL_TEST_WORKER_PATH, "ci-artifacts/devshell-worker-linux-x64");
 });
 
-test("Windows target CI keeps native build validation but omits runtime and common tests", () => {
+test("Windows x64 target CI includes installer contract and real release smoke", () => {
     const directory = mkdtempSync(join(tmpdir(), "devshell-ci-plan-"));
     const pnpmCli = join(directory, "pnpm.cjs");
     writeFileSync(pnpmCli, "");
@@ -135,6 +135,8 @@ test("Windows target CI keeps native build validation but omits runtime and comm
             "Build native Worker",
             "Package native application",
             "Package Agent artifacts",
+            "Windows installer contract tests",
+            "Windows release installer smoke",
         ]);
     } finally {
         if (previous === undefined) {

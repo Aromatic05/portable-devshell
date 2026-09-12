@@ -31,6 +31,21 @@ test("release matrix emits one Agent Extension and both native Agent providers p
     assert.match(buildJob, /if: matrix\.target == 'linux-x64'[\s\S]*?pnpm smoke:agent-package -- \.\/release-assets\/portable-devshell-app-linux-x64\.tar\.gz \.\/release-assets\/portable-devshell-agent\.dsext \.\/release-assets\/portable-devshell-agent-provider-pi-linux-x64\.dsprovider \.\/release-assets\/portable-devshell-agent-provider-opencode-linux-x64\.dsprovider/u);
 });
 
+test("release Windows x64 job runs installer contracts and the real release smoke", async () => {
+    const workflow = await readReleaseWorkflow();
+    const buildStart = workflow.indexOf("    build-worker:\n");
+    const publishStart = workflow.indexOf("    publish:\n", buildStart);
+    const buildJob = workflow.slice(buildStart, publishStart);
+    assert.match(
+        buildJob,
+        /if: matrix\.target == 'windows-x64'[\s\S]*?node --test \.\/scripts\/install-release\.test\.mjs/u
+    );
+    assert.match(
+        buildJob,
+        /if: matrix\.target == 'windows-x64'[\s\S]*?node \.\/scripts\/smoke-install-release-windows\.mjs \.\/release-assets\/portable-devshell-app-windows-x64\.tar\.gz/u
+    );
+});
+
 test("release verifies the tagged commit belongs to the default branch before asset jobs", async () => {
     const workflow = await readReleaseWorkflow();
     const verifyStart = workflow.indexOf("    verify-development-ci:\n");

@@ -124,9 +124,15 @@ jobs:
               if: matrix.target != 'linux-x64'
               run: pnpm package:agent -- --target "${{ matrix.target }}" --output-dir ./release-assets --provider-only
 
-            # Windows PowerShell/ConPTY 的交互、转义和终端语义过于晦涩且不稳定，
-            # 当前无法写出足够稳定且有证明力的 runtime 测试。Windows release job
-            # 只构建并上传已通过开发门禁的原生 Worker、应用与 Agent Provider 资产。
+            - name: 验证 Windows 安装/回滚契约
+              if: matrix.target == 'windows-x64'
+              run: node --test ./scripts/install-release.test.mjs
+
+            - name: 验证 Windows 最终安装资产
+              if: matrix.target == 'windows-x64'
+              timeout-minutes: 5
+              run: node ./scripts/smoke-install-release-windows.mjs ./release-assets/portable-devshell-app-windows-x64.tar.gz
+
             - name: 验证最终 Worker daemon
               if: runner.os != 'Windows'
               timeout-minutes: 3

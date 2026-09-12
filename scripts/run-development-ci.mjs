@@ -90,14 +90,16 @@ export function createTargetCiSteps(target, platform = process.platform) {
     ];
 
     if (platform === "win32") {
-        // Windows runtime behavior remains outside the release gate because PowerShell/ConPTY
-        // interaction is not deterministic enough to provide a useful runtime proof. The target
-        // job still builds the complete JS application and the native Worker on both Windows
-        // architectures, then packages the exact release asset.
         steps.push(
             pnpmStep("Package native application", ["package:app", "--", "--target", target, "--output-dir", "./ci-artifacts"]),
             pnpmStep("Package Agent artifacts", ["package:agent", "--", "--target", target, "--output-dir", "./ci-artifacts"]),
         );
+        if (target === "windows-x64") {
+            steps.push(
+                { args: ["--test", "./scripts/install-release.test.mjs"], command: process.execPath, name: "Windows installer contract tests" },
+                { args: ["./scripts/smoke-install-release-windows.mjs", application], command: process.execPath, name: "Windows release installer smoke" },
+            );
+        }
         return steps;
     }
 
