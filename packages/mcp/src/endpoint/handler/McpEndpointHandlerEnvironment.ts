@@ -114,6 +114,17 @@ export class McpEndpointHandlerEnvironment {
             requestContext,
         );
         const record = resolution.record;
+        const workspace = contextWorkspace(record, this.#instanceName) ?? record.workspace;
+        await this.#gateway?.beforeModelToolCall?.(
+            this.#instanceName,
+            mcpRemoteEnvironmentToolName,
+            {
+                ctxId: record.ctxId,
+                requestId: requestContext.requestId,
+                source: "mcp",
+                ...(workspace === undefined ? {} : { workspace }),
+            },
+        );
         const base = this.#contextSelector.expose(record);
         switch (commandInput.command) {
             case "help":

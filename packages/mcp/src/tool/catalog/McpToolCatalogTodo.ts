@@ -148,13 +148,13 @@ export class McpToolCatalogTodo {
         },
         {
             requiredCapabilities: [],
-            description: "Send a progress message directly to the user without ending the turn or changing Todo state. Always follow tool-call `comment`; use `todo_report` for meaningful progress, and do not repeat the same report in assistant text.",
+            description: "Send a user-visible message without ending the turn or changing Todo state. Reply to new user comments first. Otherwise report only meaningful new progress, blockers, or stage completion. Never repeat reports; if rate-limited, continue useful work instead.",
             group: "todo",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
                     message: {
-                        description: "Concise progress or status message to present directly to the user.",
+                        description: "Concise user reply or meaningful progress update.",
                         minLength: 1,
                         maxLength: TODO_MAX_TEXT_LENGTH,
                         type: "string"

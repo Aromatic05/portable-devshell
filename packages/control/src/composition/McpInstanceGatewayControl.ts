@@ -16,20 +16,39 @@ export interface McpInstanceGatewayControlOptions {
     getConfig: () => ControlConfig;
     instanceRegistry: InstanceRegistry;
     instanceConnections?: InstanceConnectionService;
+    now?: () => number;
     toolProvenance?: ToolCallProvenanceStore;
+}
+
+const TODO_REPORT_BUCKET_CAPACITY = 2;
+const TODO_REPORT_REFILL_INTERVAL_MS = 30_000;
+const TODO_REPORT_COMMENT_TOOL_BUDGET = 5;
+const TODO_REPORT_CONVERSATION_WINDOW = 32;
+
+interface TodoReportPolicyState {
+    commentToolCallsRemaining?: number;
+    lastRefillAt: number;
+    lastReportMessage?: string;
+    latestAnsweredCommentId?: string;
+    pendingCommentId?: string;
+    tokens: number;
 }
 
 export class McpInstanceGatewayControl implements McpInstanceGateway {
     readonly #getConfig: () => ControlConfig;
     readonly #instanceRegistry: InstanceRegistry;
     readonly #instanceConnections: InstanceConnectionService;
+    readonly #now: () => number;
     readonly #toolProvenance?: ToolCallProvenanceStore;
+    readonly #todoReportPolicy = new Map<string, TodoReportPolicyState>();
+    readonly #todoReportPolicyOperations = new Map<string, Promise<void>>();
     #modelCommands: (instance: string) => readonly string[] = () => [];
 
     constructor(options: McpInstanceGatewayControlOptions) {
         this.#getConfig = options.getConfig;
         this.#instanceRegistry = options.instanceRegistry;
         this.#instanceConnections = options.instanceConnections ?? new InstanceConnectionService(options.instanceRegistry);
+        this.#now = options.now ?? Date.now;
         this.#toolProvenance = options.toolProvenance;
     }
 
@@ -47,6 +66,30 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 retryable: false
             });
         }
+    }
+
+    async beforeModelToolCall(instance: string, toolName: string, context: ToolCallContext): Promise<void> {
+        const ctxId = context.ctxId;
+        if (ctxId === undefined || toolName === "todo_report") return;
+        const key = todoReportPolicyKey(instance, ctxId);
+        await this.#withTodoReportPolicy(key, async () => {
+            const state = await this.#syncTodoReportPolicy(instance, ctxId);
+            if (state.pendingCommentId === undefined) return;
+            const remaining = state.commentToolCallsRemaining ?? TODO_REPORT_COMMENT_TOOL_BUDGET;
+            if (remaining <= 0) {
+                throw createError({
+                    code: errorCodes.todoInvalid,
+                    details: {
+                        commentId: state.pendingCommentId,
+                        ctxId,
+                        toolCallBudget: TODO_REPORT_COMMENT_TOOL_BUDGET,
+                    },
+                    message: "A delivered user comment is still unanswered. Call todo_report before using more tools.",
+                    retryable: false,
+                });
+            }
+            state.commentToolCallsRemaining = remaining - 1;
+        });
     }
 
     async auditToolCall<T extends JsonValue>(
@@ -362,11 +405,119 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         callId: string,
         context: ToolCallContext,
     ): Promise<void> {
-        await this.#requireDescriptor(instance).conversation.recordReport({
-            callId,
-            ctxId: requireCtxId(context),
-            text: message,
+        const ctxId = requireCtxId(context);
+        const key = todoReportPolicyKey(instance, ctxId);
+        await this.#withTodoReportPolicy(key, async () => {
+            const descriptor = this.#requireDescriptor(instance);
+            const state = await this.#syncTodoReportPolicy(instance, ctxId);
+            this.#refillTodoReportBucket(state, this.#now());
+            const commentId = state.pendingCommentId;
+
+            if (commentId === undefined) {
+                if (state.lastReportMessage === message) {
+                    throw createError({
+                        code: errorCodes.todoInvalid,
+                        details: { ctxId, reason: "duplicate" },
+                        message: "todo_report rejected an unchanged consecutive report. Continue useful work until there is new information.",
+                        retryable: false,
+                    });
+                }
+                if (state.tokens < 1) {
+                    const retryAfterMs = Math.ceil((1 - state.tokens) * TODO_REPORT_REFILL_INTERVAL_MS);
+                    throw createError({
+                        code: errorCodes.todoInvalid,
+                        details: {
+                            capacity: TODO_REPORT_BUCKET_CAPACITY,
+                            ctxId,
+                            refillIntervalMs: TODO_REPORT_REFILL_INTERVAL_MS,
+                            retryAfterMs,
+                        },
+                        message: `todo_report is rate-limited; the next autonomous report token is available in about ${Math.ceil(retryAfterMs / 1000)}s. Continue useful work instead of retrying early.`,
+                        retryable: false,
+                    });
+                }
+            }
+
+            await descriptor.conversation.recordReport({ callId, ctxId, text: message });
+            if (commentId === undefined) {
+                state.tokens -= 1;
+            } else {
+                state.latestAnsweredCommentId = commentId;
+                state.pendingCommentId = undefined;
+                state.commentToolCallsRemaining = undefined;
+            }
+            state.lastReportMessage = message;
         });
+    }
+
+    async #syncTodoReportPolicy(instance: string, ctxId: string): Promise<TodoReportPolicyState> {
+        const key = todoReportPolicyKey(instance, ctxId);
+        let state = this.#todoReportPolicy.get(key);
+        if (state === undefined) {
+            state = {
+                lastRefillAt: this.#now(),
+                tokens: TODO_REPORT_BUCKET_CAPACITY,
+            };
+            this.#todoReportPolicy.set(key, state);
+        }
+
+        const entries = await this.#requireDescriptor(instance).conversation.list({
+            ctxId,
+            limit: TODO_REPORT_CONVERSATION_WINDOW,
+        });
+        const latestReport = [...entries].reverse().find((entry) => entry.kind === "report");
+        if (latestReport !== undefined) state.lastReportMessage = latestReport.text;
+        const latestComment = [...entries]
+            .reverse()
+            .find((entry) => entry.kind === "comment" && entry.status === "delivered");
+        if (latestComment === undefined) {
+            state.pendingCommentId = undefined;
+            state.commentToolCallsRemaining = undefined;
+            return state;
+        }
+
+        const deliveredAt = latestComment.deliveredAt ?? latestComment.createdAt;
+        const answeredInHistory = latestReport !== undefined && latestReport.createdAt > deliveredAt;
+        if (state.latestAnsweredCommentId === latestComment.id || answeredInHistory) {
+            state.latestAnsweredCommentId = latestComment.id;
+            state.pendingCommentId = undefined;
+            state.commentToolCallsRemaining = undefined;
+            return state;
+        }
+
+        if (state.pendingCommentId !== latestComment.id) {
+            state.pendingCommentId = latestComment.id;
+            state.commentToolCallsRemaining = TODO_REPORT_COMMENT_TOOL_BUDGET;
+        }
+        return state;
+    }
+
+    #refillTodoReportBucket(state: TodoReportPolicyState, now: number): void {
+        const elapsed = Math.max(0, now - state.lastRefillAt);
+        state.tokens = Math.min(
+            TODO_REPORT_BUCKET_CAPACITY,
+            state.tokens + elapsed / TODO_REPORT_REFILL_INTERVAL_MS,
+        );
+        state.lastRefillAt = now;
+    }
+
+    async #withTodoReportPolicy<T>(key: string, operation: () => Promise<T>): Promise<T> {
+        const previous = this.#todoReportPolicyOperations.get(key) ?? Promise.resolve();
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const current = previous.catch(() => undefined).then(async () => await gate);
+        this.#todoReportPolicyOperations.set(key, current);
+        await previous.catch(() => undefined);
+        try {
+            return await operation();
+        } finally {
+            release();
+            if (this.#todoReportPolicyOperations.get(key) === current) {
+                this.#todoReportPolicyOperations.delete(key);
+            }
+        }
     }
 
     #requireWait(instance: string) {
@@ -393,6 +544,10 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             retryable: false
         });
     }
+}
+
+function todoReportPolicyKey(instance: string, ctxId: string): string {
+    return `${instance}\u0000${ctxId}`;
 }
 
 function withTodoSummaries<T extends object>(snapshot: T, activeTodos: import("@portable-devshell/shared").ActiveTodoSummary[]): T & { activeTodos?: import("@portable-devshell/shared").ActiveTodoSummary[] } {

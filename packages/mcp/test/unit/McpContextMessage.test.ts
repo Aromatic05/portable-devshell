@@ -162,6 +162,24 @@ test("a failed tool call does not consume a queued Comment", async () => {
     assert.equal(consumeCount, 0);
 });
 
+test("model-facing tool calls run the conversation reply gate before execution", async () => {
+    const guarded: Array<{ instance: string; toolName: string }> = [];
+    const { dispatch } = createHarness({
+        async beforeModelToolCall(instance, toolName) {
+            guarded.push({ instance, toolName });
+        },
+    });
+    const ctxId = await createContext(dispatch, "guarded-context");
+
+    await dispatch.callTool(
+        "bash_run",
+        { command: "pwd", ctxId },
+        { principal: "tester", requestId: "guarded-call" },
+    );
+
+    assert.deepEqual(guarded, [{ instance: "alpha", toolName: "bash_run" }]);
+});
+
 test("a routed artifact result consumes Comments from the routed instance Context", async () => {
     const consumed: Array<{ callId: string; ctxId: string; instance: string }> = [];
     const audited: Array<{ instance: string; toolName: string }> = [];
@@ -296,6 +314,11 @@ async function createContext(
 
 function createHarness(
     gatewayOverrides: {
+        beforeModelToolCall?(
+            instance: string,
+            toolName: string,
+            context: ToolCallContext,
+        ): Promise<void>;
         consumeContextMessages?(
             instance: string,
             ctxId: string,

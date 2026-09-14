@@ -230,6 +230,9 @@ export class McpEndpointDispatch {
             !appOnlyInteraction,
             signal
         );
+        if (!appOnlyInteraction) {
+            await this.#gateway?.beforeModelToolCall?.(routed.instance, toolName, context);
+        }
         const goalActivity = !appOnlyInteraction && context.ctxId !== undefined && toolName !== "workspace_goal"
             ? workspaceGoalActivity(toolName, routed.input, this.#tmuxBlockSyncMs)
             : undefined;

@@ -29,6 +29,86 @@ function createGateway(ready: boolean): McpInstanceGatewayControl {
     });
 }
 
+function createTodoReportHarness() {
+    let now = Date.parse("2026-09-14T00:00:00.000Z");
+    let callSequence = 0;
+    let failNext = false;
+    const entries: Array<Record<string, unknown>> = [];
+    const reports: string[] = [];
+    const registry = new InstanceRegistry([{
+        conversation: {
+            close() {},
+            async list(input: { ctxId?: string; limit?: number } = {}) {
+                const filtered = entries.filter((entry) => input.ctxId === undefined || entry.ctxId === input.ctxId);
+                return (input.limit === undefined ? filtered : filtered.slice(-input.limit)) as never;
+            },
+            async recordReport(input: { callId: string; ctxId: string; text: string }) {
+                if (failNext) {
+                    failNext = false;
+                    throw new Error("report failed");
+                }
+                reports.push(input.text);
+                entries.push({
+                    callId: input.callId,
+                    createdAt: new Date(now).toISOString(),
+                    ctxId: input.ctxId,
+                    id: input.callId,
+                    kind: "report",
+                    text: input.text,
+                });
+            },
+        },
+        enabled: true,
+        mcpEnabled: true,
+        mcpPath: "/local/mcp",
+        modelExtensions: [],
+        name: "local",
+    } as never]);
+    const gateway = new McpInstanceGatewayControl({
+        getConfig: () => createDefaultControlConfig(),
+        instanceRegistry: registry,
+        now: () => now,
+    });
+    const context = { ctxId: "ctx-report-policy", source: "mcp" as const, workspace: "/workspace" };
+
+    return {
+        advance(milliseconds: number) {
+            now += milliseconds;
+        },
+        context,
+        deliverComment(id: string, text: string) {
+            const timestamp = new Date(now).toISOString();
+            entries.push({
+                callId: `delivery-${id}`,
+                createdAt: timestamp,
+                ctxId: context.ctxId,
+                deliveredAt: timestamp,
+                id,
+                kind: "comment",
+                status: "delivered",
+                text,
+            });
+        },
+        failNextReport() {
+            failNext = true;
+        },
+        gateway,
+        async report(message: string) {
+            callSequence += 1;
+            await gateway.reportTodo("local", message, `report-${callSequence}`, context);
+        },
+        reports,
+    };
+}
+
+async function assertRateLimited(operation: Promise<unknown>, retryAfterMs: number): Promise<void> {
+    await assert.rejects(operation, (error: unknown) => {
+        assert.equal((error as { code?: string }).code, "todo.invalid");
+        assert.equal((error as { details?: { retryAfterMs?: number } }).details?.retryAfterMs, retryAfterMs);
+        return true;
+    });
+}
+
 test("cross-instance readiness check reports core.instanceNotReady before schema lookup", () => {
     const gateway = createGateway(false);
 
@@ -84,6 +164,92 @@ test("cross-instance audit is recorded by the target worker", async () => {
         input: { path: "./preview.png" },
         toolName: "artifact_viewImage"
     }]);
+});
+
+test("todo_report autonomous updates use a two-token bucket with fractional refill", async () => {
+    const harness = createTodoReportHarness();
+
+    await harness.report("first");
+    await harness.report("second");
+    await assertRateLimited(harness.report("third"), 30_000);
+    harness.advance(15_000);
+    await assertRateLimited(harness.report("third"), 15_000);
+    harness.advance(15_000);
+    await harness.report("third");
+    harness.advance(60_000);
+    await harness.report("fourth");
+    await harness.report("fifth");
+    await assertRateLimited(harness.report("sixth"), 30_000);
+
+    assert.deepEqual(harness.reports, ["first", "second", "third", "fourth", "fifth"]);
+});
+
+test("todo_report rejects an unchanged autonomous report without spending a token", async () => {
+    const harness = createTodoReportHarness();
+
+    await harness.report("same");
+    await assert.rejects(harness.report("same"), (error: unknown) => {
+        assert.equal((error as { code?: string }).code, "todo.invalid");
+        assert.equal((error as { details?: { reason?: string } }).details?.reason, "duplicate");
+        return true;
+    });
+    await harness.report("second");
+    await assertRateLimited(harness.report("third"), 30_000);
+});
+
+test("todo_report serializes concurrent autonomous bursts through the same bucket", async () => {
+    const harness = createTodoReportHarness();
+
+    const results = await Promise.allSettled([
+        harness.report("parallel one"),
+        harness.report("parallel two"),
+        harness.report("parallel three"),
+    ]);
+
+    assert.equal(results.filter((result) => result.status === "fulfilled").length, 2);
+    assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+    assert.equal(harness.reports.length, 2);
+});
+
+test("a delivered Comment gets five ordinary calls then requires todo_report", async () => {
+    const harness = createTodoReportHarness();
+    await harness.report("autonomous one");
+    harness.deliverComment("comment-1", "Please answer this");
+
+    for (let index = 0; index < 5; index += 1) {
+        await harness.gateway.beforeModelToolCall("local", "file_read", harness.context);
+    }
+    await assert.rejects(
+        harness.gateway.beforeModelToolCall("local", "file_read", harness.context),
+        (error: unknown) => {
+            assert.equal((error as { code?: string }).code, "todo.invalid");
+            assert.equal((error as { details?: { toolCallBudget?: number } }).details?.toolCallBudget, 5);
+            return true;
+        },
+    );
+
+    await harness.gateway.beforeModelToolCall("local", "todo_report", harness.context);
+    await harness.report("reply to comment");
+    await harness.gateway.beforeModelToolCall("local", "file_read", harness.context);
+    await harness.report("autonomous after reply");
+    await assertRateLimited(harness.report("autonomous exhausted"), 30_000);
+    harness.advance(30_000);
+    await harness.report("autonomous after refill");
+});
+
+test("failed reports neither spend a token nor satisfy a Comment obligation", async () => {
+    const harness = createTodoReportHarness();
+    harness.failNextReport();
+    await assert.rejects(harness.report("first"), /report failed/u);
+    await harness.report("first");
+    await harness.report("second");
+    await assertRateLimited(harness.report("third"), 30_000);
+
+    harness.deliverComment("comment-failure", "Reply even if persistence fails");
+    harness.failNextReport();
+    await assert.rejects(harness.report("reply"), /report failed/u);
+    await harness.report("reply");
+    await harness.gateway.beforeModelToolCall("local", "file_read", harness.context);
 });
 
 test("closing an MCP tool session releases worker-owned session state", async () => {

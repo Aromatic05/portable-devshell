@@ -31,6 +31,7 @@ export interface McpWorkspaceEventSlice {
 export interface McpInstanceGateway {
     appendMcpToolCalled(instance: string, toolName: string, context: { requestId?: string; ctxId?: string }): Promise<void>;
     assertReady(instance: string): void;
+    beforeModelToolCall?(instance: string, toolName: string, context: ToolCallContext): Promise<void>;
     auditToolCall<T extends JsonValue>(
         instance: string,
         toolName: string,

@@ -103,7 +103,7 @@ test("MCP tools expose concise human-readable titles with a safe fallback", () =
     assert.equal(mcpToolTitle("workspace_open"), "Open Workspace");
     assert.equal(mcpToolTitle("artifact_viewImage"), "View image");
     assert.equal(mcpToolTitle("tmux_manage"), "Manage tmux resources");
-    assert.equal(mcpToolTitle("todo_report"), "Report task progress");
+    assert.equal(mcpToolTitle("todo_report"), "Message user");
     assert.equal(mcpToolTitle("future_unknown"), "Future unknown");
 });
 

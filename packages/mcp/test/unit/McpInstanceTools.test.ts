@@ -148,6 +148,66 @@ test("environ_remote attach remains callable without a ready owner Worker", asyn
     );
 });
 
+test("conversation reply gate covers environ_remote but not environ_info bootstrap", async () => {
+    const registry = new McpContextRegistry({ idFactory: () => "ctx-environ-gate" });
+    const created = await registry.create({
+        instance: "main-pc",
+        principal: "local",
+        workspace: "/workspace"
+    });
+    const guarded: string[] = [];
+    let connectCalls = 0;
+    const gateway = createGateway({
+        async beforeModelToolCall(instance, toolName, callContext) {
+            guarded.push(`${instance}:${toolName}:${callContext.ctxId}`);
+            throw new Error("reply required");
+        },
+        async connectInstance(instance) {
+            connectCalls += 1;
+            return { instance };
+        }
+    });
+    const worker = {
+        ...createWorker(),
+        async prepareExtensionResource() {
+            return { directory: "/workspace/.devshell/skills" };
+        },
+        async prepareWorkspace(workspace: string) {
+            return {
+                projectMemoryAgentFile: `${workspace}/AGENT.md`,
+                projectMemoryDirectory: workspace,
+                projectMemoryPresent: true,
+                temporaryDirectory: `${workspace}/tmp`,
+                workspace,
+            };
+        },
+    };
+    const endpoint = new McpEndpointWorker({
+        contextRegistry: registry,
+        gateway,
+        instanceName: "main-pc",
+        worker
+    });
+    const handle = await requireRemoteHandle(registry, created.ctxId, "remote-server");
+
+    await endpoint.callTool("environ_info", { ctxId: created.ctxId }, context);
+    await assert.rejects(
+        endpoint.callTool(
+            "environ_remote",
+            { command: "attach", ctxId: created.ctxId, handle, workspace: "/remote-workspace" },
+            context
+        ),
+        /reply required/u
+    );
+    assert.deepEqual(guarded, [`main-pc:environ_remote:${created.ctxId}`]);
+    assert.equal(connectCalls, 0);
+    assert.equal(
+        (await registry.validate(created.ctxId, { principal: "local" })).environments
+            .find((environment) => environment.instance === "remote-server")?.workspace,
+        undefined
+    );
+});
+
 test("environ_remote bootstraps and irreversibly masks remote routing", async () => {
     const registry = new McpContextRegistry({ idFactory: () => "ctx-environ-remote" });
     const created = await registry.create({
@@ -665,6 +725,9 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
         },
         assertReady(instance) {
             overrides.assertReady?.(instance);
+        },
+        async beforeModelToolCall(instance, toolName, callContext) {
+            await overrides.beforeModelToolCall?.(instance, toolName, callContext);
         },
         async auditToolCall<T extends JsonValue>(
             instance: string,
