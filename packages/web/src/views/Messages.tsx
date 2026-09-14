@@ -65,6 +65,7 @@ export function Messages({
     const [editingConversationKey, setEditingConversationKey] = useState<string>();
     const [editingTitle, setEditingTitle] = useState("");
     const [draggingConversationKey, setDraggingConversationKey] = useState<string>();
+    const draggingConversationKeyRef = useRef<string>();
     const controlMenuRef = useRef<HTMLDivElement>(null);
     const conversationSearchRef = useRef<HTMLInputElement>(null);
     const drawerTriggerRef = useRef<HTMLButtonElement>(null);
@@ -396,6 +397,16 @@ export function Messages({
         );
     }
 
+    function finishConversationDrag(clientX: number, clientY: number): void {
+        const sourceKey = draggingConversationKeyRef.current;
+        draggingConversationKeyRef.current = undefined;
+        setDraggingConversationKey(undefined);
+        if (sourceKey === undefined) return;
+        const target = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>(".conversation-row");
+        const targetKey = target?.dataset.conversationKey;
+        if (targetKey !== undefined) moveConversation(sourceKey, targetKey);
+    }
+
     function archiveIdle(): void {
         setCurrentConversationKeys((current) => new Set([...current].filter((key) =>
             activeConversationKeys.has(key) || key === threadKey
@@ -409,22 +420,29 @@ export function Messages({
         const key = conversationKey(session);
         const editing = editingConversationKey === key;
         return <div
-            className={`conversation-row${active ? " selected" : ""}`}
+            className={`conversation-row${active ? " selected" : ""}${draggingConversationKey === key ? " dragging" : ""}`}
             data-conversation-key={key}
-            draggable={!editing && state.conversationPreferences !== undefined}
             key={key}
-            onDragEnd={() => setDraggingConversationKey(undefined)}
-            onDragOver={(event) => {
-                if (draggingConversationKey !== undefined) event.preventDefault();
-            }}
-            onDragStart={() => setDraggingConversationKey(key)}
-            onDrop={(event) => {
-                event.preventDefault();
-                if (draggingConversationKey !== undefined) moveConversation(draggingConversationKey, key);
-                setDraggingConversationKey(undefined);
-            }}
         >
-            <span aria-hidden="true" className="conversation-drag-handle" title="Drag to reorder">⋮⋮</span>
+            <span
+                aria-hidden="true"
+                className="conversation-drag-handle"
+                onPointerCancel={() => {
+                    draggingConversationKeyRef.current = undefined;
+                    setDraggingConversationKey(undefined);
+                }}
+                onPointerDown={(event) => {
+                    if (editing || state.conversationPreferences === undefined || event.button !== 0) return;
+                    draggingConversationKeyRef.current = key;
+                    setDraggingConversationKey(key);
+                    if (typeof event.currentTarget.setPointerCapture === "function") {
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                    }
+                    event.preventDefault();
+                }}
+                onPointerUp={(event) => finishConversationDrag(event.clientX, event.clientY)}
+                title="Drag to reorder"
+            >⋮⋮</span>
             {editing ? <div className="conversation-rename-editor">
                 <label>
                     <span className="sr-only">Conversation title</span>

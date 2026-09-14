@@ -610,14 +610,25 @@ describe("Messages", () => {
         expect(screen.queryByRole("button", { name: /Move .* down/u })).not.toBeInTheDocument();
         expect(screen.queryByRole("button", { name: /Rename ctx-/u })).not.toBeInTheDocument();
 
-        fireEvent.dragStart(rows[1]!);
-        fireEvent.dragOver(rows[0]!);
-        fireEvent.drop(rows[0]!);
+        const handles = list.querySelectorAll<HTMLElement>(".conversation-drag-handle");
+        const originalElementFromPoint = document.elementFromPoint;
+        Object.defineProperty(document, "elementFromPoint", {
+            configurable: true,
+            value: vi.fn(() => rows[0]!),
+        });
+        fireEvent.pointerDown(handles[1]!, { button: 0, pointerId: 7 });
+        fireEvent.pointerUp(handles[1]!, { clientX: 10, clientY: 10, pointerId: 7 });
+        Object.defineProperty(document, "elementFromPoint", {
+            configurable: true,
+            value: originalElementFromPoint,
+        });
         await waitFor(() => expect(updateConversationPreferences).toHaveBeenCalledWith({
             orderByWorkspace: {
                 "/work/portable-devshell": ["alpha\u0000ctx-first", "alpha\u0000ctx-second"],
             },
         }));
+        expect(list.querySelectorAll<HTMLElement>(".conversation-row")[0])
+            .toHaveTextContent("Investigate the first regression in Audit.");
 
         first.unmount();
         const secondBrowserState: WebState = {
