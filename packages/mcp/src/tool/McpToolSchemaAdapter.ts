@@ -54,6 +54,10 @@ const COMMON_MODEL_INPUT_HINTS: Readonly<Record<string, string>> = {
     purpose: "Intended outcome.",
 };
 
+const MODEL_HIDDEN_INPUT_PROPERTIES = new Map<string, ReadonlySet<string>>([
+    ["tmux_input", new Set(["line", "timeMs"])],
+]);
+
 const MODEL_INPUT_HINTS = new Map<string, Readonly<Record<string, string>>>([
     ["artifact_viewImage", {
         handle: "Artifact handle; exclusive with path.",
@@ -87,10 +91,6 @@ const MODEL_INPUT_HINTS = new Map<string, Readonly<Record<string, string>>>([
     }],
     ["file_read", {
         selector: "Lines: N, N-M, N+count, or comma ranges; add :raw for exact ranges.",
-    }],
-    ["tmux_input", {
-        line: "Output lines after input; negative returns a tail.",
-        timeMs: "Maximum wait after input, in milliseconds.",
     }],
     ["tmux_inspect", {
         end: "History end offset; defaults to 0.",
@@ -126,9 +126,27 @@ const MODEL_INPUT_HINTS = new Map<string, Readonly<Record<string, string>>>([
 ]);
 
 function compactModelInputSchema(toolName: string, value: JsonValue): JsonValue {
+    const normalized = hideModelInputProperties(toolName, normalizeModelInputSchema(value));
     return pruneUnusedLocalDefinitions(
-        compactModelInputDescriptions(toolName, normalizeModelInputSchema(value)),
+        compactModelInputDescriptions(toolName, normalized),
     );
+}
+
+function hideModelInputProperties(toolName: string, value: JsonValue): JsonValue {
+    if (!isRecord(value) || !isRecord(value.properties)) return value;
+    const hidden = MODEL_HIDDEN_INPUT_PROPERTIES.get(toolName);
+    if (hidden === undefined || hidden.size === 0) return value;
+
+    const properties = { ...value.properties };
+    for (const property of hidden) delete properties[property];
+    const required = Array.isArray(value.required)
+        ? value.required.filter((entry) => typeof entry !== "string" || !hidden.has(entry))
+        : undefined;
+    return {
+        ...value,
+        properties,
+        ...(required === undefined ? {} : { required }),
+    };
 }
 
 function compactModelInputDescriptions(

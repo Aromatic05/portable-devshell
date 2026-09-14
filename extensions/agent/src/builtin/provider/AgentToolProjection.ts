@@ -14,6 +14,7 @@ const CONSUMER_ONLY_INPUT_PROPERTIES = new Set([
 
 const TOOL_INTERNAL_INPUT_PROPERTIES = new Map<string, ReadonlySet<string>>([
     ["file_edit", new Set(["resultDetail"])],
+    ["tmux_input", new Set(["line", "timeMs"])],
     ["tmux_read", new Set(["consumeOutput"])],
     ["tmux_run", new Set(["consumeOutput"])]
 ]);

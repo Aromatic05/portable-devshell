@@ -45,10 +45,25 @@ test("Agent model projection filters capabilities and strips non-model input fie
             },
             name: "tmux_read"
         },
+        {
+            description: "Send tmux input",
+            inputSchema: {
+                properties: {
+                    input: { type: "string" },
+                    line: { type: "integer" },
+                    pane: { type: "string" },
+                    task: { type: "string" },
+                    timeMs: { type: "integer" }
+                },
+                required: ["input"],
+                type: "object"
+            },
+            name: "tmux_input"
+        },
         { description: "Host-internal capability", inputSchema: { type: "object" }, name: "future_internal" }
     ]);
 
-    assert.deepEqual(projected.map((tool) => tool.name), ["bash_run", "file_edit", "tmux_read"]);
+    assert.deepEqual(projected.map((tool) => tool.name), ["bash_run", "file_edit", "tmux_read", "tmux_input"]);
     assert.match(projected[0]?.description ?? "", /tmux_run/u);
     assert.notEqual(projected[0]?.description, "Run bash");
     assert.deepEqual(
@@ -63,6 +78,14 @@ test("Agent model projection filters capabilities and strips non-model input fie
     assert.equal(
         (projected[2]?.inputSchema as { properties?: Record<string, unknown> }).properties?.consumeOutput,
         undefined
+    );
+    assert.deepEqual(
+        (projected[3]?.inputSchema as { properties?: Record<string, unknown> }).properties,
+        {
+            input: { type: "string" },
+            pane: { type: "string" },
+            task: { type: "string" }
+        }
     );
     assert.notEqual(bashSchema.properties.purpose, undefined, "projection must not mutate the canonical Worker schema");
 });

@@ -237,6 +237,48 @@ test("McpToolSchemaAdapter flattens referenced object unions for MCP clients", (
     assert.deepEqual(schema.required, ["input", "ctxId"]);
 });
 
+test("McpToolSchemaAdapter hides tmux_input wait/read fields only from model-facing schema", () => {
+    const adapter = new McpToolSchemaAdapter();
+    const tmuxInput: ToolDefinition = {
+        ...bashRun,
+        name: "tmux_input",
+        inputSchema: {
+            $defs: {
+                Pane: {
+                    additionalProperties: false,
+                    properties: {
+                        input: { type: "string" },
+                        pane: { type: "string" }
+                    },
+                    required: ["pane", "input"],
+                    type: "object"
+                },
+                Task: {
+                    additionalProperties: false,
+                    properties: {
+                        input: { type: "string" },
+                        line: { type: "integer" },
+                        task: { type: "string" },
+                        timeMs: { type: "integer" }
+                    },
+                    required: ["task", "input"],
+                    type: "object"
+                }
+            },
+            anyOf: [{ $ref: "#/$defs/Task" }, { $ref: "#/$defs/Pane" }]
+        }
+    };
+
+    const canonical = adapter.toMcpTool(tmuxInput, "Send input");
+    const model = adapter.toMcpTool(tmuxInput, "Send input", { modelFacing: true });
+    const canonicalProperties = (canonical.inputSchema as { properties?: Record<string, unknown> }).properties;
+    const modelProperties = (model.inputSchema as { properties?: Record<string, unknown> }).properties;
+
+    assert.notEqual(canonicalProperties?.line, undefined);
+    assert.notEqual(canonicalProperties?.timeMs, undefined);
+    assert.deepEqual(Object.keys(modelProperties ?? {}).sort(), ["input", "pane", "task"]);
+});
+
 test("McpToolSchemaAdapter removes model-unsupported composition constraints recursively", () => {
     const adapter = new McpToolSchemaAdapter();
     const tool = adapter.toMcpTool({
