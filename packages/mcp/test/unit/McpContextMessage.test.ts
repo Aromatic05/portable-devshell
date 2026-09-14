@@ -183,6 +183,40 @@ test("model-facing tool calls run the conversation reply gate before execution",
     ]);
 });
 
+test("a rejected conversation-control gate runs before MCP tool audit side effects", async () => {
+    let appended = 0;
+    let now = Date.parse("2026-09-14T12:00:00.000Z");
+    const contextRegistry = new McpContextRegistry({ now: () => now });
+    const { dispatch, worker } = createHarness(
+        {
+            async beforeModelToolCall(_instance, toolName) {
+                if (toolName === "bash_run") throw new Error("model stopped");
+            },
+        },
+        { contextRegistry },
+    );
+    worker.appendMcpToolCalled = async () => {
+        appended += 1;
+    };
+    const ctxId = await createContext(dispatch, "guarded-side-effects");
+    appended = 0;
+    const beforeGate = await contextRegistry.lookup(ctxId, { principal: "tester" });
+    now += 1_000;
+
+    await assert.rejects(
+        dispatch.callTool(
+            "bash_run",
+            { command: "pwd", ctxId },
+            { principal: "tester", requestId: "guarded-blocked" },
+        ),
+        /model stopped/u,
+    );
+    assert.equal(appended, 0);
+    const afterGate = await contextRegistry.lookup(ctxId, { principal: "tester" });
+    assert.equal(afterGate.lastAccessedAt, beforeGate.lastAccessedAt);
+    assert.equal(afterGate.expiresAt, beforeGate.expiresAt);
+});
+
 test("a routed artifact result consumes Comments from the routed instance Context", async () => {
     const consumed: Array<{ callId: string; ctxId: string; instance: string }> = [];
     const audited: Array<{ instance: string; toolName: string }> = [];
@@ -328,8 +362,10 @@ function createHarness(
             callId: string,
         ): Promise<ContextMessageReadResult>;
     } = {},
+    options: { contextRegistry?: McpContextRegistry } = {},
 ) {
     let callSequence = 0;
+    const contextRegistry = options.contextRegistry ?? new McpContextRegistry();
     const worker = {
         fail: false,
         async appendMcpToolCalled() {},
@@ -415,10 +451,12 @@ function createHarness(
         catalog,
         dispatch: new McpEndpointDispatch({
             catalog,
+            contextRegistry,
             gateway: gateway as never,
             instanceName: "alpha",
             worker: worker as never,
         }),
+        contextRegistry,
         worker,
     };
 }

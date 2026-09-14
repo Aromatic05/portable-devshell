@@ -2,7 +2,6 @@ import type { McpInstanceGateway } from "@portable-devshell/mcp";
 import {
     createError,
     errorCodes,
-    parseContextMessageDirective,
     type JsonValue,
     type ToolCallContext,
     type ToolDefinition
@@ -23,16 +22,11 @@ export interface McpInstanceGatewayControlOptions {
 
 const TODO_REPORT_BUCKET_CAPACITY = 2;
 const TODO_REPORT_REFILL_INTERVAL_MS = 30_000;
-const TODO_REPORT_PUSH_TOOL_BUDGET = 5;
 const TODO_REPORT_CONVERSATION_WINDOW = 400;
 
 interface TodoReportPolicyState {
     lastRefillAt: number;
     lastReportMessage?: string;
-    pendingCommentId?: string;
-    pendingPushCommentId?: string;
-    pushToolCallsRemaining?: number;
-    stopCommentId?: string;
     tokens: number;
 }
 
@@ -73,33 +67,39 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     async beforeModelToolCall(instance: string, toolName: string, context: ToolCallContext): Promise<void> {
         const ctxId = context.ctxId;
         if (ctxId === undefined) return;
-        const key = todoReportPolicyKey(instance, ctxId);
-        await this.#withTodoReportPolicy(key, async () => {
-            const state = await this.#syncTodoReportPolicy(instance, ctxId);
-            if (state.stopCommentId !== undefined) {
-                throw createError({
-                    code: errorCodes.todoInvalid,
-                    details: { commentId: state.stopCommentId, ctxId, reason: "stop" },
-                    message: "The user sent #stop. Model tool calls are disabled until the user sends #resume.",
-                    retryable: false,
-                });
-            }
-            if (toolName === "todo_report" || state.pendingPushCommentId === undefined) return;
-            const remaining = state.pushToolCallsRemaining ?? TODO_REPORT_PUSH_TOOL_BUDGET;
-            if (remaining <= 0) {
-                throw createError({
-                    code: errorCodes.todoInvalid,
-                    details: {
-                        commentId: state.pendingPushCommentId,
-                        ctxId,
-                        reason: "push",
-                        toolCallBudget: TODO_REPORT_PUSH_TOOL_BUDGET,
-                    },
-                    message: "The user sent #push and is still waiting for a reply. Call todo_report before using more tools.",
-                    retryable: false,
-                });
-            }
-            state.pushToolCallsRemaining = remaining - 1;
+        const decision = await this.#requireDescriptor(instance).contextMessages?.beforeModelToolCall(
+            ctxId,
+            toolName,
+            context.requestId,
+        ) ?? { kind: "allow" as const };
+        if (decision.kind === "allow") return;
+        if (decision.kind === "push") {
+            throw createError({
+                code: errorCodes.controlModelReplyRequired,
+                details: {
+                    commentId: decision.commentId,
+                    ctxId,
+                    toolCallBudget: decision.toolCallBudget,
+                },
+                message: "#push response deadline reached. Call todo_report before using more tools.",
+                retryable: false,
+            });
+        }
+        if (decision.kind === "resume") {
+            throw createError({
+                code: errorCodes.controlModelResumed,
+                details: { commentId: decision.commentId, ctxId },
+                message: `The user sent #resume. This tool was not executed. Read the Comment before deciding the next action: ${decision.comment}`,
+                retryable: false,
+            });
+        }
+        throw createError({
+            code: errorCodes.controlModelStopped,
+            details: { commentId: decision.commentId, ctxId },
+            message: decision.comment === undefined
+                ? "Stopped by user. Tool calls are disabled until the user sends #resume."
+                : `Stopped by user. Tool calls are disabled until the user sends #resume. User Comment: ${decision.comment}`,
+            retryable: false,
         });
     }
 
@@ -420,19 +420,12 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         const key = todoReportPolicyKey(instance, ctxId);
         await this.#withTodoReportPolicy(key, async () => {
             const descriptor = this.#requireDescriptor(instance);
+            await this.beforeModelToolCall(instance, "todo_report", context);
             const state = await this.#syncTodoReportPolicy(instance, ctxId);
-            if (state.stopCommentId !== undefined) {
-                throw createError({
-                    code: errorCodes.todoInvalid,
-                    details: { commentId: state.stopCommentId, ctxId, reason: "stop" },
-                    message: "The user sent #stop. todo_report is disabled until the user sends #resume.",
-                    retryable: false,
-                });
-            }
             this.#refillTodoReportBucket(state, this.#now());
-            const commentId = state.pendingCommentId;
+            const replyCommentId = await descriptor.contextMessages?.pendingReplyCommentId(ctxId);
 
-            if (commentId === undefined) {
+            if (replyCommentId === undefined) {
                 if (state.lastReportMessage === message) {
                     throw createError({
                         code: errorCodes.todoInvalid,
@@ -457,14 +450,13 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 }
             }
 
-            await descriptor.conversation.recordReport({ callId, ctxId, text: message });
-            if (commentId === undefined) {
-                state.tokens -= 1;
-            } else {
-                state.pendingCommentId = undefined;
-                state.pendingPushCommentId = undefined;
-                state.pushToolCallsRemaining = undefined;
-            }
+            await descriptor.conversation.recordReport({
+                callId,
+                ctxId,
+                ...(replyCommentId === undefined ? {} : { replyCommentId }),
+                text: message,
+            });
+            if (replyCommentId === undefined) state.tokens -= 1;
             state.lastReportMessage = message;
         });
     }
@@ -484,51 +476,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             ctxId,
             limit: TODO_REPORT_CONVERSATION_WINDOW,
         });
-        let latestReportIndex = -1;
-        let latestReport: (typeof entries)[number] | undefined;
-        let latestDeliveredCommentIndex = -1;
-        let latestDeliveredComment: (typeof entries)[number] | undefined;
-        let latestPushIndex = -1;
-        let latestPushComment: (typeof entries)[number] | undefined;
-        let latestStopIndex = -1;
-        let latestStopComment: (typeof entries)[number] | undefined;
-        let latestResumeIndex = -1;
-        entries.forEach((entry, index) => {
-            if (entry.kind === "report") {
-                latestReportIndex = index;
-                latestReport = entry;
-                return;
-            }
-            const directive = parseContextMessageDirective(entry.text).directive;
-            if (directive === "resume" && entry.status !== "failed") latestResumeIndex = index;
-            if (entry.status !== "delivered") return;
-            latestDeliveredCommentIndex = index;
-            latestDeliveredComment = entry;
-            if (directive === "push") {
-                latestPushIndex = index;
-                latestPushComment = entry;
-            }
-            if (directive === "stop") {
-                latestStopIndex = index;
-                latestStopComment = entry;
-            }
-        });
-        state.lastReportMessage = latestReport?.text;
-        state.pendingCommentId = latestDeliveredCommentIndex > latestReportIndex
-            ? latestDeliveredComment?.id
-            : undefined;
-        if (latestPushIndex > latestReportIndex && latestPushComment !== undefined) {
-            if (state.pendingPushCommentId !== latestPushComment.id) {
-                state.pendingPushCommentId = latestPushComment.id;
-                state.pushToolCallsRemaining = TODO_REPORT_PUSH_TOOL_BUDGET;
-            }
-        } else {
-            state.pendingPushCommentId = undefined;
-            state.pushToolCallsRemaining = undefined;
-        }
-        state.stopCommentId = latestStopIndex > latestResumeIndex
-            ? latestStopComment?.id
-            : undefined;
+        state.lastReportMessage = [...entries].reverse().find((entry) => entry.kind === "report")?.text;
         return state;
     }
 

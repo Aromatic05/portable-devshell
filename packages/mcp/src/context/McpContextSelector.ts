@@ -30,7 +30,7 @@ export interface McpContextSelector {
         input: JsonValue,
         requestContext: McpEndpointCallContext,
         instanceName: string,
-        options?: { touch?: boolean },
+        options?: { allowExpired?: boolean; touch?: boolean },
     ): Promise<McpResolvedContext>;
 }
 
@@ -68,11 +68,21 @@ class UnifiedContextSelector implements McpContextSelector {
         input: JsonValue,
         requestContext: McpEndpointCallContext,
         _instanceName: string,
-        options?: { touch?: boolean },
+        options?: { allowExpired?: boolean; touch?: boolean },
     ): Promise<McpResolvedContext> {
-        const validate = async (ctxId: string) => options?.touch === false
-            ? await registry.validate(ctxId, { principal: requestContext.principal })
-            : await registry.validateAndTouch(ctxId, { principal: requestContext.principal });
+        const validate = async (ctxId: string) => {
+            if (options?.touch !== false) {
+                return await registry.validateAndTouch(ctxId, { principal: requestContext.principal });
+            }
+            if (options.allowExpired === true) {
+                const record = await registry.lookup(ctxId, { principal: requestContext.principal });
+                if (record.status === "disabled") {
+                    return await registry.validate(ctxId, { principal: requestContext.principal });
+                }
+                return record;
+            }
+            return await registry.validate(ctxId, { principal: requestContext.principal });
+        };
         const contextInput = readOptionalMcpContextInput(input);
         if (this.requiresExplicitContextId) {
             if (contextInput.ctxId === undefined) {

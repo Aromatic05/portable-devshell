@@ -149,7 +149,11 @@ test("environ_remote attach remains callable without a ready owner Worker", asyn
 });
 
 test("conversation control gate covers environ_info and environ_remote", async () => {
-    const registry = new McpContextRegistry({ idFactory: () => "ctx-environ-gate" });
+    let now = Date.parse("2026-09-14T12:00:00.000Z");
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-environ-gate",
+        now: () => now,
+    });
     const created = await registry.create({
         instance: "main-pc",
         principal: "local",
@@ -189,6 +193,8 @@ test("conversation control gate covers environ_info and environ_remote", async (
         worker
     });
     const handle = await requireRemoteHandle(registry, created.ctxId, "remote-server");
+    const beforeGate = await registry.lookup(created.ctxId, { principal: "local" });
+    now += 1_000;
 
     await assert.rejects(
         endpoint.callTool("environ_info", { ctxId: created.ctxId }, context),
@@ -207,8 +213,11 @@ test("conversation control gate covers environ_info and environ_remote", async (
         `main-pc:environ_remote:${created.ctxId}`,
     ]);
     assert.equal(connectCalls, 0);
+    const afterGate = await registry.lookup(created.ctxId, { principal: "local" });
+    assert.equal(afterGate.lastAccessedAt, beforeGate.lastAccessedAt);
+    assert.equal(afterGate.expiresAt, beforeGate.expiresAt);
     assert.equal(
-        (await registry.validate(created.ctxId, { principal: "local" })).environments
+        afterGate.environments
             .find((environment) => environment.instance === "remote-server")?.workspace,
         undefined
     );

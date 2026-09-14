@@ -275,6 +275,21 @@ test("cross-tool error hints apply to any tool and walk the cause chain", () => 
     assert.deepEqual(codes(wrapped), ["core.workerStartFailed", "core.providerFailed"]);
 });
 
+test("conversation control errors use dedicated cross-tool guidance instead of Todo invariants", () => {
+    const stopped = resolveErrorHints("todo_write", body("control.modelStopped"));
+    assert.deepEqual(codes(stopped), ["control.modelStopped"]);
+    assert.match(stopped[0]?.text ?? "", /#resume/u);
+    assert.doesNotMatch(stopped[0]?.text ?? "", /resubmit the full plan/u);
+
+    const pushed = resolveErrorHints("file_read", body("control.modelReplyRequired"));
+    assert.deepEqual(codes(pushed), ["control.modelReplyRequired"]);
+    assert.match(pushed[0]?.text ?? "", /todo_report/u);
+
+    const resumed = resolveErrorHints("bash_run", body("control.modelResumed"));
+    assert.deepEqual(codes(resumed), ["control.modelResumed"]);
+    assert.match(resumed[0]?.text ?? "", /resumed user instruction/u);
+});
+
 test("context expired, disabled, and invalid remain distinct error classes", () => {
     const expired = resolveErrorHints("bash_run", body("mcp.contextExpired"));
     assert.deepEqual(codes(expired), ["mcp.contextExpired"]);

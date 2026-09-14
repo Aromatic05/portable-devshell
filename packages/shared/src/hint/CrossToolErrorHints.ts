@@ -47,7 +47,10 @@ const crossToolHints: Record<string, string> = {
     [errorCodes.mcpContextWorkspaceRequired]: "Obtain the instance handle with devshell instance list/status, then use environ_remote command='attach' with an absolute workspace.",
     [errorCodes.targetInvalid]: "Use a valid instance target.",
     [errorCodes.controlClientIdentityRequired]: "Supply the required client identity.",
-    [errorCodes.controlClientIdentityInvalid]: "Correct the client identity."
+    [errorCodes.controlClientIdentityInvalid]: "Correct the client identity.",
+    [errorCodes.controlModelReplyRequired]: "Call todo_report before using more tools.",
+    [errorCodes.controlModelResumed]: "Read the resumed user instruction before deciding the next action.",
+    [errorCodes.controlModelStopped]: "Do not call tools until the user sends #resume."
 };
 
 export function crossToolErrorHints(body: ControlErrorBody): ToolDiagnosticHint[] {

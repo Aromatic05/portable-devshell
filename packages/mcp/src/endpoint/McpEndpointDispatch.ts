@@ -207,19 +207,44 @@ export class McpEndpointDispatch {
         const appOnlyInteraction = selected.owner === "workspace" && isAppOnlyInteractionTool(toolName);
         const provenanceInput = readMcpProvenanceInput(input);
         input = provenanceInput.input;
-        const resolvedContext = appOnlyInteraction
+        const touchContext = !isPassiveWorkspaceRead(toolName);
+        let resolvedContext = appOnlyInteraction
             ? await this.#resolveAppOnlyContext(input, requestContext, !isPassiveWorkspaceRead(toolName))
             : await this.#contextSelector.resolve(
                   this.#contextRegistry,
                   input,
                   requestContext,
                   this.#instanceName,
-                  { touch: !isPassiveWorkspaceRead(toolName) },
+                  {
+                      allowExpired: touchContext && !this.#contextSelector.requiresExplicitContextId,
+                      touch: false,
+                  },
               );
         input = resolvedContext.input;
         const routed = selected.owner === "worker" || selected.owner === "artifact"
             ? readMcpRoutedInput(input, snapshot.instanceRoutingEnabled, this.#instanceName)
             : { input, instance: this.#instanceName };
+        if (!appOnlyInteraction) {
+            const environment = contextEnvironment(resolvedContext.record, routed.instance);
+            await this.#gateway?.beforeModelToolCall?.(routed.instance, toolName, {
+                ctxId: resolvedContext.record.ctxId,
+                requestId: requestContext.requestId,
+                source: "mcp",
+                ...(environment?.workspace === undefined ? {} : { workspace: environment.workspace }),
+            });
+            if (touchContext) {
+                resolvedContext = {
+                    ...resolvedContext,
+                    record: resolvedContext.record.status === "expired"
+                        ? await this.#contextRegistry.renewForPrincipal(resolvedContext.record.ctxId, {
+                              principal: requestContext.principal,
+                          })
+                        : await this.#contextRegistry.validateAndTouch(resolvedContext.record.ctxId, {
+                              principal: requestContext.principal,
+                          }),
+                };
+            }
+        }
         await this.restoreTmuxWaits(this.#instanceName);
         const context = await this.#createToolContext(
             toolName,
@@ -230,9 +255,6 @@ export class McpEndpointDispatch {
             !appOnlyInteraction,
             signal
         );
-        if (!appOnlyInteraction) {
-            await this.#gateway?.beforeModelToolCall?.(routed.instance, toolName, context);
-        }
         const goalActivity = !appOnlyInteraction && context.ctxId !== undefined && toolName !== "workspace_goal"
             ? workspaceGoalActivity(toolName, routed.input, this.#tmuxBlockSyncMs)
             : undefined;

@@ -161,9 +161,10 @@ test("ContextMessageService failAllPending retires all undelivered Comments for 
         instanceName: "alpha",
     });
     await service.queue({ ctxId: "ctx-a", text: "First" });
-    const delivered = await service.queue({ ctxId: "ctx-b", text: "Delivered history" });
+    const delivered = await service.queue({ ctxId: "ctx-b", text: "#stop Delivered history" });
     await service.consumePending("ctx-b", "call-b");
     await service.queue({ ctxId: "ctx-c", text: "Second" });
+    assert.equal((await service.beforeModelToolCall("ctx-b", "file_read")).kind, "stop");
 
     const failed = await service.failAllPending("Instance alpha was deleted before Comment delivery.");
 
@@ -171,6 +172,7 @@ test("ContextMessageService failAllPending retires all undelivered Comments for 
     assert.equal(failed.every((message) => message.status === "failed"), true);
     assert.equal((await service.list("ctx-b"))[0]?.id, delivered.id);
     assert.equal((await service.list("ctx-b"))[0]?.status, "delivered");
+    assert.deepEqual(await service.beforeModelToolCall("ctx-b", "file_read"), { kind: "allow" });
 });
 
 test("ContextMessageService delivery event failure never blocks or requeues a completed call", async () => {
@@ -203,6 +205,78 @@ test("ContextMessageService delivery event failure never blocks or requeues a co
         callId: "call-2",
         messages: [],
     });
+});
+
+test("ContextMessageService keeps #stop durable and delivers #resume before tools continue", async () => {
+    const root = await createTestTempDirectory("context-message-stop-control");
+    const options = {
+        appendEvent: async () => undefined,
+        conversationFilePath: join(root, "conversation.sqlite3"),
+        instanceName: "alpha",
+    };
+    const service = new ContextMessageService(options);
+    const stop = await service.queue({ ctxId: "ctx-a", text: "#stop Stop before the next tool" });
+
+    assert.deepEqual(await service.beforeModelToolCall("ctx-a", "file_read", "request-stop"), {
+        comment: "#stop Stop before the next tool",
+        commentId: stop.id,
+        kind: "stop",
+    });
+    const reloaded = new ContextMessageService(options);
+    assert.equal((await reloaded.beforeModelToolCall("ctx-a", "file_read")).kind, "stop");
+    const resume = await reloaded.queue({
+        ctxId: "ctx-a",
+        text: "#resume Continue, but do not delete files",
+    });
+    assert.deepEqual(await reloaded.beforeModelToolCall("ctx-a", "file_read", "request-resume"), {
+        comment: "#resume Continue, but do not delete files",
+        commentId: resume.id,
+        kind: "resume",
+    });
+    assert.deepEqual(await reloaded.beforeModelToolCall("ctx-a", "file_read"), { kind: "allow" });
+});
+
+test("ContextMessageService delivers queued Stop-era messages through Resume without reactivating an old Stop", async () => {
+    const root = await createTestTempDirectory("context-message-stop-resume-queued");
+    const service = new ContextMessageService({
+        appendEvent: async () => undefined,
+        conversationFilePath: join(root, "conversation.sqlite3"),
+        instanceName: "alpha",
+    });
+    await service.queue({ ctxId: "ctx-a", text: "#stop Stop now" });
+    await service.queue({ ctxId: "ctx-a", text: "Also keep this constraint" });
+    const resume = await service.queue({ ctxId: "ctx-a", text: "#resume Continue carefully" });
+
+    assert.deepEqual(await service.beforeModelToolCall("ctx-a", "file_read", "request-resume-batch"), {
+        comment: "#stop Stop now\n\nAlso keep this constraint\n\n#resume Continue carefully",
+        commentId: resume.id,
+        kind: "resume",
+    });
+    assert.deepEqual(await service.beforeModelToolCall("ctx-a", "file_read"), { kind: "allow" });
+    assert.deepEqual(await service.consumePending("ctx-a", "next-call"), { callId: "next-call", messages: [] });
+});
+
+test("ContextMessageService persists the remaining #push budget without replenishing repeated Push", async () => {
+    const root = await createTestTempDirectory("context-message-push-control");
+    const options = {
+        appendEvent: async () => undefined,
+        conversationFilePath: join(root, "conversation.sqlite3"),
+        instanceName: "alpha",
+    };
+    const service = new ContextMessageService(options);
+    await service.queue({ ctxId: "ctx-a", text: "#push Answer this first" });
+    await service.consumePending("ctx-a", "delivery-one");
+    for (let index = 0; index < 4; index += 1) {
+        assert.deepEqual(await service.beforeModelToolCall("ctx-a", "file_read"), { kind: "allow" });
+    }
+    await service.queue({ ctxId: "ctx-a", text: "#push I am still waiting" });
+    await service.consumePending("ctx-a", "delivery-two");
+
+    const reloaded = new ContextMessageService(options);
+    assert.deepEqual(await reloaded.beforeModelToolCall("ctx-a", "file_read"), { kind: "allow" });
+    const blocked = await reloaded.beforeModelToolCall("ctx-a", "file_read");
+    assert.equal(blocked.kind, "push");
+    if (blocked.kind === "push") assert.equal(blocked.toolCallBudget, 5);
 });
 
 test("ContextMessageState retains all pending messages while bounding terminal history", () => {

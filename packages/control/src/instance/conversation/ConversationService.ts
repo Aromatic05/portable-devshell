@@ -24,12 +24,19 @@ export class ConversationService {
         return this.#store.list(input);
     }
 
-    async recordReport(input: { callId: string; createdAt?: string; ctxId: string; text: string }): Promise<void> {
+    async recordReport(input: {
+        callId: string;
+        createdAt?: string;
+        ctxId: string;
+        replyCommentId?: string;
+        text: string;
+    }): Promise<void> {
         await this.#ensureLegacyReportsMigrated();
         this.#store.appendReport({
             callId: input.callId,
             createdAt: input.createdAt ?? new Date().toISOString(),
             ctxId: input.ctxId,
+            ...(input.replyCommentId === undefined ? {} : { replyCommentId: input.replyCommentId }),
             text: input.text,
         });
     }

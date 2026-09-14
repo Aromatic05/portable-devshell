@@ -109,11 +109,12 @@ export class McpEndpointHandlerEnvironment {
         const commandInput = readMcpRemoteEnvironmentInput(input, {
             allowContextId: this.#contextSelector.requiresExplicitContextId,
         });
-        const resolution = await this.#resolveEnvironmentContext(
+        let resolution = await this.#resolveEnvironmentContext(
             commandInput.ctxId === undefined ? {} : { ctxId: commandInput.ctxId },
             requestContext,
+            { touch: false },
         );
-        const record = resolution.record;
+        let record = resolution.record;
         const workspace = contextWorkspace(record, this.#instanceName) ?? record.workspace;
         await this.#gateway?.beforeModelToolCall?.(
             this.#instanceName,
@@ -125,6 +126,10 @@ export class McpEndpointHandlerEnvironment {
                 ...(workspace === undefined ? {} : { workspace }),
             },
         );
+        if (!resolution.created) {
+            record = await this.#touchEnvironmentContext(record, requestContext);
+            resolution = { ...resolution, record };
+        }
         const base = this.#contextSelector.expose(record);
         switch (commandInput.command) {
             case "help":
@@ -186,11 +191,12 @@ export class McpEndpointHandlerEnvironment {
         const environmentInput = readMcpEnvironmentInfoInput(input, {
             allowContextId: this.#contextSelector.requiresExplicitContextId,
         });
-        const resolution = await this.#resolveEnvironmentContext(
+        let resolution = await this.#resolveEnvironmentContext(
             environmentInput,
             requestContext,
+            { touch: false },
         );
-        const record = resolution.record;
+        let record = resolution.record;
         const previousWorkspace = contextWorkspace(record, this.#instanceName);
         const workspace = environmentInput.workspace ?? previousWorkspace;
         if (workspace === undefined) {
@@ -207,6 +213,10 @@ export class McpEndpointHandlerEnvironment {
                 workspace,
             },
         );
+        if (!resolution.created) {
+            record = await this.#touchEnvironmentContext(record, requestContext);
+            resolution = { ...resolution, record };
+        }
 
         const { alerts, environment, prepared, skillsDirectory } =
             await this.#prepareEnvironment(workspace);
@@ -360,6 +370,7 @@ export class McpEndpointHandlerEnvironment {
     async #resolveEnvironmentContext(
         input: { ctxId?: string; workspace?: string },
         requestContext: McpEndpointCallContext,
+        options: { touch?: boolean } = {},
     ): Promise<{
         bindings: McpContextExternalBinding[];
         created: boolean;
@@ -376,10 +387,17 @@ export class McpEndpointHandlerEnvironment {
             const record = await this.#contextRegistry.lookup(input.ctxId, {
                 principal: requestContext.principal,
             });
+            if (record.status === "disabled") {
+                await this.#contextRegistry.validate(record.ctxId, {
+                    principal: requestContext.principal,
+                });
+            }
             return {
                 bindings: [],
                 created: false,
-                record: record.status === "expired"
+                record: options.touch === false
+                    ? record
+                    : record.status === "expired"
                     ? await this.#contextRegistry.renewForPrincipal(record.ctxId, {
                           principal: requestContext.principal,
                       })
@@ -394,24 +412,28 @@ export class McpEndpointHandlerEnvironment {
             return {
                 bindings: bound.bindings,
                 created: false,
-                record: await this.#contextRegistry.validateAndTouch(
-                    bound.record.ctxId,
-                    {
-                        principal: requestContext.principal,
-                    },
-                ),
+                record: options.touch === false
+                    ? bound.record
+                    : await this.#contextRegistry.validateAndTouch(
+                          bound.record.ctxId,
+                          {
+                              principal: requestContext.principal,
+                          },
+                      ),
             };
         }
         if (bound.record?.status === "expired") {
             return {
                 bindings: bound.bindings,
                 created: false,
-                record: await this.#contextRegistry.renewForPrincipal(
-                    bound.record.ctxId,
-                    {
-                        principal: requestContext.principal,
-                    },
-                ),
+                record: options.touch === false
+                    ? bound.record
+                    : await this.#contextRegistry.renewForPrincipal(
+                          bound.record.ctxId,
+                          {
+                              principal: requestContext.principal,
+                          },
+                      ),
             };
         }
 
@@ -429,6 +451,19 @@ export class McpEndpointHandlerEnvironment {
                 workspace,
             }),
         };
+    }
+
+    async #touchEnvironmentContext(
+        record: McpContextRecord,
+        requestContext: McpEndpointCallContext,
+    ): Promise<McpContextRecord> {
+        return record.status === "expired"
+            ? await this.#contextRegistry.renewForPrincipal(record.ctxId, {
+                  principal: requestContext.principal,
+              })
+            : await this.#contextRegistry.validateAndTouch(record.ctxId, {
+                  principal: requestContext.principal,
+              });
     }
 
     async #lookupBoundContext(

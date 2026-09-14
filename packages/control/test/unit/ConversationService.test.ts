@@ -51,6 +51,34 @@ test("ConversationStore migrates legacy Comments to v1 SQLite and preserves the 
     reopened.close();
 });
 
+test("ConversationStore backfills durable control state from pre-metadata history once", async () => {
+    const root = await createTestTempDirectory("conversation-control-backfill");
+    const databaseFile = join(root, "conversation.sqlite3");
+    const store = new ConversationStore({ filePath: databaseFile, instanceName: "alpha" });
+    store.insertComment({
+        createdAt: "2026-09-10T10:00:00.000Z",
+        ctxId: "ctx-a",
+        deliveredAt: "2026-09-10T10:00:01.000Z",
+        id: "legacy-stop",
+        instance: "alpha",
+        status: "delivered",
+        text: "#stop Preserve this fence",
+    });
+    store.close();
+    mutateConversationDatabase(databaseFile, `
+        DELETE FROM conversation_metadata
+        WHERE key LIKE 'context-control:v1:%' OR key = 'migration:context-control-v1'
+    `);
+
+    const backfilled = new ConversationStore({ filePath: databaseFile, instanceName: "alpha" });
+    assert.deepEqual(backfilled.readControlState("ctx-a"), { stoppedByCommentId: "legacy-stop" });
+    backfilled.close();
+    mutateConversationDatabase(databaseFile, "DELETE FROM conversation_entries WHERE ctx_id = 'ctx-a'");
+    const withoutHistory = new ConversationStore({ filePath: databaseFile, instanceName: "alpha" });
+    assert.deepEqual(withoutHistory.readControlState("ctx-a"), { stoppedByCommentId: "legacy-stop" });
+    withoutHistory.close();
+});
+
 test("ConversationStore rejects a newer schema without modifying it", async () => {
     const root = await createTestTempDirectory("conversation-future-schema");
     const databaseFile = join(root, "conversation.sqlite3");
@@ -240,6 +268,17 @@ function createFutureDatabase(filePath: string, version: number): void {
             INSERT INTO future_sentinel(value) VALUES ('preserve-me');
             PRAGMA user_version = ${version};
         `);
+    } finally {
+        database.close();
+    }
+}
+
+function mutateConversationDatabase(filePath: string, sql: string): void {
+    const require = createRequire(import.meta.url);
+    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const database = new DatabaseSync(filePath);
+    try {
+        database.exec(sql);
     } finally {
         database.close();
     }

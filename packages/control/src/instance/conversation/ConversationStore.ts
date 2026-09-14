@@ -11,6 +11,10 @@ import type {
     ConversationEntryKind,
     ConversationListInput,
 } from "@portable-devshell/shared";
+import {
+    CONTEXT_MESSAGE_PUSH_TOOL_BUDGET,
+    parseContextMessageDirective,
+} from "@portable-devshell/shared";
 
 import { ContextMessageState } from "../context/ContextMessageState.js";
 
@@ -23,6 +27,16 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const RETENTION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const LEGACY_COMMENT_MIGRATION_KEY = "migration:context-messages-json-v1";
 const LEGACY_REPORT_MIGRATION_KEY = "migration:todo-report-audit-v1";
+const CONTROL_STATE_MIGRATION_KEY = "migration:context-control-v1";
+const CONTROL_STATE_METADATA_PREFIX = "context-control:v1:";
+
+export interface ConversationControlState {
+    pendingPushCommentId?: string;
+    pendingReplyCommentId?: string;
+    pendingResumeCommentId?: string;
+    pushToolCallsRemaining?: number;
+    stoppedByCommentId?: string;
+}
 
 export interface ConversationStoreStats {
     comments: number;
@@ -133,23 +147,56 @@ export class ConversationStore {
 
     insertComment(record: ContextMessageRecord): void {
         const database = this.#open();
-        database.prepare(`
-            INSERT INTO conversation_entries(
-                kind, id, ctx_id, created_at, text, status, call_id, delivered_at, failed_at, error
-            ) VALUES ('comment', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-            record.id,
-            record.ctxId,
-            record.createdAt,
-            record.text,
-            record.status,
-            record.callId ?? null,
-            record.deliveredAt ?? null,
-            record.failedAt ?? null,
-            record.error ?? null,
-        );
+        database.exec("BEGIN IMMEDIATE");
+        try {
+            database.prepare(`
+                INSERT INTO conversation_entries(
+                    kind, id, ctx_id, created_at, text, status, call_id, delivered_at, failed_at, error
+                ) VALUES ('comment', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(
+                record.id,
+                record.ctxId,
+                record.createdAt,
+                record.text,
+                record.status,
+                record.callId ?? null,
+                record.deliveredAt ?? null,
+                record.failedAt ?? null,
+                record.error ?? null,
+            );
+            const state = this.#readControlStateFromDatabase(database, record.ctxId);
+            if (record.status === "delivered") applyDeliveredControls(state, [record]);
+            else if (record.status === "pending" || record.status === "sent") applyQueuedControl(state, record);
+            this.#writeControlStateInDatabase(database, record.ctxId, state);
+            database.exec("COMMIT");
+        } catch (error) {
+            database.exec("ROLLBACK");
+            throw error;
+        }
         this.#payloadBytes = this.#trackedPayloadBytes() + this.#readEntryPayloadBytes(database, "comment", record.id);
         this.#cleanup(database, record.status === "delivered" || record.status === "failed");
+    }
+
+    readControlState(ctxId: string): ConversationControlState {
+        return this.#readControlStateFromDatabase(this.#open(), ctxId);
+    }
+
+    writeControlState(ctxId: string, state: ConversationControlState): void {
+        const database = this.#open();
+        database.exec("BEGIN IMMEDIATE");
+        try {
+            this.#writeControlStateInDatabase(database, ctxId, state);
+            database.exec("COMMIT");
+        } catch (error) {
+            database.exec("ROLLBACK");
+            throw error;
+        }
+    }
+
+    clearAllControlStates(): void {
+        this.#open().prepare(
+            "DELETE FROM conversation_metadata WHERE key LIKE ?"
+        ).run(`${CONTROL_STATE_METADATA_PREFIX}%`);
     }
 
     deliverComments(ctxId: string, callId: string, deliveredAt: string): ContextMessageRecord[] {
@@ -173,6 +220,9 @@ export class ConversationStore {
                 WHERE kind = 'comment' AND id = ?
             `);
             for (const record of pending) update.run(callId, deliveredAt, record.id);
+            const state = this.#readControlStateFromDatabase(database, ctxId);
+            applyDeliveredControls(state, pending);
+            this.#writeControlStateInDatabase(database, ctxId, state);
             database.exec("COMMIT");
         } catch (error) {
             database.exec("ROLLBACK");
@@ -197,6 +247,7 @@ export class ConversationStore {
     failComments(ids: ReadonlySet<string>, error: string, failedAt: string): void {
         if (ids.size === 0) return;
         const database = this.#open();
+        const failedRecords = this.listComments().filter((record) => ids.has(record.id));
         const beforePayloadBytes = [...ids].reduce(
             (total, id) => total + this.#readEntryPayloadBytes(database, "comment", id),
             0,
@@ -209,6 +260,16 @@ export class ConversationStore {
                 WHERE kind = 'comment' AND id = ?
             `);
             for (const id of ids) update.run(failedAt, error, id);
+            for (const ctxId of new Set(failedRecords.map((record) => record.ctxId))) {
+                const state = this.#readControlStateFromDatabase(database, ctxId);
+                if (state.stoppedByCommentId !== undefined && ids.has(state.stoppedByCommentId)) {
+                    state.stoppedByCommentId = undefined;
+                }
+                if (state.pendingResumeCommentId !== undefined && ids.has(state.pendingResumeCommentId)) {
+                    state.pendingResumeCommentId = undefined;
+                }
+                this.#writeControlStateInDatabase(database, ctxId, state);
+            }
             database.exec("COMMIT");
         } catch (cause) {
             database.exec("ROLLBACK");
@@ -222,14 +283,38 @@ export class ConversationStore {
         this.#cleanup(database, true);
     }
 
-    appendReport(input: { callId: string; createdAt: string; ctxId: string; text: string }): void {
+    appendReport(input: {
+        callId: string;
+        createdAt: string;
+        ctxId: string;
+        replyCommentId?: string;
+        text: string;
+    }): void {
         const database = this.#open();
-        const result = database.prepare(`
-            INSERT INTO conversation_entries(kind, id, ctx_id, created_at, text, call_id)
-            VALUES ('report', ?, ?, ?, ?, ?)
-            ON CONFLICT(kind, id) DO NOTHING
-        `).run(input.callId, input.ctxId, input.createdAt, input.text, input.callId);
-        if (Number(result.changes) > 0) {
+        database.exec("BEGIN IMMEDIATE");
+        let changes = 0;
+        try {
+            const result = database.prepare(`
+                INSERT INTO conversation_entries(kind, id, ctx_id, created_at, text, call_id)
+                VALUES ('report', ?, ?, ?, ?, ?)
+                ON CONFLICT(kind, id) DO NOTHING
+            `).run(input.callId, input.ctxId, input.createdAt, input.text, input.callId);
+            changes = Number(result.changes);
+            if (input.replyCommentId !== undefined) {
+                const state = this.#readControlStateFromDatabase(database, input.ctxId);
+                if (state.pendingReplyCommentId === input.replyCommentId) {
+                    state.pendingReplyCommentId = undefined;
+                    state.pendingPushCommentId = undefined;
+                    state.pushToolCallsRemaining = undefined;
+                }
+                this.#writeControlStateInDatabase(database, input.ctxId, state);
+            }
+            database.exec("COMMIT");
+        } catch (error) {
+            database.exec("ROLLBACK");
+            throw error;
+        }
+        if (changes > 0) {
             this.#payloadBytes = this.#trackedPayloadBytes() + this.#readEntryPayloadBytes(database, "report", input.callId);
         }
         this.#cleanup(database, true);
@@ -340,6 +425,7 @@ export class ConversationStore {
             database.exec("PRAGMA synchronous = NORMAL");
             this.#database = database;
             this.#migrateLegacyComments();
+            this.#migrateControlState();
             this.#payloadBytes = this.#readPayloadBytes(database);
             this.#cleanup(database, true);
             return database;
@@ -560,6 +646,157 @@ export class ConversationStore {
         `).run(key, value);
     }
 
+    #readControlStateFromDatabase(database: DatabaseSync, ctxId: string): ConversationControlState {
+        const row = database.prepare(
+            "SELECT value FROM conversation_metadata WHERE key = ?"
+        ).get(controlStateMetadataKey(ctxId)) as { value: string } | undefined;
+        if (row === undefined) return {};
+        return normalizeControlState(JSON.parse(row.value) as unknown);
+    }
+
+    #writeControlStateInDatabase(
+        database: DatabaseSync,
+        ctxId: string,
+        state: ConversationControlState,
+    ): void {
+        const normalized = normalizeControlState(state);
+        const key = controlStateMetadataKey(ctxId);
+        if (Object.keys(normalized).length === 0) {
+            database.prepare("DELETE FROM conversation_metadata WHERE key = ?").run(key);
+            return;
+        }
+        this.#writeMetadataInDatabase(database, key, JSON.stringify(normalized));
+    }
+
+    #migrateControlState(): void {
+        if (this.#readMetadata(CONTROL_STATE_MIGRATION_KEY) === "complete") return;
+        const database = this.#database!;
+        const rows = database.prepare(`
+            SELECT
+                call_id AS callId,
+                created_at AS createdAt,
+                ctx_id AS ctxId,
+                delivered_at AS deliveredAt,
+                error,
+                failed_at AS failedAt,
+                id,
+                kind,
+                seq,
+                status,
+                text
+            FROM conversation_entries
+            ORDER BY seq ASC
+        `).all() as unknown as ConversationRow[];
+        const states = deriveControlStatesFromHistory(rows);
+        database.exec("BEGIN IMMEDIATE");
+        try {
+            database.prepare(
+                "DELETE FROM conversation_metadata WHERE key LIKE ?"
+            ).run(`${CONTROL_STATE_METADATA_PREFIX}%`);
+            for (const [ctxId, state] of states) {
+                this.#writeControlStateInDatabase(database, ctxId, state);
+            }
+            this.#writeMetadataInDatabase(database, CONTROL_STATE_MIGRATION_KEY, "complete");
+            database.exec("COMMIT");
+        } catch (error) {
+            database.exec("ROLLBACK");
+            throw error;
+        }
+    }
+
+}
+
+function controlStateMetadataKey(ctxId: string): string {
+    return `${CONTROL_STATE_METADATA_PREFIX}${ctxId}`;
+}
+
+function normalizeControlState(value: unknown): ConversationControlState {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw new Error("conversation control state must be an object");
+    }
+    const state = value as Record<string, unknown>;
+    const remaining = state.pushToolCallsRemaining;
+    if (remaining !== undefined && (!Number.isSafeInteger(remaining) || (remaining as number) < 0)) {
+        throw new Error("conversation control push budget is invalid");
+    }
+    return {
+        ...(typeof state.pendingPushCommentId === "string" ? { pendingPushCommentId: state.pendingPushCommentId } : {}),
+        ...(typeof state.pendingReplyCommentId === "string" ? { pendingReplyCommentId: state.pendingReplyCommentId } : {}),
+        ...(typeof state.pendingResumeCommentId === "string" ? { pendingResumeCommentId: state.pendingResumeCommentId } : {}),
+        ...(remaining === undefined ? {} : { pushToolCallsRemaining: remaining as number }),
+        ...(typeof state.stoppedByCommentId === "string" ? { stoppedByCommentId: state.stoppedByCommentId } : {}),
+    };
+}
+
+function deriveControlStatesFromHistory(
+    rows: readonly ConversationRow[],
+): Map<string, ConversationControlState> {
+    const states = new Map<string, ConversationControlState>();
+    for (const row of rows) {
+        const state = states.get(row.ctxId) ?? {};
+        if (row.kind === "report") {
+            state.pendingReplyCommentId = undefined;
+            state.pendingPushCommentId = undefined;
+            state.pushToolCallsRemaining = undefined;
+            states.set(row.ctxId, state);
+            continue;
+        }
+        if (row.status === "failed" || row.status === null) continue;
+        const record = toContextMessageRecord(row, "migration");
+        if (row.status === "pending" || row.status === "sent") {
+            applyQueuedControl(state, record);
+            states.set(row.ctxId, state);
+            continue;
+        }
+        const directive = parseContextMessageDirective(record.text).directive;
+        applyDeliveredControls(state, [record]);
+        if (directive === "push") state.pushToolCallsRemaining = 0;
+        states.set(row.ctxId, state);
+    }
+    for (const [ctxId, state] of states) {
+        const normalized = normalizeControlState(state);
+        if (Object.keys(normalized).length === 0) states.delete(ctxId);
+        else states.set(ctxId, normalized);
+    }
+    return states;
+}
+
+function applyQueuedControl(state: ConversationControlState, record: ContextMessageRecord): void {
+    const directive = parseContextMessageDirective(record.text).directive;
+    if (directive === "stop") {
+        state.stoppedByCommentId ??= record.id;
+        state.pendingResumeCommentId = undefined;
+    } else if (directive === "resume" && state.stoppedByCommentId !== undefined) {
+        state.pendingResumeCommentId = record.id;
+    }
+}
+
+function applyDeliveredControls(
+    state: ConversationControlState,
+    records: readonly ContextMessageRecord[],
+): void {
+    for (const record of records) {
+        const directive = parseContextMessageDirective(record.text).directive;
+        switch (directive) {
+            case "stop":
+                state.stoppedByCommentId ??= record.id;
+                state.pendingResumeCommentId = undefined;
+                break;
+            case "resume":
+                state.stoppedByCommentId = undefined;
+                state.pendingResumeCommentId = undefined;
+                state.pendingReplyCommentId = record.id;
+                break;
+            case "push":
+                state.pendingReplyCommentId = record.id;
+                state.pendingPushCommentId = record.id;
+                state.pushToolCallsRemaining ??= CONTEXT_MESSAGE_PUSH_TOOL_BUDGET;
+                break;
+            default:
+                state.pendingReplyCommentId = record.id;
+                break;
+        }
+    }
 }
 
 function toConversationEntry(row: ConversationRow): ConversationEntry {

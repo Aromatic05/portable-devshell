@@ -2,6 +2,8 @@ export type ContextMessageStatus = "pending" | "sent" | "delivered" | "failed";
 
 export type ContextMessageDirective = "push" | "resume" | "stop";
 
+export const CONTEXT_MESSAGE_PUSH_TOOL_BUDGET = 5;
+
 export interface ParsedContextMessageDirective {
     body: string;
     directive?: ContextMessageDirective;

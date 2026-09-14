@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+    CONTEXT_MESSAGE_PUSH_TOOL_BUDGET,
+    parseContextMessageDirective,
+} from "@portable-devshell/shared";
 
 import {
     InstanceRegistry,
@@ -33,8 +37,39 @@ function createTodoReportHarness() {
     let now = Date.parse("2026-09-14T00:00:00.000Z");
     let callSequence = 0;
     let failNext = false;
+    let pendingPushCommentId: string | undefined;
+    let pendingReplyCommentId: string | undefined;
+    let pendingResumeCommentId: string | undefined;
+    let pushToolCallsRemaining: number | undefined;
+    let stoppedByCommentId: string | undefined;
     const entries: Array<Record<string, unknown>> = [];
     const reports: string[] = [];
+    const applyQueuedControl = (id: string, text: string) => {
+        const directive = parseContextMessageDirective(text).directive;
+        if (directive === "stop") {
+            stoppedByCommentId ??= id;
+            pendingResumeCommentId = undefined;
+        } else if (directive === "resume" && stoppedByCommentId !== undefined) {
+            pendingResumeCommentId = id;
+        }
+    };
+    const applyDeliveredControl = (id: string, text: string) => {
+        const directive = parseContextMessageDirective(text).directive;
+        if (directive === "stop") {
+            stoppedByCommentId ??= id;
+            pendingResumeCommentId = undefined;
+        } else if (directive === "resume") {
+            stoppedByCommentId = undefined;
+            pendingResumeCommentId = undefined;
+            pendingReplyCommentId = id;
+        } else if (directive === "push") {
+            pendingReplyCommentId = id;
+            pendingPushCommentId = id;
+            pushToolCallsRemaining ??= CONTEXT_MESSAGE_PUSH_TOOL_BUDGET;
+        } else {
+            pendingReplyCommentId = id;
+        }
+    };
     const registry = new InstanceRegistry([{
         conversation: {
             close() {},
@@ -42,7 +77,7 @@ function createTodoReportHarness() {
                 const filtered = entries.filter((entry) => input.ctxId === undefined || entry.ctxId === input.ctxId);
                 return (input.limit === undefined ? filtered : filtered.slice(-input.limit)) as never;
             },
-            async recordReport(input: { callId: string; ctxId: string; text: string }) {
+            async recordReport(input: { callId: string; ctxId: string; replyCommentId?: string; text: string }) {
                 if (failNext) {
                     failNext = false;
                     throw new Error("report failed");
@@ -56,6 +91,47 @@ function createTodoReportHarness() {
                     kind: "report",
                     text: input.text,
                 });
+                if (input.replyCommentId !== undefined && input.replyCommentId === pendingReplyCommentId) {
+                    pendingReplyCommentId = undefined;
+                    pendingPushCommentId = undefined;
+                    pushToolCallsRemaining = undefined;
+                }
+            },
+        },
+        contextMessages: {
+            async beforeModelToolCall(_ctxId: string, toolName: string) {
+                if (stoppedByCommentId !== undefined) {
+                    if (pendingResumeCommentId !== undefined) {
+                        const resume = entries.find((entry) => entry.id === pendingResumeCommentId);
+                        const resumeId = pendingResumeCommentId;
+                        const text = String(resume?.text ?? "#resume");
+                        if (resume !== undefined) {
+                            resume.status = "delivered";
+                            applyDeliveredControl(resumeId, text);
+                        }
+                        return { comment: text, commentId: resumeId, kind: "resume" as const };
+                    }
+                    const stop = entries.find((entry) => entry.id === stoppedByCommentId);
+                    return {
+                        ...(typeof stop?.text === "string" ? { comment: stop.text } : {}),
+                        commentId: stoppedByCommentId,
+                        kind: "stop" as const,
+                    };
+                }
+                if (toolName === "todo_report" || pendingPushCommentId === undefined) return { kind: "allow" as const };
+                const remaining = pushToolCallsRemaining ?? CONTEXT_MESSAGE_PUSH_TOOL_BUDGET;
+                if (remaining <= 0) {
+                    return {
+                        commentId: pendingPushCommentId,
+                        kind: "push" as const,
+                        toolCallBudget: CONTEXT_MESSAGE_PUSH_TOOL_BUDGET,
+                    };
+                }
+                pushToolCallsRemaining = remaining - 1;
+                return { kind: "allow" as const };
+            },
+            async pendingReplyCommentId() {
+                return pendingReplyCommentId;
             },
         },
         enabled: true,
@@ -86,6 +162,7 @@ function createTodoReportHarness() {
                 status: "sent",
                 text,
             });
+            applyQueuedControl(id, text);
         },
         deliverComment(id: string, text: string) {
             const timestamp = new Date(now).toISOString();
@@ -99,6 +176,7 @@ function createTodoReportHarness() {
                 status: "delivered",
                 text,
             });
+            applyDeliveredControl(id, text);
         },
         failNextReport() {
             failNext = true;
@@ -246,8 +324,7 @@ test("a #push Comment gets five ordinary calls then requires todo_report", async
     await assert.rejects(
         harness.gateway.beforeModelToolCall("local", "file_read", harness.context),
         (error: unknown) => {
-            assert.equal((error as { code?: string }).code, "todo.invalid");
-            assert.equal((error as { details?: { reason?: string } }).details?.reason, "push");
+            assert.equal((error as { code?: string }).code, "control.modelReplyRequired");
             assert.equal((error as { details?: { toolCallBudget?: number } }).details?.toolCallBudget, 5);
             return true;
         },
@@ -257,6 +334,20 @@ test("a #push Comment gets five ordinary calls then requires todo_report", async
     await harness.gateway.beforeModelToolCall("local", "file_read", harness.context);
 });
 
+test("a repeated #push never replenishes an already running tool budget", async () => {
+    const harness = createTodoReportHarness();
+    harness.deliverComment("comment-push-1", "#push First reminder");
+    for (let index = 0; index < 4; index += 1) {
+        await harness.gateway.beforeModelToolCall("local", "file_read", harness.context);
+    }
+    harness.deliverComment("comment-push-2", "#push Still waiting");
+    await harness.gateway.beforeModelToolCall("local", "file_read", harness.context);
+    await assert.rejects(
+        harness.gateway.beforeModelToolCall("local", "file_read", harness.context),
+        (error: unknown) => (error as { code?: string }).code === "control.modelReplyRequired",
+    );
+});
+
 test("a #stop Comment blocks every model tool until the user queues #resume", async () => {
     const harness = createTodoReportHarness();
     harness.deliverComment("comment-stop", "#stop Stop working now");
@@ -264,14 +355,53 @@ test("a #stop Comment blocks every model tool until the user queues #resume", as
         await assert.rejects(
             harness.gateway.beforeModelToolCall("local", toolName, harness.context),
             (error: unknown) => {
-                assert.equal((error as { code?: string }).code, "todo.invalid");
-                assert.equal((error as { details?: { reason?: string } }).details?.reason, "stop");
+                assert.equal((error as { code?: string }).code, "control.modelStopped");
                 return true;
             },
         );
     }
     harness.queueComment("comment-resume", "#resume");
+    await assert.rejects(
+        harness.gateway.beforeModelToolCall("local", "file_read", harness.context),
+        (error: unknown) => (error as { code?: string }).code === "control.modelResumed",
+    );
     await harness.gateway.beforeModelToolCall("local", "file_read", harness.context);
+});
+
+test("a queued #stop fences the next model tool before normal Comment delivery", async () => {
+    const harness = createTodoReportHarness();
+    harness.queueComment("comment-stop-queued", "#stop Stop before this tool");
+    await assert.rejects(
+        harness.gateway.beforeModelToolCall("local", "file_read", harness.context),
+        (error: unknown) => (error as { code?: string }).code === "control.modelStopped",
+    );
+});
+
+test("#resume is shown to the model before the first resumed tool is allowed", async () => {
+    const harness = createTodoReportHarness();
+    harness.deliverComment("comment-stop-resume", "#stop Stop first");
+    harness.queueComment("comment-resume-text", "#resume Continue, but do not delete files");
+    await assert.rejects(
+        harness.gateway.beforeModelToolCall("local", "file_read", harness.context),
+        (error: unknown) => {
+            assert.equal((error as { code?: string }).code, "control.modelResumed");
+            assert.match(String((error as Error).message), /do not delete files/u);
+            return true;
+        },
+    );
+    await harness.gateway.beforeModelToolCall("local", "file_read", harness.context);
+});
+
+test("#stop cannot disappear when older conversation history falls outside the read window", async () => {
+    const harness = createTodoReportHarness();
+    harness.deliverComment("comment-stop-long", "#stop Stay stopped");
+    for (let index = 0; index < 450; index += 1) {
+        harness.deliverComment(`comment-${index}`, `ordinary ${index}`);
+    }
+    await assert.rejects(
+        harness.gateway.beforeModelToolCall("local", "file_read", harness.context),
+        (error: unknown) => (error as { code?: string }).code === "control.modelStopped",
+    );
 });
 
 test("failed reports neither spend a token nor satisfy a Comment obligation", async () => {

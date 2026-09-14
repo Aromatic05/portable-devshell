@@ -6,6 +6,11 @@ import type {
     InstanceEventType,
     JsonValue,
 } from "@portable-devshell/shared";
+import {
+    CONTEXT_MESSAGE_PUSH_TOOL_BUDGET,
+    parseContextMessageDirective,
+} from "@portable-devshell/shared";
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 
 import { ContextMessageState } from "./ContextMessageState.js";
@@ -68,11 +73,74 @@ export class ContextMessageService {
         return this.#store.listComments(query);
     }
 
+    async beforeModelToolCall(
+        ctxId: string,
+        toolName: string,
+        requestId?: string,
+    ): Promise<
+        | { kind: "allow" }
+        | { commentId: string; kind: "push"; toolCallBudget: number }
+        | { comment: string; commentId: string; kind: "resume" }
+        | { comment?: string; commentId: string; kind: "stop" }
+    > {
+        return await this.#runExclusive(async () => {
+            let state = this.#store.readControlState(ctxId);
+            if (state.stoppedByCommentId !== undefined) {
+                const stoppedByCommentId = state.stoppedByCommentId;
+                const pending = this.#store.pendingComments(ctxId);
+                if (pending.length > 0) {
+                    const delivered = this.#store.deliverComments(
+                        ctxId,
+                        requestId ?? `control-message-${randomUUID()}`,
+                        new Date().toISOString(),
+                    );
+                    await this.#recordDelivered(delivered);
+                    state = this.#store.readControlState(ctxId);
+                    const comment = delivered.map((record) => record.text).join("\n\n");
+                    if (state.stoppedByCommentId !== undefined) {
+                        return {
+                            ...(comment.length === 0 ? {} : { comment }),
+                            commentId: state.stoppedByCommentId,
+                            kind: "stop",
+                        };
+                    }
+                    const resume = [...delivered].reverse().find(
+                        (record) => parseContextMessageDirective(record.text).directive === "resume",
+                    );
+                    if (resume !== undefined) {
+                        return { comment, commentId: resume.id, kind: "resume" };
+                    }
+                    throw new Error("Conversation Stop state cleared without a delivered #resume Comment.");
+                }
+                return { commentId: stoppedByCommentId, kind: "stop" };
+            }
+            if (toolName === "todo_report" || state.pendingPushCommentId === undefined) {
+                return { kind: "allow" };
+            }
+            const remaining = state.pushToolCallsRemaining ?? CONTEXT_MESSAGE_PUSH_TOOL_BUDGET;
+            if (remaining <= 0) {
+                return {
+                    commentId: state.pendingPushCommentId,
+                    kind: "push",
+                    toolCallBudget: CONTEXT_MESSAGE_PUSH_TOOL_BUDGET,
+                };
+            }
+            state.pushToolCallsRemaining = remaining - 1;
+            this.#store.writeControlState(ctxId, state);
+            return { kind: "allow" };
+        });
+    }
+
+    async pendingReplyCommentId(ctxId: string): Promise<string | undefined> {
+        return await this.#runExclusive(async () => this.#store.readControlState(ctxId).pendingReplyCommentId);
+    }
+
     async failAllPending(reason: string): Promise<ContextMessageRecord[]> {
         return await this.#runExclusive(async () => {
             const records = this.#store.pendingComments();
+            if (records.length > 0) await this.#markFailed(records, reason);
+            this.#store.clearAllControlStates();
             if (records.length === 0) return [];
-            await this.#markFailed(records, reason);
             const ids = new Set(records.map((record) => record.id));
             return this.#store.listComments().filter((message) => ids.has(message.id));
         });
@@ -81,8 +149,9 @@ export class ContextMessageService {
     async failPending(ctxId: string, reason: string): Promise<ContextMessageRecord[]> {
         return await this.#runExclusive(async () => {
             const records = this.#store.pendingComments(ctxId);
+            if (records.length > 0) await this.#markFailed(records, reason);
+            this.#store.writeControlState(ctxId, {});
             if (records.length === 0) return [];
-            await this.#markFailed(records, reason);
             const ids = new Set(records.map((record) => record.id));
             return this.#store.listComments({ ctxId }).filter((message) => ids.has(message.id));
         });
@@ -109,6 +178,19 @@ export class ContextMessageService {
             ...(comment.length === 0 ? {} : { comment }),
             messages: delivered.map(({ createdAt, id, text }) => ({ createdAt, id, text })),
         };
+    }
+
+    async #recordDelivered(records: readonly ContextMessageRecord[]): Promise<void> {
+        if (records.length === 0) return;
+        const first = records[0]!;
+        await this.#appendEvent("context.message.delivered", {
+            callId: first.callId ?? "control-message",
+            comment: records.map((record) => record.text).join("\n\n"),
+            ctxId: first.ctxId,
+            deliveredAt: first.deliveredAt ?? new Date().toISOString(),
+            ids: records.map((record) => record.id),
+            status: "delivered",
+        }).catch(() => undefined);
     }
 
     async #markFailed(
