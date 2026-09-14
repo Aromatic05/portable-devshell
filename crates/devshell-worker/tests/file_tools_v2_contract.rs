@@ -883,7 +883,7 @@ fn file_tools_omit_absent_pagination_fields() {
 }
 
 #[test]
-fn file_glob_treats_missing_glob_roots_as_empty_without_masking_exact_missing_paths() {
+fn file_glob_treats_missing_roots_and_exact_paths_as_empty_results() {
     let env = TestEnv::new();
     let instance = "aromatic-file-find-missing-glob-root";
     fs::create_dir_all(env.workspace().join(".pi/prompts")).unwrap();
@@ -918,8 +918,8 @@ fn file_glob_treats_missing_glob_roots_as_empty_without_masking_exact_missing_pa
         "file_glob",
         json!({ "patterns": ["./.pi/skills/SKILL.md"] }),
     );
-    assert_eq!(exact_missing["ok"], false, "{exact_missing}");
-    assert_eq!(exact_missing["error"]["code"], "file.notFound");
+    assert_eq!(exact_missing["ok"], true, "{exact_missing}");
+    assert_eq!(exact_missing["result"]["entries"], json!([]));
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -1705,6 +1705,256 @@ fn file_grep_exact_page_does_not_return_an_empty_continuation() {
     assert_eq!(searched["ok"], true, "{searched}");
     assert_eq!(searched["result"]["files"].as_array().unwrap().len(), 20);
     assert!(searched["result"].get("nextCursor").is_none(), "{searched}");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_read_batch_keeps_successful_items_when_one_path_fails() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-read-partial-batch";
+    fs::write(env.workspace().join("first.txt"), "first\n").unwrap();
+    fs::write(env.workspace().join("second.txt"), "second\n").unwrap();
+    start(&env, instance);
+
+    let response = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({
+            "files": [
+                { "path": "first.txt", "selector": "1-1:raw" },
+                { "path": "missing.txt" },
+                { "path": "second.txt", "selector": "1-1:raw" }
+            ]
+        }),
+    );
+
+    assert_eq!(response["ok"], true, "{response}");
+    let files = response["result"]["files"].as_array().unwrap();
+    assert_eq!(files.len(), 3);
+    assert_eq!(files[0]["path"], "./first.txt");
+    assert_eq!(files[0]["content"], "1:first");
+    assert_eq!(files[1]["path"], "./missing.txt");
+    assert_eq!(files[1]["error"]["code"], "file.notFound");
+    assert!(files[1].get("view").is_none());
+    assert_eq!(files[2]["path"], "./second.txt");
+    assert_eq!(files[2]["content"], "1:second");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_accepts_common_apply_patch_aliases() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-edit-aliases";
+    fs::write(env.workspace().join("document.txt"), "old\n").unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "document.txt", "selector": "1-1:raw" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+
+    let edited = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": concat!(
+                "*** Begin Patch\n",
+                "*** Update File: document.txt\n",
+                "@@\n",
+                "-old\n",
+                "+new\n",
+                "*** Add File: added.txt\n",
+                "+first\n",
+                "+second\n",
+                "*** End Patch"
+            )
+        }),
+    );
+
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("document.txt")).unwrap(),
+        "new\n"
+    );
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("added.txt")).unwrap(),
+        "first\nsecond\n"
+    );
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_tools_normalize_bare_workspace_paths_and_selector_ranges() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-path-normalization";
+    fs::write(
+        env.workspace().join("document.txt"),
+        "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\n",
+    )
+    .unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({
+            "files": [{
+                "path": "document.txt",
+                "selector": "6-8,2-4,4-6:raw"
+            }]
+        }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["result"]["files"][0]["path"], "./document.txt");
+    assert_eq!(
+        read["result"]["files"][0]["content"],
+        "2:two\n3:three\n4:four\n5:five\n6:six\n7:seven\n8:eight"
+    );
+
+    let found = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_glob",
+        json!({ "patterns": ["document.txt"] }),
+    );
+    assert_eq!(found["ok"], true, "{found}");
+    assert_eq!(found["result"]["entries"][0]["path"], "./document.txt");
+
+    let searched = call(
+        &env,
+        instance,
+        "3",
+        "ctx-a",
+        "file_grep",
+        json!({ "paths": ["document.txt"], "pattern": "six", "syntax": "literal" }),
+    );
+    assert_eq!(searched["ok"], true, "{searched}");
+    assert_eq!(searched["result"]["files"][0]["path"], "./document.txt");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_grep_treats_missing_paths_as_empty_and_recovers_malformed_default_regex_as_literal() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-grep-tolerant";
+    fs::write(
+        env.workspace().join("document.txt"),
+        "const value = new Server(1);\n",
+    )
+    .unwrap();
+    start(&env, instance);
+
+    let missing = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_grep",
+        json!({ "paths": ["missing.txt"], "pattern": "needle", "syntax": "literal" }),
+    );
+    assert_eq!(missing["ok"], true, "{missing}");
+    assert_eq!(missing["result"]["files"], json!([]));
+
+    let fallback = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_grep",
+        json!({ "paths": ["document.txt"], "pattern": "new Server(" }),
+    );
+    assert_eq!(fallback["ok"], true, "{fallback}");
+    assert_eq!(fallback["result"]["files"][0]["path"], "./document.txt");
+    assert!(
+        fallback["result"]["files"][0]["content"]
+            .as_str()
+            .is_some_and(|content| content.contains("new Server(1)")),
+        "{fallback}"
+    );
+
+    let explicit_regex = call(
+        &env,
+        instance,
+        "3",
+        "ctx-a",
+        "file_grep",
+        json!({ "paths": ["document.txt"], "pattern": "new Server(", "syntax": "regex" }),
+    );
+    assert_eq!(explicit_regex["ok"], false, "{explicit_regex}");
+    assert_eq!(explicit_regex["error"]["code"], "file.invalidRegex");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_semantic_failure_leaves_entire_changeset_unapplied() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-edit-semantic-atomic";
+    fs::write(env.workspace().join("existing.txt"), "old\n").unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "existing.txt", "selector": "1-1:raw" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+
+    let edited = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": concat!(
+                "*** Begin Edit\n",
+                "*** Write File: created.txt\n",
+                "created\n",
+                "*** Patch File: existing.txt\n",
+                "@@\n",
+                "-missing\n",
+                "+changed\n",
+                "*** End Edit"
+            )
+        }),
+    );
+
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(edited["result"]["operations"][0]["status"], "notExecuted");
+    assert_eq!(edited["result"]["operations"][1]["status"], "failed");
+    assert_eq!(
+        edited["result"]["operations"][1]["error"]["code"],
+        "file.patchNotFound"
+    );
+    assert!(!env.workspace().join("created.txt").exists());
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("existing.txt")).unwrap(),
+        "old\n"
+    );
 
     env.json_command(&["stop", "--instance", instance]);
 }

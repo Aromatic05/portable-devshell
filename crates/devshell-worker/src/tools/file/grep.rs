@@ -89,7 +89,7 @@ impl ToolHandler for FileGrepTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tools::contract::catalog_entry::<FileGrepInput, FileGrepOutput>(
             &self.name,
-            "Search UTF-8 text in files, directories, or globs. Initial requests accept pattern and optional search fields; continuation requests contain cursor alone. Returned source lines establish edit coverage. A truncated file reports nextLine as the first omitted matching line for exact-file continuation with startLine.".to_string(),
+            "Search UTF-8 text in files, directories, or globs. Bare relative paths are normalized to the workspace namespace and missing paths contribute no matches. Regex remains the default; when syntax is omitted and the pattern is not valid regex, it is retried as a literal. Explicit syntax=regex stays strict. Returned source lines establish edit coverage.".to_string(),
             [ToolCapability::Read],
         )
     }
@@ -138,16 +138,25 @@ impl ToolHandler for FileGrepTool {
                     "paths must contain at least one path when provided",
                 ));
             }
-            let syntax = input.syntax.unwrap_or(SearchSyntax::Regex);
             let case_sensitive = input.case_sensitive.unwrap_or(true);
-            let expression = match syntax {
-                SearchSyntax::Literal => regex::escape(&pattern),
-                SearchSyntax::Regex => pattern,
+            let (expression, fallback_literal) = match input.syntax {
+                Some(SearchSyntax::Literal) => (regex::escape(&pattern), false),
+                Some(SearchSyntax::Regex) => (pattern.clone(), false),
+                None => (pattern.clone(), true),
             };
-            let matcher = RegexBuilder::new(&expression)
+            let matcher = match RegexBuilder::new(&expression)
                 .case_insensitive(!case_sensitive)
                 .build()
-                .map_err(|error| ToolError::new("file.invalidRegex", error.to_string()))?;
+            {
+                Ok(matcher) => matcher,
+                Err(_) if fallback_literal => RegexBuilder::new(&regex::escape(&pattern))
+                    .case_insensitive(!case_sensitive)
+                    .build()
+                    .map_err(|error| ToolError::new("file.invalidRegex", error.to_string()))?,
+                Err(error) => {
+                    return Err(ToolError::new("file.invalidRegex", error.to_string()));
+                }
+            };
             let hidden = input.hidden.unwrap_or(true);
             let gitignore = input.gitignore.unwrap_or(true);
             let context = input.context;
@@ -381,7 +390,11 @@ fn is_single_exact_file(call: &ToolCall, paths: &[String]) -> Result<bool, ToolE
     if paths.len() != 1 || paths[0].contains(['*', '?', '[']) {
         return Ok(false);
     }
-    let (_, resolved) = resolve_existing(call, &paths[0], false)?;
+    let (_, resolved) = match resolve_existing(call, &paths[0], false) {
+        Ok(resolved) => resolved,
+        Err(error) if error.code == "file.notFound" => return Ok(false),
+        Err(error) => return Err(error),
+    };
     Ok(resolved
         .metadata()
         .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?

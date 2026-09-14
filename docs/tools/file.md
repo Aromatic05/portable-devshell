@@ -1,5 +1,7 @@
 # 文件读取与编辑
 
+`file_*` 的模型输入接受 workspace 裸相对路径并归一化为 `./...`。例如 `src/lib.rs` 等价于 `./src/lib.rs`；`.` 归一化为 `./`。绝对路径仍使用平台原生绝对路径。`..`、`././...`、`~/...` 等含糊或越界写法仍按 `file.invalidPath` 拒绝，底层路径安全规则不放宽。
+
 ## `file_read`
 
 `file_read` 批量读取文件正文、结构或路径元数据。正文和 outline 读取在当前 worker instance 与 `ctxId` 内建立隐式编辑快照；metadata 只观察文件系统状态，不建立编辑 coverage。调用方不需要复制 snapshot ID、tag 或 revision。
@@ -50,6 +52,8 @@ outline
 raw
 ```
 
+多个显式范围可以乱序、重叠或相邻；Worker 会先排序并合并。结束行超过 EOF 时自动截到文件末尾；起始行已经超过 EOF、反向范围或非法行号仍返回 `file.invalidRange`。Batch 中单个 path 的 `notFound`、`notFile`、`invalidRange`、`outlineUnavailable` 等读取错误不会丢掉其他成功项，而是写入该项的 `error` 字段。
+
 outline 返回符号的起止行、层级、语言和 `parseStatus`。outline 不使用正文分页式 `nextSelector`；根据符号范围再次调用 `view=content` 即可读取实现。
 
 ## `file_glob`
@@ -62,6 +66,8 @@ outline 返回符号的起止行、层级、语言和 `parseStatus`。outline �
   "type": "file"
 }
 ```
+
+不存在的 exact path 和不存在的 glob root 都是合法的 discovery miss，返回空结果而不是把整个 tool call 标记为 `file.notFound`。多个 pattern 中某个目标缺失也不会影响其他 pattern 的结果。
 
 每页最多返回 200 个 entry。出现 `nextCursor` 时，cursor 保存实际 traversal continuation，包括目录 DFS 栈、当前 entry index、ignore 规则、类型过滤条件和去重状态。下一页只传 `cursor`，不再重复 `patterns`、`type`、`hidden` 或 `gitignore`；它会从上次停止的位置继续，而不是重新遍历根目录。
 
@@ -83,6 +89,8 @@ Traversal 使用已经解析并锚定的目录能力。因此第一页之后即�
   "context": 2
 }
 ```
+
+不存在的搜索 path 贡献 0 个匹配，不会拖垮其他搜索根。`syntax` 省略时仍优先按 regex 解释；如果 pattern 无法编译成 regex，则自动按 literal 重试。显式 `syntax="regex"` 时保持严格，非法表达式仍返回 `file.invalidRegex`。
 
 一页最多返回 20 个匹配文件。与 `file_glob` 相同，`nextCursor` 保存完整 discovery/search continuation；下一页只传 `cursor`，此时不得重复 `pattern`、`paths`、`syntax`、`caseSensitive`、`hidden`、`gitignore`、`context` 或 `startLine`。它会继续扫描尚未访问的候选文件。恰好一页结束时已经没有更多匹配，则不会额外返回一个只会产生空页的 cursor。
 
@@ -149,6 +157,8 @@ Rewrite File
 Delete File
 Move File
 ```
+
+Canonical 方言仍然是 `*** Begin Edit` / `*** End Edit` 与上述五种 section。为兼容常见 coding-agent 先验，parser 同时接受 `*** Begin Patch` / `*** End Patch`、`*** Update File:`（等价于 `Patch File`）以及 `*** Add File:`（等价于 `Write File`）。Codex 风格 `Add File` 中每行统一的 `+` 前缀会被去除。
 
 ### Write File
 
@@ -225,16 +235,9 @@ Patch 行前缀：
 
 ## 执行语义
 
-完整 change set 先进行解析、权限、路径、Patch 和快照预检。预检失败保证零修改。
+完整 change set 先进行解析、权限、路径和快照静态预检。对于包含多个子操作的 change set，Worker 还会在虚拟文件状态中完整进行语义预演：Patch 定位、coverage、revision/merge、Write/Move/Delete 的目标关系以及调用内依赖全部通过后，才开始真实写盘。因此这些可预见的语义错误保证 workspace **0 落盘**；失败 section 返回 `failed`，其余 section 返回 `notExecuted`。
 
-随后按 section 顺序执行：
-
-```text
-每个子操作自身原子
-首个运行期失败后停止
-先前成功的操作保留
-后续操作标记为 notExecuted
-```
+进入真实 commit 后仍按 section 顺序执行，每个单文件子操作自身原子；若发生磁盘 I/O、权限、设备故障等 OS 级错误，则立即 fail-stop，后续 section 标记为 `notExecuted`，已经提交的 section 可能保留。当前语义因此是 **semantic atomicity**，不是文件系统级多文件 ACID 事务。单文件 Write/Patch/Rewrite 继续使用临时 sibling + revision CAS + 原子发布；如果未来需要强化物理 commit 原子性，应增加 staging/rollback journal，而不是改回 best-effort continue。
 
 同一 change set 内可以依赖前面的结果：
 
@@ -251,7 +254,7 @@ Patch B
 
 `file_read`、`file_glob` 和 `file_grep` 会在目录遍历、文件读取及结果组装的安全点响应取消。
 
-`file_edit` 的取消是协作式的：解析和完整预检阶段可以直接停止；开始执行后只在子操作边界检查取消。当前正在进行的原子 Write/Patch/Rewrite/Delete/Move 不会被截断，先前已经成功的子操作也不会回滚。取消发生后，当前 section 返回取消错误，后续 section 标记为 `notExecuted`。
+`file_edit` 的取消是协作式的：解析、静态预检以及多操作 change set 的语义预演阶段可以直接停止且不会写盘；开始真实执行后只在子操作边界检查取消。当前正在进行的原子 Write/Patch/Rewrite/Delete/Move 不会被截断，先前已经成功提交的子操作也不会回滚。取消发生后，当前 section 返回取消错误，后续 section 标记为 `notExecuted`。
 
 ## 正文中的控制标记
 
@@ -259,10 +262,13 @@ Write/Rewrite 只在行首遇到完整控制行时结束，例如：
 
 ```text
 *** Patch File:
+*** Update File:
+*** Add File:
 *** Rewrite File:
 *** Delete File:
 *** Move File:
 *** End Edit
+*** End Patch
 ```
 
 普通 `***` 文本没有特殊含义。文件内容本身需要包含完整控制行时，使用 `Patch File`，新增行的 `+` 前缀会消除 envelope 歧义。

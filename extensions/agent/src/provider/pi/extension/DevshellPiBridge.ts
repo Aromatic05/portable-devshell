@@ -263,7 +263,7 @@ export function piPromptMetadata(toolName: string): Pick<PiToolLike, "promptGuid
                 promptSnippet: "Edit workspace files with devshell Write/Patch/Rewrite/Delete/Move edit blocks",
                 promptGuidelines: [
                     "Before file_edit modifies an existing file, use file_read or file_grep on that file in the current context; file_edit rejects unseen existing files.",
-                    "file_edit changes must use devshell edit blocks: start with '*** Begin Edit', use '*** Patch File:', '*** Write File:', '*** Rewrite File:', '*** Delete File:', or '*** Move File:', and finish with '*** End Edit'. Never use '*** Update File:'."
+                    "Prefer devshell edit blocks: start with '*** Begin Edit', use '*** Patch File:', '*** Write File:', '*** Rewrite File:', '*** Delete File:', or '*** Move File:', and finish with '*** End Edit'. Common apply_patch aliases such as '*** Update File:' and '*** Add File:' are accepted for compatibility."
                 ]
             };
         default:

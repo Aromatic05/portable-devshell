@@ -11,7 +11,7 @@ use crate::tools::file::types::{
     FileReadInput, FileReadMetadata, FileReadOutput, FileReadRequest, FileReadResolvedView,
     FileReadView,
 };
-use crate::tools::file::{FileToolState, resolve_existing, resolve_info};
+use crate::tools::file::{FileToolState, normalize_file_path, resolve_existing, resolve_info};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const DEFAULT_LINE_COUNT: usize = 200;
@@ -43,7 +43,7 @@ impl ToolHandler for FileReadTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tools::contract::catalog_entry::<FileReadBatchInput, FileReadBatchOutput>(
             &self.name,
-            "Read one or more paths as text content, structural outline, or filesystem metadata. Accepts batch requests in files=[{path, view?, selector?}, ...] and read-only virtual tool-result paths. Content selectors support N, N-M, N+count, and sorted non-overlapping ranges with optional :raw exact-range mode. Workspace content reads establish edit coverage; virtual tool-result reads, outline reads, and metadata reads do not.".to_string(),
+            "Read one or more paths as text content, structural outline, or filesystem metadata. Bare relative paths are normalized to the workspace namespace. Batch requests return successful items alongside per-item read errors. Content selectors support N, N-M, N+count, and comma-separated ranges; ranges are sorted, merged, and clamped to EOF when unambiguous. Workspace content reads establish edit coverage; virtual tool-result reads, outline reads, and metadata reads do not.".to_string(),
             [ToolCapability::Read],
         )
     }
@@ -76,9 +76,14 @@ impl FileReadTool {
         let mut serialized_bytes = br#"{"files":[]}"#.len();
         for input in input.files {
             call.check_cancelled()?;
-            let path = input.path.clone();
-            let output = self.read_one(call, &input)?;
-            let entry = FileReadBatchEntry::from_output(path, output);
+            let path = batch_display_path(&input.path);
+            let entry = match self.read_one(call, &input) {
+                Ok(output) => FileReadBatchEntry::from_output(path, output),
+                Err(error) if is_batch_item_error(&error) => {
+                    FileReadBatchEntry::from_error(path, error)
+                }
+                Err(error) => return Err(error),
+            };
             let entry_bytes = serde_json::to_vec(&entry)
                 .map_err(|error| ToolError::new("tool.internalError", error.to_string()))?
                 .len()
@@ -464,6 +469,28 @@ impl FileReadTool {
     }
 }
 
+fn batch_display_path(raw: &str) -> String {
+    match parse_tool_result_path(raw) {
+        Ok(Some(_)) => raw.to_string(),
+        _ => normalize_file_path(raw).unwrap_or_else(|_| raw.to_string()),
+    }
+}
+
+fn is_batch_item_error(error: &ToolError) -> bool {
+    matches!(
+        error.code.as_str(),
+        "file.notFound"
+            | "file.notFile"
+            | "file.notText"
+            | "file.readFailed"
+            | "file.invalidRange"
+            | "file.outlineUnavailable"
+            | "file.revisionMismatch"
+            | "file.lineTooLarge"
+            | "tool.invalidArguments"
+    )
+}
+
 fn map_tool_result_error(error: ToolError) -> ToolError {
     match error.code.as_str() {
         "artifact.notFound" | "artifact.expired" => {
@@ -599,7 +626,6 @@ fn parse_selector(selector: Option<&str>, total: usize) -> Result<ParsedSelector
     }
 
     let mut requested = Vec::new();
-    let mut previous_requested_end = 0;
     let mut open_window = None;
     for part in range_text.split(',') {
         if requested.len() >= MAX_RANGES {
@@ -627,10 +653,10 @@ fn parse_selector(selector: Option<&str>, total: usize) -> Result<ParsedSelector
                 true,
             )
         };
-        if start > total || end < start || start <= previous_requested_end {
+        if start > total || end < start {
             return Err(ToolError::new(
                 "file.invalidRange",
-                "selector ranges must be valid, sorted, and non-overlapping",
+                "selector range is outside the file or has an invalid order",
             ));
         }
         if is_open_window {
@@ -643,11 +669,21 @@ fn parse_selector(selector: Option<&str>, total: usize) -> Result<ParsedSelector
             open_window = Some((start, end));
         }
         requested.push((start, end));
-        previous_requested_end = end;
     }
 
-    let mut expanded: Vec<(usize, usize)> = Vec::with_capacity(requested.len());
+    requested.sort_unstable_by_key(|range| range.0);
+    let mut normalized_requested: Vec<(usize, usize)> = Vec::with_capacity(requested.len());
     for (start, end) in requested {
+        match normalized_requested.last_mut() {
+            Some((_, previous_end)) if start <= previous_end.saturating_add(1) => {
+                *previous_end = (*previous_end).max(end);
+            }
+            _ => normalized_requested.push((start, end)),
+        }
+    }
+
+    let mut expanded: Vec<(usize, usize)> = Vec::with_capacity(normalized_requested.len());
+    for (start, end) in normalized_requested {
         let range = if raw_mode {
             (start, end)
         } else {

@@ -35,7 +35,7 @@ impl ToolHandler for FileGlobTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tools::contract::catalog_entry::<FileGlobInput, FileGlobOutput>(
             &self.name,
-            "Resolve exact paths or glob patterns to files and directories. Initial requests accept patterns with optional type, hidden, and gitignore filters; continuation requests contain cursor alone. Paths use ./ for the workspace namespace and / for the absolute namespace.".to_string(),
+            "Resolve exact paths or glob patterns to files and directories. Bare relative paths are normalized to the workspace namespace. Missing exact paths and missing glob roots are normal empty discovery results. Initial requests accept patterns with optional type, hidden, and gitignore filters; continuation requests contain cursor alone.".to_string(),
             [ToolCapability::Read],
         )
     }

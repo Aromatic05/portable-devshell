@@ -10,7 +10,7 @@ use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use crate::security::path::{
     ResolvedDirectory, ResolvedMetadata, ResolvedPath, parse_requested_path,
 };
-use crate::tools::file::{authorize, resolve_existing};
+use crate::tools::file::{authorize, normalize_file_path, resolve_existing};
 use crate::tools::{ToolCall, ToolError};
 
 #[derive(Clone)]
@@ -68,7 +68,8 @@ impl DiscoveryCursor {
         let mut pending = VecDeque::with_capacity(specs.len());
         for spec in specs {
             call.check_cancelled()?;
-            pending.push_back(prepare_source(call, spec, hidden, gitignore)?);
+            let spec = normalize_file_path(spec)?;
+            pending.push_back(prepare_source(call, &spec, hidden, gitignore)?);
         }
         Ok(Self {
             pending,
@@ -116,7 +117,13 @@ fn prepare_exact(
     hidden: bool,
     gitignore: bool,
 ) -> Result<DiscoverySource, ToolError> {
-    let (requested, resolved) = resolve_existing(call, spec, false)?;
+    let (requested, resolved) = match resolve_existing(call, spec, false) {
+        Ok(resolved) => resolved,
+        Err(error) if error.code == "file.notFound" => {
+            return Ok(DiscoverySource::Single(None));
+        }
+        Err(error) => return Err(error),
+    };
     let metadata = resolved
         .metadata()
         .map_err(|error| ToolError::new("file.notFound", error.to_string()))?;

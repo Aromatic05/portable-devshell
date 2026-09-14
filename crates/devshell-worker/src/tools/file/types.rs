@@ -58,7 +58,7 @@ pub struct FileReadRequest {
     pub path: String,
     #[serde(default)]
     pub view: FileReadView,
-    /// Content selector using N, N-M, N+count, or sorted non-overlapping comma-separated ranges. Append :raw to disable editing-context expansion; a single N still opens the default window, so use N-N:raw for exactly one line. Without :raw, each range includes one preceding line and up to three following lines. Cannot be combined with view=outline.
+    /// Content selector using N, N-M, N+count, or comma-separated ranges. Ranges are sorted and merged when unambiguous. Append :raw to disable editing-context expansion; a single N still opens the default window, so use N-N:raw for exactly one line. Without :raw, each range includes one preceding line and up to three following lines. Cannot be combined with view=outline.
     #[schemars(length(min = 1))]
     pub selector: Option<String>,
 }
@@ -99,7 +99,8 @@ pub struct FileReadOutput {
 #[serde(rename_all = "camelCase")]
 pub struct FileReadBatchEntry {
     pub path: String,
-    pub view: FileReadResolvedView,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view: Option<FileReadResolvedView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -112,19 +113,52 @@ pub struct FileReadBatchEntry {
     pub language: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parse_status: Option<FileParseStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<FileReadBatchError>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FileReadBatchError {
+    pub code: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retryable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
 }
 
 impl FileReadBatchEntry {
     pub fn from_output(path: String, output: FileReadOutput) -> Self {
         Self {
             path,
-            view: output.view,
+            view: Some(output.view),
             content: output.content,
             metadata: output.metadata,
             truncated: output.truncated,
             next_selector: output.next_selector,
             language: output.language,
             parse_status: output.parse_status,
+            error: None,
+        }
+    }
+
+    pub fn from_error(path: String, error: crate::tools::ToolError) -> Self {
+        Self {
+            path,
+            view: None,
+            content: None,
+            metadata: None,
+            truncated: None,
+            next_selector: None,
+            language: None,
+            parse_status: None,
+            error: Some(FileReadBatchError {
+                code: error.code,
+                message: error.message,
+                retryable: error.retryable.then_some(true),
+                details: error.details,
+            }),
         }
     }
 }

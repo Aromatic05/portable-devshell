@@ -624,7 +624,8 @@ test("Pi devshell edit tool contributes its Worker preconditions and grammar to 
     assert.equal(metadata.promptGuidelines?.length, 2);
     assert.match(metadata.promptGuidelines?.[0] ?? "", /file_read or file_grep/u);
     assert.match(metadata.promptGuidelines?.[1] ?? "", /\*\*\* Patch File:/u);
-    assert.match(metadata.promptGuidelines?.[1] ?? "", /Never use '\*\*\* Update File:'/u);
+    assert.match(metadata.promptGuidelines?.[1] ?? "", /\*\*\* Update File:/u);
+    assert.match(metadata.promptGuidelines?.[1] ?? "", /\*\*\* Add File:/u);
 });
 
 test("Pi devshell renderer formats common calls without JSON fallback", () => {

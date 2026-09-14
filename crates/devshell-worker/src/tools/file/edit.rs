@@ -2,17 +2,17 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::security::path::{ResolvedPath, ResolvedTarget, parse_requested_path};
+use crate::security::path::{ResolvedPath, ResolvedTarget};
 use crate::tools::file::diff;
 use crate::tools::file::publish::{self, PublishMode};
 use crate::tools::file::state::{
-    ContextFileSnapshot, FULL_SNAPSHOT_LIMIT, SnapshotContent, TextFile, TextInspection,
+    ContextFileSnapshot, FULL_SNAPSHOT_LIMIT, SnapshotContent, TextFile, TextFormat, TextInspection,
 };
 use crate::tools::file::types::{
     FileChangeAction, FileChangeError, FileChangeOperationOutput, FileChangeResultDetail,
     FileChangeSetInput, FileChangeSetOutput, FileChangeStatus,
 };
-use crate::tools::file::{FileToolState, authorize, resolve_create};
+use crate::tools::file::{FileToolState, resolve_create};
 use crate::tools::file::{context_patch, context_patch_stream};
 use crate::tools::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
@@ -42,7 +42,7 @@ impl ToolHandler for FileEditTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tools::contract::catalog_entry::<FileChangeSetInput, FileChangeSetOutput>(
             &self.name,
-            "Apply an ordered multi-file change set. changes contains one *** Begin Edit / *** End Edit envelope with Write File, Patch File, Rewrite File, Delete File, or Move File sections. Move File requires a following *** To: target line; patch hunks use @@, @@ BOF, or @@ EOF with space, -, and + line prefixes. Mutations of existing files require edit coverage established earlier in the same context. If an operation fails, earlier operations remain applied and later operations are not executed.".to_string(),
+            "Apply an ordered multi-file change set. Prefer *** Begin Edit / *** End Edit with Write File, Patch File, Rewrite File, Delete File, or Move File sections; common Begin/End Patch, Update File, and Add File aliases are accepted. Move File requires a following *** To: target line; patch hunks use @@, @@ BOF, or @@ EOF with space, -, and + line prefixes. Mutations of existing files require edit coverage established earlier in the same context. Multi-operation change sets are semantically validated before writing, so validation failures leave the workspace unchanged; an OS-level commit failure remains fail-stop and may retain earlier committed operations.".to_string(),
             [ToolCapability::Write],
         )
     }
@@ -54,6 +54,22 @@ impl ToolHandler for FileEditTool {
         let parsed = parse_change_set(&input.changes)?;
         call.check_cancelled()?;
         let prepared = self.preflight(&call, parsed)?;
+        if prepared.len() > 1
+            && let Err((failed_index, error)) = self.validate_semantics(&call, &prepared)
+        {
+            let mut operations = Vec::with_capacity(prepared.len());
+            for (offset, operation) in prepared.iter().enumerate() {
+                let index = offset + 1;
+                if index == failed_index {
+                    operations.push(failed_output(index, operation, error.clone()));
+                } else {
+                    operations.push(not_executed(index, operation));
+                }
+            }
+            let mut output = FileChangeSetOutput { operations };
+            enforce_output_budget(&mut output)?;
+            return crate::tools::contract::serialize(output);
+        }
         let mut output = self.execute(&call, prepared, detail);
         if detail == FileChangeResultDetail::Summary {
             for operation in &mut output.operations {
@@ -106,6 +122,11 @@ enum PreparedOperation {
         target: PathBuf,
         base: Option<ContextFileSnapshot>,
     },
+}
+
+#[derive(Clone)]
+struct SemanticFile {
+    text: TextFile,
 }
 
 #[derive(Clone, Copy)]
@@ -280,6 +301,142 @@ impl FileEditTool {
         }
 
         Ok(prepared)
+    }
+
+    fn validate_semantics(
+        &self,
+        call: &ToolCall,
+        operations: &[PreparedOperation],
+    ) -> Result<(), (usize, ToolError)> {
+        let mut virtual_files = HashMap::<PathBuf, Option<SemanticFile>>::new();
+        let mut local_snapshots = HashMap::<PathBuf, ContextFileSnapshot>::new();
+
+        for (offset, operation) in operations.iter().cloned().enumerate() {
+            let index = offset + 1;
+            let result = (|| -> Result<(), ToolError> {
+                call.check_cancelled()?;
+                let operation = bind_local_snapshot(operation, &local_snapshots)?;
+                match operation {
+                    PreparedOperation::Write {
+                        display,
+                        path,
+                        content,
+                    } => {
+                        if !virtual_files.contains_key(&path) {
+                            require_semantic_absent(call, &display, &path)?;
+                        }
+                        let text = TextFile::from_normalized_format(
+                            TextFormat {
+                                bom: false,
+                                final_newline: content.ends_with('\n'),
+                                line_ending: "\n",
+                            },
+                            &content,
+                        )?;
+                        let seen = (1..=text.lines.len()).collect::<BTreeSet<_>>();
+                        let snapshot = semantic_snapshot(&path, &text, seen);
+                        virtual_files.insert(path.clone(), Some(SemanticFile { text }));
+                        local_snapshots.insert(path, snapshot);
+                    }
+                    PreparedOperation::Patch {
+                        display,
+                        path,
+                        patch,
+                        base,
+                    } => {
+                        let base = require_bound_base(base)?;
+                        let current = semantic_current(call, &display, &path, &virtual_files)?;
+                        let (original, may_merge) = match &base.content {
+                            SnapshotContent::Full(content) => (content.clone(), true),
+                            SnapshotContent::Sparse => {
+                                require_revision(&base, &current)?;
+                                (current.normalized(), false)
+                            }
+                        };
+                        let application = context_patch::apply(&original, &patch)?;
+                        require_coverage(&base, &application.required_lines)?;
+                        let (normalized, merged) = if current.revision == base.revision {
+                            (application.normalized.clone(), false)
+                        } else if may_merge {
+                            (
+                                diff::merge_changes(
+                                    &original,
+                                    &current.normalized(),
+                                    &application.normalized,
+                                )?,
+                                true,
+                            )
+                        } else {
+                            return Err(revision_mismatch());
+                        };
+                        let updated = TextFile::from_normalized(&current, &normalized)?;
+                        let seen = if merged {
+                            application.resulting_known_lines.clone()
+                        } else {
+                            application.remap_seen_lines(&base.seen_lines)
+                        };
+                        let snapshot = semantic_snapshot(&path, &updated, seen);
+                        virtual_files.insert(path.clone(), Some(SemanticFile { text: updated }));
+                        local_snapshots.insert(path, snapshot);
+                    }
+                    PreparedOperation::Rewrite {
+                        display,
+                        path,
+                        content,
+                        base,
+                    } => {
+                        let base = require_bound_base(base)?;
+                        let current = semantic_current(call, &display, &path, &virtual_files)?;
+                        require_revision(&base, &current)?;
+                        let updated = TextFile::from_normalized(&current, &content)?;
+                        let seen = (1..=updated.lines.len()).collect::<BTreeSet<_>>();
+                        let snapshot = semantic_snapshot(&path, &updated, seen);
+                        virtual_files.insert(path.clone(), Some(SemanticFile { text: updated }));
+                        local_snapshots.insert(path, snapshot);
+                    }
+                    PreparedOperation::Delete {
+                        display,
+                        path,
+                        base,
+                    } => {
+                        let base = require_bound_base(base)?;
+                        let current = semantic_current(call, &display, &path, &virtual_files)?;
+                        require_revision(&base, &current)?;
+                        virtual_files.insert(path.clone(), None);
+                        local_snapshots.remove(&path);
+                    }
+                    PreparedOperation::Move {
+                        source_display,
+                        source,
+                        target_display,
+                        target,
+                        base,
+                    } => {
+                        let base = require_bound_base(base)?;
+                        let current =
+                            semantic_current(call, &source_display, &source, &virtual_files)?;
+                        require_revision(&base, &current)?;
+                        if !virtual_files.contains_key(&target) {
+                            require_semantic_absent(call, &target_display, &target)?;
+                        }
+                        let source_snapshot = local_snapshots.get(&source).cloned().unwrap_or(base);
+                        let mut target_snapshot = source_snapshot;
+                        target_snapshot.canonical_path = target.display().to_string();
+                        let moved = SemanticFile { text: current };
+                        virtual_files.insert(source.clone(), None);
+                        virtual_files.insert(target.clone(), Some(moved));
+                        local_snapshots.remove(&source);
+                        local_snapshots.insert(target, target_snapshot);
+                    }
+                }
+                Ok(())
+            })();
+            if let Err(error) = result {
+                return Err((index, error));
+            }
+        }
+
+        Ok(())
     }
 
     fn require_snapshot(
@@ -1011,15 +1168,19 @@ fn parse_change_set(input: &str) -> Result<Vec<ParsedOperation>, ToolError> {
         .iter()
         .position(|line| !line.trim().is_empty())
         .ok_or_else(|| invalid_edit("change set is empty"))?;
-    if lines[first] != "*** Begin Edit" {
-        return Err(invalid_edit("change set must start with `*** Begin Edit`"));
+    if !matches!(lines[first], "*** Begin Edit" | "*** Begin Patch") {
+        return Err(invalid_edit(
+            "change set must start with `*** Begin Edit` or `*** Begin Patch`",
+        ));
     }
     let last = lines
         .iter()
         .rposition(|line| !line.trim().is_empty())
         .ok_or_else(|| invalid_edit("change set is empty"))?;
-    if lines[last] != "*** End Edit" {
-        return Err(invalid_edit("change set must end with `*** End Edit`"));
+    if !matches!(lines[last], "*** End Edit" | "*** End Patch") {
+        return Err(invalid_edit(
+            "change set must end with `*** End Edit` or `*** End Patch`",
+        ));
     }
 
     let mut operations = Vec::new();
@@ -1045,7 +1206,19 @@ fn parse_change_set(input: &str) -> Result<Vec<ParsedOperation>, ToolError> {
             index = next;
             continue;
         }
-        if let Some(path) = line.strip_prefix("*** Patch File:") {
+        if let Some(path) = line.strip_prefix("*** Add File:") {
+            let path = parse_path(path)?;
+            let (body, next) = collect_body(&lines, index + 1, last);
+            let content = add_file_body(body);
+            ensure_text(&content)?;
+            operations.push(ParsedOperation::Write { path, content });
+            index = next;
+            continue;
+        }
+        if let Some(path) = line
+            .strip_prefix("*** Patch File:")
+            .or_else(|| line.strip_prefix("*** Update File:"))
+        {
             let path = parse_path(path)?;
             let (body, next) = collect_body(&lines, index + 1, last);
             let patch = body.join("\n");
@@ -1127,6 +1300,21 @@ fn literal_body(lines: Vec<&str>) -> String {
     content
 }
 
+fn add_file_body(mut lines: Vec<&str>) -> String {
+    while lines.last() == Some(&"") {
+        lines.pop();
+    }
+    if !lines.is_empty() && lines.iter().all(|line| line.starts_with('+')) {
+        return literal_body(
+            lines
+                .into_iter()
+                .map(|line| line.strip_prefix('+').unwrap_or(line))
+                .collect(),
+        );
+    }
+    literal_body(lines)
+}
+
 const LITERAL_DIFF_LINE_RATIO: f64 = 0.5;
 
 fn reject_literal_diff(content: &str) -> Result<(), ToolError> {
@@ -1152,11 +1340,13 @@ fn reject_literal_diff(content: &str) -> Result<(), ToolError> {
 
 fn is_operation_header(line: &str) -> bool {
     line.starts_with("*** Write File:")
+        || line.starts_with("*** Add File:")
         || line.starts_with("*** Patch File:")
+        || line.starts_with("*** Update File:")
         || line.starts_with("*** Rewrite File:")
         || line.starts_with("*** Delete File:")
         || line.starts_with("*** Move File:")
-        || line == "*** End Edit"
+        || matches!(line, "*** End Edit" | "*** End Patch")
 }
 
 fn skip_blank_lines(lines: &[&str], mut index: usize, end: usize) -> usize {
@@ -1178,8 +1368,6 @@ fn parse_path(raw: &str) -> Result<String, ToolError> {
 }
 
 fn resolve_for_plan(call: &ToolCall, raw: &str) -> Result<(String, PathBuf), ToolError> {
-    let requested = parse_requested_path(raw)?;
-    authorize(call, requested.namespace, true)?;
     let (requested, resolved) = resolve_create(call, raw)?;
     Ok((requested.raw, resolved.canonical))
 }
@@ -1197,6 +1385,68 @@ fn rebind_for_execution(
         ));
     }
     Ok(resolved)
+}
+
+fn semantic_current(
+    call: &ToolCall,
+    display: &str,
+    path: &Path,
+    virtual_files: &HashMap<PathBuf, Option<SemanticFile>>,
+) -> Result<TextFile, ToolError> {
+    match virtual_files.get(path) {
+        Some(Some(file)) => return Ok(file.text.clone()),
+        Some(None) => {
+            return Err(ToolError::new(
+                "tool.internalError",
+                format!(
+                    "semantic change-set state marks {} as absent",
+                    path.display()
+                ),
+            ));
+        }
+        None => {}
+    }
+    let resolved = rebind_for_execution(call, display, path)?;
+    TextFile::read_file(
+        resolved
+            .open_file()
+            .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+        &call.cancellation,
+    )
+}
+
+fn require_semantic_absent(call: &ToolCall, display: &str, path: &Path) -> Result<(), ToolError> {
+    let resolved = rebind_for_execution(call, display, path)?;
+    let target = resolved
+        .target()
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    if target
+        .metadata(false)
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
+        .is_some()
+    {
+        return Err(ToolError::new(
+            "file.alreadyExists",
+            format!("target already exists: {display}"),
+        ));
+    }
+    Ok(())
+}
+
+fn semantic_snapshot(
+    path: &Path,
+    text: &TextFile,
+    seen_lines: BTreeSet<usize>,
+) -> ContextFileSnapshot {
+    ContextFileSnapshot {
+        canonical_path: path.display().to_string(),
+        revision: text.revision.clone(),
+        seen_lines,
+        total_lines: text.lines.len(),
+        content: SnapshotContent::Full(text.normalized()),
+        ordinal: 0,
+        last_accessed_at_ms: 0,
+    }
 }
 
 fn virtual_entry(entries: &mut HashMap<PathBuf, VirtualEntry>, path: &Path) -> VirtualEntry {
