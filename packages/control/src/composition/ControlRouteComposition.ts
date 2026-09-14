@@ -12,6 +12,10 @@ import { createArtifactRouteModule } from "../control/artifact/route/ArtifactRou
 import { createCliRouteModule, type CliCommandPort } from "../control/cli/CliRouteModule.js";
 import type { ConfigEditorPort } from "../control/config/ConfigRouteModule.js";
 import { createConfigRouteModule } from "../control/config/ConfigRouteModule.js";
+import {
+    createConversationPreferenceRouteModule,
+    type ConversationPreferencePort,
+} from "../control/conversation/ConversationPreferenceRouteModule.js";
 import { createDebugRouteModule, type DebugPatchPort } from "../control/debug/DebugRouteModule.js";
 import { createExtensionRouteModule, type ExtensionControlPort } from "../control/extension/route/ExtensionRouteModule.js";
 import type { InstanceCreatePort } from "../control/instance/InstanceRouteModule.js";
@@ -46,6 +50,7 @@ export interface ControlRouteCompositionOptions {
     cliCommands?: CliCommandPort;
     config?: ConfigEditorPort;
     contextAdmin?: () => ContextAdminPort | undefined;
+    conversationPreferences?: ConversationPreferencePort;
     debug?: DebugPatchPort;
     extension?: ExtensionControlPort;
     instanceCreate?: InstanceCreatePort;
@@ -133,6 +138,9 @@ export class ControlRouteComposition {
                         }))
                     }),
                     createContextRouteModule(this.#options.contextAdmin),
+                    ...(this.#options.conversationPreferences === undefined
+                        ? []
+                        : [createConversationPreferenceRouteModule(this.#options.conversationPreferences)]),
                     createOperationalOverviewRouteModule(this.#overview),
                     createInstanceRouteModule({
                         create: this.#options.instanceCreate,

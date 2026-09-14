@@ -5,6 +5,7 @@ import { controlRemoteRpcPath, controlWebBasePath } from "@portable-devshell/sha
 import { McpOAuthProtectedResource, type HttpHost } from "@portable-devshell/mcp";
 import type { InstanceRegistry } from "../../control/instance/registry/InstanceRegistry.js";
 import { DebugPatchService } from "../../control/debug/DebugPatchService.js";
+import type { ConversationPreferencePort } from "../../control/conversation/ConversationPreferenceRouteModule.js";
 import { CliExtensionCommandService } from "../../control/cli/CliExtensionCommandService.js";
 import { ModelDevshellBroker } from "../../control/cli/ModelDevshellBroker.js";
 import { RuntimeSubscriptionManager } from "../../instance/runtime/RuntimeSubscriptionManager.js";
@@ -31,6 +32,7 @@ import type { ControlRuntimeReverse } from "./ControlRuntimeReverse.js";
 export interface ControlRuntimeOptions {
     artifact: ControlRuntimeArtifact;
     builtinExtensionSources?: readonly BuiltinExtensionSource[];
+    conversationPreferences: ConversationPreferencePort;
     extensionPaths: ExtensionPathLayout;
     extensions: ExtensionHost;
     instances: InstanceRegistry;
@@ -108,6 +110,7 @@ export class ControlRuntime {
             }),
             config: options.mcp.configEditor,
             contextAdmin: () => options.mcp.host?.contextAdmin,
+            conversationPreferences: options.conversationPreferences,
             debug: this.#debug,
             extension: this.#extensionControl,
             instanceCreate: options.mcp.instanceCreate,

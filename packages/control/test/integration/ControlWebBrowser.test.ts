@@ -48,6 +48,11 @@ test("real Chromium opens auth=none WebUI, establishes a session, and boots thro
     await assertOverview(page, runtime.calls);
 
     assert.equal(runtime.calls.hello > 0, true, "the SPA must complete the real control protocol handshake");
+    const preferenceDeadline = Date.now() + 5_000;
+    while (runtime.calls.preferences === 0 && Date.now() < preferenceDeadline) {
+        await page.waitForTimeout(25);
+    }
+    assert.equal(runtime.calls.preferences > 0, true, "the SPA must load server-backed Conversation preferences");
     assert.equal(
         (await page.context().cookies()).some((cookie) => cookie.name === "devshell_web_session"),
         true,
@@ -191,7 +196,7 @@ test("real Chromium preserves a public URL prefix through session bootstrap and 
 interface BrowserRuntime {
     approvals?: McpOAuthApprovalService;
     basePath: string;
-    calls: { hello: number; overview: number };
+    calls: { hello: number; overview: number; preferences: number };
     close(): Promise<void>;
     origin: string;
 }
@@ -219,7 +224,7 @@ async function startBrowserRuntime(options: {
                 },
         basePath,
     });
-    const calls = { hello: 0, overview: 0 };
+    const calls = { hello: 0, overview: 0, preferences: 0 };
     const channels = new ControlChannelServer({
         listeners: [
             new ControlWebSocketListener({
@@ -313,7 +318,7 @@ async function buildBrowserAssets(outputDirectory: string): Promise<void> {
     });
 }
 
-function createRouteSnapshot(calls: { hello: number; overview: number }): PrefixRouteSnapshot {
+function createRouteSnapshot(calls: { hello: number; overview: number; preferences: number }): PrefixRouteSnapshot {
     return PrefixRoute.snapshot([
         {
             destination: "@control",
@@ -333,6 +338,32 @@ function createRouteSnapshot(calls: { hello: number; overview: number }): Prefix
                         },
                         { name: "status", handle: () => ({ instanceCount: 0, ok: true, pid: process.pid }) },
                         { name: "ping", handle: () => ({ pong: true }) },
+                    ],
+                },
+                {
+                    name: "conversation",
+                    operations: [
+                        {
+                            name: "preferences",
+                            handle: () => {
+                                calls.preferences += 1;
+                                return {
+                                    orderByWorkspace: {},
+                                    titles: {},
+                                    version: 1,
+                                    workspaceOrder: [],
+                                };
+                            },
+                        },
+                        {
+                            name: "updatePreferences",
+                            handle: () => ({
+                                orderByWorkspace: {},
+                                titles: {},
+                                version: 1,
+                                workspaceOrder: [],
+                            }),
+                        },
                     ],
                 },
                 {

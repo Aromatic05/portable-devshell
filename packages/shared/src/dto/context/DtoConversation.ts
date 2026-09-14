@@ -21,3 +21,29 @@ export interface ConversationListInput {
     limit?: number;
     maxBytes?: number;
 }
+
+
+export const CONVERSATION_PREFERENCES_VERSION = 1 as const;
+
+export interface ConversationPreferencesSnapshot {
+    orderByWorkspace: Record<string, string[]>;
+    titles: Record<string, string>;
+    version: typeof CONVERSATION_PREFERENCES_VERSION;
+    workspaceOrder: string[];
+}
+
+export interface ConversationPreferencesPatch {
+    ifMissing?: boolean;
+    orderByWorkspace?: Record<string, string[]>;
+    titles?: Record<string, string | null>;
+    workspaceOrder?: string[];
+}
+
+export function createEmptyConversationPreferences(): ConversationPreferencesSnapshot {
+    return {
+        orderByWorkspace: {},
+        titles: {},
+        version: CONVERSATION_PREFERENCES_VERSION,
+        workspaceOrder: [],
+    };
+}

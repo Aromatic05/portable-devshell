@@ -4,6 +4,7 @@ import {
     ControlRefreshScheduler,
     errorMessage,
     withRequestTimeout,
+    type ConversationPreferencesPatch,
 } from "@portable-devshell/shared/browser";
 
 import type { WebClients } from "../client/WebClients.js";
@@ -33,6 +34,7 @@ export class WebStore {
     #stopped = false;
     #loadPromise?: Promise<void>;
     #reconnectPromise?: Promise<void>;
+    #conversationPreferenceQueue = Promise.resolve();
     #generation = 0;
     #ignoreTransportClose = false;
 
@@ -102,7 +104,9 @@ export class WebStore {
         const generation = this.#generation;
         this.#set({ ...this.#state, connection: "connecting", error: undefined });
         const request = this.#model.load().then(
-            () => {
+            async () => {
+                if (!this.#current(generation)) return;
+                await this.#loadConversationPreferences(generation);
                 if (this.#current(generation)) {
                     this.#set({ ...this.#state, connection: "online", error: undefined });
                 }
@@ -120,6 +124,38 @@ export class WebStore {
             if (this.#loadPromise === request) this.#loadPromise = undefined;
         });
         this.#loadPromise = request;
+        return await request;
+    }
+
+    async updateConversationPreferences(patch: ConversationPreferencesPatch): Promise<boolean> {
+        const generation = this.#generation;
+        const run = async (): Promise<boolean> => {
+            if (!this.#current(generation)) return false;
+            try {
+                const preferences = await withRequestTimeout(
+                    this.clients.conversation.updatePreferences(patch),
+                    this.#requestTimeoutMs,
+                    "conversation.updatePreferences",
+                );
+                if (!this.#current(generation)) return false;
+                this.#set({
+                    ...this.#state,
+                    conversationPreferences: preferences,
+                    conversationPreferencesError: undefined,
+                });
+                return true;
+            } catch (error) {
+                if (this.#current(generation)) {
+                    this.#set({
+                        ...this.#state,
+                        conversationPreferencesError: errorMessage(error),
+                    });
+                }
+                return false;
+            }
+        };
+        const request = this.#conversationPreferenceQueue.then(run, run);
+        this.#conversationPreferenceQueue = request.then(() => undefined, () => undefined);
         return await request;
     }
 
@@ -325,6 +361,29 @@ export class WebStore {
         );
     }
 
+    async #loadConversationPreferences(generation: number): Promise<void> {
+        try {
+            const preferences = await withRequestTimeout(
+                this.clients.conversation.preferences(),
+                this.#requestTimeoutMs,
+                "conversation.preferences",
+            );
+            if (!this.#current(generation)) return;
+            this.#set({
+                ...this.#state,
+                conversationPreferences: preferences,
+                conversationPreferencesError: undefined,
+            });
+        } catch (error) {
+            if (!this.#current(generation)) return;
+            this.#set({
+                ...this.#state,
+                conversationPreferences: undefined,
+                conversationPreferencesError: errorMessage(error),
+            });
+        }
+    }
+
     async #reconnect(): Promise<void> {
         this.#generation += 1;
         const generation = this.#generation;
@@ -334,6 +393,7 @@ export class WebStore {
         this.#set({
             ...this.#state,
             connection: "connecting",
+            conversationPreferencesError: undefined,
             error: undefined,
             notice: undefined,
             operations: {},

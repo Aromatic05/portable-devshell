@@ -20,7 +20,12 @@ import type {
     ContextMessageQueueInput,
     ContextMessageRecord,
 } from "../dto/context/DtoContextMessage.js";
-import type { ConversationEntry, ConversationListInput } from "../dto/context/DtoConversation.js";
+import type {
+    ConversationEntry,
+    ConversationListInput,
+    ConversationPreferencesPatch,
+    ConversationPreferencesSnapshot,
+} from "../dto/context/DtoConversation.js";
 import type { McpContextRecord } from "../dto/context/DtoContextRecord.js";
 import {
     CONTROL_PROTOCOL_VERSION,
@@ -151,6 +156,8 @@ export interface ControlClients {
     };
     conversation: {
         list(instance: string, input?: ConversationListInput): Promise<ConversationEntry[]>;
+        preferences(): Promise<ConversationPreferencesSnapshot>;
+        updatePreferences(patch: ConversationPreferencesPatch): Promise<ConversationPreferencesSnapshot>;
     };
     debug: {
         list(): Promise<DebugPatchSummary[]>;
@@ -278,6 +285,7 @@ export function createControlClients(
     const service = controlClientModule(connection, "service");
     const contextMessage = instanceClientModule(connection, "contextMessage");
     const conversation = instanceClientModule(connection, "conversation");
+    const conversationControl = controlClientModule(connection, "conversation");
     const goal = instanceClientModule(connection, "goal");
     const runtime = instanceClientModule(connection, "runtime");
     const terminal = instanceClientModule(connection, "terminal");
@@ -341,6 +349,8 @@ export function createControlClients(
         },
         conversation: {
             list: (name, input) => conversation.request(name, "list", input ?? {}),
+            preferences: () => conversationControl.request("preferences"),
+            updatePreferences: (patch) => conversationControl.request("updatePreferences", patch),
         },
         debug: {
             list: () => debug.request("list"),

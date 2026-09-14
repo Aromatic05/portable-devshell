@@ -403,6 +403,11 @@ function fakeClients(): WebClients {
         artifact: {} as WebClients["artifact"],
         cli: {} as WebClients["cli"],
         config: {} as WebClients["config"],
+        conversation: {
+            list: async () => [],
+            preferences: async () => ({ orderByWorkspace: {}, titles: {}, version: 1, workspaceOrder: [] }),
+            updatePreferences: async () => ({ orderByWorkspace: {}, titles: {}, version: 1, workspaceOrder: [] }),
+        },
         reverse: {} as WebClients["reverse"],
         terminal: {} as WebClients["terminal"],
         service: {

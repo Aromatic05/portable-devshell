@@ -17,6 +17,12 @@ import { buildConversationMarkdown, Messages } from "../src/views/Messages.js";
 
 const state: WebState = {
     connection: "online",
+    conversationPreferences: {
+        orderByWorkspace: {},
+        titles: {},
+        version: 1,
+        workspaceOrder: [],
+    },
     operations: {},
     readModel: {
         ...createInitialControlReadModelState(),
@@ -98,6 +104,14 @@ const threadRoute: Extract<WebRoute, { page: "messages" }> = {
     instance: "alpha",
     ctxId: "ctx-old-active",
 };
+
+function messageStore(overrides: Record<string, unknown> = {}): WebStore {
+    return {
+        queueContextMessage: vi.fn(async () => true),
+        updateConversationPreferences: vi.fn(async () => true),
+        ...overrides,
+    } as unknown as WebStore;
+}
 
 function twoActiveConversationState(): WebState {
     const firstAt = new Date(Date.now() - 20 * 60 * 1_000).toISOString();
@@ -324,7 +338,7 @@ describe("Messages", () => {
                 navigate={vi.fn()}
                 route={threadRoute}
                 state={state}
-                store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+                store={messageStore()}
             />);
 
             fireEvent.click(screen.getByRole("button", { name: "Export Markdown" }));
@@ -354,7 +368,7 @@ describe("Messages", () => {
             navigate={vi.fn()}
             route={threadRoute}
             state={state}
-            store={{ queueContextMessage } as WebStore}
+            store={messageStore({ queueContextMessage })}
         />);
 
         expect(screen.getByRole("log", { name: "Conversation history" })).toHaveTextContent("Check the route model.");
@@ -381,7 +395,7 @@ describe("Messages", () => {
     });
     it("adds text directives from the composer control menu without structured message metadata", async () => {
         const queueContextMessage = vi.fn(async () => true);
-        render(<Messages navigate={vi.fn()} route={threadRoute} state={state} store={{ queueContextMessage } as WebStore} />);
+        render(<Messages navigate={vi.fn()} route={threadRoute} state={state} store={messageStore({ queueContextMessage })} />);
         const composer = screen.getByRole("textbox", { name: "Comment" });
         fireEvent.click(screen.getByRole("button", { name: "Add message control" }));
         expect(screen.getByRole("menuitem", { name: /^Push/u })).toBeEnabled();
@@ -395,7 +409,7 @@ describe("Messages", () => {
     });
     it("can send #stop and #resume as standalone text controls", async () => {
         const queueContextMessage = vi.fn(async () => true);
-        render(<Messages navigate={vi.fn()} route={threadRoute} state={state} store={{ queueContextMessage } as WebStore} />);
+        render(<Messages navigate={vi.fn()} route={threadRoute} state={state} store={messageStore({ queueContextMessage })} />);
         const form = screen.getByRole("textbox", { name: "Comment" }).closest("form")!;
         fireEvent.click(screen.getByRole("button", { name: "Add message control" }));
         fireEvent.click(screen.getByRole("menuitem", { name: /^Stop/u }));
@@ -410,10 +424,10 @@ describe("Messages", () => {
     it("shows a send failure next to the composer and preserves the draft", async () => {
         const failedState = { ...state, error: "Control connection was lost." };
         const queueContextMessage = vi.fn(async () => false);
-        const store = {
+        const store = messageStore({
             get state() { return failedState; },
             queueContextMessage,
-        } as unknown as WebStore;
+        });
         render(<Messages
             navigate={vi.fn()}
             route={threadRoute}
@@ -442,7 +456,7 @@ describe("Messages", () => {
                 navigate={vi.fn()}
                 route={threadRoute}
                 state={state}
-                store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+                store={messageStore()}
             />);
             await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
             const initialCalls = scrollIntoView.mock.calls.length;
@@ -456,7 +470,7 @@ describe("Messages", () => {
                     ctxId: "ctx-second",
                 }}
                 state={state}
-                store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+                store={messageStore()}
             />);
             await waitFor(() => expect(scrollIntoView.mock.calls.length).toBeGreaterThan(initialCalls));
         } finally {
@@ -481,7 +495,7 @@ describe("Messages", () => {
             navigate={vi.fn()}
             route={threadRoute}
             state={historyOnlyState}
-            store={{ queueContextMessage } as WebStore}
+            store={messageStore({ queueContextMessage })}
         />);
 
         const composer = screen.getByRole("textbox", { name: "Comment" });
@@ -511,7 +525,7 @@ describe("Messages", () => {
             navigate={vi.fn()}
             route={threadRoute}
             state={disabledState}
-            store={{ queueContextMessage } as WebStore}
+            store={messageStore({ queueContextMessage })}
         />);
 
         const composer = screen.getByRole("textbox", { name: "Comment" });
@@ -530,7 +544,7 @@ describe("Messages", () => {
             navigate={navigate}
             route={{ page: "messages", view: "contexts" }}
             state={state}
-            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+            store={messageStore()}
         />);
 
         expect(view.container.querySelector(".messages-sidebar")).not.toHaveClass("open");
@@ -541,40 +555,51 @@ describe("Messages", () => {
         expect(view.container.querySelector(".messages-sidebar")).not.toHaveClass("open");
     });
 
-    it("renames a conversation and keeps the custom title across remounts", () => {
+    it("renames a conversation through server preferences and restores it in a new browser", async () => {
         localStorage.clear();
         const nextState = twoActiveConversationState();
+        const updateConversationPreferences = vi.fn(async () => true);
         const first = render(<Messages
             navigate={vi.fn()}
             route={{ page: "messages", view: "contexts" }}
             state={nextState}
-            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+            store={messageStore({ updateConversationPreferences })}
         />);
 
         fireEvent.click(screen.getByRole("button", { name: "Rename ctx-second" }));
         fireEvent.change(screen.getByLabelText("Conversation title"), { target: { value: "Messages navigation review" } });
         fireEvent.click(screen.getByRole("button", { name: "Save title" }));
-        expect(screen.getByRole("button", { name: /Messages navigation review/u })).toBeInTheDocument();
+        await waitFor(() => expect(updateConversationPreferences).toHaveBeenCalledWith({
+            titles: { "alpha\u0000ctx-second": "Messages navigation review" },
+        }));
 
         first.unmount();
+        const secondBrowserState: WebState = {
+            ...nextState,
+            conversationPreferences: {
+                ...nextState.conversationPreferences!,
+                titles: { "alpha\u0000ctx-second": "Messages navigation review" },
+            },
+        };
         render(<Messages
             navigate={vi.fn()}
             route={{ page: "messages", view: "contexts" }}
-            state={nextState}
-            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+            state={secondBrowserState}
+            store={messageStore()}
         />);
         expect(screen.getByRole("button", { name: /Messages navigation review/u })).toBeInTheDocument();
-        localStorage.clear();
+        expect(localStorage.getItem("portable-devshell:web:conversation-preferences:v1")).toBeNull();
     });
 
-    it("persists manual drag ordering instead of re-sorting by activity", () => {
+    it("persists manual ordering through server preferences instead of browser storage", async () => {
         localStorage.clear();
         const nextState = twoActiveConversationState();
+        const updateConversationPreferences = vi.fn(async () => true);
         const first = render(<Messages
             navigate={vi.fn()}
             route={{ page: "messages", view: "contexts" }}
             state={nextState}
-            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+            store={messageStore({ updateConversationPreferences })}
         />);
         const list = screen.getByRole("navigation", { name: "Conversations" });
         const rows = list.querySelectorAll<HTMLElement>(".conversation-row");
@@ -585,20 +610,118 @@ describe("Messages", () => {
         fireEvent.dragStart(rows[1]!);
         fireEvent.dragOver(rows[0]!);
         fireEvent.drop(rows[0]!);
-        expect(list.querySelectorAll<HTMLElement>(".conversation-row")[0])
-            .toHaveTextContent("Investigate the first regression in Audit.");
+        await waitFor(() => expect(updateConversationPreferences).toHaveBeenCalledWith({
+            orderByWorkspace: {
+                "/work/portable-devshell": ["alpha\u0000ctx-first", "alpha\u0000ctx-second"],
+            },
+        }));
 
         first.unmount();
+        const secondBrowserState: WebState = {
+            ...nextState,
+            conversationPreferences: {
+                ...nextState.conversationPreferences!,
+                orderByWorkspace: {
+                    "/work/portable-devshell": ["alpha\u0000ctx-first", "alpha\u0000ctx-second"],
+                },
+                workspaceOrder: ["/work/portable-devshell"],
+            },
+        };
         render(<Messages
             navigate={vi.fn()}
             route={{ page: "messages", view: "contexts" }}
-            state={nextState}
-            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+            state={secondBrowserState}
+            store={messageStore()}
         />);
         expect(screen.getByRole("navigation", { name: "Conversations" })
             .querySelectorAll<HTMLElement>(".conversation-row")[0])
             .toHaveTextContent("Investigate the first regression in Audit.");
-        localStorage.clear();
+        expect(localStorage.getItem("portable-devshell:web:conversation-preferences:v1")).toBeNull();
+    });
+
+    it("migrates legacy browser preferences once and deletes them only after server persistence succeeds", async () => {
+        const nextState = twoActiveConversationState();
+        localStorage.setItem("portable-devshell:web:conversation-preferences:v1", JSON.stringify({
+            orderByWorkspace: {
+                "/work/portable-devshell": ["alpha\u0000ctx-first", "alpha\u0000ctx-second"],
+            },
+            titles: { "alpha\u0000ctx-second": "Legacy title" },
+            workspaceOrder: ["/work/portable-devshell"],
+        }));
+        const updateConversationPreferences = vi.fn(async () => true);
+
+        render(<Messages
+            navigate={vi.fn()}
+            route={{ page: "messages", view: "contexts" }}
+            state={nextState}
+            store={messageStore({ updateConversationPreferences })}
+        />);
+
+        await waitFor(() => expect(updateConversationPreferences).toHaveBeenCalledWith({
+            ifMissing: true,
+            orderByWorkspace: {
+                "/work/portable-devshell": ["alpha\u0000ctx-first", "alpha\u0000ctx-second"],
+            },
+            titles: { "alpha\u0000ctx-second": "Legacy title" },
+            workspaceOrder: ["/work/portable-devshell"],
+        }));
+        await waitFor(() => expect(localStorage.getItem("portable-devshell:web:conversation-preferences:v1")).toBeNull());
+    });
+
+    it("retains legacy browser preferences when server migration fails", async () => {
+        const nextState = twoActiveConversationState();
+        const legacy = JSON.stringify({
+            titles: { "alpha\u0000ctx-second": "Legacy title" },
+        });
+        localStorage.setItem("portable-devshell:web:conversation-preferences:v1", legacy);
+        const updateConversationPreferences = vi.fn(async () => false);
+
+        render(<Messages
+            navigate={vi.fn()}
+            route={{ page: "messages", view: "contexts" }}
+            state={nextState}
+            store={messageStore({ updateConversationPreferences })}
+        />);
+
+        await waitFor(() => expect(updateConversationPreferences).toHaveBeenCalledWith(expect.objectContaining({
+            ifMissing: true,
+            titles: { "alpha\u0000ctx-second": "Legacy title" },
+        })));
+        expect(localStorage.getItem("portable-devshell:web:conversation-preferences:v1")).toBe(legacy);
+    });
+
+    it("discovers new server ordering entries without pruning unloaded workspaces or overwriting existing order", async () => {
+        const nextState = twoActiveConversationState();
+        const serverState: WebState = {
+            ...nextState,
+            conversationPreferences: {
+                orderByWorkspace: {
+                    "/work/portable-devshell": ["alpha\u0000ctx-first"],
+                    "/work/hidden": ["beta\u0000ctx-hidden"],
+                },
+                titles: {},
+                version: 1,
+                workspaceOrder: ["/work/hidden", "/work/portable-devshell"],
+            },
+        };
+        const updateConversationPreferences = vi.fn(async () => true);
+
+        render(<Messages
+            navigate={vi.fn()}
+            route={{ page: "messages", view: "contexts" }}
+            state={serverState}
+            store={messageStore({ updateConversationPreferences })}
+        />);
+
+        await waitFor(() => expect(updateConversationPreferences).toHaveBeenCalledWith({
+            ifMissing: true,
+            orderByWorkspace: {
+                "/work/portable-devshell": ["alpha\u0000ctx-second", "alpha\u0000ctx-first"],
+            },
+        }));
+        expect(updateConversationPreferences).not.toHaveBeenCalledWith(expect.objectContaining({
+            workspaceOrder: ["/work/portable-devshell"],
+        }));
     });
 
     it("offers keyboard and touch-friendly move controls in addition to drag ordering", () => {
@@ -607,7 +730,7 @@ describe("Messages", () => {
             navigate={vi.fn()}
             route={{ page: "messages", view: "contexts" }}
             state={nextState}
-            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+            store={messageStore()}
         />);
 
         const list = screen.getByRole("navigation", { name: "Conversations" });
@@ -622,7 +745,7 @@ describe("Messages", () => {
             navigate={vi.fn()}
             route={{ page: "messages", view: "contexts" }}
             state={nextState}
-            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+            store={messageStore()}
         />);
         expect(screen.getByRole("button", { name: /Investigate the first regression/u })).toBeInTheDocument();
 
@@ -651,7 +774,7 @@ describe("Messages", () => {
             navigate={vi.fn()}
             route={{ page: "messages", view: "contexts" }}
             state={idleState}
-            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+            store={messageStore()}
         />);
 
         expect(screen.getByRole("button", { name: /Investigate the first regression/u })).toHaveTextContent("idle");
@@ -663,7 +786,7 @@ describe("Messages", () => {
     });
 
     it("closes the message control menu with Escape", () => {
-        render(<Messages navigate={vi.fn()} route={threadRoute} state={state} store={{ queueContextMessage: vi.fn(async () => true) } as WebStore} />);
+        render(<Messages navigate={vi.fn()} route={threadRoute} state={state} store={messageStore()} />);
         fireEvent.click(screen.getByRole("button", { name: "Add message control" }));
         expect(screen.getByRole("menu", { name: "Message controls" })).toBeInTheDocument();
         fireEvent.keyDown(document, { key: "Escape" });
@@ -698,7 +821,7 @@ describe("Messages", () => {
             navigate={vi.fn()}
             route={{ page: "messages", view: "contexts" }}
             state={historyState}
-            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+            store={messageStore()}
         />);
 
         const active = screen.getByRole("button", { name: "Current" });
@@ -764,7 +887,7 @@ describe("Messages", () => {
             navigate={vi.fn()}
             route={{ page: "messages", view: "contexts" }}
             state={groupedState}
-            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+            store={messageStore()}
         />);
 
         fireEvent.click(screen.getByRole("button", { name: "History" }));
@@ -799,7 +922,7 @@ describe("Messages", () => {
                     }, ...groupedState.readModel.contexts],
                 },
             }}
-            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+            store={messageStore()}
         />);
         const stableGroups = within(screen.getByRole("navigation", { name: "Conversations" })).getAllByRole("group");
         expect(stableGroups.map((group) => group.getAttribute("aria-label")))

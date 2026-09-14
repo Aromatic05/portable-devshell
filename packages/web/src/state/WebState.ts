@@ -1,5 +1,6 @@
 import {
     createInitialControlReadModelState,
+    type ConversationPreferencesSnapshot,
     type ControlReadModelState,
 } from "@portable-devshell/shared/browser";
 
@@ -7,6 +8,8 @@ export type ConnectionState = "connecting" | "online" | "offline";
 
 export interface WebState {
     connection: ConnectionState;
+    conversationPreferences?: ConversationPreferencesSnapshot;
+    conversationPreferencesError?: string;
     error?: string;
     notice?: string;
     operations: Record<string, "pending">;

@@ -25,6 +25,7 @@ import {
 
 import { ControlRouteComposition } from "../../src/composition/ControlRouteComposition.ts";
 import { ConfigEditorCoordinator } from "../../src/control/config/editor/ConfigEditorCoordinator.ts";
+import { ConversationPreferenceStore } from "../../src/control/conversation/ConversationPreferenceStore.ts";
 import { ControlConfigStore } from "../../src/control/config/ControlConfigStore.ts";
 import { DebugPatchService } from "../../src/control/debug/DebugPatchService.ts";
 import { InstanceRegistry } from "../../src/control/instance/registry/InstanceRegistry.ts";
@@ -312,6 +313,77 @@ test("config RPC masks the Web token across get, validate, and update responses"
         mode: "token",
         token: strongToken
     });
+});
+
+test("ControlSocketServer exposes server-backed Conversation preferences through the control route", async (t) => {
+    const directory = await createTestTempDirectory("conversation-preference-rpc");
+    const socketPath = createTestIpcPath("conversation-preference-rpc", directory);
+    const preferences = new ConversationPreferenceStore(join(directory, "conversation-preferences.json"));
+    const routes = new ControlRouteComposition({
+        conversationPreferences: preferences,
+        instances: new InstanceRegistry([]),
+        shutdown() {},
+    });
+    const server = new ControlSocketServer({ routes, socketPath });
+    await server.start();
+    t.after(async () => {
+        await cleanupInOrder(
+            () => server.stop(),
+            () => routes.dispose(),
+            () => rm(directory, { force: true, recursive: true }),
+        );
+    });
+
+    const initialPreferences = await request(
+        socketPath,
+        "@control",
+        "conversation.preferences",
+        undefined,
+        "tui",
+    );
+    assert.equal(initialPreferences.error, undefined, JSON.stringify(initialPreferences.error));
+    assert.deepEqual(initialPreferences.payload, {
+        orderByWorkspace: {},
+        titles: {},
+        version: 1,
+        workspaceOrder: [],
+    });
+
+    const updated = (await request(
+        socketPath,
+        "@control",
+        "conversation.updatePreferences",
+        {
+            orderByWorkspace: {
+                "/work/portable-devshell": ["alpha\u0000ctx-b", "alpha\u0000ctx-a"],
+            },
+            titles: { "alpha\u0000ctx-a": "Audit regression" },
+            workspaceOrder: ["/work/portable-devshell"],
+        },
+        "tui",
+    )).payload;
+    assert.deepEqual(updated, {
+        orderByWorkspace: {
+            "/work/portable-devshell": ["alpha\u0000ctx-b", "alpha\u0000ctx-a"],
+        },
+        titles: { "alpha\u0000ctx-a": "Audit regression" },
+        version: 1,
+        workspaceOrder: ["/work/portable-devshell"],
+    });
+    assert.deepEqual((await request(
+        socketPath,
+        "@control",
+        "conversation.preferences",
+        undefined,
+        "tui",
+    )).payload, updated);
+    assert.equal((await request(
+        socketPath,
+        "@control",
+        "conversation.updatePreferences",
+        { unknown: true },
+        "tui",
+    )).error?.code, errorCodes.targetInvalid);
 });
 
 test("ControlSocketServer rebuilds the immutable route snapshot after registry changes", async (t) => {

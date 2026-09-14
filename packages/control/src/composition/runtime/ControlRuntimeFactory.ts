@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 
 import { ControlPathHome } from "@portable-devshell/shared";
 import { ExtensionHost } from "../../control/extension/host/ExtensionHost.js";
+import { ConversationPreferenceStore } from "../../control/conversation/ConversationPreferenceStore.js";
 import { ExtensionArtifactCapabilityControl } from "../../control/extension/host/generation/capability/ExtensionArtifactCapabilityControl.js";
 import { ExtensionAssetCapabilityControl } from "../../control/extension/host/generation/capability/ExtensionAssetCapabilityControl.js";
 import { ExtensionInstanceCapabilityControl } from "../../control/extension/host/generation/capability/ExtensionInstanceCapabilityControl.js";
@@ -100,6 +101,7 @@ export class ControlRuntimeFactory {
             return new ControlRuntime({
                 artifact,
                 builtinExtensionSources: this.#builtinExtensionSources,
+                conversationPreferences: new ConversationPreferenceStore(controlPaths.conversationPreferencesFile),
                 extensionPaths,
                 extensions,
                 instances: options.state.instances,

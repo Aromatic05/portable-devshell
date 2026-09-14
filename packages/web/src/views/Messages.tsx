@@ -7,8 +7,11 @@ import {
     useState,
 } from "react";
 import {
+    createEmptyConversationPreferences,
     parseContextMessageDirective,
     type ContextMessageDirective,
+    type ConversationPreferencesPatch,
+    type ConversationPreferencesSnapshot,
     workspaceFolderName,
 } from "@portable-devshell/shared/browser";
 
@@ -46,8 +49,14 @@ export function Messages({
     }>();
     const [query, setQuery] = useState("");
     const [sessionScope, setSessionScope] = useState<"current" | "history">("current");
-    const [conversationPreferences, setConversationPreferences] = useState<ConversationPreferences>(
-        () => readConversationPreferences(),
+    const [conversationPreferences, setConversationPreferences] = useState<ConversationPreferencesSnapshot>(
+        () => state.conversationPreferences ?? createEmptyConversationPreferences(),
+    );
+    const [legacyConversationPreferences] = useState<LegacyConversationPreferences | undefined>(
+        () => readLegacyConversationPreferences(),
+    );
+    const [legacyMigrationPending, setLegacyMigrationPending] = useState(
+        () => legacyConversationPreferences !== undefined,
     );
     const [currentConversationKeys, setCurrentConversationKeys] = useState<Set<string>>(
         () => new Set(selectWebMessageSessions(state).map(conversationKey)),
@@ -63,6 +72,10 @@ export function Messages({
     const followBottomRef = useRef(true);
     const previousThreadKeyRef = useRef<string>();
     const sidebarRef = useRef<HTMLDivElement>(null);
+    const legacyMigrationStartedRef = useRef(false);
+    const preferenceMutationVersionRef = useRef(0);
+    const pendingPreferenceMutationsRef = useRef(0);
+    const preferenceOrderSyncRef = useRef(false);
     const activeSessions = useMemo(() => selectWebMessageSessions(state), [state]);
     const inactiveSessions = useMemo(() => selectWebMessageHistorySessions(state), [state]);
     const allBaseSessions = useMemo(
@@ -137,13 +150,63 @@ export function Messages({
     }, [activeSessions]);
 
     useEffect(() => {
-        setConversationPreferences((current) => {
-            const next = ensureConversationPreferenceOrder(current, allBaseSessions);
-            if (next === current) return current;
-            writeConversationPreferences(next);
-            return next;
+        if (state.conversationPreferences === undefined || pendingPreferenceMutationsRef.current > 0) return;
+        setConversationPreferences(state.conversationPreferences);
+    }, [state.conversationPreferences]);
+
+    useEffect(() => {
+        if (
+            !legacyMigrationPending ||
+            legacyConversationPreferences === undefined ||
+            state.conversationPreferences === undefined ||
+            legacyMigrationStartedRef.current
+        ) return;
+        legacyMigrationStartedRef.current = true;
+        const imported = ensureConversationPreferenceOrder(
+            legacyConversationPreferences.preferences,
+            allBaseSessions,
+            legacyConversationPreferences.legacyOrder,
+        );
+        void store.updateConversationPreferences({
+            ifMissing: true,
+            orderByWorkspace: imported.orderByWorkspace,
+            titles: imported.titles,
+            workspaceOrder: imported.workspaceOrder,
+        }).then((succeeded) => {
+            if (succeeded) {
+                removeLegacyConversationPreferences();
+                setConversationPreferences(store.state?.conversationPreferences ?? imported);
+            }
+            setLegacyMigrationPending(false);
         });
-    }, [allBaseSessions]);
+    }, [
+        allBaseSessions,
+        legacyConversationPreferences,
+        legacyMigrationPending,
+        state.conversationPreferences,
+        store,
+    ]);
+
+    useEffect(() => {
+        if (
+            state.conversationPreferences === undefined ||
+            legacyMigrationPending ||
+            preferenceOrderSyncRef.current
+        ) return;
+        const next = ensureConversationPreferenceOrder(conversationPreferences, allBaseSessions);
+        if (next === conversationPreferences) return;
+        const patch = conversationOrderPatch(conversationPreferences, next);
+        if (patch === undefined) return;
+        preferenceOrderSyncRef.current = true;
+        persistConversationPreferences(next, { ...patch, ifMissing: true }, () => {
+            preferenceOrderSyncRef.current = false;
+        });
+    }, [
+        allBaseSessions,
+        conversationPreferences,
+        legacyMigrationPending,
+        state.conversationPreferences,
+    ]);
 
     useEffect(() => {
         setDrawerOpen(false);
@@ -266,31 +329,47 @@ export function Messages({
         );
     }
 
-    function updateConversationPreferences(
-        updater: (current: ConversationPreferences) => ConversationPreferences,
+    function persistConversationPreferences(
+        next: ConversationPreferencesSnapshot,
+        patch: ConversationPreferencesPatch,
+        settled?: () => void,
     ): void {
-        setConversationPreferences((current) => {
-            const next = updater(current);
-            writeConversationPreferences(next);
-            return next;
+        const mutationVersion = ++preferenceMutationVersionRef.current;
+        pendingPreferenceMutationsRef.current += 1;
+        setConversationPreferences(next);
+        void store.updateConversationPreferences(patch).then((succeeded) => {
+            pendingPreferenceMutationsRef.current = Math.max(0, pendingPreferenceMutationsRef.current - 1);
+            if (mutationVersion === preferenceMutationVersionRef.current) {
+                if (succeeded) {
+                    setConversationPreferences(store.state?.conversationPreferences ?? next);
+                } else {
+                    setConversationPreferences(
+                        store.state?.conversationPreferences ??
+                        state.conversationPreferences ??
+                        createEmptyConversationPreferences(),
+                    );
+                }
+            }
+            settled?.();
         });
     }
 
     function saveConversationTitle(session: WebMessageSession): void {
         const key = conversationKey(session);
         const nextTitle = editingTitle.trim();
-        updateConversationPreferences((current) => {
-            const titles = { ...current.titles };
-            if (nextTitle.length === 0) delete titles[key];
-            else titles[key] = nextTitle;
-            return { ...current, titles };
-        });
+        const titles = { ...conversationPreferences.titles };
+        if (nextTitle.length === 0) delete titles[key];
+        else titles[key] = nextTitle;
+        persistConversationPreferences(
+            { ...conversationPreferences, titles },
+            { titles: { [key]: nextTitle.length === 0 ? null : nextTitle } },
+        );
         setEditingConversationKey(undefined);
         setEditingTitle("");
     }
 
     function moveConversation(sourceKey: string, targetKey: string): void {
-        if (sourceKey === targetKey) return;
+        if (sourceKey === targetKey || state.conversationPreferences === undefined) return;
         const source = allSessions.find((session) => conversationKey(session) === sourceKey);
         const target = allSessions.find((session) => conversationKey(session) === targetKey);
         if (
@@ -299,18 +378,22 @@ export function Messages({
             workspacePreferenceKey(source) !== workspacePreferenceKey(target)
         ) return;
         const workspace = workspacePreferenceKey(source);
-        updateConversationPreferences((current) => ({
-            ...current,
-            orderByWorkspace: {
-                ...current.orderByWorkspace,
-                [workspace]: reorderConversationKeys(
-                    allSessions.filter((session) => workspacePreferenceKey(session) === workspace),
-                    sourceKey,
-                    targetKey,
-                    current.orderByWorkspace[workspace] ?? [],
-                ),
+        const order = reorderConversationKeys(
+            allSessions.filter((session) => workspacePreferenceKey(session) === workspace),
+            sourceKey,
+            targetKey,
+            conversationPreferences.orderByWorkspace[workspace] ?? [],
+        );
+        persistConversationPreferences(
+            {
+                ...conversationPreferences,
+                orderByWorkspace: {
+                    ...conversationPreferences.orderByWorkspace,
+                    [workspace]: order,
+                },
             },
-        }));
+            { orderByWorkspace: { [workspace]: order } },
+        );
     }
 
     function moveConversationByOffset(
@@ -340,7 +423,7 @@ export function Messages({
         return <div
             className={`conversation-row${active ? " selected" : ""}`}
             data-conversation-key={key}
-            draggable={!editing}
+            draggable={!editing && state.conversationPreferences !== undefined}
             key={key}
             onDragEnd={() => setDraggingConversationKey(undefined)}
             onDragOver={(event) => {
@@ -410,7 +493,7 @@ export function Messages({
                     <button
                         aria-label={`Move ${session.ctxId} up`}
                         className="conversation-move"
-                        disabled={collection.filter((candidate) => workspacePreferenceKey(candidate) === workspacePreferenceKey(session))[0]?.ctxId === session.ctxId}
+                        disabled={state.conversationPreferences === undefined || collection.filter((candidate) => workspacePreferenceKey(candidate) === workspacePreferenceKey(session))[0]?.ctxId === session.ctxId}
                         onClick={() => moveConversationByOffset(session, -1, collection)}
                         title="Move up"
                         type="button"
@@ -418,7 +501,7 @@ export function Messages({
                     <button
                         aria-label={`Move ${session.ctxId} down`}
                         className="conversation-move"
-                        disabled={collection.filter((candidate) => workspacePreferenceKey(candidate) === workspacePreferenceKey(session)).at(-1)?.ctxId === session.ctxId}
+                        disabled={state.conversationPreferences === undefined || collection.filter((candidate) => workspacePreferenceKey(candidate) === workspacePreferenceKey(session)).at(-1)?.ctxId === session.ctxId}
                         onClick={() => moveConversationByOffset(session, 1, collection)}
                         title="Move down"
                         type="button"
@@ -426,6 +509,7 @@ export function Messages({
                     <button
                         aria-label={`Rename ${session.ctxId}`}
                         className="conversation-rename"
+                        disabled={state.conversationPreferences === undefined}
                         onClick={() => {
                             setEditingConversationKey(key);
                             setEditingTitle(session.title);
@@ -473,6 +557,10 @@ export function Messages({
                 onClick={archiveIdle}
                 type="button"
             >Archive idle</button> : null}
+            {state.conversationPreferencesError === undefined ? null : <p
+                className="messages-preference-error error"
+                role="alert"
+            >Conversation preferences are not being persisted: {state.conversationPreferencesError}</p>}
             <label className="messages-search">
                 <span className="sr-only">Search conversations</span>
                 <input
@@ -700,11 +788,9 @@ function groupHistorySessionsByWorkspace(sessions: readonly WebMessageSession[])
     return [...groups.values()];
 }
 
-interface ConversationPreferences {
+interface LegacyConversationPreferences {
     legacyOrder: string[];
-    orderByWorkspace: Record<string, string[]>;
-    titles: Record<string, string>;
-    workspaceOrder: string[];
+    preferences: ConversationPreferencesSnapshot;
 }
 
 const conversationPreferencesStorageKey = "portable-devshell:web:conversation-preferences:v1";
@@ -717,11 +803,11 @@ function workspacePreferenceKey(session: Pick<WebMessageSession, "instance" | "w
     return session.workspace ?? `\u0000${session.instance}`;
 }
 
-function readConversationPreferences(): ConversationPreferences {
-    if (typeof window === "undefined") return emptyConversationPreferences();
+function readLegacyConversationPreferences(): LegacyConversationPreferences | undefined {
+    if (typeof window === "undefined") return undefined;
     try {
         const raw = window.localStorage.getItem(conversationPreferencesStorageKey);
-        if (raw === null) return emptyConversationPreferences();
+        if (raw === null) return undefined;
         const parsed = JSON.parse(raw) as {
             order?: unknown;
             orderByWorkspace?: unknown;
@@ -748,24 +834,27 @@ function readConversationPreferences(): ConversationPreferences {
         const workspaceOrder = Array.isArray(parsed.workspaceOrder)
             ? parsed.workspaceOrder.filter((value): value is string => typeof value === "string")
             : [];
-        return { legacyOrder, orderByWorkspace, titles, workspaceOrder };
+        return {
+            legacyOrder,
+            preferences: { orderByWorkspace, titles, version: 1, workspaceOrder },
+        };
     } catch {
-        return emptyConversationPreferences();
+        return undefined;
     }
 }
 
-function writeConversationPreferences(preferences: ConversationPreferences): void {
+function removeLegacyConversationPreferences(): void {
     if (typeof window === "undefined") return;
     try {
-        window.localStorage.setItem(conversationPreferencesStorageKey, JSON.stringify(preferences));
+        window.localStorage.removeItem(conversationPreferencesStorageKey);
     } catch {
-        // Browser storage is an optional HCI preference layer; the conversation remains usable without it.
+        // Migration cleanup is best-effort after the server has accepted the preferences.
     }
 }
 
 function applyConversationPreferences(
     sessions: readonly WebMessageSession[],
-    preferences: ConversationPreferences,
+    preferences: ConversationPreferencesSnapshot,
 ): WebMessageSession[] {
     const workspaceRank = new Map(preferences.workspaceOrder.map((key, index) => [key, index]));
     return sessions
@@ -786,7 +875,7 @@ function applyConversationPreferences(
                 }
                 return leftWorkspace.localeCompare(rightWorkspace);
             }
-            const rank = new Map((preferences.orderByWorkspace[leftWorkspace] ?? preferences.legacyOrder)
+            const rank = new Map((preferences.orderByWorkspace[leftWorkspace] ?? [])
                 .map((key, index) => [key, index]));
             const leftRank = rank.get(conversationKey(left));
             const rightRank = rank.get(conversationKey(right));
@@ -797,14 +886,11 @@ function applyConversationPreferences(
         });
 }
 
-function emptyConversationPreferences(): ConversationPreferences {
-    return { legacyOrder: [], orderByWorkspace: {}, titles: {}, workspaceOrder: [] };
-}
-
 function ensureConversationPreferenceOrder(
-    preferences: ConversationPreferences,
+    preferences: ConversationPreferencesSnapshot,
     sessions: readonly WebMessageSession[],
-): ConversationPreferences {
+    legacyOrder: readonly string[] = [],
+): ConversationPreferencesSnapshot {
     const workspaceSessions = new Map<string, WebMessageSession[]>();
     for (const session of sessions) {
         const workspace = workspacePreferenceKey(session);
@@ -822,7 +908,7 @@ function ensureConversationPreferenceOrder(
         workspaceOrder.some((workspace, index) => workspace !== preferences.workspaceOrder[index]);
     for (const [workspace, values] of workspaceSessions) {
         const loadedKeys = values.map(conversationKey);
-        const previous = orderByWorkspace[workspace] ?? preferences.legacyOrder.filter((key) => loadedKeys.includes(key));
+        const previous = orderByWorkspace[workspace] ?? legacyOrder.filter((key) => loadedKeys.includes(key));
         const missing = loadedKeys.filter((key) => !previous.includes(key));
         const next = [...missing, ...previous];
         if (
@@ -835,7 +921,26 @@ function ensureConversationPreferenceOrder(
         }
     }
     if (!changed) return preferences;
-    return { ...preferences, legacyOrder: [], orderByWorkspace, workspaceOrder };
+    return { ...preferences, orderByWorkspace, workspaceOrder };
+}
+
+function conversationOrderPatch(
+    current: ConversationPreferencesSnapshot,
+    next: ConversationPreferencesSnapshot,
+): ConversationPreferencesPatch | undefined {
+    const orderByWorkspace = Object.fromEntries(Object.entries(next.orderByWorkspace).filter(([workspace, order]) => {
+        const previous = current.orderByWorkspace[workspace];
+        return previous === undefined ||
+            previous.length !== order.length ||
+            order.some((key, index) => key !== previous[index]);
+    }));
+    const workspaceOrderChanged = current.workspaceOrder.length !== next.workspaceOrder.length ||
+        next.workspaceOrder.some((workspace, index) => workspace !== current.workspaceOrder[index]);
+    if (Object.keys(orderByWorkspace).length === 0 && !workspaceOrderChanged) return undefined;
+    return {
+        ...(Object.keys(orderByWorkspace).length === 0 ? {} : { orderByWorkspace }),
+        ...(workspaceOrderChanged ? { workspaceOrder: next.workspaceOrder } : {}),
+    };
 }
 
 function reorderConversationKeys(

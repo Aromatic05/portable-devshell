@@ -82,10 +82,16 @@ export type {
     ContextMessageStatus
 } from "./dto/context/DtoContextMessage.js";
 export { parseContextMessageDirective } from "./dto/context/DtoContextMessage.js";
+export {
+    CONVERSATION_PREFERENCES_VERSION,
+    createEmptyConversationPreferences,
+} from "./dto/context/DtoConversation.js";
 export type {
     ConversationEntry,
     ConversationEntryKind,
-    ConversationListInput
+    ConversationListInput,
+    ConversationPreferencesPatch,
+    ConversationPreferencesSnapshot,
 } from "./dto/context/DtoConversation.js";
 export type {
     McpContextRecord,

@@ -22,6 +22,103 @@ afterEach(() => {
 });
 
 describe("WebStore", () => {
+    it("waits for Control hello before loading Conversation preferences", async () => {
+        const clients = fakeClients();
+        let resolveHello!: (value: { capabilities: ["request", "stream", "streamResume"]; protocolVersion: 1 }) => void;
+        clients.service.hello = vi.fn(async () => await new Promise((resolve) => { resolveHello = resolve; }));
+        clients.conversation.preferences = vi.fn(async () => ({
+            orderByWorkspace: {},
+            titles: {},
+            version: 1 as const,
+            workspaceOrder: [],
+        }));
+        const store = new WebStore(clients);
+
+        const loading = store.load();
+        await Promise.resolve();
+        expect(clients.conversation.preferences).not.toHaveBeenCalled();
+
+        resolveHello({ capabilities: ["request", "stream", "streamResume"], protocolVersion: 1 });
+        await loading;
+        expect(clients.conversation.preferences).toHaveBeenCalledOnce();
+    });
+
+    it("loads and updates server-backed Conversation preferences", async () => {
+        const clients = fakeClients();
+        clients.conversation.preferences = vi.fn(async () => ({
+            orderByWorkspace: { "/work/demo": ["demo\u0000ctx-a"] },
+            titles: { "demo\u0000ctx-a": "Server title" },
+            version: 1 as const,
+            workspaceOrder: ["/work/demo"],
+        }));
+        clients.conversation.updatePreferences = vi.fn(async (patch) => ({
+            orderByWorkspace: { "/work/demo": ["demo\u0000ctx-b", "demo\u0000ctx-a"] },
+            titles: {
+                "demo\u0000ctx-a": "Server title",
+                ...Object.fromEntries(Object.entries(patch.titles ?? {}).flatMap(([key, value]) =>
+                    value === null ? [] : [[key, value]]
+                )),
+            },
+            version: 1 as const,
+            workspaceOrder: ["/work/demo"],
+        }));
+        const store = new WebStore(clients);
+
+        await store.load();
+        expect(store.state.conversationPreferences?.titles["demo\u0000ctx-a"]).toBe("Server title");
+        expect(await store.updateConversationPreferences({
+            titles: { "demo\u0000ctx-b": "Second browser" },
+        })).toBe(true);
+        expect(clients.conversation.updatePreferences).toHaveBeenCalledWith({
+            titles: { "demo\u0000ctx-b": "Second browser" },
+        });
+        expect(store.state.conversationPreferences?.titles["demo\u0000ctx-b"]).toBe("Second browser");
+    });
+
+    it("does not replay queued Conversation preference mutations after the store generation changes", async () => {
+        const clients = fakeClients();
+        const snapshot = {
+            orderByWorkspace: {},
+            titles: {},
+            version: 1 as const,
+            workspaceOrder: [],
+        };
+        let releaseFirst!: () => void;
+        clients.conversation.updatePreferences = vi.fn()
+            .mockImplementationOnce(async () => {
+                await new Promise<void>((resolve) => { releaseFirst = resolve; });
+                return snapshot;
+            })
+            .mockResolvedValue(snapshot);
+        const store = new WebStore(clients);
+        await store.load();
+
+        const first = store.updateConversationPreferences({ titles: { "demo\u0000ctx-a": "A" } });
+        const second = store.updateConversationPreferences({ titles: { "demo\u0000ctx-b": "B" } });
+        await Promise.resolve();
+        expect(clients.conversation.updatePreferences).toHaveBeenCalledTimes(1);
+
+        store.close();
+        releaseFirst();
+        expect(await first).toBe(false);
+        expect(await second).toBe(false);
+        expect(clients.conversation.updatePreferences).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the Web session online but exposes Conversation preference load failures", async () => {
+        const clients = fakeClients();
+        clients.conversation.preferences = vi.fn(async () => {
+            throw new Error("Preference store unavailable");
+        });
+        const store = new WebStore(clients);
+
+        await store.load();
+
+        expect(store.state.connection).toBe("online");
+        expect(store.state.conversationPreferences).toBeUndefined();
+        expect(store.state.conversationPreferencesError).toBe("Preference store unavailable");
+    });
+
     it("does not request OAuth approvals when OAuth is disabled", async () => {
         const clients = fakeClients();
         const listApprovals = vi.fn(async () => []);
@@ -468,7 +565,21 @@ function fakeClients(
         artifact: {} as WebClients["artifact"],
         cli: {} as WebClients["cli"],
         config: {} as WebClients["config"],
-        conversation: { list: vi.fn(async () => []) },
+        conversation: {
+            list: vi.fn(async () => []),
+            preferences: vi.fn(async () => ({
+                orderByWorkspace: {},
+                titles: {},
+                version: 1 as const,
+                workspaceOrder: [],
+            })),
+            updatePreferences: vi.fn(async () => ({
+                orderByWorkspace: {},
+                titles: {},
+                version: 1 as const,
+                workspaceOrder: [],
+            })),
+        },
         extension: {} as WebClients["extension"],
         context: {
             disable: async () => {
