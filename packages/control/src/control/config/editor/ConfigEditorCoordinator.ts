@@ -339,7 +339,7 @@ export class ConfigEditorCoordinator {
         const existing = currentConfig.instances.find((entry) => entry.name === instanceName);
         if (existing === undefined) throw missingInstance(instanceName);
 
-        const degradedProviderState = this.#assertInstanceDeletable(instanceName);
+        const skipRuntimeRetirement = this.#assertInstanceDeletable(instanceName);
         const nextConfig = this.#validateConfig({
             ...currentConfig,
             instances: currentConfig.instances.filter((entry) => entry.name !== instanceName)
@@ -348,7 +348,7 @@ export class ConfigEditorCoordinator {
         for (const retire of [...this.#instanceDeleteRetirements]) {
             await retire(existing);
         }
-        await this.#retireStateForDelete(this.#instanceRegistry.get(instanceName), degradedProviderState);
+        await this.#retireStateForDelete(this.#instanceRegistry.get(instanceName), skipRuntimeRetirement);
         await this.#getMcpHost()?.contextAdmin.detachInstance(instanceName);
         this.#instanceRegistry.get(instanceName)?.conversation.close();
         await this.#persistConfig(nextConfig);
@@ -413,7 +413,7 @@ export class ConfigEditorCoordinator {
 
     async #retireStateForDelete(
         descriptor: ReturnType<InstanceRegistry["get"]>,
-        degradedProviderState = false,
+        skipRuntimeRetirement = false,
     ): Promise<void> {
         if (descriptor === undefined) return;
         const reason = `Instance ${descriptor.name} was deleted.`;
@@ -457,12 +457,10 @@ export class ConfigEditorCoordinator {
         );
         await descriptor.goal.stopAll();
         await descriptor.todo.cancelAll();
-        if (degradedProviderState) {
-            await descriptor.worker.retireProviderResources().catch(() => undefined);
-            return;
+        if (!skipRuntimeRetirement) {
+            await descriptor.worker.retireRuntime().catch(() => undefined);
         }
-        await descriptor.worker.retireRuntime();
-        await descriptor.worker.retireProviderResources();
+        await descriptor.worker.retireProviderResources().catch(() => undefined);
     }
 
     async #retireInteractionsForDisable(

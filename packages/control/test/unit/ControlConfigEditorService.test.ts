@@ -1009,6 +1009,46 @@ test("instance delete permits failed and stale instances without requiring a pro
     }
 });
 
+test("instance delete permits a stopped instance when runtime and provider cleanup are unreachable", async () => {
+    let config = createConfig();
+    const workerRetirements: string[] = [];
+    const registry = new InstanceRegistry([descriptor({
+        async retireProviderResources() {
+            workerRetirements.push("provider");
+            throw new Error("provider cleanup unavailable");
+        },
+        async retireRuntime() {
+            workerRetirements.push("runtime");
+            throw new Error("Worker target probe failed for provider ssh.");
+        },
+        snapshot: stoppedSnapshot,
+    }, {
+        goal: {
+            async continuation() { return {}; },
+            async manage() { return undefined; },
+            async read() { return undefined; },
+            async stopAll() { return []; },
+            async touch() {},
+        },
+        todo: {
+            async cancelAll() {},
+            async control() { throw new Error("unused"); },
+            currentAssociation() { return undefined; },
+            async delete() {},
+            async read() { return { items: [], revision: 0, summary: { completed: 0, total: 0 } }; },
+            summaries() { return []; },
+            async write() { throw new Error("unused"); },
+        },
+    })]);
+    const service = createService(() => config, (next) => { config = next; }, registry);
+
+    await service.deleteInstance({ instanceName: "demo-local" });
+
+    assert.equal(config.instances.length, 0);
+    assert.equal(registry.get("demo-local"), undefined);
+    assert.deepEqual(workerRetirements, ["runtime", "provider"]);
+});
+
 test("config editor rejects delete and rebuild patches while an instance is running before persistence", async () => {
     let config = createConfig();
     const writes: unknown[] = [];
