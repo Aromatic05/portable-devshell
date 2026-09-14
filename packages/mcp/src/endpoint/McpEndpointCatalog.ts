@@ -138,7 +138,8 @@ export class McpEndpointCatalog {
             : withMcpCommentOutputSchema(contextualTool);
         const adapted = this.#schemaAdapter.toMcpTool(
             exposed,
-            this.#descriptionEnhancer.enhance(exposed.name, exposed.description)
+            this.#descriptionEnhancer.enhance(exposed.name, exposed.description),
+            { modelFacing },
         );
         const securitySchemes = mcpToolSecuritySchemes(this.#auth);
         const invocationStatus = mcpToolInvocationStatus(exposed.name);

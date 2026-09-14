@@ -772,14 +772,8 @@ test("todo tools are fixed control-side primitives and remain available while th
         revision: 0,
         summary: { completed: 0, total: 0 }
     });
-    const todoReadSchema = endpoint.listTools().find((tool) => tool.name === "todo_read")?.outputSchema as {
-        properties?: Record<string, unknown>;
-        required?: string[];
-    };
-    assert.equal(todoReadSchema.required?.includes("revision"), true);
-    assert.notEqual(todoReadSchema.properties?.items, undefined);
-    assert.notEqual(todoReadSchema.properties?.summary, undefined);
-    assert.notEqual(todoReadSchema.properties?.tasks, undefined);
+    const todoReadSchema = endpoint.listTools().find((tool) => tool.name === "todo_read")?.outputSchema;
+    assert.deepEqual(todoReadSchema, { type: "object" });
     const todoWriteSchema = endpoint.listTools().find((tool) => tool.name === "todo_write")?.inputSchema as {
         properties?: {
             todos?: {
@@ -799,7 +793,7 @@ test("todo tools are fixed control-side primitives and remain available while th
     assert.equal(todoWriteSchema.properties?.todos?.minContains, undefined);
     assert.equal(todoWriteSchema.properties?.todos?.maxContains, undefined);
     const todoReport = endpoint.listTools().find((tool) => tool.name === "todo_report");
-    assert.match(todoReport?.description ?? "", /Always follow tool-call `comment`/u);
+    assert.match(todoReport?.description ?? "", /new user comments first/u);
     const report = await endpoint.callTool("todo_report", withContext({ message: "Finished the first acceptance stage." }), context) as {
         content?: unknown;
         structuredContent?: unknown;
@@ -877,10 +871,7 @@ test("openai-session binding uses the same Todo contract as explicit ctxId", asy
     assert.equal(discovered.tasks?.[0]?.ctxId, current.ctxId);
 
     const todoTool = endpoint.listTools().find((tool) => tool.name === "todo_read");
-    const schema = todoTool?.outputSchema as {
-        properties?: { tasks?: { items?: { properties?: Record<string, unknown> } } };
-    };
-    assert.notEqual(schema.properties?.tasks?.items?.properties?.ctxId, undefined);
+    assert.deepEqual(todoTool?.outputSchema, { type: "object" });
     assert.notEqual(
         (todoTool?.inputSchema as { properties?: Record<string, unknown> }).properties?.title,
         undefined

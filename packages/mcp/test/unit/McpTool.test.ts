@@ -154,13 +154,14 @@ test("McpToolCatalogEndpoint rejects duplicate names across providers", () => {
     );
 });
 
-test("McpToolDescriptionEnhancer owns Worker consumer guidance and preserves other descriptions", () => {
+test("McpToolDescriptionEnhancer owns concise model-facing guidance", () => {
     const enhancer = new McpToolDescriptionEnhancer();
     const bash = enhancer.enhance("bash_run", "  Worker-neutral shell contract  ");
     assert.match(bash, /tmux_run/u);
     assert.match(bash, /file_read/u);
     assert.notEqual(bash, "Worker-neutral shell contract");
-    assert.equal(enhancer.enhance("workspace_open", "  Open workspace  "), "Open workspace");
+    assert.match(enhancer.enhance("workspace_open", "  Open workspace  "), /environ_info/u);
+    assert.match(enhancer.enhance("todo_report", "verbose internal contract"), /new user comments first/u);
     assert.equal(enhancer.enhance("future_tool", undefined), "");
 });
 
@@ -301,4 +302,43 @@ test("McpToolSchemaAdapter removes model-unsupported composition constraints rec
     const output = tool.outputSchema as { properties?: { source?: Record<string, unknown> } };
     assert.equal(output.properties?.source?.oneOf, undefined);
     assert.deepEqual(Object.keys((output.properties?.source?.properties as Record<string, unknown>) ?? {}).sort(), ["handle", "path"]);
+});
+
+test("McpToolSchemaAdapter compacts model-facing prose and output schemas", () => {
+    const adapter = new McpToolSchemaAdapter();
+    const tool = adapter.toMcpTool({
+        ...bashRun,
+        inputSchema: {
+            $defs: {
+                Unused: { properties: { stale: { type: "string" } }, type: "object" },
+                Used: { enum: ["safe"], type: "string" },
+            },
+            $schema: "https://json-schema.org/draft/2020-12/schema",
+            additionalProperties: false,
+            properties: {
+                command: { description: "Shell command to execute.", type: "string" },
+                cwd: { description: "A deliberately verbose working-directory description that should be replaced.", type: "string" },
+                mode: { $ref: "#/$defs/Used" },
+                purpose: { description: "A deliberately verbose provenance description.", maxLength: 160, type: "string" },
+            },
+            required: ["command"],
+            title: "VerboseInputTitle",
+            type: "object",
+        },
+        outputSchema: {
+            properties: { stdout: { type: "string" } },
+            required: ["stdout"],
+            type: "object",
+        },
+    }, "Run shell", { modelFacing: true });
+
+    const properties = (tool.inputSchema as { properties?: Record<string, { description?: string }> }).properties;
+    assert.equal(properties?.command?.description, undefined);
+    assert.equal(properties?.cwd?.description, "Working directory; ./ is workspace-relative, / absolute.");
+    assert.equal(properties?.purpose?.description, "Intended outcome.");
+    const input = tool.inputSchema as Record<string, unknown>;
+    assert.equal(input.$schema, undefined);
+    assert.equal(input.title, undefined);
+    assert.deepEqual(Object.keys((input.$defs as Record<string, unknown>) ?? {}), ["Used"]);
+    assert.deepEqual(tool.outputSchema, { type: "object" });
 });

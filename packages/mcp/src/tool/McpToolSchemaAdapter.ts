@@ -8,6 +8,10 @@ export interface McpTool {
     outputSchema: JsonValue;
 }
 
+export interface McpToolSchemaAdapterOptions {
+    modelFacing?: boolean;
+}
+
 export class McpToolSchemaUnavailableError extends Error {
     readonly code = "mcp.toolSchemaUnavailable";
 
@@ -18,18 +22,194 @@ export class McpToolSchemaUnavailableError extends Error {
 }
 
 export class McpToolSchemaAdapter {
-    toMcpTool(tool: ToolDefinition, description: string): McpTool {
+    toMcpTool(
+        tool: ToolDefinition,
+        description: string,
+        options: McpToolSchemaAdapterOptions = {},
+    ): McpTool {
         if (tool.inputSchema === undefined || tool.outputSchema === undefined) {
             throw new McpToolSchemaUnavailableError(tool.name);
         }
 
+        const modelFacing = options.modelFacing === true;
+
         return {
             ...(tool._meta === undefined ? {} : { _meta: tool._meta }),
             description,
-            inputSchema: normalizeModelInputSchema(tool.inputSchema),
+            inputSchema: modelFacing
+                ? compactModelInputSchema(tool.name, tool.inputSchema)
+                : normalizeModelInputSchema(tool.inputSchema),
             name: tool.name,
-            outputSchema: normalizeModelSchema(tool.outputSchema)
+            outputSchema: modelFacing
+                ? { type: "object" }
+                : normalizeModelSchema(tool.outputSchema),
         };
+    }
+}
+
+const COMMON_MODEL_INPUT_HINTS: Readonly<Record<string, string>> = {
+    ctxId: "Context from environ_info.",
+    explanation: "Why this call is useful.",
+    instance: "Managed instance name.",
+    purpose: "Intended outcome.",
+};
+
+const MODEL_INPUT_HINTS = new Map<string, Readonly<Record<string, string>>>([
+    ["artifact_viewImage", {
+        handle: "Artifact handle; exclusive with path.",
+        path: "Image path; exclusive with handle.",
+    }],
+    ["bash_run", {
+        cwd: "Working directory; ./ is workspace-relative, / absolute.",
+        stdin: "Omit to send EOF.",
+        timeoutMs: "Required timeout in milliseconds.",
+    }],
+    ["environ_info", {
+        workspace: "Absolute workspace to attach or switch.",
+    }],
+    ["environ_remote", {
+        command: "Use help to list current operations.",
+        handle: "Opaque instance handle from devshell instance list/status.",
+        workspace: "Absolute workspace for attach operations.",
+    }],
+    ["file_edit", {
+        changes: "Ordered *** Begin Edit / *** End Edit change set.",
+    }],
+    ["file_glob", {
+        cursor: "Continuation cursor; when set, omit query fields.",
+        patterns: "Exact paths or globs; required without cursor.",
+    }],
+    ["file_grep", {
+        cursor: "Continuation cursor; when set, omit query fields.",
+        pattern: "Required without cursor.",
+        startLine: "Single exact file only.",
+        syntax: "Defaults to regex.",
+    }],
+    ["file_read", {
+        selector: "Lines: N, N-M, N+count, or comma ranges; add :raw for exact ranges.",
+    }],
+    ["tmux_input", {
+        line: "Output lines after input; negative returns a tail.",
+        timeMs: "Maximum wait after input, in milliseconds.",
+    }],
+    ["tmux_inspect", {
+        end: "History end offset; defaults to 0.",
+        panes: "Set to all to inspect every pane.",
+        start: "History start offset; defaults to -80.",
+    }],
+    ["tmux_manage", {
+        force: "Allow closing a running or busy resource.",
+    }],
+    ["tmux_read", {
+        line: "Positive consumes unread lines; negative waits and returns a tail.",
+        timeMs: "Maximum wait, in milliseconds.",
+    }],
+    ["tmux_run", {
+        line: "Output lines returned with the task.",
+        timeout: "Block-wait deadline; the task keeps running after it expires.",
+        wait: "block waits for progress; nonblock returns after start.",
+    }],
+    ["todo_read", {
+        taskId: "Stable task id; prefer once known.",
+        title: "Compatibility selector; omit with taskId.",
+    }],
+    ["todo_report", {
+        message: "User reply or meaningful progress update.",
+    }],
+    ["todo_write", {
+        checkpoint: "Optional durable handoff context.",
+        revision: "Latest todo revision.",
+        taskId: "Stable task id.",
+        title: "Immutable task title.",
+        todos: "Complete replacement list.",
+    }],
+]);
+
+function compactModelInputSchema(toolName: string, value: JsonValue): JsonValue {
+    return pruneUnusedLocalDefinitions(
+        compactModelInputDescriptions(toolName, normalizeModelInputSchema(value)),
+    );
+}
+
+function compactModelInputDescriptions(
+    toolName: string,
+    value: JsonValue,
+    hint?: string,
+): JsonValue {
+    if (Array.isArray(value)) {
+        return value.map((entry) => compactModelInputDescriptions(toolName, entry));
+    }
+    if (!isRecord(value)) return value;
+
+    const compacted: Record<string, JsonValue> = {};
+    for (const [key, entry] of Object.entries(value)) {
+        if (key === "description" || key === "$schema" || key === "title") continue;
+        if (key === "properties" && isRecord(entry)) {
+            compacted.properties = Object.fromEntries(
+                Object.entries(entry).map(([propertyName, propertySchema]) => [
+                    propertyName,
+                    compactModelInputDescriptions(
+                        toolName,
+                        propertySchema,
+                        modelInputHint(toolName, propertyName),
+                    ),
+                ]),
+            );
+            continue;
+        }
+        compacted[key] = compactModelInputDescriptions(toolName, entry);
+    }
+    return hint === undefined ? compacted : { ...compacted, description: hint };
+}
+
+function modelInputHint(toolName: string, propertyName: string): string | undefined {
+    return MODEL_INPUT_HINTS.get(toolName)?.[propertyName] ??
+        COMMON_MODEL_INPUT_HINTS[propertyName];
+}
+
+function pruneUnusedLocalDefinitions(value: JsonValue): JsonValue {
+    if (!isRecord(value) || !isRecord(value.$defs)) return value;
+
+    const definitions = value.$defs;
+    const root = { ...value };
+    delete root.$defs;
+    const reachable = new Set<string>();
+    collectLocalDefinitionReferences(root, reachable);
+
+    const pending = [...reachable];
+    for (let index = 0; index < pending.length; index += 1) {
+        const name = pending[index];
+        if (name === undefined) continue;
+        const definition = definitions[name];
+        if (definition === undefined) continue;
+        const nested = new Set<string>();
+        collectLocalDefinitionReferences(definition, nested);
+        for (const reference of nested) {
+            if (reachable.has(reference)) continue;
+            reachable.add(reference);
+            pending.push(reference);
+        }
+    }
+
+    if (reachable.size === 0) return root;
+    const kept = Object.fromEntries(
+        Object.entries(definitions).filter(([name]) => reachable.has(name)),
+    );
+    return Object.keys(kept).length === 0 ? root : { ...root, $defs: kept };
+}
+
+function collectLocalDefinitionReferences(value: JsonValue, references: Set<string>): void {
+    if (Array.isArray(value)) {
+        for (const entry of value) collectLocalDefinitionReferences(entry, references);
+        return;
+    }
+    if (!isRecord(value)) return;
+    if (typeof value.$ref === "string" && value.$ref.startsWith("#/$defs/")) {
+        references.add(value.$ref.slice("#/$defs/".length));
+    }
+    for (const [key, entry] of Object.entries(value)) {
+        if (key === "$defs") continue;
+        collectLocalDefinitionReferences(entry, references);
     }
 }
 

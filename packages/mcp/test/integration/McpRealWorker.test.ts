@@ -97,17 +97,17 @@ test("MCP initialize tools/list and tools/call succeed against the frozen worker
         assert.match(bash?.description ?? "", /tmux_run/u);
         assert.equal(workerBash?.description.includes("tmux_run"), false);
         assert.deepEqual(
-            Object.fromEntries(Object.entries(bash?.inputSchema ?? {}).filter(([key]) => key !== "properties" && key !== "required")),
-            Object.fromEntries(Object.entries(workerBashSchema).filter(([key]) => key !== "properties" && key !== "required"))
+            Object.fromEntries(Object.entries(bash?.inputSchema ?? {}).filter(([key]) => !["$schema", "properties", "required", "title"].includes(key))),
+            Object.fromEntries(Object.entries(workerBashSchema).filter(([key]) => !["$schema", "properties", "required", "title"].includes(key)))
         );
         if (tmuxManage !== undefined && workerTmuxSchema !== undefined) {
             assert.deepEqual(
-                Object.fromEntries(Object.entries(tmuxManage.inputSchema).filter(([key]) => key !== "properties" && key !== "required")),
-                Object.fromEntries(Object.entries(workerTmuxSchema).filter(([key]) => key !== "properties" && key !== "required"))
+                Object.fromEntries(Object.entries(tmuxManage.inputSchema).filter(([key]) => !["$schema", "properties", "required", "title"].includes(key))),
+                Object.fromEntries(Object.entries(workerTmuxSchema).filter(([key]) => !["$schema", "properties", "required", "title"].includes(key)))
             );
         }
         assert.deepEqual((bash?.inputSchema.properties as Record<string, unknown>).ctxId, {
-            description: "Context ID returned by environ_info in explicit Context mode.",
+            description: "Context from environ_info.",
             minLength: 1,
             type: "string"
         });

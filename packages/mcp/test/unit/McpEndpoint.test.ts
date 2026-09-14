@@ -119,15 +119,18 @@ test("HTTP tools/list keeps Workspace actions app-only while advertising host au
         const tools = response.body.result?.tools as Array<{
             _meta?: Record<string, JsonValue>;
             name?: string;
+            outputSchema?: JsonValue;
             securitySchemes?: JsonValue;
         }> | undefined;
         const answer = tools?.find((tool) => tool.name === "workspace_answer");
         const environment = tools?.find((tool) => tool.name === "environ_info");
         const open = tools?.find((tool) => tool.name === "workspace_open");
         assert.notEqual(environment, undefined);
+        assert.deepEqual(environment?.outputSchema, { type: "object" });
         assert.equal(environment?._meta?.["openai/outputTemplate"], workspaceAppResourceUri);
         assert.deepEqual((environment?._meta?.ui as { visibility?: JsonValue } | undefined)?.visibility, ["model", "app"]);
         assert.notEqual(answer, undefined);
+        assert.notDeepEqual(answer?.outputSchema, { type: "object" });
         assert.deepEqual(answer?._meta?.ui, { visibility: ["app"] });
         assert.equal(answer?._meta?.["openai/visibility"], "private");
         assert.equal(answer?._meta?.["openai/widgetAccessible"], true);
@@ -669,13 +672,13 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
     }).properties;
     assert.notEqual(bashProperties?.ctxId, undefined);
     assert.deepEqual(bashProperties?.purpose, {
-        description: "Briefly state the intended outcome of this tool call. Do not just restate the tool or command.",
+        description: "Intended outcome.",
         maxLength: 160,
         minLength: 1,
         type: "string",
     });
     assert.deepEqual(bashProperties?.explanation, {
-        description: "Optionally state why this tool call is useful now, including relevant observations or prior results.",
+        description: "Why this call is useful.",
         maxLength: 1000,
         minLength: 1,
         type: "string",
@@ -689,14 +692,7 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
     assert.equal(environmentInputProperties?.purpose, undefined);
     assert.equal(environmentInputProperties?.explanation, undefined);
     assert.notEqual(environmentInputProperties?.ctxId, undefined);
-    assert.notEqual(
-        (
-            environmentTool?.outputSchema as {
-                properties?: Record<string, unknown>;
-            }
-        ).properties?.ctxId,
-        undefined,
-    );
+    assert.deepEqual(environmentTool?.outputSchema, { type: "object" });
 
     const requestContext = {
         principal: "subject-1",
