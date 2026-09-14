@@ -177,7 +177,10 @@ test("model-facing tool calls run the conversation reply gate before execution",
         { principal: "tester", requestId: "guarded-call" },
     );
 
-    assert.deepEqual(guarded, [{ instance: "alpha", toolName: "bash_run" }]);
+    assert.deepEqual(guarded, [
+        { instance: "alpha", toolName: "environ_info" },
+        { instance: "alpha", toolName: "bash_run" },
+    ]);
 });
 
 test("a routed artifact result consumes Comments from the routed instance Context", async () => {

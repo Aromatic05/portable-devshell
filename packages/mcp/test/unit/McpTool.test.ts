@@ -161,7 +161,8 @@ test("McpToolDescriptionEnhancer owns concise model-facing guidance", () => {
     assert.match(bash, /file_read/u);
     assert.notEqual(bash, "Worker-neutral shell contract");
     assert.match(enhancer.enhance("workspace_open", "  Open workspace  "), /environ_info/u);
-    assert.match(enhancer.enhance("todo_report", "verbose internal contract"), /new user comments first/u);
+    assert.match(enhancer.enhance("todo_report", "verbose internal contract"), /#push/u);
+    assert.match(enhancer.enhance("todo_report", "verbose internal contract"), /#stop/u);
     assert.equal(enhancer.enhance("future_tool", undefined), "");
 });
 

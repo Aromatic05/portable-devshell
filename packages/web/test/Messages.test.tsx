@@ -280,6 +280,33 @@ describe("Messages", () => {
             "#/audit/context/alpha/ctx-old-active",
         );
     });
+    it("adds text directives from the composer control menu without structured message metadata", async () => {
+        const queueContextMessage = vi.fn(async () => true);
+        render(<Messages navigate={vi.fn()} route={threadRoute} state={state} store={{ queueContextMessage } as WebStore} />);
+        const composer = screen.getByRole("textbox", { name: "Comment" });
+        fireEvent.click(screen.getByRole("button", { name: "Add message control" }));
+        expect(screen.getByRole("menuitem", { name: /^Push/u })).toBeEnabled();
+        expect(screen.getByRole("menuitem", { name: /^Stop/u })).toBeEnabled();
+        expect(screen.getByRole("menuitem", { name: /^Resume/u })).toBeEnabled();
+        fireEvent.click(screen.getByRole("menuitem", { name: /^Push/u }));
+        expect(within(composer.closest("form")!).getByText("#push")).toBeVisible();
+        fireEvent.change(composer, { target: { value: "Answer before continuing." } });
+        fireEvent.submit(composer.closest("form")!);
+        await waitFor(() => expect(queueContextMessage).toHaveBeenCalledWith("alpha", "ctx-old-active", "#push Answer before continuing."));
+    });
+    it("can send #stop and #resume as standalone text controls", async () => {
+        const queueContextMessage = vi.fn(async () => true);
+        render(<Messages navigate={vi.fn()} route={threadRoute} state={state} store={{ queueContextMessage } as WebStore} />);
+        const form = screen.getByRole("textbox", { name: "Comment" }).closest("form")!;
+        fireEvent.click(screen.getByRole("button", { name: "Add message control" }));
+        fireEvent.click(screen.getByRole("menuitem", { name: /^Stop/u }));
+        fireEvent.submit(form);
+        await waitFor(() => expect(queueContextMessage).toHaveBeenLastCalledWith("alpha", "ctx-old-active", "#stop"));
+        fireEvent.click(screen.getByRole("button", { name: "Add message control" }));
+        fireEvent.click(screen.getByRole("menuitem", { name: /^Resume/u }));
+        fireEvent.submit(form);
+        await waitFor(() => expect(queueContextMessage).toHaveBeenLastCalledWith("alpha", "ctx-old-active", "#resume"));
+    });
 
     it("shows a send failure next to the composer and preserves the draft", async () => {
         const failedState = { ...state, error: "Control connection was lost." };

@@ -76,6 +76,17 @@ function createTodoReportHarness() {
             now += milliseconds;
         },
         context,
+        queueComment(id: string, text: string) {
+            const timestamp = new Date(now).toISOString();
+            entries.push({
+                createdAt: timestamp,
+                ctxId: context.ctxId,
+                id,
+                kind: "comment",
+                status: "sent",
+                text,
+            });
+        },
         deliverComment(id: string, text: string) {
             const timestamp = new Date(now).toISOString();
             entries.push({
@@ -211,11 +222,24 @@ test("todo_report serializes concurrent autonomous bursts through the same bucke
     assert.equal(harness.reports.length, 2);
 });
 
-test("a delivered Comment gets five ordinary calls then requires todo_report", async () => {
+test("a normal Comment never limits tools and its reply bypasses the autonomous bucket", async () => {
     const harness = createTodoReportHarness();
     await harness.report("autonomous one");
-    harness.deliverComment("comment-1", "Please answer this");
+    await harness.report("autonomous two");
+    harness.deliverComment("comment-1", "Please answer this normally");
+    for (let index = 0; index < 10; index += 1) {
+        await harness.gateway.beforeModelToolCall("local", "file_read", harness.context);
+    }
+    await harness.report("reply to comment");
+    await harness.gateway.beforeModelToolCall("local", "file_read", harness.context);
+    await assertRateLimited(harness.report("autonomous exhausted"), 30_000);
+    harness.advance(30_000);
+    await harness.report("autonomous after refill");
+});
 
+test("a #push Comment gets five ordinary calls then requires todo_report", async () => {
+    const harness = createTodoReportHarness();
+    harness.deliverComment("comment-push", "#push Please answer this first");
     for (let index = 0; index < 5; index += 1) {
         await harness.gateway.beforeModelToolCall("local", "file_read", harness.context);
     }
@@ -223,18 +247,31 @@ test("a delivered Comment gets five ordinary calls then requires todo_report", a
         harness.gateway.beforeModelToolCall("local", "file_read", harness.context),
         (error: unknown) => {
             assert.equal((error as { code?: string }).code, "todo.invalid");
+            assert.equal((error as { details?: { reason?: string } }).details?.reason, "push");
             assert.equal((error as { details?: { toolCallBudget?: number } }).details?.toolCallBudget, 5);
             return true;
         },
     );
-
     await harness.gateway.beforeModelToolCall("local", "todo_report", harness.context);
-    await harness.report("reply to comment");
+    await harness.report("reply to pushed comment");
     await harness.gateway.beforeModelToolCall("local", "file_read", harness.context);
-    await harness.report("autonomous after reply");
-    await assertRateLimited(harness.report("autonomous exhausted"), 30_000);
-    harness.advance(30_000);
-    await harness.report("autonomous after refill");
+});
+
+test("a #stop Comment blocks every model tool until the user queues #resume", async () => {
+    const harness = createTodoReportHarness();
+    harness.deliverComment("comment-stop", "#stop Stop working now");
+    for (const toolName of ["file_read", "todo_report", "environ_remote"]) {
+        await assert.rejects(
+            harness.gateway.beforeModelToolCall("local", toolName, harness.context),
+            (error: unknown) => {
+                assert.equal((error as { code?: string }).code, "todo.invalid");
+                assert.equal((error as { details?: { reason?: string } }).details?.reason, "stop");
+                return true;
+            },
+        );
+    }
+    harness.queueComment("comment-resume", "#resume");
+    await harness.gateway.beforeModelToolCall("local", "file_read", harness.context);
 });
 
 test("failed reports neither spend a token nor satisfy a Comment obligation", async () => {

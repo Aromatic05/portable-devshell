@@ -148,7 +148,7 @@ export class McpToolCatalogTodo {
         },
         {
             requiredCapabilities: [],
-            description: "Send a user-visible message without ending the turn or changing Todo state. Reply to new user comments first. Otherwise report only meaningful new progress, blockers, or stage completion. Never repeat reports; if rate-limited, continue useful work instead.",
+            description: "Send a user-visible message without ending the turn or changing Todo state. Reply to comments first. #push requires a reply within five tool calls. #stop disables tools until #resume. Otherwise report only meaningful new progress; never repeat reports.",
             group: "todo",
             inputSchema: {
                 additionalProperties: false,

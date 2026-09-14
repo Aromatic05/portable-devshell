@@ -197,6 +197,17 @@ export class McpEndpointHandlerEnvironment {
             throw contextWorkspaceRequired(record.ctxId, this.#instanceName);
         }
 
+        await this.#gateway?.beforeModelToolCall?.(
+            this.#instanceName,
+            mcpEnvironmentToolName,
+            {
+                ctxId: record.ctxId,
+                requestId: requestContext.requestId,
+                source: "mcp",
+                workspace,
+            },
+        );
+
         const { alerts, environment, prepared, skillsDirectory } =
             await this.#prepareEnvironment(workspace);
         try {

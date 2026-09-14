@@ -6,7 +6,11 @@ import {
     useRef,
     useState,
 } from "react";
-import { workspaceFolderName } from "@portable-devshell/shared/browser";
+import {
+    parseContextMessageDirective,
+    type ContextMessageDirective,
+    workspaceFolderName,
+} from "@portable-devshell/shared/browser";
 
 import { webRouteHref, type WebRoute } from "../routing/hashRoute.js";
 import {
@@ -34,6 +38,8 @@ export function Messages({
 }) {
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [draft, setDraft] = useState("");
+    const [messageDirective, setMessageDirective] = useState<ContextMessageDirective>();
+    const [controlMenuOpen, setControlMenuOpen] = useState(false);
     const [composerFeedback, setComposerFeedback] = useState<{
         kind: "error" | "success";
         text: string;
@@ -72,6 +78,8 @@ export function Messages({
     useEffect(() => {
         setDrawerOpen(false);
         setDraft("");
+        setMessageDirective(undefined);
+        setControlMenuOpen(false);
         setComposerFeedback(undefined);
     }, [route]);
 
@@ -104,12 +112,14 @@ export function Messages({
     async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
         event.preventDefault();
         if (route.view !== "thread") return;
-        const text = draft.trim();
+        const text = composeMessageText(messageDirective, draft);
         if (text.length === 0) return;
         setComposerFeedback(undefined);
         const queued = await store.queueContextMessage(route.instance, route.ctxId, text);
         if (queued) {
             setDraft("");
+            setMessageDirective(undefined);
+            setControlMenuOpen(false);
             setComposerFeedback({ kind: "success", text: "Message queued." });
         } else {
             setComposerFeedback({
@@ -246,22 +256,55 @@ export function Messages({
                 <h3>Messages</h3>
                 <p className="empty">Choose a conversation to read its Comment and Report history.</p>
             </div> : <div aria-label="Conversation history" className="message-history" role="log">
-                {entries.length === 0 ? <p className="empty">No Comments or Reports yet.</p> : entries.map((entry) => <article
-                    className={`message-entry ${entry.kind}`}
-                    key={entry.id}
-                >
-                    <div className="message-meta">
-                        <strong>{entry.kind === "comment" ? "You" : "Agent"}</strong>
-                        <time dateTime={entry.at}>{formatMessageDate(entry.at)}</time>
-                        {entry.kind === "comment" && entry.status !== "delivered"
-                            ? <span className="result pending">{entry.status}</span>
-                            : null}
-                    </div>
-                    <p>{entry.text}</p>
-                </article>)}
+                {entries.length === 0 ? <p className="empty">No Comments or Reports yet.</p> : entries.map((entry) => {
+                    const parsed = entry.kind === "comment"
+                        ? parseContextMessageDirective(entry.text)
+                        : { body: entry.text };
+                    return <article className={`message-entry ${entry.kind}`} key={entry.id}>
+                        <div className="message-meta">
+                            <strong>{entry.kind === "comment" ? "You" : "Agent"}</strong>
+                            <time dateTime={entry.at}>{formatMessageDate(entry.at)}</time>
+                            {parsed.directive === undefined ? null
+                                : <span className="message-control-chip">#{parsed.directive}</span>}
+                            {entry.kind === "comment" && entry.status !== "delivered"
+                                ? <span className="result pending">{entry.status}</span>
+                                : null}
+                        </div>
+                        {parsed.body.length === 0 ? null : <p>{parsed.body}</p>}
+                    </article>;
+                })}
                 <div aria-hidden="true" className="message-history-end" ref={historyEndRef} />
             </div>}
             {route.view === "thread" ? <form className="messages-composer" onSubmit={(event) => void submit(event)}>
+                {messageDirective === undefined ? null : <div className="messages-composer-controls">
+                    <span className="message-control-card">
+                        <strong>#{messageDirective}</strong>
+                        <button aria-label="Remove message control" onClick={() => setMessageDirective(undefined)} type="button">×</button>
+                    </span>
+                </div>}
+                <div className="messages-control-picker">
+                    <button
+                        aria-expanded={controlMenuOpen}
+                        aria-haspopup="menu"
+                        aria-label="Add message control"
+                        onClick={() => setControlMenuOpen((open) => !open)}
+                        type="button"
+                    >+</button>
+                    {controlMenuOpen ? <div aria-label="Message controls" className="messages-control-menu" role="menu">
+                        {messageControlOptions.map((option) => <button
+                            key={option.directive}
+                            onClick={() => {
+                                setMessageDirective(option.directive);
+                                setControlMenuOpen(false);
+                            }}
+                            role="menuitem"
+                            type="button"
+                        >
+                            <strong>{option.label}</strong>
+                            <span>{option.description}</span>
+                        </button>)}
+                    </div> : null}
+                </div>
                 <label className="sr-only" htmlFor="messages-comment">Comment</label>
                 <textarea
                     id="messages-comment"
@@ -291,7 +334,7 @@ export function Messages({
                 <button
                     aria-label="Send Comment"
                     className="primary"
-                    disabled={draft.trim().length === 0 || state.operations[`context-message:${route.instance}:${route.ctxId}`] !== undefined}
+                    disabled={(draft.trim().length === 0 && messageDirective === undefined) || state.operations[`context-message:${route.instance}:${route.ctxId}`] !== undefined}
                     type="submit"
                 >{state.operations[`context-message:${route.instance}:${route.ctxId}`] !== undefined ? "…" : "↑"}</button>
                 {composerFeedback === undefined ? null : <p
@@ -301,6 +344,24 @@ export function Messages({
             </form> : null}
         </div>
     </section>;
+}
+
+const messageControlOptions: ReadonlyArray<{
+    description: string;
+    directive: ContextMessageDirective;
+    label: string;
+}> = [
+    { description: "Require a reply within five tool calls.", directive: "push", label: "Push" },
+    { description: "Stop model tool calls until resumed.", directive: "stop", label: "Stop" },
+    { description: "Release a previous Stop.", directive: "resume", label: "Resume" },
+];
+
+function composeMessageText(directive: ContextMessageDirective | undefined, draft: string): string {
+    const text = draft.trim();
+    if (directive === undefined) return text;
+    const parsed = parseContextMessageDirective(text);
+    const body = parsed.directive === undefined ? text : parsed.body;
+    return body.length === 0 ? `#${directive}` : `#${directive} ${body}`;
 }
 
 function formatMessageDate(value: string): string {

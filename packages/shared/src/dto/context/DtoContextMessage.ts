@@ -1,5 +1,22 @@
 export type ContextMessageStatus = "pending" | "sent" | "delivered" | "failed";
 
+export type ContextMessageDirective = "push" | "resume" | "stop";
+
+export interface ParsedContextMessageDirective {
+    body: string;
+    directive?: ContextMessageDirective;
+}
+
+export function parseContextMessageDirective(text: string): ParsedContextMessageDirective {
+    const trimmed = text.trimStart();
+    const match = /^#(push|stop|resume)(?:\s+|$)/u.exec(trimmed);
+    if (match === null) return { body: text };
+    return {
+        body: trimmed.slice(match[0].length).trimStart(),
+        directive: match[1] as ContextMessageDirective,
+    };
+}
+
 export interface ContextMessageRecord {
     callId?: string;
     createdAt: string;

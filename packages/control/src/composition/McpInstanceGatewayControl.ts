@@ -2,6 +2,7 @@ import type { McpInstanceGateway } from "@portable-devshell/mcp";
 import {
     createError,
     errorCodes,
+    parseContextMessageDirective,
     type JsonValue,
     type ToolCallContext,
     type ToolDefinition
@@ -22,15 +23,16 @@ export interface McpInstanceGatewayControlOptions {
 
 const TODO_REPORT_BUCKET_CAPACITY = 2;
 const TODO_REPORT_REFILL_INTERVAL_MS = 30_000;
-const TODO_REPORT_COMMENT_TOOL_BUDGET = 5;
-const TODO_REPORT_CONVERSATION_WINDOW = 32;
+const TODO_REPORT_PUSH_TOOL_BUDGET = 5;
+const TODO_REPORT_CONVERSATION_WINDOW = 400;
 
 interface TodoReportPolicyState {
-    commentToolCallsRemaining?: number;
     lastRefillAt: number;
     lastReportMessage?: string;
-    latestAnsweredCommentId?: string;
     pendingCommentId?: string;
+    pendingPushCommentId?: string;
+    pushToolCallsRemaining?: number;
+    stopCommentId?: string;
     tokens: number;
 }
 
@@ -70,25 +72,34 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
 
     async beforeModelToolCall(instance: string, toolName: string, context: ToolCallContext): Promise<void> {
         const ctxId = context.ctxId;
-        if (ctxId === undefined || toolName === "todo_report") return;
+        if (ctxId === undefined) return;
         const key = todoReportPolicyKey(instance, ctxId);
         await this.#withTodoReportPolicy(key, async () => {
             const state = await this.#syncTodoReportPolicy(instance, ctxId);
-            if (state.pendingCommentId === undefined) return;
-            const remaining = state.commentToolCallsRemaining ?? TODO_REPORT_COMMENT_TOOL_BUDGET;
+            if (state.stopCommentId !== undefined) {
+                throw createError({
+                    code: errorCodes.todoInvalid,
+                    details: { commentId: state.stopCommentId, ctxId, reason: "stop" },
+                    message: "The user sent #stop. Model tool calls are disabled until the user sends #resume.",
+                    retryable: false,
+                });
+            }
+            if (toolName === "todo_report" || state.pendingPushCommentId === undefined) return;
+            const remaining = state.pushToolCallsRemaining ?? TODO_REPORT_PUSH_TOOL_BUDGET;
             if (remaining <= 0) {
                 throw createError({
                     code: errorCodes.todoInvalid,
                     details: {
-                        commentId: state.pendingCommentId,
+                        commentId: state.pendingPushCommentId,
                         ctxId,
-                        toolCallBudget: TODO_REPORT_COMMENT_TOOL_BUDGET,
+                        reason: "push",
+                        toolCallBudget: TODO_REPORT_PUSH_TOOL_BUDGET,
                     },
-                    message: "A delivered user comment is still unanswered. Call todo_report before using more tools.",
+                    message: "The user sent #push and is still waiting for a reply. Call todo_report before using more tools.",
                     retryable: false,
                 });
             }
-            state.commentToolCallsRemaining = remaining - 1;
+            state.pushToolCallsRemaining = remaining - 1;
         });
     }
 
@@ -410,6 +421,14 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         await this.#withTodoReportPolicy(key, async () => {
             const descriptor = this.#requireDescriptor(instance);
             const state = await this.#syncTodoReportPolicy(instance, ctxId);
+            if (state.stopCommentId !== undefined) {
+                throw createError({
+                    code: errorCodes.todoInvalid,
+                    details: { commentId: state.stopCommentId, ctxId, reason: "stop" },
+                    message: "The user sent #stop. todo_report is disabled until the user sends #resume.",
+                    retryable: false,
+                });
+            }
             this.#refillTodoReportBucket(state, this.#now());
             const commentId = state.pendingCommentId;
 
@@ -442,9 +461,9 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             if (commentId === undefined) {
                 state.tokens -= 1;
             } else {
-                state.latestAnsweredCommentId = commentId;
                 state.pendingCommentId = undefined;
-                state.commentToolCallsRemaining = undefined;
+                state.pendingPushCommentId = undefined;
+                state.pushToolCallsRemaining = undefined;
             }
             state.lastReportMessage = message;
         });
@@ -465,30 +484,51 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             ctxId,
             limit: TODO_REPORT_CONVERSATION_WINDOW,
         });
-        const latestReport = [...entries].reverse().find((entry) => entry.kind === "report");
-        if (latestReport !== undefined) state.lastReportMessage = latestReport.text;
-        const latestComment = [...entries]
-            .reverse()
-            .find((entry) => entry.kind === "comment" && entry.status === "delivered");
-        if (latestComment === undefined) {
-            state.pendingCommentId = undefined;
-            state.commentToolCallsRemaining = undefined;
-            return state;
+        let latestReportIndex = -1;
+        let latestReport: (typeof entries)[number] | undefined;
+        let latestDeliveredCommentIndex = -1;
+        let latestDeliveredComment: (typeof entries)[number] | undefined;
+        let latestPushIndex = -1;
+        let latestPushComment: (typeof entries)[number] | undefined;
+        let latestStopIndex = -1;
+        let latestStopComment: (typeof entries)[number] | undefined;
+        let latestResumeIndex = -1;
+        entries.forEach((entry, index) => {
+            if (entry.kind === "report") {
+                latestReportIndex = index;
+                latestReport = entry;
+                return;
+            }
+            const directive = parseContextMessageDirective(entry.text).directive;
+            if (directive === "resume" && entry.status !== "failed") latestResumeIndex = index;
+            if (entry.status !== "delivered") return;
+            latestDeliveredCommentIndex = index;
+            latestDeliveredComment = entry;
+            if (directive === "push") {
+                latestPushIndex = index;
+                latestPushComment = entry;
+            }
+            if (directive === "stop") {
+                latestStopIndex = index;
+                latestStopComment = entry;
+            }
+        });
+        state.lastReportMessage = latestReport?.text;
+        state.pendingCommentId = latestDeliveredCommentIndex > latestReportIndex
+            ? latestDeliveredComment?.id
+            : undefined;
+        if (latestPushIndex > latestReportIndex && latestPushComment !== undefined) {
+            if (state.pendingPushCommentId !== latestPushComment.id) {
+                state.pendingPushCommentId = latestPushComment.id;
+                state.pushToolCallsRemaining = TODO_REPORT_PUSH_TOOL_BUDGET;
+            }
+        } else {
+            state.pendingPushCommentId = undefined;
+            state.pushToolCallsRemaining = undefined;
         }
-
-        const deliveredAt = latestComment.deliveredAt ?? latestComment.createdAt;
-        const answeredInHistory = latestReport !== undefined && latestReport.createdAt > deliveredAt;
-        if (state.latestAnsweredCommentId === latestComment.id || answeredInHistory) {
-            state.latestAnsweredCommentId = latestComment.id;
-            state.pendingCommentId = undefined;
-            state.commentToolCallsRemaining = undefined;
-            return state;
-        }
-
-        if (state.pendingCommentId !== latestComment.id) {
-            state.pendingCommentId = latestComment.id;
-            state.commentToolCallsRemaining = TODO_REPORT_COMMENT_TOOL_BUDGET;
-        }
+        state.stopCommentId = latestStopIndex > latestResumeIndex
+            ? latestStopComment?.id
+            : undefined;
         return state;
     }
 

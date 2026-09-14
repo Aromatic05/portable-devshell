@@ -76,10 +76,12 @@ export type {
     ToolCallStatus
 } from "./dto/tool/DtoToolCallRecord.js";
 export type {
+    ContextMessageDirective,
     ContextMessageQueueInput,
     ContextMessageRecord,
     ContextMessageStatus
 } from "./dto/context/DtoContextMessage.js";
+export { parseContextMessageDirective } from "./dto/context/DtoContextMessage.js";
 export type {
     ConversationEntry,
     ConversationEntryKind,

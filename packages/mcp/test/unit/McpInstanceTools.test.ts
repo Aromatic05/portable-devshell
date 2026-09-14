@@ -148,7 +148,7 @@ test("environ_remote attach remains callable without a ready owner Worker", asyn
     );
 });
 
-test("conversation reply gate covers environ_remote but not environ_info bootstrap", async () => {
+test("conversation control gate covers environ_info and environ_remote", async () => {
     const registry = new McpContextRegistry({ idFactory: () => "ctx-environ-gate" });
     const created = await registry.create({
         instance: "main-pc",
@@ -190,7 +190,10 @@ test("conversation reply gate covers environ_remote but not environ_info bootstr
     });
     const handle = await requireRemoteHandle(registry, created.ctxId, "remote-server");
 
-    await endpoint.callTool("environ_info", { ctxId: created.ctxId }, context);
+    await assert.rejects(
+        endpoint.callTool("environ_info", { ctxId: created.ctxId }, context),
+        /reply required/u
+    );
     await assert.rejects(
         endpoint.callTool(
             "environ_remote",
@@ -199,7 +202,10 @@ test("conversation reply gate covers environ_remote but not environ_info bootstr
         ),
         /reply required/u
     );
-    assert.deepEqual(guarded, [`main-pc:environ_remote:${created.ctxId}`]);
+    assert.deepEqual(guarded, [
+        `main-pc:environ_info:${created.ctxId}`,
+        `main-pc:environ_remote:${created.ctxId}`,
+    ]);
     assert.equal(connectCalls, 0);
     assert.equal(
         (await registry.validate(created.ctxId, { principal: "local" })).environments
@@ -856,7 +862,8 @@ test("todo tools are fixed control-side primitives and remain available while th
     assert.equal(todoWriteSchema.properties?.todos?.minContains, undefined);
     assert.equal(todoWriteSchema.properties?.todos?.maxContains, undefined);
     const todoReport = endpoint.listTools().find((tool) => tool.name === "todo_report");
-    assert.match(todoReport?.description ?? "", /new user comments first/u);
+    assert.match(todoReport?.description ?? "", /#push/u);
+    assert.match(todoReport?.description ?? "", /#stop/u);
     const report = await endpoint.callTool("todo_report", withContext({ message: "Finished the first acceptance stage." }), context) as {
         content?: unknown;
         structuredContent?: unknown;
