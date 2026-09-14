@@ -48,6 +48,9 @@ test("TodoService creates, validates revisions, persists atomically, and emits d
     assert.equal(created.summary.total, 3);
     assert.equal(created.summary.currentItemId, "implement");
     assert.equal("tasks" in created, false);
+    assert.equal("tasks" in await service.read({ taskId: created.taskId }), false);
+    assert.equal("tasks" in await service.read({ taskId: "task-missing" }), false);
+    assert.deepEqual((await service.read()).tasks?.map((task) => task.taskId), [created.taskId]);
     assert.equal(service.currentAssociation("mcp-session")?.todoItemId, "implement");
     assert.equal(events[0]?.type, "todo.created");
 
@@ -164,7 +167,8 @@ test("TodoService emits terminal events once, archives terminal tasks, and reloa
     const read = await reloaded.read("Second task");
     assert.equal(read.revision, next.revision);
     assert.deepEqual(read.items, next.items);
-    assert.equal(read.tasks?.[0]?.title, "Second task");
+    assert.equal("tasks" in read, false);
+    assert.equal((await reloaded.read()).tasks?.[0]?.title, "Second task");
     const persisted = JSON.parse(await readFile(filePath, "utf8")) as {
         archived: unknown[];
     };
@@ -194,7 +198,8 @@ test("TodoService cancelAll archives every active task while preserving prior hi
     assert.deepEqual(service.summaries(), []);
     const firstRead = await service.read({ taskId: first.taskId });
     assert.equal(typeof firstRead.cancelledAt, "string");
-    assert.equal(firstRead.tasks?.every((task) => task.status === "cancelled"), true);
+    assert.equal("tasks" in firstRead, false);
+    assert.deepEqual((await service.read()).tasks, []);
 });
 
 test("TodoService permanently deletes an active or archived todo project", async () => {

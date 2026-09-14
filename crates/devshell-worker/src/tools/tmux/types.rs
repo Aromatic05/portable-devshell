@@ -90,7 +90,7 @@ pub struct TmuxReadParams {
     #[schemars(range(min = 0, max = 3600000))]
     pub time_ms: Option<u64>,
     #[serde(default)]
-    /// Output lines to consume. Negative values return the tail after the wait interval. Defaults to 80. Range: -400..=400.
+    /// Output lines to consume. Negative values consume all unread transcript data, discard the earlier portion, and return the requested tail after the wait interval. Defaults to 80. Range: -400..=400.
     #[schemars(range(min = -400, max = 400))]
     pub line: Option<i64>,
     #[serde(default)]

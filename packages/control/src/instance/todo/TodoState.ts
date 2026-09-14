@@ -230,9 +230,13 @@ export class TodoState {
 
     readResult(document: TodoDocument, input: TodoReadInput | string = {}): TodoReadResult {
         const selector = typeof input === "string" ? { title: input } : input;
-        const tasks = this.#taskSummaries(document);
         if (selector.taskId === undefined && selector.title === undefined) {
-            return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks };
+            return {
+                items: [],
+                revision: 0,
+                summary: { completed: 0, total: 0 },
+                tasks: this.#taskSummaries(document),
+            };
         }
         const state = [...document.active, ...document.archived].find((entry) => (
             selector.taskId === undefined
@@ -240,7 +244,7 @@ export class TodoState {
                 : entry.taskId === selector.taskId
         ));
         if (state === undefined) {
-            return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks };
+            return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
         }
         return {
             ...(state.cancelledAt === undefined ? {} : { cancelledAt: state.cancelledAt }),
@@ -251,7 +255,6 @@ export class TodoState {
             summary: summarize(state.items),
             taskId: state.taskId,
             title: state.title,
-            tasks
         };
     }
 

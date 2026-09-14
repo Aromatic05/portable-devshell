@@ -63,7 +63,7 @@ const AGENT_MODEL_TOOL_PROJECTIONS = new Map<string, AgentModelToolProjectionSpe
         projectResult: renderTmuxManageModelToolResult
     }],
     ["tmux_read", {
-        description: "Wait for or consume a managed task transcript using its task id. Use this for durable task output; use tmux_inspect for non-consuming pane screen state. Positive line consumes oldest unread lines, while negative line waits and returns a tail.",
+        description: "Wait for or consume a managed task transcript using its task id. Use this for durable task output; use tmux_inspect for non-consuming pane screen state. Positive line consumes the oldest unread lines. Negative line also consumes all unread transcript data, discards the earlier portion, and returns only the requested tail after waiting.",
         projectResult: renderTmuxTaskModelToolResult
     }],
     ["tmux_run", {

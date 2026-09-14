@@ -57,7 +57,7 @@ export class TodoService {
         return await this.#runExclusive(async () => {
             const committed = await this.#store.transition((document) => {
                 const transition = this.#state.transition(document, input, ctxId);
-                const { tasks: _tasks, ...result } = this.#readDocument(transition.document, {
+                const result = this.#readDocument(transition.document, {
                     ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
                     title: input.title
                 });
@@ -80,7 +80,7 @@ export class TodoService {
         return await this.#runExclusive(async () => {
             const committed = await this.#store.transition((document) => {
                 const transition = this.#state.control(document, taskId, action, ctxId, expectedRevision);
-                const { tasks: _tasks, ...result } = this.#readDocument(transition.document, { taskId });
+                const result = this.#readDocument(transition.document, { taskId });
                 return {
                     document: transition.document,
                     result: { events: transition.events, value: result }

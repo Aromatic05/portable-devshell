@@ -719,9 +719,46 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
     assert_eq!(output_limited["result"]["termination"], "exited");
     assert_eq!(output_limited["result"]["stdoutTruncated"], true);
     assert_eq!(output_limited["result"]["stderrTruncated"], false);
+    assert!(
+        output_limited["result"]["stdout"]
+            .as_str()
+            .unwrap()
+            .contains("... [output omitted] ...")
+    );
     assert!(output_limited["result"].get("timedOut").is_none());
     assert!(output_limited["result"].get("artifactWarnings").is_none());
     assert!(output_limited["result"].get("stderrArtifact").is_none());
+
+    #[cfg(unix)]
+    let exact_output_command = "awk 'BEGIN { for (i = 0; i < 128; i++) printf \"x\" }'";
+    #[cfg(windows)]
+    let exact_output_command = "[Console]::Out.Write([string]::new([char]'x', 128))";
+    let exact_output = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "6-exact",
+            "method": "bash_run",
+            "params": {
+                "command": exact_output_command,
+                "timeoutMs": 30_000,
+                "maxCaptureBytes": 128
+            },
+            "context": { "workspace": env.workspace() }
+        }),
+    );
+    assert_eq!(exact_output["ok"], true, "{exact_output}");
+    assert_eq!(exact_output["result"]["stdoutBytes"], 128, "{exact_output}");
+    assert_eq!(
+        exact_output["result"]["stdoutTruncated"], false,
+        "{exact_output}"
+    );
+    assert_eq!(
+        exact_output["result"]["stdout"],
+        "x".repeat(128),
+        "{exact_output}"
+    );
+
     assert!(
         output_limited["result"]["stdoutArtifact"]["handle"]
             .as_str()

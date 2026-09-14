@@ -39,19 +39,11 @@ test("TodoState owns validation, transitions, summaries, and associations", () =
         revision: 1,
         summary: { completed: 1, currentItemId: "implement", total: 3 },
         taskId: "task-fixed",
-        title: "Implement",
-        tasks: [{
-            completed: 1,
-            ctxId: "ctx-1",
-            currentItem: "Implement",
-            revision: 1,
-            status: "in_progress",
-            taskId: "task-fixed",
-            title: "Implement",
-            total: 3,
-            updatedAt: "2026-07-16T00:00:00.000Z"
-        }]
+        title: "Implement"
     });
+    assert.equal("tasks" in state.readResult(created.document, { taskId: "task-fixed" }), false);
+    assert.equal("tasks" in state.readResult(created.document, { taskId: "task-missing" }), false);
+    assert.deepEqual(state.readResult(created.document).tasks?.map((task) => task.taskId), ["task-fixed"]);
     assert.equal(state.activeSummaries(created.document)[0]?.status, "in_progress");
     const parallel = state.transition(
         created.document,

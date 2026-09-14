@@ -115,6 +115,14 @@ test("Agent model projection owns usage descriptions without mutating Worker sch
     assert.equal(properties?.consumeOutput, undefined);
     assert.equal(inputSchema.properties.wait.description, "Worker neutral wait");
     assert.equal(inputSchema.properties.timeout.description, "Worker neutral timeout");
+
+    const [read] = projectAgentModelTools([{
+        description: "Worker neutral tmux read contract",
+        inputSchema: { properties: { line: { type: "integer" }, task: { type: "string" } }, type: "object" },
+        name: "tmux_read"
+    }]);
+    assert.match(read?.description ?? "", /consumes all unread transcript data/u);
+    assert.match(read?.description ?? "", /discards the earlier portion/u);
 });
 
 test("every Agent model tool has an Agent-owned description", () => {

@@ -177,7 +177,7 @@ pub fn register_tools(
     ))?;
     registry.register(tool::<TmuxReadParams, TmuxReadOutput>(
         ToolName::parse("tmux_read").unwrap(),
-        "Read a managed task's durable terminal transcript. Positive line values consume the oldest unread lines, zero discards unread transcript data, and negative values wait until terminal state or timeMs and return the requested tail. Transcript capture is bounded and reports truncation explicitly.",
+        "Read a managed task's durable terminal transcript. Positive line values consume the oldest unread lines, zero discards unread transcript data, and negative values wait until terminal state or timeMs, consume all unread transcript data, discard the earlier portion, and return only the requested tail. Transcript capture is bounded and reports truncation explicitly.",
         ToolCapability::Read,
         Arc::clone(&states),
         TmuxState::read,

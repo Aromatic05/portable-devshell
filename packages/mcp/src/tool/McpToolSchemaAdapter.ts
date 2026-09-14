@@ -101,7 +101,7 @@ const MODEL_INPUT_HINTS = new Map<string, Readonly<Record<string, string>>>([
         force: "Allow closing a running or busy resource.",
     }],
     ["tmux_read", {
-        line: "Positive consumes unread lines; negative waits and returns a tail.",
+        line: "Positive consumes oldest unread lines; negative also consumes all unread data, discards the earlier part, and returns the requested tail after waiting.",
         timeMs: "Maximum wait, in milliseconds.",
     }],
     ["tmux_run", {

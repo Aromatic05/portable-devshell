@@ -258,8 +258,8 @@ impl ToolHandler for BashRunTool {
                 None
             },
             timed_out: matches!(termination, BashTermination::Timeout).then_some(true),
-            stdout: String::from_utf8_lossy(&stdout.kept).to_string(),
-            stderr: String::from_utf8_lossy(&stderr.kept).to_string(),
+            stdout: render_inline_stream(&stdout),
+            stderr: render_inline_stream(&stderr),
             stdout_bytes: stdout_bytes.load(Ordering::SeqCst),
             stderr_bytes: stderr_bytes.load(Ordering::SeqCst),
             stdout_truncated: stdout.truncated,
@@ -404,9 +404,6 @@ fn spawn_reader(
                     truncated = true;
                 }
                 tail.push_back(*byte);
-            }
-            if offset < count && head.len() + tail.len() >= max {
-                truncated = true;
             }
         }
         let mut kept = head;
@@ -592,6 +589,19 @@ fn enforce_inline_rpc_budget(output: &mut StreamOutput) {
         output.kept = kept;
     }
     output.truncated = true;
+}
+
+fn render_inline_stream(output: &StreamOutput) -> String {
+    if !output.truncated {
+        return String::from_utf8_lossy(&output.kept).to_string();
+    }
+    const MARKER: &[u8] = b"\n... [output omitted] ...\n";
+    let split = output.kept.len() / 2;
+    let mut rendered = Vec::with_capacity(output.kept.len() + MARKER.len());
+    rendered.extend_from_slice(&output.kept[..split]);
+    rendered.extend_from_slice(MARKER);
+    rendered.extend_from_slice(&output.kept[split..]);
+    String::from_utf8_lossy(&rendered).to_string()
 }
 
 fn json_string_upper_bound(bytes: &[u8]) -> usize {
