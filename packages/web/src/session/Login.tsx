@@ -5,7 +5,7 @@ export function Login({
     onLogin,
 }: {
     error?: string;
-    onLogin(token: string): Promise<void>;
+    onLogin(token: string): Promise<boolean>;
 }) {
     const [token, setToken] = useState("");
     const [submitting, setSubmitting] = useState(false);
@@ -13,9 +13,11 @@ export function Login({
     async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
         event.preventDefault();
         setSubmitting(true);
-        await onLogin(token);
-        setToken("");
-        setSubmitting(false);
+        try {
+            if (await onLogin(token)) setToken("");
+        } finally {
+            setSubmitting(false);
+        }
     }
 
     return <main className="session">

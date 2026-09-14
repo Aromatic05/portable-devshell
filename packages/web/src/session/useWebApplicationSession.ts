@@ -10,7 +10,7 @@ export type SessionState = "checking" | "login" | "ready";
 export interface WebApplicationSession {
     busy?: ApplicationBusy;
     error?: string;
-    login(token: string): Promise<void>;
+    login(token: string): Promise<boolean>;
     logout(): Promise<void>;
     reconnect(): Promise<void>;
     sessionState: SessionState;
@@ -29,7 +29,7 @@ export function useWebApplicationSession(
     }>();
     const storeRef = useRef<WebStore>();
     const lifecycle = useRef(0);
-    const loginRequest = useRef<Promise<void>>();
+    const loginRequest = useRef<Promise<boolean>>();
     const logoutRequest = useRef<Promise<void>>();
     const reconnectRequest = useRef<Promise<void>>();
     const [error, setError] = useState<string>();
@@ -101,7 +101,7 @@ export function useWebApplicationSession(
         void nextStore.load();
     }
 
-    async function login(token: string): Promise<void> {
+    async function login(token: string): Promise<boolean> {
         if (loginRequest.current !== undefined) return await loginRequest.current;
         const generation = ++lifecycle.current;
         const request = (async () => {
@@ -111,22 +111,24 @@ export function useWebApplicationSession(
                     if (lifecycle.current === generation) {
                         setError("Sign-in was not accepted.");
                     }
-                    return;
+                    return false;
                 }
-                if (lifecycle.current !== generation) return;
+                if (lifecycle.current !== generation) return false;
                 setError(undefined);
                 activateStore(generation);
+                return true;
             } catch {
                 if (lifecycle.current === generation) {
                     setError("Unable to establish a session.");
                 }
+                return false;
             } finally {
                 if (lifecycle.current === generation) setBusy(undefined);
             }
         })();
         loginRequest.current = request;
         try {
-            await request;
+            return await request;
         } finally {
             if (loginRequest.current === request) loginRequest.current = undefined;
         }

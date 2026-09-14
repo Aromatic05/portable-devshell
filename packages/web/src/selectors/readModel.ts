@@ -9,7 +9,14 @@ import {
 import type { WebState } from "../state/WebStore.js";
 
 export interface TodoSummary {
+    checkpoint?: {
+        blockers?: string[];
+        next?: string;
+        summary: string;
+        updatedAt: string;
+    };
     completed: number;
+    currentItem?: string;
     instance: string;
     revision: number;
     status: string;
@@ -35,6 +42,10 @@ export function todoSummaries(state: WebState): TodoSummary[] {
     return Object.entries(state.readModel.instanceState).flatMap(([instance, value]) => value.todo === undefined ? [] : [[instance, value.todo] as const]).flatMap(([instance, todo]) =>
         projectTodoTaskSummaries(todo).map((task) => ({
             completed: task.completed,
+            ...(task.checkpoint === undefined && todo.taskId !== task.taskId
+                ? {}
+                : { checkpoint: task.checkpoint ?? todo.checkpoint }),
+            ...(task.currentItem === undefined ? {} : { currentItem: task.currentItem }),
             instance,
             revision: task.revision,
             status: task.status,

@@ -601,6 +601,75 @@ describe("Messages", () => {
         localStorage.clear();
     });
 
+    it("offers keyboard and touch-friendly move controls in addition to drag ordering", () => {
+        const nextState = twoActiveConversationState();
+        render(<Messages
+            navigate={vi.fn()}
+            route={{ page: "messages", view: "contexts" }}
+            state={nextState}
+            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+        />);
+
+        const list = screen.getByRole("navigation", { name: "Conversations" });
+        fireEvent.click(screen.getByRole("button", { name: "Move ctx-first up" }));
+        expect(list.querySelectorAll<HTMLElement>(".conversation-row")[0])
+            .toHaveTextContent("Investigate the first regression in Audit.");
+    });
+
+    it("keeps an idle Current conversation in place until the user archives idle conversations", () => {
+        const nextState = twoActiveConversationState();
+        const view = render(<Messages
+            navigate={vi.fn()}
+            route={{ page: "messages", view: "contexts" }}
+            state={nextState}
+            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+        />);
+        expect(screen.getByRole("button", { name: /Investigate the first regression/u })).toBeInTheDocument();
+
+        const idleAt = new Date(Date.now() - 2 * 60 * 60 * 1_000).toISOString();
+        const idleState: WebState = {
+            ...nextState,
+            readModel: {
+                ...nextState.readModel,
+                contexts: nextState.readModel.contexts.map((context) => ({
+                    ...context,
+                    lastAccessedAt: idleAt,
+                })),
+                instanceState: {
+                    ...nextState.readModel.instanceState,
+                    alpha: {
+                        ...nextState.readModel.instanceState.alpha!,
+                        conversationEntries: nextState.readModel.instanceState.alpha!.conversationEntries.map((entry) => ({
+                            ...entry,
+                            createdAt: idleAt,
+                        })),
+                    },
+                },
+            },
+        };
+        view.rerender(<Messages
+            navigate={vi.fn()}
+            route={{ page: "messages", view: "contexts" }}
+            state={idleState}
+            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+        />);
+
+        expect(screen.getByRole("button", { name: /Investigate the first regression/u })).toHaveTextContent("idle");
+        fireEvent.click(screen.getByRole("button", { name: "Archive idle" }));
+        expect(screen.queryByRole("button", { name: /Investigate the first regression/u })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "History" }));
+        fireEvent.click(screen.getByRole("button", { name: /portable-devshell/u }));
+        expect(screen.getByRole("button", { name: /Investigate the first regression/u })).toBeInTheDocument();
+    });
+
+    it("closes the message control menu with Escape", () => {
+        render(<Messages navigate={vi.fn()} route={threadRoute} state={state} store={{ queueContextMessage: vi.fn(async () => true) } as WebStore} />);
+        fireEvent.click(screen.getByRole("button", { name: "Add message control" }));
+        expect(screen.getByRole("menu", { name: "Message controls" })).toBeInTheDocument();
+        fireEvent.keyDown(document, { key: "Escape" });
+        expect(screen.queryByRole("menu", { name: "Message controls" })).not.toBeInTheDocument();
+    });
+
     it("switches the sidebar between active and history conversations", () => {
         const historyState: WebState = {
             ...state,
@@ -632,7 +701,7 @@ describe("Messages", () => {
             store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
         />);
 
-        const active = screen.getByRole("button", { name: "Active" });
+        const active = screen.getByRole("button", { name: "Current" });
         const history = screen.getByRole("button", { name: "History" });
         expect(active.closest(".messages-sidebar-heading")).not.toBeNull();
         expect(history.closest(".messages-sidebar-heading")).not.toBeNull();
@@ -691,7 +760,7 @@ describe("Messages", () => {
                 ],
             },
         };
-        render(<Messages
+        const view = render(<Messages
             navigate={vi.fn()}
             route={{ page: "messages", view: "contexts" }}
             state={groupedState}
@@ -710,5 +779,30 @@ describe("Messages", () => {
         fireEvent.click(portableToggle);
         expect(portableToggle).toHaveAttribute("aria-expanded", "true");
         expect(within(groups[0]!).getAllByText(/portable-devshell · ctx-projec/u)).toHaveLength(2);
+
+        view.rerender(<Messages
+            navigate={vi.fn()}
+            route={{ page: "messages", view: "contexts" }}
+            state={{
+                ...groupedState,
+                readModel: {
+                    ...groupedState.readModel,
+                    contexts: [{
+                        createdAt: "2026-09-02T08:00:00Z",
+                        ctxId: "ctx-efilinux-newer",
+                        expiresAt: "2026-09-02T09:00:00Z",
+                        instance: "alpha",
+                        lastAccessedAt: "2026-09-02T08:20:00Z",
+                        principal: "client-alpha",
+                        status: "expired",
+                        workspace: "/work/efilinux",
+                    }, ...groupedState.readModel.contexts],
+                },
+            }}
+            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+        />);
+        const stableGroups = within(screen.getByRole("navigation", { name: "Conversations" })).getAllByRole("group");
+        expect(stableGroups.map((group) => group.getAttribute("aria-label")))
+            .toEqual(["portable-devshell", "efilinux"]);
     });
 });

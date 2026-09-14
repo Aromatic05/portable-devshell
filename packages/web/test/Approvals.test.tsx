@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { asInstanceName, createInitialControlReadModelState } from "@portable-devshell/shared/browser";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 
 import { Approvals } from "../src/views/Approvals.js";
 import type { WebStore } from "../src/state/WebStore.js";
@@ -73,4 +73,41 @@ it("summarizes the OAuth client, scopes, resources, and redirects before approva
     expect(within(dialog).getByText(/mcp/u)).toBeInTheDocument();
     expect(within(dialog).getByText(/devshell\.example\/alpha\/mcp/u)).toBeInTheDocument();
     expect(within(dialog).getByText(/chatgpt\.com\/callback/u)).toBeInTheDocument();
+});
+
+it("keeps a failed approval confirmation open and shows the error in the dialog", async () => {
+    const readModel = createInitialControlReadModelState();
+    readModel.instanceState.alpha = {
+        approvals: [{
+            approvalId: "approval-failed",
+            callId: "call-failed",
+            createdAt: "2026-08-12T00:00:00.000Z",
+            expiresAt: "2026-08-12T00:10:00.000Z",
+            inputSummary: "{}",
+            instance: asInstanceName("alpha"),
+            reason: "needs review",
+            riskLevel: "high",
+            source: "mcp",
+            status: "pending",
+            toolName: "bash_run",
+        }],
+        commentCalls: [],
+        contextMessages: [],
+        logs: [],
+        sequence: 0,
+        toolCalls: [],
+    };
+    const state = { connection: "online" as const, error: "Approval failed.", operations: {}, readModel };
+    const store = {
+        get state() { return state; },
+        decideTool: vi.fn(async () => false),
+    } as unknown as WebStore;
+    render(<Approvals store={store} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Confirm approve" })).getByRole("button", { name: "Approve" }));
+
+    await waitFor(() => expect(store.decideTool).toHaveBeenCalledOnce());
+    const dialog = screen.getByRole("dialog", { name: "Confirm approve" });
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Approval failed.");
 });

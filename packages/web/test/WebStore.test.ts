@@ -90,6 +90,28 @@ describe("WebStore", () => {
         store.close();
     });
 
+    it("surfaces recorded snapshot or log failures from a manual Instance refresh", async () => {
+        const clients = fakeClients();
+        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+        await store.load();
+        clients.runtime.refresh = vi.fn(async () => { throw new Error("snapshot refresh failed"); });
+        clients.runtime.readLogs = vi.fn(async () => []);
+
+        await expect(store.refreshInstance("demo")).rejects.toThrow("snapshot refresh failed");
+        store.close();
+    });
+
+    it("surfaces recorded Tool Call or log failures from a manual Tool Call refresh", async () => {
+        const clients = fakeClients();
+        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+        await store.load();
+        clients.tool.listCalls = vi.fn(async () => { throw new Error("tool calls refresh failed"); });
+        clients.runtime.readLogs = vi.fn(async () => []);
+
+        await expect(store.refreshToolCall("demo")).rejects.toThrow("tool calls refresh failed");
+        store.close();
+    });
+
     it("refreshes every Audit read surface", async () => {
         const clients = fakeClients();
         clients.context.list = vi.fn(async () => []);

@@ -45,32 +45,55 @@ export function Messages({
         text: string;
     }>();
     const [query, setQuery] = useState("");
-    const [sessionScope, setSessionScope] = useState<"active" | "history">("active");
+    const [sessionScope, setSessionScope] = useState<"current" | "history">("current");
     const [conversationPreferences, setConversationPreferences] = useState<ConversationPreferences>(
         () => readConversationPreferences(),
+    );
+    const [currentConversationKeys, setCurrentConversationKeys] = useState<Set<string>>(
+        () => new Set(selectWebMessageSessions(state).map(conversationKey)),
     );
     const [expandedHistoryGroups, setExpandedHistoryGroups] = useState<Set<string>>(() => new Set());
     const [editingConversationKey, setEditingConversationKey] = useState<string>();
     const [editingTitle, setEditingTitle] = useState("");
     const [draggingConversationKey, setDraggingConversationKey] = useState<string>();
+    const controlMenuRef = useRef<HTMLDivElement>(null);
+    const conversationSearchRef = useRef<HTMLInputElement>(null);
+    const drawerTriggerRef = useRef<HTMLButtonElement>(null);
     const historyEndRef = useRef<HTMLDivElement>(null);
     const followBottomRef = useRef(true);
     const previousThreadKeyRef = useRef<string>();
+    const sidebarRef = useRef<HTMLDivElement>(null);
     const activeSessions = useMemo(() => selectWebMessageSessions(state), [state]);
-    const historySessions = useMemo(() => selectWebMessageHistorySessions(state), [state]);
+    const inactiveSessions = useMemo(() => selectWebMessageHistorySessions(state), [state]);
+    const allBaseSessions = useMemo(
+        () => [...activeSessions, ...inactiveSessions],
+        [activeSessions, inactiveSessions],
+    );
+    const currentSessions = useMemo(
+        () => allBaseSessions.filter((session) => currentConversationKeys.has(conversationKey(session))),
+        [allBaseSessions, currentConversationKeys],
+    );
+    const historySessions = useMemo(
+        () => allBaseSessions.filter((session) => !currentConversationKeys.has(conversationKey(session))),
+        [allBaseSessions, currentConversationKeys],
+    );
     const sessions = useMemo(
         () => applyConversationPreferences(
-            sessionScope === "active" ? activeSessions : historySessions,
+            sessionScope === "current" ? currentSessions : historySessions,
             conversationPreferences,
         ),
-        [activeSessions, conversationPreferences, historySessions, sessionScope],
+        [conversationPreferences, currentSessions, historySessions, sessionScope],
     );
     const allSessions = useMemo(
         () => applyConversationPreferences(
-            [...activeSessions, ...historySessions],
+            allBaseSessions,
             conversationPreferences,
         ),
-        [activeSessions, conversationPreferences, historySessions],
+        [allBaseSessions, conversationPreferences],
+    );
+    const activeConversationKeys = useMemo(
+        () => new Set(activeSessions.map(conversationKey)),
+        [activeSessions],
     );
     const visibleSessions = useMemo(
         () => filterWebMessageSessions(sessions, query),
@@ -94,6 +117,33 @@ export function Messages({
         : undefined;
     const latestEntryId = entries.at(-1)?.id;
     const sidebarOpen = drawerOpen;
+    const idleCurrentCount = currentSessions.filter((session) =>
+        !activeConversationKeys.has(conversationKey(session)) && conversationKey(session) !== threadKey
+    ).length;
+
+    useEffect(() => {
+        setCurrentConversationKeys((current) => {
+            const next = new Set(current);
+            let changed = false;
+            for (const session of activeSessions) {
+                const key = conversationKey(session);
+                if (!next.has(key)) {
+                    next.add(key);
+                    changed = true;
+                }
+            }
+            return changed ? next : current;
+        });
+    }, [activeSessions]);
+
+    useEffect(() => {
+        setConversationPreferences((current) => {
+            const next = ensureConversationPreferenceOrder(current, allBaseSessions);
+            if (next === current) return current;
+            writeConversationPreferences(next);
+            return next;
+        });
+    }, [allBaseSessions]);
 
     useEffect(() => {
         setDrawerOpen(false);
@@ -104,6 +154,57 @@ export function Messages({
         setEditingConversationKey(undefined);
         setEditingTitle("");
     }, [route]);
+
+    useEffect(() => {
+        if (!controlMenuOpen) return;
+        const pointerDown = (event: PointerEvent) => {
+            if (event.target instanceof Node && controlMenuRef.current?.contains(event.target) !== true) {
+                setControlMenuOpen(false);
+            }
+        };
+        const keyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") setControlMenuOpen(false);
+        };
+        document.addEventListener("pointerdown", pointerDown);
+        document.addEventListener("keydown", keyDown);
+        return () => {
+            document.removeEventListener("pointerdown", pointerDown);
+            document.removeEventListener("keydown", keyDown);
+        };
+    }, [controlMenuOpen]);
+
+    useEffect(() => {
+        if (!drawerOpen) return;
+        const previous = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+        conversationSearchRef.current?.focus();
+        const keyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                setDrawerOpen(false);
+                drawerTriggerRef.current?.focus();
+                return;
+            }
+            if (event.key !== "Tab") return;
+            const controls = Array.from(sidebarRef.current?.querySelectorAll<HTMLElement>(
+                'button:not([disabled]), input:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+            ) ?? []).filter((element) => element.offsetParent !== null || element === document.activeElement);
+            if (controls.length === 0) return;
+            const first = controls[0]!;
+            const last = controls.at(-1)!;
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        };
+        document.addEventListener("keydown", keyDown);
+        return () => {
+            document.removeEventListener("keydown", keyDown);
+            if (document.activeElement === document.body) previous?.focus();
+        };
+    }, [drawerOpen]);
 
     useLayoutEffect(() => {
         if (threadKey === undefined) {
@@ -190,13 +291,47 @@ export function Messages({
 
     function moveConversation(sourceKey: string, targetKey: string): void {
         if (sourceKey === targetKey) return;
+        const source = allSessions.find((session) => conversationKey(session) === sourceKey);
+        const target = allSessions.find((session) => conversationKey(session) === targetKey);
+        if (
+            source === undefined ||
+            target === undefined ||
+            workspacePreferenceKey(source) !== workspacePreferenceKey(target)
+        ) return;
+        const workspace = workspacePreferenceKey(source);
         updateConversationPreferences((current) => ({
             ...current,
-            order: reorderConversationKeys(allSessions, sourceKey, targetKey, current.order),
+            orderByWorkspace: {
+                ...current.orderByWorkspace,
+                [workspace]: reorderConversationKeys(
+                    allSessions.filter((session) => workspacePreferenceKey(session) === workspace),
+                    sourceKey,
+                    targetKey,
+                    current.orderByWorkspace[workspace] ?? [],
+                ),
+            },
         }));
     }
 
-    function renderSession(session: WebMessageSession) {
+    function moveConversationByOffset(
+        session: WebMessageSession,
+        offset: -1 | 1,
+        collection: readonly WebMessageSession[],
+    ): void {
+        const key = conversationKey(session);
+        const peers = collection.filter((candidate) => workspacePreferenceKey(candidate) === workspacePreferenceKey(session));
+        const index = peers.findIndex((candidate) => conversationKey(candidate) === key);
+        const target = peers[index + offset];
+        if (target !== undefined) moveConversation(key, conversationKey(target));
+    }
+
+    function archiveIdle(): void {
+        setCurrentConversationKeys((current) => new Set([...current].filter((key) =>
+            activeConversationKeys.has(key) || key === threadKey
+        )));
+    }
+
+    function renderSession(session: WebMessageSession, collection: readonly WebMessageSession[]) {
         const active = route.view === "thread" &&
             route.instance === session.instance &&
             route.ctxId === session.ctxId;
@@ -266,19 +401,39 @@ export function Messages({
                     type="button"
                 >
                     <strong>{session.title}</strong>
-                    <span>{session.instance} · {session.status ?? "history"}</span>
+                    <span>{session.instance} · {sessionScope === "current"
+                        ? (activeConversationKeys.has(key) ? "active" : "idle")
+                        : (session.status ?? "history")}</span>
                     <time dateTime={session.latestAt}>{formatMessageDate(session.latestAt)}</time>
                 </button>
-                <button
-                    aria-label={`Rename ${session.ctxId}`}
-                    className="conversation-rename"
-                    onClick={() => {
-                        setEditingConversationKey(key);
-                        setEditingTitle(session.title);
-                    }}
-                    title="Rename conversation"
-                    type="button"
-                >Rename</button>
+                <div className="conversation-row-actions">
+                    <button
+                        aria-label={`Move ${session.ctxId} up`}
+                        className="conversation-move"
+                        disabled={collection.filter((candidate) => workspacePreferenceKey(candidate) === workspacePreferenceKey(session))[0]?.ctxId === session.ctxId}
+                        onClick={() => moveConversationByOffset(session, -1, collection)}
+                        title="Move up"
+                        type="button"
+                    >↑</button>
+                    <button
+                        aria-label={`Move ${session.ctxId} down`}
+                        className="conversation-move"
+                        disabled={collection.filter((candidate) => workspacePreferenceKey(candidate) === workspacePreferenceKey(session)).at(-1)?.ctxId === session.ctxId}
+                        onClick={() => moveConversationByOffset(session, 1, collection)}
+                        title="Move down"
+                        type="button"
+                    >↓</button>
+                    <button
+                        aria-label={`Rename ${session.ctxId}`}
+                        className="conversation-rename"
+                        onClick={() => {
+                            setEditingConversationKey(key);
+                            setEditingTitle(session.title);
+                        }}
+                        title="Rename conversation"
+                        type="button"
+                    >Rename</button>
+                </div>
             </>}
         </div>;
     }
@@ -291,15 +446,15 @@ export function Messages({
             tabIndex={sidebarOpen ? 0 : -1}
             type="button"
         />
-        <div className={`messages-sidebar${sidebarOpen ? " open" : ""}`}>
+        <div className={`messages-sidebar${sidebarOpen ? " open" : ""}`} ref={sidebarRef}>
             <div className="messages-sidebar-heading">
                 <strong>Conversations</strong>
                 <div aria-label="Conversation scope" className="messages-session-scope" role="group">
                     <button
-                        aria-pressed={sessionScope === "active"}
-                        onClick={() => setSessionScope("active")}
+                        aria-pressed={sessionScope === "current"}
+                        onClick={() => setSessionScope("current")}
                         type="button"
-                    >Active</button>
+                    >Current</button>
                     <button
                         aria-pressed={sessionScope === "history"}
                         onClick={() => setSessionScope("history")}
@@ -313,11 +468,17 @@ export function Messages({
                     type="button"
                 >×</button>
             </div>
+            {sessionScope === "current" && idleCurrentCount > 0 ? <button
+                className="messages-archive-idle"
+                onClick={archiveIdle}
+                type="button"
+            >Archive idle</button> : null}
             <label className="messages-search">
                 <span className="sr-only">Search conversations</span>
                 <input
                     onChange={(event) => setQuery(event.target.value)}
                     placeholder="Search conversations"
+                    ref={conversationSearchRef}
                     type="search"
                     value={query}
                 />
@@ -325,8 +486,8 @@ export function Messages({
             <nav aria-label="Conversations" className="conversation-list">
                 {visibleSessions.length === 0
                     ? <p className="empty">No conversations found.</p>
-                    : sessionScope === "active"
-                        ? visibleSessions.map((session) => renderSession(session))
+                    : sessionScope === "current"
+                        ? visibleSessions.map((session) => renderSession(session, visibleSessions))
                         : historyGroups.map((group) => <section
                             aria-label={group.label}
                             className="conversation-workspace-group"
@@ -357,7 +518,7 @@ export function Messages({
                                         <span>{group.sessions.length}</span>
                                     </button>
                                     {expanded ? <div className="conversation-workspace-sessions">
-                                        {group.sessions.map((session) => renderSession(session))}
+                                        {group.sessions.map((session) => renderSession(session, group.sessions))}
                                     </div> : null}
                                 </>;
                             })()}
@@ -370,6 +531,7 @@ export function Messages({
                     aria-label="Open conversations"
                     className="messages-drawer-toggle"
                     onClick={() => setDrawerOpen(true)}
+                    ref={drawerTriggerRef}
                     type="button"
                 >
                     <span aria-hidden="true" className="two-line-menu"><i /><i /></span>
@@ -421,7 +583,7 @@ export function Messages({
                         <button aria-label="Remove message control" onClick={() => setMessageDirective(undefined)} type="button">×</button>
                     </span>
                 </div>}
-                <div className="messages-control-picker">
+                <div className="messages-control-picker" ref={controlMenuRef}>
                     <button
                         aria-expanded={controlMenuOpen}
                         aria-haspopup="menu"
@@ -539,8 +701,10 @@ function groupHistorySessionsByWorkspace(sessions: readonly WebMessageSession[])
 }
 
 interface ConversationPreferences {
-    order: string[];
+    legacyOrder: string[];
+    orderByWorkspace: Record<string, string[]>;
     titles: Record<string, string>;
+    workspaceOrder: string[];
 }
 
 const conversationPreferencesStorageKey = "portable-devshell:web:conversation-preferences:v1";
@@ -549,23 +713,44 @@ function conversationKey(session: Pick<WebMessageSession, "ctxId" | "instance">)
     return `${session.instance}\u0000${session.ctxId}`;
 }
 
+function workspacePreferenceKey(session: Pick<WebMessageSession, "instance" | "workspace">): string {
+    return session.workspace ?? `\u0000${session.instance}`;
+}
+
 function readConversationPreferences(): ConversationPreferences {
-    if (typeof window === "undefined") return { order: [], titles: {} };
+    if (typeof window === "undefined") return emptyConversationPreferences();
     try {
         const raw = window.localStorage.getItem(conversationPreferencesStorageKey);
-        if (raw === null) return { order: [], titles: {} };
-        const parsed = JSON.parse(raw) as { order?: unknown; titles?: unknown };
-        const order = Array.isArray(parsed.order)
+        if (raw === null) return emptyConversationPreferences();
+        const parsed = JSON.parse(raw) as {
+            order?: unknown;
+            orderByWorkspace?: unknown;
+            titles?: unknown;
+            workspaceOrder?: unknown;
+        };
+        const legacyOrder = Array.isArray(parsed.order)
             ? parsed.order.filter((value): value is string => typeof value === "string")
             : [];
+        const orderByWorkspace = typeof parsed.orderByWorkspace === "object" &&
+            parsed.orderByWorkspace !== null &&
+            !Array.isArray(parsed.orderByWorkspace)
+            ? Object.fromEntries(Object.entries(parsed.orderByWorkspace).flatMap(([workspace, value]) =>
+                Array.isArray(value)
+                    ? [[workspace, value.filter((item): item is string => typeof item === "string")]]
+                    : []
+            ))
+            : {};
         const titles = typeof parsed.titles === "object" && parsed.titles !== null && !Array.isArray(parsed.titles)
             ? Object.fromEntries(Object.entries(parsed.titles).filter(
                 (entry): entry is [string, string] => typeof entry[1] === "string",
             ))
             : {};
-        return { order, titles };
+        const workspaceOrder = Array.isArray(parsed.workspaceOrder)
+            ? parsed.workspaceOrder.filter((value): value is string => typeof value === "string")
+            : [];
+        return { legacyOrder, orderByWorkspace, titles, workspaceOrder };
     } catch {
-        return { order: [], titles: {} };
+        return emptyConversationPreferences();
     }
 }
 
@@ -582,22 +767,75 @@ function applyConversationPreferences(
     sessions: readonly WebMessageSession[],
     preferences: ConversationPreferences,
 ): WebMessageSession[] {
-    const rank = new Map(preferences.order.map((key, index) => [key, index]));
+    const workspaceRank = new Map(preferences.workspaceOrder.map((key, index) => [key, index]));
     return sessions
         .map((session) => ({
             ...session,
             title: preferences.titles[conversationKey(session)] ?? session.title,
         }))
         .sort((left, right) => {
+            const leftWorkspace = workspacePreferenceKey(left);
+            const rightWorkspace = workspacePreferenceKey(right);
+            if (leftWorkspace !== rightWorkspace) {
+                const leftWorkspaceRank = workspaceRank.get(leftWorkspace);
+                const rightWorkspaceRank = workspaceRank.get(rightWorkspace);
+                if (leftWorkspaceRank !== undefined || rightWorkspaceRank !== undefined) {
+                    if (leftWorkspaceRank === undefined) return 1;
+                    if (rightWorkspaceRank === undefined) return -1;
+                    return leftWorkspaceRank - rightWorkspaceRank;
+                }
+                return leftWorkspace.localeCompare(rightWorkspace);
+            }
+            const rank = new Map((preferences.orderByWorkspace[leftWorkspace] ?? preferences.legacyOrder)
+                .map((key, index) => [key, index]));
             const leftRank = rank.get(conversationKey(left));
             const rightRank = rank.get(conversationKey(right));
-            if (leftRank === undefined && rightRank === undefined) {
-                return right.startedAt.localeCompare(left.startedAt) || left.ctxId.localeCompare(right.ctxId);
-            }
+            if (leftRank === undefined && rightRank === undefined) return right.startedAt.localeCompare(left.startedAt) || left.ctxId.localeCompare(right.ctxId);
             if (leftRank === undefined) return -1;
             if (rightRank === undefined) return 1;
             return leftRank - rightRank;
         });
+}
+
+function emptyConversationPreferences(): ConversationPreferences {
+    return { legacyOrder: [], orderByWorkspace: {}, titles: {}, workspaceOrder: [] };
+}
+
+function ensureConversationPreferenceOrder(
+    preferences: ConversationPreferences,
+    sessions: readonly WebMessageSession[],
+): ConversationPreferences {
+    const workspaceSessions = new Map<string, WebMessageSession[]>();
+    for (const session of sessions) {
+        const workspace = workspacePreferenceKey(session);
+        const current = workspaceSessions.get(workspace) ?? [];
+        current.push(session);
+        workspaceSessions.set(workspace, current);
+    }
+    const loadedWorkspaces = [...workspaceSessions.keys()];
+    const workspaceOrder = [
+        ...preferences.workspaceOrder,
+        ...loadedWorkspaces.filter((workspace) => !preferences.workspaceOrder.includes(workspace)),
+    ];
+    const orderByWorkspace = { ...preferences.orderByWorkspace };
+    let changed = workspaceOrder.length !== preferences.workspaceOrder.length ||
+        workspaceOrder.some((workspace, index) => workspace !== preferences.workspaceOrder[index]);
+    for (const [workspace, values] of workspaceSessions) {
+        const loadedKeys = values.map(conversationKey);
+        const previous = orderByWorkspace[workspace] ?? preferences.legacyOrder.filter((key) => loadedKeys.includes(key));
+        const missing = loadedKeys.filter((key) => !previous.includes(key));
+        const next = [...missing, ...previous];
+        if (
+            orderByWorkspace[workspace] === undefined ||
+            next.length !== orderByWorkspace[workspace]!.length ||
+            next.some((key, index) => key !== orderByWorkspace[workspace]![index])
+        ) {
+            orderByWorkspace[workspace] = next;
+            changed = true;
+        }
+    }
+    if (!changed) return preferences;
+    return { ...preferences, legacyOrder: [], orderByWorkspace, workspaceOrder };
 }
 
 function reorderConversationKeys(

@@ -69,9 +69,15 @@ export function Application({
         </header>
         <main className={`page page-${route.page}`}>
             <PartialFailures failures={webFailures(state.readModel)} />
-            <div aria-live="polite">
-                {state.notice === undefined ? null : <p className="notice">{state.notice}</p>}
-                {state.error === undefined ? null : <p className="error" role="alert">{state.error}</p>}
+            <div aria-live="polite" className="global-feedback">
+                {state.notice === undefined ? null : <div className="feedback-row notice">
+                    <p>{state.notice}</p>
+                    <button aria-label="Dismiss notice" onClick={() => store.dismissFeedback("notice")} type="button">×</button>
+                </div>}
+                {state.error === undefined ? null : <div className="feedback-row error" role="alert">
+                    <p>{state.error}</p>
+                    <button aria-label="Dismiss error" onClick={() => store.dismissFeedback("error")} type="button">×</button>
+                </div>}
                 {error === undefined ? null : <p className="error" role="alert">{error}</p>}
             </div>
             {route.page === "overview" ? <Overview state={state} /> : null}

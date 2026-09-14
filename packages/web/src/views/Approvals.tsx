@@ -28,6 +28,7 @@ export function Approvals({
     const tools = toolApprovals(state);
     const oauth = state.readModel.oauthApprovals.filter((item) => item.status === "pending");
     const [selection, setSelection] = useState<Selection>();
+    const [failure, setFailure] = useState<string>();
     const operation = selection === undefined
         ? undefined
         : `${selection.kind === "tool" ? "approval" : "oauth"}:${selection.approvalId}`;
@@ -42,13 +43,19 @@ export function Approvals({
                     disabled={controlsDisabled}
                     item={item}
                     key={item.approvalId}
-                    onDecide={setSelection}
+                    onDecide={(next) => {
+                        setFailure(undefined);
+                        setSelection(next);
+                    }}
                 />)}
                 {oauth.map((item) => <OAuthApproval
                     disabled={controlsDisabled}
                     item={item}
                     key={item.approvalId}
-                    onDecide={setSelection}
+                    onDecide={(next) => {
+                        setFailure(undefined);
+                        setSelection(next);
+                    }}
                 />)}
             </div>}
         {selection === undefined ? null : <ConfirmationDialog
@@ -56,8 +63,13 @@ export function Approvals({
             busy={operation !== undefined && state.operations[operation] !== undefined}
             description={`${selection.decision === "approve" ? "Approve" : "Deny"} ${selection.label}?`}
             disabled={controlsDisabled}
-            onCancel={() => setSelection(undefined)}
+            error={failure}
+            onCancel={() => {
+                setFailure(undefined);
+                setSelection(undefined);
+            }}
             onConfirm={() => {
+                setFailure(undefined);
                 const request = selection.kind === "tool"
                     ? store.decideTool(
                           selection.instance!,
@@ -65,7 +77,10 @@ export function Approvals({
                           selection.decision,
                       )
                     : store.decideOAuth(selection.approvalId, selection.decision);
-                void request.finally(() => setSelection(undefined));
+                void request.then((succeeded) => {
+                    if (succeeded) setSelection(undefined);
+                    else setFailure(store.state.error ?? "Approval could not be recorded.");
+                });
             }}
         />}
     </section>;

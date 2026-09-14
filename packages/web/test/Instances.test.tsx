@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { asInstanceName, createInitialControlReadModelState } from "@portable-devshell/shared/browser";
 import { expect, it, vi } from "vitest";
 
@@ -108,4 +108,29 @@ it("keeps confirmation for stopping a running local instance", () => {
     expect(dialog).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Stop" }));
     expect(store.stop).toHaveBeenCalledWith("local-one");
+});
+
+it("keeps a failed Stop confirmation open and shows the failure in place", async () => {
+    const store = localStore("ready");
+    Object.assign(store.state, { error: "Stop failed." });
+    store.stop = vi.fn(async () => false) as unknown as WebStore["stop"];
+    render(<Instances store={store} />);
+    fireEvent.click(screen.getByRole("button", { name: /local-one/u }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Confirm stop" })).getByRole("button", { name: "Stop" }));
+
+    await waitFor(() => expect(store.stop).toHaveBeenCalledOnce());
+    const dialog = screen.getByRole("dialog", { name: "Confirm stop" });
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Stop failed.");
+});
+
+it("shows instance refresh failures beside the selected detail instead of failing silently", async () => {
+    const store = localStore("ready");
+    store.refreshInstance = vi.fn(async () => { throw new Error("Instance refresh failed."); });
+    render(<Instances store={store} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /local-one/u }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Instance refresh failed.");
+    expect(screen.getByRole("heading", { name: "local-one", level: 3 })).toBeInTheDocument();
 });

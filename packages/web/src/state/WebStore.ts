@@ -8,7 +8,7 @@ import {
 
 import type { WebClients } from "../client/WebClients.js";
 import { WebOperationCoordinator } from "./WebOperationCoordinator.js";
-import { createInitialWebState, type WebState } from "./WebState.js";
+import { createInitialWebState, webFailures, type WebState } from "./WebState.js";
 
 export type { ConnectionState, WebState } from "./WebState.js";
 
@@ -134,10 +134,18 @@ export class WebStore {
 
     async refreshInstance(name: string): Promise<void> {
         await this.#model.refreshInstance(name, ["snapshot", "logs"]);
+        const failures = webFailures(this.#model.state);
+        const errors = [failures[`instance:${name}`], failures[`logs:${name}`]]
+            .filter((value): value is string => value !== undefined);
+        if (errors.length > 0) throw new Error(errors.join("; "));
     }
 
     async refreshToolCall(instance: string): Promise<void> {
         await this.#model.refreshInstance(instance, ["toolCalls", "logs"]);
+        const failures = webFailures(this.#model.state);
+        const errors = [failures[`toolCalls:${instance}`], failures[`logs:${instance}`]]
+            .filter((value): value is string => value !== undefined);
+        if (errors.length > 0) throw new Error(errors.join("; "));
     }
 
     async readToolCallDetail(instance: string, callId: string) {
@@ -155,9 +163,9 @@ export class WebStore {
         instance: string,
         approvalId: string,
         decision: "approve" | "deny",
-    ): Promise<void> {
+    ): Promise<boolean> {
         const generation = this.#generation;
-        await this.#operations.run(
+        return await this.#operations.run(
             `approval:${approvalId}`,
             "Approval recorded.",
             generation,
@@ -171,9 +179,9 @@ export class WebStore {
     async decideOAuth(
         approvalId: string,
         decision: "approve" | "deny",
-    ): Promise<void> {
+    ): Promise<boolean> {
         const generation = this.#generation;
-        await this.#operations.run(
+        return await this.#operations.run(
             `oauth:${approvalId}`,
             "Approval recorded.",
             generation,
@@ -271,12 +279,22 @@ export class WebStore {
         );
     }
 
-    async start(instance: string): Promise<void> {
-        await this.#lifecycle(instance, "start");
+    async start(instance: string): Promise<boolean> {
+        return await this.#lifecycle(instance, "start");
     }
 
-    async stop(instance: string): Promise<void> {
-        await this.#lifecycle(instance, "stop");
+    async stop(instance: string): Promise<boolean> {
+        return await this.#lifecycle(instance, "stop");
+    }
+
+    dismissFeedback(kind: "error" | "notice"): void {
+        if (kind === "error") {
+            if (this.#state.error === undefined) return;
+            this.#set({ ...this.#state, error: undefined });
+            return;
+        }
+        if (this.#state.notice === undefined) return;
+        this.#set({ ...this.#state, notice: undefined });
     }
 
     close(): void {
@@ -291,9 +309,9 @@ export class WebStore {
         this.clients.close();
     }
 
-    async #lifecycle(instance: string, action: "start" | "stop"): Promise<void> {
+    async #lifecycle(instance: string, action: "start" | "stop"): Promise<boolean> {
         const generation = this.#generation;
-        await this.#operations.run(
+        return await this.#operations.run(
             `${action}:${instance}`,
             `${instance} ${action} requested.`,
             generation,

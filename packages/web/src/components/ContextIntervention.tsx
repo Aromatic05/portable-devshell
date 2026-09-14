@@ -17,6 +17,8 @@ export function ContextIntervention({
     store: WebStore;
 }) {
     const [disableConfirmation, setDisableConfirmation] = useState(false);
+    const [failure, setFailure] = useState<string>();
+    const [disableFailure, setDisableFailure] = useState<string>();
     const context = state.readModel.contexts.find((record) => record.ctxId === ctxId);
     const environment = context === undefined
         ? undefined
@@ -31,6 +33,8 @@ export function ContextIntervention({
 
     useEffect(() => {
         setDisableConfirmation(false);
+        setFailure(undefined);
+        setDisableFailure(undefined);
     }, [ctxId, instance]);
 
     return <section className="card context-intervention" aria-labelledby="context-intervention-title">
@@ -42,13 +46,21 @@ export function ContextIntervention({
             {context === undefined || context.status === "disabled" ? null : <div className="actions">
                 <button
                     disabled={!interactive || state.operations[renewOperation] !== undefined}
-                    onClick={() => void store.renewContext(ctxId)}
+                    onClick={() => {
+                        setFailure(undefined);
+                        void store.renewContext(ctxId).then((succeeded) => {
+                            if (!succeeded) setFailure(store.state.error ?? "Context could not be renewed.");
+                        });
+                    }}
                     type="button"
                 >{state.operations[renewOperation] !== undefined ? "Renewing…" : "Renew Context"}</button>
                 <button
                     className="danger"
                     disabled={!interactive}
-                    onClick={() => setDisableConfirmation(true)}
+                    onClick={() => {
+                        setDisableFailure(undefined);
+                        setDisableConfirmation(true);
+                    }}
                     type="button"
                 >Disable Context</button>
             </div>}
@@ -56,15 +68,26 @@ export function ContextIntervention({
         {context === undefined ? <p className="hint">Context registry record unavailable.</p> : <p className="hint">
             Workspace: {environment?.workspace ?? context.workspace ?? "not attached"} · Status: {context.status} · expires {context.expiresAt}
         </p>}
+        {failure === undefined ? null : <p className="error" role="alert">{failure}</p>}
         {disableConfirmation ? <ConfirmationDialog
             actionLabel="Disable"
             busy={state.operations[disableOperation] !== undefined}
             description={`Disable Context ${ctxId}${environment?.workspace === undefined ? "" : ` from workspace ${environment.workspace}`} across all attached instances? This cannot be renewed; the client must establish a new Context.`}
             disabled={!interactive}
-            onCancel={() => setDisableConfirmation(false)}
+            error={disableFailure}
+            onCancel={() => {
+                setDisableFailure(undefined);
+                setDisableConfirmation(false);
+            }}
             onConfirm={() => {
-                const request = store.disableContext(ctxId);
-                void request.finally(() => setDisableConfirmation(false));
+                setDisableFailure(undefined);
+                void store.disableContext(ctxId).then((succeeded) => {
+                    if (succeeded) {
+                        setDisableConfirmation(false);
+                    } else {
+                        setDisableFailure(store.state.error ?? "Context could not be disabled.");
+                    }
+                });
             }}
         /> : null}
     </section>;

@@ -47,6 +47,84 @@ it("identifies the exact instance and task before permanently deleting a Todo pr
     await waitFor(() => expect(deleteTodo).toHaveBeenCalledWith("alpha", "task-1"));
 });
 
+it("shows current Todo work, checkpoint, blockers, and task steps for supervision", () => {
+    const state: WebState = {
+        connection: "online",
+        operations: {},
+        readModel: {
+            ...createInitialControlReadModelState(),
+            instanceState: {
+                alpha: {
+                    approvals: [],
+                    commentCalls: [],
+                    contextMessages: [],
+                    logs: [],
+                    sequence: 0,
+                    toolCalls: [],
+                    todo: {
+                        checkpoint: {
+                            blockers: ["Waiting for review"],
+                            next: "Run release checks",
+                            summary: "Implementation is ready for review.",
+                            updatedAt: "2026-09-14T10:00:00Z",
+                        },
+                        items: [{ content: "Ship", id: "ship", status: "in_progress" }],
+                        revision: 3,
+                        summary: { completed: 0, currentItemId: "ship", total: 1 },
+                        taskId: "task-supervision",
+                        title: "Release supervision",
+                    },
+                },
+            },
+        },
+    };
+
+    render(<Todos state={state} store={{} as WebStore} />);
+
+    expect(screen.getByText("Implementation is ready for review.")).toBeInTheDocument();
+    expect(screen.getByText("Run release checks")).toBeInTheDocument();
+    expect(screen.getByText("Waiting for review")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Task steps"));
+    expect(screen.getAllByText("Ship")).toHaveLength(2);
+    expect(screen.getByText("in_progress", { selector: "span" })).toBeInTheDocument();
+});
+
+it("keeps failed Todo deletion in context and shows the error in the dialog", async () => {
+    const state: WebState = {
+        connection: "online",
+        error: "Todo deletion failed.",
+        operations: {},
+        readModel: {
+            ...createInitialControlReadModelState(),
+            instanceState: {
+                alpha: {
+                    approvals: [],
+                    commentCalls: [],
+                    contextMessages: [],
+                    logs: [],
+                    sequence: 0,
+                    toolCalls: [],
+                    todo: {
+                        items: [{ content: "Ship", id: "ship", status: "in_progress" }],
+                        revision: 3,
+                        summary: { completed: 0, currentItemId: "ship", total: 1 },
+                        taskId: "task-1",
+                        title: "Release portable-devshell",
+                    },
+                },
+            },
+        },
+    };
+    const deleteTodo = vi.fn(async () => false);
+    render(<Todos state={state} store={{ deleteTodo } as unknown as WebStore} />);
+    fireEvent.click(screen.getByRole("button", { name: "Delete project" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Confirm delete" })).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(deleteTodo).toHaveBeenCalledOnce());
+    const dialog = screen.getByRole("dialog", { name: "Confirm delete" });
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Todo deletion failed.");
+});
+
 it("disables Todo deletion during a session-level operation", () => {
     const state: WebState = {
         connection: "online",

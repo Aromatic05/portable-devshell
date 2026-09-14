@@ -1,6 +1,7 @@
 import type { WebState } from "../state/WebStore.js";
 import { webFailures } from "../state/WebState.js";
 import { SystemResources } from "../components/diagnostics/SystemResources.js";
+import { webRouteHref } from "../routing/hashRoute.js";
 import { overviewAlertRoute, overviewAlerts, overviewToolCalls } from "../selectors/readModel.js";
 
 export function Overview({ state }: { state: WebState }) {
@@ -32,7 +33,11 @@ export function Overview({ state }: { state: WebState }) {
                 </section>
                 <section>
                     <h3><a href="#/audit">Recent tool calls</a></h3>
-                    {overviewToolCalls(overview).length === 0 ? <p className="empty">No recent activity.</p> : <ol className="feed">{overviewToolCalls(overview).map((activity) => <li key={activity.callId}><time>{activity.completedAt ?? activity.startedAt}</time><strong>{activity.instance}</strong> {activity.toolName} · {activity.status}</li>)}</ol>}
+                    {overviewToolCalls(overview).length === 0 ? <p className="empty">No recent activity.</p> : <ol className="feed">{overviewToolCalls(overview).map((activity) => <li key={activity.callId}>
+                        <a href={webRouteHref({ page: "audit", view: "call", instance: activity.instance, callId: activity.callId })}>
+                            <time>{activity.completedAt ?? activity.startedAt}</time><strong>{activity.instance}</strong> {activity.toolName} · {activity.status}
+                        </a>
+                    </li>)}</ol>}
                 </section>
             </div>
             <div className="overview-grid">

@@ -287,6 +287,17 @@ describe("Audit", () => {
         expect(navigate).not.toHaveBeenCalled();
     });
 
+    it("treats Context ID as an exact identifier rather than a substring search", () => {
+        const { container } = renderAudit();
+
+        fireEvent.change(screen.getByLabelText("Context ID"), { target: { value: "ctx-" } });
+
+        expect(container.querySelectorAll(".activity-feed > li")).toHaveLength(0);
+        fireEvent.change(screen.getByLabelText("Context ID"), { target: { value: "ctx-alpha" } });
+        expect(container.querySelectorAll(".activity-feed > li")).toHaveLength(1);
+        expect(screen.getByText("bash_run", { selector: "strong" })).toBeInTheDocument();
+    });
+
     it("scopes tool calls without exposing a Comment composer in Audit", () => {
         const view = renderAudit({ route: alphaContextRoute });
 
@@ -314,6 +325,38 @@ describe("Audit", () => {
         expect(within(dialog).getByText(/\/workspace\/alpha/u)).toBeInTheDocument();
         fireEvent.click(within(dialog).getByRole("button", { name: "Disable" }));
         await waitFor(() => expect(disableContext).toHaveBeenCalledWith("ctx-alpha"));
+    });
+
+    it("keeps Context disable confirmation open and reports a failed operation in place", async () => {
+        const failedState = { ...state, error: "Context disable failed." };
+        renderAudit({
+            route: alphaContextRoute,
+            state: failedState,
+            store: {
+                get state() { return failedState; },
+                disableContext: vi.fn(async () => false),
+                renewContext: vi.fn(async () => true),
+            },
+        });
+
+        fireEvent.click(screen.getByRole("button", { name: "Disable Context" }));
+        fireEvent.click(within(screen.getByRole("dialog", { name: "Confirm disable" })).getByRole("button", { name: "Disable" }));
+
+        const dialog = await screen.findByRole("dialog", { name: "Confirm disable" });
+        expect(within(dialog).getByRole("alert")).toHaveTextContent("Context disable failed.");
+    });
+
+    it("shows Tool Call detail loading failures inside the expanded record", async () => {
+        renderAudit({
+            store: {
+                readToolCallDetail: vi.fn(async () => { throw new Error("Tool Call detail unavailable."); }),
+                refreshToolCall: vi.fn(async () => undefined),
+            },
+        });
+
+        fireEvent.click(screen.getByText("file_read", { selector: "strong" }).closest("summary")!);
+
+        expect(await screen.findByRole("alert")).toHaveTextContent("Tool Call detail unavailable.");
     });
 
     it("keeps batch Context management separate from Audit scope", async () => {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { ConfirmationDialog } from "../components/ConfirmationDialog.js";
 import {
@@ -21,6 +21,13 @@ export function Instances({
         action: "Stop";
         instance: string;
     }>();
+    const [confirmationFailure, setConfirmationFailure] = useState<string>();
+    const [detailFailure, setDetailFailure] = useState<string>();
+    const [refreshingInstance, setRefreshingInstance] = useState<string>();
+    const [lifecycleFailure, setLifecycleFailure] = useState<string>();
+    const refreshGeneration = useRef(0);
+    const selectedRef = useRef<string>();
+    selectedRef.current = selected;
     const entry = model.instances.find(({ name }) => name === selected);
     const selectedWorker = model.overview?.instances.find(
         ({ name }) => name === entry?.name,
@@ -46,8 +53,21 @@ export function Instances({
                     className={`instance card${selected === item.name ? " selected" : ""}`}
                     key={item.name}
                     onClick={() => {
+                        const generation = ++refreshGeneration.current;
+                        selectedRef.current = item.name;
                         setSelected(item.name);
-                        void store.refreshInstance(item.name);
+                        setDetailFailure(undefined);
+                        setLifecycleFailure(undefined);
+                        setRefreshingInstance(item.name);
+                        void store.refreshInstance(item.name).catch((error: unknown) => {
+                            if (refreshGeneration.current === generation && selectedRef.current === item.name) {
+                                setDetailFailure(error instanceof Error ? error.message : "Instance details could not be refreshed.");
+                            }
+                        }).finally(() => {
+                            if (refreshGeneration.current === generation) {
+                                setRefreshingInstance((current) => current === item.name ? undefined : current);
+                            }
+                        });
                     }}
                 >
                     <strong>{item.name}</strong>
@@ -58,10 +78,18 @@ export function Instances({
                 </button>)}
             </div>}
         {entry === undefined ? null : <article className="detail">
-            <button className="back" onClick={() => setSelected(undefined)}>
+            <button className="back" onClick={() => {
+                refreshGeneration.current += 1;
+                selectedRef.current = undefined;
+                setSelected(undefined);
+                setDetailFailure(undefined);
+                setLifecycleFailure(undefined);
+            }}>
                 Back to instances
             </button>
             <h3>{entry.name}</h3>
+            {refreshingInstance === entry.name ? <p className="hint" role="status">Refreshing instance details…</p> : null}
+            {detailFailure === undefined ? null : <p className="error" role="alert">{detailFailure}</p>}
             <p>
                 Runtime: {entry.snapshot.status}; daemon: {entry.snapshot.daemonState};
                 sequence: {entry.snapshot.lastSeq}
@@ -82,9 +110,15 @@ export function Instances({
                     }
                     onClick={() => {
                         if (lifecycleAction === "Start") {
-                            void store.start(entry.name);
+                            setLifecycleFailure(undefined);
+                            void store.start(entry.name).then((succeeded) => {
+                                if (!succeeded && selectedRef.current === entry.name) {
+                                    setLifecycleFailure(store.state.error ?? `${entry.name} could not be started.`);
+                                }
+                            });
                             return;
                         }
+                        setConfirmationFailure(undefined);
                         setConfirmation({ action: "Stop", instance: entry.name });
                     }}
                 >
@@ -93,6 +127,7 @@ export function Instances({
                         : lifecycleAction}
                 </button>}
             </div>
+            {lifecycleFailure === undefined ? null : <p className="error" role="alert">{lifecycleFailure}</p>}
             <h4>Recent logs</h4>
             <pre>{(model.instanceState[entry.name]?.logs ?? [])
                 .map((log) => `${log.at} ${log.message}`)
@@ -103,10 +138,17 @@ export function Instances({
             busy={operation !== undefined && state.operations[operation] !== undefined}
             description={`${confirmation.action} ${confirmation.instance}?`}
             disabled={!interactive}
-            onCancel={() => setConfirmation(undefined)}
+            error={confirmationFailure}
+            onCancel={() => {
+                setConfirmationFailure(undefined);
+                setConfirmation(undefined);
+            }}
             onConfirm={() => {
-                const request = store.stop(confirmation.instance);
-                void request.finally(() => setConfirmation(undefined));
+                setConfirmationFailure(undefined);
+                void store.stop(confirmation.instance).then((succeeded) => {
+                    if (succeeded) setConfirmation(undefined);
+                    else setConfirmationFailure(store.state.error ?? `${confirmation.instance} could not be stopped.`);
+                });
             }}
         />}
     </section>;

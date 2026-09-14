@@ -77,6 +77,18 @@ describe("authenticated application shell", () => {
         expect(session.establish).not.toHaveBeenCalled();
     });
 
+    it("preserves the entered token when sign-in is rejected", async () => {
+        const session = fakeSession({ authMode: "token", check: false, establish: false });
+        render(<App createClients={fakeClients} session={session} />);
+
+        const token = await screen.findByLabelText("Access token");
+        fireEvent.change(token, { target: { value: "secret-token" } });
+        fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+        expect(await screen.findByRole("alert")).toHaveTextContent("Sign-in was not accepted.");
+        expect(token).toHaveValue("secret-token");
+    });
+
     it("redirects to the OAuth start endpoint when auth=oauth2", async () => {
         const session = fakeSession({ authMode: "oauth2", check: false, establish: false });
         render(<App createClients={fakeClients} session={session} />);
@@ -320,6 +332,42 @@ describe("authenticated application shell", () => {
         fireEvent.click(activity);
         expect(await screen.findByRole("heading", { name: "Audit" })).toBeInTheDocument();
         expect(window.location.hash).toBe("#/audit");
+    });
+
+    it("links each Overview activity directly to its Tool Call", async () => {
+        const clients = fakeClients();
+        clients.overview.get = vi.fn(async () => ({
+            activity: [{
+                callId: "call-direct",
+                completedAt: "2026-09-14T10:00:01Z",
+                instance: asInstanceName("demo"),
+                startedAt: "2026-09-14T10:00:00Z",
+                status: "completed" as const,
+                toolName: "file_read",
+            }],
+            alerts: [],
+            controller: { pid: 1, uptimeSeconds: 1 },
+            counts: { activeTodos: 0, failedCalls24h: 0, instancesAttention: 0, instancesCritical: 0, instancesReady: 1, instancesTotal: 1, pendingApprovals: 0 },
+            generatedAt: "2026-09-14T10:00:02Z",
+            health: "healthy" as const,
+            instances: [],
+            todos: [],
+        }));
+        window.location.hash = "#/overview";
+        render(<App createClients={() => clients} session={fakeSession({ check: true })} />);
+
+        const activity = await screen.findByRole("link", { name: /demo.*file_read.*completed/u });
+        expect(activity).toHaveAttribute("href", "#/audit/instance/demo/call/call-direct");
+    });
+
+    it("lets the user dismiss stale global errors", async () => {
+        const clients = fakeClients();
+        clients.service.hello = vi.fn(async () => { throw new Error("Control offline"); });
+        render(<App createClients={() => clients} session={fakeSession({ check: true })} />);
+
+        expect(await screen.findByRole("alert")).toHaveTextContent("Control offline");
+        fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
+        await waitFor(() => expect(screen.queryByText("Control offline")).not.toBeInTheDocument());
     });
 });
 

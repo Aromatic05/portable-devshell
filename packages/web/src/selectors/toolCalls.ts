@@ -57,7 +57,7 @@ export function selectToolCalls(
     for (const call of [...calls].sort((left, right) =>
         right.startedAt.localeCompare(left.startedAt)
     )) {
-        if (ctxId.length > 0 && !(call.ctxId ?? "").toLowerCase().includes(ctxId)) continue;
+        if (ctxId.length > 0 && (call.ctxId ?? "").toLowerCase() !== ctxId) continue;
         if (filters.tool !== "all" && call.toolName !== filters.tool) continue;
         if (filters.result !== "all" && toolCallResult(call) !== filters.result) continue;
         if (workspace.length > 0 && !(call.workspace ?? "").toLowerCase().includes(workspace)) continue;

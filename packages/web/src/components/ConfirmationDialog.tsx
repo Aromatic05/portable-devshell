@@ -5,6 +5,7 @@ export function ConfirmationDialog({
     busy,
     description,
     disabled = false,
+    error,
     onCancel,
     onConfirm,
 }: {
@@ -12,6 +13,7 @@ export function ConfirmationDialog({
     busy: boolean;
     description: string;
     disabled?: boolean;
+    error?: string;
     onCancel(): void;
     onConfirm(): void;
 }) {
@@ -79,6 +81,7 @@ export function ConfirmationDialog({
             >
                 <h2 id="confirmation-title">Confirm {actionLabel.toLowerCase()}</h2>
                 <p>{description}</p>
+                {error === undefined ? null : <p className="error" role="alert">{error}</p>}
                 <div className="actions">
                     <button disabled={busy} onClick={onCancel} ref={cancelRef}>Cancel</button>
                     <button
