@@ -262,3 +262,16 @@ test("Agent model result hard ceiling remains a final backstop", () => {
     assert.match(result, /pane-0/u);
     assert.match(result, /pane-999/u);
 });
+
+test("Agent model file_read projection preserves per-file partial errors", () => {
+    const read = projectAgentModelToolResult("file_read", {
+        files: [
+            { path: "./missing.txt", error: { code: "file.notFound", message: "path does not exist" } },
+            { path: "./good.txt", view: "content", content: "1:ok" }
+        ]
+    });
+    assert.match(read, /file=\.\/missing\.txt/u);
+    assert.match(read, /error=file\.notFound: path does not exist/u);
+    assert.match(read, /file=\.\/good\.txt view=content/u);
+    assert.match(read, /1:ok/u);
+});

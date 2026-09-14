@@ -973,3 +973,19 @@ test("Pi devshell Worker unified diff adapter matches Pi numbered diff semantics
         ["-3 [old] thing", "+3 [new] thing", " 4 tail"].join("\n")
     );
 });
+
+test("Pi devshell read renderer preserves per-file partial errors", () => {
+    const details: JsonValue = {
+        files: [
+            { path: "./missing.txt", error: { code: "file.notFound", message: "path does not exist" } },
+            { path: "./good.txt", view: "content", content: "1:ok" }
+        ]
+    };
+    const collapsed = formatPiToolResult("file_read", { content: [], details }, false);
+    assert.match(collapsed, /^\.\/missing\.txt · file\.notFound: path does not exist$/mu);
+    assert.doesNotMatch(collapsed, /1:ok/u);
+
+    const expanded = formatPiToolResult("file_read", { content: [], details }, true);
+    assert.match(expanded, /^\.\/missing\.txt · file\.notFound: path does not exist$/mu);
+    assert.match(expanded, /^1:ok$/mu);
+});

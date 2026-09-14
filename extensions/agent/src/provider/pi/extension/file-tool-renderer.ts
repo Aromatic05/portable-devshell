@@ -65,16 +65,21 @@ export function renderFileReadComponent(
     context: PiToolRenderContextLike
 ) {
     const sections = fileReadSections(result.details, context.args);
-    if (!options.expanded && !sections.some((section) => section.metadata !== undefined)) {
+    if (!options.expanded && !sections.some((section) => section.metadata !== undefined || section.error !== undefined)) {
         return clearComponent(context.lastComponent);
     }
     const rendered: string[] = [];
     for (const [index, section] of sections.entries()) {
         if (index > 0) rendered.push("");
+        if (section.error !== undefined) {
+            rendered.push(style(theme, "warning", renderReadErrorRow(section.path, section.error)));
+            continue;
+        }
         if (section.metadata !== undefined) {
             rendered.push(renderMetadataRow(section.path, section.metadata));
             continue;
         }
+        if (!options.expanded) continue;
         if (sections.length > 1 && section.path !== undefined) {
             rendered.push(`${style(theme, "toolTitle", "read", true)} ${style(theme, "accent", section.path)}`);
         }
@@ -86,14 +91,19 @@ export function renderFileReadComponent(
 
 export function renderFileRead(value: JsonValue | undefined, expanded: boolean): string[] {
     const sections = fileReadSections(value);
-    if (!expanded && !sections.some((section) => section.metadata !== undefined)) return [];
+    if (!expanded && !sections.some((section) => section.metadata !== undefined || section.error !== undefined)) return [];
     const lines: string[] = [];
     for (const [index, section] of sections.entries()) {
         if (index > 0) lines.push("");
+        if (section.error !== undefined) {
+            lines.push(renderReadErrorRow(section.path, section.error));
+            continue;
+        }
         if (section.metadata !== undefined) {
             lines.push(renderMetadataRow(section.path, section.metadata));
             continue;
         }
+        if (!expanded) continue;
         if (sections.length > 1 && section.path !== undefined) lines.push(`read ${section.path}`);
         lines.push(...section.content.split("\n"));
         if (section.nextSelector !== undefined) lines.push(`[More available: selector ${section.nextSelector}]`);
@@ -162,6 +172,7 @@ function formatReadRequest(title: string, record: Record<string, unknown>, theme
 
 interface FileReadSection {
     content: string;
+    error?: Record<string, unknown>;
     language?: string;
     metadata?: Record<string, unknown>;
     nextSelector?: string;
@@ -176,6 +187,7 @@ function fileReadSections(value: JsonValue | undefined, args?: unknown): FileRea
     if (Array.isArray(record.files)) {
         return record.files.map(asRecord).filter((entry): entry is Record<string, unknown> => entry !== undefined).map((entry) => ({
             content: stringField(entry, "content") ?? "",
+            error: asRecord(entry.error),
             language: stringField(entry, "language"),
             metadata: asRecord(entry.metadata),
             nextSelector: stringField(entry, "nextSelector"),
@@ -187,6 +199,7 @@ function fileReadSections(value: JsonValue | undefined, args?: unknown): FileRea
     const argRecord = asRecord(args);
     return [{
         content: stringField(record, "content") ?? "",
+        error: asRecord(record.error),
         language: stringField(record, "language"),
         metadata: asRecord(record.metadata),
         nextSelector: stringField(record, "nextSelector"),
@@ -194,6 +207,12 @@ function fileReadSections(value: JsonValue | undefined, args?: unknown): FileRea
         path: argRecord === undefined ? undefined : stringField(argRecord, "path"),
         truncated: record.truncated === true
     }];
+}
+
+function renderReadErrorRow(path: string | undefined, error: Record<string, unknown>): string {
+    const code = stringField(error, "code") ?? "file.readFailed";
+    const message = stringField(error, "message");
+    return `${path ?? "?"} · ${code}${message === undefined ? "" : `: ${message}`}`;
 }
 
 function renderMetadataRow(path: string | undefined, metadata: Record<string, unknown>): string {

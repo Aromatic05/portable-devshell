@@ -218,6 +218,12 @@ function renderFileReadModelToolResult(value: Record<string, ExtensionJsonValue>
     const contentBudget = Math.max(80, Math.floor(MAX_SEMANTIC_CONTENT_CHARACTERS / files.length));
     return files.map((file) => {
         const path = typeof file.path === "string" ? file.path : "<unknown>";
+        const error = isRecord(file.error) ? file.error : undefined;
+        if (error !== undefined) {
+            const code = typeof error.code === "string" ? error.code : "file.readFailed";
+            const message = typeof error.message === "string" ? error.message : renderCompactRecord(error);
+            return `file=${path}\nerror=${code}${message.length === 0 ? "" : `: ${message}`}`;
+        }
         const view = typeof file.view === "string" ? file.view : "unknown";
         const header = compactFields([
             `file=${path}`,
