@@ -96,6 +96,13 @@ export function Audit({
 
     function changeFilters(next: Filters): void {
         setToolCallPage(0);
+        if (
+            contextStatus === "active" &&
+            filters.ctxId.trim().length === 0 &&
+            next.ctxId.trim().length > 0
+        ) {
+            setContextStatus("all");
+        }
         setFilters(next);
     }
 

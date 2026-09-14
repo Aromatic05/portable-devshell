@@ -59,6 +59,7 @@ describe("tool call audit query", () => {
             filterToolCalls(
                 calls,
                 {
+                    ctxId: "ctx-alpha",
                     period: "1h",
                     query: "command failed",
                     result: "failure",
@@ -68,6 +69,17 @@ describe("tool call audit query", () => {
                 Date.parse("2026-07-31T10:00:00Z"),
             ),
         ).toEqual([calls[1]]);
+    });
+
+    it("filters tool calls directly by Context ID", () => {
+        expect(filterToolCalls(calls, {
+            ...emptyToolCallFilters,
+            ctxId: "ctx-alpha",
+        })).toEqual([calls[1], calls[0]]);
+        expect(filterToolCalls(calls, {
+            ...emptyToolCallFilters,
+            ctxId: "ctx-missing",
+        })).toEqual([]);
     });
 
     it("formats complete structured input and restores output from linked logs", () => {

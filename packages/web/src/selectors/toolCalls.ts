@@ -6,6 +6,7 @@ export type ToolCallResult = "all" | "failure" | "pending" | "success";
 export type ToolCallPeriod = "all" | "1h" | "24h";
 
 export interface ToolCallFilters {
+    ctxId: string;
     period: ToolCallPeriod;
     query: string;
     result: ToolCallResult;
@@ -21,6 +22,7 @@ export interface ToolCallSelection {
 const searchTextCache = new WeakMap<ToolCallRecord, string>();
 
 export const emptyToolCallFilters: ToolCallFilters = {
+    ctxId: "",
     period: "all",
     query: "",
     result: "all",
@@ -41,6 +43,7 @@ export function selectToolCalls(
     offset = 0,
     limit = 100,
 ): ToolCallSelection {
+    const ctxId = filters.ctxId.trim().toLowerCase();
     const query = filters.query.trim().toLowerCase();
     const workspace = filters.workspace.trim().toLowerCase();
     const minTime =
@@ -54,6 +57,7 @@ export function selectToolCalls(
     for (const call of [...calls].sort((left, right) =>
         right.startedAt.localeCompare(left.startedAt)
     )) {
+        if (ctxId.length > 0 && !(call.ctxId ?? "").toLowerCase().includes(ctxId)) continue;
         if (filters.tool !== "all" && call.toolName !== filters.tool) continue;
         if (filters.result !== "all" && toolCallResult(call) !== filters.result) continue;
         if (workspace.length > 0 && !(call.workspace ?? "").toLowerCase().includes(workspace)) continue;

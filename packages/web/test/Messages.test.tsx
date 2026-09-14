@@ -3,7 +3,7 @@ import {
     asInstanceName,
     createInitialControlReadModelState,
 } from "@portable-devshell/shared/browser";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
     selectWebMessageEntries,
@@ -99,7 +99,52 @@ const threadRoute: Extract<WebRoute, { page: "messages" }> = {
     ctxId: "ctx-old-active",
 };
 
+function twoActiveConversationState(): WebState {
+    const firstAt = new Date(Date.now() - 20 * 60 * 1_000).toISOString();
+    const secondAt = new Date(Date.now() - 10 * 60 * 1_000).toISOString();
+    return {
+        ...state,
+        readModel: {
+            ...state.readModel,
+            contexts: [{
+                ...state.readModel.contexts[0]!,
+                createdAt: firstAt,
+                ctxId: "ctx-first",
+                lastAccessedAt: firstAt,
+            }, {
+                ...state.readModel.contexts[0]!,
+                createdAt: secondAt,
+                ctxId: "ctx-second",
+                lastAccessedAt: secondAt,
+            }],
+            instanceState: {
+                ...state.readModel.instanceState,
+                alpha: {
+                    ...state.readModel.instanceState.alpha!,
+                    conversationEntries: [{
+                        createdAt: firstAt,
+                        ctxId: "ctx-first",
+                        id: "first-comment",
+                        kind: "comment",
+                        status: "delivered",
+                        text: "Investigate the first regression in Audit.",
+                    }, {
+                        createdAt: secondAt,
+                        ctxId: "ctx-second",
+                        id: "second-comment",
+                        kind: "comment",
+                        status: "delivered",
+                        text: "Review the Messages navigation.",
+                    }],
+                },
+            },
+        },
+    };
+}
+
 describe("Messages", () => {
+    afterEach(() => localStorage.clear());
+
     it("keeps only sessions active within the last 30 minutes", () => {
         const now = Date.parse("2026-09-02T10:05:00Z");
         expect(selectWebMessageSessions(state, now)).toEqual([
@@ -107,7 +152,7 @@ describe("Messages", () => {
                 ctxId: "ctx-old-active",
                 instance: "alpha",
                 status: "active",
-                title: "portable-devshell",
+                title: "Check the route model.",
             }),
         ]);
 
@@ -168,6 +213,60 @@ describe("Messages", () => {
             .toEqual(["ctx-history"]);
     });
 
+    it("uses the first Comment as the conversation summary and keeps positions stable as activity changes", () => {
+        const now = Date.parse("2026-09-02T10:05:00Z");
+        const multiState: WebState = {
+            ...state,
+            readModel: {
+                ...state.readModel,
+                contexts: [{
+                    ...state.readModel.contexts[0]!,
+                    createdAt: "2026-09-02T09:00:00Z",
+                    ctxId: "ctx-first",
+                    lastAccessedAt: "2026-09-02T10:04:00Z",
+                }, {
+                    ...state.readModel.contexts[0]!,
+                    createdAt: "2026-09-02T09:30:00Z",
+                    ctxId: "ctx-second",
+                    lastAccessedAt: "2026-09-02T10:03:00Z",
+                }],
+                instanceState: {
+                    ...state.readModel.instanceState,
+                    alpha: {
+                        ...state.readModel.instanceState.alpha!,
+                        conversationEntries: [{
+                            createdAt: "2026-09-02T09:00:00Z",
+                            ctxId: "ctx-first",
+                            id: "first-comment",
+                            kind: "comment",
+                            status: "delivered",
+                            text: "Investigate the first regression in Audit.",
+                        }, {
+                            createdAt: "2026-09-02T10:04:00Z",
+                            ctxId: "ctx-first",
+                            id: "first-report",
+                            kind: "report",
+                            text: "A later report must not move this conversation.",
+                        }, {
+                            createdAt: "2026-09-02T09:30:00Z",
+                            ctxId: "ctx-second",
+                            id: "second-comment",
+                            kind: "comment",
+                            status: "delivered",
+                            text: "Review the Messages navigation.",
+                        }],
+                    },
+                },
+            },
+        };
+
+        expect(selectWebMessageSessions(multiState, now).map(({ ctxId, title }) => ({ ctxId, title })))
+            .toEqual([
+                { ctxId: "ctx-second", title: "Review the Messages navigation." },
+                { ctxId: "ctx-first", title: "Investigate the first regression in Audit." },
+            ]);
+    });
+
     it("projects canonical Conversation entries into one chronological conversation", () => {
         expect(selectWebMessageEntries(state, "alpha", "ctx-old-active")).toEqual([
             expect.objectContaining({ kind: "comment", text: "Check the route model." }),
@@ -208,7 +307,7 @@ describe("Messages", () => {
         const createObjectURL = vi.fn(() => "blob:conversation");
         const revokeObjectURL = vi.fn();
         const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function () {
-            expect(this.download).toBe("portable-devshell-alpha-ctx-old-active.md");
+            expect(this.download).toBe("Check-the-route-model.-alpha-ctx-old-active.md");
             expect(this.href).toBe("blob:conversation");
         });
         Object.defineProperty(URL, "createObjectURL", {
@@ -437,9 +536,69 @@ describe("Messages", () => {
         expect(view.container.querySelector(".messages-sidebar")).not.toHaveClass("open");
         fireEvent.click(screen.getByRole("button", { name: "Open conversations" }));
         expect(view.container.querySelector(".messages-sidebar")).toHaveClass("open");
-        fireEvent.click(screen.getByRole("button", { name: /portable-devshell/ }));
+        fireEvent.click(screen.getByRole("button", { name: /Check the route model/u }));
         expect(navigate).toHaveBeenCalledWith(threadRoute);
         expect(view.container.querySelector(".messages-sidebar")).not.toHaveClass("open");
+    });
+
+    it("renames a conversation and keeps the custom title across remounts", () => {
+        localStorage.clear();
+        const nextState = twoActiveConversationState();
+        const first = render(<Messages
+            navigate={vi.fn()}
+            route={{ page: "messages", view: "contexts" }}
+            state={nextState}
+            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+        />);
+
+        fireEvent.click(screen.getByRole("button", { name: "Rename ctx-second" }));
+        fireEvent.change(screen.getByLabelText("Conversation title"), { target: { value: "Messages navigation review" } });
+        fireEvent.click(screen.getByRole("button", { name: "Save title" }));
+        expect(screen.getByRole("button", { name: /Messages navigation review/u })).toBeInTheDocument();
+
+        first.unmount();
+        render(<Messages
+            navigate={vi.fn()}
+            route={{ page: "messages", view: "contexts" }}
+            state={nextState}
+            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+        />);
+        expect(screen.getByRole("button", { name: /Messages navigation review/u })).toBeInTheDocument();
+        localStorage.clear();
+    });
+
+    it("persists manual drag ordering instead of re-sorting by activity", () => {
+        localStorage.clear();
+        const nextState = twoActiveConversationState();
+        const first = render(<Messages
+            navigate={vi.fn()}
+            route={{ page: "messages", view: "contexts" }}
+            state={nextState}
+            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+        />);
+        const list = screen.getByRole("navigation", { name: "Conversations" });
+        const rows = list.querySelectorAll<HTMLElement>(".conversation-row");
+        expect(rows).toHaveLength(2);
+        expect(rows[0]).toHaveTextContent("Review the Messages navigation.");
+        expect(rows[1]).toHaveTextContent("Investigate the first regression in Audit.");
+
+        fireEvent.dragStart(rows[1]!);
+        fireEvent.dragOver(rows[0]!);
+        fireEvent.drop(rows[0]!);
+        expect(list.querySelectorAll<HTMLElement>(".conversation-row")[0])
+            .toHaveTextContent("Investigate the first regression in Audit.");
+
+        first.unmount();
+        render(<Messages
+            navigate={vi.fn()}
+            route={{ page: "messages", view: "contexts" }}
+            state={nextState}
+            store={{ queueContextMessage: vi.fn(async () => true) } as WebStore}
+        />);
+        expect(screen.getByRole("navigation", { name: "Conversations" })
+            .querySelectorAll<HTMLElement>(".conversation-row")[0])
+            .toHaveTextContent("Investigate the first regression in Audit.");
+        localStorage.clear();
     });
 
     it("switches the sidebar between active and history conversations", () => {
@@ -479,18 +638,20 @@ describe("Messages", () => {
         expect(history.closest(".messages-sidebar-heading")).not.toBeNull();
         expect(active).toHaveAttribute("aria-pressed", "true");
         expect(history).toHaveAttribute("aria-pressed", "false");
-        expect(screen.getByRole("button", { name: /portable-devshell/ })).toBeInTheDocument();
-        expect(screen.queryByRole("button", { name: /ctx-history/ })).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /Check the route model/u })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /Historical conversation/u })).not.toBeInTheDocument();
 
         fireEvent.click(history);
 
         expect(active).toHaveAttribute("aria-pressed", "false");
         expect(history).toHaveAttribute("aria-pressed", "true");
-        expect(screen.queryByRole("button", { name: /portable-devshell/ })).not.toBeInTheDocument();
-        expect(screen.getByRole("button", { name: /ctx-history/ })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /Check the route model/u })).not.toBeInTheDocument();
+        const groupToggle = screen.getByRole("button", { name: /Other/u });
+        fireEvent.click(groupToggle);
+        expect(screen.getByRole("button", { name: /Historical conversation/u })).toBeInTheDocument();
     });
 
-    it("groups history conversations by workspace", () => {
+    it("groups history conversations by workspace and lets each workspace collapse", () => {
         const groupedState: WebState = {
             ...state,
             readModel: {
@@ -543,11 +704,11 @@ describe("Messages", () => {
         const groups = within(conversationList).getAllByRole("group");
         expect(groups.map((group) => group.getAttribute("aria-label")))
             .toEqual(["portable-devshell", "efilinux"]);
-        expect(within(groups[0]!).getAllByRole("button").map((button) => button.textContent))
-            .toEqual([
-                expect.stringContaining("ctx-project-new"),
-                expect.stringContaining("ctx-project-old"),
-            ]);
-        expect(within(groups[1]!).getByRole("button")).toHaveTextContent("ctx-efilinux");
+        const portableToggle = within(groups[0]!).getByRole("button", { name: /portable-devshell/u });
+        expect(portableToggle).toHaveAttribute("aria-expanded", "false");
+        expect(within(groups[0]!).queryByText("ctx-project-new")).not.toBeInTheDocument();
+        fireEvent.click(portableToggle);
+        expect(portableToggle).toHaveAttribute("aria-expanded", "true");
+        expect(within(groups[0]!).getAllByText(/portable-devshell · ctx-projec/u)).toHaveLength(2);
     });
 });

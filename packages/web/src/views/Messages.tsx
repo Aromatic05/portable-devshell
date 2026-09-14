@@ -46,14 +46,31 @@ export function Messages({
     }>();
     const [query, setQuery] = useState("");
     const [sessionScope, setSessionScope] = useState<"active" | "history">("active");
+    const [conversationPreferences, setConversationPreferences] = useState<ConversationPreferences>(
+        () => readConversationPreferences(),
+    );
+    const [expandedHistoryGroups, setExpandedHistoryGroups] = useState<Set<string>>(() => new Set());
+    const [editingConversationKey, setEditingConversationKey] = useState<string>();
+    const [editingTitle, setEditingTitle] = useState("");
+    const [draggingConversationKey, setDraggingConversationKey] = useState<string>();
     const historyEndRef = useRef<HTMLDivElement>(null);
     const followBottomRef = useRef(true);
     const previousThreadKeyRef = useRef<string>();
+    const activeSessions = useMemo(() => selectWebMessageSessions(state), [state]);
+    const historySessions = useMemo(() => selectWebMessageHistorySessions(state), [state]);
     const sessions = useMemo(
-        () => sessionScope === "active"
-            ? selectWebMessageSessions(state)
-            : selectWebMessageHistorySessions(state),
-        [sessionScope, state],
+        () => applyConversationPreferences(
+            sessionScope === "active" ? activeSessions : historySessions,
+            conversationPreferences,
+        ),
+        [activeSessions, conversationPreferences, historySessions, sessionScope],
+    );
+    const allSessions = useMemo(
+        () => applyConversationPreferences(
+            [...activeSessions, ...historySessions],
+            conversationPreferences,
+        ),
+        [activeSessions, conversationPreferences, historySessions],
     );
     const visibleSessions = useMemo(
         () => filterWebMessageSessions(sessions, query),
@@ -63,9 +80,12 @@ export function Messages({
         () => groupHistorySessionsByWorkspace(visibleSessions),
         [visibleSessions],
     );
-    const selected = route.view === "thread"
+    const selectedBase = route.view === "thread"
         ? selectWebMessageSession(state, route.instance, route.ctxId)
         : undefined;
+    const selected = selectedBase === undefined
+        ? undefined
+        : applyConversationPreferences([selectedBase], conversationPreferences)[0];
     const entries = route.view === "thread"
         ? selectWebMessageEntries(state, route.instance, route.ctxId)
         : [];
@@ -81,6 +101,8 @@ export function Messages({
         setMessageDirective(undefined);
         setControlMenuOpen(false);
         setComposerFeedback(undefined);
+        setEditingConversationKey(undefined);
+        setEditingTitle("");
     }, [route]);
 
     useLayoutEffect(() => {
@@ -143,29 +165,122 @@ export function Messages({
         );
     }
 
-    function renderSession(session: WebMessageSession, title = session.title) {
+    function updateConversationPreferences(
+        updater: (current: ConversationPreferences) => ConversationPreferences,
+    ): void {
+        setConversationPreferences((current) => {
+            const next = updater(current);
+            writeConversationPreferences(next);
+            return next;
+        });
+    }
+
+    function saveConversationTitle(session: WebMessageSession): void {
+        const key = conversationKey(session);
+        const nextTitle = editingTitle.trim();
+        updateConversationPreferences((current) => {
+            const titles = { ...current.titles };
+            if (nextTitle.length === 0) delete titles[key];
+            else titles[key] = nextTitle;
+            return { ...current, titles };
+        });
+        setEditingConversationKey(undefined);
+        setEditingTitle("");
+    }
+
+    function moveConversation(sourceKey: string, targetKey: string): void {
+        if (sourceKey === targetKey) return;
+        updateConversationPreferences((current) => ({
+            ...current,
+            order: reorderConversationKeys(allSessions, sourceKey, targetKey, current.order),
+        }));
+    }
+
+    function renderSession(session: WebMessageSession) {
         const active = route.view === "thread" &&
             route.instance === session.instance &&
             route.ctxId === session.ctxId;
-        return <button
-            aria-current={active ? "page" : undefined}
-            className={active ? "selected" : ""}
-            key={`${session.instance}:${session.ctxId}`}
-            onClick={() => {
-                setDrawerOpen(false);
-                navigate({
-                    page: "messages",
-                    view: "thread",
-                    instance: session.instance,
-                    ctxId: session.ctxId,
-                });
+        const key = conversationKey(session);
+        const editing = editingConversationKey === key;
+        return <div
+            className={`conversation-row${active ? " selected" : ""}`}
+            data-conversation-key={key}
+            draggable={!editing}
+            key={key}
+            onDragEnd={() => setDraggingConversationKey(undefined)}
+            onDragOver={(event) => {
+                if (draggingConversationKey !== undefined) event.preventDefault();
             }}
-            type="button"
+            onDragStart={() => setDraggingConversationKey(key)}
+            onDrop={(event) => {
+                event.preventDefault();
+                if (draggingConversationKey !== undefined) moveConversation(draggingConversationKey, key);
+                setDraggingConversationKey(undefined);
+            }}
         >
-            <strong>{title}</strong>
-            <span>{session.instance} · {session.status ?? "history"}</span>
-            <time dateTime={session.latestAt}>{formatMessageDate(session.latestAt)}</time>
-        </button>;
+            <span aria-hidden="true" className="conversation-drag-handle" title="Drag to reorder">⋮⋮</span>
+            {editing ? <div className="conversation-rename-editor">
+                <label>
+                    <span className="sr-only">Conversation title</span>
+                    <input
+                        aria-label="Conversation title"
+                        autoFocus
+                        maxLength={120}
+                        onChange={(event) => setEditingTitle(event.target.value)}
+                        onKeyDown={(event) => {
+                            if (event.key === "Escape") {
+                                setEditingConversationKey(undefined);
+                                setEditingTitle("");
+                            } else if (event.key === "Enter") {
+                                event.preventDefault();
+                                saveConversationTitle(session);
+                            }
+                        }}
+                        value={editingTitle}
+                    />
+                </label>
+                <div className="conversation-rename-actions">
+                    <button aria-label="Save title" onClick={() => saveConversationTitle(session)} type="button">Save</button>
+                    <button
+                        aria-label="Cancel rename"
+                        onClick={() => {
+                            setEditingConversationKey(undefined);
+                            setEditingTitle("");
+                        }}
+                        type="button"
+                    >Cancel</button>
+                </div>
+            </div> : <>
+                <button
+                    aria-current={active ? "page" : undefined}
+                    className="conversation-open"
+                    onClick={() => {
+                        setDrawerOpen(false);
+                        navigate({
+                            page: "messages",
+                            view: "thread",
+                            instance: session.instance,
+                            ctxId: session.ctxId,
+                        });
+                    }}
+                    type="button"
+                >
+                    <strong>{session.title}</strong>
+                    <span>{session.instance} · {session.status ?? "history"}</span>
+                    <time dateTime={session.latestAt}>{formatMessageDate(session.latestAt)}</time>
+                </button>
+                <button
+                    aria-label={`Rename ${session.ctxId}`}
+                    className="conversation-rename"
+                    onClick={() => {
+                        setEditingConversationKey(key);
+                        setEditingTitle(session.title);
+                    }}
+                    title="Rename conversation"
+                    type="button"
+                >Rename</button>
+            </>}
+        </div>;
     }
 
     return <section className="messages-page">
@@ -218,10 +333,34 @@ export function Messages({
                             key={group.key}
                             role="group"
                         >
-                            <h3 className="conversation-workspace-heading" title={group.workspace}>
-                                {group.label}
-                            </h3>
-                            {group.sessions.map((session) => renderSession(session, session.ctxId))}
+                            {(() => {
+                                const containsSelected = route.view === "thread" && group.sessions.some((session) =>
+                                    session.instance === route.instance && session.ctxId === route.ctxId
+                                );
+                                const expanded = query.trim().length > 0 ||
+                                    containsSelected ||
+                                    expandedHistoryGroups.has(group.key);
+                                return <>
+                                    <button
+                                        aria-expanded={expanded}
+                                        className="conversation-workspace-heading"
+                                        onClick={() => setExpandedHistoryGroups((current) => {
+                                            const next = new Set(current);
+                                            if (next.has(group.key)) next.delete(group.key);
+                                            else next.add(group.key);
+                                            return next;
+                                        })}
+                                        title={group.workspace}
+                                        type="button"
+                                    >
+                                        <span>{expanded ? "▾" : "▸"} {group.label}</span>
+                                        <span>{group.sessions.length}</span>
+                                    </button>
+                                    {expanded ? <div className="conversation-workspace-sessions">
+                                        {group.sessions.map((session) => renderSession(session))}
+                                    </div> : null}
+                                </>;
+                            })()}
                         </section>)}
             </nav>
         </div>
@@ -397,6 +536,85 @@ function groupHistorySessionsByWorkspace(sessions: readonly WebMessageSession[])
         groups.set(key, group);
     }
     return [...groups.values()];
+}
+
+interface ConversationPreferences {
+    order: string[];
+    titles: Record<string, string>;
+}
+
+const conversationPreferencesStorageKey = "portable-devshell:web:conversation-preferences:v1";
+
+function conversationKey(session: Pick<WebMessageSession, "ctxId" | "instance">): string {
+    return `${session.instance}\u0000${session.ctxId}`;
+}
+
+function readConversationPreferences(): ConversationPreferences {
+    if (typeof window === "undefined") return { order: [], titles: {} };
+    try {
+        const raw = window.localStorage.getItem(conversationPreferencesStorageKey);
+        if (raw === null) return { order: [], titles: {} };
+        const parsed = JSON.parse(raw) as { order?: unknown; titles?: unknown };
+        const order = Array.isArray(parsed.order)
+            ? parsed.order.filter((value): value is string => typeof value === "string")
+            : [];
+        const titles = typeof parsed.titles === "object" && parsed.titles !== null && !Array.isArray(parsed.titles)
+            ? Object.fromEntries(Object.entries(parsed.titles).filter(
+                (entry): entry is [string, string] => typeof entry[1] === "string",
+            ))
+            : {};
+        return { order, titles };
+    } catch {
+        return { order: [], titles: {} };
+    }
+}
+
+function writeConversationPreferences(preferences: ConversationPreferences): void {
+    if (typeof window === "undefined") return;
+    try {
+        window.localStorage.setItem(conversationPreferencesStorageKey, JSON.stringify(preferences));
+    } catch {
+        // Browser storage is an optional HCI preference layer; the conversation remains usable without it.
+    }
+}
+
+function applyConversationPreferences(
+    sessions: readonly WebMessageSession[],
+    preferences: ConversationPreferences,
+): WebMessageSession[] {
+    const rank = new Map(preferences.order.map((key, index) => [key, index]));
+    return sessions
+        .map((session) => ({
+            ...session,
+            title: preferences.titles[conversationKey(session)] ?? session.title,
+        }))
+        .sort((left, right) => {
+            const leftRank = rank.get(conversationKey(left));
+            const rightRank = rank.get(conversationKey(right));
+            if (leftRank === undefined && rightRank === undefined) {
+                return right.startedAt.localeCompare(left.startedAt) || left.ctxId.localeCompare(right.ctxId);
+            }
+            if (leftRank === undefined) return -1;
+            if (rightRank === undefined) return 1;
+            return leftRank - rightRank;
+        });
+}
+
+function reorderConversationKeys(
+    sessions: readonly WebMessageSession[],
+    sourceKey: string,
+    targetKey: string,
+    previousOrder: readonly string[],
+): string[] {
+    const keys = sessions.map(conversationKey);
+    const sourceIndex = keys.indexOf(sourceKey);
+    const targetIndex = keys.indexOf(targetKey);
+    if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return [...previousOrder];
+    const [moved] = keys.splice(sourceIndex, 1);
+    if (moved === undefined) return [...previousOrder];
+    keys.splice(targetIndex, 0, moved);
+    const loaded = new Set(keys);
+    return [...keys, ...previousOrder.filter((key) => !loaded.has(key))];
 }
 
 export function buildConversationMarkdown({

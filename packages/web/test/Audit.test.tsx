@@ -261,6 +261,32 @@ describe("Audit", () => {
         expect(screen.getByRole("group", { name: "Active filters" })).toHaveTextContent("Workspace: projects/alpha");
     });
 
+    it("restores direct Context ID filtering without changing Audit scope or hiding stale Contexts", () => {
+        const staleState: WebState = {
+            ...state,
+            readModel: {
+                ...state.readModel,
+                contexts: state.readModel.contexts.map((context) => context.ctxId === "ctx-beta"
+                    ? {
+                        ...context,
+                        lastAccessedAt: "2026-07-31T09:00:00Z",
+                        status: "expired" as const,
+                    }
+                    : context),
+            },
+        };
+        const { navigate, container } = renderAudit({ state: staleState });
+
+        expect(screen.queryByText("file_read", { selector: "strong" })).not.toBeInTheDocument();
+
+        fireEvent.change(screen.getByLabelText("Context ID"), { target: { value: "ctx-beta" } });
+
+        expect(container.querySelectorAll(".activity-feed > li")).toHaveLength(1);
+        expect(screen.getByText("file_read", { selector: "strong" })).toBeInTheDocument();
+        expect(screen.queryByText("bash_run", { selector: "strong" })).not.toBeInTheDocument();
+        expect(navigate).not.toHaveBeenCalled();
+    });
+
     it("scopes tool calls without exposing a Comment composer in Audit", () => {
         const view = renderAudit({ route: alphaContextRoute });
 

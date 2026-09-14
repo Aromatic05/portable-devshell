@@ -1,5 +1,7 @@
 import {
+    compactContextId,
     humanConversationTitle,
+    parseContextMessageDirective,
     type ContextMessageStatus,
 } from "@portable-devshell/shared/browser";
 
@@ -17,6 +19,7 @@ export interface WebMessageSession {
     ctxId: string;
     instance: string;
     latestAt: string;
+    startedAt: string;
     status?: "active" | "expired" | "disabled";
     title: string;
     workspace?: string;
@@ -54,6 +57,7 @@ export function selectWebMessageSession(
 
 function projectWebMessageSessions(state: WebState): WebMessageSession[] {
     const sessions = new Map<string, Omit<WebMessageSession, "title">>();
+    const summaries = new Map<string, { at: string; text: string }>();
     const touch = (
         instance: string,
         ctxId: string | undefined,
@@ -66,6 +70,7 @@ function projectWebMessageSessions(state: WebState): WebMessageSession[] {
             ctxId,
             instance,
             latestAt: laterTimestamp(current?.latestAt, input.latestAt),
+            startedAt: earlierTimestamp(current?.startedAt, input.startedAt),
             status: input.status ?? current?.status,
             workspace: input.workspace ?? current?.workspace,
         });
@@ -79,6 +84,7 @@ function projectWebMessageSessions(state: WebState): WebMessageSession[] {
         for (const environment of environments) {
             touch(environment.instance, context.ctxId, {
                 latestAt: context.lastAccessedAt || context.createdAt,
+                startedAt: context.createdAt,
                 status: context.status,
                 workspace: environment.workspace ?? context.workspace,
             });
@@ -86,12 +92,25 @@ function projectWebMessageSessions(state: WebState): WebMessageSession[] {
     }
     for (const [instance, instanceState] of Object.entries(state.readModel.instanceState)) {
         for (const entry of instanceState.conversationEntries) {
-            touch(instance, entry.ctxId, { latestAt: entry.createdAt });
+            touch(instance, entry.ctxId, {
+                latestAt: entry.createdAt,
+                startedAt: entry.createdAt,
+            });
+            if (entry.kind !== "comment") continue;
+            const text = conversationSummary(entry.text);
+            if (text === undefined) continue;
+            const key = `${instance}\u0000${entry.ctxId}`;
+            const current = summaries.get(key);
+            if (current === undefined || entry.createdAt.localeCompare(current.at) < 0) {
+                summaries.set(key, { at: entry.createdAt, text });
+            }
         }
     }
 
     const values = [...sessions.values()];
-    const baseTitles = values.map((session) => humanConversationTitle(session));
+    const baseTitles = values.map((session) =>
+        summaries.get(`${session.instance}\u0000${session.ctxId}`)?.text ?? humanConversationTitle(session)
+    );
     const titleCounts = new Map<string, number>();
     for (const title of baseTitles) titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
     return values
@@ -100,11 +119,14 @@ function projectWebMessageSessions(state: WebState): WebMessageSession[] {
             return {
                 ...session,
                 title: (titleCounts.get(baseTitle) ?? 0) > 1
-                    ? `${baseTitle} · ${session.instance}`
+                    ? `${baseTitle} · ${compactContextId(session.ctxId, 10)}`
                     : baseTitle,
             };
         })
-        .sort((left, right) => right.latestAt.localeCompare(left.latestAt));
+        .sort((left, right) =>
+            right.startedAt.localeCompare(left.startedAt) ||
+            left.ctxId.localeCompare(right.ctxId)
+        );
 }
 
 export function selectWebMessageEntries(
@@ -151,4 +173,16 @@ function laterTimestamp(left: string | undefined, right: string | undefined): st
     if (left === undefined) return right ?? "";
     if (right === undefined) return left;
     return left.localeCompare(right) >= 0 ? left : right;
+}
+
+function earlierTimestamp(left: string | undefined, right: string | undefined): string {
+    if (left === undefined) return right ?? "";
+    if (right === undefined) return left;
+    return left.localeCompare(right) <= 0 ? left : right;
+}
+
+function conversationSummary(text: string): string | undefined {
+    const compact = parseContextMessageDirective(text).body.replace(/\s+/gu, " ").trim();
+    if (compact.length === 0) return undefined;
+    return compact.length <= 64 ? compact : `${compact.slice(0, 61).trimEnd()}…`;
 }

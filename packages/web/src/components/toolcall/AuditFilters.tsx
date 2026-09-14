@@ -40,6 +40,7 @@ export function AuditFilters({
     const [scopeQuery, setScopeQuery] = useState("");
     const advancedCount = [
         contextStatus !== "all",
+        filters.ctxId.length > 0,
         filters.workspace.length > 0,
         filters.tool !== "all",
         filters.period !== "all",
@@ -81,6 +82,14 @@ export function AuditFilters({
                     </optgroup>)}
                 </select>
             </div>
+            <label className="audit-context-id">Context ID
+                <input
+                    onChange={(event) => onChange({ ...filters, ctxId: event.target.value })}
+                    placeholder="ctxId"
+                    type="search"
+                    value={filters.ctxId}
+                />
+            </label>
             <label className="audit-search">Search audit
                 <input
                     onChange={(event) => onChange({ ...filters, query: event.target.value })}
@@ -114,6 +123,7 @@ export function AuditFilters({
             {contextStatus === "all" ? null : <button onClick={() => onContextStatusChange("all")} type="button">
                 {contextStatus === "active" ? "Context: Active · last 30 min ×" : `Context: ${contextStatus} ×`}
             </button>}
+            {filters.ctxId.length === 0 ? null : <button onClick={() => onChange({ ...filters, ctxId: "" })} type="button">Context ID: {filters.ctxId} ×</button>}
             {filters.workspace.length === 0 ? null : <button onClick={() => onChange({ ...filters, workspace: "" })} type="button">Workspace: {filters.workspace} ×</button>}
             {filters.tool === "all" ? null : <button onClick={() => onChange({ ...filters, tool: "all" })} type="button">Tool: {filters.tool} ×</button>}
             {filters.period === "all" ? null : <button onClick={() => onChange({ ...filters, period: "all" })} type="button">Time: {filters.period} ×</button>}
