@@ -339,7 +339,7 @@ export class ConfigEditorCoordinator {
         const existing = currentConfig.instances.find((entry) => entry.name === instanceName);
         if (existing === undefined) throw missingInstance(instanceName);
 
-        this.#assertInstanceStopped(instanceName, "delete");
+        const degradedProviderState = this.#assertInstanceDeletable(instanceName);
         const nextConfig = this.#validateConfig({
             ...currentConfig,
             instances: currentConfig.instances.filter((entry) => entry.name !== instanceName)
@@ -348,7 +348,7 @@ export class ConfigEditorCoordinator {
         for (const retire of [...this.#instanceDeleteRetirements]) {
             await retire(existing);
         }
-        await this.#retireStateForDelete(this.#instanceRegistry.get(instanceName));
+        await this.#retireStateForDelete(this.#instanceRegistry.get(instanceName), degradedProviderState);
         await this.#getMcpHost()?.contextAdmin.detachInstance(instanceName);
         this.#instanceRegistry.get(instanceName)?.conversation.close();
         await this.#persistConfig(nextConfig);
@@ -413,6 +413,7 @@ export class ConfigEditorCoordinator {
 
     async #retireStateForDelete(
         descriptor: ReturnType<InstanceRegistry["get"]>,
+        degradedProviderState = false,
     ): Promise<void> {
         if (descriptor === undefined) return;
         const reason = `Instance ${descriptor.name} was deleted.`;
@@ -456,6 +457,10 @@ export class ConfigEditorCoordinator {
         );
         await descriptor.goal.stopAll();
         await descriptor.todo.cancelAll();
+        if (degradedProviderState) {
+            await descriptor.worker.retireProviderResources().catch(() => undefined);
+            return;
+        }
         await descriptor.worker.retireRuntime();
         await descriptor.worker.retireProviderResources();
     }
@@ -677,7 +682,21 @@ export class ConfigEditorCoordinator {
         ));
     }
 
-    #assertInstanceStopped(instanceName: string, operation: "delete" | "disable" | "update"): void {
+    #assertInstanceDeletable(instanceName: string): boolean {
+        const descriptor = this.#instanceRegistry.get(instanceName);
+        if (descriptor === undefined) return false;
+        const snapshot = descriptor.worker.snapshot();
+        if (snapshot.daemonState === "stopped") return false;
+        if (snapshot.daemonState === "failed" || snapshot.daemonState === "stale") return true;
+        throw createError({
+            code: errorCodes.instanceConflict,
+            details: { instance: instanceName, operation: "delete", status: snapshot.status },
+            message: `Instance ${instanceName} must be stopped before delete.`,
+            retryable: false
+        });
+    }
+
+    #assertInstanceStopped(instanceName: string, operation: "disable" | "update"): void {
         const descriptor = this.#instanceRegistry.get(instanceName);
         if (descriptor === undefined) return;
         const snapshot = descriptor.worker.snapshot();
