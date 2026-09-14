@@ -396,25 +396,13 @@ export function Messages({
         );
     }
 
-    function moveConversationByOffset(
-        session: WebMessageSession,
-        offset: -1 | 1,
-        collection: readonly WebMessageSession[],
-    ): void {
-        const key = conversationKey(session);
-        const peers = collection.filter((candidate) => workspacePreferenceKey(candidate) === workspacePreferenceKey(session));
-        const index = peers.findIndex((candidate) => conversationKey(candidate) === key);
-        const target = peers[index + offset];
-        if (target !== undefined) moveConversation(key, conversationKey(target));
-    }
-
     function archiveIdle(): void {
         setCurrentConversationKeys((current) => new Set([...current].filter((key) =>
             activeConversationKeys.has(key) || key === threadKey
         )));
     }
 
-    function renderSession(session: WebMessageSession, collection: readonly WebMessageSession[]) {
+    function renderSession(session: WebMessageSession) {
         const active = route.view === "thread" &&
             route.instance === session.instance &&
             route.ctxId === session.ctxId;
@@ -481,43 +469,19 @@ export function Messages({
                             ctxId: session.ctxId,
                         });
                     }}
+                    onDoubleClick={(event) => {
+                        event.preventDefault();
+                        setEditingConversationKey(key);
+                        setEditingTitle(session.title);
+                    }}
                     type="button"
                 >
                     <strong>{session.title}</strong>
                     <span>{session.instance} · {sessionScope === "current"
                         ? (activeConversationKeys.has(key) ? "active" : "idle")
                         : (session.status ?? "history")}</span>
-                    <time dateTime={session.latestAt}>{formatMessageDate(session.latestAt)}</time>
+                    <time dateTime={session.latestAt}>{formatConversationDate(session.latestAt)}</time>
                 </button>
-                <div className="conversation-row-actions">
-                    <button
-                        aria-label={`Move ${session.ctxId} up`}
-                        className="conversation-move"
-                        disabled={state.conversationPreferences === undefined || collection.filter((candidate) => workspacePreferenceKey(candidate) === workspacePreferenceKey(session))[0]?.ctxId === session.ctxId}
-                        onClick={() => moveConversationByOffset(session, -1, collection)}
-                        title="Move up"
-                        type="button"
-                    >↑</button>
-                    <button
-                        aria-label={`Move ${session.ctxId} down`}
-                        className="conversation-move"
-                        disabled={state.conversationPreferences === undefined || collection.filter((candidate) => workspacePreferenceKey(candidate) === workspacePreferenceKey(session)).at(-1)?.ctxId === session.ctxId}
-                        onClick={() => moveConversationByOffset(session, 1, collection)}
-                        title="Move down"
-                        type="button"
-                    >↓</button>
-                    <button
-                        aria-label={`Rename ${session.ctxId}`}
-                        className="conversation-rename"
-                        disabled={state.conversationPreferences === undefined}
-                        onClick={() => {
-                            setEditingConversationKey(key);
-                            setEditingTitle(session.title);
-                        }}
-                        title="Rename conversation"
-                        type="button"
-                    >Rename</button>
-                </div>
             </>}
         </div>;
     }
@@ -575,7 +539,7 @@ export function Messages({
                 {visibleSessions.length === 0
                     ? <p className="empty">No conversations found.</p>
                     : sessionScope === "current"
-                        ? visibleSessions.map((session) => renderSession(session, visibleSessions))
+                        ? visibleSessions.map((session) => renderSession(session))
                         : historyGroups.map((group) => <section
                             aria-label={group.label}
                             className="conversation-workspace-group"
@@ -606,7 +570,7 @@ export function Messages({
                                         <span>{group.sessions.length}</span>
                                     </button>
                                     {expanded ? <div className="conversation-workspace-sessions">
-                                        {group.sessions.map((session) => renderSession(session, group.sessions))}
+                                        {group.sessions.map((session) => renderSession(session))}
                                     </div> : null}
                                 </>;
                             })()}
@@ -759,6 +723,22 @@ function formatMessageDate(value: string): string {
     return new Intl.DateTimeFormat(undefined, {
         dateStyle: "medium",
         timeStyle: "short",
+    }).format(date);
+}
+
+function formatConversationDate(value: string, now = new Date()): string {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    const sameYear = date.getFullYear() === now.getFullYear();
+    const sameDay = sameYear && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+    return new Intl.DateTimeFormat(undefined, {
+        ...(sameDay ? {} : {
+            day: "numeric",
+            month: "short",
+            ...(sameYear ? {} : { year: "numeric" as const }),
+        }),
+        hour: "2-digit",
+        minute: "2-digit",
     }).format(date);
 }
 

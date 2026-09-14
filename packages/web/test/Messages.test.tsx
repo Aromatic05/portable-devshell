@@ -566,7 +566,7 @@ describe("Messages", () => {
             store={messageStore({ updateConversationPreferences })}
         />);
 
-        fireEvent.click(screen.getByRole("button", { name: "Rename ctx-second" }));
+        fireEvent.doubleClick(screen.getByRole("button", { name: /Review the Messages navigation/u }));
         fireEvent.change(screen.getByLabelText("Conversation title"), { target: { value: "Messages navigation review" } });
         fireEvent.click(screen.getByRole("button", { name: "Save title" }));
         await waitFor(() => expect(updateConversationPreferences).toHaveBeenCalledWith({
@@ -606,6 +606,9 @@ describe("Messages", () => {
         expect(rows).toHaveLength(2);
         expect(rows[0]).toHaveTextContent("Review the Messages navigation.");
         expect(rows[1]).toHaveTextContent("Investigate the first regression in Audit.");
+        expect(screen.queryByRole("button", { name: /Move .* up/u })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /Move .* down/u })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /Rename ctx-/u })).not.toBeInTheDocument();
 
         fireEvent.dragStart(rows[1]!);
         fireEvent.dragOver(rows[0]!);
@@ -722,21 +725,6 @@ describe("Messages", () => {
         expect(updateConversationPreferences).not.toHaveBeenCalledWith(expect.objectContaining({
             workspaceOrder: ["/work/portable-devshell"],
         }));
-    });
-
-    it("offers keyboard and touch-friendly move controls in addition to drag ordering", () => {
-        const nextState = twoActiveConversationState();
-        render(<Messages
-            navigate={vi.fn()}
-            route={{ page: "messages", view: "contexts" }}
-            state={nextState}
-            store={messageStore()}
-        />);
-
-        const list = screen.getByRole("navigation", { name: "Conversations" });
-        fireEvent.click(screen.getByRole("button", { name: "Move ctx-first up" }));
-        expect(list.querySelectorAll<HTMLElement>(".conversation-row")[0])
-            .toHaveTextContent("Investigate the first regression in Audit.");
     });
 
     it("keeps an idle Current conversation in place until the user archives idle conversations", () => {
