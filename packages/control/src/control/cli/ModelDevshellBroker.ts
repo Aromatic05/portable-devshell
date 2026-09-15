@@ -1,6 +1,6 @@
 import type {
-    WorkerDevshellCommandClose,
-    WorkerDevshellCommandOpen
+    WorkerCommandSessionClose,
+    WorkerCommandSessionOpen
 } from "@portable-devshell/core";
 import {
     errorCodes,
@@ -76,10 +76,10 @@ export class ModelDevshellBroker {
         }
         for (const descriptor of this.#instances.list()) {
             if (this.#subscriptions.has(descriptor.worker)) continue;
-            const unsubscribeOpen = descriptor.worker.onDevshellCommandOpen((request) => {
+            const unsubscribeOpen = descriptor.worker.onCommandSessionOpen((request) => {
                 this.#acceptOpen(descriptor, request);
             });
-            const unsubscribeClose = descriptor.worker.onDevshellCommandClose((request) => {
+            const unsubscribeClose = descriptor.worker.onCommandSessionClose((request) => {
                 this.#acceptClose(descriptor, request);
             });
             this.#subscriptions.set(descriptor.worker, () => {
@@ -90,7 +90,7 @@ export class ModelDevshellBroker {
         }
     }
 
-    #acceptOpen(descriptor: InstanceDescriptor, request: WorkerDevshellCommandOpen): void {
+    #acceptOpen(descriptor: InstanceDescriptor, request: WorkerCommandSessionOpen): void {
         const key = sessionKey(descriptor.name, request.sessionId);
         if (this.#active.has(key)) {
             const error = integrityError("Worker reused an active model devshell session id.");
@@ -110,7 +110,7 @@ export class ModelDevshellBroker {
             });
     }
 
-    #acceptClose(descriptor: InstanceDescriptor, request: WorkerDevshellCommandClose): void {
+    #acceptClose(descriptor: InstanceDescriptor, request: WorkerCommandSessionClose): void {
         const key = sessionKey(descriptor.name, request.sessionId);
         const controller = this.#active.get(key);
         if (controller === undefined) return;
@@ -129,7 +129,7 @@ export class ModelDevshellBroker {
 
     async #handle(
         descriptor: InstanceDescriptor,
-        request: WorkerDevshellCommandOpen,
+        request: WorkerCommandSessionOpen,
         signal: AbortSignal
     ): Promise<void> {
         try {
@@ -142,7 +142,7 @@ export class ModelDevshellBroker {
         const [commandId, ...argv] = request.argv;
         if (commandId === "--help" || commandId === "-h" || commandId === "help") {
             await this.#write(descriptor, request.sessionId, "stdout", await this.#renderHelp(descriptor, request.ctxId));
-            await descriptor.worker.completeDevshellCommand({ exitCode: 0, sessionId: request.sessionId });
+            await descriptor.worker.completeCommandSession({ exitCode: 0, sessionId: request.sessionId });
             return;
         }
 
@@ -162,7 +162,7 @@ export class ModelDevshellBroker {
                 "stderr",
                 `CLI command ${commandId} is unavailable.\n`
             );
-            await descriptor.worker.completeDevshellCommand({ exitCode: 127, sessionId: request.sessionId });
+            await descriptor.worker.completeCommandSession({ exitCode: 127, sessionId: request.sessionId });
             return;
         }
 
@@ -213,7 +213,7 @@ export class ModelDevshellBroker {
                     `${JSON.stringify(result.value ?? null, null, 2)}\n`
                 );
             }
-            await descriptor.worker.completeDevshellCommand({ exitCode: 0, sessionId: request.sessionId });
+            await descriptor.worker.completeCommandSession({ exitCode: 0, sessionId: request.sessionId });
         } catch (error) {
             await this.#completeFailure(descriptor, request.sessionId, error);
         }
@@ -221,7 +221,7 @@ export class ModelDevshellBroker {
 
     async #validateProvenance(
         descriptor: InstanceDescriptor,
-        request: WorkerDevshellCommandOpen
+        request: WorkerCommandSessionOpen
     ): Promise<void> {
         const [record] = await descriptor.worker.readToolCalls({
             callIds: [request.parentCallId],
@@ -300,7 +300,7 @@ export class ModelDevshellBroker {
         text: string
     ): Promise<void> {
         for (const data of chunks(text)) {
-            await descriptor.worker.writeDevshellCommandOutput({ data, sessionId, stream });
+            await descriptor.worker.writeCommandSessionOutput({ data, sessionId, stream });
         }
     }
 
@@ -317,12 +317,12 @@ export class ModelDevshellBroker {
                 ? 127
                 : 1;
         await this.#write(descriptor, sessionId, "stderr", `${message}\n`).catch(() => undefined);
-        await descriptor.worker.completeDevshellCommand({ exitCode, sessionId }).catch(() => undefined);
+        await descriptor.worker.completeCommandSession({ exitCode, sessionId }).catch(() => undefined);
     }
 
     async #recordIntegrityFault(
         descriptor: InstanceDescriptor,
-        request: WorkerDevshellCommandOpen,
+        request: WorkerCommandSessionOpen,
         error: unknown
     ): Promise<void> {
         await descriptor.worker.appendControlEvent("worker.protocolIntegrityFault", {

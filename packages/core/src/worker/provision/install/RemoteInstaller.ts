@@ -1,0 +1,458 @@
+import type { ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+
+import {
+    ControlError,
+    errorCodes,
+    type ControlError as ControlErrorType,
+} from "@portable-devshell/shared";
+
+import type { ProviderCommandContext } from "../../transport/command/Transport.js";
+import { waitForCommandResult } from "../../transport/command/Transport.js";
+import { WorkerAssetResolver } from "../AssetResolver.js";
+import type { WorkerTarget } from "../target/Target.js";
+import { WORKER_GENERATION_RETENTION_DAYS } from "./GenerationPolicy.js";
+
+export interface WorkerInstallerRemoteOptions {
+    resolver?: WorkerAssetResolver;
+    probeTarget: () => Promise<WorkerTarget>;
+    spawnShell: (
+        commandLine: string,
+        stdio: ["ignore" | "pipe", "pipe", "pipe"],
+        context: ProviderCommandContext,
+    ) => ChildProcess;
+    createProviderError: (
+        context: ProviderCommandContext,
+        cause: unknown,
+        options?: {
+            errorCode?: string;
+            result?: {
+                exitCode?: number | null;
+                signal?: string;
+                stderr?: string;
+                stdout?: string;
+            };
+        },
+    ) => ControlErrorType;
+    createContext: (
+        operation: string,
+        command: readonly string[],
+    ) => ProviderCommandContext;
+}
+
+export class WorkerInstallerRemote {
+    readonly #resolver: WorkerAssetResolver;
+    readonly #probeTarget: WorkerInstallerRemoteOptions["probeTarget"];
+    readonly #spawnShell: WorkerInstallerRemoteOptions["spawnShell"];
+    readonly #createProviderError: WorkerInstallerRemoteOptions["createProviderError"];
+    readonly #createContext: WorkerInstallerRemoteOptions["createContext"];
+    #homeDirectoryPromise?: Promise<string>;
+    #installPromise?: Promise<string>;
+
+    constructor(options: WorkerInstallerRemoteOptions) {
+        this.#resolver = options.resolver ?? new WorkerAssetResolver();
+        this.#probeTarget = options.probeTarget;
+        this.#spawnShell = options.spawnShell;
+        this.#createProviderError = options.createProviderError;
+        this.#createContext = options.createContext;
+    }
+
+    async ensure(executable: string): Promise<string> {
+        if (executable !== "devshell-worker") {
+            return executable;
+        }
+
+        if (this.#installPromise === undefined) {
+            this.#installPromise = this.#installDefaultWorker().finally(() => {
+                this.#installPromise = undefined;
+            });
+        }
+
+        return await this.#installPromise;
+    }
+
+    async #installDefaultWorker(): Promise<string> {
+        const target = await this.#probeTarget();
+        const asset = await this.#resolver.resolve(target).catch((error) => {
+            if (error instanceof ControlError) {
+                throw error;
+            }
+
+            throw this.#createProviderError(
+                this.#createContext("resolveExecutable", ["devshell-worker"]),
+                error,
+            );
+        });
+        const homeDirectory = await this.#resolveHomeDirectory();
+
+        if (
+            await this.#isRemoteWorkerCurrent(
+                homeDirectory,
+                target.key,
+                asset.sha256,
+            )
+        ) {
+            return buildRemoteExecutablePath(homeDirectory);
+        }
+
+        const binary = await readFile(asset.binaryPath).catch((error) => {
+            throw this.#createProviderError(
+                this.#createContext("resolveExecutable", ["devshell-worker"]),
+                error,
+            );
+        });
+        const actualSha256 = createHash("sha256").update(binary).digest("hex");
+        if (actualSha256 !== asset.sha256) {
+            throw this.#createProviderError(
+                this.#createContext("installWorker", [asset.binaryPath]),
+                new Error(
+                    `worker bundle checksum mismatch: expected ${asset.sha256}, got ${actualSha256}`,
+                ),
+                { errorCode: errorCodes.coreWorkerProvisionFailed },
+            );
+        }
+        const commandLine = buildInstallScript(
+            homeDirectory,
+            target.key,
+            asset.sha256,
+        );
+        const context = this.#createContext("installWorker", [
+            "sh",
+            "-lc",
+            commandLine,
+        ]);
+        const child = this.#spawnShell(
+            commandLine,
+            ["pipe", "pipe", "pipe"],
+            context,
+        );
+
+        await writeToChildStdin(
+            child,
+            binary,
+            this.#createProviderError,
+            context,
+        );
+
+        const result = await waitForCommandResult(
+            child,
+            this.#createProviderError,
+            context,
+        );
+        if (result.exitCode !== 0) {
+            throw this.#createProviderError(
+                context,
+                new Error(
+                    result.stderr || result.stdout || "worker install failed",
+                ),
+                {
+                    errorCode: errorCodes.coreWorkerProvisionFailed,
+                    result,
+                },
+            );
+        }
+
+        return buildRemoteExecutablePath(homeDirectory);
+    }
+
+    async #isRemoteWorkerCurrent(
+        homeDirectory: string,
+        targetKey: string,
+        sha256: string,
+    ): Promise<boolean> {
+        const commandLine = buildInspectScript(
+            homeDirectory,
+            targetKey,
+            sha256,
+        );
+        const context = this.#createContext("installWorker", [
+            "sh",
+            "-lc",
+            commandLine,
+        ]);
+        const child = this.#spawnShell(
+            commandLine,
+            ["ignore", "pipe", "pipe"],
+            context,
+        );
+        const result = await waitForCommandResult(
+            child,
+            this.#createProviderError,
+            context,
+        );
+
+        if (result.exitCode !== 0) {
+            throw this.#createProviderError(
+                context,
+                new Error(
+                    result.stderr ||
+                        result.stdout ||
+                        "worker install check failed",
+                ),
+                {
+                    errorCode: errorCodes.coreWorkerProvisionFailed,
+                    result,
+                },
+            );
+        }
+
+        const status = result.stdout.trim();
+        if (status === "ready") {
+            return true;
+        }
+        if (status === "missing") {
+            return false;
+        }
+
+        throw this.#createProviderError(
+            context,
+            new Error(
+                `unexpected worker install check result: ${status || "empty"}`,
+            ),
+            {
+                errorCode: errorCodes.coreWorkerProvisionFailed,
+                result,
+            },
+        );
+    }
+
+    async #resolveHomeDirectory(): Promise<string> {
+        if (this.#homeDirectoryPromise !== undefined) {
+            return await this.#homeDirectoryPromise;
+        }
+
+        const promise = this.#readHomeDirectory().catch((error) => {
+            if (this.#homeDirectoryPromise === promise) {
+                this.#homeDirectoryPromise = undefined;
+            }
+            throw error;
+        });
+        this.#homeDirectoryPromise = promise;
+        return await promise;
+    }
+
+    async #readHomeDirectory(): Promise<string> {
+        const commandLine =
+            'printf %s "${HOME:?HOME is required to install the worker}"';
+        const context = this.#createContext("installWorker", [
+            "sh",
+            "-lc",
+            commandLine,
+        ]);
+        const child = this.#spawnShell(
+            commandLine,
+            ["ignore", "pipe", "pipe"],
+            context,
+        );
+        const result = await waitForCommandResult(
+            child,
+            this.#createProviderError,
+            context,
+        );
+
+        if (result.exitCode !== 0) {
+            throw this.#createProviderError(
+                context,
+                new Error(
+                    result.stderr || result.stdout || "failed to resolve HOME",
+                ),
+                { errorCode: errorCodes.coreWorkerProvisionFailed, result },
+            );
+        }
+
+        const homeDirectory = result.stdout.trim();
+        if (homeDirectory.length === 0) {
+            throw this.#createProviderError(
+                context,
+                new Error("HOME is required to install the worker"),
+                { errorCode: errorCodes.coreWorkerProvisionFailed, result },
+            );
+        }
+
+        return homeDirectory;
+    }
+
+}
+
+function buildInspectScript(
+    homeDirectory: string,
+    targetKey: string,
+    sha256: string,
+): string {
+    const installDirectory = `${homeDirectory}/.devshell/workers/${targetKey}/${sha256}`;
+    const binaryPath = `${installDirectory}/devshell-worker`;
+    const shaPath = `${installDirectory}/devshell-worker.sha256`;
+    const symlinkPath = buildRemoteExecutablePath(homeDirectory);
+    const symlinkTarget = `../workers/${targetKey}/${sha256}/devshell-worker`;
+    const workerRoot = `${homeDirectory}/.devshell/workers/${targetKey}`;
+
+    return [
+        "set -eu",
+        `install_dir=${shellEscape(installDirectory)}`,
+        `binary_path=${shellEscape(binaryPath)}`,
+        `sha_path=${shellEscape(shaPath)}`,
+        `symlink_path=${shellEscape(symlinkPath)}`,
+        `symlink_target=${shellEscape(symlinkTarget)}`,
+        `expected_sha=${shellEscape(sha256)}`,
+        hashFunctionScript(),
+        'installed_sha=""',
+        'actual_sha=""',
+        'if [ -f "$sha_path" ]; then installed_sha="$(cat "$sha_path")"; fi',
+        'if [ -f "$binary_path" ]; then actual_sha="$(sha256_file "$binary_path")"; fi',
+        'if [ "$installed_sha" = "$expected_sha" ] && [ "$actual_sha" = "$expected_sha" ]; then',
+        '  touch "$install_dir" 2>/dev/null || true',
+        '  mkdir -p "$(dirname "$symlink_path")"',
+        '  alias_tmp="${symlink_path}.next.$$"',
+        '  cleanup_alias() { rm -f "$alias_tmp"; }',
+        "  trap cleanup_alias EXIT HUP INT TERM",
+        '  ln -s "$symlink_target" "$alias_tmp"',
+        '  mv -f "$alias_tmp" "$symlink_path"',
+        ...workerGenerationGcScript(workerRoot),
+        "  trap - EXIT HUP INT TERM",
+        "  printf '%s' ready",
+        "else",
+        "  printf '%s' missing",
+        "fi",
+    ].join("\n");
+}
+
+function buildInstallScript(
+    homeDirectory: string,
+    targetKey: string,
+    sha256: string,
+): string {
+    const installDirectory = `${homeDirectory}/.devshell/workers/${targetKey}/${sha256}`;
+    const binaryPath = `${installDirectory}/devshell-worker`;
+    const shaPath = `${installDirectory}/devshell-worker.sha256`;
+    const symlinkPath = buildRemoteExecutablePath(homeDirectory);
+    const symlinkTarget = `../workers/${targetKey}/${sha256}/devshell-worker`;
+    const workerRoot = `${homeDirectory}/.devshell/workers/${targetKey}`;
+
+    return [
+        "set -eu",
+        `install_dir=${shellEscape(installDirectory)}`,
+        `binary_path=${shellEscape(binaryPath)}`,
+        `sha_path=${shellEscape(shaPath)}`,
+        `symlink_path=${shellEscape(symlinkPath)}`,
+        `symlink_target=${shellEscape(symlinkTarget)}`,
+        `expected_sha=${shellEscape(sha256)}`,
+        hashFunctionScript(),
+        'tmp_binary_path="${binary_path}.tmp.$$"',
+        'tmp_sha_path="${sha_path}.tmp.$$"',
+        'alias_tmp="${symlink_path}.next.$$"',
+        'cleanup() { rm -f "$tmp_binary_path" "$tmp_sha_path" "$alias_tmp"; }',
+        "trap cleanup EXIT HUP INT TERM",
+        'mkdir -p "$install_dir" "$(dirname "$symlink_path")"',
+        'cat > "$tmp_binary_path"',
+        'chmod 755 "$tmp_binary_path"',
+        'actual_sha="$(sha256_file "$tmp_binary_path")"',
+        'if [ "$actual_sha" != "$expected_sha" ]; then',
+        '  printf \'worker bundle checksum mismatch: expected %s, got %s\\n\' "$expected_sha" "$actual_sha" >&2',
+        "  exit 1",
+        "fi",
+        'printf \'%s\\n\' "$expected_sha" > "$tmp_sha_path"',
+        'mv "$tmp_binary_path" "$binary_path"',
+        'mv "$tmp_sha_path" "$sha_path"',
+        'touch "$install_dir" 2>/dev/null || true',
+        'ln -s "$symlink_target" "$alias_tmp"',
+        'mv -f "$alias_tmp" "$symlink_path"',
+        ...workerGenerationGcScript(workerRoot),
+        "trap - EXIT HUP INT TERM",
+    ].join("\n");
+}
+
+function workerGenerationGcScript(workerRoot: string): string[] {
+    return [
+        `worker_root=${shellEscape(workerRoot)}`,
+        'if [ -d "$worker_root" ]; then',
+        '  for generation in "$worker_root"/*; do',
+        '    [ -L "$generation" ] && continue',
+        '    [ -d "$generation" ] || continue',
+        '    generation_name="${generation##*/}"',
+        '    [ "$generation_name" = "$expected_sha" ] && continue',
+        '    [ "${#generation_name}" -eq 64 ] || continue',
+        '    case "$generation_name" in *[!0-9a-f]*) continue ;; esac',
+        `    if [ -n "$(find "$generation" -prune -mtime +${WORKER_GENERATION_RETENTION_DAYS - 1} -print 2>/dev/null)" ]; then`,
+        '      rm -rf "$generation" 2>/dev/null || true',
+        "    fi",
+        "  done",
+        "fi",
+    ];
+}
+
+function hashFunctionScript(): string {
+    return [
+        "sha256_file() {",
+        "  if command -v sha256sum >/dev/null 2>&1; then",
+        "    sha256sum \"$1\" | awk '{print $1}'",
+        "  elif command -v shasum >/dev/null 2>&1; then",
+        "    shasum -a 256 \"$1\" | awk '{print $1}'",
+        "  elif command -v openssl >/dev/null 2>&1; then",
+        "    openssl dgst -sha256 \"$1\" | awk '{print $NF}'",
+        "  else",
+        "    printf 'no SHA-256 implementation is available\\n' >&2",
+        "    return 127",
+        "  fi",
+        "}",
+    ].join("\n");
+}
+
+function buildRemoteExecutablePath(homeDirectory: string): string {
+    return `${homeDirectory}/.devshell/bin/devshell-worker`;
+}
+
+function shellEscape(value: string): string {
+    return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+async function writeToChildStdin(
+    child: ChildProcess,
+    bytes: Buffer,
+    createError: (
+        context: ProviderCommandContext,
+        cause: unknown,
+        options?: {
+            errorCode?: string;
+            result?: {
+                exitCode?: number | null;
+                signal?: string;
+                stderr?: string;
+                stdout?: string;
+            };
+        },
+    ) => Error,
+    context: ProviderCommandContext,
+    payloadName = "worker binary",
+): Promise<void> {
+    const stdin = child.stdin;
+
+    if (stdin === null) {
+        throw createError(
+            context,
+            new Error(`${payloadName} stdin is unavailable`),
+            {
+                errorCode: errorCodes.coreWorkerProvisionFailed,
+            },
+        );
+    }
+
+    await new Promise<void>((resolve, reject) => {
+        const onError = (error: Error) => {
+            stdin.off("finish", onFinish);
+            reject(
+                createError(context, error, {
+                    errorCode: errorCodes.coreWorkerProvisionFailed,
+                }),
+            );
+        };
+        const onFinish = () => {
+            stdin.off("error", onError);
+            resolve();
+        };
+
+        stdin.once("error", onError);
+        stdin.once("finish", onFinish);
+        stdin.end(bytes);
+    });
+}

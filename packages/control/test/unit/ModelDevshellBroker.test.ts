@@ -10,25 +10,25 @@ import type { InstanceDescriptor } from "../../src/control/instance/InstanceDesc
 import { InstanceRegistry } from "../../src/control/instance/registry/InstanceRegistry.ts";
 import type { ContextAdminPort } from "../../src/control/mcp/ContextRouteModule.ts";
 import type {
-    WorkerDevshellCommandClose,
-    WorkerDevshellCommandOpen
+    WorkerCommandSessionClose,
+    WorkerCommandSessionOpen
 } from "@portable-devshell/core";
 
 interface Harness {
     aborts: number;
     broker: ModelDevshellBroker;
-    close(request: WorkerDevshellCommandClose): void;
+    close(request: WorkerCommandSessionClose): void;
     completions: Array<{ error?: string; exitCode: number; sessionId: string }>;
     contextReferences: Array<{ ctxId: string; instance: string }>;
     faults: unknown[];
     outputs: Array<{ data: string; sessionId: string; stream: string }>;
-    open(request: WorkerDevshellCommandOpen): void;
+    open(request: WorkerCommandSessionOpen): void;
     setRecord(record: ToolCallRecord): void;
 }
 
 function harness(options: { allow?: boolean; contextWorkspace?: string } = {}): Harness {
-    let closeListener: ((request: WorkerDevshellCommandClose) => void) | undefined;
-    let openListener: ((request: WorkerDevshellCommandOpen) => void) | undefined;
+    let closeListener: ((request: WorkerCommandSessionClose) => void) | undefined;
+    let openListener: ((request: WorkerCommandSessionOpen) => void) | undefined;
     let aborts = 0;
     let record = toolRecord();
     const outputs: Harness["outputs"] = [];
@@ -40,17 +40,17 @@ function harness(options: { allow?: boolean; contextWorkspace?: string } = {}): 
             if (type === "worker.protocolIntegrityFault") faults.push(data);
             return Promise.resolve();
         },
-        completeDevshellCommand(input: Harness["completions"][number]) {
+        completeCommandSession(input: Harness["completions"][number]) {
             completions.push(input);
             return Promise.resolve();
         },
-        onDevshellCommandClose(next: (request: WorkerDevshellCommandClose) => void) {
+        onCommandSessionClose(next: (request: WorkerCommandSessionClose) => void) {
             closeListener = next;
             return () => {
                 if (closeListener === next) closeListener = undefined;
             };
         },
-        onDevshellCommandOpen(next: (request: WorkerDevshellCommandOpen) => void) {
+        onCommandSessionOpen(next: (request: WorkerCommandSessionOpen) => void) {
             openListener = next;
             return () => {
                 if (openListener === next) openListener = undefined;
@@ -59,7 +59,7 @@ function harness(options: { allow?: boolean; contextWorkspace?: string } = {}): 
         readToolCalls() {
             return Promise.resolve([record]);
         },
-        writeDevshellCommandOutput(input: Harness["outputs"][number]) {
+        writeCommandSessionOutput(input: Harness["outputs"][number]) {
             outputs.push(input);
             return Promise.resolve();
         }
@@ -219,7 +219,7 @@ test("Worker broker close aborts the active model command without recording an i
     assert.deepEqual(h.faults, []);
 });
 
-function openRequest(overrides: Partial<WorkerDevshellCommandOpen> = {}): WorkerDevshellCommandOpen {
+function openRequest(overrides: Partial<WorkerCommandSessionOpen> = {}): WorkerCommandSessionOpen {
     return {
         argv: ["probe"],
         ctxId: "ctx-a",

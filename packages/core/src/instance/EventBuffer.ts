@@ -1,0 +1,103 @@
+import { errorCodes, type InstanceEvent, type InstanceName, type JsonValue } from "@portable-devshell/shared";
+
+import type { AuditRecordStore } from "../storage/audit/RecordStore.js";
+
+export interface InstanceEventInput {
+    at: string;
+    data?: JsonValue;
+    type: InstanceEvent["type"];
+}
+
+export interface InstanceEventStreamGap {
+    code: typeof errorCodes.streamGap;
+    fromSeq: number;
+    kind: "gap";
+    lastSeq: number;
+    nextSeq: number;
+}
+
+export interface InstanceEventStreamSlice {
+    events: InstanceEvent[];
+    kind: "events";
+    lastSeq: number;
+}
+
+export class InstanceEventBuffer {
+    readonly #instanceName: InstanceName;
+    readonly #capacity: number;
+    readonly #store?: AuditRecordStore<InstanceEvent>;
+    #appendTail: Promise<void> = Promise.resolve();
+    #initialized = false;
+    #events: InstanceEvent[] = [];
+    #lastSeq = 0;
+
+    constructor(instanceName: InstanceName, capacity: number, store?: AuditRecordStore<InstanceEvent>) {
+        this.#instanceName = instanceName;
+        this.#capacity = capacity;
+        this.#store = store;
+    }
+
+    get lastSeq(): number {
+        return this.#lastSeq;
+    }
+
+    async append(event: InstanceEventInput): Promise<InstanceEvent> {
+        const operation = this.#appendTail.then(async () => {
+            await this.#initialize();
+            const storedEvent: InstanceEvent = {
+                at: event.at,
+                data: event.data,
+                instanceName: this.#instanceName,
+                seq: this.#lastSeq + 1,
+                type: event.type
+            };
+
+            await this.#store?.append(storedEvent);
+            this.#lastSeq = storedEvent.seq;
+            this.#events.push(storedEvent);
+            if (this.#events.length > this.#capacity) {
+                this.#events.shift();
+            }
+            return storedEvent;
+        });
+        this.#appendTail = operation.then(
+            () => undefined,
+            () => undefined
+        );
+        return await operation;
+    }
+
+    readFrom(fromSeq = 1): InstanceEventStreamGap | InstanceEventStreamSlice {
+        const nextSeq = this.#events[0]?.seq ?? this.#lastSeq + 1;
+
+        if (fromSeq < nextSeq) {
+            return {
+                code: errorCodes.streamGap,
+                fromSeq,
+                kind: "gap",
+                lastSeq: this.#lastSeq,
+                nextSeq
+            };
+        }
+
+        return {
+            events: this.#events.filter((event) => event.seq >= fromSeq),
+            kind: "events",
+            lastSeq: this.#lastSeq
+        };
+    }
+
+    async #initialize(): Promise<void> {
+        if (this.#initialized || this.#store === undefined) {
+            this.#initialized = true;
+            return;
+        }
+
+        const records = this.#store.readTail === undefined
+            ? await this.#store.readAll()
+            : await this.#store.readTail(this.#capacity);
+        this.#events = records.slice(-this.#capacity);
+        this.#lastSeq = Math.max(records.at(-1)?.seq ?? 0, await this.#store.readHighWater?.() ?? 0);
+        this.#initialized = true;
+    }
+}

@@ -1,22 +1,22 @@
-export { InstancePaths } from "./instance/InstancePaths.js";
+export { InstancePaths } from "./instance/Paths.js";
 export {
     assertSqliteSchemaVersionSupported,
     readSqlitePragmaNumber,
     SqliteSchemaVersionTooNewError,
-} from "./storage/SqliteSchemaVersion.js";
-export type { WorkerCommandInteractiveSession } from "./worker/command/WorkerCommandTransport.js";
+} from "./storage/SqliteSchema.js";
+export type { WorkerCommandInteractiveSession } from "./worker/transport/command/Transport.js";
 export type {
-    WorkerDevshellCommandClose,
-    WorkerDevshellCommandCompletion,
-    WorkerDevshellCommandOpen,
-    WorkerDevshellCommandOutput,
-    WorkerDevshellCommandStream
-} from "./worker/devshell/WorkerDevshellCommandBridge.js";
-export { WorkerHandle } from "./worker/handle/WorkerHandle.js";
-export { WorkerInstance } from "./worker/instance/WorkerInstance.js";
-export type { WorkerInstanceConfig } from "./worker/instance/WorkerInstanceConfig.js";
-export { WorkerInstanceFactory } from "./worker/instance/WorkerInstanceFactory.js";
-export { resolveWorkerHomeDirectory } from "./worker/platform/WorkerHomeDirectory.js";
+    WorkerCommandSessionClose,
+    WorkerCommandSessionCompletion,
+    WorkerCommandSessionOpen,
+    WorkerCommandSessionOutput,
+    WorkerCommandSessionStream
+} from "./worker/protocol/CommandSession.js";
+export { WorkerHandle } from "./worker/instance/capability/Handle.js";
+export { WorkerInstance } from "./worker/instance/Instance.js";
+export type { WorkerInstanceConfig } from "./worker/instance/Config.js";
+export { WorkerInstanceFactory } from "./worker/instance/Factory.js";
+export { resolveWorkerHomeDirectory } from "./worker/provision/HomeDirectory.js";
 export type {
     WorkerArtifactDirectPushInput,
     WorkerArtifactDirectPushResult,
@@ -31,11 +31,11 @@ export type {
     WorkerArtifactReceiveFinishResult,
     WorkerArtifactReceiveWriteInput,
     WorkerArtifactReceiveWriteResult
-} from "./worker/protocol/WorkerProtocolClient.js";
-export type { WorkerRpcConnector } from "./worker/rpc/WorkerRpcBridge.js";
-export { WorkerRpcInboundConnector } from "./worker/rpc/WorkerRpcInboundConnector.js";
-export { WorkerTransportFactory } from "./worker/transport/factory/WorkerTransportFactory.js";
-export type { WorkerTransportFactoryOptions } from "./worker/transport/factory/WorkerTransportFactory.js";
+} from "./worker/protocol/Client.js";
+export type { WorkerRpcConnector } from "./worker/protocol/rpc/connection/Bridge.js";
+export { WorkerRpcInboundConnector } from "./worker/protocol/rpc/connection/InboundConnector.js";
+export { WorkerTransportFactory } from "./worker/transport/Factory.js";
+export type { WorkerTransportFactoryOptions } from "./worker/transport/Factory.js";
 
 export type {
     WorkerTerminalAttachResult,
@@ -44,6 +44,6 @@ export type {
     WorkerTerminalNotification,
     WorkerTerminalOpenInput,
     WorkerTerminalOutputFrame
-} from "./worker/terminal/WorkerTerminalClient.js";
+} from "./worker/protocol/Terminal.js";
 
-export { WorkerRpcError } from "./worker/rpc/WorkerRpcError.js";
+export { WorkerRpcError } from "./worker/protocol/rpc/Message.js";
