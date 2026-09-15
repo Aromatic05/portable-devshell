@@ -1,0 +1,78 @@
+import { useEffect, useSyncExternalStore } from "react";
+import { Box, Text } from "ink";
+
+import type { TuiTerminalSnapshot } from "../emulation/Model.js";
+
+export interface TuiTerminalRenderSource {
+    getSnapshot(): TuiTerminalSnapshot;
+    subscribe(listener: () => void): () => void;
+}
+
+export interface TuiComponentTerminalProps {
+    columns: number;
+    focused: boolean;
+    instance?: string;
+    onGraphicsVisibility(visible: boolean): void;
+    rows: number;
+    source: TuiTerminalRenderSource;
+}
+
+export function TuiComponentTerminal(props: TuiComponentTerminalProps) {
+    const snapshot = useSyncExternalStore(
+        (listener) => props.source.subscribe(listener),
+        () => props.source.getSnapshot(),
+        () => props.source.getSnapshot()
+    );
+
+    useEffect(() => {
+        props.onGraphicsVisibility(true);
+    }, [
+        props.onGraphicsVisibility,
+        snapshot.columns,
+        snapshot.graphics.revision,
+        snapshot.rows,
+        snapshot.scroll.viewportLine,
+    ]);
+
+    useEffect(() => {
+        return () => props.onGraphicsVisibility(false);
+    }, [props.onGraphicsVisibility]);
+
+    const status = snapshot.error ?? snapshot.message ?? `${snapshot.status}${snapshot.exitCode === undefined ? "" : ` (${snapshot.exitCode})`}`;
+    const scroll = snapshot.scroll.atBottom ? "" : ` · scroll -${snapshot.scroll.offsetFromBottom}`;
+    const selection = snapshot.selection === undefined ? "" : ` · selected ${snapshot.selection.characters}`;
+    const graphics = snapshot.graphics.count === 0
+        ? ""
+        : ` · graphics ${snapshot.graphics.count} ${snapshot.graphics.protocols.join("+")}`;
+    const controls = props.focused
+        ? "drag copy · Shift+PgUp/PgDn · Ctrl+] sidebar"
+        : "→/Tab focus · r replay · K kill";
+    return (
+        <Box flexDirection="column" height={props.rows + 1} overflow="hidden">
+            <Text bold color={props.focused ? "cyan" : undefined}>
+                {`terminal · ${props.instance ?? "no instance"} · ${status}${scroll}${selection}${graphics} · ${controls}`}
+            </Text>
+            {snapshot.lines.slice(0, props.rows).map((line, row) => (
+                <Box height={1} key={row} overflow="hidden" width={props.columns}>
+                    <Text wrap="truncate-end">
+                        {line.segments.map((segment, index) => (
+                            <Text
+                                backgroundColor={segment.backgroundColor}
+                                bold={segment.bold}
+                                color={segment.color}
+                                dimColor={segment.dimColor}
+                                inverse={segment.inverse}
+                                italic={segment.italic}
+                                key={`${row}:${index}`}
+                                strikethrough={segment.strikethrough}
+                                underline={segment.underline}
+                            >
+                                {segment.text}
+                            </Text>
+                        ))}
+                    </Text>
+                </Box>
+            ))}
+        </Box>
+    );
+}

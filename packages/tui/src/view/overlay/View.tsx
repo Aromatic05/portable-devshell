@@ -1,0 +1,142 @@
+import type {
+    ApprovalRequest,
+    ToolCallRecord,
+} from "@portable-devshell/shared";
+import { Box, Text } from "ink";
+
+import type { TuiAppState } from "../../state/store/Model.js";
+import { topTuiOverlay } from "../../state/Overlay.js";
+import { TuiComponentConfirmDialog } from "./Confirm.js";
+import { TuiComponentTextDetail } from "../component/content/Detail.js";
+import {
+    tuiApprovalActions,
+    tuiApprovalActionText,
+    tuiApprovalFields,
+} from "./Presentation.js";
+
+export interface TuiOverlayViewProps {
+    onTextDetailImageVisibility?(visible: boolean): void;
+    state: TuiAppState;
+    viewportRows: number;
+    width: number;
+}
+
+export function TuiOverlayView(props: TuiOverlayViewProps) {
+    const overlay = topTuiOverlay(props.state.interaction.overlays);
+    if (overlay === undefined) return null;
+
+    switch (overlay.kind) {
+        case "confirmation":
+            return (
+                <TuiComponentConfirmDialog
+                    body={overlay.body}
+                    cancelFocused={overlay.selectedAction === "cancel"}
+                    cancelLabel={overlay.cancelLabel}
+                    confirmFocused={overlay.selectedAction === "confirm"}
+                    confirmLabel={overlay.confirmLabel}
+                    open={true}
+                    title={overlay.title}
+                    width={props.width}
+                />
+            );
+        case "text-detail":
+            return (
+                <TuiComponentTextDetail
+                    detail={{
+                        body: overlay.body,
+                        image: overlay.image,
+                        scrollOffset: overlay.scrollOffset,
+                        title: overlay.title,
+                    }}
+                    onImageVisibility={props.onTextDetailImageVisibility}
+                    viewportRows={props.viewportRows}
+                    width={props.width}
+                />
+            );
+        case "approval": {
+            const approval = (
+                props.state.readModel.instanceState[overlay.instance]?.approvals ?? []
+            ).find((candidate) => candidate.approvalId === overlay.approvalId);
+            const toolCall =
+                approval === undefined
+                    ? undefined
+                    : (
+                          props.state.readModel.instanceState[overlay.instance]?.toolCalls ??
+                          []
+                      ).find(
+                          (candidate) => candidate.callId === approval.callId,
+                      );
+            return (
+                <ApprovalOverlay
+                    approval={approval}
+                    selectedAction={overlay.selectedAction}
+                    toolCall={toolCall}
+                    width={props.width}
+                />
+            );
+        }
+        case "search":
+            return (
+                <Box borderColor="cyan" borderStyle="round" paddingX={1}>
+                    <Text>{`/ ${props.state.ui.searchQueries[props.state.ui.selectedPage] ?? ""}`}</Text>
+                </Box>
+            );
+        case "tool-form":
+            return (
+                <Box
+                    borderColor="cyan"
+                    borderStyle="round"
+                    flexDirection="column"
+                    paddingX={1}
+                >
+                    <Text bold>{`Call Tool: ${overlay.toolName}`}</Text>
+                    <Text dimColor>{`instance ${overlay.instance}`}</Text>
+                    <Text>{overlay.input}</Text>
+                </Box>
+            );
+    }
+}
+
+function ApprovalOverlay(props: {
+    approval?: ApprovalRequest;
+    selectedAction: "back" | "input" | "deny" | "approve";
+    toolCall?: ToolCallRecord;
+    width: number;
+}) {
+    if (props.approval === undefined) {
+        return (
+            <Box borderColor="yellow" borderStyle="round" paddingX={1}>
+                <Text color="yellow">
+                    Approval is no longer pending. Close this overlay to return.
+                </Text>
+            </Box>
+        );
+    }
+
+    const fields = tuiApprovalFields(props.approval, props.toolCall);
+
+    return (
+        <Box
+            borderColor="cyan"
+            borderStyle="round"
+            flexDirection="column"
+            paddingX={1}
+            width={props.width}
+        >
+            <Text bold>Approval</Text>
+            {fields.map(([label, value]) => (
+                <Text key={label}>{`${label}: ${value}`}</Text>
+            ))}
+            <Box marginTop={1}>
+                {tuiApprovalActions.map((action) => (
+                    <Text
+                        backgroundColor={
+                            props.selectedAction === action ? "cyan" : undefined
+                        }
+                        key={action}
+                    >{tuiApprovalActionText(action)}</Text>
+                ))}
+            </Box>
+        </Box>
+    );
+}

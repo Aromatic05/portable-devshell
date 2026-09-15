@@ -1,0 +1,976 @@
+import { PassThrough } from "node:stream";
+import type { ReadStream, WriteStream } from "node:tty";
+
+import React from "react";
+import { render, type Instance as InkInstance } from "ink";
+
+import {
+    createTuiClients,
+    type TuiClients,
+} from "./control/Client.js";
+import { TuiCommandDispatcher } from "../interaction/command/Dispatch.js";
+import { TuiControlSession } from "./control/Session.js";
+import { TuiFocusManager } from "../interaction/focus/Manager.js";
+import { TuiKeyDispatcher } from "../interaction/Input.js";
+import { TuiRenderScheduler } from "./Render.js";
+import { buildFocusGraphForState } from "../view/shell/Router.js";
+import { TuiAppStore } from "../state/store/App.js";
+import { topTuiOverlay } from "../state/Overlay.js";
+import {
+    selectErrorMessage,
+    selectMainScreenModel,
+    tuiViewProjection,
+} from "../view/projection/View.js";
+import type { TuiTerminalTab } from "../state/route/Model.js";
+import { TuiApp } from "../view/shell/App.js";
+import type { TuiAppKey } from "../view/shell/App.js";
+import {
+    buildTuiHitRegions,
+    buildTuiTextDetailImageRegion,
+    hitTargetAt,
+    tuiScreenSelectionColumnBounds,
+    type TuiHitTarget,
+} from "../view/projection/HitRegion.js";
+import { tuiSidebarSectionAt } from "../view/projection/Sidebar.js";
+import {
+    tuiBlockHeight,
+    tuiMainLayoutMetrics,
+} from "../view/shell/Layout.js";
+import { TuiRuntimeOperations } from "./Operations.js";
+import { TuiRouteDataLoader } from "./control/Route.js";
+import { TuiRouteLifecycleController } from "./control/Route.js";
+import {
+    detectTerminalGraphicsSupport,
+    type TuiTerminalGraphicsMode,
+} from "../terminal/graphics/Renderer.js";
+import {
+    detectTerminalImageSupport,
+    renderTerminalImageFrame,
+    terminalImageClearSequence,
+    type TuiTerminalImageSupport,
+} from "../terminal/graphics/Image.js";
+import { projectTuiTerminalInputFrame } from "../terminal/Input.js";
+import { TuiControlTerminalPtyFactory } from "../terminal/control/Pty.js";
+import { TuiTerminalSession } from "../terminal/emulation/Session.js";
+import { TuiTmuxPaneTerminalSession } from "../terminal/tmux/Session.js";
+import { TuiTerminalController } from "../terminal/Controller.js";
+import {
+    createTuiScreenCaptureStdout,
+    TuiScreenTextSelection,
+} from "../interaction/selection/Screen.js";
+import { TuiInputFramer, type TuiInputFrame } from "../interaction/Framer.js";
+import { TuiViewport } from "./Render.js";
+
+const APPLICATION_ESCAPE_TIMEOUT_MS = 25;
+const TERMINAL_ESCAPE_TIMEOUT_MS = 100;
+
+export interface TuiRuntimeOptions {
+    controlToken?: string;
+    controlUrl?: string;
+    environment?: NodeJS.ProcessEnv;
+    stdin?: ReadStream;
+    stdout?: WriteStream;
+    xdgRuntimeDir?: string;
+}
+
+export interface TuiRuntimeDependencies {
+    clients?: TuiClients;
+    graphicsMode?: TuiTerminalGraphicsMode;
+    inkDebug?: boolean;
+    terminal?: TuiTerminalSession;
+}
+
+export class TuiRuntime {
+    readonly commandDispatcher: TuiCommandDispatcher;
+    readonly focusManager: TuiFocusManager;
+    readonly keyDispatcher: TuiKeyDispatcher;
+    readonly routeLifecycle: TuiRouteLifecycleController;
+    readonly scheduler: TuiRenderScheduler;
+    readonly selection: TuiScreenTextSelection;
+    readonly session: TuiControlSession;
+    readonly store: TuiAppStore;
+    readonly terminal: TuiTerminalSession;
+    readonly tmuxPanes: TuiTmuxPaneTerminalSession;
+    readonly viewport: TuiViewport;
+    readonly #alternateScreen: AlternateScreen;
+    readonly #inkDebug: boolean;
+    readonly #inkStdin: ReadStream;
+    readonly #operations: TuiRuntimeOperations;
+    readonly #stdin: ReadStream;
+    readonly #storeUnsubscribe: () => void;
+    readonly #stdout: WriteStream;
+    readonly #terminalImageSupport: TuiTerminalImageSupport;
+    readonly #inputFramer = new TuiInputFramer();
+    readonly #controlTerminalPty?: TuiControlTerminalPtyFactory;
+    readonly #terminalController: TuiTerminalController;
+    #inputDeliveryQueue: Promise<void> = Promise.resolve();
+    #inputEscapeTimer?: ReturnType<typeof setTimeout>;
+    #cursorBlinkTimer?: ReturnType<typeof setInterval>;
+    #ink?: InkInstance;
+    #inputStarted = false;
+    #inputQueue: Promise<void> = Promise.resolve();
+    #screenMouseGesture?: {
+        anchor: { x: number; y: number };
+        selecting: boolean;
+        target?: TuiHitTarget;
+    };
+    #stopped = false;
+    #reconcilingFocus = false;
+
+    constructor(
+        options: TuiRuntimeOptions = {},
+        dependencies: TuiRuntimeDependencies = {},
+    ) {
+        this.#stdin = options.stdin ?? process.stdin;
+        const stdout = options.stdout ?? process.stdout;
+        this.viewport = new TuiViewport({
+            columns: stdout.columns ?? 120,
+            rows: stdout.rows ?? 40,
+        });
+        this.selection = new TuiScreenTextSelection({
+            columns: this.viewport.getSnapshot().columns,
+            rows: this.viewport.getSnapshot().rows,
+        });
+        this.#stdout = createTuiScreenCaptureStdout(stdout, this.selection);
+        this.#stdout.on("resize", this.#handleHostResize);
+        this.#inkDebug = dependencies.inkDebug ?? false;
+        const terminalGraphicsSupport = detectTerminalGraphicsSupport(
+            process.env,
+            dependencies.graphicsMode,
+        );
+        this.#terminalImageSupport = detectTerminalImageSupport(
+            process.env,
+            dependencies.graphicsMode,
+        );
+        this.#inkStdin = createInkStdin(this.#stdin);
+        this.#alternateScreen = new AlternateScreen(this.#stdout);
+        this.store = new TuiAppStore();
+        this.scheduler = new TuiRenderScheduler(this.store);
+        this.focusManager = new TuiFocusManager(this.store, {
+            boxIdForLine: (lineId) =>
+                selectMainScreenModel(this.store.getState()).boxes.find((box) =>
+                    box.expandedLines.some((line) => line.id === lineId),
+                )?.id,
+            currentPage: () => this.store.getState().ui.selectedPage,
+            expandedKeyFor: (boxId) =>
+                selectMainScreenModel(this.store.getState()).boxes.find(
+                    (box) => box.id === boxId,
+                )?.expandedKey,
+            graphFor: (page, mode) =>
+                buildFocusGraphForState({
+                    ...this.store.getState(),
+                    interaction: {
+                        ...this.store.getState().interaction,
+                        focusScope: mode,
+                    },
+                    ui: {
+                        ...this.store.getState().ui,
+                        selectedPage: page,
+                    },
+                }),
+            mode: () => this.store.getState().interaction.focusScope,
+        });
+        this.keyDispatcher = new TuiKeyDispatcher();
+
+        const clients =
+            dependencies.clients ??
+            createTuiClients({
+                ...(options.controlToken === undefined ? {} : { controlToken: options.controlToken }),
+                ...(options.controlUrl === undefined ? {} : { controlUrl: options.controlUrl }),
+                ...(options.environment === undefined ? {} : { environment: options.environment }),
+                xdgRuntimeDir: options.xdgRuntimeDir,
+            });
+        if (dependencies.terminal === undefined) {
+            this.#controlTerminalPty = new TuiControlTerminalPtyFactory({
+                client: clients.terminal,
+                workspaceForInstance: (instance) => this.#requireInstanceHome(instance),
+            });
+            this.terminal = new TuiTerminalSession({
+                ptyFactory: this.#controlTerminalPty.create(),
+            });
+        } else {
+            this.terminal = dependencies.terminal;
+        }
+        this.session = new TuiControlSession({
+            clients,
+            store: this.store,
+        });
+        this.#operations = new TuiRuntimeOperations({
+            clients,
+            session: this.session,
+            store: this.store,
+        });
+        this.tmuxPanes = new TuiTmuxPaneTerminalSession({
+            operations: this.#operations.tmuxOperations,
+        });
+        this.#terminalController = new TuiTerminalController({
+            columns: () => this.columns,
+            graphicsSupport: terminalGraphicsSupport,
+            rows: () => this.rows,
+            session: this.session,
+            stdout: this.#stdout,
+            store: this.store,
+            terminal: this.terminal,
+            tmuxPanes: this.tmuxPanes,
+            copyText: (text) => this.#copyText(text),
+            enqueueInput: (operation) => { void this.#enqueueInput(operation); },
+            handleAppMouse: async (event) => await this.#handleMouse(event),
+            writeAppInput: (data) => { this.#inkStdin.write(data); },
+        });
+        const routeDataLoader = new TuiRouteDataLoader({
+            session: this.session,
+            store: this.store,
+        });
+        this.routeLifecycle = new TuiRouteLifecycleController({
+            onEnter: async (context) => await routeDataLoader.enter(context),
+            onError: ({ route }, error) => {
+                this.store.setScreenStatus(
+                    route.page,
+                    `Route load failed: ${readErrorMessage(error)}`,
+                );
+            },
+            store: this.store,
+        });
+        this.commandDispatcher = new TuiCommandDispatcher({
+            focusManager: this.focusManager,
+            mainBoxInnerColumns: () =>
+                tuiMainLayoutMetrics(this.columns, this.rows).boxInnerWidth,
+            mainContentColumns: () =>
+                tuiMainLayoutMetrics(this.columns, this.rows).contentWidth,
+            mainViewportRows: () => {
+                const geometry = tuiMainLayoutMetrics(
+                    this.columns,
+                    this.rows,
+                );
+                const state = this.store.getState();
+                return Math.max(
+                    0,
+                    geometry.contentHeight -
+                        tuiBlockHeight(selectErrorMessage(state)) -
+                        (state.connection.status === "connecting" ? 1 : 0),
+                );
+            },
+            onApprovalDecision: async (instance, approvalId, decision) => {
+                await this.#operations.decideApproval(
+                    instance,
+                    approvalId,
+                    decision,
+                );
+            },
+            onArtifactCancelTransfer: async (transferId) => {
+                await this.#operations.cancelArtifactTransfer(transferId);
+            },
+            onArtifactRevokeShare: async (shareId) => {
+                await this.#operations.revokeArtifactShare(shareId);
+            },
+            onArtifactViewImage: async (instance, input) => {
+                if ("imageRef" in input) {
+                    const stored = await clients.artifact.readImage(input.imageRef);
+                    return {
+                        ...stored,
+                        name: input.name,
+                        source: input.source,
+                    };
+                }
+                if ("path" in input) {
+                    return await clients.artifact.viewImage(instance, {
+                        ...(input.instance === undefined ? {} : { instance: input.instance }),
+                        path: input.path,
+                        workspace: input.workspace ?? this.#requireInstanceHome(input.instance ?? instance),
+                    });
+                }
+                return await clients.artifact.viewImage(instance, input);
+            },
+            onContextMessage: async (instance, ctxId, text) => {
+                await this.#operations.queueContextMessage(
+                    instance,
+                    ctxId,
+                    text,
+                );
+            },
+            onContextDisable: async (instance, ctxId) => {
+                await this.#operations.disableContext(instance, ctxId);
+            },
+            onContextRenew: async (instance, ctxId) => {
+                await this.#operations.renewContext(instance, ctxId);
+            },
+            onOpenTerminal: async (instance) => {
+                this.store.setSelectedInstance(instance);
+                this.store.setSelectedPage("terminal");
+                this.store.setFocusScope("terminal");
+                await this.#terminalController.syncSession();
+            },
+            onTerminalKill: async (instance) => {
+                const killed = await this.#controlTerminalPty?.kill(instance);
+                if (killed === undefined) {
+                    throw new Error(
+                        `No running persistent terminal is available for ${instance}.`,
+                    );
+                }
+            },
+            onControlRestart: async () => {
+                await this.#operations.restartControl();
+            },
+            onCreateInstance: async (draft) => {
+                return await this.#operations.createInstance(draft);
+            },
+            onGetInstanceCreateSchema: async () => {
+                return await this.#operations.getInstanceCreateSchema();
+            },
+            onInstanceAction: async (action, instance) => {
+                await this.#operations.runInstanceAction(action, instance);
+            },
+            onConfigUpdate: async (request) => {
+                return await this.#operations.updateConfig(request);
+            },
+            onInstanceDangerAction: async (_action, instance) => {
+                await this.#operations.deleteInstance(instance);
+            },
+            onTodoDelete: async (instance, taskId) => {
+                await this.#operations.deleteTodo(instance, taskId);
+            },
+            onInstanceEnabledChange: async (instance, enabled) => {
+                await this.#operations.setInstanceEnabled(instance, enabled);
+            },
+            onLogsReload: async () => {
+                await this.#operations.reloadLogs();
+            },
+            onOAuthApprovalDecision: async (approvalId, decision) => {
+                await this.#operations.decideOAuthApproval(
+                    approvalId,
+                    decision,
+                );
+            },
+            onPageReload: async (page, instance) => {
+                if (page === "terminal") {
+                    this.#terminalController.invalidate();
+                    await this.#terminalController.syncSession();
+                    return;
+                }
+                await this.#operations.reloadPage(page, instance);
+            },
+            onQuit: async () => {
+                await this.stop();
+            },
+            onRedraw: () => {
+                this.redraw();
+            },
+            onToolCall: async (instance, toolName, input) => {
+                return await this.#operations.callTool(
+                    instance,
+                    toolName,
+                    input,
+                );
+            },
+            onToolCallDetail: async (instance, callId) => {
+                return await this.session.readToolCallDetail(instance, callId);
+            },
+            onValidateConfigDraft: async (draft) => {
+                await this.#operations.validateConfigDraft(draft);
+            },
+            projection: tuiViewProjection,
+            onValidateInstanceCreateDraft: async (draft) => {
+                return await this.#operations.validateInstanceCreateDraft(
+                    draft,
+                );
+            },
+            store: this.store,
+        });
+        this.#storeUnsubscribe = this.store.subscribe(() => {
+            const scope = this.store.getState().interaction.focusScope;
+            const reconcile =
+                scope === "mainBoxes" ||
+                scope === "boxDetail" ||
+                scope === "form" ||
+                scope === "wizard";
+            if (reconcile && !this.#reconcilingFocus) {
+                this.#reconcilingFocus = true;
+                try {
+                    this.focusManager.syncPanel(
+                        this.store.getState().ui.selectedPage,
+                        this.store.getState().interaction.focusScope,
+                    );
+                } finally {
+                    this.#reconcilingFocus = false;
+                }
+            }
+            this.#terminalController.syncFocus();
+            void this.#terminalController.syncSession();
+            this.#terminalController.syncTmuxPanes();
+        });
+        this.focusManager.syncPanel(
+            this.store.getState().ui.selectedPage,
+            this.store.getState().interaction.focusScope,
+        );
+    }
+
+    async run(): Promise<void> {
+        this.store.setSelectedPage("overview");
+        this.#alternateScreen.enter();
+        this.#startInput();
+        this.#startCursorBlink();
+        this.#mountInk();
+        await this.session.start();
+        this.routeLifecycle.start(true);
+
+        while (!this.#stopped) {
+            const ink = this.#ink;
+            if (ink === undefined) {
+                break;
+            }
+            await ink.waitUntilExit();
+            if (this.#stopped) {
+                break;
+            }
+            break;
+        }
+        await this.stop();
+    }
+
+    async reconnect(): Promise<void> {
+        await this.session.reconnect();
+    }
+
+    get columns(): number {
+        return this.viewport.getSnapshot().columns;
+    }
+
+    get rows(): number {
+        return this.viewport.getSnapshot().rows;
+    }
+
+    handleInput(input: string, key: TuiAppKey): Promise<void> {
+        return this.#enqueueInput(async () => {
+            this.selection.clearSelection();
+            const intents = this.keyDispatcher.dispatch(
+                this.store.getState().interaction.focusScope,
+                { input, key },
+            );
+            await this.commandDispatcher.dispatchMany(intents);
+        });
+    }
+    async openTerminal(
+        instance: string | undefined,
+        columns: number,
+        rows: number,
+    ): Promise<void> {
+        await this.#terminalController.open(instance, columns, rows);
+    }
+    selectTerminalTab(tab: TuiTerminalTab): void {
+        this.#terminalController.selectTab(tab);
+    }
+
+    async stop(): Promise<void> {
+        if (this.#stopped) {
+            return;
+        }
+        this.#stopped = true;
+        this.#clearInputEscapeTimer();
+        this.#stopCursorBlink();
+        this.renderTextDetailImage(false);
+        this.renderTerminalGraphics(false);
+        this.#storeUnsubscribe();
+        this.routeLifecycle.stop();
+        this.terminal.dispose();
+        this.tmuxPanes.dispose();
+        await this.session.stop();
+        this.scheduler.dispose();
+        this.#ink?.unmount();
+        this.#ink = undefined;
+        this.#stopInput();
+        this.#stdout.off("resize", this.#handleHostResize);
+        this.#alternateScreen.exit();
+        this.selection.dispose();
+    }
+
+    #handleHostResize = (): void => {
+        const columns = this.#stdout.columns ?? 120;
+        const rows = this.#stdout.rows ?? 40;
+        if (!this.viewport.resize(columns, rows)) return;
+        this.selection.resize(columns, rows);
+        void this.#terminalController.syncSession();
+    };
+
+    redraw(): void {
+        this.#stdout.write("\u001B[2J\u001B[H");
+        queueMicrotask(() => {
+            this.renderTextDetailImage(true);
+            this.renderTerminalGraphics(true);
+        });
+    }
+
+    renderTextDetailImage(visible: boolean): void {
+        const detail = topTuiOverlay(
+            this.store.getState().interaction.overlays,
+        );
+        if (
+            !visible ||
+            detail?.kind !== "text-detail" ||
+            detail.image === undefined
+        ) {
+            const clear = terminalImageClearSequence(
+                this.#terminalImageSupport,
+            );
+            if (clear.length > 0) {
+                this.#stdout.write(clear);
+            }
+            return;
+        }
+
+        const region = buildTuiTextDetailImageRegion(this.store.getState(), {
+            columns: this.columns,
+            rows: this.rows,
+        });
+        if (region === undefined) {
+            return;
+        }
+        const frame = renderTerminalImageFrame({
+            image: detail.image,
+            region,
+            support: this.#terminalImageSupport,
+        });
+        if (frame.protocol === "none" && frame.reason !== undefined) {
+            const { image: _image, ...textDetail } = detail;
+            this.store.replaceTopOverlay({
+                ...textDetail,
+                body: `${detail.body}\n\nImage preview unavailable: ${frame.reason}`,
+            });
+            return;
+        }
+        if (frame.sequence.length > 0) {
+            this.#stdout.write(frame.sequence);
+        }
+    }
+    renderTerminalGraphics(visible: boolean): void {
+        this.#terminalController.renderGraphics(visible);
+    }
+
+    #startCursorBlink(): void {
+        this.#cursorBlinkTimer = setInterval(() => {
+            const editor = this.store.getState().interaction.editor;
+            if (editor?.editing === true && editor.kind !== "comment") {
+                this.store.bumpRedrawNonce();
+            }
+        }, 500);
+    }
+
+    #stopCursorBlink(): void {
+        if (this.#cursorBlinkTimer === undefined) {
+            return;
+        }
+        clearInterval(this.#cursorBlinkTimer);
+        this.#cursorBlinkTimer = undefined;
+    }
+
+    #mountInk(): void {
+        this.#ink = render(React.createElement(TuiApp, { runtime: this }), {
+            debug: this.#inkDebug,
+            exitOnCtrlC: false,
+            stdin: this.#inkStdin,
+            stdout: this.#stdout,
+        });
+    }
+
+    #startInput(): void {
+        if (this.#inputStarted) {
+            return;
+        }
+        this.#inputStarted = true;
+        this.#stdin.on("data", this.#forwardInput);
+    }
+
+    #stopInput(): void {
+        if (!this.#inputStarted) {
+            return;
+        }
+        this.#inputStarted = false;
+        this.#stdin.off("data", this.#forwardInput);
+    }
+
+    #forwardInput = (chunk: string | Buffer): void => {
+        if (this.#ink === undefined) {
+            return;
+        }
+        this.#clearInputEscapeTimer();
+        this.#dispatchInputFrames(this.#inputFramer.push(chunk));
+        if (!this.#inputFramer.hasPendingEscape()) return;
+        const timeoutMs = this.#terminalOwnsInput()
+            ? TERMINAL_ESCAPE_TIMEOUT_MS
+            : APPLICATION_ESCAPE_TIMEOUT_MS;
+        this.#inputEscapeTimer = setTimeout(() => {
+            this.#inputEscapeTimer = undefined;
+            this.#dispatchInputFrames(this.#inputFramer.flushPendingEscape());
+        }, timeoutMs);
+    };
+
+    #dispatchInputFrames(frames: readonly TuiInputFrame[]): void {
+        const delivery = this.#inputDeliveryQueue.then(async () => {
+            for (let index = 0; index < frames.length; index += 1) {
+                if (this.#ink === undefined) return;
+                const frame = frames[index]!;
+                if (this.#terminalOwnsInput()) {
+                    const action = projectTuiTerminalInputFrame(frame);
+                    if (action.type === "data" && action.data !== "\u001B") {
+                        let data = action.data;
+                        while (index + 1 < frames.length) {
+                            const next = projectTuiTerminalInputFrame(
+                                frames[index + 1]!,
+                            );
+                            if (
+                                next.type !== "data" ||
+                                next.data === "\u001B"
+                            ) {
+                                break;
+                            }
+                            data += next.data;
+                            index += 1;
+                        }
+                        this.#terminalController.dispatchInputActions([
+                            { data, type: "data" },
+                        ]);
+                    } else {
+                        this.#terminalController.dispatchInputActions([action]);
+                    }
+                    await this.#inputQueue;
+                    continue;
+                }
+                if (frame.type === "mouse") {
+                    await this.#enqueueInput(
+                        async () => await this.#handleMouse(frame),
+                    );
+                    continue;
+                }
+                this.#inkStdin.write(frame.data);
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                await this.#inputQueue;
+            }
+        });
+        this.#inputDeliveryQueue = delivery.catch(() => undefined);
+    }
+    #terminalOwnsInput(): boolean {
+        return this.#terminalController.ownsInput();
+    }
+
+    #enqueueInput(operation: () => Promise<void> | void): Promise<void> {
+        const handled = this.#inputQueue.then(async () => await operation());
+        this.#inputQueue = handled.catch(() => undefined);
+        return handled;
+    }
+
+    #clearInputEscapeTimer(): void {
+        if (this.#inputEscapeTimer !== undefined) {
+            clearTimeout(this.#inputEscapeTimer);
+            this.#inputEscapeTimer = undefined;
+        }
+    }
+
+    #requireInstanceHome(instance: string): string {
+        const home = this.store.getState().instances.find((candidate) => candidate.name === instance)?.homeDirectory;
+        if (home !== undefined && home.length > 0) return home;
+        throw new Error(`Worker home directory is unavailable for ${instance}.`);
+    }
+
+    #copyText(text: string): void {
+        if (text.length === 0) {
+            return;
+        }
+        const encoded = Buffer.from(text, "utf8").toString("base64");
+        this.#stdout.write(`\u001B]52;c;${encoded}\u0007`);
+    }
+
+    async #handleMouse(event: {
+        button: number;
+        kind: "press" | "release";
+        x: number;
+        y: number;
+    }): Promise<void> {
+        const regions = buildTuiHitRegions(this.store.getState(), {
+            columns: this.columns,
+            rows: this.rows,
+        });
+        if ((event.button & 64) !== 0) {
+            if (event.kind !== "press") return;
+            const delta = (event.button & 1) === 0 ? -3 : 3;
+            const state = this.store.getState();
+            const overlay = topTuiOverlay(state.interaction.overlays);
+            this.selection.clearSelection();
+            this.#screenMouseGesture = undefined;
+            if (overlay?.kind === "text-detail") {
+                await this.commandDispatcher.dispatch({
+                    delta,
+                    type: "textDetail.scroll",
+                });
+                return;
+            }
+            const sidebarSection = tuiSidebarSectionAt(
+                { columns: this.columns, rows: this.rows },
+                event.x,
+                event.y,
+            );
+            if (sidebarSection !== undefined) {
+                await this.commandDispatcher.dispatch({
+                    delta,
+                    section: sidebarSection,
+                    type: "sidebar.scroll",
+                });
+                return;
+            }
+            const scrollRegion = regions.find(
+                (region) =>
+                    (region.target.kind === "scrollViewport" ||
+                        region.target.kind === "messagesViewport") &&
+                    event.x >= region.x &&
+                    event.x < region.x + region.width &&
+                    event.y >= region.y &&
+                    event.y < region.y + region.height,
+            );
+            if (scrollRegion === undefined) return;
+            if (state.ui.selectedPage === "terminal") {
+                this.#terminalController.scrollViewport(delta);
+                return;
+            }
+            await this.commandDispatcher.dispatch({ delta, type: "screen.scroll" });
+            return;
+        }
+
+        const motion = (event.button & 32) !== 0;
+        const leftButton = (event.button & 3) === 0;
+        if (event.kind === "press" && leftButton && !motion) {
+            this.selection.clearSelection();
+            this.#screenMouseGesture = {
+                anchor: { x: event.x, y: event.y },
+                selecting: false,
+                target: hitTargetAt(regions, event.x, event.y),
+            };
+            return;
+        }
+
+        const gesture = this.#screenMouseGesture;
+        if (gesture === undefined) {
+            return;
+        }
+        const moved =
+            event.x !== gesture.anchor.x || event.y !== gesture.anchor.y;
+        if ((motion || event.kind === "release") && moved) {
+            if (!gesture.selecting) {
+                await this.selection.beginSelection(
+                    gesture.anchor.x,
+                    gesture.anchor.y,
+                    tuiScreenSelectionColumnBounds(
+                        this.store.getState(),
+                        { columns: this.columns, rows: this.rows },
+                        gesture.anchor.x,
+                        gesture.anchor.y,
+                    ),
+                );
+                gesture.selecting = true;
+            }
+            this.selection.updateSelection(event.x, event.y);
+        }
+        if (event.kind !== "release") {
+            return;
+        }
+
+        this.#screenMouseGesture = undefined;
+        if (gesture.selecting || moved) {
+            this.#copyText(this.selection.getSelectionText());
+            return;
+        }
+
+        const target = hitTargetAt(regions, event.x, event.y);
+        if (
+            target !== undefined &&
+            sameTuiHitTarget(gesture.target, target)
+        ) {
+            await this.#handleHitTarget(target);
+        }
+    }
+
+    async #handleHitTarget(target: TuiHitTarget): Promise<void> {
+        if (target.kind === "messagesViewport") {
+            await this.commandDispatcher.dispatch({
+                type: "contextConversation.edit",
+            });
+            return;
+        }
+        if (target.kind === "context") {
+            this.focusManager.setFocus({ id: target.id, kind: "context" });
+            await this.commandDispatcher.dispatch({ type: "focus.activate" });
+            return;
+        }
+        if (target.kind === "instance") {
+            this.store.setSelectedInstance(target.id);
+            this.focusManager.setFocus({ id: target.id, kind: "instance" });
+            return;
+        }
+        if (target.kind === "overviewInstance") {
+            this.focusManager.setFocus({
+                id: `overview-instance:${target.instance}`,
+                kind: "box",
+            });
+            return;
+        }
+        if (target.kind === "terminalTab") {
+            this.selectTerminalTab(target.tab);
+            return;
+        }
+        if (target.kind === "overlayAction") {
+            if (target.overlay === "confirmation") {
+                await this.commandDispatcher.dispatch({
+                    button: target.action,
+                    type: "confirm.focus",
+                });
+                await this.commandDispatcher.dispatch({ type: "confirm.accept" });
+                return;
+            }
+            if (
+                this.focusManager.setFocus({
+                    id: target.action,
+                    kind: "approvalAction",
+                })
+            ) {
+                await this.commandDispatcher.dispatch({ type: "focus.activate" });
+            }
+            return;
+        }
+        if (target.kind === "scrollViewport") {
+            const state = this.store.getState();
+            const scope = state.interaction.focusScope;
+            if (
+                scope === "mainBoxes" ||
+                scope === "boxDetail" ||
+                scope === "sidebarContext" ||
+                scope === "sidebarInstances"
+            ) {
+                this.focusManager.syncPanel(state.ui.selectedPage, "mainBoxes");
+            }
+            return;
+        }
+
+        const state = this.store.getState();
+        const box = selectMainScreenModel(state).boxes.find((candidate) => {
+            return candidate.id === target.boxId;
+        });
+        if (box === undefined) {
+            return;
+        }
+        if (target.kind === "boxTitle") {
+            this.focusManager.focusMainBox(box.id);
+            await this.commandDispatcher.dispatch({ type: "screen.toggle" });
+            return;
+        }
+        if (!box.expanded) {
+            this.focusManager.focusMainBox(box.id);
+            return;
+        }
+        if (target.lineId === undefined) {
+            this.focusManager.focusMainBox(box.id);
+            return;
+        }
+        if (
+            !this.focusManager.setFocus({
+                boxId: box.id,
+                id: target.lineId,
+                kind: "line",
+            })
+        ) {
+            this.focusManager.focusMainBox(box.id);
+            return;
+        }
+        await this.commandDispatcher.dispatch({ type: "focus.activate" });
+    }
+
+
+}
+
+function sameTuiHitTarget(
+    left: TuiHitTarget | undefined,
+    right: TuiHitTarget | undefined,
+): boolean {
+    if (left === undefined || right === undefined || left.kind !== right.kind) {
+        return false;
+    }
+    switch (left.kind) {
+        case "context":
+        case "instance":
+            return right.kind === left.kind && right.id === left.id;
+        case "overviewInstance":
+            return right.kind === "overviewInstance" && right.instance === left.instance;
+        case "messagesViewport":
+            return right.kind === "messagesViewport";
+        case "terminalTab":
+            return right.kind === "terminalTab" && right.tab === left.tab;
+        case "overlayAction":
+            return (
+                right.kind === "overlayAction" &&
+                right.overlay === left.overlay &&
+                right.action === left.action
+            );
+        case "boxTitle":
+            return right.kind === "boxTitle" && right.boxId === left.boxId;
+        case "boxBody":
+            return (
+                right.kind === "boxBody" &&
+                right.boxId === left.boxId &&
+                right.lineId === left.lineId
+            );
+        case "scrollViewport":
+            return right.kind === "scrollViewport";
+    }
+}
+
+function readErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+function createInkStdin(stdin: ReadStream): ReadStream {
+    const proxy = new PassThrough() as PassThrough & {
+        isTTY?: boolean;
+        ref?(): PassThrough;
+        setRawMode?(enabled: boolean): PassThrough;
+        unref?(): PassThrough;
+    };
+    proxy.isTTY = stdin.isTTY;
+    proxy.ref = () => {
+        stdin.ref();
+        return proxy;
+    };
+    proxy.setRawMode = (enabled) => {
+        stdin.setRawMode?.(enabled);
+        return proxy;
+    };
+    proxy.unref = () => {
+        stdin.unref();
+        return proxy;
+    };
+    return proxy as unknown as ReadStream;
+}
+
+class AlternateScreen {
+    readonly #stdout: WriteStream;
+    #active = false;
+
+    constructor(stdout: WriteStream) {
+        this.#stdout = stdout;
+    }
+
+    enter(): void {
+        if (this.#active) {
+            return;
+        }
+        this.#active = true;
+        this.#stdout.write(
+            "\u001B[?1049h\u001B[?25l\u001B[?1000h\u001B[?1002h\u001B[?1006h\u001B[?2004h",
+        );
+    }
+
+    exit(): void {
+        if (!this.#active) {
+            return;
+        }
+        this.#active = false;
+        this.#stdout.write(
+            "\u001B[?2004l\u001B[?1006l\u001B[?1002l\u001B[?1000l\u001B[?1l\u001B>\u001B[?25h\u001B[?1049l",
+        );
+    }
+}
