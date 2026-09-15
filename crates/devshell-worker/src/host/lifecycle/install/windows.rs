@@ -9,7 +9,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
 };
 
-use super::super::hex;
+use super::hex;
 
 pub fn install(bytes: &[u8], home: &Path, target: &str, sha: &str) -> Result<PathBuf, String> {
     verify_payload(bytes, sha)?;
