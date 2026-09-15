@@ -885,7 +885,7 @@ function workerPath() {
 }
 
 function cliEntry() {
-    return resolve(repoRoot, "packages", "cli", "src", "CliMain.ts");
+    return resolve(repoRoot, "packages", "cli", "src", "app", "Entry.ts");
 }
 
 function sourceLoader() {

@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { CliMain } from "./Main.js";

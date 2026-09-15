@@ -21,7 +21,8 @@ export const cliEntry = resolve(
     "packages",
     "cli",
     "src",
-    "CliMain.ts",
+    "app",
+    "Entry.ts",
 );
 
 export function resolvePreparedWorker() {
