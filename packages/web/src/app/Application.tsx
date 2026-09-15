@@ -1,18 +1,18 @@
 import { useEffect, useSyncExternalStore } from "react";
 
-import { PageSwitcher } from "../components/PageSwitcher.js";
-import { PartialFailures } from "../components/PartialFailures.js";
-import { useHashRoute } from "../routing/hashRoute.js";
-import { openTodos, pendingApprovals } from "../selectors/readModel.js";
-import type { WebStore } from "../state/WebStore.js";
-import { webFailures } from "../state/WebState.js";
-import type { ApplicationBusy } from "../session/useWebApplicationSession.js";
-import { Approvals } from "../views/Approvals.js";
-import { Audit } from "../views/Audit.js";
-import { Instances } from "../views/Instances.js";
-import { Messages } from "../views/Messages.js";
-import { Overview } from "../views/Overview.js";
-import { Todos } from "../views/Todos.js";
+import { PageSwitcher } from "../view/component/Navigation.js";
+import { PartialFailures } from "../view/component/Feedback.js";
+import { useHashRoute } from "./Route.js";
+import { openTodos, pendingApprovals } from "../view/ReadModel.js";
+import type { WebStore } from "../state/Store.js";
+import { webFailures } from "../state/Model.js";
+import type { ApplicationBusy } from "./session/Hook.js";
+import { Approvals } from "../view/page/activity/Approvals.js";
+import { Audit } from "../view/page/activity/audit/Page.js";
+import { Instances } from "../view/page/Instances.js";
+import { Messages } from "../view/page/activity/messages/Page.js";
+import { Overview } from "../view/page/Overview.js";
+import { Todos } from "../view/page/Todos.js";
 
 export function Application({
     busy,
