@@ -1,0 +1,844 @@
+import assert from "node:assert/strict";
+import { mkdir, rm, access, readFile, stat, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import test from "node:test";
+import { McpOAuthApprovalService } from "../../../src/auth/oauth/interaction/Approval.ts";
+import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
+import { execFile } from "node:child_process";
+import { createServer } from "node:http";
+import { promisify } from "node:util";
+import { McpOAuthInteraction } from "../../../src/auth/oauth/interaction/Interaction.ts";
+import { createMcpOAuthOidcFileAdapterFactory } from "../../../src/auth/oauth/provider/Adapter.ts";
+import { McpOAuthProviderRuntime } from "../../../src/auth/oauth/provider/Provider.ts";
+import { McpOAuthRegistrationLimiter } from "../../../src/auth/oauth/interaction/Registration.ts";
+
+{
+test("OAuth approvals persist registration and authorization decisions", async () => {
+    const storageDir = await createTestTempDirectory("oauth-approvals");
+    const service = new McpOAuthApprovalService(storageDir);
+
+    try {
+        await service.warmup();
+        const registration = await service.registerClient({
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"]
+        });
+        assert.equal(registration.kind, "registration");
+        assert.equal(registration.status, "pending");
+
+        await service.decide(registration.approvalId, "approve", "tui");
+        const authorization = await service.requestAuthorization("interaction-1", "transaction-1", {
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"],
+            requestedResources: ["https://example.test/demo/mcp"],
+            requestedScopes: ["openid", "mcp"]
+        });
+        assert.equal(authorization.kind, "authorization");
+        assert.equal(authorization.status, "pending");
+
+        await service.decide(authorization.approvalId, "deny", "tui");
+
+        const reloaded = new McpOAuthApprovalService(storageDir);
+        await reloaded.warmup();
+        assert.deepEqual(
+            (await reloaded.list()).map((request) => [request.kind, request.status]),
+            [["authorization", "denied"], ["registration", "approved"]]
+        );
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("one OAuth authorization transaction shares approval across login and consent interactions", async () => {
+    const storageDir = await createTestTempDirectory("oauth-shared-authorization");
+    const service = new McpOAuthApprovalService(storageDir);
+
+    try {
+        await service.warmup();
+        const registration = await service.registerClient({
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"]
+        });
+        await service.decide(registration.approvalId, "approve", "tui");
+
+        const login = await service.requestAuthorization("login-interaction", "pkce-flow-1", {
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"],
+            requestedResources: ["https://example.test/demo/mcp"],
+            requestedScopes: ["openid", "mcp"]
+        });
+        await service.decide(login.approvalId, "approve", "tui");
+        const consent = await service.requestAuthorization("consent-interaction", "pkce-flow-1", {
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"],
+            requestedResources: ["https://example.test/demo/mcp"],
+            requestedScopes: ["openid", "mcp"]
+        });
+
+        assert.equal(consent.approvalId, login.approvalId);
+        assert.equal(consent.status, "approved");
+        assert.equal((await service.getAuthorization("consent-interaction"))?.approvalId, login.approvalId);
+        assert.equal((await service.list()).filter((request) => request.kind === "authorization").length, 1);
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("OAuth approval reuse is bound to the complete authorization request", async () => {
+    const storageDir = await createTestTempDirectory("oauth-request-binding");
+    const service = new McpOAuthApprovalService(storageDir);
+
+    try {
+        await service.warmup();
+        const registration = await service.registerClient({
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"]
+        });
+        await service.decide(registration.approvalId, "approve", "tui");
+
+        const read = await service.requestAuthorization("read-login", "shared-pkce", {
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"],
+            requestedResources: ["https://example.test/read/mcp"],
+            requestedScopes: ["openid", "read"]
+        });
+        await service.decide(read.approvalId, "approve", "tui");
+
+        const manage = await service.requestAuthorization("manage-login", "shared-pkce", {
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/other-callback"],
+            requestedResources: ["https://example.test/admin/mcp"],
+            requestedScopes: ["openid", "manage"]
+        });
+
+        assert.notEqual(manage.approvalId, read.approvalId);
+        assert.equal(manage.status, "pending");
+        assert.equal((await service.list()).filter((request) => request.kind === "authorization").length, 2);
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("completed OAuth authorization transactions cannot reuse a prior approval", async () => {
+    const storageDir = await createTestTempDirectory("oauth-transaction-complete");
+    const service = new McpOAuthApprovalService(storageDir);
+
+    try {
+        await service.warmup();
+        const registration = await service.registerClient({
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"]
+        });
+        await service.decide(registration.approvalId, "approve", "tui");
+        const input = {
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"],
+            requestedResources: ["https://example.test/demo/mcp"],
+            requestedScopes: ["openid", "mcp"]
+        };
+
+        const first = await service.requestAuthorization("login-1", "pkce-flow-1", input);
+        await service.decide(first.approvalId, "approve", "tui");
+        const consent = await service.requestAuthorization("consent-1", "pkce-flow-1", input);
+        assert.equal(consent.approvalId, first.approvalId);
+        await service.completeAuthorization("consent-1");
+
+        const replay = await service.requestAuthorization("login-2", "pkce-flow-1", input);
+        assert.notEqual(replay.approvalId, first.approvalId);
+        assert.equal(replay.status, "pending");
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("OAuth approvals expire after five-minute policy is exceeded", async () => {
+    const storageDir = await createTestTempDirectory("oauth-approval-expiry");
+    let now = 0;
+    const service = new McpOAuthApprovalService(storageDir, { now: () => now, timeoutMs: 300_000 });
+
+    try {
+        await service.warmup();
+        const request = await service.registerClient({ clientId: "client", clientName: "Client", redirectUris: [] });
+        now = 300_001;
+        assert.equal((await service.get(request.approvalId))?.status, "expired");
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("expired OAuth registration can be requested again for the same client", async () => {
+    const storageDir = await createTestTempDirectory("oauth-registration-retry");
+    let now = 0;
+    const service = new McpOAuthApprovalService(storageDir, { now: () => now, timeoutMs: 300_000 });
+
+    try {
+        await service.warmup();
+        const first = await service.registerClient({ clientId: "chatgpt", clientName: "ChatGPT", redirectUris: [] });
+        now = 300_001;
+        const second = await service.registerClient({ clientId: "chatgpt", clientName: "ChatGPT", redirectUris: [] });
+
+        assert.equal((await service.get(first.approvalId))?.status, "expired");
+        assert.notEqual(second.approvalId, first.approvalId);
+        assert.equal(second.kind, "registration");
+        assert.equal(second.status, "pending");
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("OAuth approvals enforce a pending registration quota", async () => {
+    const storageDir = await createTestTempDirectory("oauth-registration-limit");
+    const service = new McpOAuthApprovalService(storageDir, { maxPendingRegistrations: 2 });
+
+    try {
+        await service.warmup();
+        await service.registerClient({ clientId: "client-a", clientName: "A", redirectUris: [] });
+        await service.registerClient({ clientId: "client-b", clientName: "B", redirectUris: [] });
+        await assert.rejects(
+            service.registerClient({ clientId: "client-c", clientName: "C", redirectUris: [] }),
+            /pending OAuth registration limit/u
+        );
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("OAuth approvals bound terminal authorization history without removing approved registrations or pending requests", async () => {
+    const storageDir = await createTestTempDirectory("oauth-terminal-history");
+    const service = new McpOAuthApprovalService(storageDir, { maxTerminalEntries: 2 });
+
+    try {
+        await service.warmup();
+        const registration = await service.registerClient({
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"]
+        });
+        await service.decide(registration.approvalId, "approve", "tui");
+
+        const terminalIds: string[] = [];
+        for (let index = 0; index < 3; index += 1) {
+            const interactionId = `interaction-${index}`;
+            const authorization = await service.requestAuthorization(interactionId, `transaction-${index}`, {
+                clientId: "chatgpt",
+                clientName: "ChatGPT",
+                redirectUris: ["https://chatgpt.com/callback"],
+                requestedScopes: [`scope-${index}`]
+            });
+            terminalIds.push(authorization.approvalId);
+            await service.decide(authorization.approvalId, "approve", "tui");
+            await service.completeAuthorization(interactionId);
+        }
+
+        const pending = await service.requestAuthorization("interaction-pending", "transaction-pending", {
+            clientId: "chatgpt",
+            clientName: "ChatGPT",
+            redirectUris: ["https://chatgpt.com/callback"],
+            requestedScopes: ["pending"]
+        });
+        const approvals = await service.list();
+
+        assert.equal(approvals.some((request) => request.approvalId === registration.approvalId), true);
+        assert.equal(approvals.some((request) => request.approvalId === pending.approvalId && request.status === "pending"), true);
+        assert.equal(approvals.some((request) => request.approvalId === terminalIds[0]), false);
+        assert.equal(approvals.some((request) => request.approvalId === terminalIds[1]), true);
+        assert.equal(approvals.some((request) => request.approvalId === terminalIds[2]), true);
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("OAuth approvals reject oversized persisted input before mutating state", async () => {
+    const storageDir = await createTestTempDirectory("oauth-input-limit");
+    const service = new McpOAuthApprovalService(storageDir, { maxInputBytes: 128 });
+
+    try {
+        await service.warmup();
+        await assert.rejects(
+            service.registerClient({
+                clientId: "oversized",
+                clientName: "x".repeat(512),
+                redirectUris: ["https://example.test/callback"]
+            }),
+            /storage limit/u
+        );
+        assert.deepEqual(await service.list(), []);
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("OAuth approval memory rolls back when a decision cannot be persisted", async () => {
+    const storageDir = await createTestTempDirectory("oauth-decision-rollback");
+    const service = new McpOAuthApprovalService(storageDir);
+
+    try {
+        await service.warmup();
+        const request = await service.registerClient({
+            clientId: "rollback-client",
+            clientName: "Rollback Client",
+            redirectUris: []
+        });
+        const approvalFile = join(storageDir, "approvals.jsonl");
+        await rm(approvalFile, { force: true });
+        await mkdir(approvalFile);
+
+        await assert.rejects(
+            service.decide(request.approvalId, "approve", "cli")
+        );
+        assert.equal((await service.get(request.approvalId))?.status, "pending");
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+}
+
+{
+const execFileAsync = promisify(execFile);
+
+const config = {
+    documentationUrl: "https://docs.example.test/aromatic",
+    requiredScopes: ["mcp"],
+    resourceName: "aromatic"
+};
+
+test("McpOAuthProviderRuntime owns provider lifecycle, resources, metadata, and durable signing keys", async () => {
+    const storageDir = await createTestTempDirectory("mcp-oauth-provider-runtime");
+    const approvals = new McpOAuthApprovalService(storageDir);
+    const runtime = new McpOAuthProviderRuntime({
+        approvals,
+        config,
+        publicBaseUrl: "https://mcp.example.test/devshell/",
+        storageDir,
+        trustProxy: true
+    });
+
+    try {
+        runtime.registerResource(new URL("https://mcp.example.test/devshell/demo/mcp"), config);
+        await runtime.warmup();
+
+        assert.equal(runtime.basePath, "/devshell");
+        assert.equal(runtime.issuerUrl.href, "https://mcp.example.test/devshell/");
+        assert.equal(runtime.provider.proxy, true);
+        assert.equal(runtime.shouldHandleProviderPath("/.well-known/openid-configuration"), true);
+        assert.equal(runtime.shouldHandleProviderPath("/devshell/authorize"), true);
+        assert.equal(runtime.shouldHandleProviderPath("/unrelated"), false);
+        assert.deepEqual(
+            runtime.protectedResourceMetadata(
+                new URL("https://mcp.example.test/devshell/demo/mcp")
+            ),
+            {
+                authorization_servers: ["https://mcp.example.test/devshell"],
+                resource: "https://mcp.example.test/devshell/demo/mcp",
+                resource_documentation: "https://docs.example.test/aromatic",
+                resource_name: "aromatic",
+                scopes_supported: ["mcp"]
+            }
+        );
+
+        const firstJwks = await readFile(join(storageDir, "jwks.json"), "utf8");
+        if (process.platform !== "win32") {
+            assert.equal((await stat(join(storageDir, "jwks.json"))).mode & 0o777, 0o600);
+        }
+        const reloaded = new McpOAuthProviderRuntime({
+            approvals: new McpOAuthApprovalService(storageDir),
+            config,
+            publicBaseUrl: "https://mcp.example.test/devshell/",
+            storageDir,
+            trustProxy: false
+        });
+        reloaded.registerResource(new URL("https://mcp.example.test/devshell/demo/mcp"), config);
+        await reloaded.warmup();
+        const secondJwks = await readFile(join(storageDir, "jwks.json"), "utf8");
+        assert.equal(secondJwks, firstJwks);
+        assert.equal(reloaded.provider.proxy, false);
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("McpOAuthProviderRuntime fails closed before creating provider secrets when storage hardening fails", async () => {
+    const storageDir = await createTestTempDirectory("mcp-oauth-storage-security-failure");
+    const runtime = new McpOAuthProviderRuntime({
+        approvals: new McpOAuthApprovalService(storageDir),
+        config,
+        publicBaseUrl: "https://mcp.example.test/",
+        storageDir,
+        storageSecurity: {
+            async secureStorage() {
+                throw new Error("storage hardening failed");
+            }
+        }
+    });
+
+    try {
+        await assert.rejects(runtime.warmup(), /storage hardening failed/iu);
+        assert.throws(() => runtime.provider, /not initialized/iu);
+        await assert.rejects(
+            access(join(storageDir, "jwks.json")),
+            (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT"
+        );
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test(
+    "MCP OAuth storage uses owner-only Windows ACLs",
+    { skip: process.platform === "win32" ? false : "requires Windows DACL semantics" },
+    async () => {
+        const storageDir = await createTestTempDirectory("mcp-oauth-windows-acl");
+        const runtime = new McpOAuthProviderRuntime({
+            approvals: new McpOAuthApprovalService(storageDir),
+            config,
+            publicBaseUrl: "https://mcp.example.test/",
+            storageDir
+        });
+        const resource = new URL("https://mcp.example.test/demo/mcp");
+        runtime.registerResource(resource, config);
+
+        try {
+            await runtime.warmup();
+            const adapter = runtime.provider.AccessToken.adapter as {
+                upsert(id: string, payload: Record<string, unknown>, expiresIn: number): Promise<void>;
+            };
+            const now = Math.floor(Date.now() / 1000);
+            await adapter.upsert("windows-acl-token", {
+                aud: resource.href,
+                clientId: "windows-acl-client",
+                exp: now + 3600,
+                grantId: "windows-acl-grant",
+                iat: now,
+                kind: "AccessToken",
+                scope: "mcp"
+            }, 3600);
+
+            assertOwnerOnlyWindowsAcl(await readWindowsAcl(storageDir), true);
+            assertOwnerOnlyWindowsAcl(await readWindowsAcl(join(storageDir, "jwks.json")), false);
+            assertOwnerOnlyWindowsAcl(await readWindowsAcl(join(storageDir, "adapter")), false);
+            assertOwnerOnlyWindowsAcl(
+                await readWindowsAcl(join(storageDir, "adapter", "AccessToken.json")),
+                false
+            );
+        } finally {
+            await rm(storageDir, { force: true, recursive: true });
+        }
+    }
+);
+
+test("McpOAuthProviderRuntime upgrades persisted dynamic clients with required resource scopes", async () => {
+    const storageDir = await createTestTempDirectory("mcp-oauth-client-scope-upgrade");
+    const adapterDir = join(storageDir, "adapter");
+    const clientFile = join(adapterDir, "Client.json");
+    await mkdir(adapterDir, { recursive: true });
+    await writeFile(clientFile, JSON.stringify({
+        "claude-code": {
+            payload: {
+                application_type: "native",
+                client_id: "claude-code",
+                client_name: "Claude Code",
+                grant_types: ["authorization_code", "refresh_token"],
+                redirect_uris: ["http://localhost/callback"],
+                response_types: ["code"],
+                scope: "openid offline_access",
+                token_endpoint_auth_method: "none"
+            }
+        }
+    }), "utf8");
+    const runtime = new McpOAuthProviderRuntime({
+        approvals: new McpOAuthApprovalService(storageDir),
+        config,
+        publicBaseUrl: "https://mcp.example.test/",
+        storageDir
+    });
+
+    try {
+        await runtime.warmup();
+        const client = await runtime.provider.Client.find("claude-code");
+        assert.notEqual(client, undefined);
+        assert.deepEqual(
+            new Set(client!.scope?.split(" ")),
+            new Set(["mcp", "openid", "offline_access"])
+        );
+        const persisted = JSON.parse(await readFile(clientFile, "utf8")) as {
+            "claude-code": { payload: { scope?: string } };
+        };
+        assert.deepEqual(
+            new Set(persisted["claude-code"].payload.scope?.split(" ")),
+            new Set(["mcp", "openid", "offline_access"])
+        );
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("dynamic registration fails before credentials are issued when registration approval capacity is exhausted", async () => {
+    const storageDir = await createTestTempDirectory("mcp-oauth-registration-overflow");
+    const approvals = new McpOAuthApprovalService(storageDir, { maxPendingRegistrations: 1 });
+    const runtime = new McpOAuthProviderRuntime({
+        approvals,
+        config,
+        publicBaseUrl: "https://mcp.example.test/",
+        storageDir
+    });
+
+    try {
+        await runtime.warmup();
+        await approvals.registerClient({
+            clientId: "pending-client",
+            clientName: "Pending Client",
+            redirectUris: ["http://localhost/pending"]
+        });
+        const server = createServer(runtime.provider.callback());
+        await new Promise<void>((resolve, reject) => {
+            server.once("error", reject);
+            server.listen(0, "127.0.0.1", resolve);
+        });
+        const address = server.address();
+        if (address === null || typeof address === "string") {
+            throw new Error("OAuth registration test server did not expose a TCP address.");
+        }
+        const response = await fetch(`http://127.0.0.1:${address.port}/register`, {
+            body: JSON.stringify({
+                client_name: "Overflow Client",
+                grant_types: ["authorization_code", "refresh_token"],
+                redirect_uris: ["http://localhost/overflow"],
+                response_types: ["code"],
+                token_endpoint_auth_method: "none"
+            }),
+            headers: { "content-type": "application/json" },
+            method: "POST"
+        });
+        const body = await response.json() as Record<string, unknown>;
+        await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
+
+        assert.equal(response.status, 429);
+        assert.equal(body.error, "invalid_request");
+        assert.equal("client_id" in body, false);
+        assert.equal("registration_access_token" in body, false);
+        assert.deepEqual(
+            (await approvals.list()).map((request) => request.clientId),
+            ["pending-client"]
+        );
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+
+test("OAuth resource verification rejects tokens with missing or malformed audience", async () => {
+    const storageDir = await createTestTempDirectory("mcp-oauth-audience");
+    const runtime = new McpOAuthProviderRuntime({
+        approvals: new McpOAuthApprovalService(storageDir),
+        config,
+        publicBaseUrl: "https://mcp.example.test/",
+        storageDir
+    });
+    const resource = new URL("https://mcp.example.test/demo/mcp");
+    runtime.registerResource(resource, config);
+    await runtime.warmup();
+
+    try {
+        const adapter = runtime.provider.AccessToken.adapter as {
+            upsert(id: string, payload: Record<string, unknown>, expiresIn: number): Promise<void>;
+        };
+        const now = Math.floor(Date.now() / 1000);
+        const base = {
+            clientId: "client-audience-test",
+            exp: now + 3600,
+            iat: now,
+            kind: "AccessToken",
+            scope: "mcp"
+        };
+        await adapter.upsert("missing-audience", base, 3600);
+        await adapter.upsert("malformed-audience", { ...base, aud: "not a URL" }, 3600);
+
+        await assert.rejects(runtime.verifyAccessToken(resource, "missing-audience"), /resource|audience|invalid/iu);
+        await assert.rejects(runtime.verifyAccessToken(resource, "malformed-audience"), /resource|audience|invalid/iu);
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("OAuth resource verification rejects tokens missing required resource scopes", async () => {
+    const storageDir = await createTestTempDirectory("mcp-oauth-scope");
+    const runtime = new McpOAuthProviderRuntime({
+        approvals: new McpOAuthApprovalService(storageDir),
+        config,
+        publicBaseUrl: "https://mcp.example.test/",
+        storageDir
+    });
+    const resource = new URL("https://mcp.example.test/demo/mcp");
+    runtime.registerResource(resource, config);
+    await runtime.warmup();
+
+    try {
+        const adapter = runtime.provider.AccessToken.adapter as {
+            upsert(id: string, payload: Record<string, unknown>, expiresIn: number): Promise<void>;
+        };
+        const now = Math.floor(Date.now() / 1000);
+        await adapter.upsert("insufficient-scope", {
+            aud: resource.href,
+            clientId: "client-scope-test",
+            exp: now + 3600,
+            iat: now,
+            kind: "AccessToken",
+            scope: "openid"
+        }, 3600);
+
+        await assert.rejects(
+            runtime.verifyAccessToken(resource, "insufficient-scope"),
+            /scope/iu
+        );
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("OAuth provider reports destroyed access-token identity to long-lived resource listeners", async () => {
+    const storageDir = await createTestTempDirectory("mcp-oauth-revocation-event");
+    const runtime = new McpOAuthProviderRuntime({
+        approvals: new McpOAuthApprovalService(storageDir),
+        config,
+        publicBaseUrl: "https://mcp.example.test/",
+        storageDir
+    });
+    const resource = new URL("https://mcp.example.test/demo/mcp");
+    runtime.registerResource(resource, config);
+    await runtime.warmup();
+    const revocations: Array<{ grantId: string }> = [];
+    const unsubscribe = runtime.onAccessRevoked((revocation) => revocations.push(revocation));
+
+    try {
+        const adapter = runtime.provider.AccessToken.adapter as {
+            upsert(id: string, payload: Record<string, unknown>, expiresIn: number): Promise<void>;
+        };
+        const now = Math.floor(Date.now() / 1000);
+        await adapter.upsert("revocable-access", {
+            aud: resource.href,
+            clientId: "client-revocation-test",
+            exp: now + 3600,
+            grantId: "grant-revocation-test",
+            iat: now,
+            kind: "AccessToken",
+            scope: "mcp"
+        }, 3600);
+        const token = await runtime.provider.AccessToken.find("revocable-access");
+        assert.notEqual(token, undefined);
+
+        await token!.destroy();
+
+        assert.deepEqual(revocations, [{ grantId: "grant-revocation-test" }]);
+    } finally {
+        unsubscribe();
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+
+test("McpOAuthInteraction renders escaped approval state with the configured base path", async () => {
+    const storageDir = await createTestTempDirectory("mcp-oauth-interaction");
+    const approvals = new McpOAuthApprovalService(storageDir);
+    await approvals.warmup();
+    const interaction = new McpOAuthInteraction({
+        accountId: "aromatic<admin>",
+        approvals,
+        basePath: "/devshell",
+        provider: () => {
+            throw new Error("provider is not needed for rendering");
+        }
+    });
+
+    try {
+        const html = interaction.renderPage({
+            accountId: "aromatic<admin>",
+            approvalId: "approval-1",
+            approvalKind: "authorization",
+            approvalStatus: "pending",
+            clientName: "Client <script>",
+            promptName: "consent",
+            requestedResources: [{
+                indicator: "https://mcp.example.test/demo/mcp?a=<b>",
+                scopes: ["mcp", "write<all>"]
+            }],
+            requiredScopes: ["openid", "mcp"]
+        });
+
+        assert.match(html, /Client &lt;script&gt;/u);
+        assert.match(html, /aromatic&lt;admin&gt;/u);
+        assert.match(html, /write&lt;all&gt;/u);
+        assert.match(html, /\/devshell\/oauth\/approvals\/approval-1/u);
+        assert.doesNotMatch(html, /Client <script>/u);
+        assert.match(html, /Waiting for administrator approval/u);
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("McpOAuthInteraction renders approved registration as a reload flow", async () => {
+    const storageDir = await createTestTempDirectory("mcp-oauth-registration-page");
+    const interaction = new McpOAuthInteraction({
+        accountId: "aromatic",
+        approvals: new McpOAuthApprovalService(storageDir),
+        basePath: "",
+        provider: () => {
+            throw new Error("provider is not needed for rendering");
+        }
+    });
+
+    try {
+        const html = interaction.renderPage({
+            accountId: "aromatic",
+            approvalId: "approval-registration",
+            approvalKind: "registration",
+            approvalStatus: "approved",
+            clientName: "ChatGPT",
+            promptName: "login",
+            requestedResources: [],
+            requiredScopes: []
+        });
+
+        assert.match(html, /Administrator approved this request/u);
+        assert.match(html, /window\.location\.reload\(\)/u);
+        assert.match(html, /fetch\("\/oauth\/approvals\/approval-registration"/u);
+        assert.doesNotMatch(html, /disabled/u);
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("OIDC file adapter serializes concurrent updates without losing records", async () => {
+    const storageDir = await createTestTempDirectory("mcp-oauth-adapter");
+    const adapter = createMcpOAuthOidcFileAdapterFactory(storageDir)("Client");
+
+    try {
+        await Promise.all(
+            Array.from({ length: 64 }, async (_, index) => {
+                await adapter.upsert(`client-${index}`, { clientId: `client-${index}` } as never, 3600);
+            })
+        );
+        for (let index = 0; index < 64; index += 1) {
+            assert.equal((await adapter.find(`client-${index}`))?.clientId, `client-${index}`);
+        }
+        if (process.platform !== "win32") {
+            assert.equal((await stat(join(storageDir, "Client.json"))).mode & 0o777, 0o600);
+        }
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("OIDC file adapters share cached model state and invalidate it after a failed write", async () => {
+    const storageDir = await createTestTempDirectory("mcp-oauth-adapter-cache");
+    let failStorage = false;
+    const secureStorage = async () => {
+        if (failStorage) throw new Error("secure storage failed");
+    };
+    const first = createMcpOAuthOidcFileAdapterFactory(storageDir, secureStorage)("AccessToken");
+    const second = createMcpOAuthOidcFileAdapterFactory(storageDir, secureStorage)("AccessToken");
+
+    try {
+        await first.upsert("stable", { clientId: "client-stable", nested: { value: "original" } } as never, 3600);
+        const shared = await second.find("stable");
+        assert.equal(shared?.clientId, "client-stable");
+        (shared as { nested?: { value?: string } }).nested!.value = "mutated";
+        assert.equal(((await first.find("stable")) as { nested?: { value?: string } })?.nested?.value, "original");
+
+        failStorage = true;
+        await assert.rejects(
+            second.upsert("failed", { clientId: "client-failed" } as never, 3600),
+            /secure storage failed/u
+        );
+        failStorage = false;
+
+        assert.equal(await first.find("failed"), undefined);
+        assert.equal((await second.find("stable"))?.clientId, "client-stable");
+
+        await Promise.all(
+            Array.from({ length: 32 }, async (_, index) => {
+                const adapter = index % 2 === 0 ? first : second;
+                await adapter.upsert(`shared-${index}`, { clientId: `client-${index}` } as never, 3600);
+            })
+        );
+        for (let index = 0; index < 32; index += 1) {
+            assert.equal((await first.find(`shared-${index}`))?.clientId, `client-${index}`);
+        }
+    } finally {
+        await rm(storageDir, { force: true, recursive: true });
+    }
+});
+
+test("OAuth registration limiter rejects bursts above its configured quota", () => {
+    let now = 0;
+    const limiter = new McpOAuthRegistrationLimiter({ maxRequests: 2, now: () => now, windowMs: 1000 });
+    assert.equal(limiter.accept("client-a"), true);
+    assert.equal(limiter.accept("client-a"), true);
+    assert.equal(limiter.accept("client-a"), false);
+    now = 1001;
+    assert.equal(limiter.accept("client-a"), true);
+});
+
+interface WindowsAclSnapshot {
+    currentSid: string;
+    ownerSid: string;
+    protected: boolean;
+    rules: Array<{
+        identitySid: string;
+        inherited: boolean;
+        rights: string;
+        type: string;
+    }>;
+}
+
+async function readWindowsAcl(path: string): Promise<WindowsAclSnapshot> {
+    const script = [
+        "$path = $env:PORTABLE_DEVSHELL_TEST_ACL_PATH",
+        "$acl = if ([System.IO.Directory]::Exists($path)) { [System.IO.Directory]::GetAccessControl($path) } else { [System.IO.File]::GetAccessControl($path) }",
+        "$sidType = [System.Security.Principal.SecurityIdentifier]",
+        "$rules = @($acl.Access | ForEach-Object {",
+        "  [pscustomobject]@{",
+        "    identitySid = $_.IdentityReference.Translate($sidType).Value",
+        "    inherited = $_.IsInherited",
+        "    rights = $_.FileSystemRights.ToString()",
+        "    type = $_.AccessControlType.ToString()",
+        "  }",
+        "})",
+        "[pscustomobject]@{",
+        "  currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
+        "  ownerSid = $acl.GetOwner($sidType).Value",
+        "  protected = $acl.AreAccessRulesProtected",
+        "  rules = $rules",
+        "} | ConvertTo-Json -Depth 4 -Compress",
+    ].join("\n");
+    const { stdout } = await execFileAsync(
+        "powershell.exe",
+        ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+        {
+            env: { ...process.env, PORTABLE_DEVSHELL_TEST_ACL_PATH: path },
+            windowsHide: true
+        }
+    );
+    return JSON.parse(stdout) as WindowsAclSnapshot;
+}
+
+function assertOwnerOnlyWindowsAcl(snapshot: WindowsAclSnapshot, requireProtected: boolean): void {
+    assert.equal(snapshot.ownerSid, snapshot.currentSid);
+    if (requireProtected) assert.equal(snapshot.protected, true);
+    assert.ok(snapshot.rules.length > 0);
+    for (const rule of snapshot.rules) {
+        assert.equal(rule.identitySid, snapshot.currentSid);
+        assert.equal(rule.type, "Allow");
+        assert.match(rule.rights, /FullControl/u);
+    }
+}
+}

@@ -1,0 +1,890 @@
+import { randomUUID } from "node:crypto";
+
+import type {
+    GoalManageInput,
+    GoalSnapshot,
+    JsonValue,
+    TodoTaskControlAction,
+    ToolCallContext,
+    ToolDefinition,
+    WaitRecord
+} from "@portable-devshell/shared";
+
+import {
+    isMcpGoalGateway,
+    isMcpInteractionGateway,
+    isMcpWaitRecoveryGateway,
+    isMcpWaitTrackingGateway,
+    isMcpWorkspaceGateway,
+    type McpInstanceGateway,
+    type McpInteractionGateway
+} from "../../Port.js";
+import type { McpContextRegistry } from "../../../context/registry/Registry.js";
+import type { McpToolCatalogInteractionName } from "./Catalog.js";
+import { McpToolSchemaUnavailableError } from "../../tool/Schema.js";
+import { McpWorkspaceLegacyV0615 } from "../../../workspace/reentry/Legacy.js";
+import { McpWorkspaceReentryArbiter } from "../../../workspace/reentry/Arbiter.js";
+import { readWorkspaceSnapshot, workspaceEventBelongsTo } from "../../../workspace/Snapshot.js";
+import { WorkspaceAppLeaseStore } from "../../../workspace/app/Lease.js";
+import { WorkspaceAppPresenceStore } from "../../../workspace/app/Presence.js";
+import { throwIfMcpEndpointAborted, waitForMcpEndpointAbortable } from "../../dispatch/Support.js";
+import { McpNativeToolResult, type McpEndpointResult } from "../../Endpoint.js";
+
+export class McpEndpointHandlerInteraction {
+    readonly #appLeases: WorkspaceAppLeaseStore;
+    readonly #appPresence: WorkspaceAppPresenceStore;
+    readonly #legacyV0615: McpWorkspaceLegacyV0615;
+    readonly #reentry?: McpWorkspaceReentryArbiter;
+
+    constructor(private readonly options: {
+        contextRegistry?: McpContextRegistry;
+        gateway?: McpInstanceGateway;
+        instanceName: string;
+        now?: () => number;
+        watchHeartbeatMs?: number;
+        watchPollMs?: number;
+        workspaceActivationGraceMs?: number;
+        workspaceLivenessMs?: number;
+        workspaceAppLeases?: WorkspaceAppLeaseStore;
+        workspaceAppPresence?: WorkspaceAppPresenceStore;
+        workspaceLiveBaseUrl?: string;
+        workspaceReentryArbiter?: McpWorkspaceReentryArbiter;
+    }) {
+        this.#appLeases = options.workspaceAppLeases ?? new WorkspaceAppLeaseStore();
+        this.#appPresence = options.workspaceAppPresence ?? new WorkspaceAppPresenceStore({ now: options.now });
+        this.#legacyV0615 = new McpWorkspaceLegacyV0615(options);
+        this.#reentry = options.workspaceReentryArbiter ?? (options.contextRegistry === undefined
+            ? undefined
+            : new McpWorkspaceReentryArbiter({
+                contextRegistry: options.contextRegistry,
+                gateway: options.gateway,
+                instanceName: options.instanceName,
+            }));
+    }
+
+    async call(
+        toolName: McpToolCatalogInteractionName,
+        input: JsonValue,
+        context: ToolCallContext,
+        callId: string,
+        signal?: AbortSignal,
+    ): Promise<McpEndpointResult> {
+        const gateway = requireInteractionGateway(this.options.gateway, this.options.instanceName);
+        switch (toolName) {
+            case "workspace_ask":
+                return await this.#askQuestion(gateway, input, context, callId, signal);
+            case "workspace_goal":
+                return await this.#manageGoal(input, context);
+            case "workspace_open":
+                return await this.#openWorkspace(context);
+            case "workspace_reconnect":
+                return await this.#reconnectWorkspace(gateway, input, context);
+            case "workspace_snapshot":
+                return await this.#readWorkspace(gateway, input, context);
+            case "workspace_watch":
+                return await this.#watchWorkspace(gateway, input, context, signal);
+            case "workspace_answer":
+                await this.#assertAppToken(input, context);
+                return await this.#answerQuestion(gateway, input, context);
+            case "workspace_interrupt":
+                await this.#assertAppToken(input, context);
+                return await this.#interruptWait(gateway, input, context);
+            case "workspace_task":
+                await this.#assertAppToken(input, context);
+                return await this.#controlTask(gateway, input, context);
+            case "workspace_recover":
+                await this.#assertAppToken(input, context);
+                return await this.#recoverWait(gateway, input, context);
+            case "workspace_reentry":
+                await this.#assertAppToken(input, context);
+                if (this.#reentry === undefined) throw new Error("Workspace re-entry arbitration is unavailable.");
+                return await this.#reentry.control(input, context);
+            case "workspace_pause":
+                await this.#assertAppToken(input, context);
+                return await this.#pauseGoal(input, context);
+            case "workspace_resume":
+                await this.#assertAppToken(input, context);
+                return await this.#resumeGoal(input, context);
+            case "workspace_stop":
+                await this.#assertAppToken(input, context);
+                return await this.#stopGoal(input, context);
+            case "workspace_approval":
+                await this.#assertAppToken(input, context);
+                return await this.#decideApproval(gateway, input, context);
+        }
+    }
+
+    async callLegacyV0615(
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+    ): Promise<McpEndpointResult> {
+        await this.#assertAppToken(input, context);
+        return await this.#legacyV0615.call(toolName, input, context);
+    }
+
+    async bootstrapWorkspace(
+        ctxId: string,
+        structuredContent: JsonValue,
+        content: McpNativeToolResult["content"] = [],
+    ): Promise<McpNativeToolResult> {
+        const token = await this.#appLeases.issue(this.options.instanceName, ctxId);
+        this.#appPresence.open(this.options.instanceName, ctxId);
+        return this.#workspaceResult(
+            ctxId,
+            token,
+            structuredContent,
+            content,
+            false,
+        );
+    }
+
+    async #askQuestion(
+        gateway: McpInteractionGateway,
+        input: JsonValue,
+        context: ToolCallContext,
+        callId: string,
+        signal?: AbortSignal,
+    ): Promise<JsonValue> {
+        const request = readQuestion(input);
+        const ctxId = requireCtxId(context);
+        await this.#requireActiveWorkspace(
+            ctxId,
+            "workspace_ask requires an active Live Workspace for this ctxId. environ_info normally bootstraps the Live Workspace; call workspace_open only to re-present or restore it when the App is no longer active.",
+        );
+        const goalGateway = isMcpGoalGateway(this.options.gateway) ? this.options.gateway : undefined;
+        const goal = await goalGateway?.readGoal(this.options.instanceName, ctxId);
+        const attachedGoal = goal !== undefined && (goal.status === "active" || goal.status === "blocked") ? goal : undefined;
+        const taskAssociation = attachedGoal === undefined
+            ? await currentTodoAssociation(gateway, this.options.instanceName, ctxId)
+            : { kind: "none" as const };
+        const goalStep = attachedGoal?.steps.find((step) => step.status === "active");
+        const questionId = `question-${randomUUID()}`;
+        const wait = await gateway.createWait(this.options.instanceName, {
+            automaticRecovery: taskAssociation.kind !== "ambiguous",
+            createdByCtxId: ctxId,
+            ...(attachedGoal === undefined ? {} : { goalId: attachedGoal.goalId, goalProgressAt: attachedGoal.lastProgressAt, goalRevision: attachedGoal.revision }),
+            ...(goalStep === undefined ? {} : { goalStepId: goalStep.id }),
+            kind: "question",
+            ownerCallId: callId,
+            payload: {
+                allowText: request.allowText,
+                choices: request.choices,
+                question: request.question,
+            },
+            targetId: questionId,
+            ...(taskAssociation.kind !== "one" ? {} : {
+                taskId: taskAssociation.taskId,
+                taskRevision: taskAssociation.revision,
+                todoItemId: taskAssociation.todoItemId,
+            }),
+            ...(context.workspace === undefined ? {} : { workspace: context.workspace }),
+        });
+
+        let resolved: WaitRecord;
+        try {
+            resolved = await waitForMcpEndpointAbortable(
+                gateway.waitForWait(this.options.instanceName, wait.waitId),
+                signal,
+            );
+        } catch (error) {
+            if (signal?.aborted === true) {
+                await gateway.detachWait(this.options.instanceName, wait.waitId).catch(() => undefined);
+            }
+            throw error;
+        }
+
+        if (signal?.aborted === true) {
+            await gateway.detachWait(this.options.instanceName, wait.waitId).catch(() => undefined);
+            throwIfMcpEndpointAborted(signal);
+        }
+        const answer = readAnswer(resolved.result);
+        try {
+            await gateway.touchGoal?.(this.options.instanceName, ctxId);
+            throwIfMcpEndpointAborted(signal);
+            await gateway.consumeWait(this.options.instanceName, wait.waitId);
+        } catch (error) {
+            const current = (await gateway.listWaits(this.options.instanceName))
+                .find((entry) => entry.waitId === wait.waitId);
+            if (current?.status === "resolved" && current.detachedAt === undefined) {
+                await gateway.detachWait(this.options.instanceName, wait.waitId).catch(() => undefined);
+            }
+            throw error;
+        }
+        return { answer, questionId };
+    }
+
+    async #openWorkspace(context: ToolCallContext): Promise<McpNativeToolResult> {
+        const ctxId = requireCtxId(context);
+        return await this.bootstrapWorkspace(
+            ctxId,
+            {
+                ctxId,
+                instance: this.options.instanceName,
+            },
+            [{ type: "text", text: "portable-devshell Workspace opened." }],
+        );
+    }
+
+    async #manageGoal(input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
+        const gateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
+        const request = readGoalManageInput(input);
+        const ctxId = requireCtxId(context);
+        request.workspace = context.workspace;
+        if (request.action === "start") {
+            this.#requirePresentedWorkspace(
+                ctxId,
+                "workspace_goal start requires an initialized Workspace for this ctxId. Call environ_info with workspace to initialize it before starting a Goal.",
+            );
+        }
+        const goal = await gateway.manageGoal(
+            this.options.instanceName,
+            request,
+            ctxId,
+        );
+        if (goal !== undefined) await this.#reconcileGoalWaits(ctxId, goal);
+        if (request.action === "start") {
+            await this.options.contextRegistry?.resumeAutomaticReentry(ctxId, this.options.instanceName);
+        } else if (request.action !== "get") {
+            await this.options.contextRegistry?.observeAutomaticReentryActivity(
+                ctxId,
+                this.options.instanceName,
+                request.action === "block" ? "wait" : request.action === "update" && request.objective === undefined && request.steps === undefined && request.stepId === undefined
+                    ? "observation"
+                    : "mutation",
+            );
+        }
+        return { goal: goal ?? null } as unknown as JsonValue;
+    }
+
+    async #pauseGoal(input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
+        const gateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
+        const fence = readGoalFence(input, "workspace_pause");
+        const ctxId = requireCtxId(context);
+        const goal = await gateway.manageGoal(
+            this.options.instanceName,
+            { action: "pause", expectedGoalId: fence.goalId, expectedRevision: fence.revision, userControl: true, workspace: context.workspace },
+            ctxId,
+        );
+        await this.options.contextRegistry?.suppressAutomaticReentry(
+            ctxId,
+            this.options.instanceName,
+            "Workspace Goal paused by user",
+            "paused",
+        );
+        return { goal: goal ?? null } as unknown as JsonValue;
+    }
+
+    async #stopGoal(input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
+        const gateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
+        const fence = readGoalFence(input, "workspace_stop");
+        const ctxId = requireCtxId(context);
+        const goal = await gateway.manageGoal(
+            this.options.instanceName,
+            { action: "stop", expectedGoalId: fence.goalId, expectedRevision: fence.revision, workspace: context.workspace },
+            ctxId,
+        );
+        if (goal !== undefined) await this.#reconcileGoalWaits(ctxId, goal);
+        await this.options.contextRegistry?.suppressAutomaticReentry(ctxId, this.options.instanceName, "Workspace Goal stopped by user");
+        return { goal: goal ?? null } as unknown as JsonValue;
+    }
+
+    async #resumeGoal(input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
+        const gateway = requireGoalGateway(this.options.gateway, this.options.instanceName);
+        const fence = readGoalFence(input, "workspace_resume");
+        const ctxId = requireCtxId(context);
+        const goal = await gateway.manageGoal(
+            this.options.instanceName,
+            { action: "resume", expectedGoalId: fence.goalId, expectedRevision: fence.revision, userControl: true, workspace: context.workspace },
+            ctxId,
+        );
+        if (goal !== undefined) await this.#reconcileGoalWaits(ctxId, goal);
+        await this.options.contextRegistry?.resumeAutomaticReentry(ctxId, this.options.instanceName);
+        return { goal: goal ?? null } as unknown as JsonValue;
+    }
+
+    async #readWorkspace(
+        gateway: McpInteractionGateway,
+        input: JsonValue,
+        context: ToolCallContext,
+    ): Promise<McpNativeToolResult> {
+        const ctxId = requireCtxId(context);
+        const token = await this.#assertAppToken(input, context);
+        return this.#workspaceResult(
+            ctxId,
+            token,
+            await this.#workspaceSnapshot(gateway, ctxId),
+        );
+    }
+
+    async #reconnectWorkspace(
+        gateway: McpInteractionGateway,
+        input: JsonValue,
+        context: ToolCallContext,
+    ): Promise<McpNativeToolResult> {
+        const ctxId = requireCtxId(context);
+        const token = await this.#assertAppToken(input, context);
+        return this.#workspaceResult(
+            ctxId,
+            token,
+            await this.#workspaceSnapshot(gateway, ctxId),
+        );
+    }
+
+    async #watchWorkspace(
+        gateway: McpInteractionGateway,
+        input: JsonValue,
+        context: ToolCallContext,
+        signal?: AbortSignal,
+    ): Promise<McpNativeToolResult> {
+        if (!isMcpWorkspaceGateway(gateway)) {
+            throw new Error(`Workspace live events are unavailable for ${this.options.instanceName}.`);
+        }
+        const ctxId = requireCtxId(context);
+        const token = await this.#assertAppToken(input, context);
+        const startedAt = this.options.now?.() ?? Date.now();
+        const instances = await this.#contextInstances(ctxId);
+        const configuredHeartbeatMs = this.options.watchHeartbeatMs ?? 20_000;
+        const heartbeatMs = instances.length > 1
+            ? Math.min(configuredHeartbeatMs, 1_000)
+            : configuredHeartbeatMs;
+        const pollMs = this.options.watchPollMs ?? 250;
+        let cursor = readWorkspaceCursor(input);
+        this.#beginWorkspaceWatch(ctxId);
+        try {
+            while (true) {
+                const batch = await gateway.readWorkspaceEvents(this.options.instanceName, cursor + 1);
+                const changed = batch.gap || batch.lastSeq < cursor || batch.events.some((event) => workspaceEventBelongsTo(event, ctxId));
+                cursor = batch.lastSeq;
+                if (changed) {
+                    return this.#workspaceResult(ctxId, token, {
+                        changed: true,
+                        cursor,
+                        snapshot: await this.#workspaceSnapshot(gateway, ctxId),
+                    });
+                }
+                if ((this.options.now?.() ?? Date.now()) - startedAt >= heartbeatMs) {
+                    return this.#workspaceResult(ctxId, token, {
+                        changed: false,
+                        cursor,
+                        snapshot: await this.#workspaceSnapshot(gateway, ctxId),
+                    });
+                }
+                await waitForMcpEndpointAbortable(delay(pollMs), signal);
+            }
+        } finally {
+            this.#endWorkspaceWatch(ctxId);
+        }
+    }
+
+    async #workspaceSnapshot(gateway: McpInteractionGateway, ctxId: string): Promise<JsonValue> {
+        const registry = this.options.contextRegistry;
+        if (registry === undefined) return await readWorkspaceSnapshot(gateway, this.options.instanceName, ctxId);
+        const record = await registry.validateForInstance(ctxId, this.options.instanceName);
+        const reentry = await registry.readAutomaticReentry(ctxId, this.options.instanceName);
+        return await readWorkspaceSnapshot(gateway, this.options.instanceName, ctxId, {
+            instances: record.environments.map((environment) => environment.instance),
+            reentry: reentry as unknown as JsonValue,
+        });
+    }
+
+    async #contextInstances(ctxId: string): Promise<string[]> {
+        const registry = this.options.contextRegistry;
+        if (registry === undefined) return [this.options.instanceName];
+        const record = await registry.validateForInstance(ctxId, this.options.instanceName);
+        return [...new Set([this.options.instanceName, ...record.environments.map((environment) => environment.instance)])];
+    }
+
+    async #reconcileGoalWaits(ctxId: string, goal: GoalSnapshot): Promise<void> {
+        const gateway = this.options.gateway;
+        if (!isMcpWaitRecoveryGateway(gateway)) return;
+        const currentStepId = goal.steps.find((step) => step.status === "active")?.id;
+        const terminal = goal.status === "completed" || goal.status === "stopped";
+        const waits = await gateway.listWaits(this.options.instanceName);
+        for (const wait of waits) {
+            if (wait.createdByCtxId !== ctxId || wait.goalId !== goal.goalId) continue;
+            if (wait.status === "consumed" || wait.status === "cancelled" || wait.recoveryDisabledAt !== undefined) continue;
+            const staleStep = wait.goalStepId !== undefined && wait.goalStepId !== currentStepId;
+            const staleProgress = wait.goalStepId === undefined && wait.goalProgressAt !== undefined &&
+                wait.goalProgressAt !== goal.lastProgressAt;
+            const staleLegacyRevision = wait.goalStepId === undefined && wait.goalProgressAt === undefined &&
+                wait.goalRevision !== undefined && wait.goalRevision !== goal.revision;
+            if (!terminal && !staleStep && !staleProgress && !staleLegacyRevision) continue;
+            if (wait.kind === "question" && (wait.status === "waiting" || wait.status === "detached") && gateway.cancelWait !== undefined) {
+                await gateway.cancelWait(this.options.instanceName, wait.waitId).catch(() => undefined);
+                continue;
+            }
+            await gateway.disableWaitRecovery(this.options.instanceName, wait.waitId).catch(() => undefined);
+        }
+    }
+
+    async #disableTaskWaits(ctxId: string, taskId: string): Promise<void> {
+        const gateway = this.options.gateway;
+        if (!isMcpWaitRecoveryGateway(gateway)) return;
+        const waits = await gateway.listWaits(this.options.instanceName);
+        for (const wait of waits) {
+            if (wait.createdByCtxId !== ctxId || wait.taskId !== taskId) continue;
+            if (wait.status === "consumed" || wait.status === "cancelled" || wait.recoveryDisabledAt !== undefined) continue;
+            if (wait.kind === "question" && (wait.status === "waiting" || wait.status === "detached") && gateway.cancelWait !== undefined) {
+                await gateway.cancelWait(this.options.instanceName, wait.waitId).catch(() => undefined);
+                continue;
+            }
+            await gateway.disableWaitRecovery(this.options.instanceName, wait.waitId).catch(() => undefined);
+        }
+    }
+
+    #workspaceResult(
+        ctxId: string,
+        token: string,
+        structuredContent: JsonValue,
+        content: McpNativeToolResult["content"] = [],
+        markAppSeen = true,
+    ): McpNativeToolResult {
+        if (!this.#appPresence.has(this.options.instanceName, ctxId)) {
+            throw new Error("Workspace App authorization is unavailable for the current Context.");
+        }
+        if (markAppSeen) this.#appPresence.touch(this.options.instanceName, ctxId);
+        return new McpNativeToolResult({
+            _meta: {
+                "portable-devshell/workspace": {
+                    token,
+                    ...(this.options.workspaceLiveBaseUrl === undefined
+                        ? {}
+                        : { liveBaseUrl: this.options.workspaceLiveBaseUrl }),
+                },
+            },
+            content,
+            structuredContent,
+        });
+    }
+
+    #workspaceIsActive(ctxId: string): boolean {
+        return this.#appPresence.isActive(
+            this.options.instanceName,
+            ctxId,
+            this.options.workspaceLivenessMs ?? 60_000,
+        );
+    }
+
+    #beginWorkspaceWatch(ctxId: string): void {
+        this.#appPresence.beginWatch(this.options.instanceName, ctxId);
+    }
+
+    #endWorkspaceWatch(ctxId: string): void {
+        this.#appPresence.endWatch(this.options.instanceName, ctxId);
+    }
+
+    async #requireActiveWorkspace(ctxId: string, message: string): Promise<void> {
+        if (this.#workspaceIsActive(ctxId)) return;
+        if (!this.#appPresence.has(this.options.instanceName, ctxId)) throw new Error(message);
+        const graceMs = this.options.workspaceActivationGraceMs ?? 5_000;
+        if (!await this.#appPresence.waitUntilActive(
+            this.options.instanceName,
+            ctxId,
+            this.options.workspaceLivenessMs ?? 60_000,
+            graceMs,
+        )) {
+            throw new Error(
+                "Workspace is already initialized for this Context, but the Live Workspace App is not active yet. This can happen during the transient startup or handoff race between Workspace presentation and the App snapshot/watch handshake. The current ctxId and workspace remain valid; do not call environ_info again, create a new Context, or switch ctxId. Retry the Workspace-dependent operation once the App becomes active. Call workspace_open with the same Context only if the Workspace App is no longer presented.",
+            );
+        }
+    }
+
+    #requirePresentedWorkspace(ctxId: string, message: string): void {
+        if (this.#appPresence.has(this.options.instanceName, ctxId)) return;
+        throw new Error(message);
+    }
+
+    async #answerQuestion(
+        gateway: McpInteractionGateway,
+        input: JsonValue,
+        context: ToolCallContext,
+    ): Promise<JsonValue> {
+        const { answer, waitId } = readQuestionAnswer(input);
+        const wait = (await gateway.listWaits(this.options.instanceName)).find((record) => record.waitId === waitId);
+        if (wait === undefined || wait.kind !== "question" || wait.createdByCtxId !== requireCtxId(context)) {
+            throw new Error(`Question wait ${waitId} was not found for the current Context.`);
+        }
+        validateQuestionAnswer(wait, answer);
+        const resolved = await gateway.resolveWait(this.options.instanceName, waitId, { answer });
+        await this.options.contextRegistry?.resumeAutomaticReentry(requireCtxId(context), this.options.instanceName);
+        return {
+            answer,
+            detached: resolved.detachedAt !== undefined,
+            ...(resolved.goalId === undefined ? {} : { goalId: resolved.goalId }),
+            questionId: resolved.targetId,
+            ...(resolved.taskId === undefined ? {} : { taskId: resolved.taskId }),
+            waitId: resolved.waitId,
+        };
+    }
+
+    async #interruptWait(
+        gateway: McpInteractionGateway,
+        input: JsonValue,
+        context: ToolCallContext,
+    ): Promise<JsonValue> {
+        if (!isMcpWaitTrackingGateway(gateway)) {
+            throw new Error(`Workspace wait interruption is unavailable for ${this.options.instanceName}.`);
+        }
+        const waitId = readWaitId(input, "workspace_interrupt");
+        const wait = (await gateway.listWaits(this.options.instanceName)).find((entry) => entry.waitId === waitId);
+        if (
+            wait === undefined || wait.createdByCtxId !== requireCtxId(context) ||
+            wait.kind !== "tmux" || (wait.status !== "waiting" && wait.status !== "detached")
+        ) {
+            throw new Error(`Interruptible tmux wait ${waitId} was not found for the current Context.`);
+        }
+        const interrupted = {
+            interrupted: true,
+            task: { id: wait.targetId, status: "running" },
+        } as const;
+        const resolved = await gateway.resolveWait(this.options.instanceName, waitId, interrupted);
+        await this.options.contextRegistry?.resumeAutomaticReentry(requireCtxId(context), this.options.instanceName);
+        return {
+            detached: resolved.detachedAt !== undefined,
+            ...(resolved.goalId === undefined ? {} : { goalId: resolved.goalId }),
+            interrupted: true,
+            status: resolved.status,
+            ...(resolved.taskId === undefined ? {} : { taskId: resolved.taskId }),
+            tmuxTaskId: resolved.targetId,
+            waitId: resolved.waitId,
+        };
+    }
+
+    async #controlTask(
+        gateway: McpInteractionGateway,
+        input: JsonValue,
+        context: ToolCallContext,
+    ): Promise<JsonValue> {
+        if (gateway.controlTodo === undefined) {
+            throw new Error(`Workspace task control is unavailable for ${this.options.instanceName}.`);
+        }
+        const { action, revision, taskId } = readTaskControl(input);
+        const ctxId = requireCtxId(context);
+        const task = asRecord(await gateway.readTodo(this.options.instanceName, { taskId }));
+        if (task?.taskId !== taskId || !taskBelongsToContext(task, taskId, ctxId)) {
+            throw new Error(`Todo task ${taskId} is not attached to the current Context.`);
+        }
+        const controlled = await gateway.controlTodo(this.options.instanceName, taskId, action, ctxId, revision);
+        if (action === "cancel") {
+            await this.#disableTaskWaits(ctxId, taskId);
+            await this.options.contextRegistry?.suppressAutomaticReentry(ctxId, this.options.instanceName, "Workspace task cancelled by user");
+        } else if (action === "pause") {
+            await this.options.contextRegistry?.suppressAutomaticReentry(ctxId, this.options.instanceName, "Workspace task paused by user", "paused");
+        } else {
+            await this.options.contextRegistry?.resumeAutomaticReentry(ctxId, this.options.instanceName);
+        }
+        return controlled;
+    }
+
+    async #recoverWait(
+        gateway: McpInteractionGateway,
+        input: JsonValue,
+        context: ToolCallContext,
+    ): Promise<JsonValue> {
+        if (!isMcpWaitRecoveryGateway(gateway)) {
+            throw new Error(`Workspace recovery is unavailable for ${this.options.instanceName}.`);
+        }
+        const recovery = readWaitRecovery(input);
+        const wait = (await gateway.listWaits(this.options.instanceName)).find((entry) => entry.waitId === recovery.waitId);
+        if (
+            wait === undefined || wait.createdByCtxId !== requireCtxId(context) ||
+            (wait.kind !== "tmux" && wait.kind !== "question") ||
+            wait.detachedAt === undefined || wait.status !== "resolved"
+        ) {
+            throw new Error(`Recoverable detached wait ${recovery.waitId} was not found for the current Context.`);
+        }
+        const dismissed = await gateway.dismissWaitRecovery(
+            this.options.instanceName,
+            recovery.waitId,
+            recovery.recoveryMessageId,
+        );
+        return {
+            dismissed: true,
+            kind: dismissed.kind,
+            targetId: dismissed.targetId,
+            waitId: dismissed.waitId,
+        };
+    }
+
+    async #decideApproval(
+        gateway: McpInteractionGateway,
+        input: JsonValue,
+        context: ToolCallContext,
+    ): Promise<JsonValue> {
+        const { approvalId, decision } = readApprovalDecision(input);
+        const ctxId = requireCtxId(context);
+        const instances = await this.#contextInstances(ctxId);
+        let approval: Awaited<ReturnType<McpInteractionGateway["listApprovals"]>>[number] | undefined;
+        let approvalInstance: string | undefined;
+        for (const instance of instances) {
+            const candidate = (await gateway.listApprovals(instance).catch(() => [])).find((entry) => entry.approvalId === approvalId);
+            if (candidate !== undefined) {
+                approval = candidate;
+                approvalInstance = instance;
+                break;
+            }
+        }
+        if (approval === undefined || approvalInstance === undefined || approval.ctxId !== ctxId || approval.status !== "pending") {
+            throw new Error(`Pending approval ${approvalId} was not found for the current Context.`);
+        }
+        const decided = await gateway.decideApproval(approvalInstance, approvalId, decision);
+        const { ctxId: _ctxId, ...visible } = decided;
+        return visible as unknown as JsonValue;
+    }
+
+    async #assertAppToken(input: JsonValue, context: ToolCallContext): Promise<string> {
+        const ctxId = requireCtxId(context);
+        const record = asRecord(input);
+        const token = record === undefined ? undefined : record.token;
+        if (
+            typeof token !== "string" || token.length === 0 ||
+            !await this.#appLeases.verify(this.options.instanceName, ctxId, token)
+        ) {
+            throw new Error("Workspace App authorization is invalid for the current Context.");
+        }
+        this.#appPresence.touch(this.options.instanceName, ctxId);
+        return token;
+    }
+}
+
+function requireInteractionGateway(
+    gateway: McpInstanceGateway | undefined,
+    instanceName: string,
+): McpInteractionGateway {
+    if (isMcpInteractionGateway(gateway)) return gateway;
+    throw new Error(`Workspace interaction backend is unavailable for ${instanceName}.`);
+}
+
+function requireGoalGateway(gateway: McpInstanceGateway | undefined, instanceName: string) {
+    if (isMcpGoalGateway(gateway)) return gateway;
+    throw new Error(`Workspace Goal backend is unavailable for ${instanceName}.`);
+}
+
+function readGoalManageInput(input: JsonValue): GoalManageInput {
+    const record = asRecord(input);
+    if (record === undefined) throw new Error("workspace_goal requires an object input.");
+    const action = record.action;
+    if (
+        action !== "start" && action !== "get" && action !== "update" && action !== "block" &&
+        action !== "resume" && action !== "finish" && action !== "stop"
+    ) {
+        throw new Error("workspace_goal action must be start, get, update, block, resume, finish, or stop.");
+    }
+    return {
+        action,
+        ...(typeof record.note === "string" ? { note: record.note } : {}),
+        ...(typeof record.objective === "string" ? { objective: record.objective } : {}),
+        ...(typeof record.status === "string" ? { status: record.status as GoalManageInput["status"] } : {}),
+        ...(typeof record.stepId === "string" ? { stepId: record.stepId } : {}),
+        ...(Array.isArray(record.steps) ? { steps: record.steps as unknown as GoalManageInput["steps"] } : {}),
+        ...(typeof record.text === "string" ? { text: record.text } : {}),
+    };
+}
+
+function readQuestion(input: JsonValue): {
+    allowText: boolean;
+    choices: string[];
+    question: string;
+} {
+    const record = asRecord(input);
+    if (record === undefined) throw new Error("workspace_ask requires an object input.");
+    const question = text(record.question, "question");
+    const choices = record.choices === undefined ? [] : stringArray(record.choices, "choices");
+    const allowText = record.allowText === undefined ? true : record.allowText;
+    if (typeof allowText !== "boolean") throw new Error("allowText must be a boolean.");
+    if (!allowText && choices.length === 0) throw new Error("workspace_ask requires choices when allowText is false.");
+    return { allowText, choices, question };
+}
+
+function readQuestionAnswer(input: JsonValue): { answer: string; waitId: string } {
+    const record = asRecord(input);
+    if (record === undefined) throw new Error("workspace_answer requires an object input.");
+    return { answer: text(record.answer, "answer"), waitId: text(record.waitId, "waitId") };
+}
+
+function readApprovalDecision(input: JsonValue): { approvalId: string; decision: "approve" | "deny" } {
+    const record = asRecord(input);
+    if (record === undefined) throw new Error("workspace_approval requires an object input.");
+    const decision = record.decision;
+    if (decision !== "approve" && decision !== "deny") throw new Error("decision must be approve or deny.");
+    return { approvalId: text(record.approvalId, "approvalId"), decision };
+}
+
+function readGoalFence(input: JsonValue, toolName: string): { goalId: string; revision: number } {
+    const record = asRecord(input);
+    if (record === undefined) throw new Error(`${toolName} requires an object input.`);
+    const revision = record.revision;
+    if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1) {
+        throw new Error(`${toolName} revision must be a positive integer.`);
+    }
+    return { goalId: text(record.goalId, "goalId"), revision };
+}
+
+function readTaskControl(input: JsonValue): { action: TodoTaskControlAction; revision: number; taskId: string } {
+    const record = asRecord(input);
+    if (record === undefined) throw new Error("workspace_task requires an object input.");
+    const action = record.action;
+    if (action !== "pause" && action !== "resume" && action !== "cancel") {
+        throw new Error("action must be pause, resume, or cancel.");
+    }
+    const revision = record.revision;
+    if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1) {
+        throw new Error("workspace_task revision must be a positive integer.");
+    }
+    return { action, revision, taskId: text(record.taskId, "taskId") };
+}
+
+function readWaitId(input: JsonValue, toolName: string): string {
+    const record = asRecord(input);
+    if (record === undefined) throw new Error(`${toolName} requires an object input.`);
+    return text(record.waitId, "waitId");
+}
+
+function readWaitRecovery(input: JsonValue): { action: "dismiss"; recoveryMessageId: string; waitId: string } {
+    const record = asRecord(input);
+    if (record === undefined) throw new Error("workspace_recover requires an object input.");
+    if (record.action !== "dismiss") throw new Error("workspace_recover action must be dismiss.");
+    return {
+        action: "dismiss",
+        recoveryMessageId: text(record.recoveryMessageId, "recoveryMessageId"),
+        waitId: text(record.waitId, "waitId"),
+    };
+}
+
+function readWorkspaceCursor(input: JsonValue): number {
+    const record = asRecord(input);
+    const cursor = record?.cursor;
+    if (typeof cursor !== "number" || !Number.isSafeInteger(cursor) || cursor < 0) {
+        throw new Error("workspace_watch cursor must be a non-negative integer.");
+    }
+    return cursor;
+}
+
+function taskBelongsToContext(todo: Record<string, JsonValue>, taskId: string, ctxId: string): boolean {
+    if (!Array.isArray(todo.tasks)) return false;
+    return todo.tasks.some((entry) => {
+        const task = asRecord(entry);
+        return task?.taskId === taskId && task.ctxId === ctxId;
+    });
+}
+
+async function currentTodoAssociation(
+    gateway: McpInteractionGateway,
+    instance: string,
+    ctxId: string,
+): Promise<
+    | { kind: "none" }
+    | { kind: "ambiguous" }
+    | { kind: "one"; revision: number; taskId: string; todoItemId: string }
+> {
+    const todo = asRecord(await gateway.readTodo(instance));
+    if (!Array.isArray(todo?.tasks)) return { kind: "none" };
+    const active = todo.tasks.map(asRecord).filter((task) => (
+        task?.ctxId === ctxId && task.status === "in_progress" && typeof task.taskId === "string"
+    ));
+    if (active.length === 0) return { kind: "none" };
+    if (active.length !== 1) return { kind: "ambiguous" };
+    const taskId = active[0]?.taskId;
+    if (typeof taskId !== "string") return { kind: "ambiguous" };
+    const detail = asRecord(await gateway.readTodo(instance, { taskId }));
+    if (!Array.isArray(detail?.items) || typeof detail.revision !== "number") return { kind: "ambiguous" };
+    const current = detail.items.map(asRecord).filter((item) => item?.status === "in_progress" && typeof item.id === "string");
+    if (current.length !== 1 || typeof current[0]?.id !== "string") return { kind: "ambiguous" };
+    return { kind: "one", revision: detail.revision, taskId, todoItemId: current[0].id };
+}
+
+function validateQuestionAnswer(wait: WaitRecord, answer: string): void {
+    const payload = asRecord(wait.payload) ?? {};
+    const choices = Array.isArray(payload.choices)
+        ? payload.choices.filter((choice): choice is string => typeof choice === "string")
+        : [];
+    if (payload.allowText === false && !choices.includes(answer)) {
+        throw new Error("Answer must be one of the offered choices.");
+    }
+}
+
+function readAnswer(result: JsonValue | undefined): string {
+    const record = asRecord(result);
+    if (record === undefined) throw new Error("Question resolved without an answer.");
+    return text(record.answer, "answer");
+}
+
+function requireCtxId(context: ToolCallContext): string {
+    if (typeof context.ctxId !== "string" || context.ctxId.length === 0) {
+        throw new Error("Interaction tool requires a validated Context.");
+    }
+    return context.ctxId;
+}
+
+function text(value: unknown, field: string): string {
+    if (typeof value !== "string" || value.trim().length === 0) {
+        throw new Error(`${field} must be a non-empty string.`);
+    }
+    return value.trim();
+}
+
+function stringArray(value: unknown, field: string): string[] {
+    if (!Array.isArray(value) || value.length > 12) throw new Error(`${field} must be an array with at most 12 entries.`);
+    return value.map((entry, index) => text(entry, `${field}[${index}]`));
+}
+
+function asRecord(value: unknown): { [key: string]: JsonValue } | undefined {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+        ? value as { [key: string]: JsonValue }
+        : undefined;
+}
+
+async function delay(milliseconds: number): Promise<void> {
+    await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
+
+const commentSchema: JsonValue = {
+    description: "Actionable notes.",
+    items: { minLength: 1, type: "string" },
+    type: "array"
+};
+
+export function withMcpCommentOutputSchema(tool: ToolDefinition): ToolDefinition {
+    if (!isRecord(tool.outputSchema) || !isObjectSchema(tool.outputSchema.type)) {
+        throw new McpToolSchemaUnavailableError(tool.name);
+    }
+    const properties = isRecord(tool.outputSchema.properties)
+        ? tool.outputSchema.properties
+        : {};
+    return {
+        ...tool,
+        outputSchema: {
+            ...tool.outputSchema,
+            properties: {
+                ...properties,
+                comment: commentSchema
+            }
+        }
+    };
+}
+
+export function attachMcpComments(result: JsonValue, comments: readonly string[]): JsonValue {
+    if (!isRecord(result)) {
+        throw new Error("MCP tool results must be objects when context comments are enabled.");
+    }
+    if (comments.length === 0) return result;
+    const existing = Array.isArray(result.comment)
+        ? result.comment.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+        : [];
+    return {
+        ...result,
+        comment: [...existing, ...comments]
+    };
+}
+
+function isObjectSchema(type: JsonValue | undefined): boolean {
+    if (type === undefined || type === "object") {
+        return true;
+    }
+    return Array.isArray(type) && type.includes("object");
+}
+
+function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}

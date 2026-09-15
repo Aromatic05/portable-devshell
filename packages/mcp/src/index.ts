@@ -1,17 +1,17 @@
-export type { McpAuthConfig, McpOAuth2Config } from "./auth/McpAuthConfig.js";
-export { McpOAuthApprovalService } from "./auth/oauth/McpOAuthApprovalService.js";
-export { McpOAuthProtectedResource } from "./auth/oauth/McpOAuthProtectedResource.js";
+export type { McpAuthConfig, McpOAuth2Config } from "./auth/Config.js";
+export { McpOAuthApprovalService } from "./auth/oauth/interaction/Approval.js";
+export { McpOAuthProtectedResource } from "./auth/oauth/Resource.js";
 export type {
     McpOAuthAccessRevocation,
     McpOAuthAccessTokenVerification
-} from "./auth/oauth/McpOAuthProviderRuntime.js";
-export { McpHost } from "./host/McpHost.js";
-export type { McpHostInstanceConfig } from "./host/McpHost.js";
-export type { McpToolProvenanceRecord, McpToolProvenanceRecorder } from "./endpoint/McpToolProvenance.js";
-export { McpContextRegistry } from "./context/McpContextRegistry.js";
-export type { McpContextBinding } from "./context/McpContextRegistry.js";
-export { HttpHost } from "./host/HttpHost.js";
-export type { McpInstanceGateway } from "./instance/McpInstanceGateway.js";
-export { resolvePortableDevshellApplicationVersion } from "./version/McpApplicationVersion.js";
+} from "./auth/oauth/provider/Provider.js";
+export { McpHost } from "./host/Host.js";
+export type { McpHostInstanceConfig } from "./host/Host.js";
+export type { McpToolProvenanceRecord, McpToolProvenanceRecorder } from "./endpoint/domain/worker/Provenance.js";
+export { McpContextRegistry } from "./context/registry/Registry.js";
+export type { McpContextBinding } from "./context/registry/Model.js";
+export { HttpHost } from "./host/Http.js";
+export type { McpInstanceGateway } from "./endpoint/Port.js";
+export { resolvePortableDevshellApplicationVersion } from "./Version.js";
 
-export * from "./workspace/WorkspaceAppLeaseStore.js";
+export * from "./workspace/app/Lease.js";
