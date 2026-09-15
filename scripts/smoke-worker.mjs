@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
-import { WORKER_PROTOCOL_VERSION } from "../packages/core/dist/worker/protocol/WorkerProtocolClient.js";
+import { WORKER_PROTOCOL_VERSION } from "../packages/core/dist/worker/protocol/Client.js";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const workerArgument = process.argv[2];

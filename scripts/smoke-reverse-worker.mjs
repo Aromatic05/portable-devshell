@@ -26,7 +26,8 @@ const testFile = resolve(
     "control",
     "test",
     "integration",
-    "ReverseRealWorker.test.ts",
+    "worker",
+    "Reverse.test.ts",
 );
 
 const result = spawnSync(

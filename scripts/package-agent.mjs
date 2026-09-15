@@ -135,7 +135,7 @@ export async function packageAgentArtifacts(options = {}) {
             pathToFileURL(
                 resolve(
                     repoRoot,
-                    "packages/control/dist/control/artifact/host/ArtifactHostArchive.js",
+                    "packages/control/dist/control/artifact/host/storage/Archive.js",
                 ),
             ).href
         );
