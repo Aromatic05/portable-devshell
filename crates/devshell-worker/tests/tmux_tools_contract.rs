@@ -2494,10 +2494,15 @@ fn tmux_run_stays_clean_bash_while_main_uses_user_zsh_rc() {
     assert_eq!(input["ok"], true, "{input}");
     let marker = env.workspace().join("zsh-interactive-marker.txt");
     let deadline = Instant::now() + Duration::from_secs(3);
-    while !marker.exists() && Instant::now() < deadline {
+    let mut marker_value = String::new();
+    while Instant::now() < deadline {
+        marker_value = std::fs::read_to_string(&marker).unwrap_or_default();
+        if marker_value.trim() == "loaded" {
+            break;
+        }
         thread::sleep(Duration::from_millis(25));
     }
-    assert_eq!(std::fs::read_to_string(marker).unwrap().trim(), "loaded");
+    assert_eq!(marker_value.trim(), "loaded");
     stop(&env, instance);
 }
 
