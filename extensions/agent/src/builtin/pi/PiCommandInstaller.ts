@@ -1,4 +1,5 @@
 import {
+    chmod,
     lstat,
     mkdir,
     readFile,
@@ -97,6 +98,7 @@ async function replaceFile(
     const temporary = `${path}.${process.pid}.tmp`;
     try {
         await writeFile(temporary, source, { mode });
+        await chmod(temporary, mode);
         await rm(path, { force: true });
         await rename(temporary, path);
     } finally {

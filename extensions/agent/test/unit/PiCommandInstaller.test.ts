@@ -54,11 +54,14 @@ async function harness(t: test.TestContext) {
 
 test("Agent bundled Pi publishes its own Unix pi command", async (t) => {
     const h = await harness(t);
-    const result = await ensureBundledPiCommand(h.context, {
-        environment: { PORTABLE_DEVSHELL_BIN_DIR: h.binDirectory },
-        homeDirectory: h.root,
-        platform: "linux",
-    });
+    const result = await withRestrictiveUmask(
+        async () =>
+            await ensureBundledPiCommand(h.context, {
+                environment: { PORTABLE_DEVSHELL_BIN_DIR: h.binDirectory },
+                homeDirectory: h.root,
+                platform: "linux",
+            }),
+    );
 
     assert.equal(result.installed, true);
     assert.equal(result.command, join(h.binDirectory, "pi"));
@@ -67,6 +70,18 @@ test("Agent bundled Pi publishes its own Unix pi command", async (t) => {
     assert.match(source, /PiLauncher\.js/u);
     assert.equal((await lstat(result.command)).mode & 0o111, 0o111);
 });
+
+async function withRestrictiveUmask<T>(
+    operation: () => Promise<T>,
+): Promise<T> {
+    if (process.platform === "win32") return await operation();
+    const previous = process.umask(0o077);
+    try {
+        return await operation();
+    } finally {
+        process.umask(previous);
+    }
+}
 
 test("Agent bundled Pi migrates the legacy core-owned pi launcher", async (t) => {
     const h = await harness(t);
