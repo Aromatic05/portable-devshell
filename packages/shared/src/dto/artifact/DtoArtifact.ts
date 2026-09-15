@@ -71,6 +71,17 @@ export type ArtifactPayloadDescriptor = ArtifactBytePayloadDescriptor | Artifact
 
 export type ArtifactImageMediaType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
+export interface ArtifactImageContent {
+    blake3: string;
+    bytes: number;
+    content: string;
+    encoding: "base64";
+    imageRef: string;
+    mediaType: ArtifactImageMediaType;
+}
+
+export type ArtifactStoredImageResult = ArtifactImageContent;
+
 export type ArtifactViewImageInput =
     | {
           handle: string;
@@ -84,11 +95,7 @@ export type ArtifactViewImageInput =
           workspace: string;
       };
 
-export interface ArtifactViewImageResult {
-    bytes: number;
-    content: string;
-    encoding: "base64";
-    mediaType: ArtifactImageMediaType;
+export interface ArtifactViewImageResult extends ArtifactImageContent {
     name: string;
     source: ArtifactSourceDescriptor;
 }

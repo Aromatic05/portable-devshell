@@ -31,7 +31,9 @@ export class McpEndpointHandlerArtifact {
                     signal
                 );
                 const structuredContent = {
+                    blake3: image.blake3,
                     bytes: image.bytes,
+                    imageRef: image.imageRef,
                     mediaType: image.mediaType,
                     name: image.name,
                     source: image.source

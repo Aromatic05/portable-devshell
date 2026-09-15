@@ -424,19 +424,31 @@ test("artifact image view reads through the payload protocol and always closes t
 
     const image = await service.viewImage({ path: "./pixel.png", workspace: "/workspace" }, "source-a");
 
-    assert.deepEqual(image, {
+    assert.equal(image.bytes, png.length);
+    assert.equal(image.content, png.toString("base64"));
+    assert.equal(image.encoding, "base64");
+    assert.equal(image.mediaType, "image/png");
+    assert.equal(image.name, "payload.bin");
+    assert.match(image.blake3, /^[0-9a-f]{64}$/u);
+    assert.equal(image.imageRef, `${image.blake3}.png`);
+    assert.deepEqual(image.source, {
+        instance: "source-a",
+        path: "./pixel.png",
+        type: "file",
+        workspace: "/workspace"
+    });
+    assert.deepEqual(await service.readImage(image.imageRef), {
+        blake3: image.blake3,
         bytes: png.length,
         content: png.toString("base64"),
         encoding: "base64",
-        mediaType: "image/png",
-        name: "payload.bin",
-        source: {
-            instance: "source-a",
-            path: "./pixel.png",
-            type: "file",
-            workspace: "/workspace"
-        }
+        imageRef: image.imageRef,
+        mediaType: "image/png"
     });
+    assert.deepEqual(
+        await readFile(join(storageDir, "images", image.blake3.slice(0, 2), image.imageRef)),
+        png
+    );
     assert.deepEqual(source.closedPayloads, ["payload-1"]);
 });
 

@@ -195,6 +195,12 @@ export class WebStore {
         }));
     }
 
+    readonly readArtifactImage = async (imageRef: string) => await withRequestTimeout(
+        this.clients.artifact.readImage(imageRef),
+        this.#requestTimeoutMs,
+        "artifact.readImage",
+    );
+
     async decideTool(
         instance: string,
         approvalId: string,

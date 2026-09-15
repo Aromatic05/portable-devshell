@@ -24,10 +24,13 @@ const png = Buffer.from(
 test("artifact fixed MCP surface contains image primitive but no read or management operations", () => {
     const gateway = createGateway({
         async viewArtifactImage() {
+            const blake3 = "b".repeat(64);
             return {
+                blake3,
                 bytes: png.length,
                 content: png.toString("base64"),
                 encoding: "base64",
+                imageRef: `${blake3}.png`,
                 mediaType: "image/png",
                 name: "pixel.png",
                 source: { instance: "main-pc", path: "./pixel.png", type: "file" }

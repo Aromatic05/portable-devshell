@@ -2,6 +2,7 @@ import type {
     ArtifactShareInput,
     ArtifactShareResult,
     ArtifactShareRevokeResult,
+    ArtifactStoredImageResult,
     ArtifactTransferRecord,
     ArtifactTransferResult,
     ArtifactTransferStartInput,
@@ -119,6 +120,7 @@ export interface ControlClients {
         getTransfer(transferId: string): Promise<ArtifactTransferRecord>;
         listShares(): Promise<ArtifactShareResult[]>;
         listTransfers(): Promise<ArtifactTransferRecord[]>;
+        readImage(imageRef: string): Promise<ArtifactStoredImageResult>;
         revokeShare(shareId: string): Promise<ArtifactShareRevokeResult>;
         startTransfer(
             defaultInstance: string,
@@ -304,6 +306,7 @@ export function createControlClients(
             getTransfer: (transferId) => artifact.request("getTransfer", { transferId }),
             listShares: () => artifact.request("listShares"),
             listTransfers: () => artifact.request("listTransfers"),
+            readImage: (imageRef) => artifact.request("readImage", { imageRef }),
             revokeShare: (shareId) => artifact.request("revokeShare", { shareId }),
             startTransfer: (defaultInstance, input) =>
                 artifact.request("startTransfer", { ...input, defaultInstance }),

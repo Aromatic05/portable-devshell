@@ -359,6 +359,68 @@ describe("Audit", () => {
         expect(await screen.findByRole("alert")).toHaveTextContent("Tool Call detail unavailable.");
     });
 
+    it("renders persisted artifact_viewImage content from its Audit imageRef", async () => {
+        const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+        const blake3 = "b".repeat(64);
+        const readArtifactImage = vi.fn(async () => ({
+            blake3,
+            bytes: 68,
+            content: png,
+            encoding: "base64" as const,
+            imageRef: `${blake3}.png`,
+            mediaType: "image/png" as const,
+        }));
+        const imageState: WebState = {
+            ...state,
+            readModel: {
+                ...state.readModel,
+                instanceState: {
+                    ...state.readModel.instanceState,
+                    alpha: {
+                        ...state.readModel.instanceState.alpha!,
+                        toolCalls: [{
+                            callId: "call-image",
+                            completedAt: "2026-07-31T09:20:01Z",
+                            ctxId: "ctx-alpha",
+                            input: { path: "./preview.png" },
+                            inputSummary: '{"path":"./preview.png"}',
+                            instance: asInstanceName("alpha"),
+                            output: {
+                                blake3,
+                                bytes: 68,
+                                imageRef: `${blake3}.png`,
+                                mediaType: "image/png",
+                                name: "preview.png",
+                                source: {
+                                    instance: "alpha",
+                                    path: "./preview.png",
+                                    type: "file",
+                                    workspace: "/projects/alpha",
+                                },
+                            },
+                            source: "mcp",
+                            startedAt: "2026-07-31T09:20:00Z",
+                            status: "completed",
+                            toolName: "artifact_viewImage",
+                            workspace: "/projects/alpha",
+                        }],
+                    },
+                },
+            },
+        };
+        renderAudit({
+            route: alphaContextRoute,
+            state: imageState,
+            store: { readArtifactImage },
+        });
+
+        fireEvent.click(screen.getByText("artifact_viewImage", { selector: "strong" }).closest("summary")!);
+
+        const image = await screen.findByRole("img", { name: "preview.png" });
+        expect(readArtifactImage).toHaveBeenCalledWith(`${blake3}.png`);
+        expect(image).toHaveAttribute("src", `data:image/png;base64,${png}`);
+    });
+
     it("keeps batch Context management separate from Audit scope", async () => {
         const disableContexts = vi.fn(async () => true);
         renderAudit({

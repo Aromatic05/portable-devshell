@@ -275,10 +275,13 @@ test("a routed artifact result consumes Comments from the routed instance Contex
             assert.equal(defaultInstance, "alpha");
             assert.equal((input as { instance?: string }).instance, "beta");
             assert.equal(input.workspace, "/projects/beta");
+            const blake3 = "b".repeat(64);
             return {
+                blake3,
                 bytes: 1,
                 content: "AA==",
                 encoding: "base64" as const,
+                imageRef: `${blake3}.png`,
                 mediaType: "image/png" as const,
                 name: "preview.png",
                 source: {
@@ -321,8 +324,10 @@ test("a routed artifact result consumes Comments from the routed instance Contex
     );
 
     assert.deepEqual((result as { structuredContent?: JsonValue }).structuredContent, {
+        blake3: "b".repeat(64),
         bytes: 1,
         comment: ["beta comment"],
+        imageRef: `${"b".repeat(64)}.png`,
         mediaType: "image/png",
         name: "preview.png",
         source: {

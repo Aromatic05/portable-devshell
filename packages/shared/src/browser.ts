@@ -69,6 +69,7 @@ export type {
     ApprovalDecisionValue,
     ApprovalRequest
 } from "./dto/tool/DtoToolApproval.js";
+export type { ArtifactStoredImageResult } from "./dto/artifact/DtoArtifact.js";
 export type {
     ToolCallQuery,
     ToolCallRecord,

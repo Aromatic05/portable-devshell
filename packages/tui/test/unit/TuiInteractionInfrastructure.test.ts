@@ -2049,15 +2049,18 @@ test("audit truncates input and output previews while opening complete structure
 });
 test("artifact_viewImage audit output loads an image into the detail panel", async () => {
     const calls: Array<{ input: unknown; instance: string }> = [];
+    const blake3 = "b".repeat(64);
     const png =
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
     const harness = createHarness({
         onArtifactViewImage: async (instance, input) => {
             calls.push({ input, instance });
             return {
+                blake3,
                 bytes: 68,
                 content: png,
                 encoding: "base64",
+                imageRef: `${blake3}.png`,
                 mediaType: "image/png",
                 name: "preview.png",
                 source: { instance, path: "./preview.png", type: "file" },
@@ -2073,7 +2076,9 @@ test("artifact_viewImage audit output loads an image into the detail panel", asy
             inputSummary: '{"path":"./preview.png"}',
             instance: "alpha" as never,
             output: {
+                blake3,
                 bytes: 68,
+                imageRef: `${blake3}.png`,
                 mediaType: "image/png",
                 name: "preview.png",
                 source: {
@@ -2105,9 +2110,14 @@ test("artifact_viewImage audit output loads an image into the detail panel", asy
     assert.deepEqual(calls, [
         {
             input: {
-                instance: "alpha",
-                path: "./preview.png",
-                workspace: "/projects/image",
+                imageRef: `${blake3}.png`,
+                name: "preview.png",
+                source: {
+                    instance: "alpha",
+                    path: "./preview.png",
+                    type: "file",
+                    workspace: "/projects/image",
+                },
             },
             instance: "alpha",
         },
@@ -3441,11 +3451,21 @@ function createHarness(
     options: {
         onArtifactViewImage?: (
             instance: string,
-            input: { handle?: string; instance?: string; path?: string },
+            input: {
+                handle?: string;
+                imageRef?: string;
+                instance?: string;
+                name?: string;
+                path?: string;
+                source?: unknown;
+                workspace?: string;
+            },
         ) => Promise<{
+            blake3: string;
             bytes: number;
             content: string;
             encoding: "base64";
+            imageRef: string;
             mediaType: "image/gif" | "image/jpeg" | "image/png" | "image/webp";
             name: string;
             source: unknown;

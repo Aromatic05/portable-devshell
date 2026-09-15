@@ -328,9 +328,11 @@ test("terminal image renderer emits Kitty PNG and iTerm2 fallback frames", () =>
 
     const png = renderTerminalImageFrame({
         image: {
+            blake3: "a".repeat(64),
             bytes: 3,
             content: "AAAA",
             encoding: "base64",
+            imageRef: `${"a".repeat(64)}.png`,
             mediaType: "image/png",
             name: "preview.png",
             source: { instance: "alpha", path: "./preview.png", type: "file" },
@@ -345,9 +347,11 @@ test("terminal image renderer emits Kitty PNG and iTerm2 fallback frames", () =>
 
     const jpeg = renderTerminalImageFrame({
         image: {
+            blake3: "b".repeat(64),
             bytes: 3,
             content: "BBBB",
             encoding: "base64",
+            imageRef: `${"b".repeat(64)}.jpg`,
             mediaType: "image/jpeg",
             name: "photo.jpg",
             source: { instance: "alpha", path: "./photo.jpg", type: "file" },
@@ -358,6 +362,24 @@ test("terminal image renderer emits Kitty PNG and iTerm2 fallback frames", () =>
     assert.equal(jpeg.protocol, "iterm2");
     assert.equal(jpeg.sequence.includes("1337;File="), true);
     assert.equal(jpeg.sequence.includes(":BBBB"), true);
+
+    const unsupported = renderTerminalImageFrame({
+        image: {
+            blake3: "a".repeat(64),
+            bytes: 3,
+            content: "AAAA",
+            encoding: "base64",
+            imageRef: `${"a".repeat(64)}.png`,
+            mediaType: "image/png",
+            name: "preview.png",
+            source: { instance: "alpha", path: "./preview.png", type: "file" },
+        },
+        region: { height: 6, width: 20, x: 30, y: 8 },
+        support: { iterm2: false, kitty: false },
+    });
+    assert.equal(unsupported.protocol, "none");
+    assert.match(unsupported.reason ?? "", /does not advertise Kitty or iTerm2/u);
+    assert.equal(unsupported.sequence, "");
 });
 
 test("terminal session connects PTY output, input, resize, and disposal", async () => {

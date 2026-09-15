@@ -1759,6 +1759,7 @@ test("real Ink runtime switches terminal sources and drives tmux View and Attach
 
 test("real Ink runtime renders artifact_viewImage audit output in the detail panel", async () => {
     const host = createTerminal();
+    const blake3 = "b".repeat(64);
     const imageCall: ToolCallRecord = {
         callId: "image-call",
         ctxId: "ctx-image",
@@ -1767,7 +1768,9 @@ test("real Ink runtime renders artifact_viewImage audit output in the detail pan
         inputSummary: '{"path":"./preview.png"}',
         instance: asInstanceName("alpha"),
         output: {
+            blake3,
             bytes: 68,
+            imageRef: `${blake3}.png`,
             mediaType: "image/png",
             name: "preview.png",
             source: {
@@ -1793,10 +1796,12 @@ test("real Ink runtime renders artifact_viewImage audit output in the detail pan
             }],
         },
         image: {
+            blake3,
             bytes: 68,
             content:
                 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
             encoding: "base64",
+            imageRef: `${blake3}.png`,
             mediaType: "image/png",
             name: "preview.png",
             source: { instance: "alpha", path: "./preview.png", type: "file" },
@@ -1882,16 +1887,8 @@ test("real Ink runtime renders artifact_viewImage audit output in the detail pan
         await runtime.stop();
     }
 
-    assert.deepEqual(clients.imageReads(), [
-        {
-            input: {
-                instance: "alpha",
-                path: "./preview.png",
-                workspace: "/home/alpha",
-            },
-            instance: "alpha",
-        },
-    ]);
+    assert.deepEqual(clients.imageRefReads(), [`${blake3}.png`]);
+    assert.deepEqual(clients.imageReads(), []);
 });
 
 function createClients(
@@ -1906,9 +1903,11 @@ function createClients(
             provider?: string;
         }>;
         image?: {
+            blake3: string;
             bytes: number;
             content: string;
             encoding: "base64";
+            imageRef: string;
             mediaType: "image/gif" | "image/jpeg" | "image/png" | "image/webp";
             name: string;
             source: {
@@ -1930,12 +1929,21 @@ function createClients(
     let instanceList = options.instanceList ?? [];
     const configUpdates: unknown[] = [];
     const imageReads: Array<{ input: unknown; instance: string }> = [];
+    const imageRefReads: string[] = [];
     const lifecycleActions: string[] = [];
     let refreshCount = 0;
     let schemaCalls = 0;
     const toolCalls: Array<{ input: unknown; instance: string; toolName: string }> = [];
     const value = {
         artifact: {
+            async readImage(imageRef: string) {
+                imageRefReads.push(imageRef);
+                if (options.image === undefined) {
+                    throw new Error("No image fixture configured.");
+                }
+                const { name: _name, source: _source, ...stored } = options.image;
+                return stored;
+            },
             async viewImage(instance: string, input: unknown) {
                 imageReads.push({ input, instance });
                 if (options.image === undefined) {
@@ -2159,6 +2167,7 @@ function createClients(
         closed: () => closeCount,
         configUpdates: () => configUpdates,
         createSchemaCalls: () => schemaCalls,
+        imageRefReads: () => imageRefReads,
         imageReads: () => imageReads,
         lifecycleActions: () => lifecycleActions,
         refreshCalls: () => refreshCount,

@@ -2,6 +2,7 @@ import {
     createError,
     errorCodes,
     type ArtifactImageMediaType,
+    type ArtifactStoredImageResult,
     type ArtifactViewImageInput,
     type ArtifactViewImageResult
 } from "@portable-devshell/shared";
@@ -16,6 +17,7 @@ import {
     requireArtifactEndpoint,
     type ArtifactServiceOptions
 } from "../ArtifactServiceModel.js";
+import { ArtifactImageStore } from "./ArtifactImageStore.js";
 
 export const MAX_ARTIFACT_IMAGE_BYTES = 10 * 1024 * 1024;
 const ARTIFACT_IMAGE_PAYLOAD_TTL_MS = 5 * 60 * 1000;
@@ -24,8 +26,9 @@ const MAX_ARTIFACT_IMAGE_CHUNK_BYTES = 1024 * 1024;
 export class ArtifactImageService {
     readonly #chunkBytes: number;
     readonly #resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
+    readonly #store: ArtifactImageStore;
 
-    constructor(options: Pick<ArtifactServiceOptions, "chunkBytes" | "resolveEndpoint">) {
+    constructor(options: Pick<ArtifactServiceOptions, "chunkBytes" | "resolveEndpoint" | "storageDir">) {
         const requestedChunkBytes = options.chunkBytes;
         this.#chunkBytes =
             typeof requestedChunkBytes === "number" &&
@@ -34,6 +37,15 @@ export class ArtifactImageService {
                 ? Math.min(requestedChunkBytes, MAX_ARTIFACT_IMAGE_CHUNK_BYTES)
                 : DEFAULT_ARTIFACT_CHUNK_BYTES;
         this.#resolveEndpoint = options.resolveEndpoint;
+        this.#store = new ArtifactImageStore(options.storageDir);
+    }
+
+    async initialize(): Promise<void> {
+        await this.#store.initialize();
+    }
+
+    async read(imageRef: string): Promise<ArtifactStoredImageResult> {
+        return await this.#store.read(imageRef);
     }
 
     async view(
@@ -80,12 +92,10 @@ export class ArtifactImageService {
                 signal
             );
             const mediaType = detectArtifactImageMediaType(bytes.subarray(0, 16));
+            const stored = await this.#store.persist(bytes, mediaType);
 
             return {
-                bytes: bytes.length,
-                content: bytes.toString("base64"),
-                encoding: "base64",
-                mediaType,
+                ...stored,
                 name: opened.descriptor.name,
                 source: sourceDescriptor(sourceInstance, sourceInput, opened.descriptor)
             };

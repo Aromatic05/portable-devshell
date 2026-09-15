@@ -1,4 +1,5 @@
 import type {
+    ArtifactSourceDescriptor,
     ArtifactViewImageResult,
     JsonValue,
     ToolCallRecord,
@@ -15,9 +16,13 @@ import type { TuiUiIntent } from "../../../state/TuiInteractionState.js";
 import { topTuiOverlay } from "../../../state/overlay/TuiOverlay.js";
 import type { TuiFocusManager } from "../../focus/TuiFocusManager.js";
 
-export type TuiArtifactViewImageRequest =
+type TuiArtifactViewImageSourceRequest =
     | { handle: string; instance?: string }
     | { instance?: string; path: string; workspace?: string };
+
+export type TuiArtifactViewImageRequest =
+    | { imageRef: string; name: string; source: ArtifactSourceDescriptor }
+    | TuiArtifactViewImageSourceRequest;
 
 interface CommandAuditOptions {
     dispatch(intent: TuiUiIntent): Promise<boolean>;
@@ -216,6 +221,8 @@ function readArtifactViewImageInput(
     input: JsonValue | undefined,
     output: JsonValue | undefined,
 ): TuiArtifactViewImageRequest | undefined {
+    const stored = readStoredArtifactViewImageRequest(output);
+    if (stored !== undefined) return stored;
     const inputRequest = readArtifactViewImageRequest(input);
     const outputSource = readArtifactViewImageSource(output);
     if (outputSource === undefined) return inputRequest;
@@ -234,16 +241,45 @@ function readArtifactViewImageInput(
     return outputSource;
 }
 
+function readStoredArtifactViewImageRequest(
+    value: JsonValue | undefined,
+): Extract<TuiArtifactViewImageRequest, { imageRef: string }> | undefined {
+    if (!isRecord(value)) return undefined;
+    const imageRef = typeof value.imageRef === "string" && value.imageRef.length > 0
+        ? value.imageRef
+        : undefined;
+    const name = typeof value.name === "string" && value.name.length > 0
+        ? value.name
+        : undefined;
+    const source = readArtifactSourceDescriptor(value.source);
+    return imageRef === undefined || name === undefined || source === undefined
+        ? undefined
+        : { imageRef, name, source };
+}
+
+function readArtifactSourceDescriptor(value: JsonValue | undefined): ArtifactSourceDescriptor | undefined {
+    const source = readArtifactViewImageRequest(value);
+    if (source === undefined || source.instance === undefined) return undefined;
+    const type = isRecord(value) && (value.type === "artifact" || value.type === "file" || value.type === "directory")
+        ? value.type
+        : undefined;
+    return {
+        ...source,
+        ...(type === undefined ? {} : { type }),
+        instance: source.instance,
+    };
+}
+
 function readArtifactViewImageSource(
     value: JsonValue | undefined,
-): TuiArtifactViewImageRequest | undefined {
+): TuiArtifactViewImageSourceRequest | undefined {
     if (!isRecord(value)) return undefined;
     return readArtifactViewImageRequest(value.source);
 }
 
 function readArtifactViewImageRequest(
     value: JsonValue | undefined,
-): TuiArtifactViewImageRequest | undefined {
+): TuiArtifactViewImageSourceRequest | undefined {
     if (typeof value !== "object" || value === null || Array.isArray(value))
         return undefined;
     const handle =

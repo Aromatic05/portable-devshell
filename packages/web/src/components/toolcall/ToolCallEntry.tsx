@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type {
+    ArtifactStoredImageResult,
     InstanceLogEntry,
     ToolCallRecord,
 } from "@portable-devshell/shared/browser";
@@ -18,6 +19,7 @@ export function ToolCallEntry({
     disabled = false,
     initiallyOpen = false,
     logs,
+    onLoadImage,
     onLoadDetail,
     onRefresh,
 }: {
@@ -25,6 +27,7 @@ export function ToolCallEntry({
     disabled?: boolean;
     initiallyOpen?: boolean;
     logs: readonly InstanceLogEntry[];
+    onLoadImage(imageRef: string): Promise<ArtifactStoredImageResult>;
     onLoadDetail(): Promise<ToolCallRecord | undefined>;
     onRefresh(): Promise<void>;
 }) {
@@ -58,7 +61,7 @@ export function ToolCallEntry({
             }}><time dateTime={call.startedAt} title={call.startedAt}>{formatRelativeTime(call.startedAt)}</time><strong>{call.toolName}</strong><span>{workspaceFolderName(call.workspace)} · {call.instance}</span><span>ctx {call.ctxId ?? "unscoped"}</span><span className={`result ${toolCallResult(call)}`}>{call.status}</span></summary>
             {open && loading ? <p>Loading details…</p> : null}
             {open && loadFailure !== undefined ? <p className="error" role="alert">{loadFailure}</p> : null}
-            {open && !loading ? <ToolCallDetails call={visibleCall} disabled={disabled} logs={logs} onRefresh={onRefresh} /> : null}
+            {open && !loading ? <ToolCallDetails call={visibleCall} disabled={disabled} logs={logs} onLoadImage={onLoadImage} onRefresh={onRefresh} /> : null}
         </details>
     </li>;
 }
@@ -67,16 +70,50 @@ function ToolCallDetails({
     call,
     disabled,
     logs,
+    onLoadImage,
     onRefresh,
 }: {
     call: ToolCallRecord;
     disabled: boolean;
     logs: readonly InstanceLogEntry[];
+    onLoadImage(imageRef: string): Promise<ArtifactStoredImageResult>;
     onRefresh(): Promise<void>;
 }) {
     const output = resolveToolCallOutput(call, logs);
+    const imageMetadata = artifactImageMetadata(call);
+    const imageRef = imageMetadata?.imageRef;
+    const [image, setImage] = useState<ArtifactStoredImageResult>();
+    const [imageFailure, setImageFailure] = useState<string>();
+    const [imageLoading, setImageLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [refreshFailure, setRefreshFailure] = useState<string>();
+    useEffect(() => {
+        if (imageRef === undefined) {
+            setImage(undefined);
+            setImageFailure(undefined);
+            setImageLoading(false);
+            return;
+        }
+        let active = true;
+        setImage(undefined);
+        setImageFailure(undefined);
+        setImageLoading(true);
+        void onLoadImage(imageRef).then(
+            (next) => {
+                if (!active) return;
+                setImage(next);
+                setImageLoading(false);
+            },
+            (error: unknown) => {
+                if (!active) return;
+                setImageFailure(errorMessage(error, "Image preview could not be loaded."));
+                setImageLoading(false);
+            },
+        );
+        return () => {
+            active = false;
+        };
+    }, [imageRef, onLoadImage]);
     const refresh = async (): Promise<void> => {
         setRefreshing(true);
         setRefreshFailure(undefined);
@@ -108,8 +145,31 @@ function ToolCallDetails({
         </dl>
         <h3>Input</h3><pre>{formatToolValue(call.input, call.inputSummary)}</pre>
         <h3>Output</h3><pre>{formatToolValue(output)}</pre>
+        {imageMetadata === undefined ? null : <>
+            <h3>Image</h3>
+            {imageLoading ? <p>Loading image preview…</p> : null}
+            {imageFailure === undefined ? null : <p className="error" role="alert">{imageFailure}</p>}
+            {image === undefined ? null : <img
+                alt={imageMetadata.name}
+                className="artifact-image-preview"
+                src={`data:${image.mediaType};base64,${image.content}`}
+            />}
+        </>}
         {call.error === undefined ? null : <><h3>Error</h3><pre className="error">{call.error}</pre></>}
     </>;
+}
+
+function artifactImageMetadata(call: ToolCallRecord): { imageRef: string; name: string } | undefined {
+    if (call.toolName !== "artifact_viewImage" || !isRecord(call.output)) return undefined;
+    const imageRef = call.output.imageRef;
+    const name = call.output.name;
+    return typeof imageRef === "string" && imageRef.length > 0 && typeof name === "string" && name.length > 0
+        ? { imageRef, name }
+        : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function errorMessage(error: unknown, fallback: string): string {

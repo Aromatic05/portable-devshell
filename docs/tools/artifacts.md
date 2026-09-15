@@ -18,6 +18,8 @@ artifact_viewImage
 
 支持 PNG、JPEG、GIF 和 WebP；格式依据文件魔数判断，不信任扩展名。SVG、目录、空文件、未知格式以及超过 10 MiB 的图片会被拒绝。成功结果包含原生 MCP `ImageContent` 和不含图片字节的结构化元数据；payload lease 无论成功或失败都必须关闭。
 
+Control 同时把已验证的图片按 BLAKE3 内容寻址保存到 `~/.devshell/control/artifacts/images/<hash-prefix>/<hash>.<ext>`。结构化结果只记录 `imageRef`、`blake3`、大小、媒体类型、名称和原始 source；Audit SQLite 不保存 base64 图片正文。Web/TUI 在查看历史 ToolCall 时通过内部 `artifact.readImage(imageRef)` 按需读取该快照，因此原始文件删除或来源 instance 离线后仍可查看已经审计过的图片。
+
 ## 内容、引用与租约
 
 Artifact 字节内容与对外暴露的短期 handle 分离保存：

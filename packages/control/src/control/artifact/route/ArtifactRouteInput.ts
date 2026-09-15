@@ -18,6 +18,11 @@ export function readArtifactViewImageInput(params?: JsonValue): ArtifactViewImag
         : { handle, ...(instance === undefined ? {} : { instance }) };
 }
 
+export function readArtifactImageRef(params?: JsonValue): string {
+    if (!isRecord(params)) throw invalid("artifact.readImage requires parameters.");
+    return readRequiredString(params.imageRef, "imageRef");
+}
+
 export function readArtifactShareInput(params?: JsonValue): ArtifactShareInput {
     if (!isRecord(params)) throw invalid("artifact.createShare requires parameters.");
     const expiresInSeconds = readPositiveInteger(params.expiresInSeconds, "expiresInSeconds");

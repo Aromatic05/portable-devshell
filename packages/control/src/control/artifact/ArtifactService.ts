@@ -3,6 +3,7 @@ import type {
     ArtifactShareInput,
     ArtifactShareResult,
     ArtifactShareRevokeResult,
+    ArtifactStoredImageResult,
     ArtifactTransferCancelInput,
     ArtifactTransferLookupInput,
     ArtifactTransferRecord,
@@ -65,6 +66,7 @@ export class ArtifactService {
             return;
         }
 
+        await this.#imageService.initialize();
         await this.#recordStore.initialize();
         await this.#shareService.initialize();
         await this.#transferService.initialize();
@@ -90,6 +92,13 @@ export class ArtifactService {
             throw new Error("ArtifactService is not initialized.");
         }
         return await this.#imageService.view(input, defaultInstance, signal);
+    }
+
+    async readImage(imageRef: string): Promise<ArtifactStoredImageResult> {
+        if (!this.#initialized) {
+            throw new Error("ArtifactService is not initialized.");
+        }
+        return await this.#imageService.read(imageRef);
     }
 
     async createShare(

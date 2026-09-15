@@ -265,6 +265,14 @@ export class TuiRuntime {
                 await this.#operations.revokeArtifactShare(shareId);
             },
             onArtifactViewImage: async (instance, input) => {
+                if ("imageRef" in input) {
+                    const stored = await clients.artifact.readImage(input.imageRef);
+                    return {
+                        ...stored,
+                        name: input.name,
+                        source: input.source,
+                    };
+                }
                 if ("path" in input) {
                     return await clients.artifact.viewImage(instance, {
                         ...(input.instance === undefined ? {} : { instance: input.instance }),
@@ -601,6 +609,14 @@ export class TuiRuntime {
             region,
             support: this.#terminalImageSupport,
         });
+        if (frame.protocol === "none" && frame.reason !== undefined) {
+            const { image: _image, ...textDetail } = detail;
+            this.store.replaceTopOverlay({
+                ...textDetail,
+                body: `${detail.body}\n\nImage preview unavailable: ${frame.reason}`,
+            });
+            return;
+        }
         if (frame.sequence.length > 0) {
             this.#stdout.write(frame.sequence);
         }

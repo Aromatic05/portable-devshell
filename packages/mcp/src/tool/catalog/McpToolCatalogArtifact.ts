@@ -40,7 +40,9 @@ function artifactViewImageTool(): ToolDefinition {
         outputSchema: {
             additionalProperties: false,
             properties: {
+                blake3: { pattern: "^[0-9a-f]{64}$", type: "string" },
                 bytes: { minimum: 1, type: "integer" },
+                imageRef: { minLength: 1, type: "string" },
                 mediaType: { enum: ["image/png", "image/jpeg", "image/gif", "image/webp"], type: "string" },
                 name: { minLength: 1, type: "string" },
                 source: {
@@ -60,7 +62,7 @@ function artifactViewImageTool(): ToolDefinition {
                     type: "object"
                 }
             },
-            required: ["bytes", "mediaType", "name", "source"],
+            required: ["blake3", "bytes", "imageRef", "mediaType", "name", "source"],
             type: "object"
         },
         requiredCapabilities: ["read"]

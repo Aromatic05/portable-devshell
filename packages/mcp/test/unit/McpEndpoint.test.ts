@@ -1290,9 +1290,11 @@ test("artifact_viewImage returns native image content over SDK transport", async
             assert.equal(defaultInstance, "demo");
             assert.deepEqual(input, { path: "./pixel.png", workspace: "/workspace" });
             return {
+                blake3: "b".repeat(64),
                 bytes: 68,
                 content: pngData,
                 encoding: "base64",
+                imageRef: `${"b".repeat(64)}.png`,
                 mediaType: "image/png",
                 name: "pixel.png",
                 source: { instance: "demo", path: "./pixel.png", type: "file" }
@@ -1332,11 +1334,14 @@ test("artifact_viewImage returns native image content over SDK transport", async
             { data: pngData, mimeType: "image/png", type: "image" }
         ]);
         assert.deepEqual(response.body.result?.structuredContent, {
+            blake3: "b".repeat(64),
             bytes: 68,
+            imageRef: `${"b".repeat(64)}.png`,
             mediaType: "image/png",
             name: "pixel.png",
             source: { instance: "demo", path: "./pixel.png", type: "file" }
         });
+        assert.equal("content" in (response.body.result?.structuredContent ?? {}), false);
     } finally {
         await server.close();
     }
