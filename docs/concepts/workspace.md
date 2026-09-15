@@ -62,6 +62,7 @@ Workspace UI 使用官方 MCP Apps SDK，而不是自定义 postMessage bridge�
 * stable reader alias 与已发布过的历史 URI 继续可读，保证旧会话升级后仍能 remount；
 * App 使用 `snapshot` / `watch` / `reconnect` 一类 app-only helper 获取状态；
 * `watch` 基于 instance event sequence，只在当前 Context 的相关事件变化时返回新 snapshot，正常无变化时是 heartbeat，不做固定频率全量 polling；
+* 已建立 App bridge 后，单次 `tools/call`、model-context 或 Host message 请求超时只进入原 bridge 内的 `Reconnecting` / retry 路径，不能 `app.close()`、重新 `ui/initialize` 或重新申请 display mode；只有 SDK 报告真实 `app.onclose` 或初始握手失败时才执行 lifecycle reconnect；
 * app-only 写操作必须携带当前 Context 和隐藏 app capability。
 
 这些 helper 属于 App 协议，不应成为模型主动调用的工具。

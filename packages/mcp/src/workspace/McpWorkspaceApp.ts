@@ -146,8 +146,10 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var goalTimer = null;
   var automaticMessageInFlight = false;
   var hostBridgeGeneration = 0;
+  var hostRequestHealthy = false;
   var modelContextEpoch = 0;
   var modelContextSyncController = null;
+  var modelContextRetryTimer = null;
   var modelContextUpdateTail = Promise.resolve();
   var sizeChangedCleanup = null;
   var connectRetryTimer = null;
@@ -160,7 +162,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   var presentationClaimPending = false;
   var presentationTransitionSettling = false;
   var bridgeConnecting = false;
-  var bridgeResetting = false;
   var shuttingDown = false;
 
   function escapeHtml(value) {
@@ -188,10 +189,11 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       if (ctxId !== requestCtxId || appToken !== requestToken || liveBaseUrl !== requestLiveBaseUrl) {
         throw new Error("Workspace Context changed while the request was in flight");
       }
+      noteHostRequestSuccess();
       acceptMeta(result && result._meta, true);
       return result;
     }).catch(function (error) {
-      if (!(signal && signal.aborted) && hostBridgeTransportFailure(error)) void resetHostBridge();
+      if (!(signal && signal.aborted)) noteHostRequestFailure(error);
       throw error;
     });
   }
@@ -541,7 +543,13 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   }
 
   async function syncModelContext(continuation) {
-    if (!initialized || !snapshot || automaticMessageInFlight) return;
+    if (!initialized || !snapshot) return;
+    if (automaticMessageInFlight) {
+      scheduleModelContextRetry();
+      return;
+    }
+    if (modelContextRetryTimer) clearTimeout(modelContextRetryTimer);
+    modelContextRetryTimer = null;
     var epoch = modelContextEpoch;
     var controller = new AbortController();
     modelContextSyncController = controller;
@@ -551,10 +559,18 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
         signal: controller.signal
       });
     } catch (error) {
-      if (!controller.signal.aborted && hostBridgeTransportFailure(error)) void resetHostBridge();
+      if (!controller.signal.aborted && hostBridgeTransportFailure(error)) scheduleModelContextRetry();
     } finally {
       if (modelContextSyncController === controller) modelContextSyncController = null;
     }
+  }
+
+  function scheduleModelContextRetry() {
+    if (shuttingDown || !initialized || !snapshot || modelContextRetryTimer) return;
+    modelContextRetryTimer = setTimeout(function () {
+      modelContextRetryTimer = null;
+      void syncModelContext();
+    }, LIVE_START_RETRY_MS);
   }
 
   async function updateHostModelContext(value, options) {
@@ -566,14 +582,28 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       }
       var requestOptions = { timeout: HOST_REQUEST_TIMEOUT_MS };
       if (options && options.signal) requestOptions.signal = options.signal;
-      return await app.updateModelContext(value, requestOptions);
+      try {
+        var result = await app.updateModelContext(value, requestOptions);
+        noteHostRequestSuccess();
+        return result;
+      } catch (error) {
+        noteHostRequestFailure(error);
+        throw error;
+      }
     });
     modelContextUpdateTail = operation.then(function () {}, function () {});
     return await operation;
   }
 
   async function sendHostMessage(value) {
-    return await app.sendMessage(value, { timeout: HOST_REQUEST_TIMEOUT_MS });
+    try {
+      var result = await app.sendMessage(value, { timeout: HOST_REQUEST_TIMEOUT_MS });
+      noteHostRequestSuccess();
+      return result;
+    } catch (error) {
+      noteHostRequestFailure(error);
+      throw error;
+    }
   }
 
   function newReentryClaimId() {
@@ -626,7 +656,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
   }
 
   function hostDeliveryAvailable() {
-    return initialized && bridgeReady && !bridgeResetting && !shuttingDown;
+    return initialized && bridgeReady && hostRequestHealthy && !shuttingDown;
   }
 
   async function dispatchServerReentry(intent, sourceId) {
@@ -679,7 +709,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     } catch (error) {
       console.error(error);
       outcome = {
-        bridgeFailure: hostBridgeTransportFailure(error),
         claimId: claimed ? claimId : undefined,
         error: error instanceof Error ? error.message : String(error),
         status: attempted || messageDispatched ? "uncertain" : "blocked"
@@ -708,7 +737,6 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       }
       automaticMessageInFlight = false;
       render();
-      if (outcome && outcome.bridgeFailure) await resetHostBridge();
       await refresh(false).catch(function () {});
       scheduleAutomaticReentry(0);
     }
@@ -829,28 +857,22 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     return code === -32000 || code === -32001;
   }
 
+  function noteHostRequestFailure(error) {
+    if (!hostBridgeTransportFailure(error)) return false;
+    hostRequestHealthy = false;
+    status.textContent = "Reconnecting";
+    return true;
+  }
+
+  function noteHostRequestSuccess() {
+    hostRequestHealthy = true;
+    if (status.textContent === "Reconnecting") status.textContent = "";
+  }
+
   function invalidateHostBridgeGeneration() {
     hostBridgeGeneration += 1;
     modelContextEpoch += 1;
     if (modelContextSyncController) modelContextSyncController.abort("Host bridge changed");
-  }
-
-  async function resetHostBridge() {
-    if (shuttingDown || bridgeResetting) return;
-    bridgeResetting = true;
-    invalidateHostBridgeGeneration();
-    bridgeReady = false;
-    reconnectOnStart = true;
-    status.textContent = "Reconnecting";
-    stopHostSizeTracking();
-    stopLive();
-    try {
-      await app.close();
-    } catch (_) {
-    } finally {
-      bridgeResetting = false;
-      scheduleConnectRetry();
-    }
   }
 
   function scheduleConnectRetry() {
@@ -1014,6 +1036,8 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     connectRetryTimer = null;
     if (liveStartRetryTimer) clearTimeout(liveStartRetryTimer);
     liveStartRetryTimer = null;
+    if (modelContextRetryTimer) clearTimeout(modelContextRetryTimer);
+    modelContextRetryTimer = null;
     if (displayModeRetryTimer) clearTimeout(displayModeRetryTimer);
     displayModeRetryTimer = null;
     if (presentationSettleTimer) clearTimeout(presentationSettleTimer);
@@ -1024,6 +1048,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     presentationTransitionSettling = false;
     watchStarted = false;
     initialized = false;
+    hostRequestHealthy = false;
   }
 
   function stopHostSizeTracking() {
@@ -1042,14 +1067,13 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     var observer = null;
 
     function handleSizeSendFailure(error) {
-      if (!active || generation !== hostBridgeGeneration || !bridgeReady || shuttingDown || bridgeResetting) return;
+      if (!active || generation !== hostBridgeGeneration || !bridgeReady || shuttingDown) return;
       console.error(error);
-      if (hostBridgeTransportFailure(error)) void resetHostBridge();
     }
 
     function measureAndSendSize() {
       frame = 0;
-      if (!active || generation !== hostBridgeGeneration || !bridgeReady || shuttingDown || bridgeResetting) return;
+      if (!active || generation !== hostBridgeGeneration || !bridgeReady || shuttingDown) return;
       var element = document.documentElement;
       var previousHeight = element.style.height;
       element.style.height = "max-content";
@@ -1111,10 +1135,11 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
     }
   };
   app.onclose = function () {
-    if (shuttingDown || bridgeResetting) return;
+    if (shuttingDown) return;
     invalidateHostBridgeGeneration();
     stopHostSizeTracking();
     bridgeReady = false;
+    hostRequestHealthy = false;
     reconnectOnStart = true;
     status.textContent = "Reconnecting";
     stopLive();
@@ -1193,6 +1218,7 @@ input { width: 100%; min-width: 0; border: 0; padding: 8px 9px; background: tran
       await app.connect(undefined, { timeout: HOST_CONNECT_TIMEOUT_MS });
       applyHostContext(app.getHostContext());
       bridgeReady = true;
+      hostRequestHealthy = true;
       initialized = true;
       startHostSizeTracking();
       presentationGeneration += 1;

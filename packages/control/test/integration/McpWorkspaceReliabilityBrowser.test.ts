@@ -364,7 +364,7 @@ test("Live Workspace retries a transient initial snapshot failure", BROWSER_TEST
     await page.waitForFunction("(window.__liveSnapshotCallCount || 0) >= 2");
 });
 
-test("Live Workspace re-handshakes after an established Host bridge stops answering", BROWSER_TEST_OPTIONS, async (t) => {
+test("Live Workspace keeps the established Host bridge mounted when a tool request stalls", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
 
@@ -386,15 +386,17 @@ test("Live Workspace re-handshakes after an established Host bridge stops answer
         if (iframe === null) throw new Error("Workspace iframe is missing.");
         iframe.srcdoc = html
             .replace("var APP_TOOL_TIMEOUT_MS = 30000;", "var APP_TOOL_TIMEOUT_MS = 50;")
-            .replace("var LIVE_START_RETRY_MS = 1000;", "var LIVE_START_RETRY_MS = 50;");
+            .replace("var LIVE_START_RETRY_MS = 1000;", "var LIVE_START_RETRY_MS = 50;")
+            .replace("await sleep(1000);", "await sleep(50);");
     }, workspaceAppHtml);
 
     await page.waitForFunction("(window.__bridgeWatchCount || 0) >= 1");
-    await page.waitForFunction("(window.__bridgeInitializeCount || 0) >= 2");
-    await page.waitForFunction("(window.__liveToolCalls || []).some(call => call.name === 'workspace_reconnect')");
+    await page.waitForFunction("(window.__bridgeWatchCount || 0) >= 2");
+    assert.equal(await page.evaluate("window.__bridgeInitializeCount"), 1);
+    assert.equal(await page.evaluate("window.__liveDisplayModeRequests.length"), 1);
 });
 
-test("Live Workspace re-handshakes when Host model-context delivery stalls", BROWSER_TEST_OPTIONS, async (t) => {
+test("Live Workspace retries Host model-context delivery without re-handshaking", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
 
@@ -420,8 +422,9 @@ test("Live Workspace re-handshakes when Host model-context delivery stalls", BRO
     }, workspaceAppHtml);
 
     await page.waitForFunction("(window.__contextUpdateCount || 0) >= 1");
-    await page.waitForFunction("(window.__contextBridgeInitializeCount || 0) >= 2");
     await page.waitForFunction("(window.__contextUpdateCount || 0) >= 2");
+    assert.equal(await page.evaluate("window.__contextBridgeInitializeCount"), 1);
+    assert.equal(await page.evaluate("window.__liveDisplayModeRequests.length"), 1);
 });
 
 test("Workspace does not let an older concurrent snapshot overwrite a newer action refresh", BROWSER_TEST_OPTIONS, async (t) => {
@@ -1521,7 +1524,7 @@ test("Workspace releases re-entry before dispatch when model context injection f
     assert.deepEqual(pageFailures, []);
 });
 
-test("Workspace records uncertain delivery before resetting a failed Host message bridge", BROWSER_TEST_OPTIONS, async (t) => {
+test("Workspace records uncertain delivery without remounting a failed Host message request", BROWSER_TEST_OPTIONS, async (t) => {
     const browser = await launchBrowser();
     t.after(async () => await browser.close());
 
@@ -1560,8 +1563,8 @@ test("Workspace records uncertain delivery before resetting a failed Host messag
     await app.getByRole("button", { name: "Continue", exact: true }).click();
     await page.waitForFunction("(window.__modelContextFailureReports || []).length === 1");
     assert.equal(await page.evaluate("window.__modelContextFailureReports[0].outcome"), "uncertain");
-    await page.waitForFunction("(window.__modelContextFailureInitializeCount || 0) >= 2");
     await page.waitForTimeout(250);
+    assert.equal(await page.evaluate("window.__modelContextFailureInitializeCount"), 1);
     const reportClaimId = await page.evaluate("window.__modelContextFailureReports[0].claimId") as string;
     assert.deepEqual(
         await page.evaluate((claimId) => {
