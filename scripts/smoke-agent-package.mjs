@@ -386,6 +386,15 @@ async function smokeOpenCodeChild(providerDirectory, command, env) {
     child.stderr?.on("data", (chunk) => {
         stderr += String(chunk);
     });
+    const heartbeat = setInterval(() => {
+        if (!child.connected) return;
+        try {
+            child.send({ type: "owner.heartbeat" });
+        } catch {
+            // Child lifecycle observers below report a real disconnect/exit.
+        }
+    }, 2_000);
+    heartbeat.unref();
     try {
         child.send({
             command,
@@ -419,6 +428,7 @@ async function smokeOpenCodeChild(providerDirectory, command, env) {
         child.disconnect();
         await waitForChildExit(child);
     } finally {
+        clearInterval(heartbeat);
         if (child.exitCode === null && child.signalCode === null)
             child.kill("SIGKILL");
     }
