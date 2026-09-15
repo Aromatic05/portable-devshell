@@ -15,27 +15,32 @@ const { parentPort, workerData } = require("node:worker_threads");
 const { DatabaseSync } = require("node:sqlite");
 
 let database;
+let result;
 try {
     database = new DatabaseSync(workerData.filePath, { timeout: 5_000 });
     if (workerData.operation === "payloadBackfill") {
         const row = database
             .prepare("SELECT COALESCE(SUM(payload_bytes), 0) AS payloadBytes FROM audit_records WHERE id <= ?")
             .get(workerData.highWater);
-        parentPort.postMessage({ payloadBytes: Number(row.payloadBytes) });
+        result = { payloadBytes: Number(row.payloadBytes) };
     } else if (workerData.operation === "walCheckpoint") {
         database.exec("PRAGMA journal_size_limit = 1048576");
         const row = database.prepare("PRAGMA wal_checkpoint(PASSIVE)").get();
-        parentPort.postMessage({
+        result = {
             checkpointComplete: Number(row.busy) === 0 && Number(row.checkpointed) >= Number(row.log)
-        });
+        };
     } else {
         throw new Error("Unknown audit background operation.");
     }
 } catch (error) {
-    parentPort.postMessage({ error: error instanceof Error ? error.message : String(error) });
-} finally {
-    database?.close();
+    result = { error: error instanceof Error ? error.message : String(error) };
 }
+try {
+    database?.close();
+} catch (error) {
+    result = { error: error instanceof Error ? error.message : String(error) };
+}
+parentPort.postMessage(result);
 `;
 
 export function startAuditPayloadBackfill(
