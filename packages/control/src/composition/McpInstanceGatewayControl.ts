@@ -23,6 +23,13 @@ export interface McpInstanceGatewayControlOptions {
 const TODO_REPORT_BUCKET_CAPACITY = 2;
 const TODO_REPORT_REFILL_INTERVAL_MS = 30_000;
 const TODO_REPORT_CONVERSATION_WINDOW = 400;
+const TODO_ACCESS_BUCKET_CAPACITY = 2;
+const TODO_ACCESS_REFILL_INTERVAL_MS = 30_000;
+
+interface TodoAccessPolicyState {
+    lastRefillAt: number;
+    tokens: number;
+}
 
 interface TodoReportPolicyState {
     lastRefillAt: number;
@@ -36,6 +43,8 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     readonly #instanceConnections: InstanceConnectionService;
     readonly #now: () => number;
     readonly #toolProvenance?: ToolCallProvenanceStore;
+    readonly #todoAccessPolicy = new Map<string, TodoAccessPolicyState>();
+    readonly #todoAccessPolicyOperations = new Map<string, Promise<void>>();
     readonly #todoReportPolicy = new Map<string, TodoReportPolicyState>();
     readonly #todoReportPolicyOperations = new Map<string, Promise<void>>();
     #modelCommands: (instance: string) => readonly string[] = () => [];
@@ -72,7 +81,12 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             toolName,
             context.requestId,
         ) ?? { kind: "allow" as const };
-        if (decision.kind === "allow") return;
+        if (decision.kind === "allow") {
+            if (toolName === "todo_read" || toolName === "todo_write") {
+                await this.#consumeTodoAccessToken(instance, ctxId);
+            }
+            return;
+        }
         if (decision.kind === "push") {
             throw createError({
                 code: errorCodes.controlModelReplyRequired,
@@ -417,7 +431,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         context: ToolCallContext,
     ): Promise<void> {
         const ctxId = requireCtxId(context);
-        const key = todoReportPolicyKey(instance, ctxId);
+        const key = todoPolicyKey(instance, ctxId);
         await this.#withTodoReportPolicy(key, async () => {
             const descriptor = this.#requireDescriptor(instance);
             await this.beforeModelToolCall(instance, "todo_report", context);
@@ -462,7 +476,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     }
 
     async #syncTodoReportPolicy(instance: string, ctxId: string): Promise<TodoReportPolicyState> {
-        const key = todoReportPolicyKey(instance, ctxId);
+        const key = todoPolicyKey(instance, ctxId);
         let state = this.#todoReportPolicy.get(key);
         if (state === undefined) {
             state = {
@@ -489,21 +503,62 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         state.lastRefillAt = now;
     }
 
+    async #consumeTodoAccessToken(instance: string, ctxId: string): Promise<void> {
+        const key = todoPolicyKey(instance, ctxId);
+        await this.#withPolicyLock(this.#todoAccessPolicyOperations, key, async () => {
+            let state = this.#todoAccessPolicy.get(key);
+            if (state === undefined) {
+                state = {
+                    lastRefillAt: this.#now(),
+                    tokens: TODO_ACCESS_BUCKET_CAPACITY,
+                };
+                this.#todoAccessPolicy.set(key, state);
+            }
+            const now = this.#now();
+            const elapsed = Math.max(0, now - state.lastRefillAt);
+            state.tokens = Math.min(
+                TODO_ACCESS_BUCKET_CAPACITY,
+                state.tokens + elapsed / TODO_ACCESS_REFILL_INTERVAL_MS,
+            );
+            state.lastRefillAt = now;
+            if (state.tokens < 1) {
+                const retryAfterMs = Math.ceil((1 - state.tokens) * TODO_ACCESS_REFILL_INTERVAL_MS);
+                throw createError({
+                    code: errorCodes.todoInvalid,
+                    details: {
+                        capacity: TODO_ACCESS_BUCKET_CAPACITY,
+                        ctxId,
+                        refillIntervalMs: TODO_ACCESS_REFILL_INTERVAL_MS,
+                        retryAfterMs,
+                        tools: ["todo_read", "todo_write"],
+                    },
+                    message: `todo_read/todo_write are rate-limited by a shared bucket; the next token is available in about ${Math.ceil(retryAfterMs / 1000)}s. Continue the actual task instead of polling Todo state.`,
+                    retryable: false,
+                });
+            }
+            state.tokens -= 1;
+        });
+    }
+
     async #withTodoReportPolicy<T>(key: string, operation: () => Promise<T>): Promise<T> {
-        const previous = this.#todoReportPolicyOperations.get(key) ?? Promise.resolve();
+        return await this.#withPolicyLock(this.#todoReportPolicyOperations, key, operation);
+    }
+
+    async #withPolicyLock<T>(operations: Map<string, Promise<void>>, key: string, operation: () => Promise<T>): Promise<T> {
+        const previous = operations.get(key) ?? Promise.resolve();
         let release!: () => void;
         const gate = new Promise<void>((resolve) => {
             release = resolve;
         });
         const current = previous.catch(() => undefined).then(async () => await gate);
-        this.#todoReportPolicyOperations.set(key, current);
+        operations.set(key, current);
         await previous.catch(() => undefined);
         try {
             return await operation();
         } finally {
             release();
-            if (this.#todoReportPolicyOperations.get(key) === current) {
-                this.#todoReportPolicyOperations.delete(key);
+            if (operations.get(key) === current) {
+                operations.delete(key);
             }
         }
     }
@@ -534,7 +589,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     }
 }
 
-function todoReportPolicyKey(instance: string, ctxId: string): string {
+function todoPolicyKey(instance: string, ctxId: string): string {
     return `${instance}\u0000${ctxId}`;
 }
 

@@ -300,6 +300,42 @@ test("todo_report serializes concurrent autonomous bursts through the same bucke
     assert.equal(harness.reports.length, 2);
 });
 
+test("todo_read and todo_write share a bucket that is independent from todo_report", async () => {
+    const harness = createTodoReportHarness();
+
+    await harness.gateway.beforeModelToolCall("local", "todo_read", harness.context);
+    await harness.gateway.beforeModelToolCall("local", "todo_write", harness.context);
+    await assertRateLimited(
+        harness.gateway.beforeModelToolCall("local", "todo_read", harness.context),
+        30_000,
+    );
+
+    await harness.report("report one");
+    await harness.report("report two");
+    await assertRateLimited(harness.report("report three"), 30_000);
+    await assertRateLimited(
+        harness.gateway.beforeModelToolCall("local", "todo_read", harness.context),
+        30_000,
+    );
+
+    harness.advance(30_000);
+    await harness.gateway.beforeModelToolCall("local", "todo_write", harness.context);
+    await harness.report("report three");
+});
+
+test("todo_read and todo_write serialize concurrent bursts through their shared bucket", async () => {
+    const harness = createTodoReportHarness();
+
+    const results = await Promise.allSettled([
+        harness.gateway.beforeModelToolCall("local", "todo_read", harness.context),
+        harness.gateway.beforeModelToolCall("local", "todo_write", harness.context),
+        harness.gateway.beforeModelToolCall("local", "todo_read", harness.context),
+    ]);
+
+    assert.equal(results.filter((result) => result.status === "fulfilled").length, 2);
+    assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+});
+
 test("a normal Comment never limits tools and its reply bypasses the autonomous bucket", async () => {
     const harness = createTodoReportHarness();
     await harness.report("autonomous one");
